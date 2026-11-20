@@ -241,6 +241,13 @@
   background: var(--motion-hover);
 }
 
+/* Scenario workspace host container */
+.om-scenario-host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* 6-column capability index with Workflows column */
 .om-capability-columns {
   grid-template-columns: repeat(6, minmax(0, 1fr));

@@ -1690,3 +1690,20 @@
     flex-wrap: wrap;
   }
 }
+
+.om-scenario-header-category {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-4);
+  flex-shrink: 0;
+}
+
+.om-scenario-step-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-scenario-history--empty {
+  gap: var(--motion-space-8);
+}

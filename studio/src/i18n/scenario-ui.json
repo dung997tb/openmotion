@@ -525,7 +525,8 @@
     "{platform} preview": "{platform} 预览",
     "{step} has no embedded images.": "「{step}」尚未内嵌任何图片。",
     "{step} has not been started yet.": "「{step}」尚未开始。",
-    "{total} pool assets · {pinned} pinned": "{total} 项资产池素材 · 已置顶 {pinned} 项"
+    "{total} pool assets · {pinned} pinned": "{total} 项资产池素材 · 已置顶 {pinned} 项",
+    "Download started": "已开始下载"
   },
   "ja": {
     "$129": "¥19,800",
@@ -1053,7 +1054,8 @@
     "{platform} preview": "{platform} プレビュー",
     "{step} has no embedded images.": "「{step}」には埋め込み画像がありません。",
     "{step} has not been started yet.": "「{step}」はまだ開始されていません。",
-    "{total} pool assets · {pinned} pinned": "プールアセット {total} 件 · ピン留め {pinned} 件"
+    "{total} pool assets · {pinned} pinned": "プールアセット {total} 件 · ピン留め {pinned} 件",
+    "Download started": "ダウンロードを開始しました"
   },
   "ko": {
     "$129": "₩169,000",
@@ -1581,7 +1583,8 @@
     "{platform} preview": "{platform} 미리보기",
     "{step} has no embedded images.": "{step}에 포함된 이미지가 없습니다.",
     "{step} has not been started yet.": "{step}이(가) 아직 시작되지 않았습니다.",
-    "{total} pool assets · {pinned} pinned": "풀 에셋 {total}개 · 고정됨 {pinned}개"
+    "{total} pool assets · {pinned} pinned": "풀 에셋 {total}개 · 고정됨 {pinned}개",
+    "Download started": "다운로드를 시작했습니다"
   },
   "de": {
     "$129": "129 €",
@@ -2109,7 +2112,8 @@
     "{platform} preview": "{platform}-Vorschau",
     "{step} has no embedded images.": "{step} enthält keine eingebetteten Bilder.",
     "{step} has not been started yet.": "{step} wurde noch nicht gestartet.",
-    "{total} pool assets · {pinned} pinned": "{total} Pool-Assets · {pinned} angeheftet"
+    "{total} pool assets · {pinned} pinned": "{total} Pool-Assets · {pinned} angeheftet",
+    "Download started": "Download gestartet"
   },
   "fr": {
     "$129": "129 €",
@@ -2637,7 +2641,8 @@
     "{platform} preview": "Aperçu {platform}",
     "{step} has no embedded images.": "{step} ne contient aucune image intégrée.",
     "{step} has not been started yet.": "{step} n'a pas encore commencé.",
-    "{total} pool assets · {pinned} pinned": "{total} ressources dans le pool · {pinned} épinglée(s)"
+    "{total} pool assets · {pinned} pinned": "{total} ressources dans le pool · {pinned} épinglée(s)",
+    "Download started": "Téléchargement démarré"
   },
   "ru": {
     "$129": "129 $",
@@ -3165,7 +3170,8 @@
     "{platform} preview": "Предпросмотр {platform}",
     "{step} has no embedded images.": "На шаге «{step}» нет встроенных изображений.",
     "{step} has not been started yet.": "Шаг «{step}» ещё не начат.",
-    "{total} pool assets · {pinned} pinned": "Ресурсов в пуле: {total} · закреплено: {pinned}"
+    "{total} pool assets · {pinned} pinned": "Ресурсов в пуле: {total} · закреплено: {pinned}",
+    "Download started": "Загрузка началась"
   },
   "es": {
     "$129": "$129",
@@ -3693,7 +3699,8 @@
     "{platform} preview": "Vista previa de {platform}",
     "{step} has no embedded images.": "{step} no tiene imágenes incrustadas.",
     "{step} has not been started yet.": "{step} aún no se ha iniciado.",
-    "{total} pool assets · {pinned} pinned": "{total} recursos en el grupo · {pinned} fijados"
+    "{total} pool assets · {pinned} pinned": "{total} recursos en el grupo · {pinned} fijados",
+    "Download started": "Descarga iniciada"
   },
   "pt-BR": {
     "$129": "R$ 599",
@@ -4221,7 +4228,8 @@
     "{platform} preview": "Prévia do {platform}",
     "{step} has no embedded images.": "{step} não tem imagens incorporadas.",
     "{step} has not been started yet.": "{step} ainda não foi iniciado.",
-    "{total} pool assets · {pinned} pinned": "{total} recursos no pool · {pinned} fixados"
+    "{total} pool assets · {pinned} pinned": "{total} recursos no pool · {pinned} fixados",
+    "Download started": "Download iniciado"
   },
   "it": {
     "$129": "129 €",
@@ -4749,7 +4757,8 @@
     "{platform} preview": "Anteprima {platform}",
     "{step} has no embedded images.": "{step} non contiene immagini incorporate.",
     "{step} has not been started yet.": "{step} non è ancora stato avviato.",
-    "{total} pool assets · {pinned} pinned": "{total} risorse nel pool · {pinned} fissate"
+    "{total} pool assets · {pinned} pinned": "{total} risorse nel pool · {pinned} fissate",
+    "Download started": "Download avviato"
   },
   "tr": {
     "$129": "129 $",
@@ -5277,6 +5286,7 @@
     "{platform} preview": "{platform} önizlemesi",
     "{step} has no embedded images.": "{step} adımında gömülü görsel yok.",
     "{step} has not been started yet.": "{step} adımı henüz başlatılmadı.",
-    "{total} pool assets · {pinned} pinned": "{total} havuz varlığı · {pinned} sabitlendi"
+    "{total} pool assets · {pinned} pinned": "{total} havuz varlığı · {pinned} sabitlendi",
+    "Download started": "İndirme başlatıldı"
   }
 }
