@@ -1,0 +1,121 @@
+import { useEffect, useState } from 'react';
+import { Button } from 'open-design-ui/button';
+import {
+  scenarioCategories,
+  scenariosByCategory,
+  type ScenarioId,
+} from '../../../shared/scenarios';
+import type { ScenarioRunSummary } from '../../../shared/scenario-runs';
+import { useI18n } from '../i18n/I18n';
+import { RemixIcon } from '../icons/RemixIcons';
+import { scenarioCover } from '../scenario/scenarioCovers';
+import { scenarioClient } from '../scenario/scenarioClient';
+import { ExploreCoverImage } from './ExploreCoverImage';
+import './scenarioNavigation.css';
+
+export function ScenarioMegaMenu({
+  activeScenarioId,
+  onSelect,
+  onOpenHub,
+}: {
+  activeScenarioId: ScenarioId | 'hub' | null;
+  onSelect: (id: ScenarioId, runId?: string) => void;
+  onOpenHub: () => void;
+}) {
+  const { t } = useI18n();
+  const [recentRuns, setRecentRuns] = useState<ScenarioRunSummary[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    scenarioClient
+      .list({ limit: 3 })
+      .then(result => {
+        if (!cancelled && Array.isArray(result?.runs)) {
+          setRecentRuns(result.runs.slice(0, 3));
+        }
+      })
+      .catch(() => {
+        // Optional recent-runs strip stays hidden if the run service is unavailable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="om-scenario-mega">
+      <div className="om-scenario-mega-columns">
+        {scenarioCategories.map(category => {
+          const items = scenariosByCategory(category.id);
+          return (
+            <section
+              key={category.id}
+              className="om-scenario-mega-column"
+              aria-label={t(category.label)}
+              data-scenario-category={category.id}
+            >
+              <div className="om-scenario-mega-column-head">
+                <RemixIcon name={category.icon} size={14} aria-hidden="true" />
+                <h2>{t(category.label)}</h2>
+              </div>
+              <div className="om-scenario-mega-list">
+                {items.map(scenario => (
+                  <Button
+                    key={scenario.id}
+                    variant="plain"
+                    className="om-scene-tile om-scenario-mega-tile"
+                    data-scenario-tile={scenario.id}
+                    aria-current={activeScenarioId === scenario.id ? 'page' : undefined}
+                    onClick={() => onSelect(scenario.id)}
+                  >
+                    <span className="om-scene-tile-art om-scenario-mega-thumb" aria-hidden="true">
+                      <ExploreCoverImage src={scenarioCover(scenario.id)} eager />
+                    </span>
+                    <span className="om-scenario-mega-copy">
+                      <span className="om-scenario-mega-title">
+                        <strong>{t(scenario.title)}</strong>
+                        {scenario.badge && (
+                          <span className="om-badge" data-nav-badge={scenario.badge} lang="en">
+                            {scenario.badge}
+                          </span>
+                        )}
+                      </span>
+                      <span className="om-scenario-mega-subtitle">{t(scenario.subtitle)}</span>
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      <div className="om-scenario-mega-footer">
+        {recentRuns.length > 0 && (
+          <div className="om-scenario-mega-recent" aria-label={t('Recent runs')}>
+            <span className="om-scenario-mega-recent-label">{t('Recent runs')}</span>
+            {recentRuns.map(run => (
+              <Button
+                key={run.id}
+                variant="plain"
+                className="om-nav-item om-scenario-mega-run"
+                title={run.title}
+                onClick={() => onSelect(run.scenarioId, run.id)}
+              >
+                <RemixIcon name="time-line" size={13} aria-hidden="true" />
+                <span className="om-scenario-mega-run-title">{run.title}</span>
+              </Button>
+            ))}
+          </div>
+        )}
+        <Button
+          variant="plain"
+          className="om-nav-item om-scenario-mega-all"
+          onClick={onOpenHub}
+        >
+          <span>{t('All workflows')}</span>
+          <RemixIcon name="arrow-right-line" size={15} aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
+  );
+}

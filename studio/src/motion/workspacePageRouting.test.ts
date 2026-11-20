@@ -219,3 +219,58 @@ it('restores each specialty brief, model overview and nested creator preview fro
   expect(open(detail.href, { template: null }).href).toBe(profile.href);
   expect(open(profile.href, { templates: false }).href).toBe(origin);
 });
+
+it('round-trips scenario hub, scenario workspace, run/step overlay patches and safe fallbacks', () => {
+  const origin = 'http://localhost/?page=explore&community=product-films#project/film';
+  const runId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const hub = new URL(workspacePageHref(origin, { scenarioHub: true, scenarioCategory: 'campaign' }), origin);
+  expect(hub.search).toBe('?page=scenarios&category=campaign&community=product-films');
+  expect(hub.hash).toBe('#project/film');
+  expect(isWorkspaceSettingsPage(hub.search)).toBe(true);
+  expect(readWorkspacePage(hub.search)).toMatchObject({ scenarioHub: true, scenarioCategory: 'campaign', scenario: null, scenarioRun: null, scenarioStep: null, community: 'product-films' });
+
+  // Overlay category update retains scenarioHub.
+  const roleHub = new URL(workspacePageHref(hub.href, { scenarioCategory: 'role' }), origin);
+  expect(roleHub.search).toBe('?page=scenarios&category=role&community=product-films');
+  expect(readWorkspacePage(roleHub.search)).toMatchObject({ scenarioHub: true, scenarioCategory: 'role' });
+
+  // Scenario destination with run and step.
+  const workspace = new URL(workspacePageHref(hub.href, { scenario: 'black-friday', scenarioRun: runId, scenarioStep: 'sales-film' }), origin);
+  expect(workspace.search).toBe(`?page=scenario&scenario=black-friday&run=${runId}&step=sales-film&community=product-films`);
+  expect(isWorkspaceSettingsPage(workspace.search)).toBe(true);
+  expect(readWorkspacePage(workspace.search)).toMatchObject({
+    scenarioHub: false,
+    scenarioCategory: null,
+    scenario: 'black-friday',
+    scenarioRun: runId,
+    scenarioStep: 'sales-film',
+  });
+
+  // Overlay step/run patch retains parent scenario.
+  const nextStep = new URL(workspacePageHref(workspace.href, { scenarioStep: 'social' }), origin);
+  expect(readWorkspacePage(nextStep.search)).toMatchObject({ scenario: 'black-friday', scenarioRun: runId, scenarioStep: 'social' });
+
+  // Leaving scenario clears scenario, run, step and category.
+  const returned = new URL(workspacePageHref(nextStep.href, { explore: true }), origin);
+  expect(returned.href).toBe(origin);
+  expect(returned.searchParams.has('scenario')).toBe(false);
+  expect(returned.searchParams.has('run')).toBe(false);
+  expect(returned.searchParams.has('step')).toBe(false);
+  expect(returned.searchParams.has('category')).toBe(false);
+
+  // Unknown scenario falls back to scenarioHub; invalid run UUID and unknown step are ignored.
+  expect(readWorkspacePage('?page=scenario&scenario=does-not-exist')).toMatchObject({
+    scenarioHub: true,
+    scenario: null,
+    scenarioRun: null,
+    scenarioStep: null,
+  });
+  expect(readWorkspacePage('?page=scenario&scenario=black-friday&run=not-a-uuid&step=unknown-step')).toMatchObject({
+    scenarioHub: false,
+    scenario: 'black-friday',
+    scenarioRun: null,
+    scenarioStep: null,
+  });
+  expect(isWorkspaceSettingsPage('?page=scenario&scenario=black-friday')).toBe(true);
+  expect(isWorkspaceSettingsPage('?page=scenarios')).toBe(true);
+});

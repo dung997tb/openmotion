@@ -8,6 +8,7 @@ import { phase1Tools } from '../shared/phase1-tools.ts';
 import { agentGuide, type IntegrationInfo } from '../shared/integration.ts';
 import { imageFeaturePrompt } from '../shared/image-features.ts';
 import { videoFeatureParameters, videoFeaturePrompt } from '../shared/video-features.ts';
+import { findScenario, scenarioAgentPrompt, scenarioRecipeTools } from '../shared/scenarios.ts';
 
 test('MCP onboarding covers every public domain tool and scenarios only compose real tools', () => {
   const described = mcpCapabilities.flatMap(capability => [...capability.tools]);
@@ -221,6 +222,34 @@ test('video feature handbook scenarios cover camera control, multi-shot and nati
     for (const locale of Object.values(translations) as Record<string, string>[]) {
       assert.ok(locale[scenario.title]?.trim());
       assert.ok(locale[scenario.description]?.trim());
+    }
+  }
+});
+
+test('scenario workflows capability, Black Friday recipe and design asset embedding stay aligned and localized', () => {
+  const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
+  const capability = mcpCapabilities.find(item => item.id === 'scenario-workflows')!;
+  const blackFriday = mcpScenarios.find(item => item.id === 'scenario-black-friday')!;
+  const embedAssets = mcpScenarios.find(item => item.id === 'design-embed-assets')!;
+
+  assert.ok(capability);
+  assert.deepEqual([...capability.tools], ['openmotion_assets_use', 'openmotion_design_edit', 'openmotion_design_project']);
+  assert.equal(blackFriday.prompt, scenarioAgentPrompt(findScenario('black-friday')!));
+  assert.deepEqual([...blackFriday.tools], [...scenarioRecipeTools]);
+  for (const tool of scenarioRecipeTools) assert.ok(blackFriday.prompt.includes(tool), tool);
+  assert.deepEqual([...embedAssets.tools], ['openmotion_assets_use', 'openmotion_design_edit']);
+  assert.ok(embedAssets.prompt.includes('openmotion_assets_use'));
+  assert.ok(embedAssets.prompt.includes('openmotion_design_edit'));
+  assert.ok(embedAssets.prompt.includes('import_asset'));
+
+  for (const [locale, values] of Object.entries(translations) as [string, Record<string, string>][]) {
+    for (const key of [
+      capability.title, capability.description, capability.prompt,
+      blackFriday.title, blackFriday.description,
+      embedAssets.title, embedAssets.description, embedAssets.prompt,
+    ]) {
+      assert.ok(values[key]?.trim(), `${locale}: missing ${key}`);
+      assert.notEqual(values[key], key, `${locale}: untranslated ${key}`);
     }
   }
 });
