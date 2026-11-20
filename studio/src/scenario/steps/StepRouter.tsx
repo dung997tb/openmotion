@@ -1,5 +1,24 @@
 import type { StepProps } from '../stepContract';
+import { BriefStep } from './BriefStep';
+import { ExportHubStep } from './ExportHubStep';
+import { MediaStep } from './MediaStep';
+import { SocialPackStep } from './SocialPackStep';
+import { WebPageStep } from './WebPageStep';
+import './steps.css';
 
-export function StepRouter({ step }: StepProps) {
-  return <div data-step-type={step.type} data-step-id={step.id} />;
+export function StepRouter(props: StepProps) {
+  switch (props.step.type) {
+    case 'brief':
+      return <BriefStep {...props} />;
+    case 'web-page':
+      return <WebPageStep {...props} />;
+    case 'image':
+    case 'video':
+    case 'audio':
+      return <MediaStep {...props} />;
+    case 'social-pack':
+      return <SocialPackStep {...props} />;
+    case 'export-hub':
+      return <ExportHubStep {...props} />;
+  }
 }
