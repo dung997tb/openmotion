@@ -51,6 +51,8 @@ import { TaskLedger } from './tracking/task-ledger.ts';
 import { WorkRounds, workRoundMode } from './inline-video.ts';
 import { brandKitHttp } from './gateway/brand-http.ts';
 import { brandKitsFor } from './gateway/brand-kits.ts';
+import { AssetLibrary } from './gateway/asset-library.ts';
+import { scenarioHttp } from './gateway/scenario-http.ts';
 import { designHttp } from './design-projects.ts';
 
 const sharedStore = new WorkspaceStore();
@@ -404,10 +406,11 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       return json(res, 405, { error: 'Unsupported conversation request' });
     }
     if (motionRequest && url.pathname.startsWith('/api/project-archives/') && await projectArchiveHttp(req, res, url, store.workspaceStore ?? store, context.runtimeRoot)) return;
+    if (motionRequest && url.pathname.startsWith('/api/scenarios/') && await scenarioHttp(req, res, url, store.workspaceStore ?? store)) return;
     if (motionRequest && url.pathname.startsWith('/api/assets/') && await assetHttp(req, res, url, store)) return;
     if (motionRequest && await brandKitHttp(req, res, url, store.directory, input)) return;
     const editorUrl = `http://${host || 'localhost'}/#project/${store.projectId}`;
-    if (motionRequest && url.pathname.startsWith('/api/design/') && await designHttp(req, res, url, (store.workspaceStore ?? store).directory, new URL(editorUrl).origin, input)) return;
+    if (motionRequest && url.pathname.startsWith('/api/design/') && await designHttp(req, res, url, (store.workspaceStore ?? store).directory, new URL(editorUrl).origin, input, ref => new AssetLibrary(store.workspaceStore ?? store).resolve(ref))) return;
     if (motionRequest && ['/api/diagnostics', '/api/diagnostics/events'].includes(url.pathname)) {
       // Downloads are POST-only: cross-origin links must not trigger a collection.
       if (req.method !== 'POST') return json(res, 405, { error: 'POST_REQUIRED' });

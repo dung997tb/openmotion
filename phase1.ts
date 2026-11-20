@@ -18,7 +18,9 @@ import { loadCanvasSourceOperations } from './shared/composition-canvas-source.t
 import { loadCaptionSourceOperations } from './shared/transcript-captions.ts';
 import { brandKitOperation } from './gateway/brand-kit-operation.ts';
 import { brandKitsFor } from './gateway/brand-kits.ts';
-import { dispatchDesignTool } from './design-projects.ts';
+import { AssetLibrary } from './gateway/asset-library.ts';
+import { scenarioOperation, scenarioRunsFor } from './gateway/scenario-runs.ts';
+import { designProjectsFor, dispatchDesignTool } from './design-projects.ts';
 import { MAX_ASSET_BYTES, isAssetFileWithinLimit } from './shared/asset-limits.ts';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -374,7 +376,7 @@ export class Phase1Service {
   }
   async dispatch(name: string, args: any, host?: HostContext): Promise<any> {
     if (name === 'motion_design_catalog' || name === 'motion_design_project' || name === 'motion_design_edit' || name === 'motion_design_comments') {
-      return dispatchDesignTool(name, args, this.store.directory, this.context.origin());
+      return dispatchDesignTool(name, args, this.store.directory, this.context.origin(), ref => new AssetLibrary(this.store).resolve(ref));
     }
     if (name === 'motion_manage_project') return manageProject(this.store, args, this.runtimeRoot);
     if (name === 'motion_project_archive') {
@@ -383,6 +385,16 @@ export class Phase1Service {
     }
     if (name === 'motion_assets') {
       if (args.action === 'brand_kit') return brandKitOperation(brandKitsFor(this.store.directory), args.brandKit, this.context.origin());
+      if (args.action === 'scenario') {
+        return scenarioOperation(scenarioRunsFor(this.store), args.scenario, {
+          origin: () => this.context.origin(),
+          assets: input => assetOperation(this.store, input, (i, o) => this.importAssets(i, o), this.context.tracking),
+          design: designProjectsFor(this.store.directory),
+          resolveAsset: ref => new AssetLibrary(this.store).resolve(ref),
+          createMotionProject: input => this.dispatch('motion_create_project', input),
+          exportMotionArchive: input => projectArchive(this.store, input, this.runtimeRoot),
+        });
+      }
       if (args.action === 'transcript') {
         const input = args.transcript;
         if (input.command === 'caption_tracks' || input.command === 'caption_export') {

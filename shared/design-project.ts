@@ -121,6 +121,7 @@ export const designRoutes = {
   projectAction: (id: string, action: 'duplicate' | 'trash' | 'restore' | 'open-in' | 'reveal') => `${DESIGN_API}/projects/${id}/${action}`, // POST
   file: (id: string, path: string) => `${DESIGN_API}/projects/${id}/files/${path}`,   // GET text content {path, content, revision}
   write: (id: string) => `${DESIGN_API}/projects/${id}/write`,    // POST {requestId, expectedRevision, files:[{path,content}], deletes?:[], summary?, source:'manual'}
+  importAsset: (id: string) => `${DESIGN_API}/projects/${id}/import-asset`, // POST {requestId, expectedRevision, assetId, versionId, path?}
   raw: (id: string, path = '') => `${DESIGN_API}/raw/${id}/${path}`, // GET static preview (sandboxed iframe src); ?version=<id> for history
   versions: (id: string) => `${DESIGN_API}/projects/${id}/versions`, // GET
   restore: (id: string, versionId: string) => `${DESIGN_API}/projects/${id}/versions/${versionId}/restore`, // POST {requestId, expectedRevision}

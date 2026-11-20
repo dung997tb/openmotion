@@ -1,5 +1,6 @@
 import { brandKitToolArguments } from './brand-kit-tool.ts';
 import { transcriptToolArguments, transcriptToolDescription } from './transcript-tool.ts';
+import { scenarioToolArguments, scenarioToolDescription } from './scenario-runs.ts';
 
 const id = { type: 'string', pattern: '^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$' };
 const object = <T extends Record<string, unknown>>(properties: T, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -38,11 +39,11 @@ export const assetUseTool = {
 };
 export const workspaceAssetUseTool = {
   ...assetUseTool,
-  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription,
+  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription + scenarioToolDescription,
   annotations: { ...assetUseTool.annotations, destructiveHint: true },
   inputSchema: {
     ...assetUseTool.inputSchema, properties: { ...assetUseTool.inputSchema.properties,
-      action: { enum: [...assetUseTool.inputSchema.properties.action.enum, 'brand_kit', 'transcript'] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments },
-    oneOf: [...assetUseTool.inputSchema.oneOf, ...['brand_kit', 'transcript'].map(action => ({ type: 'object', properties: { action: { enum: [action] } }, required: [action === 'brand_kit' ? 'brandKit' : 'transcript'], additionalProperties: true }))],
+      action: { enum: [...assetUseTool.inputSchema.properties.action.enum, 'brand_kit', 'transcript', 'scenario'] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments, scenario: scenarioToolArguments },
+    oneOf: [...assetUseTool.inputSchema.oneOf, ...(['brand_kit', 'transcript', 'scenario'] as const).map(action => ({ type: 'object', properties: { action: { enum: [action] } }, required: [action === 'brand_kit' ? 'brandKit' : action], additionalProperties: true }))],
   },
 };

@@ -92,12 +92,13 @@ export const designTools = [
   {
     name: 'openmotion_design_edit',
     title: 'OpenMotion · Design Edit',
-    description: 'Read and edit files in an HTML Design Studio project with revision protection and version history. Always read the project first (openmotion_design_project action=get) to obtain current expectedRevision. Every action=write atomically persists files and creates a new immutable vN version snapshot. action=restore_version restores an older snapshot as a NEW version without erasing history.',
+    description: 'Read and edit files in an HTML Design Studio project with revision protection and version history. Always read the project first (openmotion_design_project action=get) to obtain current expectedRevision. Every action=write atomically persists files and creates a new immutable vN version snapshot. action=restore_version restores an older snapshot as a NEW version without erasing history. action=import_asset copies a pinned workspace asset version (assetId+versionId from openmotion_assets_use) into the project as a binary file and returns its project-relative path for use in HTML; requires expectedRevision; creates a new version.',
     inputSchema: obj({
-      action: { enum: ['read_file', 'write', 'list_versions', 'restore_version'] },
+      action: { enum: ['read_file', 'write', 'list_versions', 'restore_version', 'import_asset'] },
       projectId: uuid,
       requestId: id,
       expectedRevision: revision,
+      assetId: uuid,
       path: relPath,
       offset: { type: 'integer', minimum: 0, maximum: 50_000_000 },
       limit: { type: 'integer', minimum: 1, maximum: 500_000 },
