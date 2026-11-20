@@ -1,0 +1,694 @@
+import { Button } from 'open-design-ui/button';
+import { IconButton } from 'open-design-ui/icon-button';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  designBriefPrompt,
+  designProjectPrompt,
+  designRoutes,
+  designViewports,
+  type DesignProject,
+  type DesignProjectDetail,
+  type DesignTemplateSummary,
+  type DesignVersion,
+  type DesignViewportId,
+} from '../../../../shared/design-project';
+import {
+  briefMarkdown,
+  listHtmlImageTargets,
+  type EmbedImageTarget,
+  type HtmlImageTarget,
+} from '../../../../shared/scenario-content';
+import type { ScenarioRun, StepIteration } from '../../../../shared/scenario-runs';
+import { findScenarioStep } from '../../../../shared/scenarios';
+import { MenuItem, Select } from '../../components/ui';
+import { PanelEmptyState } from '../../components/ui/PanelEmptyState';
+import { Skeleton } from '../../components/ui/Skeleton';
+import { designClient } from '../../design/designClient';
+import { ScaledPreviewThumb } from '../../design/ScaledPreviewThumb';
+import { useI18n } from '../../i18n/I18n';
+import { RemixIcon } from '../../icons/RemixIcons';
+import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
+import { ScenarioApiError } from '../scenarioClient';
+import type { StepProps } from '../stepContract';
+import { BindingSlot } from './BindingSlot';
+import { copyText, extractErrorMessage } from './stepUtils';
+
+function targetToValue(target: HtmlImageTarget): string {
+  return target.kind === 'slot' ? `slot:${target.slot}` : `img:${target.index}`;
+}
+
+function parseTargetValue(value: string): EmbedImageTarget {
+  if (value.startsWith('slot:')) {
+    return { kind: 'slot', slot: value.slice(5) };
+  }
+  if (value.startsWith('img:')) {
+    const index = Number.parseInt(value.slice(4), 10);
+    if (Number.isInteger(index) && index >= 0) return { kind: 'img', index };
+  }
+  return { kind: 'append' };
+}
+
+export function WebPageStep({
+  scenario,
+  step,
+  state,
+  run,
+  active,
+  api,
+  pool,
+  toast,
+  nav,
+  renderExportMenu,
+  renderIterations,
+}: StepProps) {
+  const { t, locale } = useI18n();
+  const { info: integration } = useIntegrationInfo();
+
+  const pageConfig = step.page;
+  const linkedStepId = pageConfig?.linkedStepId;
+  const linkedStepState = linkedStepId ? run?.steps[linkedStepId] : undefined;
+  const designProjectId = state.links.designProjectId ?? linkedStepState?.links.designProjectId ?? null;
+  const isEmbedOnly = pageConfig?.mode === 'embed';
+
+  // Creation catalog state (when no project linked)
+  const [templates, setTemplates] = useState<DesignTemplateSummary[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState(false);
+  const [existingProjects, setExistingProjects] = useState<DesignProject[]>([]);
+  const [selectedExistingId, setSelectedExistingId] = useState('');
+  const [creatingMode, setCreatingMode] = useState<string | null>(null);
+
+  // Linked project state
+  const [project, setProject] = useState<DesignProjectDetail | null>(null);
+  const [currentHtml, setCurrentHtml] = useState('');
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [viewportId, setViewportId] = useState<DesignViewportId>('desktop');
+
+  // Embed state
+  const [targetByPoolId, setTargetByPoolId] = useState<Record<string, string>>({});
+  const [embeddingId, setEmbeddingId] = useState<string | null>(null);
+  const [embeddingAll, setEmbeddingAll] = useState(false);
+
+  const loadTemplatesAndProjects = useCallback(async () => {
+    setTemplatesLoading(true);
+    setTemplatesError(false);
+    try {
+      const [tplRes, projRes] = await Promise.all([
+        designClient.listTemplates({ scenario: pageConfig?.designScenario ?? 'prototype' }),
+        designClient.listProjects().catch(() => ({ projects: [] })),
+      ]);
+      const preferred = new Set(pageConfig?.templates ?? []);
+      const sorted = [...tplRes.items].sort(
+        (a, b) => Number(preferred.has(b.id)) - Number(preferred.has(a.id)),
+      );
+      setTemplates(sorted);
+      const activeProjects = projRes.projects.filter(p => !p.trashedAt);
+      setExistingProjects(activeProjects);
+      setSelectedExistingId(prev => prev || activeProjects[0]?.id || '');
+    } catch {
+      setTemplatesError(true);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, [pageConfig?.designScenario, pageConfig?.templates]);
+
+  useEffect(() => {
+    if (!active || designProjectId || isEmbedOnly) return;
+    void loadTemplatesAndProjects();
+  }, [active, designProjectId, isEmbedOnly, loadTemplatesAndProjects]);
+
+  const loadLinkedProject = useCallback(async (id: string) => {
+    setProjectLoading(true);
+    setProjectError(null);
+    try {
+      const { project: detail } = await designClient.getProject(id);
+      setProject(detail);
+      const file = await designClient.readFile(detail.id, detail.entry);
+      setCurrentHtml(file.content);
+    } catch (error) {
+      setProjectError(extractErrorMessage(error, t('Could not load Design project.')));
+    } finally {
+      setProjectLoading(false);
+    }
+  }, [t]);
+
+  // Reload project whenever designProjectId or latest design iteration revision changes
+  const latestDesignRevision = state.iterations.at(-1)?.design?.revision ?? null;
+  useEffect(() => {
+    if (!active || !designProjectId) {
+      if (!designProjectId) {
+        setProject(null);
+        setCurrentHtml('');
+      }
+      return;
+    }
+    void loadLinkedProject(designProjectId);
+  }, [active, designProjectId, latestDesignRevision, loadLinkedProject]);
+
+  const htmlTargets = useMemo(() => listHtmlImageTargets(currentHtml), [currentHtml]);
+  const targetOptions = useMemo(() => {
+    const items = htmlTargets.map(target => {
+      if (target.kind === 'slot') {
+        return { value: targetToValue(target), label: `${target.label} (${target.slot})` };
+      }
+      const shortSrc = target.src ? ` · ${target.src.slice(0, 26)}` : '';
+      return { value: targetToValue(target), label: `${t('Image {index}', { index: target.index + 1 })}${shortSrc}` };
+    });
+    items.push({ value: 'append', label: t('Append to gallery') });
+    return items;
+  }, [htmlTargets, t]);
+
+  const boundEmbedIds = state.bindings.embedImages ?? [];
+  const boundImages = useMemo(
+    () => boundEmbedIds
+      .map(id => pool.byId.get(id))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item && item.kind === 'image')),
+    [boundEmbedIds, pool.byId],
+  );
+
+  const defaultTargetForIndex = useCallback(
+    (index: number) => {
+      const slotTargets = htmlTargets.filter(target => target.kind === 'slot');
+      if (slotTargets[index]) return targetToValue(slotTargets[index]);
+      if (htmlTargets[index]) return targetToValue(htmlTargets[index]);
+      return 'append';
+    },
+    [htmlTargets],
+  );
+
+  const selectedTargetFor = (poolItemId: string, index: number) => {
+    const existing = targetByPoolId[poolItemId];
+    if (existing && targetOptions.some(opt => opt.value === existing)) return existing;
+    return defaultTargetForIndex(index);
+  };
+
+  const handleCreateStarter = async () => {
+    setCreatingMode('starter');
+    try {
+      const res = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
+        `create-page:${step.id}:starter`,
+        'create_page',
+        { stepId: step.id, mode: 'starter' },
+      );
+      setProject(res.project);
+      toast.showToast(t('Starter page created'), 'info', 'feedback');
+    } catch (error) {
+      toast.showToast(extractErrorMessage(error, t('Could not create starter page.')), 'error', 'feedback');
+    } finally {
+      setCreatingMode(null);
+    }
+  };
+
+  const handleCreateFromTemplate = async (templateId: string) => {
+    setCreatingMode(`template:${templateId}`);
+    try {
+      const res = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
+        `create-page:${step.id}:${templateId}`,
+        'create_page',
+        { stepId: step.id, mode: 'template', templateId },
+      );
+      setProject(res.project);
+      toast.showToast(t('Page created from template'), 'info', 'feedback');
+    } catch (error) {
+      toast.showToast(extractErrorMessage(error, t('Could not create page from template.')), 'error', 'feedback');
+    } finally {
+      setCreatingMode(null);
+    }
+  };
+
+  const handleLinkExisting = async () => {
+    if (!selectedExistingId) return;
+    setCreatingMode('link');
+    try {
+      const res = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
+        `link-design:${step.id}:${selectedExistingId}`,
+        'link_design',
+        { stepId: step.id, designProjectId: selectedExistingId },
+      );
+      setProject(res.project);
+      toast.showToast(t('Design project linked'), 'info', 'feedback');
+    } catch (error) {
+      toast.showToast(extractErrorMessage(error, t('Could not link Design project.')), 'error', 'feedback');
+    } finally {
+      setCreatingMode(null);
+    }
+  };
+
+  const handleCopyAgentDesignPrompt = async () => {
+    if (project) {
+      const prompt = designProjectPrompt(
+        project,
+        `Update this page for the "${scenario.title}" workflow (runId=${run?.id ?? 'draft'}, step=${step.id}).`,
+        { integration, language: locale },
+      );
+      const ok = await copyText(prompt);
+      toast.showToast(ok ? t('Copied. Paste into your Agent.') : t('Could not copy to clipboard.'), ok ? 'info' : 'error', 'feedback');
+      return;
+    }
+
+    const imageRefs = pool.items
+      .filter(item => item.ref.type === 'asset' && item.kind === 'image')
+      .map(item =>
+        item.ref.type === 'asset'
+          ? `- "${item.label}": assetId=${item.ref.assetId} versionId=${item.ref.versionId}`
+          : null,
+      )
+      .filter((line): line is string => line !== null);
+
+    const briefLines = [
+      briefMarkdown(scenario, run?.brief ?? {}),
+      run ? `Scenario runId: ${run.id} (link the resulting project via openmotion_assets_use action=scenario command=link_design stepId=${step.id})` : '',
+      imageRefs.length
+        ? `Available pool images (embed with openmotion_design_edit action=import_asset):\n${imageRefs.join('\n')}`
+        : '',
+    ].filter(Boolean).join('\n\n');
+
+    const prompt = designBriefPrompt({
+      scenario: pageConfig?.designScenario ?? 'prototype',
+      brief: briefLines,
+      templateIds: [...(pageConfig?.templates ?? [])],
+      language: locale,
+      integration,
+    });
+    const ok = await copyText(prompt);
+    toast.showToast(ok ? t('Copied. Paste into your Agent.') : t('Could not copy to clipboard.'), ok ? 'info' : 'error', 'feedback');
+  };
+
+  const handleEmbedSingle = async (poolItemId: string, index: number) => {
+    if (!project) return;
+    const item = pool.byId.get(poolItemId);
+    if (!item) return;
+    setEmbeddingId(poolItemId);
+    try {
+      const target = parseTargetValue(selectedTargetFor(poolItemId, index));
+      const res = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail; version: DesignVersion; path: string }>(
+        `embed:${step.id}:${poolItemId}`,
+        'embed_image',
+        {
+          stepId: step.id,
+          designProjectId: project.id,
+          expectedDesignRevision: project.revision,
+          poolItemId,
+          target,
+          alt: item.label,
+        },
+      );
+      setProject(res.project);
+      const updatedFile = await designClient.readFile(res.project.id, res.project.entry).catch(() => null);
+      if (updatedFile) setCurrentHtml(updatedFile.content);
+      toast.showToast(t('Image embedded'), 'info', 'feedback');
+    } catch (error) {
+      if (error instanceof ScenarioApiError && error.code === 'DESIGN_CONFLICT') {
+        await loadLinkedProject(project.id);
+        toast.showToast(t('The page changed elsewhere. Reloaded the latest version.'), 'error', 'feedback');
+      } else {
+        toast.showToast(extractErrorMessage(error, t('Could not embed image.')), 'error', 'feedback');
+      }
+    } finally {
+      setEmbeddingId(null);
+    }
+  };
+
+  const handleEmbedAll = async () => {
+    if (!project || !boundImages.length) return;
+    setEmbeddingAll(true);
+    let currentProject = project;
+    let embeddedCount = 0;
+    try {
+      for (let i = 0; i < boundImages.length; i += 1) {
+        const item = boundImages[i];
+        const target = parseTargetValue(selectedTargetFor(item.id, i));
+        const res = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail; version: DesignVersion; path: string }>(
+          `embed-all:${step.id}:${item.id}:${i}`,
+          'embed_image',
+          {
+            stepId: step.id,
+            designProjectId: currentProject.id,
+            expectedDesignRevision: currentProject.revision,
+            poolItemId: item.id,
+            target,
+            alt: item.label,
+          },
+        );
+        currentProject = res.project;
+        embeddedCount += 1;
+      }
+      setProject(currentProject);
+      const updatedFile = await designClient.readFile(currentProject.id, currentProject.entry).catch(() => null);
+      if (updatedFile) setCurrentHtml(updatedFile.content);
+      toast.showToast(t('Embedded {count} images', { count: embeddedCount }), 'info', 'feedback');
+    } catch (error) {
+      await loadLinkedProject(currentProject.id);
+      if (error instanceof ScenarioApiError && error.code === 'DESIGN_CONFLICT') {
+        toast.showToast(t('The page changed elsewhere. Reloaded the latest version.'), 'error', 'feedback');
+      } else {
+        toast.showToast(extractErrorMessage(error, t('Could not embed all images.')), 'error', 'feedback');
+      }
+    } finally {
+      setEmbeddingAll(false);
+    }
+  };
+
+  const handleDownloadDesign = async (format: 'html' | 'zip') => {
+    if (!project) return;
+    try {
+      await designClient.downloadExport(project.id, { format });
+      toast.showToast(t('Download started'), 'info', 'feedback');
+    } catch (error) {
+      toast.showToast(extractErrorMessage(error, t('Could not export page.')), 'error', 'feedback');
+    }
+  };
+
+  const handleCopyPreviewUrl = async () => {
+    if (!project) return;
+    const rawPath = designRoutes.raw(project.id, project.entry);
+    const fullUrl = typeof window !== 'undefined' ? new URL(rawPath, window.location.origin).href : rawPath;
+    const ok = await copyText(fullUrl);
+    toast.showToast(ok ? t('Preview URL copied') : t('Could not copy to clipboard.'), ok ? 'info' : 'error', 'feedback');
+  };
+
+  const exportMenuExtras = project ? (
+    <>
+      <MenuItem icon={<RemixIcon name="download-2-line" size={14} />} onClick={() => void handleDownloadDesign('html')}>
+        {t('Download HTML')}
+      </MenuItem>
+      <MenuItem icon={<RemixIcon name="download-2-line" size={14} />} onClick={() => void handleDownloadDesign('zip')}>
+        {t('Download ZIP')}
+      </MenuItem>
+      <MenuItem icon={<RemixIcon name="link" size={14} />} onClick={() => void handleCopyPreviewUrl()}>
+        {t('Copy preview URL')}
+      </MenuItem>
+      <MenuItem icon={<RemixIcon name="external-link-line" size={14} />} onClick={() => nav.openDesignProject(project.id)}>
+        {t('Open in Design editor')}
+      </MenuItem>
+      <MenuItem icon={<RemixIcon name="robot-line" size={14} />} onClick={() => void handleCopyAgentDesignPrompt()}>
+        {t('Copy Agent handoff')}
+      </MenuItem>
+    </>
+  ) : undefined;
+
+  // Embed-only step without a linked upstream page yet
+  if (isEmbedOnly && linkedStepId && !designProjectId) {
+    const linkedStepDef = findScenarioStep(scenario, linkedStepId);
+    const linkedTitle = t(linkedStepDef?.title ?? linkedStepId);
+    return (
+      <div className="om-step-body" data-step-body="web-page">
+        <div className="om-step-toolbar">
+          <div className="om-step-toolbar-group" />
+          <div className="om-step-toolbar-group">{renderExportMenu()}</div>
+        </div>
+        <div className="om-step-card om-step-empty-action-card">
+          <PanelEmptyState
+            icon="layout-line"
+            message={t('Create the page in {step} first.', { step: linkedTitle })}
+            description={t('Once the landing page exists, return here to embed images as versioned local assets.')}
+          />
+          <Button
+            variant="primary"
+            icon={<RemixIcon name="arrow-right-line" size={14} />}
+            onClick={() => nav.selectStep(linkedStepId)}
+          >
+            {t('Go to {step}', { step: linkedTitle })}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // No project linked yet (create or both mode)
+  if (!designProjectId) {
+    const preferredSet = new Set(pageConfig?.templates ?? []);
+    return (
+      <div className="om-step-body" data-step-body="web-page">
+        <div className="om-step-toolbar">
+          <div className="om-step-toolbar-group">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<RemixIcon name="layout-line" size={14} />}
+              loading={creatingMode === 'starter'}
+              disabled={creatingMode !== null}
+              onClick={() => void handleCreateStarter()}
+            >
+              {t('Generate starter page (offline)')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<RemixIcon name="robot-line" size={14} />}
+              onClick={() => void handleCopyAgentDesignPrompt()}
+            >
+              {t('Ask your Agent to design it')}
+            </Button>
+          </div>
+          <div className="om-step-toolbar-group">{renderExportMenu()}</div>
+        </div>
+
+        <section className="om-step-card" aria-label={t('Start from a Design template')}>
+          <div className="om-step-section-head">
+            <div>
+              <h3 className="om-step-section-title">{t('Start from a Design template')}</h3>
+              <p className="om-step-muted">{t('Pick a starter layout and customize it in this workflow or in Design Studio.')}</p>
+            </div>
+          </div>
+          {templatesError ? (
+            <div className="om-step-inline-error">
+              <span>{t('Could not load Design templates.')}</span>
+              <Button variant="ghost" size="sm" onClick={() => void loadTemplatesAndProjects()}>{t('Retry')}</Button>
+            </div>
+          ) : templatesLoading ? (
+            <div className="om-step-template-grid">
+              {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="om-step-template-skeleton" />)}
+            </div>
+          ) : templates.length > 0 ? (
+            <div className="om-step-template-grid">
+              {templates.slice(0, 8).map(tpl => {
+                const recommended = preferredSet.has(tpl.id);
+                return (
+                  <Button
+                    key={tpl.id}
+                    variant="plain"
+                    type="button"
+                    className="om-step-template-card"
+                    disabled={creatingMode !== null}
+                    onClick={() => void handleCreateFromTemplate(tpl.id)}
+                  >
+                    <ScaledPreviewThumb
+                      src={tpl.previewUrl}
+                      title={tpl.title}
+                      badge={recommended ? t('Recommended') : undefined}
+                    />
+                    <span className="om-step-template-copy">
+                      <strong>{tpl.title}</strong>
+                      <small>{tpl.description}</small>
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="om-step-muted">{t('No templates found for this scenario. Use the offline starter page instead.')}</p>
+          )}
+        </section>
+
+        <section className="om-step-card" aria-label={t('Link an existing Design project')}>
+          <div className="om-step-section-head">
+            <div>
+              <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
+              <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+            </div>
+          </div>
+          {existingProjects.length > 0 ? (
+            <div className="om-step-link-row">
+              <Select
+                label={t('Design project')}
+                value={selectedExistingId}
+                options={existingProjects.map(p => ({ value: p.id, label: p.title }))}
+                onCommit={setSelectedExistingId}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={creatingMode === 'link'}
+                disabled={!selectedExistingId || creatingMode !== null}
+                onClick={() => void handleLinkExisting()}
+              >
+                {t('Link project')}
+              </Button>
+            </div>
+          ) : (
+            <p className="om-step-muted">{t('No existing Design projects found in this workspace.')}</p>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  const activeViewport = designViewports.find(v => v.id === viewportId) ?? designViewports[0];
+  const previewSrc = project
+    ? `${designRoutes.raw(project.id, project.entry)}?v=${encodeURIComponent(project.revision)}`
+    : '';
+
+  return (
+    <div className="om-step-body" data-step-body="web-page">
+      <div className="om-step-toolbar">
+        <div className="om-step-toolbar-group">
+          <div className="om-step-segmented" role="group" aria-label={t('Preview viewport')}>
+            {designViewports.map(vp => (
+              <Button
+                key={vp.id}
+                variant={viewportId === vp.id ? 'secondary' : 'ghost'}
+                size="sm"
+                aria-pressed={viewportId === vp.id}
+                icon={<RemixIcon name={vp.icon} size={14} />}
+                onClick={() => setViewportId(vp.id)}
+              >
+                {t(vp.label)}
+              </Button>
+            ))}
+          </div>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            aria-label={t('Reload preview')}
+            icon={<RemixIcon name="refresh-line" size={14} />}
+            onClick={() => void loadLinkedProject(designProjectId)}
+          />
+        </div>
+        <div className="om-step-toolbar-group">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RemixIcon name="external-link-line" size={14} />}
+            onClick={() => nav.openDesignProject(designProjectId)}
+          >
+            {t('Open in Design editor')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RemixIcon name="robot-line" size={14} />}
+            onClick={() => void handleCopyAgentDesignPrompt()}
+          >
+            {t('Ask your Agent')}
+          </Button>
+          {renderExportMenu(exportMenuExtras)}
+        </div>
+      </div>
+
+      <section className="om-step-card om-step-page-preview-card" aria-label={t('Live page preview')}>
+        {projectError ? (
+          <div className="om-step-inline-error">
+            <span>{projectError}</span>
+            <Button variant="ghost" size="sm" onClick={() => void loadLinkedProject(designProjectId)}>{t('Retry')}</Button>
+          </div>
+        ) : projectLoading && !project ? (
+          <Skeleton className="om-step-iframe-skeleton" />
+        ) : project ? (
+          <div className="om-step-page-stage" data-viewport={viewportId}>
+            <div
+              className="om-step-page-frame"
+              style={activeViewport.width ? { width: activeViewport.width, maxWidth: '100%' } : undefined}
+            >
+              <iframe
+                key={`${project.id}:${project.revision}`}
+                className="om-step-page-iframe"
+                title={project.title}
+                sandbox="allow-scripts"
+                src={previewSrc}
+              />
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="om-step-card" aria-label={t('Embed images')}>
+        <div className="om-step-section-head">
+          <div>
+            <h3 className="om-step-section-title">{t('Embed images into this page')}</h3>
+            <p className="om-step-muted">{t('Import pool images as local project files and place them into HTML slots.')}</p>
+          </div>
+          {boundImages.length > 0 && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<RemixIcon name="file-image-line" size={14} />}
+              loading={embeddingAll}
+              disabled={!project || embeddingId !== null || embeddingAll}
+              onClick={() => void handleEmbedAll()}
+            >
+              {t('Embed all')}
+            </Button>
+          )}
+        </div>
+
+        <BindingSlot
+          slot="embedImages"
+          label={t('Images to embed')}
+          kinds={['image']}
+          stepId={step.id}
+          boundIds={boundEmbedIds}
+          pool={pool}
+          api={api}
+          toast={toast}
+          disabled={embeddingAll}
+        />
+
+        {boundImages.length > 0 && (
+          <div className="om-step-embed-rows">
+            {boundImages.map((item, idx) => {
+              const targetValue = selectedTargetFor(item.id, idx);
+              return (
+                <div key={item.id} className="om-step-embed-row" data-embed-item={item.id}>
+                  <span className="om-step-embed-label">{item.label}</span>
+                  <div className="om-step-embed-target">
+                    <Select
+                      label={t('Target slot for {label}', { label: item.label })}
+                      value={targetValue}
+                      options={targetOptions}
+                      disabled={embeddingAll || embeddingId === item.id}
+                      onCommit={next => setTargetByPoolId(prev => ({ ...prev, [item.id]: next }))}
+                    />
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={embeddingId === item.id}
+                    disabled={!project || embeddingAll || embeddingId !== null}
+                    onClick={() => void handleEmbedSingle(item.id, idx)}
+                  >
+                    {t('Embed')}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {renderIterations({
+        renderOutput: (iteration: StepIteration) => {
+          if (!iteration.design) {
+            return <span className="om-step-muted">{t('Page revision')}</span>;
+          }
+          const entry = project?.entry ?? 'index.html';
+          const versionUrl = iteration.design.versionId
+            ? `${designRoutes.raw(iteration.design.projectId, entry)}?version=${encodeURIComponent(iteration.design.versionId)}`
+            : `${designRoutes.raw(iteration.design.projectId, entry)}?v=${encodeURIComponent(iteration.design.revision)}`;
+          return (
+            <div className="om-step-design-iter">
+              <ScaledPreviewThumb
+                src={versionUrl}
+                title={t('Version {number}', { number: iteration.number })}
+              />
+              <span className="om-step-muted">
+                {iteration.design.revision.slice(0, 8)}
+              </span>
+            </div>
+          );
+        },
+      })}
+    </div>
+  );
+}
