@@ -14,7 +14,10 @@ import {
   copyText,
   extractErrorMessage,
   formatBytes,
+  isScenarioConflictError,
   poolKindIcon,
+  poolKindLabel,
+  stepStatusLabel,
   triggerUrlDownload,
 } from './stepUtils';
 
@@ -99,6 +102,7 @@ export function ExportHubStep({
       return;
     }
     setBuilding(true);
+    const allStepsSelected = contentSteps.every(stepDef => selectedStepIds.includes(stepDef.id));
     try {
       const res = await api.mutate<{ bundle: ScenarioBundleReceipt }>(
         'export-bundle',
@@ -107,7 +111,7 @@ export function ExportHubStep({
           activeOnly,
           includeStandaloneHtml,
           includeMotionSource,
-          stepIds: selectedStepIds,
+          ...(allStepsSelected ? {} : { stepIds: selectedStepIds }),
         },
       );
       const url = bundleDownloadUrl(res.bundle.bundleId);
@@ -123,7 +127,9 @@ export function ExportHubStep({
         },
       );
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not build ZIP package.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not build ZIP package.')), 'error', 'feedback');
+      }
     } finally {
       setBuilding(false);
     }
@@ -154,7 +160,9 @@ export function ExportHubStep({
         },
       );
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not export step package.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not export step package.')), 'error', 'feedback');
+      }
     } finally {
       setDownloadingStepId(null);
     }
@@ -235,7 +243,7 @@ export function ExportHubStep({
                     <RemixIcon name={stepDef.icon} size={15} />
                     <strong>{t(stepDef.title)}</strong>
                   </span>
-                  <span className="om-step-badge" data-status={status}>{t(status)}</span>
+                  <span className="om-step-badge" data-status={status}>{t(stepStatusLabel(status))}</span>
                 </div>
                 <p className="om-step-muted">
                   {activeIter
@@ -275,7 +283,7 @@ export function ExportHubStep({
           {POOL_KIND_ORDER.map(kind => (
             <div key={kind} className="om-step-pool-stat">
               <RemixIcon name={poolKindIcon(kind)} size={14} />
-              <span>{t(kind)}</span>
+              <span>{t(poolKindLabel(kind))}</span>
               <strong>{poolStats.byKind[kind]}</strong>
             </div>
           ))}

@@ -31,7 +31,7 @@ import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { ScenarioApiError } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
-import { copyText, extractErrorMessage } from './stepUtils';
+import { copyText, extractErrorMessage, isScenarioConflictError } from './stepUtils';
 
 function targetToValue(target: HtmlImageTarget): string {
   return target.kind === 'slot' ? `slot:${target.slot}` : `img:${target.index}`;
@@ -194,7 +194,9 @@ export function WebPageStep({
       setProject(res.project);
       toast.showToast(t('Starter page created'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not create starter page.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not create starter page.')), 'error', 'feedback');
+      }
     } finally {
       setCreatingMode(null);
     }
@@ -211,7 +213,9 @@ export function WebPageStep({
       setProject(res.project);
       toast.showToast(t('Page created from template'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not create page from template.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not create page from template.')), 'error', 'feedback');
+      }
     } finally {
       setCreatingMode(null);
     }
@@ -229,7 +233,9 @@ export function WebPageStep({
       setProject(res.project);
       toast.showToast(t('Design project linked'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not link Design project.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not link Design project.')), 'error', 'feedback');
+      }
     } finally {
       setCreatingMode(null);
     }
@@ -302,7 +308,7 @@ export function WebPageStep({
       if (error instanceof ScenarioApiError && error.code === 'DESIGN_CONFLICT') {
         await loadLinkedProject(project.id);
         toast.showToast(t('The page changed elsewhere. Reloaded the latest version.'), 'error', 'feedback');
-      } else {
+      } else if (!isScenarioConflictError(error)) {
         toast.showToast(extractErrorMessage(error, t('Could not embed image.')), 'error', 'feedback');
       }
     } finally {
@@ -342,7 +348,7 @@ export function WebPageStep({
       await loadLinkedProject(currentProject.id);
       if (error instanceof ScenarioApiError && error.code === 'DESIGN_CONFLICT') {
         toast.showToast(t('The page changed elsewhere. Reloaded the latest version.'), 'error', 'feedback');
-      } else {
+      } else if (!isScenarioConflictError(error)) {
         toast.showToast(extractErrorMessage(error, t('Could not embed all images.')), 'error', 'feedback');
       }
     } finally {

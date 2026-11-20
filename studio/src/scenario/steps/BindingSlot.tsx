@@ -7,7 +7,13 @@ import type { PoolKind } from '../../../../shared/scenarios';
 import { useI18n } from '../../i18n/I18n';
 import { RemixIcon } from '../../icons/RemixIcons';
 import type { StepProps } from '../stepContract';
-import { extractErrorMessage, POOL_DRAG_MIME, poolKindIcon } from './stepUtils';
+import {
+  extractErrorMessage,
+  isScenarioConflictError,
+  POOL_DRAG_MIME,
+  poolKindIcon,
+  poolKindLabel,
+} from './stepUtils';
 
 export type BindingSlotProps = {
   slot: string;
@@ -103,7 +109,9 @@ export function BindingSlot({
       });
       onChanged?.(capped);
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not update step inputs.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not update step inputs.')), 'error', 'feedback');
+      }
     }
   };
 
@@ -158,7 +166,11 @@ export function BindingSlot({
       return;
     }
     if (!kinds.includes(item.kind)) {
-      toast.showToast(t('This slot accepts {kinds} only.', { kinds: kinds.join(', ') }), 'error', 'feedback');
+      toast.showToast(
+        t('This slot accepts {kinds} only.', { kinds: kinds.map(kind => t(poolKindLabel(kind))).join(', ') }),
+        'error',
+        'feedback',
+      );
       return;
     }
     if (boundIds.includes(item.id)) return;

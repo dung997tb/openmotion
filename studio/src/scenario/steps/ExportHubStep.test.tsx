@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PoolItem, ScenarioBundleReceipt } from '../../../../shared/scenario-runs';
-import { bundleDownloadUrl } from '../scenarioClient';
+import { bundleDownloadUrl, ScenarioApiError } from '../scenarioClient';
 import { ExportHubStep } from './ExportHubStep';
 import { createStepProps, makeBaseRun, mountStep } from './stepTestHelpers';
 
@@ -61,8 +61,13 @@ describe('ExportHubStep', () => {
       expect(mounted.container.textContent).toContain('Detail page has no embedded images.');
       expect(mounted.container.textContent).toContain('1 pinned');
 
-      // Open step button navigates to that step
+      // Human-readable localized status & pool kind labels (not raw enum values)
       const detailCard = mounted.container.querySelector('[data-overview-step="detail-page"]')!;
+      expect(detailCard.querySelector('[data-status="in-progress"]')?.textContent).toBe('In progress');
+      expect(mounted.container.textContent).toContain('Image');
+      expect(mounted.container.textContent).not.toContain('in-progress');
+
+      // Open step button navigates to that step
       const openBtn = Array.from(detailCard.querySelectorAll('button')).find(b => b.textContent?.includes('Open step'))!;
       await act(async () => { openBtn.click(); });
       expect(mocks.nav.selectStep).toHaveBeenCalledWith('detail-page');
@@ -72,7 +77,7 @@ describe('ExportHubStep', () => {
       expect(motionCheckbox).toBeTruthy();
       await act(async () => { motionCheckbox.click(); });
 
-      // Click Build ZIP package
+      // Click Build ZIP package (all steps selected => omits stepIds for full bundle)
       const buildBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Build ZIP package'))!;
       await act(async () => { buildBtn.click(); });
 
@@ -83,7 +88,22 @@ describe('ExportHubStep', () => {
           activeOnly: true,
           includeStandaloneHtml: true,
           includeMotionSource: true,
-          stepIds: ['brief', 'product-images', 'detail-page', 'sales-film', 'social'],
+        },
+      );
+
+      // Deselect one step => passes filtered stepIds
+      const socialChip = Array.from(mounted.container.querySelectorAll('[aria-label="Included steps"] button'))
+        .find(b => b.textContent?.includes('Social posts')) as HTMLButtonElement;
+      await act(async () => { socialChip.click(); });
+      await act(async () => { buildBtn.click(); });
+      expect(mocks.mutate).toHaveBeenLastCalledWith(
+        'export-bundle',
+        'export',
+        {
+          activeOnly: true,
+          includeStandaloneHtml: true,
+          includeMotionSource: true,
+          stepIds: ['brief', 'product-images', 'detail-page', 'sales-film'],
         },
       );
 
@@ -108,6 +128,24 @@ describe('ExportHubStep', () => {
       const mcpBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Open MCP · Connect Agent'))!;
       await act(async () => { mcpBtn.click(); });
       expect(mocks.nav.openMcp).toHaveBeenCalledWith('scenario-black-friday');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('does not emit a duplicate error toast when mutate rejects with SCENARIO_CONFLICT', async () => {
+    const run = makeBaseRun('black-friday', { pool: samplePool });
+    const { props, mocks } = createStepProps('black-friday', 'export', {
+      run,
+      mutateImpl: (async () => {
+        throw new ScenarioApiError('SCENARIO_CONFLICT', 'SCENARIO_CONFLICT: revision 1 != 2', 409);
+      }) as never,
+    });
+    const mounted = await mountStep(<ExportHubStep {...props} />);
+    try {
+      const buildBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Build ZIP package'))!;
+      await act(async () => { buildBtn.click(); });
+      expect(mocks.showToast).not.toHaveBeenCalled();
     } finally {
       await mounted.unmount();
     }

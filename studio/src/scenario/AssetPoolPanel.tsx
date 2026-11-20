@@ -22,6 +22,7 @@ import { uploadLibraryAsset } from '../motion/assetClient';
 import { useOptionalWorkspaceChrome } from '../motion/WorkspaceChromeContext';
 import { downloadText } from './scenarioClient';
 import { PoolItemPreviewDialog, PoolThumb, resolvePoolTextContent } from './PoolItemPreview';
+import { isScenarioConflictError } from './steps/stepUtils';
 
 export type PoolPickRequest = {
   slot: string;
@@ -306,11 +307,13 @@ export function AssetPoolPanel({
         );
       }
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not add uploaded files to pool'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not add uploaded files to pool'),
+          'error',
+          'feedback',
+        );
+      }
     } finally {
       setUploading(false);
     }
@@ -334,11 +337,13 @@ export function AssetPoolPanel({
       setAssetPickerOpen(false);
       toast.showToast(t('Added to workflow pool'), 'info', 'feedback');
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not add asset to pool'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not add asset to pool'),
+          'error',
+          'feedback',
+        );
+      }
     } finally {
       setAssetPickerBusy(false);
     }
@@ -362,11 +367,13 @@ export function AssetPoolPanel({
       setDesignPickerOpen(false);
       toast.showToast(t('Added Design project to pool'), 'info', 'feedback');
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not add Design project'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not add Design project'),
+          'error',
+          'feedback',
+        );
+      }
     }
   };
 
@@ -387,11 +394,13 @@ export function AssetPoolPanel({
       setMotionPickerOpen(false);
       toast.showToast(t('Added Motion project to pool'), 'info', 'feedback');
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not add Motion project'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not add Motion project'),
+          'error',
+          'feedback',
+        );
+      }
     }
   };
 
@@ -463,11 +472,27 @@ export function AssetPoolPanel({
         'feedback',
       );
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not remove item'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not remove item'),
+          'error',
+          'feedback',
+        );
+      }
+    }
+  };
+
+  const handleTogglePin = async (item: PoolItem) => {
+    try {
+      await onUpdateItem(item.id, { pinned: !item.pinned });
+    } catch (err) {
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not update asset'),
+          'error',
+          'feedback',
+        );
+      }
     }
   };
 
@@ -488,11 +513,13 @@ export function AssetPoolPanel({
     try {
       await onUpdateItem(item.id, { label: trimmed });
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not rename asset'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not rename asset'),
+          'error',
+          'feedback',
+        );
+      }
     }
   };
 
@@ -906,7 +933,7 @@ export function AssetPoolPanel({
                           className="om-scenario-pin-button"
                           aria-label={t(item.pinned ? 'Unpin asset' : 'Pin asset')}
                           aria-pressed={item.pinned}
-                          onClick={() => void onUpdateItem(item.id, { pinned: !item.pinned })}
+                          onClick={() => void handleTogglePin(item)}
                           icon={
                             <RemixIcon
                               name={item.pinned ? 'sparkling-fill' : 'sparkling-line'}

@@ -526,7 +526,12 @@
     "{step} has no embedded images.": "「{step}」尚未内嵌任何图片。",
     "{step} has not been started yet.": "「{step}」尚未开始。",
     "{total} pool assets · {pinned} pinned": "{total} 项资产池素材 · 已置顶 {pinned} 项",
-    "Download started": "已开始下载"
+    "Download started": "已开始下载",
+    "Copy tone": "文案语气",
+    "Bold & direct": "鲜明直接",
+    "Running": "运行中",
+    "Completed": "已完成",
+    "Could not update asset": "无法更新素材"
   },
   "ja": {
     "$129": "¥19,800",
@@ -1055,7 +1060,12 @@
     "{step} has no embedded images.": "「{step}」には埋め込み画像がありません。",
     "{step} has not been started yet.": "「{step}」はまだ開始されていません。",
     "{total} pool assets · {pinned} pinned": "プールアセット {total} 件 · ピン留め {pinned} 件",
-    "Download started": "ダウンロードを開始しました"
+    "Download started": "ダウンロードを開始しました",
+    "Copy tone": "コピーのトーン",
+    "Bold & direct": "大胆で率直",
+    "Running": "実行中",
+    "Completed": "完了",
+    "Could not update asset": "アセットを更新できませんでした"
   },
   "ko": {
     "$129": "₩169,000",
@@ -1584,7 +1594,12 @@
     "{step} has no embedded images.": "{step}에 포함된 이미지가 없습니다.",
     "{step} has not been started yet.": "{step}이(가) 아직 시작되지 않았습니다.",
     "{total} pool assets · {pinned} pinned": "풀 에셋 {total}개 · 고정됨 {pinned}개",
-    "Download started": "다운로드를 시작했습니다"
+    "Download started": "다운로드를 시작했습니다",
+    "Copy tone": "문구 톤",
+    "Bold & direct": "대담하고 직설적",
+    "Running": "실행 중",
+    "Completed": "완료됨",
+    "Could not update asset": "에셋을 업데이트할 수 없습니다"
   },
   "de": {
     "$129": "129 €",
@@ -2113,7 +2128,12 @@
     "{step} has no embedded images.": "{step} enthält keine eingebetteten Bilder.",
     "{step} has not been started yet.": "{step} wurde noch nicht gestartet.",
     "{total} pool assets · {pinned} pinned": "{total} Pool-Assets · {pinned} angeheftet",
-    "Download started": "Download gestartet"
+    "Download started": "Download gestartet",
+    "Copy tone": "Textton",
+    "Bold & direct": "Mutig & direkt",
+    "Running": "Läuft",
+    "Completed": "Abgeschlossen",
+    "Could not update asset": "Asset konnte nicht aktualisiert werden"
   },
   "fr": {
     "$129": "129 €",
@@ -2642,7 +2662,12 @@
     "{step} has no embedded images.": "{step} ne contient aucune image intégrée.",
     "{step} has not been started yet.": "{step} n'a pas encore commencé.",
     "{total} pool assets · {pinned} pinned": "{total} ressources dans le pool · {pinned} épinglée(s)",
-    "Download started": "Téléchargement démarré"
+    "Download started": "Téléchargement démarré",
+    "Copy tone": "Ton du texte",
+    "Bold & direct": "Audacieux et direct",
+    "Running": "En cours",
+    "Completed": "Terminé",
+    "Could not update asset": "Impossible de mettre à jour l'actif"
   },
   "ru": {
     "$129": "129 $",
@@ -3171,7 +3196,12 @@
     "{step} has no embedded images.": "На шаге «{step}» нет встроенных изображений.",
     "{step} has not been started yet.": "Шаг «{step}» ещё не начат.",
     "{total} pool assets · {pinned} pinned": "Ресурсов в пуле: {total} · закреплено: {pinned}",
-    "Download started": "Загрузка началась"
+    "Download started": "Загрузка началась",
+    "Copy tone": "Тон текста",
+    "Bold & direct": "Смелый и прямой",
+    "Running": "Выполняется",
+    "Completed": "Завершено",
+    "Could not update asset": "Не удалось обновить ресурс"
   },
   "es": {
     "$129": "$129",
@@ -3700,7 +3730,12 @@
     "{step} has no embedded images.": "{step} no tiene imágenes incrustadas.",
     "{step} has not been started yet.": "{step} aún no se ha iniciado.",
     "{total} pool assets · {pinned} pinned": "{total} recursos en el grupo · {pinned} fijados",
-    "Download started": "Descarga iniciada"
+    "Download started": "Descarga iniciada",
+    "Copy tone": "Tono del texto",
+    "Bold & direct": "Audaz y directo",
+    "Running": "En ejecución",
+    "Completed": "Completado",
+    "Could not update asset": "No se pudo actualizar el recurso"
   },
   "pt-BR": {
     "$129": "R$ 599",
@@ -4229,7 +4264,12 @@
     "{step} has no embedded images.": "{step} não tem imagens incorporadas.",
     "{step} has not been started yet.": "{step} ainda não foi iniciado.",
     "{total} pool assets · {pinned} pinned": "{total} recursos no pool · {pinned} fixados",
-    "Download started": "Download iniciado"
+    "Download started": "Download iniciado",
+    "Copy tone": "Tom do texto",
+    "Bold & direct": "Ousado e direto",
+    "Running": "Em execução",
+    "Completed": "Concluído",
+    "Could not update asset": "Não foi possível atualizar o ativo"
   },
   "it": {
     "$129": "129 €",
@@ -4758,7 +4798,12 @@
     "{step} has no embedded images.": "{step} non contiene immagini incorporate.",
     "{step} has not been started yet.": "{step} non è ancora stato avviato.",
     "{total} pool assets · {pinned} pinned": "{total} risorse nel pool · {pinned} fissate",
-    "Download started": "Download avviato"
+    "Download started": "Download avviato",
+    "Copy tone": "Tono del testo",
+    "Bold & direct": "Audace e diretto",
+    "Running": "In esecuzione",
+    "Completed": "Completato",
+    "Could not update asset": "Impossibile aggiornare la risorsa"
   },
   "tr": {
     "$129": "129 $",
@@ -5287,6 +5332,11 @@
     "{step} has no embedded images.": "{step} adımında gömülü görsel yok.",
     "{step} has not been started yet.": "{step} adımı henüz başlatılmadı.",
     "{total} pool assets · {pinned} pinned": "{total} havuz varlığı · {pinned} sabitlendi",
-    "Download started": "İndirme başlatıldı"
+    "Download started": "İndirme başlatıldı",
+    "Copy tone": "Metin tonu",
+    "Bold & direct": "Cesur ve doğrudan",
+    "Running": "Çalışıyor",
+    "Completed": "Tamamlandı",
+    "Could not update asset": "Varlık güncellenemedi"
   }
 }

@@ -1028,9 +1028,7 @@ export class ScenarioRuns {
           });
         }
 
-        if (!step.activeIterationId) {
-          step.activeIterationId = created.id;
-        }
+        step.activeIterationId = created.id;
         if (step.status === 'todo') {
           step.status = 'in-progress';
         }

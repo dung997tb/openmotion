@@ -5,7 +5,8 @@ import {
   type ScenarioDefinition,
   type ScenarioPromptIntegration,
 } from '../../../../shared/scenarios';
-import type { ScenarioRun } from '../../../../shared/scenario-runs';
+import type { ScenarioRun, ScenarioStepState, StepIteration } from '../../../../shared/scenario-runs';
+import { ScenarioApiError } from '../scenarioClient';
 
 export const POOL_DRAG_MIME = 'application/x-om-pool-item';
 
@@ -50,6 +51,40 @@ export function poolKindIcon(kind: PoolKind): string {
     case 'motion': return 'clapperboard-line';
     case 'text': return 'file-text-line';
   }
+}
+
+export function poolKindLabel(kind: PoolKind): string {
+  switch (kind) {
+    case 'image': return 'Image';
+    case 'video': return 'Video';
+    case 'audio': return 'Audio';
+    case 'page': return 'Page';
+    case 'motion': return 'Motion';
+    case 'text': return 'Text';
+  }
+}
+
+export function stepStatusLabel(status: ScenarioStepState['status']): string {
+  switch (status) {
+    case 'todo': return 'To do';
+    case 'in-progress': return 'In progress';
+    case 'done': return 'Done';
+    case 'skipped': return 'Skipped';
+  }
+}
+
+export function jobStateLabel(state: NonNullable<StepIteration['job']>['state']): string {
+  switch (state) {
+    case 'queued': return 'Queued';
+    case 'running': return 'Running';
+    case 'completed': return 'Completed';
+    case 'failed': return 'Failed';
+    case 'cancelled': return 'Cancelled';
+  }
+}
+
+export function isScenarioConflictError(error: unknown): boolean {
+  return error instanceof ScenarioApiError && error.code === 'SCENARIO_CONFLICT';
 }
 
 export function parsePriceNumber(raw: unknown): number | null {

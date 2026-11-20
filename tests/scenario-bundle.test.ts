@@ -134,6 +134,28 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
       iteration: { source: 'local', outputs: [{ type: 'social', posts }] },
     })).run;
 
+    // Also add an unattached uploaded pool asset (stepId: null, pinned: false)
+    const extraPngBytes = await makePng(store.directory, 'unattached-logo.png');
+    const extraUploadRes = await api('/motion-api/assets/upload?requestId=bundle-upload-logo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent('unattached-logo.png') },
+      body: new Blob([new Uint8Array(extraPngBytes)]),
+    });
+    assert.equal(extraUploadRes.status, 200);
+    const extraAsset = (await extraUploadRes.json()).asset;
+    run = (await callScenario(api, {
+      command: 'add_pool',
+      runId: run.id,
+      expectedRevision: run.revision,
+      requestId: 'bundle-add-unattached-pool',
+      items: [{
+        ref: { type: 'asset', assetId: extraAsset.id, versionId: extraAsset.currentVersionId },
+        label: 'Brand Mark',
+        source: 'upload',
+        stepId: null,
+      }],
+    })).run;
+
     // Full export
     const exported = await callScenario(api, {
       command: 'export',
@@ -182,8 +204,32 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
     assert.ok(entries.has(`${prefix}web/landing-page.standalone.html`), 'Standalone HTML snapshot present');
 
     assert.ok(keys.some(k => k.startsWith(`${prefix}media/images/`) && k.endsWith('.png')), 'media/images/* present');
+    assert.ok(
+      keys.some(k => k.startsWith(`${prefix}media/images/brand-mark-`) && k.endsWith('.png')),
+      `Unattached uploaded pool asset expected in full bundle, got: ${keys.join(', ')}`,
+    );
     assert.ok(entries.has(`${prefix}social/posts.json`), 'social/posts.json present');
     assert.ok(entries.has(`${prefix}social/posts.md`), 'social/posts.md present');
+
+    // Passing all non-export-hub stepIds is treated as a full bundle (includes README.md + unattached pool files)
+    const allContentStepIds = findScenario('design-full-chain')!.steps
+      .filter(step => step.type !== 'export-hub')
+      .map(step => step.id);
+    const allStepsExport = await callScenario(api, {
+      command: 'export',
+      runId: run.id,
+      requestId: 'bundle-export-all-content-steps',
+      stepIds: allContentStepIds,
+      activeOnly: true,
+    });
+    const allStepsEntries = readProjectZip(await readFile(allStepsExport.bundle.archivePath));
+    const allStepsKeys = [...allStepsEntries.keys()];
+    const allStepsPrefix = allStepsKeys[0].split('/')[0] + '/';
+    assert.ok(allStepsEntries.has(`${allStepsPrefix}README.md`), 'README.md present when all content steps are selected');
+    assert.ok(
+      allStepsKeys.some(k => k.startsWith(`${allStepsPrefix}media/images/brand-mark-`) && k.endsWith('.png')),
+      'Unattached pool asset present when all content steps are selected',
+    );
 
     // Filtered export: stepIds: ['social'] contains only social outputs and manifest
     const socialOnly = await callScenario(api, {

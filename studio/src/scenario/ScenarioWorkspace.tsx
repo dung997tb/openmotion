@@ -39,6 +39,7 @@ import { ScenarioStepper } from './ScenarioStepper';
 import type { ScenarioWorkspaceProps, StepProps } from './stepContract';
 import { resolveStepPrompt, StepExportMenu } from './StepExportMenu';
 import { StepRouter } from './steps/StepRouter';
+import { isScenarioConflictError } from './steps/stepUtils';
 import { emptyStepState, useScenarioRun } from './useScenarioRun';
 import './scenario.css';
 
@@ -247,11 +248,13 @@ export function ScenarioWorkspace({
         await mutate('rename-run', 'update_run', { changes: { title } });
         toast.showToast(t('Run renamed'), 'info', 'feedback');
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not rename run'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not rename run'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [mutate, t, toast],
@@ -263,11 +266,13 @@ export function ScenarioWorkspace({
       toast.showToast(t('Run archived'), 'info', 'feedback');
       onOpenHub();
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not archive run'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not archive run'),
+          'error',
+          'feedback',
+        );
+      }
     }
   }, [mutate, onOpenHub, t, toast]);
 
@@ -309,11 +314,13 @@ export function ScenarioWorkspace({
           status: status as ScenarioStepState['status'],
         });
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not update step status'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not update step status'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep.id, mutate, t, toast],
@@ -412,11 +419,13 @@ export function ScenarioWorkspace({
           'feedback',
         );
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not bind asset to step'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not bind asset to step'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep, activeStepState.bindings, mutate, t, toast],
@@ -448,11 +457,13 @@ export function ScenarioWorkspace({
         },
       );
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not build step package'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not build step package'),
+          'error',
+          'feedback',
+        );
+      }
     }
   }, [activeStep.id, mutate, t, toast]);
 
@@ -478,11 +489,13 @@ export function ScenarioWorkspace({
         });
         toast.showToast(t('Active version updated'), 'info', 'feedback');
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not update active version'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not update active version'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep.id, mutate, t, toast],
@@ -501,11 +514,13 @@ export function ScenarioWorkspace({
         });
         toast.showToast(t('Loaded version settings into form'), 'info', 'feedback');
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not apply version settings'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not apply version settings'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep.id, mutate, t, toast],
@@ -520,11 +535,13 @@ export function ScenarioWorkspace({
         });
         toast.showToast(t('Note saved'), 'info', 'feedback');
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not save note'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not save note'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep.id, mutate, t, toast],
@@ -550,11 +567,13 @@ export function ScenarioWorkspace({
         });
         toast.showToast(t('Generation started'), 'info', 'feedback');
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not retry generation'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not retry generation'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep.id, activeStepState, mutate, t, toast],
@@ -569,11 +588,13 @@ export function ScenarioWorkspace({
         });
         toast.showToast(t('Generation cancelled'), 'info', 'feedback');
       } catch (err) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not cancel generation'),
-          'error',
-          'feedback',
-        );
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not cancel generation'),
+            'error',
+            'feedback',
+          );
+        }
       }
     },
     [activeStep.id, mutate, t, toast],

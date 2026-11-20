@@ -17,7 +17,14 @@ import { TemplateGalleryCard } from '../../motion/TemplateGalleryCard';
 import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { useOptionalWorkspaceChrome } from '../../motion/WorkspaceChromeContext';
 import type { StepProps } from '../stepContract';
-import { buildStepAgentPrompt, copyText, extractErrorMessage, poolKindIcon } from './stepUtils';
+import {
+  buildStepAgentPrompt,
+  copyText,
+  extractErrorMessage,
+  isScenarioConflictError,
+  poolKindIcon,
+  poolKindLabel,
+} from './stepUtils';
 
 function PoolAssetThumb({ item }: { item: PoolItem }) {
   if (item.ref.type === 'asset' && item.kind === 'image') {
@@ -180,7 +187,9 @@ export function MotionPanel({
       );
       toast.showToast(t('Motion project created'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not create Motion project.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not create Motion project.')), 'error', 'feedback');
+      }
     } finally {
       setCreating(false);
     }
@@ -196,7 +205,9 @@ export function MotionPanel({
       });
       toast.showToast(t('Motion project linked'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not link Motion project.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not link Motion project.')), 'error', 'feedback');
+      }
     } finally {
       setLinking(false);
     }
@@ -469,7 +480,7 @@ export function MotionPanel({
                     />
                     <PoolAssetThumb item={item} />
                     <span className="om-step-check-label" onClick={() => togglePoolItem(item.id)}>{item.label}</span>
-                    <span className="om-step-badge">{t(item.kind)}</span>
+                    <span className="om-step-badge">{t(poolKindLabel(item.kind))}</span>
                   </div>
                 );
               })}

@@ -205,19 +205,19 @@ test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, gene
     assert.equal(addIter2Res.status, 200);
     currentRun = addIter2Res.body.run;
     const secondIterId = addIter2Res.body.iteration.id;
-    assert.equal(currentRun.steps.social.activeIterationId, firstIterId);
+    assert.equal(currentRun.steps.social.activeIterationId, secondIterId);
 
     const promoteRes = await callScenario(api, {
       command: 'promote',
       runId: currentRun.id,
       expectedRevision: currentRun.revision,
-      requestId: 'req-promote-social-2',
+      requestId: 'req-promote-social-1',
       stepId: 'social',
-      iterationId: secondIterId,
+      iterationId: firstIterId,
     });
     assert.equal(promoteRes.status, 200);
     currentRun = promoteRes.body.run;
-    assert.equal(currentRun.steps.social.activeIterationId, secondIterId);
+    assert.equal(currentRun.steps.social.activeIterationId, firstIterId);
 
     // Bind uploaded pool item to product-images, then remove a second pool item and confirm bindings stripped
     const secondPngPath = await makePng(store.directory, 'extra.png', 'navy');

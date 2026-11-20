@@ -20,11 +20,12 @@ import {
   buildStepAgentPrompt,
   copyText,
   extractErrorMessage,
+  isScenarioConflictError,
   poolKindIcon,
 } from './stepUtils';
 
 const TONE_OPTIONS = [
-  { value: 'bold', label: 'Bold' },
+  { value: 'bold', label: 'Bold & direct' },
   { value: 'friendly', label: 'Friendly' },
   { value: 'premium', label: 'Premium' },
   { value: 'playful', label: 'Playful' },
@@ -178,7 +179,9 @@ export function SocialPackStep({
       });
       toast.showToast(nextVariant > 0 ? t('Drafts regenerated') : t('Social posts drafted'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not draft social posts.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not draft social posts.')), 'error', 'feedback');
+      }
     } finally {
       setDrafting(false);
     }
@@ -199,7 +202,9 @@ export function SocialPackStep({
       setDirty(false);
       toast.showToast(t('Edits saved as new version'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not save edits.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not save edits.')), 'error', 'feedback');
+      }
     } finally {
       setSaving(false);
     }
@@ -341,9 +346,9 @@ export function SocialPackStep({
 
         <div className="om-step-two-col">
           <div className="om-step-field">
-            <span className="om-step-field-label">{t('Tone')}</span>
+            <span className="om-step-field-label">{t('Copy tone')}</span>
             <Select
-              label={t('Tone')}
+              label={t('Copy tone')}
               value={tone}
               options={TONE_OPTIONS.map(opt => ({ value: opt.value, label: t(opt.label) }))}
               onCommit={setTone}
@@ -585,7 +590,7 @@ export function SocialPackStep({
         renderOutput: (iteration: StepIteration) => {
           const iterPosts = extractPostsFromIteration(iteration);
           if (!iterPosts.length) return <span className="om-step-muted">{t('No posts')}</span>;
-          const labels = iterPosts.map(p => socialPlatforms.find(s => s.id === p.platform)?.label ?? p.platform);
+          const labels = iterPosts.map(p => t(socialPlatforms.find(s => s.id === p.platform)?.label ?? p.platform));
           return (
             <div className="om-step-iter-text">
               <strong>{t('{count} posts', { count: iterPosts.length })} · {labels.join(', ')}</strong>

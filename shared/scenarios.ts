@@ -88,7 +88,7 @@ export type ScenarioDefinition = {
 };
 
 const toneOptions = [
-  { id: 'bold', label: 'Bold' },
+  { id: 'bold', label: 'Bold & direct' },
   { id: 'friendly', label: 'Friendly' },
   { id: 'premium', label: 'Premium' },
   { id: 'playful', label: 'Playful' },
@@ -125,7 +125,7 @@ const platformOptions = socialPlatforms.map(platform => ({ id: platform.id, labe
 const commonBriefFields: readonly ScenarioBriefField[] = [
   { id: 'idea', label: 'Core idea', kind: 'textarea', required: true, placeholder: 'Describe what you want to create and the outcome you want.', maxLength: 2000 },
   { id: 'audience', label: 'Audience', kind: 'text', placeholder: 'Who is this for?', maxLength: 200 },
-  { id: 'tone', label: 'Tone', kind: 'select', options: toneOptions },
+  { id: 'tone', label: 'Copy tone', kind: 'select', options: toneOptions },
   { id: 'language', label: 'Copy language', kind: 'select', options: languageOptions },
   { id: 'brandName', label: 'Brand name', kind: 'text', placeholder: 'Optional brand or studio name', maxLength: 120 },
 ];

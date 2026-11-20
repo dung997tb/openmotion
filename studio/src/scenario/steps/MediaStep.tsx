@@ -25,6 +25,8 @@ import {
   buildStepAgentPrompt,
   copyText,
   extractErrorMessage,
+  isScenarioConflictError,
+  jobStateLabel,
   poolKindIcon,
   triggerUrlDownload,
 } from './stepUtils';
@@ -327,7 +329,7 @@ export function MediaStep(props: StepProps) {
       if (error instanceof ScenarioApiError && error.code === 'PROVIDER_UNAVAILABLE') {
         setProviderUnavailable(true);
         toast.showToast(t('No configured model provider is available for this step.'), 'error', 'feedback');
-      } else {
+      } else if (!isScenarioConflictError(error)) {
         toast.showToast(extractErrorMessage(error, t('Generation failed to start.')), 'error', 'feedback');
       }
     } finally {
@@ -344,7 +346,9 @@ export function MediaStep(props: StepProps) {
       });
       toast.showToast(t('Generation cancelled'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not cancel generation.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not cancel generation.')), 'error', 'feedback');
+      }
     } finally {
       setCancellingId(null);
     }
@@ -383,7 +387,9 @@ export function MediaStep(props: StepProps) {
       pool.highlight(addRes.poolItemIds);
       toast.showToast(t('Uploaded {count} files', { count: uploaded.length }), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not upload files.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not upload files.')), 'error', 'feedback');
+      }
     } finally {
       setUploading(false);
     }
@@ -415,7 +421,9 @@ export function MediaStep(props: StepProps) {
       setPickerOpen(false);
       toast.showToast(t('Added from workspace assets'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not add workspace asset.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not add workspace asset.')), 'error', 'feedback');
+      }
     } finally {
       setPickingAsset(false);
     }
@@ -747,7 +755,7 @@ export function MediaStep(props: StepProps) {
               {t('Output · v{number}', { number: activeIteration.number })}
             </h3>
             {activeIteration.job && (
-              <span className="om-step-badge">{t(activeIteration.job.state)}</span>
+              <span className="om-step-badge">{t(jobStateLabel(activeIteration.job.state))}</span>
             )}
           </div>
 
@@ -916,7 +924,7 @@ export function MediaStep(props: StepProps) {
             return <Skeleton className="om-step-iter-skeleton" />;
           }
           if (iteration.job && (iteration.job.state === 'failed' || iteration.job.state === 'cancelled')) {
-            return <span className="om-step-iter-error">{iteration.job.error ?? t(iteration.job.state)}</span>;
+            return <span className="om-step-iter-error">{iteration.job.error ?? t(jobStateLabel(iteration.job.state))}</span>;
           }
           const items = iteration.outputs
             .filter((out): out is { type: 'pool'; poolItemId: string } => out.type === 'pool')

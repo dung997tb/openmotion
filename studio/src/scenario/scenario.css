@@ -1678,6 +1678,18 @@
     padding: var(--motion-space-12);
   }
 
+  .om-scenario-step-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--motion-space-10);
+  }
+
+  .om-scenario-step-controls {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
   .om-scenario-compare-grid {
     grid-template-columns: 1fr;
   }

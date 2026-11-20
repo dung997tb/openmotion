@@ -68,9 +68,9 @@ export async function buildScenarioBundle(
   const includeStandaloneHtml = options.includeStandaloneHtml ?? true;
   const includeMotionSource = options.includeMotionSource ?? false;
 
-  const filtered = Array.isArray(options.stepIds) && options.stepIds.length > 0;
+  const hasStepFilter = Array.isArray(options.stepIds) && options.stepIds.length > 0;
   const selectedSteps: string[] = [];
-  if (filtered) {
+  if (hasStepFilter) {
     const seen = new Set<string>();
     for (const stepId of options.stepIds!) {
       if (!findScenarioStep(scenario, stepId)) {
@@ -85,6 +85,17 @@ export async function buildScenarioBundle(
     for (const step of scenario.steps) selectedSteps.push(step.id);
   }
   const selectedSet = new Set(selectedSteps);
+  const contentStepIds = scenario.steps.filter(step => step.type !== 'export-hub').map(step => step.id);
+  const coversAllContent = hasStepFilter && contentStepIds.every(id => selectedSet.has(id));
+  const filtered = hasStepFilter && !coversAllContent;
+  if (coversAllContent) {
+    for (const step of scenario.steps) {
+      if (!selectedSet.has(step.id)) {
+        selectedSet.add(step.id);
+        selectedSteps.push(step.id);
+      }
+    }
+  }
 
   const root = path.join(path.resolve(dataDirectory), 'scenarios');
   const bundlesDir = path.join(root, 'bundles');
@@ -244,7 +255,7 @@ export async function buildScenarioBundle(
     }
     if (!filtered) {
       for (const item of run.pool) {
-        if (item.pinned || !activeOnly) selectedAssetPoolIds.add(item.id);
+        if (item.pinned || item.stepId === null || !activeOnly) selectedAssetPoolIds.add(item.id);
       }
     }
 

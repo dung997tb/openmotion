@@ -22,6 +22,7 @@ import {
   computeDiscountSummary,
   copyText,
   extractErrorMessage,
+  isScenarioConflictError,
 } from './stepUtils';
 
 const AUTOSAVE_DELAY_MS = 800;
@@ -225,7 +226,9 @@ export function BriefStep({
       });
       toast.showToast(t('Brief revision saved'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not save brief revision.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not save brief revision.')), 'error', 'feedback');
+      }
     } finally {
       setSavingRevision(false);
     }
@@ -241,7 +244,9 @@ export function BriefStep({
       });
       toast.showToast(t('Brief restored'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not restore brief.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not restore brief.')), 'error', 'feedback');
+      }
     }
   };
 
@@ -276,7 +281,9 @@ export function BriefStep({
         toast.showToast(t('All downstream steps already have custom prompts.'), 'info', 'feedback');
       }
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not apply prompts.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not apply prompts.')), 'error', 'feedback');
+      }
     } finally {
       setApplyingPrompts(false);
     }
@@ -300,7 +307,9 @@ export function BriefStep({
       });
       toast.showToast(t('Script outline generated'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not generate script outline.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not generate script outline.')), 'error', 'feedback');
+      }
     } finally {
       setGeneratingScript(false);
     }
@@ -322,7 +331,9 @@ export function BriefStep({
       scriptDirtyRef.current = false;
       toast.showToast(t('Script saved'), 'info', 'feedback');
     } catch (error) {
-      toast.showToast(extractErrorMessage(error, t('Could not save script.')), 'error', 'feedback');
+      if (!isScenarioConflictError(error)) {
+        toast.showToast(extractErrorMessage(error, t('Could not save script.')), 'error', 'feedback');
+      }
     } finally {
       setSavingScript(false);
     }
@@ -546,7 +557,7 @@ export function BriefStep({
               </span>
             )}
             {typeof values.promoCode === 'string' && values.promoCode.trim() && (
-              <span className="om-step-code-chip">{t('Code')}: {values.promoCode.trim()}</span>
+              <span className="om-step-code-chip">{t('Promo code')}: {values.promoCode.trim()}</span>
             )}
           </div>
           {typeof values.saleWindow === 'string' && values.saleWindow.trim() && (
