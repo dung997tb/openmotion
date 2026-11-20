@@ -33,6 +33,8 @@ import { skillCategoryId } from './pageTracking';
 import { optionId, send, slugField } from './reporting';
 import { ExploreDesignSection } from '../design/scenes/ExploreDesignSection';
 import type { DesignTabId } from '../design/scenes/DesignSceneTabs';
+import { scenarioDefinitions, type ScenarioId } from '../../../shared/scenarios';
+import { ScenarioHighlights } from './ScenarioHighlights';
 import './sceneDiscovery.css';
 
 type ExploreArea = Parameters<typeof reportCreativeClick>[1];
@@ -79,6 +81,8 @@ type ExploreProps = {
   onMcp: (client?: 'claude', example?: string) => void;
   onSelectDesignScene?: (scene: DesignTabId) => void;
   onOpenDesignProject?: (projectId: string) => void;
+  onStartScenario?: (id: ScenarioId) => void;
+  onOpenScenarioHub?: () => void;
   active: boolean;
   filters: ExploreFilters;
 };
@@ -204,7 +208,7 @@ function StudioCollection({ studio, medium, onChooseStudio, onSkill, onNavigate,
   </section>;
 }
 
-function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandKit, onMcp, onSkill }: Pick<ExploreProps, 'active' | 'onModel' | 'onNavigate' | 'onChooseStudio' | 'onBrandKit' | 'onMcp' | 'onSkill'>) {
+function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandKit, onMcp, onSkill, onStartScenario, onOpenScenarioHub }: Pick<ExploreProps, 'active' | 'onModel' | 'onNavigate' | 'onChooseStudio' | 'onBrandKit' | 'onMcp' | 'onSkill' | 'onStartScenario' | 'onOpenScenarioHub'>) {
   const { t } = useI18n(), { openAssets, openModelSettings, openLibrary, openSkills } = useWorkspaceChrome();
   const [skillCategory, setSkillCategory] = useState<SkillCategory | null>(null);
   const [modelsFor, setModelsFor] = useState<StudioScene['modality'] | null>(null);
@@ -213,6 +217,17 @@ function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandK
     <h2 lang="en">Open Design</h2>
     <div className="om-capability-body">
     <div className="om-capability-columns">
+      {onStartScenario && <div>
+        <h3>{t('Workflows')}</h3>
+        {scenarioDefinitions.map(scenario => <Button variant="plain" className="om-nav-item" key={scenario.id} onClick={() => {
+          track('capability_index', 'select_scene', { navTarget: 'workflows', studio: scenario.id });
+          onStartScenario(scenario.id);
+        }}>{t(scenario.title)}</Button>)}
+        {onOpenScenarioHub && <Button variant="plain" className="om-nav-item" onClick={() => {
+          track('capability_index', 'open_studio', { navTarget: 'workflows' });
+          onOpenScenarioHub();
+        }}>{t('All workflows')}</Button>}
+      </div>}
       {creativeStudios.filter((studio): studio is MediaStudio => studio.surface === 'media').map(studio => {
         const kind = studio.primaryModality;
         return <div key={kind}><h3>{t(mediaLabels[kind])}</h3>
@@ -329,12 +344,15 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
     {!medium && <div className="om-explore-features" data-split={Boolean(featuredTemplate || initialTemplateError || initialLoading)}>
       {community ? <CommunitySpotlight community={community} skill={skills[0]} onChooseStudio={onChooseStudio} /> :
         <ExploreSpotlight active={active} onOpenBlackFriday={props.onOpenBlackFriday} onNavigate={onNavigate}
-          onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} />}
+          onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} onStartScenario={props.onStartScenario} />}
       {featuredTemplate && <TemplateSpotlight item={featuredTemplate} onTry={tryVideoPrompt} />}
       {initialTemplateError && templateError}
       {initialLoading && <CoverPlaceholder className="om-featured-template-skeleton" />}
     </div>}
     {home && <>
+      {props.onStartScenario && props.onOpenScenarioHub && (
+        <ScenarioHighlights onStartScenario={props.onStartScenario} onOpenHub={props.onOpenScenarioHub} />
+      )}
       <ExploreHighlights onChooseStudio={onChooseStudio} onOpenBlackFriday={props.onOpenBlackFriday} />
       <ClaudeStories onClaude={example => props.onMcp('claude', example)} />
     </>}

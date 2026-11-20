@@ -1,3 +1,4 @@
+import { findScenario } from '../../../shared/scenarios';
 import { exploreCommunities } from '../../../shared/studio-catalog';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
@@ -13,6 +14,8 @@ function sourceLabel(href: string): string {
   if (page.settings === 'mcp') return 'MCP';
   if (page.settings === 'brand-kit') return 'Brand Kit';
   if (page.settings) return settingsSectionLabel(page.settings);
+  if (page.scenario) return findScenario(page.scenario)?.title ?? 'Workflows';
+  if (page.scenarioHub) return 'Workflows';
   if (page.studio) return page.studio.scene.label;
   if (page.designScene) return 'Design Studio';
   if (page.modelOverview || page.modelHub) return 'Model details';

@@ -18,6 +18,8 @@ import { sceneExamples } from './sceneShowcase';
 import { destinationTarget, reportCreativeClick, type CreativePage, type CreativeTarget } from './exploreTracking';
 import { AudioNavMenu } from './AudioNavMenu';
 import type { SoundTabId } from './soundTabs';
+import type { ScenarioId } from '../../../shared/scenarios';
+import { ScenarioMegaMenu } from './ScenarioMegaMenu';
 
 export type CreativeNavigationProps = {
   onChooseStudio: (studio: CreativeStudio, kind?: Modality) => void;
@@ -27,6 +29,9 @@ export type CreativeNavigationProps = {
   motionActive: boolean;
   designActive?: boolean;
   cinemaActive?: boolean;
+  scenarioActive?: ScenarioId | 'hub' | null;
+  onOpenScenario?: (id: ScenarioId, runId?: string) => void;
+  onOpenScenarioHub?: () => void;
   onNavigate: (destination: StudioDestination | null, seed?: ImageParameterSeed) => void;
   onNavigateSound?: (destination: StudioDestination, soundTab?: SoundTabId | null) => void;
   currentPage: 'explore' | 'mcp' | null;
@@ -88,13 +93,13 @@ function MediaChoices({ studio, destination, onNavigate, onSelectModel, catalog 
   </div>;
 }
 
-export function CreativeNavigation({ specialty, onChooseStudio, destination, soundTab, motionActive, designActive, cinemaActive, onNavigate, onNavigateSound, currentPage, onOpenPage, overflowActions, trackingPage }: CreativeNavigationProps & { overflowActions?: (close: () => void) => ReactNode }) {
+export function CreativeNavigation({ specialty, onChooseStudio, destination, soundTab, motionActive, designActive, cinemaActive, scenarioActive, onOpenScenario, onOpenScenarioHub, onNavigate, onNavigateSound, currentPage, onOpenPage, overflowActions, trackingPage }: CreativeNavigationProps & { overflowActions?: (close: () => void) => ReactNode }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState<Modality | 'mcp' | null>(null);
+  const [open, setOpen] = useState<Modality | 'mcp' | 'workflows' | null>(null);
   const [popupHost, setPopupHost] = useState<HTMLElement>();
   const navId = useId();
   const rail = useRef<HTMLElement>(null);
-  const catalog = useMediaCatalog(open !== null && open !== 'mcp');
+  const catalog = useMediaCatalog(open !== null && open !== 'mcp' && open !== 'workflows');
   const trackPage = trackingPage;
   const track = (element: Parameters<typeof reportCreativeClick>[2], target: CreativeTarget) => reportCreativeClick(trackPage, 'creative_nav', element, target);
 
@@ -102,38 +107,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
   const [moreOpen, setMoreOpen] = useState(false);
   const strip = useRef<HTMLDivElement>(null);
   const more = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const viewport = rail.current!;
-    const row = strip.current!;
-    const trigger = more.current!;
-    setPopupHost(viewport.closest<HTMLElement>('dialog, [data-feedback-modal]') ?? undefined);
-    const items = Array.from(row.querySelectorAll<HTMLElement>(':scope > [data-nav-slot]'));
-    const update = () => {
-      const available = viewport.clientWidth;
-      if (!available) return;
-      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
-      const widths = items.map(item => item.getBoundingClientRect().width);
-      // Keep only the first three studios (Design, Motion, Cinema) in the primary row; place the rest under More.
-      const maxVisible = Math.min(widths.length, studioStart + 3);
-      const total = widths.slice(0, maxVisible).reduce((sum, width) => sum + width, 0) + gap * Math.max(0, maxVisible - 1);
-      let count = maxVisible;
-      if (maxVisible < widths.length || total > available) {
-        const compact = getComputedStyle(row).getPropertyValue('--compact-nav').trim() === '1';
-        const limit = compact ? Math.min(4, maxVisible) : maxVisible;
-        let used = trigger.getBoundingClientRect().width;
-        count = 0;
-        while (count < limit && used + gap + widths[count] <= available) {
-          used += gap + widths[count++];
-        }
-      }
-      setVisibleCount(count);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    [viewport, trigger, ...items].forEach(element => observer.observe(element));
-    return () => observer.disconnect();
-  }, []);
+  const hasWorkflows = Boolean(onOpenScenario && onOpenScenarioHub);
 
   const choose = (action: () => void) => {
     const navigation = rail.current;
@@ -146,6 +120,14 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
     action();
   };
   const menuDestinations = [
+    ...(hasWorkflows ? [{
+      id: 'workflows' as const,
+      studio: null,
+      label: t('Workflows'),
+      current: scenarioActive ? 'page' as const : undefined,
+      menuLabel: t('Workflows') + ' · ' + t('Topics, campaigns and roles'),
+      onActivate: () => onOpenScenarioHub!(),
+    }] : []),
     ...creativeStudios.filter((studio): studio is MediaStudio => studio.surface === 'media').map(studio => {
       const kind = studio.primaryModality;
       const label = t(mediaLabels[kind]);
@@ -174,6 +156,38 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
   const hasMore = visibleCount < count || Boolean(overflowActions);
 
   useLayoutEffect(() => {
+    const viewport = rail.current!;
+    const row = strip.current!;
+    const trigger = more.current!;
+    setPopupHost(viewport.closest<HTMLElement>('dialog, [data-feedback-modal]') ?? undefined);
+    const items = Array.from(row.querySelectorAll<HTMLElement>(':scope > [data-nav-slot]'));
+    const update = () => {
+      const available = viewport.clientWidth;
+      if (!available) return;
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      const widths = items.map(item => item.getBoundingClientRect().width);
+      // Keep only the first three studios (Design, Motion, Cinema) in the primary row; place the rest under More.
+      const maxVisible = Math.min(widths.length, studioStart + 3);
+      const total = widths.slice(0, maxVisible).reduce((sum, width) => sum + width, 0) + gap * Math.max(0, maxVisible - 1);
+      let nextCount = maxVisible;
+      if (maxVisible < widths.length || total > available) {
+        const compact = getComputedStyle(row).getPropertyValue('--compact-nav').trim() === '1';
+        const limit = compact ? Math.min(4, maxVisible) : maxVisible;
+        let used = trigger.getBoundingClientRect().width;
+        nextCount = 0;
+        while (nextCount < limit && used + gap + widths[nextCount] <= available) {
+          used += gap + widths[nextCount++];
+        }
+      }
+      setVisibleCount(nextCount);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    [viewport, trigger, ...items].forEach(element => observer.observe(element));
+    return () => observer.disconnect();
+  }, [studioStart]);
+
+  useLayoutEffect(() => {
     setOpen(null);
     if (!hasMore) setMoreOpen(false);
   }, [visibleCount, hasMore]);
@@ -182,6 +196,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
     const { id, studio, label, current, menuLabel, onActivate } = menuDestinations[index - splitStart];
     const expanded = open === id && (index >= visibleCount) === inPanel;
     const where = { navTarget: id, inOverflow: inPanel };
+    const workflowsBadgeId = id === 'workflows' ? navId + '-workflows' + (inPanel ? '-more' : '') : undefined;
     const selectScene = (next: StudioDestination, seed?: ImageParameterSeed) => {
       track('select_scene', { ...where, ...destinationTarget(next) });
       choose(() => onNavigate(next, seed));
@@ -193,7 +208,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
               setOpen(previous => value ? id : previous === id ? null : previous);
             }}
             aria-label={menuLabel} align="start" className={id === 'mcp' ? 'om-selection-panel om-creative-client-menu' : `om-selection-panel om-creative-menu om-creative-mega om-creative-menu-${id}`}
-            primaryAction={<Button variant="plain" className="om-nav-item om-nav-row-link" aria-current={current} onClick={() => { track(id === 'mcp' ? 'nav_mcp' : 'nav_media', where); choose(onActivate); }}>{label}</Button>}
+            primaryAction={<Button variant="plain" className="om-nav-item om-nav-row-link" aria-label={id === 'workflows' ? label : undefined} aria-describedby={workflowsBadgeId} aria-current={current} onClick={() => { track(id === 'mcp' ? 'nav_mcp' : id === 'workflows' ? 'nav_studio' : 'nav_media', where); choose(onActivate); }}>{label}{workflowsBadgeId && <span className="om-badge" data-nav-badge="New" id={workflowsBadgeId} lang="en">New</span>}</Button>}
             trigger={<Button variant="plain" className="om-nav-item om-nav-row-action" aria-label={menuLabel} aria-expanded={expanded}><RemixIcon name="arrow-down-s-line" size={12} /></Button>}>
             {id === 'mcp' ? <>
               <h2 lang="en">{menuLabel}</h2>
@@ -202,7 +217,19 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
                   <McpClientAvatar client={client} /><span>{t(client.name)}</span>
                 </Button>)}
               </div>
-            </> : expanded && studio && (id === 'audio'
+            </> : id === 'workflows' ? (expanded && onOpenScenario && onOpenScenarioHub && (
+              <ScenarioMegaMenu
+                activeScenarioId={scenarioActive ?? null}
+                onSelect={(scenarioId, runId) => {
+                  track('select_scene', { ...where, studio: scenarioId });
+                  choose(() => onOpenScenario(scenarioId, runId));
+                }}
+                onOpenHub={() => {
+                  track('nav_studio', where);
+                  choose(() => onOpenScenarioHub());
+                }}
+              />
+            )) : expanded && studio && (id === 'audio'
               ? <AudioNavMenu destination={destination} activeSoundTab={soundTab} catalog={catalog.catalog} failed={catalog.failed}
                   onSelect={(next, nextSoundTab, source) => {
                     track(source === 'model' ? 'select_model' : 'select_scene', { ...where, ...destinationTarget(next) });

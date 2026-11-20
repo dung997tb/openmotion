@@ -83,7 +83,7 @@ function DetailMedia({ template }: { template: GalleryTemplate }) {
 }
 
 
-type Props = { detailOnly?: boolean; initialTemplate?: GalleryTemplate; collection?: TemplateCollection | null; onCollectionChange?: (value: TemplateCollection | null) => void; collectionSkillOpen?: boolean; onBrowseTemplates?: () => void; onOpenSkill?: (id: string, trigger: HTMLButtonElement) => void; inWorkspace?: boolean; navigation?: ReactNode; returnFocus?: HTMLElement | null; open: boolean; busy: boolean; openingDisabled?: boolean; error: string; onClose: () => void; onOpen: (id: string) => void; creators?: boolean; creator?: string | null; onCreatorChange?: (creator: string | null) => void; templateId?: string | null; onTemplateChange?: (id: string | null) => void; projectId?: string; onPrepareTemplate?: (template: GalleryTemplate, requestId: string) => Promise<PreparedTemplateProject>; onOpenProject?: (id: string) => Promise<boolean> };
+type Props = { detailOnly?: boolean; initialTemplate?: GalleryTemplate; collection?: TemplateCollection | null; onCollectionChange?: (value: TemplateCollection | null) => void; collectionSkillOpen?: boolean; onBrowseTemplates?: () => void; onOpenSkill?: (id: string, trigger: HTMLButtonElement) => void; onStartScenario?: () => void; inWorkspace?: boolean; navigation?: ReactNode; returnFocus?: HTMLElement | null; open: boolean; busy: boolean; openingDisabled?: boolean; error: string; onClose: () => void; onOpen: (id: string) => void; creators?: boolean; creator?: string | null; onCreatorChange?: (creator: string | null) => void; templateId?: string | null; onTemplateChange?: (id: string | null) => void; projectId?: string; onPrepareTemplate?: (template: GalleryTemplate, requestId: string) => Promise<PreparedTemplateProject>; onOpenProject?: (id: string) => Promise<boolean> };
 
 /** Full-window discovery using the existing catalog and guarded editable-project actions. */
 function DetailScroll({ enabled, container, children }: { enabled: boolean; container: RefObject<HTMLDivElement | null>; children: ReactNode }) {
@@ -728,7 +728,7 @@ export function TemplateLibraryDialog(props: Props) {
         <TemplateSearchRecovery visible expanded query={campaignQuery} context={listContext()} reason="no_results"
           onExpand={expandSearchRecovery} onActivity={searchRecoveryActivity} showToast={(message, kind) => showToast(message, kind, 'feedback')} />
       </div>}
-      active={active} onPreview={openCard} onPriority={setPriority} onOpenSkill={props.onOpenSkill} />
+      active={active} onPreview={openCard} onPriority={setPriority} onOpenSkill={props.onOpenSkill} onStartScenario={props.onStartScenario} />
     : props.creators ? <TemplateCreators catalog={catalog} creator={props.creator ?? null} query={query} works={visible} loading={loading}
       error={error} retry={() => retry(value => value + 1)} choose={chooseCreator} open={openCard} active={active} onPriority={setPriority} /> :
     <main className={styles.results} aria-busy={loading}>
