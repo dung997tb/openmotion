@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { PreviewBuildBusy, PreviewDocumentCache } from '../../src/studio/engine/preview-document-cache.ts';
 import { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -1267,6 +1269,31 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     });
     assert.equal((await env.studioApp.request(missingUrl)).status, 200);
 
+  });
+
+  it('signals retryable overload to an isolated document through the authenticated bridge', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const projectPath = `/api/projects/${projectId}/preview`;
+    const app = new Hono<{ Variables: StudioVariables }>();
+    app.use('*', async (c, next) => { c.set('previewAssetBase', 'https://preview.test/base/'); await next(); });
+    app.route('/', env.studioApp);
+    t.mock.method(PreviewDocumentCache.prototype, 'get', () => { throw new PreviewBuildBusy(); });
+    const busy = await app.request(projectPath + '?pt=example-token');
+    assert.equal(busy.status, 503);
+    assert.equal(busy.headers.get('retry-after'), '1');
+    assert.match(busy.headers.get('content-type')!, /text\/html/);
+    assert.equal(busy.headers.get('cache-control'), 'no-store');
+    const script = (await busy.text()).match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script);
+    const parent = { postMessage: t.mock.fn() };
+    runInNewContext(script, { window: { parent }, URL, document: { referrer: 'https://studio.test/' },
+      location: { href: 'https://preview.test' + projectPath + '?pt=example-token' } });
+    assert.equal(parent.postMessage.mock.callCount(), 1);
+    const [message, origin] = parent.postMessage.mock.calls[0]!.arguments as unknown as [Record<string, unknown>, string];
+    assert.deepEqual({ ...message }, { source: 'openmotion-preview-bridge', version: 1, type: 'preview-build-busy',
+      projectId, token: 'example-token', retryAfterMs: 1000 });
+    assert.equal(origin, 'https://studio.test');
   });
 
   it('late-binds scoped roots and import maps while preserving authored base resolution', async () => {

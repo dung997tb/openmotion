@@ -8,6 +8,7 @@ import {
 } from '../context.ts';
 import {
   buildSubCompositionHtmlInMemory,
+  createPreviewBuildBusyHtml,
   bundlePreviewInMemory,
   previewEtag,
 } from '../engine/preview-bundler.ts';
@@ -173,7 +174,9 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
       return c.body(assetBase ? doc.html.replaceAll(doc.templateBase, () => assetBase) : doc.html, 200);
     } catch (error) {
       if (error instanceof PreviewBuildBusy) {
-        c.header('Retry-After', '1');
+        const retryAfterSeconds = 1;
+        c.header('Retry-After', String(retryAfterSeconds));
+        if (assetBase) return c.html(createPreviewBuildBusyHtml(projectId, retryAfterSeconds), 503);
         return c.json({ error: 'Preview builders are busy.' }, 503);
       }
       if (compPath !== undefined) throw error;

@@ -444,12 +444,7 @@ function injectBodyScript(html: string, scriptBody: string, deferred = true): st
   return insertBeforeCloseTag(html, 'body', `${tag}\n`) ?? `${html}\n${tag}`;
 }
 
-/**
- * Install the cookie-less preview bridge used when a preview is served from
- * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
- * same-origin previews keep their existing DOM/runtime fast path.
- */
-export function createPreviewBridgeScript(projectId: string, compositionPath = 'index.html', sourceVersions: Record<string, string> = {}): string {
+function previewBridgeScript(projectId: string, body: string): string {
   const encodedProjectId = JSON.stringify(projectId).replace(/</g, '\\u003c');
   return `(function(){
   var SOURCE='openmotion-preview-bridge', PARENT='openmotion-studio', VERSION=1;
@@ -457,7 +452,6 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
   var token=new URL(location.href).searchParams.get('pt');
   if(!token || window.parent===window) return;
   var parentWindow=window.parent;
-  var pickMode=false, picked=null;
   var parentOrigin='*';
   try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
   function post(type,payload,requestId){
@@ -465,6 +459,23 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
     if(requestId) message.requestId=requestId;
     parentWindow.postMessage(message,parentOrigin==='null'?'*':parentOrigin);
   }
+  ${body}
+})();`;
+}
+
+export function createPreviewBuildBusyHtml(projectId: string, retryAfterSeconds: number): string {
+  const notify = previewBridgeScript(projectId, `post('preview-build-busy',{retryAfterMs:${retryAfterSeconds * 1000}});`);
+  return injectBodyScript('<!doctype html><html><body>Preview builders are busy.</body></html>', notify, false);
+}
+
+/**
+ * Install the cookie-less preview bridge used when a preview is served from
+ * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
+ * same-origin previews keep their existing DOM/runtime fast path.
+ */
+export function createPreviewBridgeScript(projectId: string, compositionPath = 'index.html', sourceVersions: Record<string, string> = {}): string {
+  return previewBridgeScript(projectId, `
+  var pickMode=false, picked=null;
   function player(){ return window.__player || null; }
   function timeline(includeManifest){
     var p=player();
@@ -553,7 +564,7 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
   window.addEventListener('unhandledrejection',function(event){ post('runtime-error',{message:String(event.reason&&event.reason.message||event.reason||'Unhandled preview rejection')}); });
   window.addEventListener('load',ready);
   setInterval(function(){ if(document.visibilityState!=='hidden') post('timeline-state',timeline()); },500);
-})();`;
+`);
 }
 
 /**

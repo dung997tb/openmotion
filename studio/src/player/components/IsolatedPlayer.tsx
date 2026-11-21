@@ -23,6 +23,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
     const initialPortrait = useRef(props.portrait);
     const passive = props.passive === true;
     const lease = useRef<ReturnType<typeof bindPreviewLease> | null>(null);
+    const busyRetries = useRef(0);
     const [error, setError] = useState<string>();
     const attach = useCallback((node: HTMLIFrameElement | null) => {
       frame.current = node;
@@ -44,6 +45,9 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       let startedAt = performance.now();
       let deadline: ReturnType<typeof setTimeout>;
       let paintFrame = 0;
+      let busyTimer: ReturnType<typeof setTimeout>;
+      let busyForLoad = false;
+      busyRetries.current = 0;
       function resize() {
         const [width, height] = size;
         const scale = Math.min(stage!.clientWidth / width, stage!.clientHeight / height);
@@ -53,16 +57,34 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         });
       }
       function fail(message: string) {
+        clearTimeout(busyTimer);
+        clearTimeout(deadline);
         setError(message);
         callbacks.current.onCompositionLoadingChange?.(false);
         callbacks.current.onPreviewError?.(message);
         if (!passive) usePlayerStore.getState().markPreviewBooted();
       }
       function message(event: MessageEvent) {
-        if (event.data?.type !== "timeline-state" || !bridge?.accepts(event)) return;
+        if (!bridge?.accepts(event)) return;
+        if (event.data.type === "preview-build-busy") {
+          if (ready || busyForLoad) return;
+          busyForLoad = true;
+          if (busyRetries.current >= 3) {
+            fail("Preview builders are busy. Try again shortly.");
+            return;
+          }
+          const baseline = Math.min(5000, Math.max(1000, Number(event.data.retryAfterMs) || 1000));
+          const delay = baseline * 2 ** busyRetries.current * (1 + Math.random());
+          busyRetries.current++;
+          busyTimer = setTimeout(() => void lease.current?.retry(), delay);
+          return;
+        }
+        if (event.data.type !== "timeline-state") return;
         if (Number.isFinite(event.data.currentTime)) runtimeTime = event.data.currentTime;
         if (ready || !(event.data.duration > 0)) return;
         ready = true;
+        busyRetries.current = 0;
+        clearTimeout(busyTimer);
         setError(undefined);
         clearTimeout(deadline);
         const { width, height } = event.data;
@@ -87,6 +109,8 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       lease.current = bindPreviewLease(url, props.origin, (next) => {
         if (ready && !passive && !callbacks.current.noLoadTimeout) rememberPreviewPosition(iframe, runtimeTime);
         ready = false;
+        busyForLoad = false;
+        clearTimeout(busyTimer);
         setError(undefined);
         clearTimeout(deadline);
         cancelAnimationFrame(paintFrame);
@@ -100,6 +124,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         deadline = setTimeout(() => fail("The composition preview did not become ready."), 15_000);
       }, fail);
       return () => {
+        clearTimeout(busyTimer);
         clearTimeout(deadline);
         cancelAnimationFrame(paintFrame);
         observer.disconnect();
@@ -115,8 +140,8 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
           allow={passive ? "autoplay 'none'" : "autoplay; fullscreen"}
           className="absolute left-1/2 top-1/2 max-w-none border-0" />
         {error && !passive && <div data-testid="composition-preview-error" className="absolute inset-0 flex flex-col items-center justify-center bg-studio-surface text-center">
-          <p>{error}</p>
-          <Button variant="plain" onClick={() => void lease.current?.retry()}>{t("Retry preview")}</Button>
+          <p>{t(error)}</p>
+          <Button variant="plain" onClick={() => { busyRetries.current = 0; void lease.current?.retry(); }}>{t("Retry preview")}</Button>
         </div>}
       </div>
     );
