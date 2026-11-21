@@ -1,13 +1,14 @@
-import { lazy, Suspense, useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react';
+import { Suspense, useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react';
 import type { ArtifactKind, SessionArtifact } from '../../../shared/session';
 import { EditorLoading, type EditorLoadingLayout } from './EditorLoading';
 import { LivePreviewReadyContext } from './StudioHost';
 import { useDockLayoutStore } from '../components/dock/dockLayoutStore';
+import { MotionProjectEditor } from './MotionProjectEditor';
 
 // Add a viewer adapter here when a mode introduces a new artifact kind.
 // The session and browser shell do not own the editor's internal state.
 const viewers: Record<ArtifactKind, ComponentType<{ resolvedProjectId: string }>> = {
-  'motion-project': lazy(() => import('../App').then(module => ({ default: module.StudioApp }))),
+  'motion-project': MotionProjectEditor,
 };
 
 const errorSurface = '.om-recovery-screen, [data-testid="composition-preview-error"]';

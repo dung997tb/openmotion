@@ -2,9 +2,10 @@ import { Button } from 'open-design-ui/button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { WorkspaceFrame, WorkspaceMenuButton, useWorkspaceChrome } from './WorkspaceFrame';
-import { requestedProject } from './workspaceRouting';
+import { requestedProject, validWorkspaceProject } from './workspaceRouting';
 import { resolveWorkspaceRoute } from './resolveWorkspaceRoute';
 import type { SessionArtifact } from '../../../shared/session';
+import { preloadMotionProjectEditor } from './MotionProjectEditor';
 import { ArtifactViewer } from './ArtifactViewer';
 import { EditorLoading, readEditorLoadingLayout, type EditorLoadingLayout } from './EditorLoading';
 import { RecoveryScreen } from '../components/RecoveryScreen';
@@ -50,6 +51,10 @@ export function MotionApp() {
   }, [projectId, sessionId, ready, error, libraryOnly]);
   useEffect(() => {
     if (ready || settingsPage) return;
+    if (projectId && validWorkspaceProject(projectId) && (sessionId === null || validWorkspaceProject(sessionId))
+      && new URLSearchParams(location.search).get('templates') !== '1') {
+      preloadMotionProjectEditor();
+    }
     const controller = new AbortController();
     setError('');
     async function resolve() {

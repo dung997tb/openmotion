@@ -1298,6 +1298,15 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal((await env.studioApp.request(url, { headers: { 'If-None-Match': etag } })).status, 304);
     assert.equal(loads.mock.callCount(), 1);
 
+    const warm = await env.studioApp.request(url + '?capture=1', { method: 'HEAD' });
+    assert.equal(warm.status, 200);
+    assert.equal(await warm.text(), '');
+    assert.equal(loads.mock.callCount(), 2);
+    const player = await env.studioApp.request(url + '?capture=1');
+    assert.equal(player.headers.get('etag'), warm.headers.get('etag'));
+    assert.ok((await player.text()).length > 0);
+    assert.equal(loads.mock.callCount(), 2);
+
     for (const suffix of ['?capture=1', '?variables=%7B%22theme%22%3A%22red%22%7D', '/comp/index.html']) {
       const variant = await env.studioApp.request(url + suffix, { headers: { 'If-None-Match': etag } });
       assert.equal(variant.status, 200);
