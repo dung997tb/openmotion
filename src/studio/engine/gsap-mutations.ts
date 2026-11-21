@@ -77,10 +77,11 @@ export interface ExtractedGsapBlock {
 
 export function extractGsapScriptBlock(html: string): ExtractedGsapBlock | null {
   const document = parseHTMLContent(ensureHfIds(html));
+  // linkedom serializes the template's child nodes, not its detached content fragment.
   const scripts = [
     ...Array.from(document.querySelectorAll('script:not([src])')),
     ...Array.from(document.querySelectorAll('template')).flatMap((tmpl) =>
-      Array.from((tmpl as HTMLTemplateElement).content?.querySelectorAll('script:not([src])') ?? tmpl.querySelectorAll('script:not([src])')),
+      Array.from(tmpl.querySelectorAll('script:not([src])')),
     ),
   ];
   const script = findTimelineScript(scripts);

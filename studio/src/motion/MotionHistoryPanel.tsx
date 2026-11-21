@@ -10,7 +10,12 @@ import { studioWriteHeaders } from '../utils/studioFileVersion';
 import { MotionIcon } from './icons';
 import { useMotionHistoryOperation } from './MotionHistoryState';
 
-interface HistoryResponse { entries: HistoryListItem[] }
+type PanelEntry = Pick<HistoryListItem, 'id' | 'label' | 'who' | 'pinned' | 'undone' | 'restoredTo'> & {
+  endedAt: number | string;
+  seq?: number;
+  files: Array<{ path: string; before?: string | null; after?: string | null; status?: 'added' | 'deleted' | 'modified' }>;
+};
+interface HistoryResponse { entries: PanelEntry[]; currentSeq?: number }
 
 export async function historyRequest<T>(projectId: string, action = '', body?: object, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/history${action}`, {
@@ -31,7 +36,8 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
   const { t, formatDate } = useI18n();
   const { projectId, waitForPendingDomEditSaves, writeBlockedReason, renderQueue, showToast } = useStudioShellContext();
   const historyOperation = useMotionHistoryOperation();
-  const [entries, setEntries] = useState<HistoryListItem[]>([]);
+  const [entries, setEntries] = useState<PanelEntry[]>([]);
+  const [currentSeq, setCurrentSeq] = useState<number>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [onlyPinned, setOnlyPinned] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -47,11 +53,13 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
     const controller = new AbortController();
     activeRead.current = controller;
     const result = await historyRequest<HistoryResponse>(projectId, '', undefined, controller.signal);
+    const chronological = result.currentSeq === undefined ? result.entries : [...result.entries].reverse();
     if (!controller.signal.aborted && mounted.current) {
-      setEntries(result.entries);
+      setEntries(chronological);
+      setCurrentSeq(result.currentSeq);
       setLoading(false);
     }
-    return result.entries;
+    return chronological;
   }, [projectId]);
 
   useEffect(() => {
@@ -90,11 +98,11 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
     await historyRequest(projectId, '/pin', { entryId: current.id, pinned: true });
     await refresh(); setSelectedId(current.id); setOnlyPinned(false); setNotice('Current version pinned');
   }, 'keep_current');
-  const pin = (entry: HistoryListItem) => run(async () => {
+  const pin = (entry: PanelEntry) => run(async () => {
     await historyRequest(projectId, '/pin', { entryId: entry.id, pinned: !entry.pinned });
     await refresh();
   }, entry.pinned ? 'unpin' : 'pin');
-  const restore = (entry: HistoryListItem) => run(async () => {
+  const restore = (entry: PanelEntry) => run(async () => {
     await waitForPendingDomEditSaves();
     await historyRequest(projectId, '/checkpoint', {});
     await historyRequest(projectId, '/restore', { point: entry.id });
@@ -129,7 +137,7 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
           {allowPinning && entry.pinned && <span className="motion-history-badge">{t("Pinned")}</span>}
           {entry.id === entries.at(-1)?.id && <span className="motion-history-badge motion-history-badge-latest">{t("Latest")}</span>}
         </span>
-        <span className="motion-history-entry-meta"><time dateTime={new Date(entry.endedAt).toISOString()}>{formatDate(entry.endedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
+        <span className="motion-history-entry-meta"><time dateTime={new Date(entry.endedAt).toISOString()}>{formatDate(new Date(entry.endedAt).getTime(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
           <span>{entry.who.kind === 'person' ? t("Manual edit") : entry.who.kind === 'agent' ? entry.who.name : t("External change")} · {t('{count} files', { count: entry.files.length })}{entry.undone ? ` · ${t('Undone')}` : ''}</span>
         </span>
       </Button>)}
@@ -137,10 +145,10 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
     {selected && <div className="motion-history-detail">
       {!compact && <><div className="motion-history-detail-title">{t("Changes in this version")}</div>
       <ul>{selected.files.map(file => <li key={file.path}><Tooltip label={file.path} wrap><code>{file.path}</code></Tooltip>
-        <span>{file.before === null ? t('Created') : file.after === null ? t("Deleted") : t("Modified")}</span></li>)}</ul></>}
+        <span>{file.status === 'added' || file.before === null ? t('Created') : file.status === 'deleted' || file.after === null ? t("Deleted") : t("Modified")}</span></li>)}</ul></>}
       <div className="motion-history-detail-actions">
         {allowPinning && <Button variant="plain" type="button" className="motion-button" disabled={disabled} onClick={() => { trackStudioClick('version_history', 'pin_version', projectId, undefined, selected.pinned ? 'off' : 'on'); void pin(selected); }}>{selected.pinned ? t("Unpin version") : t("Keep this version")}</Button>}
-        <Button variant="plain" type="button" className="motion-button motion-button-primary" disabled={disabled || selected.id === entries.at(-1)?.id}
+        <Button variant="plain" type="button" className="motion-button motion-button-primary" disabled={disabled || (currentSeq === undefined ? selected.id === entries.at(-1)?.id : selected.seq === currentSeq)}
           onClick={() => { trackStudioClick('version_history', 'restore_version', projectId); void restore(selected); }}>{t("Restore this version")}</Button>
       </div>
       {!compact && <p>{t("Restoring creates a new entry and keeps your current changes in history.")}</p>}

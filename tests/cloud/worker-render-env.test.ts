@@ -448,11 +448,11 @@ describe('worker-render: CLI Argument Builders (hyperframes@0.9.7 snapshot & ren
       '.',
       '--output',
       '/tmp/frames',
-      '--at',
-      '0',
-      '--no-end',
       '--composition',
       'intro-scene',
+      '--frames',
+      '1',
+      '--no-end',
       '--json',
     ]);
   });

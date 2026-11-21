@@ -152,6 +152,18 @@ describe("preview errors", () => {
     }
   });
 
+  it("keeps the signed origin on cross-origin mounts and retries", async () => {
+    const url = "https://preview.example/api/projects/demo/preview/comp/one.html?pt=test";
+    const { host, player } = await mountPlayer({ directUrl: url });
+    expect(new URL(player.getAttribute("src")!).origin).toBe("https://preview.example");
+    act(() => void player.dispatchEvent(new CustomEvent("error", { detail: { message: "Retry" } })));
+    const retry = Array.from(host.querySelectorAll("button")).find(b => b.textContent === "Retry preview")!;
+    act(() => retry.click());
+    const next = new URL(player.getAttribute("src")!);
+    expect(next.origin + next.pathname).toBe(url.split("?")[0]);
+    expect(next.searchParams.get("pt")).toBe("test");
+  });
+
   it("retries a failed preview with a fresh player URL", async () => {
     const onPainted = vi.fn();
     const { host, player } = await mountPlayer({ onPainted });

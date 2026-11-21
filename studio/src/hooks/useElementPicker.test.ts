@@ -217,6 +217,32 @@ describe("a pick across a reload that swaps the preview frame", () => {
     });
   });
 
+  it("persists isolated picker edits to the owning source even when another scene uses the same ID", () => {
+    const saved = '<div id="title">Title</div>';
+    const { picker, synced } = mountPicker({ "index.html": saved, "scene.html": saved });
+    const frame = document.querySelector("iframe")!;
+    frame.src = "https://preview.example/api/projects/test/preview?pt=test-token";
+    act(() => window.dispatchEvent(new MessageEvent("message", {
+      origin: "https://preview.example",
+      source: frame.contentWindow,
+      data: {
+        source: "openmotion-preview-bridge", type: "select-element", version: 1,
+        projectId: "test", token: "test-token",
+        selection: { elementId: "title", selector: "#title", text: "Title", sourceFile: "scene.html" },
+      },
+    })));
+    act(() => picker().setTextContent("Updated"));
+    act(() => picker().setStyle("color", "red"));
+    expect(synced).toHaveLength(2);
+    expect(Object.keys(synced[1]!)).toEqual(["scene.html"]);
+    expect(synced[1]!["scene.html"]).toContain("Updated");
+    expect(synced[1]!["scene.html"]).toContain("color: red");
+
+    frame.src = "https://preview.example/api/projects/test/preview?pt=next-token";
+    act(() => picker().setTextContent("Stale target"));
+    expect(synced).toHaveLength(2);
+  });
+
   function mountSwapping() {
     const live = mountPreview();
     const ref: { current: HTMLIFrameElement | null } = { current: live };

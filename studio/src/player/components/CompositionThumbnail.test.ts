@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockResizeObserver, reportResize } from "../../hooks/resizeObserverTestUtils";
 import { thumbnailScheduler } from "../lib/thumbnailScheduler";
-import { buildCompositionThumbnailUrl, CompositionThumbnail } from "./CompositionThumbnail";
+import { buildCompositionThumbnailUrl, CompositionThumbnail, compositionThumbnailRequest } from "./CompositionThumbnail";
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
   configurable: true,
@@ -55,6 +55,22 @@ afterEach(() => {
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
   document.body.replaceChildren();
+});
+
+it("checks the cache after enqueue and cancels pending polls when the card is released", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 202 }))
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  const controller = new AbortController();
+  const url = "/api/projects/demo/thumbnail/index.html?t=3";
+  const task = compositionThumbnailRequest(url, "demo").load(controller.signal);
+  const rejected = expect(task).rejects.toMatchObject({ name: "AbortError" });
+  await vi.advanceTimersByTimeAsync(550);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([url, url + "&cached=1"]);
+  controller.abort();
+  await rejected;
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
 });
 
 describe("buildCompositionThumbnailUrl", () => {

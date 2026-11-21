@@ -967,6 +967,27 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.ok(getRenderDownload.headers.get('location')?.includes('attachment'));
   });
 
+  it('persists a GSAP mutation into the scene template that Studio reopens', async () => {
+    const env = createStudioTestEnv();
+    const scene = 'compositions/title.html';
+    const html = '<template><div data-composition-id="title"><h1 id="heading">Title</h1></div><script>const tl=gsap.timeline();tl.to("#heading",{x:10,duration:1},0);</script></template>';
+    const project = await env.workspace.createProject(env.auth, {
+      title: 'Animated title', initialFiles: [{ path: scene, content: html }, { path: 'index.html', content: '<html></html>' }],
+    });
+    const base = `/api/projects/${project.projectId}`;
+    const read = async () => {
+      const response = await env.studioApp.request(`${base}/gsap-animations/${scene}`);
+      return response.json();
+    };
+    const { animations } = await read();
+    const mutation = await env.studioApp.request(`${base}/gsap-mutations/${scene}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'update-property', animationId: animations[0].id, property: 'x', value: 55 }),
+    });
+    assert.equal(mutation.status, 200);
+    assert.equal((await read()).animations[0].properties.x, 55);
+  });
+
   it('executes DOM file-mutations and GSAP AST mutations + rollback purely in memory via PG', async () => {
     const env = createStudioTestEnv();
     const initialHtml = `<!DOCTYPE html>
