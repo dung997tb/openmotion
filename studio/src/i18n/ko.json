@@ -736,6 +736,7 @@
   "Code": "코드",
   "Catalog": "컴포넌트 라이브러리",
   "Preview": "미리보기",
+  "Preview builders are busy. Try again shortly.": "미리 보기 생성 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
   "Timeline": "타임라인",
   "Design": "디자인",
   "Layers": "레이어",

@@ -736,6 +736,7 @@
   "Code": "Codice",
   "Catalog": "Libreria dei componenti",
   "Preview": "Anteprima",
+  "Preview builders are busy. Try again shortly.": "Il servizio di anteprima è occupato. Riprova tra poco.",
   "Timeline": "Timeline",
   "Design": "Design",
   "Layers": "Livelli",
