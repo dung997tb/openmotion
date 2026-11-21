@@ -223,3 +223,14 @@ button.om-game-chip:hover, .om-game-chip[aria-expanded="true"] { background: var
 .om-game-sidebar-thumb { position: relative; display: grid; place-items: center; }
 .om-game-sidebar-thumb img { position: absolute; inset: 0; }
 .om-game-sidebar-thumb svg { position: relative; color: var(--motion-video-ink); filter: drop-shadow(0 0 2px var(--motion-overlay-ink)); }
+
+/* Handoff panel on a draft: everything the user's Agent needs, with Open in Codex and Copy instruction. */
+.om-game-stage:has(.om-game-handoff) { overflow-y: auto; }
+.om-game-handoff { display: grid; justify-items: center; gap: var(--motion-space-12); width: min(640px, calc(100% - 2 * var(--motion-space-24))); margin-block: var(--motion-space-24); text-align: center; }
+.om-game-handoff > svg { color: var(--motion-muted); }
+.om-game-handoff[data-tone="failed"] > svg { color: var(--motion-danger); }
+.om-game-handoff-steps { display: grid; gap: var(--motion-space-6); margin: 0; padding-inline-start: var(--motion-space-20); color: var(--motion-muted); font-size: var(--motion-text-sm); text-align: start; }
+.om-game-handoff-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--motion-space-8); }
+.om-game-handoff-link { display: inline-flex; align-items: center; gap: var(--motion-space-6); text-decoration: none; }
+.om-game-handoff-link[aria-disabled] { pointer-events: none; opacity: .5; }
+.om-game-handoff-text { width: 100%; max-height: 220px; margin: 0; overflow: auto; padding: var(--motion-space-12); border: 1px solid var(--motion-border-subtle); border-radius: var(--motion-radius-md); background: var(--motion-inset); color: var(--motion-text); font: var(--motion-text-xs)/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: start; white-space: pre-wrap; word-break: break-word; }

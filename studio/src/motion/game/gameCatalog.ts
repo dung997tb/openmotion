@@ -1,4 +1,4 @@
-import { gameGenres, gameSettings, gameStyles, type GameBrief, type GameCard, type GameCatalog, type GameCreated, type GameGenre, type GameSetting, type GameStyle, type GameTrailer } from '../../../../shared/game-contract';
+import { gameGenres, gameSettings, gameStyles, type GameBrief, type GameCard, type GameCatalog, type GameCreated, type GameGenre, type GameSetting, type GameStyle, type GameTrailer, type GameHandoff } from '../../../../shared/game-contract';
 import { motionApi } from '../useWorkspace';
 
 export const genreLabels: Record<GameGenre, string> = { shooter: 'Shooter', platformer: 'Platformer', story: 'Story', casual: 'Casual', racing: 'Racing', horror: 'Horror' };
@@ -144,6 +144,8 @@ export const gameApi = {
   /** Start (or restart) the record-gameplay → compose → render trailer job; read its progress. */
   startTrailer: (id: string) => motionApi<GameTrailer>(`/games/${encodeURIComponent(id)}/trailer`, json({})),
   trailer: (id: string) => motionApi<GameTrailer>(`/games/${encodeURIComponent(id)}/trailer`),
+  /** The full instruction for the user's Agent (game id, brief and steps), for any workspace draft. */
+  handoff: (id: string) => motionApi<GameHandoff>(`/games/${encodeURIComponent(id)}/handoff`),
 };
 
 export function formatPlays(value: number, locale: string) {

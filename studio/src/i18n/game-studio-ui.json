@@ -125,7 +125,19 @@
     "Search my games": "搜索我的游戏",
     "Show my games": "展开我的游戏",
     "Hide my games": "收起我的游戏",
-    "Your Agent started {title}. Find it in My games.": "Agent 开始做《{title}》，可在「我的游戏」里查看。"
+    "Your Agent started {title}. Find it in My games.": "Agent 开始做《{title}》，可在「我的游戏」里查看。",
+    "Waiting for your Agent": "等待 Agent 接手",
+    "Hand this game to your Agent": "把这个游戏交给你的 Agent",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "打开已接入 OpenMotion MCP 的 Codex、Claude Code 或其他 Agent。",
+    "Send the instruction below. It names this game, the brief and the steps.": "发送下面的指令，里面写好了游戏 ID、需求和执行步骤。",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Agent 开始做之后，这里会显示「Agent 运行中」，做好后直接显示游戏。",
+    "Open in Codex": "在 Codex 中打开",
+    "Copy instruction": "复制指令",
+    "Instruction copied": "指令已复制",
+    "Could not copy. Select the instruction and copy it.": "复制失败，请选中下面的指令手动复制。",
+    "Agent instruction": "给 Agent 的指令",
+    "Loading instruction…": "正在加载指令…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。"
   },
   "ja": {
     "3D": "3D",
@@ -253,7 +265,19 @@
     "Search my games": "マイゲームを検索",
     "Show my games": "マイゲームを表示",
     "Hide my games": "マイゲームを隠す",
-    "Your Agent started {title}. Find it in My games.": "Agent が「{title}」を作り始めました。マイゲームで確認できます。"
+    "Your Agent started {title}. Find it in My games.": "Agent が「{title}」を作り始めました。マイゲームで確認できます。",
+    "Waiting for your Agent": "エージェント待ち",
+    "Hand this game to your Agent": "このゲームをエージェントに渡す",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "OpenMotion MCP に接続した Codex、Claude Code などのエージェントを開きます。",
+    "Send the instruction below. It names this game, the brief and the steps.": "下の指示を送信します。ゲーム ID、要件、手順が含まれています。",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "エージェントが始めると「エージェント実行中」と表示され、完成するとゲームが表示されます。",
+    "Open in Codex": "Codex で開く",
+    "Copy instruction": "指示をコピー",
+    "Instruction copied": "指示をコピーしました",
+    "Could not copy. Select the instruction and copy it.": "コピーできませんでした。指示を選択してコピーしてください。",
+    "Agent instruction": "エージェントへの指示",
+    "Loading instruction…": "指示を読み込み中…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。"
   },
   "ko": {
     "3D": "3D",
@@ -381,7 +405,19 @@
     "Search my games": "내 게임 검색",
     "Show my games": "내 게임 펼치기",
     "Hide my games": "내 게임 접기",
-    "Your Agent started {title}. Find it in My games.": "Agent가 「{title}」 제작을 시작했습니다. 내 게임에서 확인하세요."
+    "Your Agent started {title}. Find it in My games.": "Agent가 「{title}」 제작을 시작했습니다. 내 게임에서 확인하세요.",
+    "Waiting for your Agent": "Agent 대기 중",
+    "Hand this game to your Agent": "이 게임을 Agent에게 넘기기",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "OpenMotion MCP에 연결된 Codex, Claude Code 등의 Agent를 엽니다.",
+    "Send the instruction below. It names this game, the brief and the steps.": "아래 지시를 보내세요. 게임 ID, 요청 내용, 단계가 들어 있습니다.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Agent가 시작하면 「Agent 실행 중」이 표시되고, 완성되면 게임이 나타납니다.",
+    "Open in Codex": "Codex에서 열기",
+    "Copy instruction": "지시 복사",
+    "Instruction copied": "지시를 복사했습니다",
+    "Could not copy. Select the instruction and copy it.": "복사하지 못했습니다. 지시를 선택해 복사하세요.",
+    "Agent instruction": "Agent 지시",
+    "Loading instruction…": "지시를 불러오는 중…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다."
   },
   "de": {
     "3D": "3D",
@@ -509,7 +545,19 @@
     "Search my games": "Meine Spiele durchsuchen",
     "Show my games": "Meine Spiele einblenden",
     "Hide my games": "Meine Spiele ausblenden",
-    "Your Agent started {title}. Find it in My games.": "Dein Agent hat „{title}“ begonnen. Du findest es unter Meine Spiele."
+    "Your Agent started {title}. Find it in My games.": "Dein Agent hat „{title}“ begonnen. Du findest es unter Meine Spiele.",
+    "Waiting for your Agent": "Wartet auf deinen Agent",
+    "Hand this game to your Agent": "Gib dieses Spiel deinem Agent",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "Öffne Codex, Claude Code oder einen anderen mit OpenMotion MCP verbundenen Agent.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Sende die Anweisung unten. Sie nennt Spiel-ID, Briefing und Schritte.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Sobald der Agent startet, steht hier „Agent läuft“, danach erscheint das Spiel.",
+    "Open in Codex": "In Codex öffnen",
+    "Copy instruction": "Anweisung kopieren",
+    "Instruction copied": "Anweisung kopiert",
+    "Could not copy. Select the instruction and copy it.": "Kopieren fehlgeschlagen. Markiere die Anweisung und kopiere sie.",
+    "Agent instruction": "Anweisung für den Agent",
+    "Loading instruction…": "Anweisung wird geladen…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst."
   },
   "fr": {
     "3D": "3D",
@@ -637,7 +685,19 @@
     "Search my games": "Rechercher mes jeux",
     "Show my games": "Afficher mes jeux",
     "Hide my games": "Masquer mes jeux",
-    "Your Agent started {title}. Find it in My games.": "Votre agent a commencé « {title} ». Retrouvez-le dans Mes jeux."
+    "Your Agent started {title}. Find it in My games.": "Votre agent a commencé « {title} ». Retrouvez-le dans Mes jeux.",
+    "Waiting for your Agent": "En attente de votre agent",
+    "Hand this game to your Agent": "Confiez ce jeu à votre agent",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "Ouvrez Codex, Claude Code ou un autre agent connecté à OpenMotion MCP.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Envoyez l’instruction ci-dessous : elle indique l’ID du jeu, la demande et les étapes.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Dès que l’agent démarre, cette page affiche « Agent en cours », puis le jeu une fois prêt.",
+    "Open in Codex": "Ouvrir dans Codex",
+    "Copy instruction": "Copier l’instruction",
+    "Instruction copied": "Instruction copiée",
+    "Could not copy. Select the instruction and copy it.": "Copie impossible. Sélectionnez l’instruction pour la copier.",
+    "Agent instruction": "Instruction pour l’agent",
+    "Loading instruction…": "Chargement de l’instruction…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même."
   },
   "ru": {
     "3D": "3D",
@@ -765,7 +825,19 @@
     "Search my games": "Поиск по моим играм",
     "Show my games": "Показать мои игры",
     "Hide my games": "Скрыть мои игры",
-    "Your Agent started {title}. Find it in My games.": "Агент начал «{title}». Найдите игру в разделе «Мои игры»."
+    "Your Agent started {title}. Find it in My games.": "Агент начал «{title}». Найдите игру в разделе «Мои игры».",
+    "Waiting for your Agent": "Ждёт вашего агента",
+    "Hand this game to your Agent": "Передайте игру своему агенту",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "Откройте Codex, Claude Code или другого агента, подключённого к OpenMotion MCP.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Отправьте инструкцию ниже: в ней ID игры, задача и шаги.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Когда агент начнёт, здесь появится «Агент работает», а затем сама игра.",
+    "Open in Codex": "Открыть в Codex",
+    "Copy instruction": "Скопировать инструкцию",
+    "Instruction copied": "Инструкция скопирована",
+    "Could not copy. Select the instruction and copy it.": "Не удалось скопировать. Выделите инструкцию и скопируйте вручную.",
+    "Agent instruction": "Инструкция для агента",
+    "Loading instruction…": "Загрузка инструкции…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами."
   },
   "es": {
     "3D": "3D",
@@ -893,7 +965,19 @@
     "Search my games": "Buscar mis juegos",
     "Show my games": "Mostrar mis juegos",
     "Hide my games": "Ocultar mis juegos",
-    "Your Agent started {title}. Find it in My games.": "Tu agente empezó «{title}». Encuéntralo en Mis juegos."
+    "Your Agent started {title}. Find it in My games.": "Tu agente empezó «{title}». Encuéntralo en Mis juegos.",
+    "Waiting for your Agent": "Esperando a tu agente",
+    "Hand this game to your Agent": "Pasa este juego a tu agente",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "Abre Codex, Claude Code u otro agente conectado a OpenMotion MCP.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Envía la instrucción de abajo: incluye el ID del juego, la petición y los pasos.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Cuando el agente empiece verás «Agente en marcha» y, al terminar, el juego.",
+    "Open in Codex": "Abrir en Codex",
+    "Copy instruction": "Copiar instrucción",
+    "Instruction copied": "Instrucción copiada",
+    "Could not copy. Select the instruction and copy it.": "No se pudo copiar. Selecciona la instrucción y cópiala.",
+    "Agent instruction": "Instrucción para el agente",
+    "Loading instruction…": "Cargando instrucción…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú."
   },
   "pt-BR": {
     "3D": "3D",
@@ -1021,7 +1105,19 @@
     "Search my games": "Buscar meus jogos",
     "Show my games": "Mostrar meus jogos",
     "Hide my games": "Ocultar meus jogos",
-    "Your Agent started {title}. Find it in My games.": "Seu agente começou “{title}”. Veja em Meus jogos."
+    "Your Agent started {title}. Find it in My games.": "Seu agente começou “{title}”. Veja em Meus jogos.",
+    "Waiting for your Agent": "Aguardando seu agente",
+    "Hand this game to your Agent": "Entregue este jogo ao seu agente",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "Abra o Codex, o Claude Code ou outro agente conectado ao OpenMotion MCP.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Envie a instrução abaixo: ela traz o ID do jogo, o pedido e as etapas.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Quando o agente começar, aparece “Agente em execução” e, ao terminar, o jogo.",
+    "Open in Codex": "Abrir no Codex",
+    "Copy instruction": "Copiar instrução",
+    "Instruction copied": "Instrução copiada",
+    "Could not copy. Select the instruction and copy it.": "Não foi possível copiar. Selecione a instrução e copie.",
+    "Agent instruction": "Instrução para o agente",
+    "Loading instruction…": "Carregando instrução…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo."
   },
   "it": {
     "3D": "3D",
@@ -1149,7 +1245,19 @@
     "Search my games": "Cerca nei miei giochi",
     "Show my games": "Mostra i miei giochi",
     "Hide my games": "Nascondi i miei giochi",
-    "Your Agent started {title}. Find it in My games.": "Il tuo agente ha iniziato «{title}». Lo trovi in I miei giochi."
+    "Your Agent started {title}. Find it in My games.": "Il tuo agente ha iniziato «{title}». Lo trovi in I miei giochi.",
+    "Waiting for your Agent": "In attesa del tuo agente",
+    "Hand this game to your Agent": "Affida questo gioco al tuo agente",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "Apri Codex, Claude Code o un altro agente collegato a OpenMotion MCP.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Invia l’istruzione qui sotto: contiene ID del gioco, richiesta e passaggi.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Quando l’agente inizia compare «Agente in esecuzione», poi il gioco quando è pronto.",
+    "Open in Codex": "Apri in Codex",
+    "Copy instruction": "Copia istruzione",
+    "Instruction copied": "Istruzione copiata",
+    "Could not copy. Select the instruction and copy it.": "Copia non riuscita. Seleziona l’istruzione e copiala.",
+    "Agent instruction": "Istruzione per l’agente",
+    "Loading instruction…": "Caricamento istruzione…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu."
   },
   "tr": {
     "3D": "3D",
@@ -1277,6 +1385,18 @@
     "Search my games": "Oyunlarımda ara",
     "Show my games": "Oyunlarımı göster",
     "Hide my games": "Oyunlarımı gizle",
-    "Your Agent started {title}. Find it in My games.": "Agent «{title}» oyununa başladı. Oyunlarım bölümünde bulabilirsin."
+    "Your Agent started {title}. Find it in My games.": "Agent «{title}» oyununa başladı. Oyunlarım bölümünde bulabilirsin.",
+    "Waiting for your Agent": "Agent bekleniyor",
+    "Hand this game to your Agent": "Bu oyunu Agent’ına ver",
+    "Open Codex, Claude Code or another Agent connected to OpenMotion MCP.": "OpenMotion MCP’ye bağlı Codex, Claude Code veya başka bir Agent’ı aç.",
+    "Send the instruction below. It names this game, the brief and the steps.": "Aşağıdaki talimatı gönder; oyun kimliği, istek ve adımlar içinde.",
+    "This page shows “Agent is running” once the Agent starts, and the game when it is ready.": "Agent başlayınca burada “Agent çalışıyor” yazar, hazır olunca oyun görünür.",
+    "Open in Codex": "Codex’te aç",
+    "Copy instruction": "Talimatı kopyala",
+    "Instruction copied": "Talimat kopyalandı",
+    "Could not copy. Select the instruction and copy it.": "Kopyalanamadı. Talimatı seçip kopyala.",
+    "Agent instruction": "Agent talimatı",
+    "Loading instruction…": "Talimat yükleniyor…",
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın."
   }
 }

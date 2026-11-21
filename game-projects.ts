@@ -14,7 +14,7 @@ import { WorkspaceStore } from './workspace.ts';
 import { execute, pluginRoot, HYPERFRAMES_VERSION } from './hyperframes.ts';
 import { verificationBinaries } from './scripts/verify-export.ts';
 import type { Duplex } from 'node:stream';
-import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCreated, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
+import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
 
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
 const kitsRoot = fileURLToPath(new URL('./templates/game-kits/', import.meta.url));
@@ -371,7 +371,7 @@ export class GameProjects {
       if (coop) game.controls = 'WASD/arrows or touch joystick; mouse aim/fire; auto-fire without aim; defend the crystal.';
     } else for (const file of starter(brief.multiplayer)) await writeFile(path.join(dir, file.path), file.content);
     await this.save(id, game);
-    return { game: await this.get(id), agentInstruction: instruction(game, brief) };
+    return { game: await this.get(id), agentInstruction: instruction(game, { ...brief, prompt: rawPrompt }) };
   }); }
   private async save(id: string, game: StoredGame) {
     idPart(id);
@@ -387,6 +387,15 @@ export class GameProjects {
     await this.save(newId, game);
     return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: original.description, genre: original.genre, style: original.style, setting: original.setting, multiplayer: original.multiplayer }, true) };
   }); }
+  /** The complete Agent handoff for a workspace draft: game id, brief and execution steps, available at any time (not only right after creation). */
+  async handoff(id: string): Promise<GameHandoff> {
+    const { dir } = await this.locate(id, true);
+    const stored = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
+    if (stored.source !== 'mine') throw new GameError('Only workspace games can be handed to an Agent');
+    const game = await this.get(id);
+    const brief: GameBrief = { prompt: stored.rawPrompt ?? stored.description, genre: stored.genre, style: stored.style, setting: stored.setting, multiplayer: stored.multiplayer, orientation: stored.orientation };
+    return { gameId: id, status: game.status, agentInstruction: instruction(game, brief, Boolean(stored.remixOf)) };
+  }
   async interact(id: string, kind: 'play'|'reaction'|'favorite', value?: unknown) { return this.mutate(async () => {
     await this.get(id);
     const state = await jsonFile<Record<string, Viewer>>(path.join(this.root, '.state.json'), {});
@@ -956,6 +965,7 @@ export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: U
     const [id, action, ...rest] = parts;
     if (parts.length === 1) { if (req.method === 'GET') return json(200,await service.get(id)); if (req.method === 'DELETE') return json(200,await service.delete(id)); }
     if (action === 'trailer' && !rest.length && req.method==='GET')return json(200,await service.trailer(id));
+    if (action === 'handoff' && !rest.length && req.method==='GET')return json(200,await service.handoff(id));
     if (action === 'play' && req.method === 'GET') {
       const entry=!rest.length||(rest.length===1&&rest[0]==='index.html');
       if(entry&&!url.searchParams.has('room')&&(await service.get(id)).multiplayer){

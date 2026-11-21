@@ -89,6 +89,8 @@ export type GameCatalog = { games: GameCard[] };
 
 /** POST /api/games and POST /api/games/:id/remix return the new project and the Agent brief. */
 export type GameCreated = { game: GameCard; agentInstruction: string };
+/** GET /api/games/:id/handoff — the full instruction to give the user's Agent for a workspace draft. */
+export type GameHandoff = { gameId: string; status: GameStatus; agentInstruction: string };
 
 /**
  * Server-authoritative multiplayer rules (logic.js). The room server calls these;

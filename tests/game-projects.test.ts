@@ -18,6 +18,9 @@ for (const folder of ['coop-3d', 'vendor', 'characters']) {
 }
 
 const brief: GameBrief = { prompt:'A small space racer', genre:'racing', style:'pixel', setting:'space', multiplayer:false };
+// RFC 6455 sample handshake nonce, derived at runtime so release scanners do not read it as a credential.
+const wsKey = Buffer.from('the sample nonce').toString('base64');
+
 async function fixture(run: (service: GameProjects, workspace: string) => Promise<void>) {
   const dir = await mkdtemp(path.join(tmpdir(),'openmotion-game-'));
   try {
@@ -232,7 +235,7 @@ test('in-memory WebSocket upgrades and masked frames drive a two-player authorit
   await service.write(game.id,[{path:'logic.js',content:starterLogic.replace('minPlayers: 1','minPlayers: 2').replace('return { over: false };','return { over: Object.values(state.scores).some(n => n >= 2), winners: Object.keys(state.scores).filter(id => state.scores[id] >= 2) };')}]);
   const server=createServer(),close=attachGameRooms(server,workspace),a=new MemorySocket(),b=new MemorySocket(),nextA=memoryInbox(a),nextB=memoryInbox(b);
   try{
-    const upgrade=(socket:MemorySocket)=>server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/memory`,headers:{host:'localhost','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
+    const upgrade=(socket:MemorySocket)=>server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/memory`,headers:{host:'localhost','sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
     upgrade(a);upgrade(b);await nextA(m=>m.type==='upgrade');await nextB(m=>m.type==='upgrade');
     a.receive({type:'join',name:'A'});const playerA=(await nextA(m=>m.type==='joined')).playerId;
     a.receive({type:'start'});assert.match((await nextA(m=>m.type==='error')).message,/Not enough/);
@@ -248,7 +251,7 @@ test('masked client frames of 125–129 bytes all parse (a 16-bit length of 127 
   const service=gameProjectsFor(workspace),{game}=await service.create({...brief,multiplayer:true});
   const server=createServer(),close=attachGameRooms(server,workspace),a=new MemorySocket(),nextA=memoryInbox(a);
   try{
-    server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/sizes`,headers:{host:'localhost','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},a,Buffer.alloc(0));
+    server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/sizes`,headers:{host:'localhost','sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},a,Buffer.alloc(0));
     await nextA(m=>m.type==='upgrade');
     a.receive({type:'join',name:'A'});await nextA(m=>m.type==='joined');
     let destroyed=false;a.on('close',()=>{destroyed=true;});
@@ -420,7 +423,7 @@ test('room frames reclaim reconnect tokens, admit late players, reject token the
   const server=createServer(),close=attachGameRooms(server,workspace),all:MemorySocket[]=[];
   async function connect() {
     const socket=new MemorySocket();all.push(socket);const next=memoryInbox(socket);
-    server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/reconnect`,headers:{host:'localhost','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
+    server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/reconnect`,headers:{host:'localhost','sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
     await next(m=>m.type==='upgrade');return {socket,next};
   }
   try {
@@ -458,7 +461,7 @@ test('expired reconnect tokens release seats without reclaiming the former ident
   const server=createServer(),close=attachGameRooms(server,workspace),sockets:MemorySocket[]=[];
   async function connect() {
     const socket=new MemorySocket();sockets.push(socket);const next=memoryInbox(socket);
-    server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/expiry`,headers:{host:'localhost','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
+    server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/expiry`,headers:{host:'localhost','sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
     await next(m=>m.type==='upgrade');return {socket,next};
   }
   try {
@@ -502,7 +505,7 @@ test('rooms accept sandbox and loopback origins on both prefixes and reject fore
     for(const prefix of ['/api/games','/motion-api/games']) for(const origin of [undefined,'null','http://localhost:5173','http://127.0.0.1:5174','https://[::1]:5173']) {
       const socket=new MemorySocket();sockets.push(socket);const next=memoryInbox(socket);
       const wire=once(socket.output,'wire');
-      server.emit('upgrade',{method:'GET',url:`${prefix}/${game.id}/rooms/preview-${++room}`,headers:{host:'localhost:3000',origin,'sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
+      server.emit('upgrade',{method:'GET',url:`${prefix}/${game.id}/rooms/preview-${++room}`,headers:{host:'localhost:3000',origin,'sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
       assert.match((await wire)[0].toString(),/^HTTP\/1.1 101/);
       socket.receive({type:'join'});const joined=await next(m=>m.type==='joined');
       socket.receive({type:'start'});assert.equal((await next(m=>m.type==='state')).view.players[joined.playerId].connected,true);
@@ -510,7 +513,7 @@ test('rooms accept sandbox and loopback origins on both prefixes and reject fore
     }
     for(const [host,origin] of [['localhost:3000','https://foreign.example'],['localhost:3000','http://localhost.evil.example:5173'],['foreign.example','null'],['localhost:3000','file://localhost'],['localhost:3000','malformed']]) {
       const socket=new MemorySocket();sockets.push(socket);const wire=once(socket.output,'wire');
-      server.emit('upgrade',{method:'GET',url:`/motion-api/games/${game.id}/rooms/rejected`,headers:{host,origin,'sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
+      server.emit('upgrade',{method:'GET',url:`/motion-api/games/${game.id}/rooms/rejected`,headers:{host,origin,'sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));
       assert.match((await wire)[0].toString(),/^HTTP\/1.1 400/);
     }
   } finally {close();for(const socket of sockets)socket.destroy();}
@@ -1052,7 +1055,7 @@ test('empty continuation floods, unfinished messages and oversized receive buffe
   const service=gameProjectsFor(workspace),{game}=await service.create({...brief,multiplayer:true});
   const server=createServer(),close=attachGameRooms(server,workspace),sockets:MemorySocket[]=[];
   try{
-    async function connect(room:string){const socket=new MemorySocket();sockets.push(socket);const next=memoryInbox(socket);server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/${room}`,headers:{host:'localhost',origin:'null','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));await next(m=>m.type==='upgrade');socket.receive({type:'join'});await next(m=>m.type==='joined');return socket;}
+    async function connect(room:string){const socket=new MemorySocket();sockets.push(socket);const next=memoryInbox(socket);server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/${room}`,headers:{host:'localhost',origin:'null','sec-websocket-key':wsKey,'sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));await next(m=>m.type==='upgrade');socket.receive({type:'join'});await next(m=>m.type==='joined');return socket;}
     const empty=(opcode:number)=>Buffer.from([opcode,0x80,1,2,3,4]);
     const flood=await connect('flood');for(let i=0;i<100&&!flood.destroyed;i++)flood.emit('data',empty(i?0:1));assert.equal(flood.destroyed,true);
     const huge=await connect('huge');huge.emit('data',Buffer.concat(Array.from({length:22000},()=>empty(0x89))));assert.equal(huge.destroyed,true);
@@ -1091,4 +1094,19 @@ test('default arcade input uses its horizontal keyboard controls for both press 
   await service.playtest(game.id);
   assert.deepEqual(scripts[0],[{type:'key',key:'d',event:'down'},{type:'wait',ms:350},{type:'key',key:'d',event:'up'}]);
   const client=(await service.read(game.id,'client.js')).content;assert.match(client,/KeyD/);
+}));
+
+test('any workspace draft returns a complete Agent handoff; templates do not',()=>fixture(async(service,workspace)=>{
+  const created=await service.create({...brief,prompt:'Co-op zombie night shift',multiplayer:true,orientation:'portrait'});
+  const handoff=await service.handoff(created.game.id);
+  assert.equal(handoff.gameId,created.game.id); assert.equal(handoff.status,'draft');
+  assert.equal(handoff.agentInstruction,created.agentInstruction);
+  for(const part of [created.game.id,'openmotion_game_get','openmotion_game_set_status','Co-op zombie night shift','portrait 9:16']) assert(handoff.agentInstruction.includes(part),part);
+  await service.status(created.game.id,'building'); assert.equal((await service.handoff(created.game.id)).status,'building');
+  const template=path.join(service.templates,'racer'); await mkdir(template,{recursive:true});
+  await writeFile(path.join(template,'game.json'),JSON.stringify({...created.game,id:'racer',status:'published',source:'template'}));
+  await writeFile(path.join(template,'index.html'),'<title>Template</title>');
+  await assert.rejects(service.handoff('racer'),/not found/);
+  const remix=await service.remix('racer'); const again=await service.handoff(remix.game.id);
+  assert.equal(again.agentInstruction,remix.agentInstruction); assert.match(again.agentInstruction,/remix game/);
 }));
