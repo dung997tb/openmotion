@@ -366,7 +366,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
     </header>
     <aside className="om-game-project-side">
       <div className="om-game-project-body">
-        {status && <p className="om-game-status-line" data-tone={game.status}>{(game.status === 'building' || game.status === 'draft') && <RemixIcon name="loader-4-line" size={14} />}{t(status)}</p>}
+        {status && <p className="om-game-status-line" data-tone={game.status}>{game.status === 'building' && <RemixIcon name="loader-4-line" size={14} />}{t(status)}</p>}
         {(gameTitle(game) === game.title || game.i18n?.[locale]?.title) && <p>{localized(game, 'description', locale)}</p>}
         <dl className="om-game-facts">
           <div><dt>{t('Genre')}</dt><dd>{t(genreLabels[game.genre])}</dd></div>
