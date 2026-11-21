@@ -1,3 +1,4 @@
+import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
 import { createHash } from 'node:crypto';
 import {
   AFTER_FONTS_SCRIPT_TYPE,
@@ -335,8 +336,15 @@ function withRootImportMap(html: string, base: string): string {
 
 function withPreviewBase(html: string, baseHref: string): string {
   const mapped = withRootImportMap(withRootPathsRelative(html, baseHref), baseHref);
-  const hasBase = parseHTMLContent(mapped).querySelector('base') !== null;
-  return hasBase ? mapped : injectTagsAtHeadStart(mapped, `<base href="${baseHref}">`);
+  const doc = parseHTMLContent(mapped);
+  const base = doc.querySelector('base[href]');
+  if (!base) return injectTagsAtHeadStart(mapped, `<base href="${baseHref}">`);
+  const href = base.getAttribute('href') ?? '';
+  if (/^https?:\/\//i.test(baseHref) && !isNonRelativeUrl(href)) {
+    base.setAttribute('href', new URL(href, baseHref).href);
+    return doc.toString();
+  }
+  return mapped;
 }
 
 function lazyPreviewImages(html: string): string {
@@ -441,7 +449,7 @@ function injectBodyScript(html: string, scriptBody: string, deferred = true): st
  * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
  * same-origin previews keep their existing DOM/runtime fast path.
  */
-export function createPreviewBridgeScript(projectId: string, compositionPath = 'index.html'): string {
+export function createPreviewBridgeScript(projectId: string, compositionPath = 'index.html', sourceVersions: Record<string, string> = {}): string {
   const encodedProjectId = JSON.stringify(projectId).replace(/</g, '\\u003c');
   return `(function(){
   var SOURCE='openmotion-preview-bridge', PARENT='openmotion-studio', VERSION=1;
@@ -458,13 +466,15 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
     parentWindow.postMessage(message,parentOrigin==='null'?'*':parentOrigin);
   }
   function player(){ return window.__player || null; }
-  function timeline(){
+  function timeline(includeManifest){
     var p=player();
     return {currentTime:p&&typeof p.getTime==='function'?Number(p.getTime())||0:0,
       duration:p&&typeof p.getDuration==='function'?Number(p.getDuration())||0:0,
       isPlaying:p&&typeof p.isPlaying==='function'?p.isPlaying()===true:false,
+      width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
+      fps:window.__clipManifest&&window.__clipManifest.fps,
       durationInFrames:window.__clipManifest&&Number(window.__clipManifest.durationInFrames)||0,
-      clips:window.__clipManifest&&Array.isArray(window.__clipManifest.clips)?window.__clipManifest.clips:[]};
+      clips:includeManifest&&window.__clipManifest&&Array.isArray(window.__clipManifest.clips)&&window.__clipManifest.clips.length?window.__clipManifest.clips:undefined};
   }
   function describe(element){
     if(!element || element.nodeType!==1) return null;
@@ -480,10 +490,12 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
       geometry:{x:rect.left,y:rect.top,width:rect.width,height:rect.height},
       viewport:{width:innerWidth,height:innerHeight}};
   }
+  var sourceVersions=${JSON.stringify(sourceVersions).replace(/</g, '\\u003c')};
+  ${PREVIEW_CANVAS_DRAG}
   function respond(requestId,result,error){
     post('response',error?{ok:false,error:String(error)}:{ok:true,result:result},requestId);
   }
-  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode']}); post('timeline-state',timeline()); }
+  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','canvas-drag']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
@@ -499,6 +511,11 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
         else if(action==='seek' && typeof p.seek==='function') p.seek(Math.max(0,Number(message.time)||0));
         else throw new Error('Unsupported playback action');
         post('timeline-state',timeline()); respond(requestId,timeline()); return;
+      }
+      if(message.type==='canvas-drag'){
+        var result=canvasDrag(message);
+        if(message.phase==='start' || message.phase==='finish') respond(requestId,result);
+        return;
       }
       if(message.type==='pick-mode'){
         pickMode=message.enabled===true;
@@ -626,7 +643,8 @@ function applyStudioPreviewAugmentations(
 
   // 2. Cookie-less cross-origin preview bridge. It is a no-op for local
   // previews because the script exits when the project token is absent.
-  out = injectBodyScript(out, createPreviewBridgeScript(project.projectId, activeCompositionPath), false);
+  out = injectBodyScript(out, createPreviewBridgeScript(project.projectId, activeCompositionPath,
+    Object.fromEntries(project.listFiles().filter(file => /\.html?$/i.test(file.path)).map(file => [file.path, file.sha256]))), false);
 
   // 3. GSAP base URL meta + project signature meta + CDN fallback
   out = injectTagsAtHeadStart(

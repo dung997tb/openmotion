@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   extractWildcardPath,
@@ -105,6 +106,11 @@ function previewErrorHtml(message: string): string {
 </html>`;
 }
 
+// A new asset base changes the HTML's base URL even if its project revision is unchanged.
+function documentSignature(revision: string, assetBase?: string): string {
+  return assetBase ? `${revision}:${createHash('sha256').update(assetBase).digest('hex').slice(0, 16)}` : revision;
+}
+
 export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Variables: StudioVariables }> {
   const app = new Hono<{ Variables: StudioVariables }>();
 
@@ -115,7 +121,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     const virtual = await deps.files.loadVirtualProject(auth, projectId);
     const capture = c.req.query('capture') === '1' || c.req.query('capture') === 'true';
     const variables = parseVariablesQuery(c.req.query('variables'));
-    const baseHref = `/api/projects/${encodeURIComponent(projectId)}/preview/`;
+    const baseHref = c.get('previewAssetBase') ?? `/api/projects/${encodeURIComponent(projectId)}/preview/`;
 
     try {
       const html = await bundlePreviewInMemory(virtual, {
@@ -139,7 +145,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
         return c.json({ error: 'Entry composition index.html not found' }, 404);
       }
 
-      const etag = previewEtag(virtual.revision, {
+      const etag = previewEtag(documentSignature(virtual.revision, c.get('previewAssetBase')), {
         gsapBaseUrl: '/api/vendor/gsap/',
         rawVariables: c.req.query('variables'),
         capture,
@@ -169,7 +175,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     const virtual = await deps.files.loadVirtualProject(auth, projectId);
     const capture = c.req.query('capture') === '1' || c.req.query('capture') === 'true';
     const variables = parseVariablesQuery(c.req.query('variables'));
-    const baseHref = `/api/projects/${encodeURIComponent(projectId)}/preview/`;
+    const baseHref = c.get('previewAssetBase') ?? `/api/projects/${encodeURIComponent(projectId)}/preview/`;
 
     const html = await buildSubCompositionHtmlInMemory(virtual, compPath, {
       runtimeUrl: '/api/runtime.js',
@@ -192,7 +198,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
       return c.json({ error: 'Sub-composition not found', path: compPath }, 404);
     }
 
-    const etag = previewEtag(virtual.revision, {
+    const etag = previewEtag(documentSignature(virtual.revision, c.get('previewAssetBase')), {
       compPath,
       gsapBaseUrl: '/api/vendor/gsap/',
       rawVariables: c.req.query('variables'),
@@ -214,7 +220,10 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
   app.get('/api/projects/:id/preview/*', async (c) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id');
-    const rawPath = extractWildcardPath(c.req.url, '/preview/');
+    const assetBase = c.get('previewAssetBase');
+    const scopedPath = assetBase && new URL(assetBase).pathname;
+    const marker = scopedPath && new URL(c.req.url).pathname.startsWith(scopedPath) ? scopedPath : '/preview/';
+    const rawPath = extractWildcardPath(c.req.url, marker);
     if (!rawPath) {
       if (c.req.method === 'HEAD') {
         const entry = await deps.files.getFile(auth, projectId, 'index.html');

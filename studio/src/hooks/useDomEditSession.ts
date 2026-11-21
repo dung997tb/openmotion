@@ -195,6 +195,7 @@ export function useDomEditSession({
   });
 
   const {
+    commitDomEditPatchBatches,
     resolveImportedFontAsset,
     handleDomStyleCommit,
     handleDomStyleCommitForSelection,
@@ -488,6 +489,7 @@ export function useDomEditSession({
     agentPromptSelectionContext,
     domEditSelectionRef,
     // Callbacks
+    commitDomEditPatchBatches,
     handleTimelineElementSelect,
     handlePreviewCanvasMouseDown,
     handlePreviewCanvasPointerMove,

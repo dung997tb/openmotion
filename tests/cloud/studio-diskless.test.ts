@@ -988,6 +988,41 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal((await read()).animations[0].properties.x, 55);
   });
 
+  it('saves a canvas drag against the displayed source and rolls back unmatched batches', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth, {
+      title: 'Canvas drag',
+      initialFiles: [{ path: 'index.html', content: '<html><body><div id="title">Title</div></body></html>' }],
+    });
+    const current = async () => (await env.files.loadVirtualProject(env.auth, projectId)).readText('index.html')!;
+    const before = await current();
+    const drag = (ids: string[], ifMatch: string) => env.studioApp.request(
+      `/api/projects/${projectId}/file-mutations/patch-element-batches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batches: [{
+          sourceFile: 'index.html', ifMatch,
+          patches: ids.map(id => ({ target: { id }, operations: [{ type: 'inline-style', property: 'left', value: '42px' }] })),
+        }] }),
+      },
+    );
+    const version = fileContentVersion(before);
+    const unmatched = await drag(['title', 'missing'], version);
+    assert.equal(unmatched.status, 200);
+    const rejected = await unmatched.json();
+    assert.equal(rejected.durable, false);
+    assert.deepEqual(rejected.files[0].matched, [true, false]);
+    assert.equal(rejected.files[0].after, before);
+    assert.equal(await current(), before);
+    const saved = await drag(['title'], version);
+    assert.equal(saved.status, 200);
+    const result = await saved.json();
+    assert.deepEqual(result.files[0].matched, [true]);
+    assert.equal(result.files[0].before, before);
+    assert.match(await current(), /left:\s*42px/);
+    assert.equal((await drag(['title'], version)).status, 409);
+  });
+
   it('executes DOM file-mutations and GSAP AST mutations + rollback purely in memory via PG', async () => {
     const env = createStudioTestEnv();
     const initialHtml = `<!DOCTYPE html>

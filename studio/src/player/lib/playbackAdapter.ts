@@ -222,7 +222,7 @@ export function wrapTimeline(tl: TimelineLike): PlaybackAdapter {
  * runtime, while this adapter keeps the same synchronous PlaybackAdapter shape
  * expected by the timeline and keyboard hooks.
  */
-export type BridgePlaybackAdapter = PlaybackAdapter & { dispose: () => void };
+export type BridgePlaybackAdapter = PlaybackAdapter & { token: string | null; dispose: () => void };
 
 export function createBridgePlaybackAdapter(preview: PreviewAdapter): BridgePlaybackAdapter {
   let currentTime = 0;
@@ -238,6 +238,7 @@ export function createBridgePlaybackAdapter(preview: PreviewAdapter): BridgePlay
   window.addEventListener("message", onMessage);
 
   const adapter: BridgePlaybackAdapter = {
+    token: preview.token,
     play: () => {
       preview.send("playback-control", { action: "play" });
       playing = true;

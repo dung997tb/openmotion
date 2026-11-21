@@ -46,6 +46,7 @@ interface PreviewMessage {
   type?: string;
   clips?: unknown;
   durationInFrames?: unknown;
+  fps?: unknown;
   isPlaying?: unknown;
   copies?: unknown;
   health?: unknown;
@@ -85,10 +86,38 @@ function acceptedPreviewMessage(
   if (isPreviewBridgeMessageValue(data) && data.source === PREVIEW_BRIDGE_SOURCE) {
     const adapter = iframe ? createPreviewAdapter({ iframe }) : null;
     if (!adapter?.accepts(e)) return null;
-    return normalizeBridgeMessage(data);
+    return projectTimelineUrls(normalizeBridgeMessage(data), adapter);
   }
   if (data?.source !== "hf-preview") return null;
-  return acceptStudioRuntimeMessage(data) ? data : null;
+  if (!acceptStudioRuntimeMessage(data)) return null;
+  if (iframe && data.type === "timeline") {
+    const adapter = createPreviewAdapter({ iframe });
+    if (adapter.token && !adapter.sameOrigin) {
+      if (e.origin !== adapter.targetOrigin || e.source !== iframe.contentWindow) return null;
+      return projectTimelineUrls(data, adapter);
+    }
+  }
+  return data;
+}
+
+// Studio media probes and file operations use the project API under the user's session.
+function projectTimelineUrls(data: PreviewMessage, preview: ReturnType<typeof createPreviewAdapter>): PreviewMessage {
+  if (!Array.isArray(data.clips) || !preview.projectId) return data;
+  const prefix = `/api/projects/${encodeURIComponent(preview.projectId)}/preview/`;
+  function projectUrl(value: string | null) {
+    if (!value || !URL.canParse(value)) return value;
+    const url = new URL(value);
+    if (url.origin !== preview.targetOrigin || !url.pathname.startsWith(prefix)) return value;
+    const path = url.pathname.slice(prefix.length).replace(/^~assets\/[^/]+\//, "");
+    const local = new URL(prefix + path, window.location.origin);
+    local.search = url.search;
+    local.searchParams.delete("pt");
+    local.hash = url.hash;
+    return local.href;
+  }
+  return { ...data, clips: data.clips.map((clip: ClipManifestClip) => ({
+    ...clip, assetUrl: projectUrl(clip.assetUrl), compositionSrc: projectUrl(clip.compositionSrc),
+  })) };
 }
 
 function normalizeBridgeMessage(data: PreviewBridgeMessage): PreviewMessage {
@@ -101,6 +130,7 @@ function normalizeBridgeMessage(data: PreviewBridgeMessage): PreviewMessage {
           source: "hf-preview",
           type: "timeline",
           clips: data.clips,
+          fps: data.fps,
           durationInFrames: Number(data.durationInFrames || 0),
         };
       }

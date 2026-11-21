@@ -1,3 +1,5 @@
+import { IsolatedPlayer } from "./IsolatedPlayer";
+import { isolatedPreviewOrigin } from "../lib/previewLease";
 import { Button } from "open-design-ui/button";
 import { useI18n } from "../../i18n/I18n";
 import { buildProjectApiPath } from "../../utils/projectRouting";
@@ -31,7 +33,7 @@ if (typeof window !== "undefined") void loadPlayerModule().catch(() => {});
 
 if (typeof window !== "undefined") installAcceleratedCanvasTracker();
 
-interface PlayerProps {
+export interface PlayerProps {
   projectId?: string;
   directUrl?: string;
   onLoad: () => void;
@@ -157,7 +159,7 @@ const runtimeBootedIn = (iframe: HTMLIFrameElement) =>
  * forwarded ref so useTimelinePlayer can access it for clip manifest parsing,
  * timeline probing, and DOM inspection.
  */
-export const Player = forwardRef<HTMLIFrameElement, PlayerProps>(
+const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
   (
     {
       projectId,
@@ -577,5 +579,10 @@ export const Player = forwardRef<HTMLIFrameElement, PlayerProps>(
     );
   },
 );
+
+export const Player = forwardRef<HTMLIFrameElement, PlayerProps>((props, ref) => {
+  const origin = isolatedPreviewOrigin();
+  return origin ? <IsolatedPlayer {...props} origin={origin} ref={ref} /> : <SameOriginPlayer {...props} ref={ref} />;
+});
 
 Player.displayName = "Player";

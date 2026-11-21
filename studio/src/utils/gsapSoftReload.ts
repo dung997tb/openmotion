@@ -87,7 +87,7 @@ export function ensureMotionPathPluginLoaded(iframe: HTMLIFrameElement | null): 
       if (event.source !== win || data?.source !== "hf-preview" || data.type !== "ready") return;
       window.removeEventListener("message", retry);
       pendingReadyRetry = null;
-      if (win.gsap?.registerPlugin) ensureMotionPathPluginLoaded(iframe);
+      if (iframe.contentDocument === doc && win.gsap?.registerPlugin) ensureMotionPathPluginLoaded(iframe);
     };
     pendingReadyRetry = retry;
     window.addEventListener("message", retry);

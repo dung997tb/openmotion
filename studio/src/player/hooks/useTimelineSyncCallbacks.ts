@@ -8,6 +8,7 @@
  *  - onIframeLoad             — orchestrates initializeAdapter with a message-based fallback
  */
 
+import { takePreviewPosition } from "../lib/previewReconnect";
 import { appendUntimedText } from "../lib/timelineUntimedText";
 import { useCallback, useRef } from "react";
 import { liveTime, usePlayerStore } from "../store/playerStore";
@@ -252,6 +253,8 @@ export function useTimelineSyncCallbacks({
       const adapter = getAdapter();
       if (!adapter || adapter.getDuration() <= 0) return false;
 
+      const reconnect = takePreviewPosition(iframeRef.current);
+      if (reconnect) pendingSeekRef.current = reconnect.time;
       adapter.pause();
       const startTime = seekAdapterToRestorePoint(adapter, pendingSeekRef);
       const commit = () => {
@@ -278,6 +281,7 @@ export function useTimelineSyncCallbacks({
           attachIframeShortcutListeners,
           syncTimelineElements,
         });
+        if (reconnect?.playing) usePlayerStore.getState().requestPlayback(true);
       };
       onAdapterReady(iframeRef.current, context, commit);
       return true;

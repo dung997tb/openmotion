@@ -14,7 +14,7 @@ const SENSITIVE_KEY_PATTERN =
 const URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/[^/\s:@]*:)([^/\s@]+)(@)/gi;
 
 export function redactString(input: string): string {
-  return input.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]$3');
+  return input.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]$3').replace(/(?:om_pt_[\w-]+\.[\w-]+|om_pl_[\w-]{43})/g, '[REDACTED]');
 }
 
 export function redactValue(value: unknown, depth = 0): unknown {
