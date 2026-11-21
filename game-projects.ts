@@ -15,7 +15,7 @@ import { WorkspaceStore } from './workspace.ts';
 import { execute, pluginRoot, HYPERFRAMES_VERSION } from './hyperframes.ts';
 import { verificationBinaries } from './scripts/verify-export.ts';
 import type { Duplex } from 'node:stream';
-import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
+import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
 
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
 const kitsRoot = fileURLToPath(new URL('./templates/game-kits/', import.meta.url));
@@ -342,21 +342,31 @@ export class GameProjects {
     const trailer=await this.readTrailer(id);
     return { ...stored, ...(trailer?{trailer}:{}), remixOf: stored.remixOf ?? null, cover: stored.cover && !/^(?:[a-z]+:|\/)/i.test(stored.cover) ? `/api/games/${id}/play/${cleanGamePath(stored.cover)}` : stored.cover ?? null, id, source, playUrl: `/api/games/${id}/play/index.html`, plays: (stored.plays ?? 0) + viewer.plays, likes: (stored.likes ?? 0) + Number(viewer.reaction === 1), dislikes: (stored.dislikes ?? 0) + Number(viewer.reaction === -1), reaction: viewer.reaction, favorite: viewer.favorite };
   }
-  async catalog() {
-    const games: GameCard[] = [];
+  async catalog(): Promise<GameCatalog> {
+    const games: GameCard[] = [], issues: GameCatalogIssue[] = [];
     for (const root of [this.templates, this.root]) {
       const entries = await readdir(root, { withFileTypes: true }).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
-      for (const entry of entries) if (entry.isDirectory() && !entry.name.startsWith('.')) games.push(await this.get(entry.name));
+      // One unreadable folder (an interrupted create, a malformed game.json) is reported, not allowed to hide every other game.
+      for (const entry of entries) if (entry.isDirectory() && !entry.name.startsWith('.')) {
+        try { games.push(await this.get(entry.name)); }
+        catch (error) { issues.push({ id: entry.name, message: (error as Error).message }); }
+      }
     }
     games.sort((a,b) => Number(b.status === 'published') - Number(a.status === 'published') || b.plays - a.plays || a.id.localeCompare(b.id));
-    return { games };
+    return issues.length ? { games, issues } : { games };
+  }
+  /** Run a project-creating step; a failure removes the partly written folder so it never becomes an orphan. */
+  private async populate<T>(dir: string, run: () => Promise<T>): Promise<T> {
+    await mkdir(dir, { recursive: true });
+    try { return await run(); }
+    catch (error) { await rm(dir, { recursive: true, force: true }).catch(() => undefined); throw error; }
   }
   async create(raw: GameBrief): Promise<GameCreated> { return this.mutate(async () => {
     const brief = briefInput(raw), id = randomUUID(), dir = path.join(this.root, id), now = new Date().toISOString();
     // A portrait brief tells the Agent to build for a phone held upright; the card keeps the shape for the 9:16 stage.
     const rawPrompt = brief.orientation === 'portrait' ? `${brief.prompt}\n\nLayout: portrait 9:16 phone game. Design every screen, HUD and control for a phone held upright (390×844); in a landscape window, centre the 9:16 play area and letterbox the sides.` : brief.prompt;
     const game: StoredGame = { rawPrompt, orientation: brief.orientation, id, title: brief.prompt.slice(0,80), description: brief.prompt, genre: brief.genre ?? 'casual', style: brief.style, setting: brief.setting, multiplayer: brief.multiplayer, maxPlayers: brief.multiplayer ? 4 : 1, status: 'draft', cover: null, playUrl: `/api/games/${id}/play/index.html`, plays: 0, likes: 0, dislikes: 0, reaction: 0, favorite: false, source: 'mine', remixOf: null, controls: '', createdAt: now, updatedAt: now };
-    await mkdir(dir, { recursive: true });
+    return this.populate(dir, async () => {
     // Multiplayer briefs with no genre ("play with friends") or a shooter/3D brief get the co-op room kit; other multiplayer
     // genres keep the room-ready starter until a matching kit exists. arcade-2d is single-player only.
     const coop = brief.multiplayer && (brief.genre === 'shooter' || brief.genre === null || brief.style === '3d');
@@ -379,6 +389,7 @@ export class GameProjects {
     } else for (const file of starter(brief.multiplayer)) await writeFile(path.join(dir, file.path), file.content);
     await this.save(id, game);
     return { game: await this.get(id), agentInstruction: instruction(game, { ...brief, prompt: rawPrompt }) };
+    });
   }); }
   private async save(id: string, game: StoredGame) {
     idPart(id);
@@ -387,12 +398,13 @@ export class GameProjects {
   }
   async remix(id: string): Promise<GameCreated> { return this.mutate(async () => {
     const original = await this.get(id), { dir } = await this.locate(id), newId = randomUUID(), target = path.join(this.root, newId);
-    await mkdir(target, { recursive: true });
+    return this.populate(target, async () => {
     for (const file of await inventory(dir)) { const dest = path.join(target, file.path); await mkdir(path.dirname(dest), { recursive: true }); await writeFile(dest, await readFile(await safeFile(dir, file.path))); }
     const originalMeta = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
     const game = { ...original, kit: originalMeta.kit, cover: originalMeta.cover ?? null, id: newId, title: `${original.title.slice(0,72)} remix`, source: 'mine' as const, status: 'draft' as const, plays: 0, likes: 0, dislikes: 0, reaction: 0 as const, favorite: false, remixOf: id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     await this.save(newId, game);
     return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: original.description, genre: original.genre, style: original.style, setting: original.setting, multiplayer: original.multiplayer }, true) };
+    });
   }); }
   /** The complete Agent handoff for a workspace draft: game id, brief and execution steps, available at any time (not only right after creation). */
   async handoff(id: string): Promise<GameHandoff> {
@@ -545,11 +557,17 @@ export class GameProjects {
     } catch (error) {
       warnings.push(`Starter kit comparison unavailable: ${(error as Error).message}`);
     }
-    if (game.multiplayer) try {
-      const source=(await this.read(id,'logic.js')).content;
-      const runtime = new GameRuntime(source, 'validation');
-      runtime.setup(['one','two']);
-      for (let tick = 0; tick < 50; tick++) { runtime.tick(tick); for (const player of ['one','two']) { runtime.apply(player, { type: 'noop' }, true); runtime.view(player); } runtime.over(); }
+    // Every game with rules gets the bounded smoke run; the kit clients import logic.js, so a broken file is a blank page.
+    // Room checks stay multiplayer-only; a solo game's validateAction may reject the probe action, as live play would.
+    // A hand-written solo game without logic.js has nothing to run.
+    let logic: string | null = null;
+    try { logic = (await this.read(id, 'logic.js')).content; }
+    catch (e) { if (game.multiplayer || baseline || (e as NodeJS.ErrnoException).code !== 'ENOENT') diagnostics.push({ path: 'logic.js', message: (e as Error).message }); }
+    if (logic !== null) try {
+      const runtime = new GameRuntime(logic, 'validation');
+      const players = game.multiplayer ? ['one','two'] : Array.from({ length: Math.max(1, runtime.meta.minPlayers) }, (_, i) => 'player-' + (i + 1));
+      runtime.setup(players);
+      for (let tick = 0; tick < 50; tick++) { runtime.tick(tick); for (const player of players) { runtime.apply(player, { type: 'noop' }, game.multiplayer); runtime.view(player); } if (runtime.over().over) break; }
     } catch (e) { diagnostics.push({ path: 'logic.js', message: (e as Error).message }); }
     return { id, passed: diagnostics.length === 0, diagnostics, warnings };
   }

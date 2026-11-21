@@ -85,7 +85,9 @@ export type GameTrailer = {
   updatedAt: string;
 };
 
-export type GameCatalog = { games: GameCard[] };
+/** A game folder the catalog could not read (an interrupted create or a malformed game.json); the other games still load. */
+export type GameCatalogIssue = { id: string; message: string };
+export type GameCatalog = { games: GameCard[]; issues?: GameCatalogIssue[] };
 
 /** POST /api/games and POST /api/games/:id/remix return the new project and the Agent brief. */
 export type GameCreated = { game: GameCard; agentInstruction: string };
