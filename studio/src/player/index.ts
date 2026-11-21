@@ -15,6 +15,19 @@ export type {
   PlayerHandleTimeListener,
 } from "./hooks/usePlayerHandle";
 export { resolveIframe } from "./lib/timelineDOM";
+export {
+  createPreviewAdapter,
+  isPreviewBridgeMessageValue,
+  PREVIEW_BRIDGE_SOURCE,
+  PREVIEW_BRIDGE_PARENT_SOURCE,
+  PREVIEW_BRIDGE_VERSION,
+} from "./lib/previewAdapter";
+export type {
+  PreviewAdapter,
+  PreviewAdapterOptions,
+  PreviewBridgeMessage,
+  PreviewBridgeMessageType,
+} from "./lib/previewAdapter";
 
 // Store
 export { usePlayerStore, liveTime } from "./store/playerStore";

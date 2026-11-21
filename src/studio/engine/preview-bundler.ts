@@ -387,6 +387,89 @@ function injectBodyScript(html: string, scriptBody: string, deferred = true): st
 }
 
 /**
+ * Install the cookie-less preview bridge used when a preview is served from
+ * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
+ * same-origin previews keep their existing DOM/runtime fast path.
+ */
+export function createPreviewBridgeScript(projectId: string): string {
+  const encodedProjectId = JSON.stringify(projectId).replace(/</g, '\\u003c');
+  return `(function(){
+  var SOURCE='openmotion-preview-bridge', PARENT='openmotion-studio', VERSION=1;
+  var projectId=${encodedProjectId};
+  var token=new URL(location.href).searchParams.get('pt');
+  if(!token || window.parent===window) return;
+  var parentWindow=window.parent;
+  var parentOrigin='*';
+  try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
+  function post(type,payload,requestId){
+    var message=Object.assign({source:SOURCE,version:VERSION,type:type,projectId:projectId,token:token},payload||{});
+    if(requestId) message.requestId=requestId;
+    parentWindow.postMessage(message,parentOrigin==='null'?'*':parentOrigin);
+  }
+  function player(){ return window.__player || null; }
+  function timeline(){
+    var p=player();
+    return {currentTime:p&&typeof p.getTime==='function'?Number(p.getTime())||0:0,
+      duration:p&&typeof p.getDuration==='function'?Number(p.getDuration())||0:0,
+      isPlaying:p&&typeof p.isPlaying==='function'?p.isPlaying()===true:false,
+      durationInFrames:window.__clipManifest&&Number(window.__clipManifest.durationInFrames)||0,
+      clips:window.__clipManifest&&Array.isArray(window.__clipManifest.clips)?window.__clipManifest.clips:[]};
+  }
+  function describe(element){
+    if(!element || element.nodeType!==1) return null;
+    var rect=element.getBoundingClientRect();
+    var text=(element.innerText||element.textContent||'').replace(/\\s+/g,' ').trim().slice(0,240);
+    return {elementId:element.id||null,selector:element.id?'#'+CSS.escape(element.id):null,
+      tagName:element.tagName.toLowerCase(),text:text||null,
+      geometry:{x:rect.left,y:rect.top,width:rect.width,height:rect.height},
+      viewport:{width:innerWidth,height:innerHeight}};
+  }
+  function respond(requestId,result,error){
+    post('response',error?{ok:false,error:String(error)}:{ok:true,result:result},requestId);
+  }
+  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control']}); post('timeline-state',timeline()); }
+  window.addEventListener('message',function(event){
+    if(event.source!==parentWindow) return;
+    var message=event.data;
+    if(!message || message.source!==PARENT || message.version!==VERSION || message.projectId!==projectId || message.token!==token) return;
+    var requestId=message.requestId;
+    try {
+      if(message.type==='handshake'){ ready(); respond(requestId,{ready:true}); return; }
+      if(message.type==='playback-control'){
+        var p=player(), action=message.action;
+        if(!p) throw new Error('Preview player is not ready');
+        if(action==='play' && typeof p.play==='function') p.play();
+        else if(action==='pause' && typeof p.pause==='function') p.pause();
+        else if(action==='seek' && typeof p.seek==='function') p.seek(Math.max(0,Number(message.time)||0));
+        else throw new Error('Unsupported playback action');
+        post('timeline-state',timeline()); respond(requestId,timeline()); return;
+      }
+      if(message.type==='selection-geometry'){
+        var target=message.elementId?document.getElementById(String(message.elementId)):null;
+        respond(requestId,target?describe(target):null); if(target) post('selection-geometry',{selection:describe(target)}); return;
+      }
+      if(message.type==='edit-element'){
+        // Editing is acknowledged here so the host can persist through Project API.
+        // The bridge never writes project files or trusts arbitrary HTML from a parent.
+        window.dispatchEvent(new CustomEvent('openmotion:edit-element',{detail:message}));
+        respond(requestId,{accepted:true}); return;
+      }
+      respond(requestId,{accepted:false},'Unsupported preview message');
+    } catch(error) { respond(requestId,null,error); post('runtime-error',{message:String(error&&error.message||error),sourceType:'bridge'}); }
+  });
+  document.addEventListener('click',function(event){
+    var target=event.target;
+    var detail=describe(target);
+    if(detail) post('select-element',{selection:detail});
+  },true);
+  window.addEventListener('error',function(event){ post('runtime-error',{message:String(event.message||'Preview runtime error'),filename:event.filename||null,line:event.lineno||null}); });
+  window.addEventListener('unhandledrejection',function(event){ post('runtime-error',{message:String(event.reason&&event.reason.message||event.reason||'Unhandled preview rejection')}); });
+  window.addEventListener('load',ready);
+  setInterval(function(){ if(document.visibilityState!=='hidden') post('timeline-state',timeline()); },500);
+})();`;
+}
+
+/**
  * Create a Redis-cached Google Fonts `fetchImpl` so `injectDeterministicFontFaces` runs with
  * `allowSystemFontCapture: false` and zero local filesystem cache writes.
  */
@@ -471,7 +554,11 @@ function applyStudioPreviewAugmentations(
         `<meta name="${STUDIO_PREVIEW_MARK_META}">${EARLY_ERRORS_SCRIPT}`,
       );
 
-  // 2. GSAP base URL meta + project signature meta + CDN fallback
+  // 2. Cookie-less cross-origin preview bridge. It is a no-op for local
+  // previews because the script exits when the project token is absent.
+  out = injectBodyScript(out, createPreviewBridgeScript(project.projectId), false);
+
+  // 3. GSAP base URL meta + project signature meta + CDN fallback
   out = injectTagsAtHeadStart(
     out,
     `<meta name="${GSAP_BASE_URL_META}" content="${escapeGsapUrl(options.gsapBaseUrl)}">`,
@@ -479,7 +566,7 @@ function applyStudioPreviewAugmentations(
   out = injectProjectSignature(out, project.revision);
   out = injectGsapCdnFallback(out, options.gsapBaseUrl);
 
-  // 3. Studio motion manifest (.hyperframes/studio-motion.json)
+  // 4. Studio motion manifest (.hyperframes/studio-motion.json)
   const motionManifest = project.readText(STUDIO_MOTION_PATH) ?? '';
   if (motionManifest.trim()) {
     const motionScript = createStudioMotionRenderBodyScript(motionManifest, {
@@ -505,7 +592,7 @@ function applyStudioPreviewAugmentations(
     }
   }
 
-  // 4. Studio manual edits manifest (.hyperframes/studio-manual-edits.json)
+  // 5. Studio manual edits manifest (.hyperframes/studio-manual-edits.json)
   const manualEditsManifest = project.readText(STUDIO_MANUAL_EDITS_PATH) ?? '';
   if (manualEditsManifest.trim()) {
     const manualEditsScript = createStudioManualEditsRenderBodyScript(manualEditsManifest, {
@@ -516,10 +603,10 @@ function applyStudioPreviewAugmentations(
     }
   }
 
-  // 5. MotionPath plugin auto-injection when needed
+  // 6. MotionPath plugin auto-injection when needed
   out = injectMotionPathPluginIfNeeded(out, options.gsapBaseUrl);
 
-  // 6. Preview variable overrides
+  // 7. Preview variable overrides
   if (options.variables && Object.keys(options.variables).length > 0) {
     out = injectPreviewVariables(out, options.variables);
   }
