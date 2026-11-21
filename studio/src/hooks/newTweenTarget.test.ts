@@ -203,15 +203,17 @@ describe("gsapDragCommit — new-tween targets", () => {
 });
 
 describe("gsapDragCommit — retargeting an existing tween is left alone", () => {
-  it("retains opacity and scale when dragging the path of a text entrance", async () => {
+  it.each(["from", "to", "fromTo"] as const)("preserves both opacity and scale endpoints on a %s path drag", async method => {
     const [element] = mountGroupSiblings(1, true);
     const { mutations, callbacks } = recorder();
-    const tween = { id: "title", targetSelector: ".group", method: "fromTo", position: 0, duration: 1,
-      fromProperties: { y: -480, opacity: 0, scaleY: 1.7 }, properties: { y: 0, opacity: 1, scaleY: 1 } } as GsapAnimation;
+    const entrance = { y: -480, opacity: 0, scaleY: 1.7 };
+    const rest = { y: 0, opacity: 1, scaleY: 1 };
+    const tween = { id: "title", targetSelector: ".group", method, position: 0, duration: 1,
+      properties: method === "fromTo" ? rest : entrance,
+      ...(method === "fromTo" ? { fromProperties: entrance } : {}) } as GsapAnimation;
     await commitWholePathOffset(classOnlySelection(element!), tween, { x: 10, y: 5 }, { x: 0, y: 0 }, null, ".group", callbacks);
-    expect(mutations[0]).toMatchObject({ keyframes: [
-      { properties: { opacity: 0, scaleY: 1.7 } }, { properties: { opacity: 1, scaleY: 1 } },
-    ] });
+    const stops = method === "to" ? [rest, entrance] : [entrance, rest];
+    expect(mutations[0]).toMatchObject({ keyframes: stops.map(({ opacity, scaleY }) => ({ properties: { opacity, scaleY } })) });
   });
 
   it("commitWholePathOffset keeps the tween's own group target", async () => {

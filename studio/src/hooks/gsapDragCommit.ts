@@ -20,6 +20,7 @@ import {
 } from "./draggedGsapPosition";
 import type { CommitMutation } from "./gsapScriptCommitTypes";
 import { isGestureTransactionCommit, runGestureTransaction } from "./gestureTransaction";
+import { synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 import { setPatchFromUpdateProperty } from "./gsapDragStaticSetHelpers";
 import { GsapEditBlockedError, type PlayheadEditRefusal } from "./gsapEditOutcome";
 import { isTweenConfigKey } from "@hyperframes/parsers/gsap-constants";
@@ -388,9 +389,10 @@ export async function commitWholePathOffset(
     const startY = typeof fromProps.y === "number" ? fromProps.y : 0;
     const endX = typeof toProps.x === "number" ? toProps.x : effectiveAnim.method === "from" ? 0 : startX;
     const endY = typeof toProps.y === "number" ? toProps.y : effectiveAnim.method === "from" ? 0 : startY;
+    const endpoints = synthesizeFlatTweenKeyframes(effectiveAnim)?.keyframes;
     kfs = [
-      { percentage: 0, properties: { ...fromProps, x: startX, y: startY } },
-      { percentage: 100, properties: { ...toProps, x: endX, y: endY } },
+      { percentage: 0, properties: { ...endpoints?.[0]?.properties, ...fromProps, x: startX, y: startY } },
+      { percentage: 100, properties: { ...endpoints?.[1]?.properties, ...toProps, x: endX, y: endY } },
     ];
   }
 
