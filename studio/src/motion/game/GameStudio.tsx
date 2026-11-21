@@ -306,7 +306,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
   const [url, setUrl] = useState<string | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const frame = useRef<HTMLIFrameElement>(null), close = useRef<HTMLButtonElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null), close = useRef<HTMLButtonElement>(null), stage = useRef<HTMLDivElement>(null);
   const gameTitle = useGameTitle();
   const mine = game.source === 'mine';
   const playable = !pending(game) && game.status !== 'failed';
@@ -408,11 +408,11 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
         </div> : <span />}
         <span className="om-game-preview-tools">
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Reload game')} disabled={!playable} onClick={() => { setSource(null); setReload(value => value + 1); }} icon={<RemixIcon name="refresh-line" size={17} />} />
-          <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Full screen')} disabled={!url} onClick={() => void frame.current?.requestFullscreen?.()} icon={<RemixIcon name="fullscreen-line" size={17} />} />
+          <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Full screen')} disabled={!url} onClick={() => void (view === 'preview' ? frame.current : stage.current)?.requestFullscreen?.()} icon={<RemixIcon name="fullscreen-line" size={17} />} />
           <Button variant="ghost" className="om-button h-auto" disabled={!url} onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open in new window')}</Button>
         </span>
       </header>
-      <div className="om-game-stage" data-orientation={game.orientation === 'portrait' && playable && view === 'preview' ? 'portrait' : undefined}>
+      <div ref={stage} className="om-game-stage" data-orientation={game.orientation === 'portrait' && playable && view === 'preview' ? 'portrait' : undefined}>
         {!playable ? <div className="om-game-waiting"><RemixIcon name={game.status === 'failed' ? 'error-warning-line' : 'loader-4-line'} size={28} />
             <strong>{game.status === 'failed' ? t('The Agent stopped before finishing this game.') : t('Agent is running…')}</strong>
             <span className="om-muted">{t('The game will load here when it is ready.')}</span></div>
@@ -424,7 +424,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
               <div><strong>{t('This game only runs on the creator’s site.')}</strong>
                 <Button variant="ghost" className="om-button h-auto" data-primary onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Play on the creator’s page')}</Button></div>
             </div>
-          : url ? <iframe key={reload} ref={frame} src={url} title={game.title} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-pointer-lock'} allow="fullscreen; gamepad; autoplay" />
+          : url ? <iframe key={reload} ref={frame} src={url} title={game.title} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-pointer-lock'} allow="fullscreen; gamepad; autoplay; clipboard-write" />
           : <span className="om-muted">{t('Loading game…')}</span>}
       </div>
     </section>

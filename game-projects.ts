@@ -1,6 +1,6 @@
 /** Shared local Game Studio service. HTTP and MCP operate on the same projects. */
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile, rename, rm, lstat, realpath, copyFile, access } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile, rename, rm, lstat, realpath, copyFile, access, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -59,7 +59,7 @@ async function safeFile(root: string, relative: string, writing = false) {
 async function inventory(root: string, prefix = ''): Promise<{ path: string; bytes: number }[]> {
   const result: { path: string; bytes: number }[] = [];
   for (const entry of await readdir(path.join(root, prefix), { withFileTypes: true })) {
-    if (entry.name.startsWith('.') || (!prefix && ['game.json','trailer'].includes(entry.name))) continue;
+    if (entry.name.startsWith('.') || (!prefix && ['game.json','trailer'].includes(entry.name.toLowerCase()))) continue;
     const relative = prefix + entry.name;
     const file = await safeFile(root, relative);
     if (entry.isDirectory()) result.push(...await inventory(root, relative + '/'));
@@ -272,6 +272,31 @@ export function trailerTransition(previous:GameTrailerStatus,next:GameTrailerSta
   return next==='failed'&&trailerRunning(previous)||({recording:'composing',composing:'rendering',rendering:'ready'} as Record<string,string>)[previous]===next;
 }
 
+/** Shared start convention for isolated playtests, covers and trailer recording. */
+export async function startGameBrowserPage(page: Pick<Page, '$' | 'evaluate' | 'waitForFunction' | 'keyboard' | 'mouse'>, recording = false) {
+  const initialTick = await page.evaluate(() => {
+    const hook = (window as any).__omGame;
+    return hook?.getState?.()?.tick ?? hook?.getStats?.()?.tick ?? null;
+  });
+  const start = await page.$('#start:not([disabled]), #play:not([disabled]), [data-action="start"]');
+  if (start) await start.click();
+  else {
+    const started = await page.evaluate(() => {
+      const hook = (window as any).__omGame;
+      if (typeof hook?.start !== 'function') return false;
+      hook.start(); return true;
+    });
+    if (!started && recording) { await page.keyboard.press('Enter'); await page.keyboard.press('Space'); await page.mouse.click(640, 360); }
+  }
+  await page.waitForFunction((tick: number | null) => {
+    const hook = (window as any).__omGame;
+    if (!hook) return true; // Legacy games have no authoritative startup observation.
+    const state = hook.getState?.(), current = state?.tick ?? hook.getStats?.()?.tick;
+    if (tick !== null && typeof current === 'number') return current > tick;
+    return state?.running === true || ['playing', 'running', 'win', 'loss'].includes(state?.phase);
+  }, { timeout: 5000 }, initialTick);
+}
+
 type StoredGame = GameCard & { rawPrompt?: string; kit?: 'coop-3d' | 'arcade-2d' | 'starter' };
 type GameMetaPatch = Pick<Partial<GameCard>, 'title' | 'description' | 'controls' | 'cover' | 'i18n'>;
 type Viewer = { plays: number; reaction: -1 | 0 | 1; favorite: boolean };
@@ -345,12 +370,13 @@ export class GameProjects {
       }
       if (coop) game.controls = 'WASD/arrows or touch joystick; mouse aim/fire; auto-fire without aim; defend the crystal.';
     } else for (const file of starter(brief.multiplayer)) await writeFile(path.join(dir, file.path), file.content);
-    await this.save(game);
+    await this.save(id, game);
     return { game: await this.get(id), agentInstruction: instruction(game, brief) };
   }); }
-  private async save(game: StoredGame) {
+  private async save(id: string, game: StoredGame) {
+    idPart(id);
     const { reaction: _reaction, favorite: _favorite, trailer:_trailer, ...stored } = game;
-    await saveJson(path.join(this.root, game.id, 'game.json'), stored);
+    await saveJson(await safeFile(path.join(this.root, id), 'game.json', true), { ...stored, id });
   }
   async remix(id: string): Promise<GameCreated> { return this.mutate(async () => {
     const original = await this.get(id), { dir } = await this.locate(id), newId = randomUUID(), target = path.join(this.root, newId);
@@ -358,7 +384,7 @@ export class GameProjects {
     for (const file of await inventory(dir)) { const dest = path.join(target, file.path); await mkdir(path.dirname(dest), { recursive: true }); await writeFile(dest, await readFile(await safeFile(dir, file.path))); }
     const originalMeta = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
     const game = { ...original, kit: originalMeta.kit, cover: originalMeta.cover ?? null, id: newId, title: `${original.title.slice(0,72)} remix`, source: 'mine' as const, status: 'draft' as const, plays: 0, likes: 0, dislikes: 0, reaction: 0 as const, favorite: false, remixOf: id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    await this.save(game);
+    await this.save(newId, game);
     return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: original.description, genre: original.genre, style: original.style, setting: original.setting, multiplayer: original.multiplayer }, true) };
   }); }
   async interact(id: string, kind: 'play'|'reaction'|'favorite', value?: unknown) { return this.mutate(async () => {
@@ -376,7 +402,7 @@ export class GameProjects {
   }); }
   async detail(id: string) { const game = await this.get(id); return { ...game, files: await inventory((await this.locate(id)).dir) }; }
   async read(id: string, relative: string) {
-    if (!textExtensions.test(relative) || relative === 'game.json' || relative.startsWith('trailer/')) throw new GameError('Only game text source may be read');
+    if (!textExtensions.test(relative) || relative.toLowerCase() === 'game.json' || relative.toLowerCase().startsWith('trailer/')) throw new GameError('Only game text source may be read');
     const file = await safeFile((await this.locate(id)).dir, relative);
     if ((await lstat(file)).size > LIMIT) throw new GameError('Text file exceeds 8 MiB');
     return { path: relative, content: await readFile(file, 'utf8') };
@@ -385,16 +411,56 @@ export class GameProjects {
     const { dir } = await this.locate(id, true);
     if (!Array.isArray(files) || !files.length || files.length > 100) throw new GameError('Write 1–100 files');
     let bytes = 0;
-    const targets: { file: string; content: string }[] = [];
-    for (const file of files) {
-      if (!file || typeof file.content !== 'string' || !textExtensions.test(cleanGamePath(file.path)) || (file.path === 'game.json' || file.path.startsWith('trailer/'))) throw new GameError('Only game text source may be written');
-      bytes += Buffer.byteLength(file.content); if (bytes > LIMIT) throw new GameError('Write exceeds 8 MiB');
-      targets.push({ file: await safeFile(dir, file.path, true), content: file.content });
+    const targets: { file: string; content: string; previous: boolean }[] = [];
+    const names = files.map(file => cleanGamePath(file?.path).toLowerCase());
+    for (let i = 0; i < names.length; i++) for (let j = 0; j < i; j++) {
+      if (names[i] === names[j] || names[i].startsWith(names[j] + '/') || names[j].startsWith(names[i] + '/')) throw new GameError('Conflicting or duplicate source paths');
     }
-    for (const target of targets) { await mkdir(path.dirname(target.file), { recursive: true }); await writeFile(target.file, target.content); }
-    const stored = await jsonFile<GameCard>(path.join(dir, 'game.json')); stored.updatedAt = new Date().toISOString();
+    for (const [i, file] of files.entries()) {
+      if (!file || typeof file.content !== 'string' || !textExtensions.test(file.path) || names[i] === 'game.json' || names[i] === 'trailer' || names[i].startsWith('trailer/')) throw new GameError('Only game text source may be written');
+      bytes += Buffer.byteLength(file.content); if (bytes > LIMIT) throw new GameError('Write exceeds 8 MiB');
+      const target = await safeFile(dir, file.path, true);
+      const info = await lstat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (info && !info.isFile()) throw new GameError('Source path conflicts with an existing directory');
+      targets.push({ file: target, content: file.content, previous: !!info });
+    }
+    const stored = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
+    stored.updatedAt = new Date().toISOString();
     if (stored.status === 'published' || stored.status === 'ready') stored.status = 'building';
-    await this.save(stored); return this.detail(id);
+    const staging = await mkdtemp(path.join(dir, '.write-')), committed: number[] = [], directories: string[] = [];
+    let keepRecovery = false, metadataAttempted = false;
+    try {
+      await copyFile(await safeFile(dir, 'game.json'), path.join(staging, 'metadata'));
+      // Stage complete source bytes and backups before changing any live file.
+      for (const [i, target] of targets.entries()) {
+        await writeFile(path.join(staging, 'new-' + i), target.content);
+        if (target.previous) await copyFile(target.file, path.join(staging, 'old-' + i));
+      }
+      for (const [i, target] of targets.entries()) {
+        const missing: string[] = [];
+        for (let parent = path.dirname(target.file); parent !== dir; parent = path.dirname(parent)) {
+          const info = await lstat(parent).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+          if (info) { if (!info.isDirectory() || info.isSymbolicLink()) throw new GameError('Source directory conflict'); break; }
+          missing.push(parent);
+        }
+        for (const parent of missing.reverse()) { await mkdir(parent); directories.push(parent); }
+        await rename(path.join(staging, 'new-' + i), target.file); committed.push(i);
+      }
+      // Metadata is the final commit step; a failure restores the entire source batch.
+      metadataAttempted = true;
+      await this.save(id, stored);
+      return await this.detail(id);
+    } catch (error) {
+      const failures: unknown[] = [];
+      if (metadataAttempted) try { await rename(path.join(staging, 'metadata'), path.join(dir, 'game.json')); } catch (failure) { failures.push(failure); }
+      for (const i of committed.reverse()) try {
+        if (targets[i].previous) await rename(path.join(staging, 'old-' + i), targets[i].file);
+        else await rm(targets[i].file, { force: true });
+      } catch (failure) { failures.push(failure); }
+      for (const parent of directories.reverse()) try { await rmdir(parent); } catch (failure) { failures.push(failure); }
+      if (failures.length) { keepRecovery = true; throw new AggregateError([error, ...failures], 'Source rollback failed; recovery backups retained in ' + staging); }
+      throw error;
+    } finally { if (!keepRecovery) await rm(staging, { recursive: true, force: true }); }
   }); }
   async updateMeta(id: string, patch: GameMetaPatch) { return this.mutate(async () => {
     const { dir } = await this.locate(id, true);
@@ -432,7 +498,7 @@ export class GameProjects {
       changes.i18n = translations;
     }
     Object.assign(game,changes); game.updatedAt = new Date().toISOString();
-    await this.save(game); return this.get(id);
+    await this.save(id, game); return this.get(id);
   }); }
   async validate(id: string) {
     const game = await this.get(id), diagnostics: { path: string; message: string }[] = [], warnings: string[] = [];
@@ -474,7 +540,7 @@ export class GameProjects {
   async status(id: string, status: unknown) { return this.mutate(async () => {
     if (typeof status !== 'string' || !['building','ready','failed'].includes(status)) throw new GameError('Invalid game status');
     const { dir } = await this.locate(id, true), game = await jsonFile<GameCard>(path.join(dir,'game.json'));
-    game.status = status as GameCard['status']; game.updatedAt = new Date().toISOString(); await this.save(game); return this.get(id);
+    game.status = status as GameCard['status']; game.updatedAt = new Date().toISOString(); await this.save(id, game); return this.get(id);
   }); }
   async publish(id: string) { return this.mutate(async () => {
     const { dir } = await this.locate(id, true), validation = await this.validate(id);
@@ -484,7 +550,7 @@ export class GameProjects {
     const prompt = game.rawPrompt ?? game.description;
     if (game.title === prompt || game.title === prompt.slice(0,80)) warnings.push('The title still matches the raw prompt; set a concise title with openmotion_game_update_meta.');
     if (game.multiplayer) game.maxPlayers = new GameRuntime((await this.read(id,'logic.js')).content, 'publication').meta.maxPlayers;
-    game.status = 'published'; game.updatedAt = new Date().toISOString(); await this.save(game);
+    game.status = 'published'; game.updatedAt = new Date().toISOString(); await this.save(id, game);
     let plan='';try{plan=(await this.read(id,'design/plan.md')).content;}catch{/* Optional planning input; missing artifacts already have validation reminders. */}
     const nextSteps=gameNextSteps(plan);nextSteps[2]='Make a gameplay trailer for this game with openmotion_game_trailer.';
     const card = await this.get(id); return { game: card, playUrl: card.playUrl, warnings, nextSteps, ...(card.multiplayer ? { roomInviteUrlPattern: card.playUrl + '?room={room}' } : {}) };
@@ -640,7 +706,7 @@ export class GameProjects {
     if(options.scripts!==undefined&&(!Array.isArray(options.scripts)||options.scripts.length>clients))throw new GameError('Supply at most one script per client');
     if(options.movementThreshold!==undefined&&(!Number.isFinite(options.movementThreshold)||options.movementThreshold<0||options.movementThreshold>100))throw new GameError('movementThreshold must be 0–100');
     if(options.expectedPhase!==undefined&&(typeof options.expectedPhase!=='string'||!options.expectedPhase||options.expectedPhase.length>64))throw new GameError('Invalid expectedPhase');
-    const defaultMove:GameBrowserAction[]=[{type:'key',key:'w',event:'down'},{type:'wait',ms:350},{type:'key',key:'w',event:'up'}];
+    const defaultMove:GameBrowserAction[]=[{type:'key',key:'d',event:'down'},{type:'wait',ms:350},{type:'key',key:'d',event:'up'}];
     const scripts=Array.from({length:clients},(_,i)=>validateGameScript(options.scripts?.[i]??(options.scripts?[]:defaultMove)));
     return this.runBrowser(id,clients,scripts,duration,options.room,false,options);
   }
@@ -696,9 +762,6 @@ export class GameProjects {
       const url=new URL(req.url??'/','http://localhost');
       if(req.method==='GET'&&url.pathname==='/favicon.ico'){res.writeHead(204);res.end();return;}
       if(req.method!=='GET'||!url.pathname.startsWith(`/api/games/${id}/play/`)){res.writeHead(404);res.end();return;}
-      // Headless verification is offline and never opens arbitrary sites or remote sockets.
-      // blob:/data: let GLTFLoader read textures embedded in .glb files; the CDN hosts match the validator's allowlist.
-      res.setHeader('Content-Security-Policy',"default-src 'self' data: blob:; connect-src 'self' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline'; worker-src 'none'");
       void gameHttp(req,res,url,path.dirname(this.root),async()=>({})).catch(()=>{res.writeHead(500);res.end();});
     });
     const closeRooms=attachGameRooms(server,path.dirname(this.root));
@@ -721,7 +784,7 @@ export class GameProjects {
         page.on('dialog',d=>{void d.dismiss();});
         page.on('popup',p=>{void p?.close();});
         await page.setRequestInterception(true);
-        page.on('request',r=>{const url=r.url();void (url.startsWith(origin+'/')||url.startsWith('data:')||url.startsWith('blob:'+origin)?r.continue():r.abort('blockedbyclient')).catch(()=>{});});
+        page.on('request',r=>{const url=r.url();void (url.startsWith(origin+'/')||url.startsWith('data:')||url.startsWith('blob:')?r.continue():r.abort('blockedbyclient')).catch(()=>{});});
         await page.evaluateOnNewDocument(`(()=>{
           // Keep concurrent headless clients rendering; this run does not test background suspension.
           Object.defineProperty(document,'hidden',{get:()=>false,configurable:true});
@@ -737,8 +800,8 @@ export class GameProjects {
         const autoJoin=await page.evaluate(()=>{const p=(window as any).__openmotionGameProbe;return {joined:p.roomJoined,elapsedMs:p.joinedAtMs as number|null};});
         return {consoleErrors,failedRequests,autoJoin};
       }));
-      // Only click the conventional start control after every isolated client has joined.
-      if(game.multiplayer||recording){const start=await pages[0].$('#start:not([disabled]), #play:not([disabled]), [data-action="start"]');if(start)await start.click();else if(recording){await pages[0].keyboard.press('Enter');await pages[0].keyboard.press('Space');await pages[0].mouse.click(640,360);}}
+      // Wait for every multiplayer join before starting; each solo page starts independently.
+      await Promise.all((game.multiplayer ? [pages[0]] : pages).map(page => startGameBrowserPage(page, !!recording)));
       const readHook=async(page:Page)=>{
         try{return await page.evaluate(async()=>{const hook=(window as any).__omGame;if(!hook||typeof hook.getState!=='function')return null;const value={state:await hook.getState(),stats:typeof hook.getStats==='function'?await hook.getStats():null};const json=JSON.stringify(value);if(json.length>65536)throw Error('Test hook state exceeds 64 KiB');return JSON.parse(json);});}
         catch(error){return {state:null,error:String(error)};}
@@ -788,7 +851,7 @@ export class GameProjects {
   }
 
   async staticFile(id: string, relative: string) {
-    if (relative === 'game.json' || relative==='trailer/job.json') throw new GameError('Private game metadata', 404);
+    if (relative.toLowerCase() === 'game.json' || relative.toLowerCase()==='trailer/job.json') throw new GameError('Private game metadata', 404);
     const root=relative.startsWith('trailer/')?await this.trailerStorage(id):(await this.locate(id)).dir;
     const file = await safeFile(root, relative);
     return { data: await readFile(file), mime: mime[path.extname(file).toLowerCase()] ?? 'application/octet-stream' };
@@ -801,9 +864,16 @@ export class GameRuntime {
   private optionalExports = new Set<string>();
   meta: { minPlayers: number; maxPlayers: number; tickRate: number };
   constructor(source: string, seed: string) {
-    if (/\b(?:import|require)\b|Math\s*(?:\.\s*random|\[\s*['"]random['"]\s*\])|Date\s*(?:\.\s*now|\[\s*['"]now['"]\s*\])/.test(source)) throw new GameError('logic.js cannot import/require, Math.random or Date.now');
     const { parse } = createRequire(import.meta.url)('acorn') as typeof import('acorn');
     const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+    const inspect = (node: any): void => {
+      if (!node || typeof node !== 'object') return;
+      const member = node.type === 'MemberExpression' && node.object?.type === 'Identifier';
+      const property = node.computed ? node.property?.value : node.property?.name;
+      if (node.type === 'ImportDeclaration' || node.type === 'ImportExpression' || node.type === 'Identifier' && node.name === 'require' || member && (node.object.name === 'Math' && property === 'random' || node.object.name === 'Date' && property === 'now')) throw new GameError('logic.js cannot import/require, Math.random or Date.now');
+      for (const value of Object.values(node)) if (Array.isArray(value)) value.forEach(inspect); else if (value && typeof value === 'object') inspect(value);
+    };
+    inspect(ast);
     const replacements: { start: number; end: number; text: string }[] = [];
     const exports: string[] = [];
     for (const node of ast.body as any[]) {
@@ -892,7 +962,12 @@ export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: U
         const target=new URL(url);target.searchParams.set('room',randomUUID().replaceAll('-','').slice(0,8));
         res.writeHead(302,{'Location':target.pathname+target.search,'Cache-Control':'no-store','Access-Control-Allow-Origin':'*'});res.end();return true;
       }
-      const file = await service.staticFile(id,rest.length?rest.join('/'):'index.html'); res.writeHead(200, { 'Access-Control-Allow-Origin':'*', 'Content-Type':file.mime, 'Content-Length':file.data.length, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff' }); res.end(file.data); return true;
+      const file = await service.staticFile(id,rest.length?rest.join('/'):'index.html');
+      const origin = new URL(url); if (req.headers?.host) origin.host = req.headers.host;
+      const sockets = ['/api/games', '/motion-api/games'].map(prefix => `${origin.protocol === 'https:' ? 'wss:' : 'ws:'}//${origin.host}${prefix}/${id}/rooms/`).join(' ');
+      const executable = /^(?:text\/html|image\/svg\+xml)/.test(file.mime);
+      const csp = "sandbox allow-scripts allow-pointer-lock allow-popups allow-modals; default-src 'self' data: blob:; connect-src 'self' blob: data: " + sockets + " https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline'; worker-src 'none'";
+      res.writeHead(200, { 'Access-Control-Allow-Origin':'*', 'Content-Type':file.mime, 'Content-Length':file.data.length, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', ...(executable ? { 'Content-Security-Policy': csp } : {}) }); res.end(file.data); return true;
     }
     if (parts.length === 2 && req.method === 'POST') {
       if (action === 'capture-cover') return json(200,await service.captureCover(id,await input(req, LIMIT)));
@@ -919,12 +994,17 @@ function frame(opcode: number, payload: Buffer) {
 }
 function peer(socket: Duplex, onMessage: (data: any) => void, onClose: () => void) {
   let buffer: Buffer = Buffer.alloc(0), fragments: Buffer[] = [], fragmentBytes = 0, fragmented = false;
+  let fragmentTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearFragmentTimer = () => { if (fragmentTimer) clearTimeout(fragmentTimer); fragmentTimer = undefined; };
+  socket.once('close', clearFragmentTimer);
   const send = (value: RoomServerMessage & { reconnectToken?: string }) => { if (!socket.destroyed) { if (socket.writableLength > 2 * LIMIT) socket.destroy(); else socket.write(frame(1,Buffer.from(JSON.stringify(value)))); } };
   socket.on('error', () => socket.destroy()); socket.once('close', onClose);
   socket.on('data', chunk => {
+    if (socket.destroyed) return;
+    if (buffer.length + chunk.length + fragmentBytes > 128 * 1024) { socket.destroy(); return; }
     buffer = Buffer.concat([buffer,chunk]);
     try {
-      while (buffer.length >= 2) {
+      while (!socket.destroyed && buffer.length >= 2) {
         const fin = !!(buffer[0]&128), opcode = buffer[0]&15, masked = !!(buffer[1]&128); let size = buffer[1]&127, offset = 2;
         if ((buffer[0]&112) || !masked) throw new Error('Invalid frame');
         if (size === 126) { if (buffer.length < 4) break; size = buffer.readUInt16BE(2); offset = 4; }
@@ -938,9 +1018,11 @@ function peer(socket: Duplex, onMessage: (data: any) => void, onClose: () => voi
         if (opcode === 9) { socket.write(frame(10,payload)); continue; }
         if (opcode === 10) continue;
         if (opcode !== 1 && opcode !== 0 || opcode === 0 && !fragmented || opcode === 1 && fragmented) throw new Error('Invalid text fragmentation');
+        if (opcode === 1 && !fin) { fragmentTimer = setTimeout(() => socket.destroy(), 10000); fragmentTimer.unref(); }
         fragmented = !fin; fragments.push(payload); fragmentBytes += size;
+        if (fragments.length > 64) throw new Error('Too many message fragments');
         if (fragmentBytes > 65536) throw new Error('Message too large');
-        if (fin) { const text = new TextDecoder('utf-8',{ fatal:true }).decode(Buffer.concat(fragments)); fragments=[]; fragmentBytes=0; onMessage(JSON.parse(text)); }
+        if (fin) { clearFragmentTimer(); const text = new TextDecoder('utf-8',{ fatal:true }).decode(Buffer.concat(fragments)); fragments=[]; fragmentBytes=0; onMessage(JSON.parse(text)); }
       }
     } catch { socket.destroy(); }
   });

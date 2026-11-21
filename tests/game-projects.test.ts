@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer, request } from 'node:http';
 import { once } from 'node:events';
-import { GameProjects, GameRuntime, gameHttp, attachGameRooms, gameProjectsFor, starterLogic, dispatchGameTool } from '../game-projects.ts';
+import { GameProjects, GameRuntime, gameHttp, attachGameRooms, gameProjectsFor, starterLogic, dispatchGameTool, startGameBrowserPage } from '../game-projects.ts';
 import { gameTools } from '../shared/game-tools.ts';
 import { validateInput } from '../shared/phase1-tools.ts';
 import type { GameBrief } from '../shared/game-contract.ts';
@@ -969,7 +969,7 @@ test('actual headless join probe observes sockets and authoritative hooks withou
     assert.equal(window.__openmotionGameProbe.roomJoined,true);assert.equal(window.__openmotionGameProbe.joinedAtMs,420);
     now=6000;frames.shift()!();assert.equal(window.__openmotionGameProbe.joinedAtMs,420);
   }
-  assert(source.indexOf('const autoJoin=await page.evaluate')<source.indexOf('// Only click the conventional start control'));
+  assert(source.indexOf('const autoJoin=await page.evaluate')<source.indexOf('startGameBrowserPage(page, !!recording)'));
 });
 
 test('basic multiplayer starter auto-joins a generated room and exposes copy/start without room inputs',()=>fixture(async(service)=>{
@@ -979,4 +979,116 @@ test('basic multiplayer starter auto-joins a generated room and exposes copy/sta
   const sockets:any[]=[];let copied='';class Socket {onopen?:()=>void;onmessage?:()=>void;url:string;constructor(url:string){this.url=url;sockets.push(this);}send(){}close(){}}
   runInNewContext(client,{URL,location:{href:`http://localhost${game.playUrl}`,pathname:game.playUrl,protocol:'http:'},crypto:{randomUUID:()=> '12345678-abcd'},history:{replaceState(){throw Error('opaque origin');}},document:{querySelector:(id:string)=>nodes.get(id)},WebSocket:Socket,addEventListener(){},navigator:{clipboard:{writeText:async(text:string)=>{copied=text;}}},console});
   assert.equal(sockets.length,1);assert.match(sockets[0].url,/\/rooms\/12345678$/);assert.equal(nodes.get('#room-code').textContent,'12345678');await nodes.get('#invite').onclick();assert.equal(new URL(copied).searchParams.get('room'),'12345678');
+}));
+
+test('reserved source aliases and tampered metadata cannot redirect saves',()=>fixture(async(service,workspace)=>{
+  const {game}=await service.create(brief), metadata=path.join(service.root,game.id,'game.json');
+  const original=await readFile(metadata,'utf8');
+  for(const file of ['GAME.JSON','Game.Json','./game.json','TRAILER/x.js','trailer/X.js']) {
+    await assert.rejects(service.write(game.id,[{path:file,content:'{}'}]));
+    assert.equal(await readFile(metadata,'utf8'),original);
+  }
+  for(const method of ['write','updateMeta','status'] as const){
+    await writeFile(metadata,JSON.stringify({...game,id:'../escaped'}));
+    if(method==='write')await service.write(game.id,[{path:'safe.js',content:'// safe'}]);
+    else if(method==='updateMeta')await service.updateMeta(game.id,{title:'Safe title'});
+    else await service.status(game.id,'ready');
+    assert.equal(JSON.parse(await readFile(metadata,'utf8')).id,game.id);
+    await assert.rejects(readFile(path.join(workspace,'escaped','game.json')),/ENOENT/);
+  }
+  await assert.rejects((service as any).save('../escape',game),/Invalid.*id/);
+}));
+
+test('source batches reject path conflicts and roll back source and status after a save failure',()=>fixture(async(service)=>{
+  const {game}=await service.create(brief);await service.status(game.id,'ready');
+  const root=(await service.locate(game.id)).dir, before=await readFile(path.join(root,'index.html'),'utf8'),meta=await readFile(path.join(root,'game.json'),'utf8');
+  for(const paths of [['a.js','a.js/b.js'],['A.js/b.js','a.js'],['same.js','SAME.js']]) {
+    await assert.rejects(service.write(game.id,[{path:'index.html',content:'changed'},...paths.map(path=>({path,content:'new'}))]),/conflict|duplicate/i);
+    assert.equal(await readFile(path.join(root,'index.html'),'utf8'),before);
+    assert.equal(await readFile(path.join(root,'game.json'),'utf8'),meta);
+  }
+  const save=(service as any).save;
+  (service as any).save=async()=>{throw Error('Injected metadata save failure');};
+  try{await assert.rejects(service.write(game.id,[{path:'index.html',content:'changed'},{path:'new/folder/file.js',content:'new'}]),/Injected/);}
+  finally{(service as any).save=save;}
+  assert.equal(await readFile(path.join(root,'index.html'),'utf8'),before);
+  assert.equal(await readFile(path.join(root,'game.json'),'utf8'),meta);
+  await assert.rejects(readFile(path.join(root,'new/folder/file.js')),/ENOENT/);
+  const detail=service.detail;
+  service.detail=async()=>{throw Error('Injected receipt failure');};
+  try{await assert.rejects(service.write(game.id,[{path:'index.html',content:'changed again'}]),/receipt failure/);}
+  finally{service.detail=detail;}
+  assert.equal(await readFile(path.join(root,'index.html'),'utf8'),before);
+  assert.equal(await readFile(path.join(root,'game.json'),'utf8'),meta);
+  await service.write(game.id,[{path:'index.html',content:'committed'}]);
+  assert.equal((await service.get(game.id)).status,'building');
+  assert.equal(await readFile(path.join(root,'index.html'),'utf8'),'committed');
+}));
+
+test('HTML and SVG have one opaque-origin sandbox CSP with local asset and room access',()=>fixture(async(service,workspace)=>{
+  const {game}=await service.create(brief);await service.write(game.id,[{path:'image.svg',content:'<svg xmlns="http://www.w3.org/2000/svg"/>'}]);
+  for(const prefix of ['/api/games','/motion-api/games'])for(const file of ['index.html','image.svg']){
+    let headers:Record<string,any>={};
+    await gameHttp({method:'GET',headers:{host:'localhost:4321'}} as any,{writeHead(status:number,h:Record<string,any>){assert.equal(status,200);headers=h;},end(){}} as any,new URL(`${prefix}/${game.id}/play/${file}`,'http://localhost'),workspace,async()=>({}));
+    const csp=headers['Content-Security-Policy'];assert.equal(typeof csp,'string');
+    assert.match(csp,/(?:^|;)\s*sandbox allow-scripts allow-pointer-lock allow-popups allow-modals(?:;|$)/);
+    assert.doesNotMatch(csp,/allow-same-origin/);assert.equal(csp.match(/sandbox/g).length,1);
+    assert.match(csp,/blob: data:|data: blob:/);assert(csp.includes(`ws://localhost:4321${prefix}/${game.id}/rooms/`));
+    assert.equal(headers['Access-Control-Allow-Origin'],'*');
+  }
+}));
+
+test('both bundled starter logic modules simulate and inert determinism examples are allowed',()=>fixture(async(_,workspace)=>{
+  const service=new GameProjects(workspace,path.join(workspace,'templates'));
+  for(const multiplayer of [false,true]){
+    const {game}=await service.create({...brief,multiplayer,genre:'shooter'});
+    const run=await service.simulate(game.id,{players:1,scripts:'idle',maxTicks:3});assert.equal(run.result.tick,3);
+  }
+  new GameRuntime(starterLogic+'\n// Math.random Date.now require import\nconst examples=["Math.random()",`Date.now()`,/require/];','examples');
+  for(const code of ['Math.random()','Math["random"]()','Date.now()','Date["now"]()','require("fs")','import("fs")','`value ${Math.random()}`'])assert.throws(()=>new GameRuntime(starterLogic+`;${code};`,'reject'),/cannot import\/require/);
+}));
+
+test('empty continuation floods, unfinished messages and oversized receive buffers disconnect',t=>fixture(async(_,workspace)=>{
+  const service=gameProjectsFor(workspace),{game}=await service.create({...brief,multiplayer:true});
+  const server=createServer(),close=attachGameRooms(server,workspace),sockets:MemorySocket[]=[];
+  try{
+    async function connect(room:string){const socket=new MemorySocket();sockets.push(socket);const next=memoryInbox(socket);server.emit('upgrade',{method:'GET',url:`/api/games/${game.id}/rooms/${room}`,headers:{host:'localhost',origin:'null','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ==','sec-websocket-version':'13',upgrade:'websocket'}},socket,Buffer.alloc(0));await next(m=>m.type==='upgrade');socket.receive({type:'join'});await next(m=>m.type==='joined');return socket;}
+    const empty=(opcode:number)=>Buffer.from([opcode,0x80,1,2,3,4]);
+    const flood=await connect('flood');for(let i=0;i<100&&!flood.destroyed;i++)flood.emit('data',empty(i?0:1));assert.equal(flood.destroyed,true);
+    const huge=await connect('huge');huge.emit('data',Buffer.concat(Array.from({length:22000},()=>empty(0x89))));assert.equal(huge.destroyed,true);
+    const slow=await connect('slow');t.mock.timers.enable({apis:['setTimeout']});slow.emit('data',empty(1));t.mock.timers.tick(10001);assert.equal(slow.destroyed,true);t.mock.timers.reset();
+  }finally{t.mock.timers.reset();close();for(const socket of sockets)socket.destroy();}
+}));
+
+test('default arcade playtest starts gameplay and passes movement when Chrome and loopback are available',async t=>fixture(async(_,workspace)=>{
+  const service=new GameProjects(workspace,path.join(workspace,'templates'));gameProjectsFor(workspace).kits=service.kits;
+  const {game}=await service.create(brief);
+  try{
+    const run=await service.playtest(game.id);const movement=run.clients[0].assertions.find(a=>a.name==='scriptedMovement');
+    assert(movement,JSON.stringify(run.clients[0].assertions));assert.equal(movement.passed,true,JSON.stringify(run.clients[0]));
+    assert.deepEqual(run.clients[0].failedRequests,[]);assert.deepEqual(run.clients[0].consoleErrors,[]);
+  }catch(error){if(/EPERM|EACCES|Chrome|Chromium|browser.*not|executable/i.test(String(error)))t.skip('Local Chrome or loopback unavailable: '+String(error));else throw error;}
+}));
+
+
+test('isolated startup uses the visible start control or start hook before observing running ticks',async()=>{
+  for(const button of [true,false]){
+    const order:string[]=[],state={tick:0,phase:'playing'},window={__omGame:{getState:()=>state,start:()=>order.push('hook')}};
+    const page={
+      async evaluate(fn:Function){return runInNewContext(`(${fn.toString()})()`,{window});},
+      async $(selector:string){assert.match(selector,/#start/);return button?{async click(){order.push('click');}}:null;},
+      async waitForFunction(fn:Function,_options:unknown,tick:number){order.push('wait');assert.equal(runInNewContext(`(${fn.toString()})(${tick})`,{window}),false);state.tick=1;assert.equal(runInNewContext(`(${fn.toString()})(${tick})`,{window}),true);},
+    };
+    await startGameBrowserPage(page as any);
+    assert.deepEqual(order,[button?'click':'hook','wait']);
+  }
+});
+
+test('default arcade input uses its horizontal keyboard controls for both press and release',()=>fixture(async(_,workspace)=>{
+  const service=new GameProjects(workspace,path.join(workspace,'templates')),{game}=await service.create(brief);
+  let scripts:any;
+  (service as any).runBrowser=async(_id:string,_clients:number,inputs:any)=>{scripts=inputs;return {clients:[]};};
+  await service.playtest(game.id);
+  assert.deepEqual(scripts[0],[{type:'key',key:'d',event:'down'},{type:'wait',ms:350},{type:'key',key:'d',event:'up'}]);
+  const client=(await service.read(game.id,'client.js')).content;assert.match(client,/KeyD/);
 }));
