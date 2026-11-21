@@ -9,6 +9,7 @@ import type { WorkspaceDefaultModels } from '../db/schema/auth.ts';
 import {
   GatewayError,
   buildGatewayStatus,
+  gatewayCallContextFromAuth,
   type PlatformModelGateway,
 } from '../services/model-gateway.ts';
 
@@ -70,11 +71,7 @@ export function createModelRoutes(deps: ModelRoutesDeps): Hono<AuthEnv> {
 
       const [models, defaults] = await Promise.all([
         deps.gateway.listMediaModels(
-          {
-            workspaceId: auth.workspaceId,
-            externalWorkspaceId: auth.externalWorkspaceId,
-            signal: c.req.raw.signal,
-          },
+          gatewayCallContextFromAuth(auth, { signal: c.req.raw.signal }),
           { refresh },
         ),
         loadWorkspaceDefaults(auth.workspaceId),
@@ -106,11 +103,7 @@ export function createModelRoutes(deps: ModelRoutesDeps): Hono<AuthEnv> {
       const refresh = c.req.query('refresh') === 'true';
       const [models, defaults] = await Promise.all([
         deps.gateway.listMediaModels(
-          {
-            workspaceId: auth.workspaceId,
-            externalWorkspaceId: auth.externalWorkspaceId,
-            signal: c.req.raw.signal,
-          },
+          gatewayCallContextFromAuth(auth, { signal: c.req.raw.signal }),
           { refresh },
         ),
         loadWorkspaceDefaults(auth.workspaceId),
@@ -130,11 +123,7 @@ export function createModelRoutes(deps: ModelRoutesDeps): Hono<AuthEnv> {
     try {
       const auth = getAuthContext(c);
       assertScope(auth, 'assets:read');
-      const ctx = {
-        workspaceId: auth.workspaceId,
-        externalWorkspaceId: auth.externalWorkspaceId,
-        signal: c.req.raw.signal,
-      };
+      const ctx = gatewayCallContextFromAuth(auth, { signal: c.req.raw.signal });
       const [models, defaults, billing] = await Promise.all([
         deps.gateway.listMediaModels(ctx),
         loadWorkspaceDefaults(auth.workspaceId),

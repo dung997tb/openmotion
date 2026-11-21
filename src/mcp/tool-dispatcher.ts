@@ -24,6 +24,7 @@ import type { AppConfig } from '../infra/config.ts';
 import {
   GatewayError,
   buildGatewayStatus,
+  gatewayCallContextFromAuth,
   type PlatformModelGateway,
 } from '../services/model-gateway.ts';
 import type { CloudImportAssetsService } from './import-assets.ts';
@@ -596,10 +597,7 @@ export class McpToolDispatcher {
       if (!this.ports.gateway) {
         throw new CloudError('SERVICE_UNAVAILABLE', 'Model gateway is not wired', { status: 503, applied: false });
       }
-      const callCtx = {
-        workspaceId: auth.workspaceId,
-        externalWorkspaceId: auth.externalWorkspaceId,
-      };
+      const callCtx = gatewayCallContextFromAuth(auth);
       const [models, defaults, billing] = await Promise.all([
         this.ports.gateway.listMediaModels(callCtx),
         this.ports.getWorkspaceDefaultModels
@@ -651,7 +649,7 @@ export class McpToolDispatcher {
         throw new CloudError('SERVICE_UNAVAILABLE', 'Model gateway is not wired', { status: 503, applied: false });
       }
       const models = await this.ports.gateway.listMediaModels(
-        { workspaceId: auth.workspaceId, externalWorkspaceId: auth.externalWorkspaceId },
+        gatewayCallContextFromAuth(auth),
         { refresh: args.refresh === true },
       );
       const query = typeof args.query === 'string' ? args.query.trim().toLowerCase() : '';

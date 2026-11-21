@@ -170,7 +170,7 @@ export function createStudioRenderRoutes(deps: DisklessStudioDeps): Hono<{ Varia
         ? body.requestId
         : undefined;
 
-    const project = await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: false });
+    const project = await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: false, auth: auth });
     if (!project.currentVersionId) {
       throw new CloudError('INVALID_ARGUMENT', 'Project does not have a committed version to render.', {
         status: 400,
@@ -337,7 +337,7 @@ export function createStudioRenderRoutes(deps: DisklessStudioDeps): Hono<{ Varia
   app.get('/api/projects/:id/renders', async (c) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id');
-    await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: true });
+    await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: true, auth: auth });
 
     const rows = await deps.db
       .select()

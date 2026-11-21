@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, notExists, or, sql } from 'drizzle-orm';
 import {
   DEFAULT_PAT_SCOPES,
   PAT_SCOPES,
@@ -20,6 +20,7 @@ import {
   workspaces,
   type WorkspaceDefaultModels,
 } from '../db/schema/auth.ts';
+import { projectGrants } from '../db/schema/projects.ts';
 
 // ---------------------------------------------------------------------------
 // Crypto & Scope Primitives
@@ -112,6 +113,7 @@ export function assertSafeReturnTo(raw: string | undefined | null): string {
 export interface UserRecord {
   id: string;
   oidcSub: string;
+  appUserId?: string | null;
   email: string | null;
   displayName: string;
   avatarUrl: string | null;
@@ -205,8 +207,30 @@ export interface OAuthTokenRecord {
   resource: string | null;
   accessExpiresAt: Date;
   refreshExpiresAt: Date | null;
+  lastUsedAt?: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
+}
+
+export interface ConnectedAppSummary {
+  clientId: string;
+  clientName: string;
+  redirectUris: string[];
+  workspaceId: string;
+  scopes: string[];
+  firstAuthorizedAt: Date;
+  lastUsedAt: Date | null;
+  activeTokenCount: number;
+}
+
+export interface ProjectGrantRecord {
+  id: string;
+  projectId: string;
+  userId: string;
+  workspaceId: string;
+  clientId: string;
+  grantedAt: Date;
+  revokedAt: Date | null;
 }
 
 export interface AuthStore {
@@ -220,6 +244,17 @@ export interface AuthStore {
     avatarUrl?: string | null;
     externalWorkspaceId?: string | null;
   }): Promise<MembershipResolution>;
+  projectAmrUserAndWorkspace(input: {
+    oidcSub: string;
+    appUserId: string;
+    email?: string | null;
+    displayName: string;
+    avatarUrl?: string | null;
+    externalWorkspaceId: string;
+    workspaceName: string;
+    role: WorkspaceRole;
+  }): Promise<MembershipResolution>;
+  findWorkspaceByExternalId(externalWorkspaceId: string): Promise<WorkspaceRecord | null>;
   ensureDevTenant(input: {
     workspaceId: string;
     userId: string;
@@ -298,8 +333,31 @@ export interface AuthStore {
   }): Promise<OAuthTokenRecord>;
   findActiveOAuthTokenByAccessHash(accessTokenHash: string): Promise<OAuthTokenRecord | null>;
   findActiveOAuthTokenByRefreshHash(refreshTokenHash: string): Promise<OAuthTokenRecord | null>;
+  touchOAuthToken(tokenId: string): Promise<void>;
   revokeOAuthTokenById(tokenId: string): Promise<boolean>;
   revokeOAuthTokenByHash(hash: string): Promise<boolean>;
+  listConnectedApps(userId: string): Promise<ConnectedAppSummary[]>;
+  revokeOAuthClientForUser(userId: string, clientId: string): Promise<number>;
+  cleanupUnusedOAuthClients(olderThan: Date): Promise<number>;
+
+  // Project-level agent grants
+  grantProjectAccess(input: {
+    projectId: string;
+    userId: string;
+    workspaceId: string;
+    clientId: string;
+  }): Promise<ProjectGrantRecord>;
+  revokeProjectAccess(input: {
+    projectId: string;
+    userId: string;
+    clientId: string;
+  }): Promise<boolean>;
+  hasActiveProjectGrant(input: {
+    projectId: string;
+    userId: string;
+    clientId: string;
+  }): Promise<boolean>;
+  listProjectGrants(projectId: string, userId: string): Promise<ProjectGrantRecord[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +404,7 @@ export class InMemoryAuthStore implements AuthStore {
   readonly oauthClients = new Map<string, OAuthClientRecord>();
   readonly oauthCodes = new Map<string, OAuthAuthCodeRecord>();
   readonly oauthTokens = new Map<string, OAuthTokenRecord>();
+  readonly projectGrants = new Map<string, ProjectGrantRecord>();
 
   setRole(workspaceId: string, userId: string, role: WorkspaceRole): void {
     this.memberships.set(`${workspaceId}:${userId}`, role);
@@ -445,6 +504,67 @@ export class InMemoryAuthStore implements AuthStore {
     this.workspaces.set(wsId, workspace);
     this.memberships.set(`${wsId}:${user.id}`, 'owner');
     return { user, workspace, role: 'owner' };
+  }
+
+  async findWorkspaceByExternalId(externalWorkspaceId: string): Promise<WorkspaceRecord | null> {
+    for (const ws of this.workspaces.values()) {
+      if (ws.externalWorkspaceId === externalWorkspaceId) return ws;
+    }
+    return null;
+  }
+
+  async projectAmrUserAndWorkspace(input: {
+    oidcSub: string;
+    appUserId: string;
+    email?: string | null;
+    displayName: string;
+    avatarUrl?: string | null;
+    externalWorkspaceId: string;
+    workspaceName: string;
+    role: WorkspaceRole;
+  }): Promise<MembershipResolution> {
+    let user = await this.findUserByOidcSub(input.oidcSub);
+    if (!user) {
+      user = {
+        id: randomUUID(),
+        oidcSub: input.oidcSub,
+        appUserId: input.appUserId,
+        email: input.email ?? null,
+        displayName: input.displayName,
+        avatarUrl: input.avatarUrl ?? null,
+        planTier: null,
+      };
+      this.users.set(user.id, user);
+    } else {
+      user = {
+        ...user,
+        appUserId: input.appUserId,
+        email: input.email ?? user.email,
+        displayName: input.displayName,
+        avatarUrl: input.avatarUrl ?? user.avatarUrl,
+      };
+      this.users.set(user.id, user);
+    }
+
+    let workspace = await this.findWorkspaceByExternalId(input.externalWorkspaceId);
+    if (!workspace) {
+      const wsId = randomUUID();
+      workspace = {
+        id: wsId,
+        slug: slugFromIdentifier(input.workspaceName || input.externalWorkspaceId),
+        externalWorkspaceId: input.externalWorkspaceId,
+        name: input.workspaceName.slice(0, 120),
+        ownerUserId: user.id,
+        defaultModels: {},
+      };
+      this.workspaces.set(wsId, workspace);
+    } else if (workspace.name !== input.workspaceName.slice(0, 120)) {
+      workspace = { ...workspace, name: input.workspaceName.slice(0, 120) };
+      this.workspaces.set(workspace.id, workspace);
+    }
+
+    this.memberships.set(`${workspace.id}:${user.id}`, input.role);
+    return { user, workspace, role: input.role };
   }
 
   async ensureDevTenant(input: {
@@ -744,6 +864,142 @@ export class InMemoryAuthStore implements AuthStore {
     }
     return false;
   }
+
+  async touchOAuthToken(tokenId: string): Promise<void> {
+    const t = this.oauthTokens.get(tokenId);
+    if (t) t.lastUsedAt = new Date();
+  }
+
+  async listConnectedApps(userId: string): Promise<ConnectedAppSummary[]> {
+    const now = Date.now();
+    const byClient = new Map<
+      string,
+      {
+        client: OAuthClientRecord;
+        workspaceId: string;
+        scopes: Set<string>;
+        firstAuthorizedAt: Date;
+        lastUsedAt: Date | null;
+        activeTokenCount: number;
+      }
+    >();
+
+    for (const t of this.oauthTokens.values()) {
+      if (t.userId !== userId || t.revokedAt) continue;
+      const accessActive = t.accessExpiresAt.getTime() > now;
+      const refreshActive = Boolean(t.refreshExpiresAt && t.refreshExpiresAt.getTime() > now);
+      if (!accessActive && !refreshActive) continue;
+      const client = this.oauthClients.get(t.clientId);
+      if (!client) continue;
+
+      let entry = byClient.get(t.clientId);
+      if (!entry) {
+        entry = {
+          client,
+          workspaceId: t.workspaceId,
+          scopes: new Set<string>(),
+          firstAuthorizedAt: t.createdAt,
+          lastUsedAt: t.lastUsedAt ?? null,
+          activeTokenCount: 0,
+        };
+        byClient.set(t.clientId, entry);
+      }
+      for (const s of t.scope.split(/\s+/).filter(Boolean)) entry.scopes.add(s);
+      if (t.createdAt < entry.firstAuthorizedAt) entry.firstAuthorizedAt = t.createdAt;
+      if (t.lastUsedAt && (!entry.lastUsedAt || t.lastUsedAt > entry.lastUsedAt)) {
+        entry.lastUsedAt = t.lastUsedAt;
+      }
+      entry.activeTokenCount += 1;
+    }
+
+    return [...byClient.values()].map((e) => ({
+      clientId: e.client.clientId,
+      clientName: e.client.clientName,
+      redirectUris: [...e.client.redirectUris],
+      workspaceId: e.workspaceId,
+      scopes: [...e.scopes],
+      firstAuthorizedAt: e.firstAuthorizedAt,
+      lastUsedAt: e.lastUsedAt,
+      activeTokenCount: e.activeTokenCount,
+    }));
+  }
+
+  async revokeOAuthClientForUser(userId: string, clientId: string): Promise<number> {
+    let count = 0;
+    const now = new Date();
+    for (const t of this.oauthTokens.values()) {
+      if (t.userId === userId && t.clientId === clientId && !t.revokedAt) {
+        t.revokedAt = now;
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  async cleanupUnusedOAuthClients(olderThan: Date): Promise<number> {
+    const usedClients = new Set<string>();
+    for (const t of this.oauthTokens.values()) {
+      usedClients.add(t.clientId);
+    }
+    let deleted = 0;
+    for (const [clientId, client] of this.oauthClients.entries()) {
+      if (!usedClients.has(clientId) && client.createdAt < olderThan) {
+        this.oauthClients.delete(clientId);
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
+
+  async grantProjectAccess(input: {
+    projectId: string;
+    userId: string;
+    workspaceId: string;
+    clientId: string;
+  }): Promise<ProjectGrantRecord> {
+    const key = `${input.projectId}:${input.userId}:${input.clientId}`;
+    const existing = this.projectGrants.get(key);
+    const now = new Date();
+    const record: ProjectGrantRecord = {
+      id: existing?.id ?? randomUUID(),
+      projectId: input.projectId,
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      grantedAt: now,
+      revokedAt: null,
+    };
+    this.projectGrants.set(key, record);
+    return record;
+  }
+
+  async revokeProjectAccess(input: {
+    projectId: string;
+    userId: string;
+    clientId: string;
+  }): Promise<boolean> {
+    const key = `${input.projectId}:${input.userId}:${input.clientId}`;
+    const existing = this.projectGrants.get(key);
+    if (!existing || existing.revokedAt) return false;
+    existing.revokedAt = new Date();
+    return true;
+  }
+
+  async hasActiveProjectGrant(input: {
+    projectId: string;
+    userId: string;
+    clientId: string;
+  }): Promise<boolean> {
+    const key = `${input.projectId}:${input.userId}:${input.clientId}`;
+    const existing = this.projectGrants.get(key);
+    return Boolean(existing && !existing.revokedAt);
+  }
+
+  async listProjectGrants(projectId: string, userId: string): Promise<ProjectGrantRecord[]> {
+    return [...this.projectGrants.values()].filter(
+      (g) => g.projectId === projectId && g.userId === userId,
+    );
+  }
 }
 
 export function createRedisAuthCache(redis: {
@@ -874,6 +1130,81 @@ export function createPgAuthStore(db: Database): AuthStore {
         );
 
         return { user, workspace, role: 'owner' as WorkspaceRole };
+      });
+    },
+
+    async findWorkspaceByExternalId(externalWorkspaceId) {
+      const [row] = await db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.externalWorkspaceId, externalWorkspaceId))
+        .limit(1);
+      return row ?? null;
+    },
+
+    async projectAmrUserAndWorkspace(input) {
+      return db.transaction(async (tx) => {
+        const [user] = await tx
+          .insert(users)
+          .values(
+            asInsert(users, {
+              oidcSub: input.oidcSub,
+              appUserId: input.appUserId,
+              email: input.email ?? null,
+              displayName: input.displayName,
+              avatarUrl: input.avatarUrl ?? null,
+            }),
+          )
+          .onConflictDoUpdate({
+            target: users.oidcSub,
+            set: asUpdate(users, {
+              appUserId: input.appUserId,
+              email: input.email ?? null,
+              displayName: input.displayName,
+              avatarUrl: input.avatarUrl ?? null,
+              updatedAt: sql`now()`,
+            }),
+          })
+          .returning();
+
+        const wsName = input.workspaceName.slice(0, 120) || 'Workspace';
+        const [insertedWs] = await tx
+          .insert(workspaces)
+          .values(
+            asInsert(workspaces, {
+              slug: slugFromIdentifier(wsName || input.externalWorkspaceId),
+              externalWorkspaceId: input.externalWorkspaceId,
+              name: wsName,
+              ownerUserId: user.id,
+              defaultModels: {},
+            }),
+          )
+          .onConflictDoUpdate({
+            target: workspaces.externalWorkspaceId,
+            set: asUpdate(workspaces, {
+              name: wsName,
+              updatedAt: sql`now()`,
+            }),
+          })
+          .returning();
+
+        await tx
+          .insert(workspaceMembers)
+          .values(
+            asInsert(workspaceMembers, {
+              workspaceId: insertedWs.id,
+              userId: user.id,
+              role: input.role,
+            }),
+          )
+          .onConflictDoUpdate({
+            target: [workspaceMembers.workspaceId, workspaceMembers.userId],
+            set: asUpdate(workspaceMembers, {
+              role: input.role,
+            }),
+          });
+
+        return { user, workspace: insertedWs, role: input.role };
       });
     },
 
@@ -1295,6 +1626,178 @@ export function createPgAuthStore(db: Database): AuthStore {
         )
         .returning({ id: oauthTokens.id });
       return rows.length > 0;
+    },
+
+    async touchOAuthToken(tokenId) {
+      await db
+        .update(oauthTokens)
+        .set(asUpdate(oauthTokens, { lastUsedAt: sql`now()` }))
+        .where(eq(oauthTokens.id, tokenId));
+    },
+
+    async listConnectedApps(userId) {
+      const now = new Date();
+      const rows = await db
+        .select({
+          token: oauthTokens,
+          client: oauthClients,
+        })
+        .from(oauthTokens)
+        .innerJoin(oauthClients, eq(oauthTokens.clientId, oauthClients.clientId))
+        .where(
+          and(
+            eq(oauthTokens.userId, userId),
+            isNull(oauthTokens.revokedAt),
+            or(gt(oauthTokens.accessExpiresAt, now), gt(oauthTokens.refreshExpiresAt, now)),
+          ),
+        )
+        .orderBy(desc(oauthTokens.createdAt));
+
+      const byClient = new Map<
+        string,
+        {
+          clientId: string;
+          clientName: string;
+          redirectUris: string[];
+          workspaceId: string;
+          scopes: Set<string>;
+          firstAuthorizedAt: Date;
+          lastUsedAt: Date | null;
+          activeTokenCount: number;
+        }
+      >();
+
+      for (const { token, client } of rows) {
+        let entry = byClient.get(client.clientId);
+        if (!entry) {
+          entry = {
+            clientId: client.clientId,
+            clientName: client.clientName,
+            redirectUris: [...client.redirectUris],
+            workspaceId: token.workspaceId,
+            scopes: new Set<string>(),
+            firstAuthorizedAt: token.createdAt,
+            lastUsedAt: token.lastUsedAt ?? null,
+            activeTokenCount: 0,
+          };
+          byClient.set(client.clientId, entry);
+        }
+        for (const s of token.scope.split(/\s+/).filter(Boolean)) entry.scopes.add(s);
+        if (token.createdAt < entry.firstAuthorizedAt) entry.firstAuthorizedAt = token.createdAt;
+        if (token.lastUsedAt && (!entry.lastUsedAt || token.lastUsedAt > entry.lastUsedAt)) {
+          entry.lastUsedAt = token.lastUsedAt;
+        }
+        entry.activeTokenCount += 1;
+      }
+
+      return [...byClient.values()].map((e) => ({
+        clientId: e.clientId,
+        clientName: e.clientName,
+        redirectUris: e.redirectUris,
+        workspaceId: e.workspaceId,
+        scopes: [...e.scopes],
+        firstAuthorizedAt: e.firstAuthorizedAt,
+        lastUsedAt: e.lastUsedAt,
+        activeTokenCount: e.activeTokenCount,
+      }));
+    },
+
+    async revokeOAuthClientForUser(userId, clientId) {
+      const rows = await db
+        .update(oauthTokens)
+        .set(asUpdate(oauthTokens, { revokedAt: sql`now()` }))
+        .where(
+          and(
+            eq(oauthTokens.userId, userId),
+            eq(oauthTokens.clientId, clientId),
+            isNull(oauthTokens.revokedAt),
+          ),
+        )
+        .returning({ id: oauthTokens.id });
+      return rows.length;
+    },
+
+    async cleanupUnusedOAuthClients(olderThan) {
+      const rows = await db
+        .delete(oauthClients)
+        .where(
+          and(
+            lt(oauthClients.createdAt, olderThan),
+            notExists(
+              db
+                .select({ id: oauthTokens.id })
+                .from(oauthTokens)
+                .where(eq(oauthTokens.clientId, oauthClients.clientId)),
+            ),
+          ),
+        )
+        .returning({ clientId: oauthClients.clientId });
+      return rows.length;
+    },
+
+    async grantProjectAccess(input) {
+      const [row] = await db
+        .insert(projectGrants)
+        .values(
+          asInsert(projectGrants, {
+            projectId: input.projectId,
+            userId: input.userId,
+            workspaceId: input.workspaceId,
+            clientId: input.clientId,
+            grantedAt: sql`now()`,
+            revokedAt: null,
+          }),
+        )
+        .onConflictDoUpdate({
+          target: [projectGrants.projectId, projectGrants.userId, projectGrants.clientId],
+          set: asUpdate(projectGrants, {
+            workspaceId: input.workspaceId,
+            grantedAt: sql`now()`,
+            revokedAt: null,
+          }),
+        })
+        .returning();
+      return row;
+    },
+
+    async revokeProjectAccess(input) {
+      const rows = await db
+        .update(projectGrants)
+        .set(asUpdate(projectGrants, { revokedAt: sql`now()` }))
+        .where(
+          and(
+            eq(projectGrants.projectId, input.projectId),
+            eq(projectGrants.userId, input.userId),
+            eq(projectGrants.clientId, input.clientId),
+            isNull(projectGrants.revokedAt),
+          ),
+        )
+        .returning({ id: projectGrants.id });
+      return rows.length > 0;
+    },
+
+    async hasActiveProjectGrant(input) {
+      const [row] = await db
+        .select({ id: projectGrants.id })
+        .from(projectGrants)
+        .where(
+          and(
+            eq(projectGrants.projectId, input.projectId),
+            eq(projectGrants.userId, input.userId),
+            eq(projectGrants.clientId, input.clientId),
+            isNull(projectGrants.revokedAt),
+          ),
+        )
+        .limit(1);
+      return Boolean(row);
+    },
+
+    async listProjectGrants(projectId, userId) {
+      return db
+        .select()
+        .from(projectGrants)
+        .where(and(eq(projectGrants.projectId, projectId), eq(projectGrants.userId, userId)))
+        .orderBy(desc(projectGrants.grantedAt));
     },
   };
 }

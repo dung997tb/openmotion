@@ -9,7 +9,7 @@ import { sessionCacheKey } from '../auth/session.ts';
 import type { AuthKeyValueCache, AuthStore } from '../auth/store.ts';
 import { isCloudError } from '../contracts/errors.ts';
 import type { AppConfig } from '../infra/config.ts';
-import type { PlatformModelGateway } from '../services/model-gateway.ts';
+import { gatewayCallContextFromAuth, type PlatformModelGateway } from '../services/model-gateway.ts';
 
 const DEFAULT_CONSOLE_URL = 'https://open-design.ai/cloud';
 
@@ -39,11 +39,9 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono<AuthEnv> {
         deps.authStore.findWorkspaceById(auth.workspaceId),
         deps.authStore.listUserWorkspaces(auth.userId),
         deps.gateway.getBillingSummary
-          ? deps.gateway.getBillingSummary({
-              workspaceId: auth.workspaceId,
-              externalWorkspaceId: auth.externalWorkspaceId,
-              signal: c.req.raw.signal,
-            })
+          ? deps.gateway.getBillingSummary(
+              gatewayCallContextFromAuth(auth, { signal: c.req.raw.signal }),
+            )
           : Promise.resolve(null),
       ]);
 

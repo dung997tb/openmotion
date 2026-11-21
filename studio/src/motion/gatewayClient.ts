@@ -1,9 +1,11 @@
 import type { GatewayStatus, Model, GenerationJob, GenerateInput } from '../../../shared/gateway';
+import { classifyAuthHttpError, notifyAuthRecovery } from './authRecoveryStore';
 export type { GatewayStatus, Model, GenerationJob, GenerateInput, Modality, GeneratedAsset } from '../../../shared/gateway';
 
 export type CloudApiError = Error & {
   status?: number;
   code?: string;
+  errorCode?: string;
   applied?: boolean;
 };
 
@@ -33,7 +35,13 @@ export async function gatewayRequest<T>(path: string, method = 'GET', body?: unk
     const error = new Error(message) as CloudApiError;
     error.status = response.status;
     if (code) error.code = code;
+    if (typeof data.errorCode === 'string') error.errorCode = data.errorCode;
     if (data.applied === false) error.applied = false;
+    const authRecovery = classifyAuthHttpError(response.status, data, message);
+    const isMutating = method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD';
+    if (authRecovery && (authRecovery.kind === 'auth_unavailable' || isMutating)) {
+      notifyAuthRecovery(authRecovery);
+    }
     throw error;
   }
   return data as T;

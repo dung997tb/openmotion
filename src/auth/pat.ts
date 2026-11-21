@@ -193,10 +193,14 @@ export async function verifyPat(
     scopes: effectiveScopes,
     authMode: options.authMode,
     authMethod: 'pat',
+    entry: 'api',
     externalWorkspaceId: membership.workspace.externalWorkspaceId,
+    authUserId: membership.user.oidcSub,
+    appUserId: membership.user.appUserId ?? null,
     tokenId: row.id,
     email: membership.user.email,
     displayName: membership.user.displayName,
+    avatarUrl: membership.user.avatarUrl,
   };
 }
 

@@ -43,6 +43,7 @@ import { McpConnectionPage } from './McpConnectionPage';
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
 import { Skeleton } from '../components/ui/Skeleton';
+import { AuthRecoveryNotice } from './authRecovery';
 import { readWorkspacePage, workspacePageHref, type WorkspacePage } from './workspacePageRouting';
 import { WORKSPACE_LOCATION_CHANGED, workspaceHistoryIndex, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { useToast } from '../hooks/useToast';
@@ -174,7 +175,13 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   }, [workspaceActive, openSettings, toggleSidebar]);
   const libraryBusy = workspace.busy || blocked || Boolean(editorState?.blocked);
   const switchingDisabled = libraryBusy || !workspace.status;
-  const archives = useProjectArchives(workspace, beforeViewChange, switchingDisabled, () => { if (narrow) setSidebarOpen(false); });
+  const archives = useProjectArchives(
+    workspace,
+    beforeViewChange,
+    switchingDisabled,
+    () => { if (narrow) setSidebarOpen(false); },
+    () => openSettings('mcp'),
+  );
   const reconnecting = Boolean(workspace.connectionError && isConnectionFailure(workspace.connectionError));
   const workspaceNotice = workspace.errorSource === 'connection' && reconnecting ? '' : workspace.error;
   const notice = workspaceNotice || message || editorState?.message || "";
@@ -291,6 +298,20 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
         specialty={page.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
         openAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion, templates: false })}
         onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={currentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={visibleSettings} destination={templatesPage ? null : page.studio} motionActive={!templatesPage && (page.motion || editorActive)} designActive={!templatesPage && Boolean(page.designScene)} onNavigate={openStudio} />
+      <AuthRecoveryNotice
+        onRetry={workspace.retryConnection}
+        onResumePendingDraft={async (draft) => {
+          if (draft.templateId) {
+            return sessionId
+              ? workspace.createArtifact(sessionId, draft.templateId)
+              : workspace.startSession(draft.instruction, draft.templateId);
+          }
+          if (draft.instruction) {
+            return workspace.startSession(draft.instruction);
+          }
+          return true;
+        }}
+      />
       <div className="motion-workspace">
       <Dialog.Portal>
         <Dialog.Backdrop className="hf-overlay-backdrop motion-sidebar-backdrop" />

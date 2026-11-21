@@ -220,7 +220,7 @@ export function buildPreviewAuthContext(payload: PreviewTokenPayload, authMode: 
     role: 'viewer',
     scopes: ['projects:read'],
     authMode,
-    authMethod: 'oauth_bearer',
+    authMethod: 'preview_token',
     tokenId: `om_preview:${payload.pid}`,
     displayName: 'Preview Viewer',
   };

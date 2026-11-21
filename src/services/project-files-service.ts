@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError, isCloudError } from '../contracts/errors.ts';
@@ -18,7 +18,7 @@ import {
   type HistoryActorKind,
   type ProjectVersionSource,
 } from '../db/schema/project-files.ts';
-import { projects } from '../db/schema/projects.ts';
+import { projectGrants, projects } from '../db/schema/projects.ts';
 import { projectChannel } from '../infra/redis.ts';
 import { assertTenantScopedKey, catalogBlobKey, workspaceBlobKey } from '../infra/storage.ts';
 import {
@@ -225,11 +225,66 @@ export function canonicalInputHash(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+export async function assertAgentProjectAccess(
+  db: DbExecutor,
+  auth: AuthContext,
+  project: ProjectRecord,
+): Promise<void> {
+  if (auth.authMethod === 'preview_token') {
+    if (auth.tokenId !== `om_preview:${project.id}`) {
+      throw new CloudError('PROJECT_NOT_FOUND', `Project ${project.id} was not found in this workspace.`, {
+        status: 404,
+        applied: false,
+      });
+    }
+    return;
+  }
+  if (auth.authMethod !== 'oauth_bearer') return;
+
+  // Owner check: if the project records an ownerUserId, a different user gets the same 404
+  // (`project_not_found`) so unauthorized callers cannot probe project existence.
+  if (project.ownerUserId && project.ownerUserId !== auth.userId) {
+    throw new CloudError('PROJECT_NOT_FOUND', `Project ${project.id} was not found in this workspace.`, {
+      status: 404,
+      applied: false,
+    });
+  }
+
+  if (!auth.clientId) {
+    throw new CloudError(
+      'PROJECT_GRANT_REQUIRED',
+      'This agent connection does not have project authorization. Grant access in OpenDesign project settings.',
+      { status: 403, applied: false, details: { projectId: project.id } },
+    );
+  }
+
+  const [grant] = await db
+    .select({ id: projectGrants.id })
+    .from(projectGrants)
+    .where(
+      and(
+        eq(projectGrants.projectId, project.id),
+        eq(projectGrants.userId, auth.userId),
+        eq(projectGrants.clientId, auth.clientId),
+        isNull(projectGrants.revokedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!grant) {
+    throw new CloudError(
+      'PROJECT_GRANT_REQUIRED',
+      'This agent connection is not authorized for this project. Open the project in OpenDesign and grant access.',
+      { status: 403, applied: false, details: { projectId: project.id, clientId: auth.clientId } },
+    );
+  }
+}
+
 export async function loadProjectOrThrow(
   db: DbExecutor,
   workspaceId: string,
   projectId: string,
-  options: { allowTrashed?: boolean; forUpdate?: boolean } = {},
+  options: { allowTrashed?: boolean; forUpdate?: boolean; auth?: AuthContext } = {},
 ): Promise<ProjectRecord> {
   assertValidUuid(workspaceId, 'workspaceId');
   assertValidUuid(projectId, 'projectId');
@@ -246,6 +301,9 @@ export async function loadProjectOrThrow(
       status: 404,
       applied: false,
     });
+  }
+  if (options.auth) {
+    await assertAgentProjectAccess(db, options.auth, project);
   }
   if (project.trashed && !options.allowTrashed) {
     throw new CloudError('PROJECT_TRASHED', `Project ${projectId} is in the trash and cannot be modified.`, {
@@ -293,6 +351,7 @@ export class ProjectFilesService {
   async listFiles(ctx: AuthContext, projectId: string, options: { allowTrashed?: boolean } = {}): Promise<VirtualFileRecord[]> {
     const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
       allowTrashed: options.allowTrashed ?? true,
+      auth: ctx,
     });
 
     const rows = await this.db
@@ -359,6 +418,7 @@ export class ProjectFilesService {
   ): Promise<VirtualFileRecord | null> {
     const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
       allowTrashed: options.allowTrashed ?? true,
+      auth: ctx,
     });
     const safePath = normalizeSafeProjectPath(filePath);
 
@@ -500,7 +560,10 @@ export class ProjectFilesService {
    * text contents for `bundlePreviewInMemory`, `lintProjectInMemory`, `infoInMemory`, and `timelineInMemory`.
    */
   async loadVirtualProject(ctx: AuthContext, projectId: string): Promise<InMemoryVirtualProject> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
+      allowTrashed: true,
+      auth: ctx,
+    });
     const files = await this.listFiles(ctx, projectId, { allowTrashed: true });
 
     const textContents = new Map<string, string>();
@@ -759,6 +822,7 @@ export class ProjectFilesService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, input.projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       // 1. Check idempotency receipt inside locked tx.

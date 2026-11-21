@@ -204,7 +204,7 @@ export class VersionHistoryService {
     versions: ProjectVersionSummary[];
     nextCursor: number | null;
   }> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const limit = Math.max(1, Math.min(200, Math.floor(options.limit ?? 50)));
 
     const whereClause =
@@ -250,7 +250,7 @@ export class VersionHistoryService {
 
   /** Unified PG history ledger for Studio History UI (`GET /api/projects/:id/history`). */
   async listHistory(ctx: AuthContext, projectId: string): Promise<HistoryListResult> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
     const entryRows = await this.db
       .select()
@@ -386,6 +386,7 @@ export class VersionHistoryService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       const currentRows = await tx
@@ -460,6 +461,7 @@ export class VersionHistoryService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       const liveFiles = await tx
@@ -632,6 +634,7 @@ export class VersionHistoryService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       const entries = await tx
@@ -766,6 +769,7 @@ export class VersionHistoryService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       const entries = await tx
@@ -903,6 +907,7 @@ export class VersionHistoryService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       if (input.requestId && inputHash) {
@@ -1218,6 +1223,7 @@ export class VersionHistoryService {
       await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
+        auth: ctx,
       });
 
       const rows = await tx
@@ -1264,7 +1270,7 @@ export class VersionHistoryService {
     files: Record<string, string>;
     file?: { path: string; content: string; version: string; sha256: string } | null;
   }> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
     const targetVersion =
       point === 'head' && project.currentVersionId
@@ -1333,7 +1339,7 @@ export class VersionHistoryService {
     projectId: string,
     sha256: string,
   ): Promise<{ buffer: Buffer; mimeType: string; blobScope: BlobScope; sha256: string }> {
-    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const cleanSha = sha256.trim().toLowerCase();
     if (!isSha256Hex(cleanSha)) {
       throw new CloudError('INVALID_ARGUMENT', 'History blob hash must be a 64-char hex SHA-256 digest.', {
@@ -1389,13 +1395,13 @@ export class VersionHistoryService {
 
   /** Mint a stateless PG-compatible history window ID for Studio edit coalescing. */
   async openWindow(ctx: AuthContext, projectId: string): Promise<{ windowId: string }> {
-    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false });
+    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false, auth: ctx });
     return { windowId: randomUUID() };
   }
 
   /** Close a history edit window (stateless no-op under PG unified ledger). */
   async closeWindow(ctx: AuthContext, projectId: string, windowId: string): Promise<{ ok: true; windowId: string }> {
-    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     return { ok: true, windowId };
   }
 

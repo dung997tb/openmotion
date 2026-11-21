@@ -102,7 +102,7 @@ export function assertAuthAccess(
     );
   }
   if (!hasScope(auth, requirements.scope)) {
-    throw new CloudError('FORBIDDEN', `Scope "${requirements.scope}" is required for this operation.`, {
+    throw new CloudError('INSUFFICIENT_SCOPE', `Scope "${requirements.scope}" is required for this operation.`, {
       status: 403,
       applied: false,
       details: { requiredScope: requirements.scope },

@@ -13,7 +13,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { workspaces } from './auth.ts';
+import { oauthClients, users, workspaces } from './auth.ts';
 
 export type ProjectType = 'natural_language' | 'template' | 'reference_video' | 'legacy';
 export type SessionMessageRole = 'user' | 'assistant';
@@ -68,6 +68,7 @@ export const projects = pgTable(
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
     sessionId: uuid('session_id')
       .notNull()
       .references(() => sessions.id, { onDelete: 'cascade' }),
@@ -138,5 +139,31 @@ export const workRounds = pgTable(
     index('idx_work_rounds_project_created').on(t.workspaceId, t.projectId, t.createdAt.desc()),
     check('chk_work_rounds_mode', sql`${t.mode} IN ('create', 'modify')`),
     check('chk_work_rounds_state', sql`${t.state} IN ('authoring', 'saved', 'failed')`),
+  ],
+);
+
+export const projectGrants = pgTable(
+  'project_grants',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    clientId: varchar('client_id', { length: 128 })
+      .notNull()
+      .references(() => oauthClients.clientId, { onDelete: 'cascade' }),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [
+    unique('uq_project_grants_project_user_client').on(t.projectId, t.userId, t.clientId),
+    index('idx_project_grants_lookup').on(t.projectId, t.userId, t.clientId),
+    index('idx_project_grants_workspace_client').on(t.workspaceId, t.clientId),
   ],
 );

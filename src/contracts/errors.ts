@@ -5,8 +5,10 @@ export const CLOUD_ERROR_CODES = [
   'WORKSPACE_FORBIDDEN',
   'QUOTA_EXCEEDED',
   'UNAUTHORIZED',
+  'AUTH_UNAVAILABLE',
   'FORBIDDEN',
   'INSUFFICIENT_SCOPE',
+  'PROJECT_GRANT_REQUIRED',
   'NOT_FOUND',
   'PROJECT_NOT_FOUND',
   'PROJECT_TRASHED',
@@ -36,6 +38,23 @@ export type CloudErrorOptions = {
   cause?: unknown;
 };
 
+export function externalAuthErrorCode(code: CloudErrorCode): string | undefined {
+  switch (code) {
+    case 'UNAUTHORIZED':
+      return 'auth_required';
+    case 'INSUFFICIENT_SCOPE':
+      return 'insufficient_scope';
+    case 'PROJECT_NOT_FOUND':
+      return 'project_not_found';
+    case 'PROJECT_GRANT_REQUIRED':
+      return 'project_grant_required';
+    case 'AUTH_UNAVAILABLE':
+      return 'auth_unavailable';
+    default:
+      return undefined;
+  }
+}
+
 export class CloudError extends Error {
   readonly code: CloudErrorCode;
   readonly status: number;
@@ -52,8 +71,10 @@ export class CloudError extends Error {
   }
 
   toJSON(): Record<string, unknown> {
+    const ext = externalAuthErrorCode(this.code);
     return {
       code: this.code,
+      ...(ext ? { errorCode: ext } : {}),
       error: this.message,
       ...(this.applied !== undefined ? { applied: this.applied } : {}),
       ...(this.details ? { details: this.details } : {}),
@@ -76,6 +97,7 @@ export function defaultStatusForErrorCode(code: CloudErrorCode): number {
     case 'WORKSPACE_FORBIDDEN':
     case 'FORBIDDEN':
     case 'INSUFFICIENT_SCOPE':
+    case 'PROJECT_GRANT_REQUIRED':
       return 403;
     case 'NOT_FOUND':
     case 'PROJECT_NOT_FOUND':
@@ -88,6 +110,7 @@ export function defaultStatusForErrorCode(code: CloudErrorCode): number {
     case 'RATE_LIMITED':
       return 429;
     case 'SERVICE_UNAVAILABLE':
+    case 'AUTH_UNAVAILABLE':
       return 503;
     case 'STORAGE_ERROR':
       return 502;

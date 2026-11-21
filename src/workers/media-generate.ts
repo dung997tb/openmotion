@@ -36,6 +36,10 @@ export interface GatewayCallContext {
   readonly workspaceId: string;
   readonly externalWorkspaceId?: string;
   readonly externalUserId?: string;
+  readonly appUserId?: string;
+  readonly amrWorkspaceMemberId?: string;
+  readonly amrWorkspaceRole?: 'owner' | 'admin' | 'member';
+  readonly amrWorkspaceLifecycleState?: string;
   readonly signal: AbortSignal;
   readonly idempotencyKey?: string;
 }
@@ -136,6 +140,10 @@ interface ParsedGenerationInput {
   }>;
   externalWorkspaceId?: string;
   externalUserId?: string;
+  appUserId?: string;
+  amrWorkspaceMemberId?: string;
+  amrWorkspaceRole?: 'owner' | 'admin' | 'member';
+  amrWorkspaceLifecycleState?: string;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
@@ -208,6 +216,14 @@ function parseGenerationInput(raw: Record<string, unknown>): ParsedGenerationInp
     references,
     externalWorkspaceId: typeof raw.externalWorkspaceId === 'string' ? raw.externalWorkspaceId : undefined,
     externalUserId: typeof raw.externalUserId === 'string' ? raw.externalUserId : undefined,
+    appUserId: typeof raw.appUserId === 'string' ? raw.appUserId : undefined,
+    amrWorkspaceMemberId: typeof raw.amrWorkspaceMemberId === 'string' ? raw.amrWorkspaceMemberId : undefined,
+    amrWorkspaceRole:
+      raw.amrWorkspaceRole === 'owner' || raw.amrWorkspaceRole === 'admin' || raw.amrWorkspaceRole === 'member'
+        ? raw.amrWorkspaceRole
+        : undefined,
+    amrWorkspaceLifecycleState:
+      typeof raw.amrWorkspaceLifecycleState === 'string' ? raw.amrWorkspaceLifecycleState : undefined,
   };
 }
 
@@ -362,6 +378,10 @@ export async function processMediaGenerateJob<K extends MediaGenerateJobName>(
       workspaceId,
       externalWorkspaceId: spec.externalWorkspaceId,
       externalUserId: spec.externalUserId,
+      appUserId: spec.appUserId,
+      amrWorkspaceMemberId: spec.amrWorkspaceMemberId,
+      amrWorkspaceRole: spec.amrWorkspaceRole,
+      amrWorkspaceLifecycleState: spec.amrWorkspaceLifecycleState,
       signal: abortController.signal,
       idempotencyKey: jobId,
     };

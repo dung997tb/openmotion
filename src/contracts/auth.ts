@@ -9,6 +9,7 @@ export const AUTH_METHODS = [
   'pat',
   'oauth_bearer',
   'oidc_jwt',
+  'preview_token',
   'dev_bypass',
 ] as const;
 export type AuthMethod = (typeof AUTH_METHODS)[number];
@@ -42,6 +43,15 @@ export const ROLE_RANK: Readonly<Record<WorkspaceRole, number>> = {
   owner: 4,
 };
 
+export const AUTH_ENTRIES = ['web', 'mcp', 'api'] as const;
+export type AuthEntry = (typeof AUTH_ENTRIES)[number];
+
+export const AMR_WORKSPACE_ROLES = ['owner', 'admin', 'member'] as const;
+export type AmrWorkspaceRole = (typeof AMR_WORKSPACE_ROLES)[number];
+
+export const EFFECTIVE_WRITE_ACCESS_VALUES = ['writable', 'read_only', 'unknown'] as const;
+export type EffectiveWriteAccess = (typeof EFFECTIVE_WRITE_ACCESS_VALUES)[number];
+
 export interface AuthContext {
   readonly workspaceId: string;
   readonly userId: string;
@@ -50,10 +60,19 @@ export interface AuthContext {
   readonly authMode: AuthMode;
   readonly authMethod: AuthMethod;
   readonly externalWorkspaceId?: string | null;
+  readonly authUserId?: string | null;
+  readonly appUserId?: string | null;
+  readonly clientId?: string | null;
+  readonly entry?: AuthEntry;
+  readonly amrWorkspaceMemberId?: string | null;
+  readonly amrWorkspaceRole?: AmrWorkspaceRole | null;
+  readonly amrWorkspaceLifecycleState?: string | null;
+  readonly effectiveWriteAccess?: EffectiveWriteAccess;
   readonly sessionId?: string;
   readonly tokenId?: string;
   readonly email?: string | null;
   readonly displayName?: string;
+  readonly avatarUrl?: string | null;
 }
 
 export function hasScope(ctx: Pick<AuthContext, 'scopes'>, required: PatScope): boolean {

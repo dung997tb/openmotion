@@ -23,6 +23,7 @@ export type WorkspaceDefaultModels = {
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   oidcSub: text('oidc_sub').notNull().unique(),
+  appUserId: text('app_user_id'),
   email: text('email'),
   displayName: text('display_name').notNull(),
   avatarUrl: text('avatar_url'),
@@ -191,6 +192,7 @@ export const oauthTokens = pgTable(
     resource: text('resource'),
     accessExpiresAt: timestamp('access_expires_at', { withTimezone: true }).notNull(),
     refreshExpiresAt: timestamp('refresh_expires_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
