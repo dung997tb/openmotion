@@ -26,7 +26,7 @@ function sourceLabel(href: string): string {
 
 export function WorkspaceBreadcrumb({ source, destination }: { source: WorkspaceSource; destination: string }) {
   const { t } = useI18n();
-  return <nav className="om-workspace-breadcrumb" aria-label={t('Breadcrumb')}>
+  return <nav className="om-workspace-breadcrumb om-breadcrumb" aria-label={t('Breadcrumb')}>
     <a className="om-text-link" href={source.href} onClick={event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (restoreWorkspaceSource(source)) event.preventDefault();

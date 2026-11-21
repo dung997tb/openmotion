@@ -7,7 +7,7 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { languages, useI18n, type Locale } from '../i18n/I18n';
 import { Select } from '../components/ui/Select';
 import { AppearanceSettings } from './AppearanceSettings';
-import { ModelSettings, kindLabels } from './ModelSettings';
+import { ModelSettings, modelKindLabel } from './ModelSettings';
 import { AccountSettings } from './AccountSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { clickMethod, clickOption, trackStudioClick } from './editorTracking';
@@ -71,12 +71,12 @@ export function SettingsCenter({ section, onSection: onSectionRaw, onBack, openC
   </div>;
 }
 function DefaultModels({ openProviders }: { openProviders: () => void }) {
-  const { t } = useI18n(), directory = useProviderDirectory();
+  const { t, locale } = useI18n(), directory = useProviderDirectory();
   return <div className="om-settings-page"><h1 className="om-title">{t('Default Agent & models')}</h1><p className="om-muted">{t('Choose a provider and model for each capability. Account models and BYOK work together.')}</p><DefaultAgentCard />
     {directory.error ? <SettingsError retry={directory.refresh} /> : !directory.data ? <SettingsLoading /> : <div className="om-card">{modelKinds.map(kind => {
       const model = directory.data?.models.find(model => model.id === directory.data?.defaults[kind]);
       const provider = directory.data?.providers.find(provider => provider.id === model?.provider);
-      return <div className="om-preference-row" key={kind}><div><h2 className="om-subtitle">{t(kindLabels[kind])}</h2><p className="om-muted">{model ? `${provider?.label} · ${model.label}${!provider?.available || !model.enabled ? ' · ' + t('Unavailable') : ''}` : t(directory.data?.defaults[kind] ? 'Unavailable model' : 'No default selected')}</p></div><ModelSwitcher capability={kind} label={t('Choose model')} openSettings={openProviders} /></div>;
+      return <div className="om-preference-row" key={kind}><div><h2 className="om-subtitle">{modelKindLabel(kind, t, locale)}</h2><p className="om-muted">{model ? `${provider?.label} · ${model.label}${!provider?.available || !model.enabled ? ' · ' + t('Unavailable') : ''}` : t(directory.data?.defaults[kind] ? 'Unavailable model' : 'No default selected')}</p></div><ModelSwitcher capability={kind} label={t('Choose model')} openSettings={openProviders} /></div>;
     })}</div>}
     <p className="om-muted">{t('Language and embedding selections are saved for Agent integrations. Editing is performed by your connected Agent.')}</p>
   </div>;

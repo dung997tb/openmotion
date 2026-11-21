@@ -103,6 +103,81 @@ test('Explore is home and project navigation stays in the workspace', { timeout:
   });
 });
 
+test('Design template details keep the project tooltip and clipboard fallback inside the dialog', { timeout: 60_000 }, async () => {
+  await fixture(async store => {
+    const running = await startServer(store, 0, { editor: true });
+    const browser = await puppeteer.launch({ executablePath: await browserExecutable(), headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.evaluateOnNewDocument(() => {
+        localStorage.setItem('motion.studio.locale', 'en');
+        localStorage.setItem('hf-studio-ui-preferences', JSON.stringify({ theme: 'system' }));
+        navigator.clipboard.writeText = async text => {
+          document.documentElement.dataset.copyAttempt = text;
+          throw new Error('Clipboard access denied');
+        };
+      });
+      const scene = new URL('/?page=design&scene=prototype', (await running.info()).previewUrl).href;
+      const dialog = '.om-design-tpl-detail-popup';
+      const remix = `${dialog} button[aria-label="Remix into project"]`;
+      const recreate = `${dialog} .om-media-detail-action-row button[data-primary]`;
+      const tooltip = `${dialog} [role="tooltip"]`;
+      const manualCopy = `${dialog} textarea[aria-label="Content to copy"]`;
+      const title = `${dialog} .om-media-detail-title`;
+
+      for (const [theme, width] of [['dark', 1400], ['light', 600]] as const) {
+        await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: theme }]);
+        await page.setViewport({ width, height: 900 });
+        await page.goto(scene, { waitUntil: 'domcontentloaded' });
+        await page.locator('.om-design-gallery-card .om-design-card-open').setTimeout(5000).click();
+        const selectedTemplate = await page.$eval(title, heading => heading.textContent);
+
+        await page.locator(remix).setTimeout(5000).hover();
+        await page.waitForSelector(tooltip, { visible: true, timeout: 5000 });
+        assert.equal(await page.$eval(tooltip, hint => hint.textContent), 'Remix into project');
+        await page.mouse.move(8, 8);
+        await page.waitForSelector(tooltip, { hidden: true, timeout: 5000 });
+        await page.focus(recreate);
+        await page.keyboard.press('Tab');
+        await page.waitForFunction(selector => document.activeElement?.matches(selector), { timeout: 5000 }, remix);
+        await page.waitForSelector(tooltip, { visible: true, timeout: 5000 });
+
+        await page.locator(recreate).setTimeout(5000).click();
+        await page.waitForSelector(manualCopy, { visible: true, timeout: 5000 });
+        assert.ok(await page.$eval(manualCopy, field => field.readOnly
+          && field.value === document.documentElement.dataset.copyAttempt
+          && field.value.includes('velar-luxury-real-estate')));
+        await page.waitForFunction(selector => {
+          const field = document.querySelector<HTMLTextAreaElement>(selector);
+          return field && field === document.activeElement && field.selectionEnd > field.selectionStart;
+        }, { timeout: 5000 }, manualCopy);
+        await page.keyboard.press('ArrowLeft');
+        assert.equal(await page.$eval(title, heading => heading.textContent), selectedTemplate);
+        const firstLine = await page.$eval(manualCopy, field => {
+          const { left, top } = field.getBoundingClientRect();
+          const style = getComputedStyle(field);
+          return { x: left + field.clientLeft + parseFloat(style.paddingLeft) + 2,
+            y: top + field.clientTop + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2 };
+        });
+        await page.mouse.move(firstLine.x, firstLine.y);
+        await page.mouse.down();
+        await page.mouse.move(firstLine.x + 60, firstLine.y, { steps: 6 });
+        await page.mouse.up();
+        assert.ok(await page.$eval(manualCopy, field => document.activeElement === field && field.selectionEnd > field.selectionStart));
+        await page.waitForSelector(`${dialog} [role="alert"]`, { visible: true, timeout: 5000 });
+        assert.equal(page.url(), scene);
+
+        await page.evaluate(() => { navigator.clipboard.writeText = async () => {}; });
+        await page.focus(recreate);
+        await page.keyboard.press('Enter');
+        await page.waitForSelector(manualCopy, { hidden: true, timeout: 5000 });
+        await page.waitForSelector(`${dialog} [role="status"]`, { visible: true, timeout: 5000 });
+        assert.equal(await page.$eval(title, heading => heading.textContent), selectedTemplate);
+      }
+    } finally { await browser.close(); await running.close(); }
+  });
+});
+
 test('Studio controls fit their resizable generator and timeline panes', { timeout: 60_000 }, async () => {
   await fixture(async store => {
     const gateway = gatewayFor(store);

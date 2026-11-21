@@ -7,7 +7,6 @@ import { DisclosureRow } from "../../../packages/design-system/react/DisclosureR
 import { useProjectArchives, ProjectArchiveMenu, type ProjectArchiveActions } from './ProjectArchives';
 import type { GalleryTemplate } from '../../../shared/catalog';
 import type { McpClient } from './mcpClients';
-import { CreativeNavigation } from './CreativeNavigation';
 import { ExploreStudios } from './ExploreStudios';
 import { creativeStudios, findMediaStudio, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import { DesignProjectEditor } from '../design/DesignProjectEditor';
@@ -81,7 +80,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   const detailOnly = Boolean(page.template) && !libraryRequested;
   const connectionsOpen = libraryRequested || detailOnly;
   const hostChrome = window.parent !== window && new URLSearchParams(location.search).get('hostChrome') === '1';
-  const templatesPage = libraryRequested && !page.creators && !hostChrome;
+  const templatesPage = libraryRequested && !hostChrome;
   // Resource pages cover the editor without unmounting it.
   const pageOpen = templatesPage || page.motion || page.cinemaLanding || Boolean(page.designScene) || Boolean(page.modelOverview) || Boolean(page.modelHub) || Boolean(page.specialty) || page.explore || assetsOpen || skillsOpen || Boolean(page.studio);
   const lastExplore = useRef({ community: page.community, medium: page.medium });
@@ -375,7 +374,6 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     if (target === 'explore') { openHome(); return; }
     openMcp(client, example);
   };
-  const galleryNavigation = !hostChrome && <CreativeNavigation trackingPage="studio" specialty={page.specialty} onChooseStudio={chooseStudio} currentPage={null} onOpenPage={openPage} destination={null} motionActive={false} onNavigate={openStudio} onNavigateSound={openAudioNav} />;
   const library = connectionsOpen && <ConnectionDialog collection={page.templateCollection} onCollectionChange={templateCollection => navigatePage({ templateCollection }, true)}
     collectionSkillOpen={page.templateCollection === 'black-friday' && Boolean(page.skill)} detailOnly={detailOnly}
     initialTemplate={detailOnly && cardPreview.current?.locale === locale ? cardPreview.current.template : undefined}
@@ -385,7 +383,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
       collectionSkillTrigger.current = trigger;
       navigatePage({ skill });
     }}
-    inWorkspace={templatesPage} navigation={libraryRequested && !templatesPage ? galleryNavigation : undefined}
+    inWorkspace={templatesPage}
     open projectId={projectId} returnFocus={libraryTrigger.current} section="templates"
     creators={page.creators} creator={page.creator} onCreatorChange={creator => navigatePage({ templates: true, creators: true, creator, template: null })}
     templateId={page.template} onTemplateChange={template => {

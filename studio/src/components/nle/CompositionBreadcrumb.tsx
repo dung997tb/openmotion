@@ -25,7 +25,7 @@ export function CompositionBreadcrumb({ stack, onNavigate }: CompositionBreadcru
   return (
     <nav
       aria-label={t("Composition navigation")}
-      className="flex items-center gap-1 px-2 h-8 border-b border-hairline bg-bg-1 shrink-0"
+      className="om-breadcrumb flex items-center gap-1 px-2 h-8 border-b border-hairline bg-bg-1 shrink-0"
     >
       {/* Back button — always goes to parent */}
       <IconButton variant="plain"
@@ -50,7 +50,7 @@ export function CompositionBreadcrumb({ stack, onNavigate }: CompositionBreadcru
           <span key={level.id} className="flex items-center gap-1">
             {i > 0 && <CaretRight size={10} className="text-text-4 shrink-0" />}
             {isLast ? (
-              <span className="text-xs text-text-1 font-medium">{level.label}</span>
+              <span className="text-xs font-medium" aria-current="location">{level.label}</span>
             ) : (
               <Button variant="plain"
                 type="button"
@@ -58,7 +58,7 @@ export function CompositionBreadcrumb({ stack, onNavigate }: CompositionBreadcru
                   trackStudioEvent("navigation", { action: "breadcrumb", target: level.label });
                   onNavigate(i);
                 }}
-                className="text-xs text-text-3 hover:text-text-1 transition-colors"
+                className="text-xs hover:underline"
               >
                 {level.label}
               </Button>

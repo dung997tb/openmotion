@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
 import { RemixIcon } from '../../../packages/design-system/react/RemixIcons';
@@ -34,11 +34,12 @@ export function DesignTemplateDetailModal({
   onNavigate: (nextIndex: number) => void;
   onClose: () => void;
   onRemix: (template: DesignTemplateSummary) => void;
-  onUseWithAgent: (template: DesignTemplateSummary) => void;
+  onUseWithAgent: (template: DesignTemplateSummary) => Promise<string | null> | void;
 }) {
   const { t } = useI18n();
   const template = templates[index] ?? null;
   const total = templates.length;
+  const popupRef = useRef<HTMLDivElement>(null);
   const [viewportId, setViewportId] = useState<DesignViewportId>('desktop');
 
   useEffect(() => {
@@ -49,6 +50,7 @@ export function DesignTemplateDetailModal({
   useEffect(() => {
     if (!template) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'ArrowLeft' && total > 1) onNavigate((index - 1 + total) % total);
       else if (e.key === 'ArrowRight' && total > 1) onNavigate((index + 1) % total);
     };
@@ -65,7 +67,7 @@ export function DesignTemplateDetailModal({
     <Dialog.Root open onOpenChange={open => { if (!open) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Backdrop className="om-design-dialog-backdrop" />
-        <Dialog.Popup className="om-media-detail-surface om-media-detail-popup om-design-tpl-detail-popup" data-feedback-modal={studioActions || undefined} aria-label={template.title}>
+        <Dialog.Popup ref={popupRef} className="om-media-detail-surface om-media-detail-popup om-design-tpl-detail-popup" data-feedback-modal={studioActions || undefined} aria-label={template.title}>
           <div className="om-media-detail-grid">
             {/* Left interactive preview stage with Motion-aligned ambient frosted backdrop */}
             <div className="om-media-detail-stage om-design-tpl-stage">
@@ -174,29 +176,71 @@ export function DesignTemplateDetailModal({
                   </Button>
                 </div>}
               </div>
-              {studioActions && <div className="om-media-detail-footer" role="group" aria-label={t('Template actions')}>
-                <div className="om-media-detail-action-row">
-                  <Button type="button" variant="ghost" className="om-button h-auto" data-primary onClick={() => onUseWithAgent(template)}>
-                    {t('Recreate this template')}<MotionIcon name="sparkles" size={16} />
-                  </Button>
-                  <Tooltip label={t('Remix into project')} wrap>
-                    <IconButton
-                      type="button"
-                      variant="plain"
-                      className="om-button om-media-detail-icon-action"
-                      aria-label={t('Remix into project')}
-                      disabled={remixing}
-                      aria-busy={remixing}
-                      icon={<RemixIcon name={remixing ? 'loader-4-line' : 'folder-add-line'} size={17} className={remixing ? 'om-busy-icon' : undefined} />}
-                      onClick={() => onRemix(template)}
-                    />
-                  </Tooltip>
-                </div>
-              </div>}
+              {studioActions && <DesignTemplateActions
+                key={template.id}
+                popupRef={popupRef}
+                remixing={remixing}
+                onRecreate={() => onUseWithAgent(template)}
+                onRemix={() => onRemix(template)}
+              />}
             </aside>
           </div>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function DesignTemplateActions({ popupRef, remixing, onRecreate, onRemix }: {
+  popupRef: RefObject<HTMLDivElement | null>;
+  remixing?: boolean;
+  onRecreate: () => Promise<string | null> | void;
+  onRemix: () => void;
+}) {
+  const { t } = useI18n();
+  const [copying, setCopying] = useState(false);
+  const [manualCopy, setManualCopy] = useState<string | null>(null);
+  const copyField = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (manualCopy) copyField.current?.focus();
+  }, [manualCopy]);
+
+  const recreate = async () => {
+    setCopying(true);
+    try {
+      setManualCopy(await onRecreate() ?? null);
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  return <div className="om-media-detail-footer" role="group" aria-label={t('Template actions')}>
+    {manualCopy && <textarea
+      ref={copyField}
+      className="om-design-textarea mb-2"
+      aria-label={t('Content to copy')}
+      readOnly
+      rows={3}
+      value={manualCopy}
+      onFocus={event => event.currentTarget.select()}
+    />}
+    <div className="om-media-detail-action-row">
+      <Button type="button" variant="ghost" className="om-button h-auto" data-primary disabled={copying} onClick={() => void recreate()}>
+        {t('Recreate this template')}<MotionIcon name="sparkles" size={16} />
+      </Button>
+      <Tooltip label={t('Remix into project')} wrap portalContainer={popupRef}>
+        <IconButton
+          type="button"
+          variant="plain"
+          className="om-button om-media-detail-icon-action"
+          aria-label={t('Remix into project')}
+          disabled={remixing}
+          aria-busy={remixing}
+          icon={<RemixIcon name={remixing ? 'loader-4-line' : 'folder-add-line'} size={17} className={remixing ? 'om-busy-icon' : undefined} />}
+          onClick={onRemix}
+        />
+      </Tooltip>
+    </div>
+  </div>;
 }

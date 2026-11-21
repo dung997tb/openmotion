@@ -176,7 +176,6 @@ test('packaged server imports without local dependencies and captions use the se
   } finally { await rm(extracted, { recursive: true, force: true }); }
 });
 
-
 test('offline game kit, binary characters, inspector and licenses survive lightweight packaging', async () => {
   for (const profile of ['phase1', 'legacy']) {
     const files = new Set(await distributionFiles(profile, file => file.startsWith('templates/game-kits/') || file === 'scripts/game-glb-inspect.mjs'));
@@ -187,4 +186,27 @@ test('offline game kit, binary characters, inspector and licenses survive lightw
       assert(files.has(relative), 'Missing offline kit file: '+relative);
     }
   }
+});
+
+test('Codex plugin manifest and Skill catalog metadata stay in English', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const manifest = JSON.parse(await readFile(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
+  assert.doesNotMatch(manifest.description, /\p{Script=Han}/u, 'plugin.json description must stay in English');
+  assert.doesNotMatch(manifest.interface.shortDescription, /\p{Script=Han}/u, 'plugin.json interface.shortDescription must stay in English');
+  for (const entry of await readdir(path.join(root, 'skills'), { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const skillDoc = await readFile(path.join(root, 'skills', entry.name, 'SKILL.md'), 'utf8');
+    const frontmatter = skillDoc.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)?.[1] ?? '';
+    assert.doesNotMatch(frontmatter, /\p{Script=Han}/u, `skills/${entry.name}/SKILL.md frontmatter must stay in English`);
+    try {
+      const openaiYaml = await readFile(path.join(root, 'skills', entry.name, 'agents/openai.yaml'), 'utf8');
+      assert.doesNotMatch(openaiYaml, /\p{Script=Han}/u, `skills/${entry.name}/agents/openai.yaml must stay in English`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  const onboardingDoc = await readFile(path.join(root, '.codex-plugin/onboarding/SKILL.md'), 'utf8');
+  const onboardingFrontmatter = onboardingDoc.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)?.[1] ?? '';
+  assert.doesNotMatch(onboardingFrontmatter, /\p{Script=Han}/u, '.codex-plugin/onboarding/SKILL.md frontmatter must stay in English');
 });

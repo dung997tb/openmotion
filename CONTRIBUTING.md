@@ -69,7 +69,7 @@ Report the latest state. Do not merge or publish.
 
 Replace `PR_URL` with your PR link. A promise to keep watching is not a running monitor: ask the Agent to identify the active mechanism and its lifetime. Closing a session stops session-only waiting; unattended tracking needs a separately configured durable runner.
 
-### Submit a video with your Agent
+### Submit a template with your Agent
 
 Share your video, reference or editable project with your Agent and paste this brief:
 
@@ -86,7 +86,7 @@ and description, and show me the template and validation results for review.
 Do not merge or publish packages or CMS content.
 ```
 
-Studio's **Submit video** link opens this guide. **Recreate and submit** copies a
+Studio's **Submit template** link opens this guide. **Recreate and submit** copies a
 brief that also identifies the selected template; **Recreate template** copies only
 the recreation brief. Paste either into your Agent to continue. These controls do
 not upload media or create a pull request by themselves.

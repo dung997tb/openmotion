@@ -1,8 +1,9 @@
 /* Page geometry only; visual recipes belong to the shared design system. */
 .om-mcp-page { flex: 1; min-width: 0; min-height: 0; overflow: auto; container-type: inline-size; }
 .om-mcp-page[data-in-settings] { overflow: visible; }
-.om-mcp-content { width: min(100%, 1248px); margin-inline: auto; padding: 0 var(--motion-space-32) var(--motion-space-32); }
-.om-mcp-content > .om-workspace-breadcrumb { position: sticky; top: 0; z-index: 2; padding-block: var(--motion-space-8); background: var(--motion-bg); }
+.om-mcp-page > :is(.om-mcp-content, .om-workspace-breadcrumb) { width: min(100%, 1248px); margin-inline: auto; padding-inline: var(--motion-space-32); }
+.om-mcp-content { padding-block-end: var(--motion-space-32); }
+.om-mcp-page > .om-workspace-breadcrumb { padding-block-start: var(--motion-space-8); }
 .om-mcp-section { padding-block: var(--motion-space-28); scroll-margin-top: var(--motion-space-24); }
 .om-mcp-hero.om-mcp-section { text-align: center; padding-top: var(--motion-space-16); }
 .om-mcp-art { position: relative; display: flex; align-items: center; justify-content: center; gap: var(--motion-space-24); height: 180px; width: min(100%, 320px); margin: 0 auto var(--motion-space-24); }
@@ -11,10 +12,14 @@
 .om-mcp-art-center { width: 142px; height: 142px; transform: rotate(-6deg); z-index: 1; }
 [data-motion-studio] .om-mcp-art .om-avatar { width: 68px; height: 68px; }
 .om-mcp-art-center img { width: 72px; height: 72px; }
-.om-mcp-client-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, max-content) minmax(80px, 1fr); align-items: center; gap: var(--motion-space-8); }
-.om-mcp-client-tabs { grid-column: 2; grid-row: 1; display: flex; min-width: 0; overflow-x: auto; }
+.om-mcp-client-row { width: 100%; }
+.om-mcp-client-viewport { overflow-x: auto; scroll-padding-inline: calc(var(--motion-control) + var(--motion-space-8)); }
+.om-mcp-client-tabs { display: flex; width: max-content; min-width: 100%; }
 .om-mcp-setup-tray { margin-top: var(--motion-space-24); }
 .om-mcp-client-tabs [role=tab] { flex: none; gap: var(--motion-space-8); }
+/* Center the tabs when they fit while keeping both ends reachable on overflow. */
+.om-mcp-client-tabs > [role=tab]:first-child { margin-inline-start: auto; }
+.om-mcp-client-tabs > [role=tab]:last-child { margin-inline-end: auto; }
 [data-motion-studio] .om-mcp-client-tabs .om-avatar { width: 24px; height: 24px; }
 .om-mcp-client-tabs .om-avatar > svg { width: var(--motion-space-16); height: var(--motion-space-16); }
 .om-mcp-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--motion-space-16); }
@@ -70,14 +75,13 @@
 .om-mcp-table td > svg { display: inline; margin-right: var(--motion-space-6); vertical-align: middle; }
 
 @container (max-width: 800px) {
-  .om-mcp-client-row { grid-template-columns: auto minmax(0, 1fr); }
-  .om-mcp-content { padding-inline: var(--motion-space-20); }
+  .om-mcp-page > :is(.om-mcp-content, .om-workspace-breadcrumb) { padding-inline: var(--motion-space-20); }
   .om-mcp-setup-grid, .om-mcp-faq, .om-mcp-footer { grid-template-columns: minmax(0, 1fr); }
   .om-mcp-template-grid { columns: 2; }
   .om-mcp-benefit-grid, .om-mcp-capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @container (max-width: 500px) {
-  .om-mcp-content { padding-inline: var(--motion-space-12); }
+  .om-mcp-page > :is(.om-mcp-content, .om-workspace-breadcrumb) { padding-inline: var(--motion-space-12); }
   .om-mcp-section { padding-block: var(--motion-space-16); }
   .om-mcp-template-grid { columns: 1; }
   .om-mcp-footer-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }

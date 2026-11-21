@@ -807,8 +807,11 @@ it('browses both Explore shelves, opens exact details and restores the selected 
     await act(async () => trigger.click());
   };
   const templates = shelf('Templates'), skills = shelf('Skills');
-  expect(templates.querySelector('header a')?.getAttribute('href')).toBe(templateContributionUrl);
+  const templateSubmission = templates.querySelector('header a');
+  expect(templateSubmission?.getAttribute('href')).toBe(templateContributionUrl);
+  expect(templateSubmission?.textContent).toBe('Submit template');
   expect(skills.querySelector('header a')?.getAttribute('href')).toBe(skillSubmissionUrl);
+  expect(skills.querySelector('.om-feed-skill-badge, .om-feed-card-detail')).toBeNull();
   expect([...skills.querySelectorAll('[aria-label="Skill category"] button')].map(button => button.textContent)).toEqual(['All', ...skillCategories]);
   await choose(templates, 'Product promos');
   expect(templates.querySelector('[aria-busy="true"]')).not.toBeNull();
@@ -957,6 +960,14 @@ it('shows every Studio in Explore and opens the selected example or technique', 
   await mount(); await click('Explore');
   const collections = () => [...container.querySelectorAll<HTMLElement>('.om-studio-collection')].map(section => section.dataset.studio);
   expect(collections()).toEqual(['design', 'motion', 'cinema', 'sound', 'shorts', 'marketing', 'explainer', '3d', 'game']);
+  for (const studio of ['shorts', 'marketing', 'explainer', 'motion', '3d']) {
+    const collection = container.querySelector(`.om-studio-collection[data-studio="${studio}"]`)!;
+    expect(collection.querySelector('.om-feed-card-description')).not.toBeNull();
+    expect(collection.querySelector('.om-feed-card-detail')).toBeNull();
+  }
+  const threeDDescriptions = container.querySelectorAll('.om-studio-collection[data-studio="3d"] .om-feed-card-description');
+  expect(threeDDescriptions).toHaveLength(6);
+  expect(threeDDescriptions[0].textContent).toBe('Rotate a globe or product and show it from different camera angles.');
   const select = async (selector: string) => {
     const item = container.querySelector<HTMLButtonElement>(selector);
     expect(item, selector).toBeTruthy();
@@ -1172,7 +1183,7 @@ it('carries a community template brief and an audio example into the matching st
   await click('Explore');
   const exploreUrl = location.href;
   const speechCard = container.querySelector<HTMLButtonElement>('.om-feed-group [data-scene="speech"]')!;
-  expect(speechCard.querySelector('.om-feed-card-detail')?.textContent).toBe('Use this prompt');
+  expect(speechCard.querySelector('.om-feed-prompt-action.om-nav-item')?.textContent).toBe('Use this prompt');
   await act(async () => speechCard.click());
   expect(page().studio?.scene.id).toBe('speech');
   expect(container.querySelector<HTMLInputElement>('.om-creative-workspace input')?.value).toContain('Every idea deserves');
@@ -1207,12 +1218,10 @@ it('recovers community templates and opens the library from the community headin
   }
   const picks = container.querySelector('[aria-labelledby="explore-community"]')!;
   expect([...picks.querySelectorAll('[data-template-id]')].map(node => node.getAttribute('data-template-id'))).toEqual(['second']);
-  const communities = container.querySelector('[aria-labelledby="om-feed-heading"]')!;
-  expect(communities.querySelector('.om-feed-more')).toBeNull();
-  const openLibrary = communities.querySelector<HTMLButtonElement>('header button')!;
-  expect(openLibrary.textContent).toBe('More community templates');
-  await act(async () => openLibrary.click());
-  expect(page()).toMatchObject({ templates: true, template: null });
+  const communityActions = [...container.querySelectorAll<HTMLButtonElement>('.om-explore-feed > header button')];
+  expect(communityActions.map(action => action.textContent)).toEqual(['View all templates']);
+  await act(async () => communityActions[0].click());
+  expect(page()).toMatchObject({ explore: true, templates: true, creators: false });
 });
 
 it('keeps Agent Skills available while the 3D studio is pending and preserves the community feed', async () => {
@@ -1364,6 +1373,7 @@ it('returns from MCP client and setup tabs to Explore, and clears the source on 
   expect(button('Close settings')).toBeUndefined();
   await click('Claude Code'); await click('Manual setup');
   expect(breadcrumb()?.href).toBe(exploreUrl);
+  expect(container.querySelector('.om-mcp-page > .om-workspace-breadcrumb + .om-mcp-client-row')).not.toBeNull();
   await mount(1);
   await returnThroughBreadcrumb('Explore');
   expect(location.href).toBe(exploreUrl);
@@ -1676,6 +1686,53 @@ it('opens the same libraries from the Explore header, shelf actions and Skills f
     expect(page()).toMatchObject({ explore: true, skills: false });
     expect(document.activeElement).toBe(trigger);
   }
+});
+
+it('opens Creators in the shared Explore shell and keeps its search and history', async () => {
+  const fallback = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (input: string, init?: RequestInit) => {
+    const path = new URL(input, location.origin).pathname;
+    if (path.endsWith('/models')) return Response.json({ models: [], nextOffset: null });
+    if (path.endsWith('/models/capabilities')) return Response.json({ providers: [], routes: {} });
+    if (!path.endsWith('/template-catalog')) return fallback(input, init);
+    return Response.json({ items: [
+      { id: 'work-1', title: 'First work', authorName: 'Jane', kind: 'builtin', tags: [] },
+      { id: 'work-2', title: 'Second work', authorName: 'Jules', kind: 'builtin', tags: [] },
+    ], next: null, catalogVersion: 'test' });
+  });
+  await mount();
+  await click('Explore');
+  const header = container.querySelector('.om-app-header');
+  const entry = container.querySelector<HTMLButtonElement>('[aria-labelledby="explore-community"] header button')!;
+  expect(entry.className).toBe(button('Manage providers').className);
+  await act(async () => { entry.focus(); entry.click(); });
+
+  const directory = container.querySelector<HTMLElement>('[data-workspace-gallery][aria-label="Creators"]')!;
+  expect(page()).toMatchObject({ explore: true, templates: true, creators: true });
+  expect(container.querySelector('.om-app-header')).toBe(header);
+  expect(container.querySelectorAll('.om-creative-navigation')).toHaveLength(1);
+  expect(container.querySelector<HTMLElement>('.om-explore-host')?.hidden).toBe(true);
+  expect(directory.querySelector('.om-gallery-wordmark')).toBeNull();
+  expect(directory.querySelector('.om-gallery-page-intro h1')?.textContent).toBe('Creators');
+  const search = directory.querySelector<HTMLInputElement>('input[aria-label="Search creators"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Jane');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const tiles = directory.querySelectorAll<HTMLButtonElement>('button.om-scene-tile');
+  expect(tiles).toHaveLength(1);
+  expect(tiles[0].textContent).toContain('Jane');
+  await act(async () => tiles[0].click());
+  expect(page().creator).toBe('credit/Jane');
+  expect(directory.querySelector('.om-gallery-page-intro h1')?.textContent).toBe('Jane');
+  await traverse(-1);
+  expect(page().creator).toBeNull();
+  await act(async () => {
+    search.focus();
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  expect(page()).toMatchObject({ explore: true, templates: false, creators: false });
+  expect(document.activeElement).toBe(entry);
 });
 
 it('does not restore the Skills trigger when navigating home via the wordmark', async () => {

@@ -241,14 +241,14 @@ export function DesignScenePage({
     textareaRef.current?.focus();
   };
 
-  const copyInstruction = useCallback(async (text: string, fromDetail = false) => {
+  const copyInstruction = useCallback(async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setManualPrompt(null);
       showToast(t('Copied. Paste into your Agent.'), 'info', 'feedback');
+      return null;
     } catch {
-      setManualPrompt(text);
-      showToast(t(fromDetail ? 'Copy failed. Check clipboard permissions and try again.' : 'Could not copy. Select and copy the text manually.'), 'error', 'feedback');
+      showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback');
+      return text;
     }
   }, [showToast, t]);
 
@@ -264,7 +264,7 @@ export function DesignScenePage({
       language: locale !== 'en' ? locale : null,
       integration: integrationInfo,
     });
-    void copyInstruction(prompt);
+    void copyInstruction(prompt).then(setManualPrompt);
   };
 
   const handleCreateBlank = async () => {
@@ -318,7 +318,7 @@ export function DesignScenePage({
       language: locale !== 'en' ? locale : null,
       integration: integrationInfo,
     });
-    void copyInstruction(prompt, previewTemplate !== null);
+    return copyInstruction(prompt);
   };
 
   return (
@@ -408,7 +408,7 @@ export function DesignScenePage({
                           </Button>
                           <p className="om-design-card-desc">{tpl.description}</p>
                         </div>
-                        <Button type="button" size="sm" variant="primary" className="om-design-gallery-action rounded-full" onClick={() => handleUseTemplateWithAgent(tpl)}>
+                        <Button type="button" size="sm" variant="primary" className="om-design-gallery-action rounded-full" onClick={() => void handleUseTemplateWithAgent(tpl).then(setManualPrompt)}>
                           {t('Recreate this template')}
                           <RemixIcon name="file-copy-line" size={14} />
                         </Button>
