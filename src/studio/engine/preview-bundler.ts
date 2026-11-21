@@ -449,6 +449,7 @@ export function createPreviewBridgeScript(projectId: string): string {
   var token=new URL(location.href).searchParams.get('pt');
   if(!token || window.parent===window) return;
   var parentWindow=window.parent;
+  var pickMode=false;
   var parentOrigin='*';
   try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
   function post(type,payload,requestId){
@@ -477,7 +478,7 @@ export function createPreviewBridgeScript(projectId: string): string {
   function respond(requestId,result,error){
     post('response',error?{ok:false,error:String(error)}:{ok:true,result:result},requestId);
   }
-  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control']}); post('timeline-state',timeline()); }
+  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode']}); post('timeline-state',timeline()); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
@@ -494,6 +495,10 @@ export function createPreviewBridgeScript(projectId: string): string {
         else throw new Error('Unsupported playback action');
         post('timeline-state',timeline()); respond(requestId,timeline()); return;
       }
+      if(message.type==='pick-mode'){
+        pickMode=message.enabled===true;
+        respond(requestId,{enabled:pickMode}); return;
+      }
       if(message.type==='selection-geometry'){
         var target=message.elementId?document.getElementById(String(message.elementId)):null;
         respond(requestId,target?describe(target):null); if(target) post('selection-geometry',{selection:describe(target)}); return;
@@ -508,6 +513,7 @@ export function createPreviewBridgeScript(projectId: string): string {
     } catch(error) { respond(requestId,null,error); post('runtime-error',{message:String(error&&error.message||error),sourceType:'bridge'}); }
   });
   document.addEventListener('click',function(event){
+    if(!pickMode) return;
     var target=event.target;
     var detail=describe(target);
     if(detail) post('select-element',{selection:detail});
