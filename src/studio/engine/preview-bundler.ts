@@ -789,10 +789,22 @@ export async function bundlePreviewInMemory(
   }
 
   const seenExternalScripts = new Set<string>();
-  const scriptChunks: string[] = [];
+  const scriptRuns: Array<{ scene?: string; chunks: string[] }> = [];
+  function appendScript(content: string, scene?: string) {
+    const last = scriptRuns.at(-1);
+    if (last && last.scene === scene) last.chunks.push(content);
+    else scriptRuns.push({ scene, chunks: [content] });
+  }
+  const sourceOwners = new Map<string, string | undefined>();
+  for (const item of subCompResult.scriptItems) {
+    if (item.kind === 'inline') continue;
+    // A script used by multiple scenes must also work when only one of them is mounted.
+    if (!sourceOwners.has(item.src)) sourceOwners.set(item.src, item.scene);
+    else if (sourceOwners.get(item.src) !== item.scene) sourceOwners.set(item.src, undefined);
+  }
   for (const item of subCompResult.scriptItems) {
     if (item.kind === 'inline') {
-      scriptChunks.push(item.content);
+      appendScript(item.content, item.scene);
       continue;
     }
     if (item.integrity?.trim() || seenExternalScripts.has(item.src)) {
@@ -805,7 +817,7 @@ export async function bundlePreviewInMemory(
       const resolved = resolveVirtualPath(sourceDir, decodedUrlPath(item.src));
       const js = resolved ? project.readText(resolved) : null;
       if (js !== null) {
-        scriptChunks.push(js);
+        appendScript(js, sourceOwners.get(item.src));
         continue;
       }
     }
@@ -821,11 +833,12 @@ export async function bundlePreviewInMemory(
     }
   }
 
-  if (scriptChunks.length > 0) {
-    const joined = joinJsChunks(scriptChunks);
-    const pieces = parsesAsScript(joined) ? [joined] : scriptChunks;
+  for (const { scene, chunks } of scriptRuns) {
+    const joined = joinJsChunks(chunks);
+    const pieces = parsesAsScript(joined) ? [joined] : chunks;
     for (const piece of pieces) {
       const script = document.createElement('script');
+      if (scene) script.setAttribute('data-hf-scene', scene);
       script.textContent = escapeInlineScriptSource(piece);
       document.body.appendChild(script);
     }
@@ -844,7 +857,7 @@ export async function bundlePreviewInMemory(
   }
 
   // Coalesce inline body scripts safely
-  const isPinned = (el: Element) => el.hasAttribute(RUNTIME_BOOTSTRAP_ATTR);
+  const isPinned = (el: Element) => el.hasAttribute(RUNTIME_BOOTSTRAP_ATTR) || el.hasAttribute('data-hf-scene');
   for (const { members, anchor } of inlineScriptRuns([...document.querySelectorAll('body script')], isPinned)) {
     const mergedJs = joinJsChunks(members.map((el) => el.textContent || ''));
     if (!mergedJs || !parsesAsScript(mergedJs)) continue;

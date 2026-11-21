@@ -622,6 +622,28 @@ describe('Zero Local ProjectDir Disk Writes Guard', () => {
 });
 
 describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', () => {
+  it('keeps deferred composition scripts with the scene that mounts their DOM', async () => {
+    const sources = {
+      'index.html': '<html><body><div data-composition-id="main"><div data-composition-id="later" data-composition-src="later.html" data-start="15" data-duration="3"></div></div><script>window.rootReady = true;</script></body></html>',
+      'later.html': '<template><div data-composition-id="later"><canvas id="reel"></canvas></div><script>document.getElementById("reel").getContext("2d");</script></template>',
+    };
+    const project = new InMemoryVirtualProject({
+      projectId: 'scene-script', projectName: 'Scene script', revision: 'b'.repeat(64),
+      textContents: sources,
+      files: Object.entries(sources).map(([path, content]) => ({
+        path, blobScope: 'workspace', sha256: sha256Hex(content), sizeBytes: Buffer.byteLength(content),
+        mimeType: 'text/html', isText: true, updatedAt: new Date(),
+      })),
+    });
+    const bundled = await bundlePreviewInMemory(project, { skipDeterministicFonts: true });
+    assert.ok(bundled);
+    const scripts = [...bundled.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+    const scene = scripts.find(([, , body]) => body.includes('getElementById("reel")'));
+    assert.ok(scene);
+    assert.match(scene[1], /data-hf-scene="later"/);
+    assert.ok(!scene[2].includes('window.rootReady'));
+  });
+
   it('bundles preview HTML, lints with PG blob metadata (no ffprobe), and computes info + timeline purely in memory', async () => {
     const html = `<!DOCTYPE html>
 <html>
@@ -966,6 +988,14 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
       initialFiles: [{ path: 'index.html', content: initialHtml }],
     });
 
+    const probe = await env.studioApp.request(
+      `/api/projects/${created.projectId}/file-mutations/probe-elements/index.html`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: [{ id: 'headline' }, { id: 'missing' }] }) },
+    );
+    assert.equal(probe.status, 200);
+    assert.deepEqual(await probe.json(), { ok: true, exists: [true, false], results: [true, false] });
+
     // DOM patch-element
     const patchRes = await env.studioApp.request(
       `/api/projects/${created.projectId}/file-mutations/patch-element/index.html`,
@@ -974,7 +1004,7 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target: { id: 'headline' },
-          ops: [{ type: 'text-content', property: 'textContent', value: 'After Patch' }],
+          operations: [{ type: 'text-content', property: 'textContent', value: 'After Patch' }],
         }),
       },
     );
