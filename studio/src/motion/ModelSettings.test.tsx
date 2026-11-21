@@ -207,7 +207,7 @@ for (const [summary, heading, action] of [
   await mount('account');
   const guide = document.querySelector('.om-plan-guide')!;
   expect(guide.querySelector('.om-plan-guide-head h2')?.textContent).toBe(heading);
-  expect(guide.textContent).toContain('Images'); expect(guide.textContent).toContain('Music'); expect(guide.textContent).toContain('Annual offer');
+  expect(guide.textContent).toContain('Images'); expect(guide.textContent).toContain('Music'); expect(guide.textContent).toContain('Multimodal from $14/mo');
   expect(guide.textContent).toContain(action);
   expect(document.querySelector('.om-account-callout')).toBeNull();
   expect(document.querySelector('.om-provider-detail-inner > .om-settings-tags')).toBeNull();
