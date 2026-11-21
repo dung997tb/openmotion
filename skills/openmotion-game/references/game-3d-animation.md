@@ -231,7 +231,7 @@ white canvas screenshot.
 
 ## Exact offline character-kit path
 
-1. Pick `templates/game-kits/characters/Mage.glb` (caster) or `Knight.glb` (melee); keep `LICENSE-KayKit.txt`. Both have 76 clips and 41 bones. See the character README for every name and measured duration.
+1. Pick `templates/game-kits/characters/Mage.glb` (caster) or `Knight.glb` (melee); keep `LICENSE-KayKit.txt`. Both keep 12 common clips (Idle, Walking_A, Running_A, Jump_Full_Short, Dodge_Forward, Spellcast_Shoot, 1H_Melee_Attack_Chop, 1H_Ranged_Shoot, Block, Hit_A, Death_A, Cheer) and 41 bones, trimmed from the 76-clip originals to stay under 1 MiB. See the character README for measured durations; fetch the full KayKit pack for other clips.
 2. Run `node scripts/game-glb-inspect.mjs templates/game-kits/characters/Mage.glb` (or Knight) before choosing clip names. Check skins ≥1, bone count, triangle count, and nonzero moving clips. Poses have duration zero. The inspector does not merge clips or validate root scale.
 3. Copy the selected GLB and local `vendor/` into the game. Import `./vendor/three.module.min.js`, `./vendor/GLTFLoader.js`, `./vendor/SkeletonUtils.js`. Load `./characters/Mage.glb`; use `SkeletonUtils.clone(gltf.scene)` per player, never Object3D.clone for independent skinned rigs.
 4. Explicit clip map: idle → `Idle`, run → `Running_A`, attack → `Spellcast_Shoot` (Mage) or `1H_Melee_Attack_Slice_Horizontal` (Knight), hit → `Hit_A`, death → `Death_A`. Resolve with `THREE.AnimationClip.findByName`; report missing clips instead of silently assuming them. The starter switches idle/run/attack, plays Hit_A for authoritative hurt events and Death_A while downed, then returns to idle/run after a server revive.
