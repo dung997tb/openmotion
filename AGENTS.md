@@ -90,6 +90,17 @@ Follow [the shared design system](docs/design-system.md#interaction-and-feedback
 - Reserve geometry for slow content with shared Skeletons and poster fallbacks. Resource errors replace their reserved content and provide recovery; do not leave indefinite loading after a known failure. Stop offscreen/background video work.
 - Verify actual opened menus, Toasts, loading/error states and narrow layouts in both themes. A component rendered in source is not evidence that it layers or behaves correctly in the browser.
 
+## Scenario workflows and guided UX
+
+When building scenario workflows, campaign/topic/role hubs, or any multi-step creation flow, make every step effortless, intuitive and approachable so a user can complete the entire chain smoothly without guesswork or form fatigue:
+
+1. **Minimize cognitive load and form intimidation.** Never greet users with a tall grid of raw fields. Prefer a single natural-language composer with inline fill-in-the-blank parameter slots, clear example hints, sensible defaults carried from upstream steps, and one-click example presets. Keep exhaustive or advanced fields tucked behind an optional progressive-disclosure toggle (such as **All fields**).
+2. **Give every creation step a natural input and one obvious primary action.** Never drop users onto a bare shelf of templates with no composer or prompt input. Pre-fill the step's input from the workflow brief and shared asset pool, let users edit or refine in plain language, attach shared assets inline, and run the step with one primary button.
+3. **Keep templates scenario-relevant and secondary.** Surface only layouts that match the active scenario by default, and place broader template catalogs or link-existing-project pickers behind quiet secondary controls rather than mixing unrelated templates into a vertical workflow.
+4. **Use calm guidance for normal workflow progress.** Unstarted steps and empty pools in a fresh draft are normal states, not errors. Use neutral inline hints with direct jump actions instead of stacked warning or alert banners.
+
+`AGENTS.md` owns this requirement; `CLAUDE.md` links here. Apply it when designing, implementing and reviewing any workflow-oriented UI.
+
 ## Core capabilities and shared APIs
 
 Every new or extended core product capability must be callable by external Agents through the public MCP contract. This includes asset creation and management, model execution, references and versions, project import and editing, preview and export. Keep operations usable independently so external Agents can compose them into their own workflows.

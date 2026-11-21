@@ -645,6 +645,18 @@
 }
 
 /* --- Web page step --- */
+.om-page-composer {
+  gap: var(--motion-space-14);
+  padding: var(--motion-space-18);
+  background: var(--motion-panel);
+  border: 1px solid var(--motion-border);
+  border-radius: var(--motion-radius-xl);
+}
+
+.om-page-composer-input {
+  min-height: 88px;
+}
+
 .om-step-empty-action-card {
   align-items: center;
   padding: var(--motion-space-32) var(--motion-space-16);

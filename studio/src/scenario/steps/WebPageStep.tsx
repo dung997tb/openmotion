@@ -21,6 +21,7 @@ import {
 import type { ScenarioRun, StepIteration } from '../../../../shared/scenario-runs';
 import { findScenarioStep } from '../../../../shared/scenarios';
 import { MenuItem, Select } from '../../components/ui';
+import { FieldTextarea } from '../../components/ui/FormField';
 import { PanelEmptyState } from '../../components/ui/PanelEmptyState';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { designClient } from '../../design/designClient';
@@ -48,6 +49,82 @@ function parseTargetValue(value: string): EmbedImageTarget {
   return { kind: 'append' };
 }
 
+function briefText(brief: Record<string, string | string[]> | undefined, key: string): string {
+  const value = brief?.[key];
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) return value.map(v => v.trim()).filter(Boolean).join(', ');
+  return '';
+}
+
+function buildDefaultPagePrompt(
+  recipe: string | undefined,
+  brief: Record<string, string | string[]> | undefined,
+  locale: string,
+): string {
+  const isZh = locale.toLowerCase().startsWith('zh');
+  const product = briefText(brief, 'productName') || briefText(brief, 'personaName') || briefText(brief, 'concept');
+  const idea = briefText(brief, 'idea');
+  const salePrice = briefText(brief, 'salePrice');
+  const originalPrice = briefText(brief, 'originalPrice');
+  const promoCode = briefText(brief, 'promoCode');
+  const saleWindow = briefText(brief, 'saleWindow');
+  const cta = briefText(brief, 'cta');
+
+  if (recipe === 'sale') {
+    const pricePart = salePrice
+      ? (originalPrice ? `${salePrice} (${isZh ? '原价' : 'was'} ${originalPrice})` : salePrice)
+      : '';
+    const codePart = promoCode ? `${isZh ? '优惠码' : 'code'} ${promoCode}` : '';
+    const parts = [pricePart, codePart, saleWindow].filter(Boolean).join(isZh ? '，' : ', ');
+    if (isZh) {
+      return `${product ? `为「${product}」` : ''}生成黑五商品详情页${parts ? `（${parts}）` : ''}。${idea ? `突出${idea}，` : ''}包含首屏促销头图、核心卖点、商品图画廊与${cta || '立即抢购'}按钮。`;
+    }
+    return `Black Friday sale detail page${product ? ` for ${product}` : ''}${parts ? ` — ${parts}` : ''}. ${idea ? `Highlight ${idea}. ` : ''}Include a bold offer hero, product gallery, key highlights, and "${cta || 'Shop now'}" CTA.`;
+  }
+
+  if (recipe === 'link-in-bio') {
+    const niche = briefText(brief, 'niche');
+    const topic = briefText(brief, 'topic');
+    if (isZh) {
+      return `为${product || 'AI 博主'}${niche ? `（${niche}）` : ''}打造个人主页与外链聚合页，包含头像简介、精选链接、${topic ? `本期主题「${topic}」` : '最新视频'}与视觉作品画廊。`;
+    }
+    return `Creator link-in-bio page${product ? ` for ${product}` : ''}${niche ? ` (${niche})` : ''} with avatar bio, featured links, ${topic ? `latest episode "${topic}"` : 'latest video spotlight'}, and visual gallery.`;
+  }
+
+  if (recipe === 'code-animation') {
+    const style = briefText(brief, 'codeStyle');
+    if (isZh) {
+      return `编写一个全屏交互式 HTML/Canvas 代码动画${product ? `：${product}` : ''}${style ? `（${style} 风格）` : ''}。${idea || '支持流畅粒子动效与高对比标题呈现。'}`;
+    }
+    return `Full-screen interactive HTML/Canvas code animation${product ? ` for "${product}"` : ''}${style ? ` in ${style} style` : ''}. ${idea || 'Smooth kinetic motion, responsive canvas, and crisp typography.'}`;
+  }
+
+  if (isZh) {
+    return `${product ? `为「${product}」` : ''}设计高转化产品落地页。${idea ? `核心介绍：${idea}。` : ''}包含首屏视觉、核心卖点卡片、图片画廊与「${cta || '立即体验'}」行动号召。`;
+  }
+  return `High-converting landing page${product ? ` for ${product}` : ''}. ${idea ? `${idea}. ` : ''}Include hero visual, value proposition cards, product gallery, and "${cta || 'Get started'}" CTA.`;
+}
+
+const PAGE_QUICK_CHIPS: Record<string, readonly { id: string; en: string; zh: string; appendEn: string; appendZh: string }[]> = {
+  sale: [
+    { id: 'countdown', en: '+ Countdown banner', zh: '+ 倒计时横幅', appendEn: 'Add a top countdown urgency banner.', appendZh: '加入顶部倒计时促销横幅。' },
+    { id: 'gallery', en: '+ Multi-angle gallery', zh: '+ 多角度商品图集', appendEn: 'Include a multi-angle product photo gallery.', appendZh: '加入多角度商品实拍画廊。' },
+    { id: 'reviews', en: '+ Buyer reviews & FAQ', zh: '+ 买家好评与 FAQ', appendEn: 'Add customer reviews and shipping FAQ.', appendZh: '加入真实评价与发货售后 FAQ。' },
+  ],
+  'link-in-bio': [
+    { id: 'newsletter', en: '+ Newsletter signup', zh: '+ 订阅入口', appendEn: 'Include an email newsletter signup card.', appendZh: '加入邮件/社群订阅卡片。' },
+    { id: 'social-row', en: '+ Social links', zh: '+ 全平台社媒入口', appendEn: 'Highlight all social platform links at the top.', appendZh: '顶部突出展示全平台社媒入口。' },
+  ],
+  'code-animation': [
+    { id: 'cursor', en: '+ Cursor reactive', zh: '+ 鼠标跟随交互', appendEn: 'Make motion react smoothly to pointer movement.', appendZh: '支持鼠标滑动实时交互反馈。' },
+    { id: 'loop', en: '+ Seamless 15s loop', zh: '+ 无缝循环动画', appendEn: 'Design as a seamless loop ready for video capture.', appendZh: '设计为适合录屏成片的无缝循环动画。' },
+  ],
+  landing: [
+    { id: 'pricing', en: '+ Pricing section', zh: '+ 价格方案区', appendEn: 'Add a clear pricing comparison section.', appendZh: '加入清晰的价格方案对比区。' },
+    { id: 'social-proof', en: '+ Testimonials', zh: '+ 客户口碑', appendEn: 'Include customer logos and testimonials.', appendZh: '加入客户案例与评价模块。' },
+  ],
+};
+
 export function WebPageStep({
   scenario,
   step,
@@ -74,9 +151,26 @@ export function WebPageStep({
   const [templates, setTemplates] = useState<DesignTemplateSummary[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState(false);
+  const [showAllTemplates, setShowAllTemplates] = useState(false);
   const [existingProjects, setExistingProjects] = useState<DesignProject[]>([]);
   const [selectedExistingId, setSelectedExistingId] = useState('');
   const [creatingMode, setCreatingMode] = useState<string | null>(null);
+
+  const defaultPagePrompt = useMemo(
+    () => buildDefaultPagePrompt(pageConfig?.recipe, run?.brief, locale),
+    [pageConfig?.recipe, run?.brief, locale],
+  );
+  const savedDraftPrompt = typeof state.draft.prompt === 'string' && state.draft.prompt.trim()
+    ? state.draft.prompt
+    : '';
+  const [pagePrompt, setPagePrompt] = useState(() => savedDraftPrompt || defaultPagePrompt);
+  const [promptTouched, setPromptTouched] = useState(Boolean(savedDraftPrompt));
+
+  useEffect(() => {
+    if (!promptTouched) {
+      setPagePrompt(savedDraftPrompt || defaultPagePrompt);
+    }
+  }, [savedDraftPrompt, defaultPagePrompt, promptTouched]);
 
   // Linked project state
   const [project, setProject] = useState<DesignProjectDetail | null>(null);
@@ -186,12 +280,44 @@ export function WebPageStep({
   const handleCreateStarter = async () => {
     setCreatingMode('starter');
     try {
+      const trimmedPrompt = pagePrompt.trim();
+      if (trimmedPrompt && trimmedPrompt !== savedDraftPrompt) {
+        await api.mutate(`page-prompt:${step.id}`, 'update_step', {
+          stepId: step.id,
+          draft: { prompt: trimmedPrompt },
+        }).catch(() => {});
+      }
       const res = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
         `create-page:${step.id}:starter`,
         'create_page',
         { stepId: step.id, mode: 'starter' },
       );
-      setProject(res.project);
+      let currentProject = res.project;
+      // If the user already attached images from the shared pool in this step, embed them automatically!
+      if (pageConfig?.mode === 'both' && boundImages.length > 0) {
+        const htmlRes = await designClient.readFile(currentProject.id, currentProject.entry).catch(() => null);
+        const slots = htmlRes ? listHtmlImageTargets(htmlRes.content).filter(item => item.kind === 'slot') : [];
+        for (let i = 0; i < boundImages.length; i += 1) {
+          const item = boundImages[i];
+          const target: EmbedImageTarget = slots[i]
+            ? { kind: 'slot', slot: slots[i].slot }
+            : { kind: 'append' };
+          const embedRes = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
+            `auto-embed:${step.id}:${item.id}:${i}`,
+            'embed_image',
+            {
+              stepId: step.id,
+              designProjectId: currentProject.id,
+              expectedDesignRevision: currentProject.revision,
+              poolItemId: item.id,
+              target,
+              alt: item.label,
+            },
+          ).catch(() => null);
+          if (embedRes?.project) currentProject = embedRes.project;
+        }
+      }
+      setProject(currentProject);
       toast.showToast(t('Starter page created'), 'info', 'feedback');
     } catch (error) {
       if (!isScenarioConflictError(error)) {
@@ -263,6 +389,7 @@ export function WebPageStep({
       .filter((line): line is string => line !== null);
 
     const briefLines = [
+      pagePrompt.trim() ? `Page instructions:\n${pagePrompt.trim()}` : '',
       briefMarkdown(scenario, run?.brief ?? {}),
       run ? `Scenario runId: ${run.id} (link the resulting project via openmotion_assets_use action=scenario command=link_design stepId=${step.id})` : '',
       imageRefs.length
@@ -425,20 +552,89 @@ export function WebPageStep({
   // No project linked yet (create or both mode)
   if (!designProjectId) {
     const preferredSet = new Set(pageConfig?.templates ?? []);
+    const recommendedTemplates = templates.filter(tpl => preferredSet.has(tpl.id));
+    const visibleTemplates = showAllTemplates
+      ? templates.slice(0, 8)
+      : (recommendedTemplates.length > 0 ? recommendedTemplates : templates.slice(0, 3));
+    const hasMoreTemplates = templates.length > visibleTemplates.length;
+    const isZh = locale.toLowerCase().startsWith('zh');
+    const quickChips = PAGE_QUICK_CHIPS[pageConfig?.recipe ?? 'landing'] ?? PAGE_QUICK_CHIPS.landing;
+
     return (
       <div className="om-step-body" data-step-body="web-page">
-        <div className="om-step-toolbar">
-          <div className="om-step-toolbar-group">
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<RemixIcon name="layout-line" size={14} />}
-              loading={creatingMode === 'starter'}
-              disabled={creatingMode !== null}
-              onClick={() => void handleCreateStarter()}
-            >
-              {t('Generate starter page (offline)')}
-            </Button>
+        {renderExportMenu()}
+
+        <section className="om-step-card om-page-composer" data-page-composer="true" aria-label={t('Describe your page')}>
+          <div className="om-brief-composer-head">
+            <div className="om-brief-composer-lead">
+              <span className="om-brief-composer-icon" aria-hidden="true">
+                <RemixIcon name="layout-line" size={16} />
+              </span>
+              <div>
+                <h3 className="om-step-section-title">{t('Describe your page')}</h3>
+                <p className="om-step-muted">{t('Pre-filled from your brief. Tweak what you want and create the page in one click.')}</p>
+              </div>
+            </div>
+          </div>
+
+          <FieldTextarea
+            id={`page-prompt-${step.id}`}
+            className="om-step-textarea om-page-composer-input"
+            rows={3}
+            aria-label={t('Describe your page')}
+            value={pagePrompt}
+            placeholder={defaultPagePrompt}
+            onChange={e => {
+              setPromptTouched(true);
+              setPagePrompt(e.target.value);
+            }}
+          />
+
+          <div className="om-brief-presets">
+            <span className="om-brief-presets-label">{t('Quick additions')}</span>
+            <div className="om-step-chip-list">
+              {quickChips.map(chip => {
+                const addition = isZh ? chip.appendZh : chip.appendEn;
+                const activeChip = pagePrompt.includes(addition);
+                return (
+                  <Button
+                    key={chip.id}
+                    variant={activeChip ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="om-brief-preset-chip"
+                    aria-pressed={activeChip}
+                    onClick={() => {
+                      setPromptTouched(true);
+                      setPagePrompt(prev => {
+                        if (prev.includes(addition)) {
+                          return prev.replace(addition, '').replace(/\s{2,}/g, ' ').trim();
+                        }
+                        return prev.trim() ? `${prev.trim()} ${addition}` : addition;
+                      });
+                    }}
+                  >
+                    {isZh ? chip.zh : chip.en}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+
+          {pageConfig?.mode === 'both' && (
+            <BindingSlot
+              slot="embedImages"
+              label={t('Images to embed')}
+              hint={t('Optional. Pick product or hero images from the shared pool to place automatically.')}
+              kinds={['image']}
+              stepId={step.id}
+              boundIds={boundEmbedIds}
+              pool={pool}
+              api={api}
+              toast={toast}
+            />
+          )}
+
+          <div className="om-brief-composer-bar">
             <Button
               variant="secondary"
               size="sm"
@@ -447,65 +643,85 @@ export function WebPageStep({
             >
               {t('Ask your Agent to design it')}
             </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<RemixIcon name="sparkling-line" size={14} />}
+              loading={creatingMode === 'starter'}
+              disabled={creatingMode !== null}
+              onClick={() => void handleCreateStarter()}
+            >
+              {t('Create page')}
+            </Button>
           </div>
-          <div className="om-step-toolbar-group">{renderExportMenu()}</div>
-        </div>
-
-        <section className="om-step-card" aria-label={t('Start from a Design template')}>
-          <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Start from a Design template')}</h3>
-              <p className="om-step-muted">{t('Pick a starter layout and customize it in this workflow or in Design Studio.')}</p>
-            </div>
-          </div>
-          {templatesError ? (
-            <div className="om-step-inline-error">
-              <span>{t('Could not load Design templates.')}</span>
-              <Button variant="ghost" size="sm" onClick={() => void loadTemplatesAndProjects()}>{t('Retry')}</Button>
-            </div>
-          ) : templatesLoading ? (
-            <div className="om-step-template-grid">
-              {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="om-step-template-skeleton" />)}
-            </div>
-          ) : templates.length > 0 ? (
-            <div className="om-step-template-grid">
-              {templates.slice(0, 8).map(tpl => {
-                const recommended = preferredSet.has(tpl.id);
-                return (
-                  <Button
-                    key={tpl.id}
-                    variant="plain"
-                    type="button"
-                    className="om-step-template-card"
-                    disabled={creatingMode !== null}
-                    onClick={() => void handleCreateFromTemplate(tpl.id)}
-                  >
-                    <ScaledPreviewThumb
-                      src={tpl.previewUrl}
-                      title={tpl.title}
-                      badge={recommended ? t('Recommended') : undefined}
-                    />
-                    <span className="om-step-template-copy">
-                      <strong>{tpl.title}</strong>
-                      <small>{tpl.description}</small>
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="om-step-muted">{t('No templates found for this scenario. Use the offline starter page instead.')}</p>
-          )}
         </section>
 
-        <section className="om-step-card" aria-label={t('Link an existing Design project')}>
-          <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
-              <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+        {(templatesLoading || templatesError || visibleTemplates.length > 0) && (
+          <section className="om-step-card" aria-label={t('Start from a Design template')}>
+            <div className="om-step-section-head">
+              <div>
+                <h3 className="om-step-section-title">{t('Or pick a starting layout')}</h3>
+                <p className="om-step-muted">{t('Pick a starter layout and customize it in this workflow or in Design Studio.')}</p>
+              </div>
+              {(hasMoreTemplates || showAllTemplates) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAllTemplates(prev => !prev)}
+                >
+                  {showAllTemplates
+                    ? t('Show recommended only')
+                    : t('Show all layouts ({count})', { count: templates.length })}
+                </Button>
+              )}
             </div>
-          </div>
-          {existingProjects.length > 0 ? (
+            {templatesError ? (
+              <div className="om-step-inline-error">
+                <span>{t('Could not load Design templates.')}</span>
+                <Button variant="ghost" size="sm" onClick={() => void loadTemplatesAndProjects()}>{t('Retry')}</Button>
+              </div>
+            ) : templatesLoading ? (
+              <div className="om-step-template-grid">
+                {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="om-step-template-skeleton" />)}
+              </div>
+            ) : (
+              <div className="om-step-template-grid">
+                {visibleTemplates.map(tpl => {
+                  const recommended = preferredSet.has(tpl.id);
+                  return (
+                    <Button
+                      key={tpl.id}
+                      variant="plain"
+                      type="button"
+                      className="om-step-template-card"
+                      disabled={creatingMode !== null}
+                      onClick={() => void handleCreateFromTemplate(tpl.id)}
+                    >
+                      <ScaledPreviewThumb
+                        src={tpl.previewUrl}
+                        title={tpl.title}
+                        badge={recommended ? t('Recommended') : undefined}
+                      />
+                      <span className="om-step-template-copy">
+                        <strong>{tpl.title}</strong>
+                        <small>{tpl.description}</small>
+                      </span>
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
+        {existingProjects.length > 0 && (
+          <section className="om-step-card" aria-label={t('Link an existing Design project')}>
+            <div className="om-step-section-head">
+              <div>
+                <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
+                <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+              </div>
+            </div>
             <div className="om-step-link-row">
               <Select
                 label={t('Design project')}
@@ -523,10 +739,8 @@ export function WebPageStep({
                 {t('Link project')}
               </Button>
             </div>
-          ) : (
-            <p className="om-step-muted">{t('No existing Design projects found in this workspace.')}</p>
-          )}
-        </section>
+          </section>
+        )}
       </div>
     );
   }

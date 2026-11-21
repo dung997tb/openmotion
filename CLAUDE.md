@@ -41,6 +41,10 @@ Use opaque, solid theme surfaces for product UI, including menus, Popovers, tool
 
 Follow [the shared UI rules](AGENTS.md#ui-design-system-and-interaction-feedback) and [the design-system interaction contract](docs/design-system.md#interaction-and-feedback-contract). Transient operation results use `useToast` and `StudioToastViewport` on the floating feedback layer, including inside native dialogs; never insert success or failure notices into the content flow. Reuse semantic light/dark tokens, non-modal dropdowns (immediate quick filters; grouped draft selections with live counts and in-panel Apply), padded rounded hover states, one visible focus treatment, and shared loading/fallback geometry. Verify the actual opened states in the browser without shifting or blocking the working area.
 
+## Scenario workflows and guided UX
+
+Follow [Scenario workflows and guided UX](AGENTS.md#scenario-workflows-and-guided-ux) for every workflow-oriented surface or multi-step creation flow. Keep every step simple, natural and approachable so users can complete the entire chain effortlessly: prefer a single fill-in-the-blank composer with one-click examples over raw multi-field forms, give every creation step a clear prompt/input box and one obvious primary action rather than a bare template wall, keep templates scenario-relevant and secondary, and show calm neutral guidance instead of stacked warnings for normal unstarted steps.
+
 ## Product documentation
 
 Follow the [README writing and acknowledgements rule](AGENTS.md#readme-writing-and-acknowledgements) for every README, alternative draft and translation. Keep the main narrative, headings and showcase copy focused on OpenMotion and what each example demonstrates. Put other-product comparisons, inspiration, source-product labels and upstream acknowledgements only in the final **Acknowledgements** section; do not use headings such as "From MotionGit". Preserve licenses and provenance, and keep required setup identifiers, supported agent/model names and explicitly requested example brand names accurate. Verify this placement before finishing README edits.

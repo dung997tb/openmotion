@@ -92,7 +92,7 @@ describe('WebPageStep', () => {
     const mounted = await mountStep(<WebPageStep {...props} />);
 
     try {
-      const starterBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Generate starter page (offline)'))!;
+      const starterBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Create page'))!;
       expect(starterBtn).toBeTruthy();
       await act(async () => { starterBtn.click(); });
 
@@ -197,6 +197,40 @@ describe('WebPageStep', () => {
       expect(jumpBtn).toBeTruthy();
       await act(async () => { jumpBtn.click(); });
       expect(mocks.nav.selectStep).toHaveBeenCalledWith('landing-page');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('shows a pre-filled page prompt composer with quick chips and filters unrelated templates by default', async () => {
+    vi.spyOn(designClient, 'listTemplates').mockResolvedValue({
+      items: [
+        { id: 'pricing-page', title: 'Pricing Page', description: 'Pricing layout', scenario: 'prototype', previewUrl: '/p1', tags: [] },
+        { id: 'trading-dashboard', title: 'Trading Analysis Dashboard', description: 'Unrelated finance layout', scenario: 'prototype', previewUrl: '/p2', tags: [] },
+      ] as never,
+      nextCursor: null,
+    });
+    vi.spyOn(designClient, 'listProjects').mockResolvedValue({ projects: [] });
+
+    const run = makeBaseRun('black-friday', {
+      brief: { productName: 'Holiday Weekender Tote', salePrice: '$79', originalPrice: '$129', promoCode: 'BF40' },
+    });
+    const { props } = createStepProps('black-friday', 'detail-page', { run });
+    const mounted = await mountStep(<WebPageStep {...props} />);
+
+    try {
+      const textarea = mounted.container.querySelector<HTMLTextAreaElement>('#page-prompt-detail-page')!;
+      expect(textarea).toBeTruthy();
+      expect(textarea.value).toContain('Holiday Weekender Tote');
+      expect(textarea.value).toContain('BF40');
+
+      // Recommended template shows; unrelated trading dashboard stays hidden until expanded
+      expect(mounted.container.textContent).toContain('Pricing Page');
+      expect(mounted.container.textContent).not.toContain('Trading Analysis Dashboard');
+
+      const showAllBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Show all layouts (2)'))!;
+      await act(async () => { showAllBtn.click(); });
+      expect(mounted.container.textContent).toContain('Trading Analysis Dashboard');
     } finally {
       await mounted.unmount();
     }
