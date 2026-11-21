@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock('../motion/diagnostics', () => ({ recordBrowserDiagnostic: vi.fn(), browserDiagnostics: () => [], nextDiagnosticRequest: () => 'fixture-request', diagnosticsActive: () => false }));
+vi.mock('@openmotion/observability/browser', () => ({ captureReactBoundaryError: vi.fn() }));
 
 vi.mock("../utils/studioTelemetry", () => ({ trackStudioEvent: vi.fn() }));
 vi.mock("../telemetry/policy", () => ({ browserTelemetryAllowed: () => true }));
@@ -19,6 +20,7 @@ vi.mock("../telemetry/events", () => ({
 
 const { StudioErrorBoundary } = await import("./StudioErrorBoundary");
 const { trackStudioFeedbackShown } = await import("../telemetry/events");
+const { captureReactBoundaryError } = await import("@openmotion/observability/browser");
 
 function Boom(): React.ReactElement {
   throw new Error("timeline exploded");
@@ -88,6 +90,11 @@ describe("StudioErrorBoundary", () => {
     renderCrashed();
     expect(trackStudioFeedbackShown).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "crash" }),
+    );
+    expect(captureReactBoundaryError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "timeline exploded" }),
+      expect.objectContaining({ componentStack: expect.any(String) }),
+      "StudioErrorBoundary",
     );
   });
 

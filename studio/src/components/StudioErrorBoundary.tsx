@@ -5,6 +5,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import { CrashFeedbackPrompt } from "./feedback/CrashFeedbackPrompt";
 import { RecoveryScreen } from './RecoveryScreen';
+import { captureReactBoundaryError } from '@openmotion/observability/browser';
 import { recordBrowserDiagnostic } from '../motion/diagnostics';
 
 interface Props {
@@ -24,6 +25,7 @@ export class StudioErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     recordBrowserDiagnostic('react_crash', error.message, error.stack);
+    captureReactBoundaryError(error, info, 'StudioErrorBoundary');
     console.error("[Studio] Uncaught error:", error, info.componentStack);
     trackStudioEvent("crash", {
       error_message: error.message,

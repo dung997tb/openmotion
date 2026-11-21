@@ -1,6 +1,10 @@
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { IconContext } from "@phosphor-icons/react";
+import {
+  createReactRootErrorHandlers,
+  initBrowserObservability,
+} from "@openmotion/observability/browser";
 import { MotionApp } from "./motion/MotionApp";
 import { ShowThemeToggle } from "./components/ThemeToggle";
 import { readIconTokens } from "./styles/iconTokens";
@@ -20,6 +24,8 @@ import "./motion/application.css";
 import { MotionStudioHost } from "./motion/MotionStudioHost";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
+
+initBrowserObservability();
 
 const ComponentInspector = new URLSearchParams(location.search).get('debug') === 'ui'
   ? lazy(() => import('./components/ComponentInspector'))
@@ -128,7 +134,7 @@ window.addEventListener("unhandledrejection", (event) => {
   recordBrowserDiagnostic('unhandled_rejection', props.error_message, props.stack_trace ?? '');
 });
 
-createRoot(document.getElementById("root")!).render(
+createRoot(document.getElementById("root")!, createReactRootErrorHandlers()).render(
   <StrictMode>
     {/* One icon size and weight for the whole app, taken from the theme file.
         Icons that pass their own size or weight still win. */}

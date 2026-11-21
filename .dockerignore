@@ -17,6 +17,7 @@ studio/build
 mcp-ui/template-recommendations/build
 web/inline-video.html
 tracking/dist
+packages/observability/dist
 dist
 coverage
 

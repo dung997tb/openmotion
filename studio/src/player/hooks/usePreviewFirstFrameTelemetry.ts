@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { parseTimelineFromDOM } from "../lib/timelineDOM";
 import { readTimelineDurationFromDocument } from "../lib/timelineElementHelpers";
 import type { PreviewIframeSlot } from "./useTimelineSyncCallbacks";
+import { recordPerformanceMetric } from "@openmotion/observability/browser";
 import { trackPreviewFirstFrame } from "../../telemetry/events";
 import { getBrowserSystemMeta } from "../../telemetry/system";
 
@@ -39,8 +40,16 @@ export function usePreviewFirstFrameTelemetry(previewSlots: PreviewIframeSlot[])
       if (reportedPaintsRef.current.has(reportKey)) return;
       reportedPaintsRef.current.add(reportKey);
       const complexity = readPreviewComplexity(iframe.contentDocument);
+      const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
+      recordPerformanceMetric("openmotion.preview.first_frame_ms", durationMs, {
+        unit: "millisecond",
+        attributes: {
+          clip_count: complexity.clip_count,
+          media_clip_count: complexity.media_clip_count,
+        },
+      });
       trackPreviewFirstFrame({
-        duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
+        duration_ms: durationMs,
         composition_seconds: readTimelineDurationFromDocument(iframe.contentDocument),
         ...complexity,
         studio_version: getBrowserSystemMeta().studio_version,

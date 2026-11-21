@@ -13,7 +13,8 @@ import { CommunityLink } from './CommunityLink';
 import { GitHubLink } from './GitHubLink';
 import { repositorySupportLinks } from './githubRepository';
 import type { SettingsSection } from './SettingsCenter';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { setObservabilityContext } from '@openmotion/observability/browser';
 
 import { CreativeNavigation, type CreativeNavigationProps } from './CreativeNavigation';
 import { WorkspaceResourceActions } from './WorkspaceResourceActions';
@@ -76,6 +77,15 @@ export function WorkspaceUtilityActions({ openSettings }: { openSettings: (secti
 export function ApplicationAccountMenu({ settings, openSettings }: { settings: SettingsSection | null; openSettings: (section: SettingsSection) => void }) {
   const { t, locale, setLocale } = useI18n();
   const { account } = useAccountSummary();
+  useEffect(() => {
+    if (!account) return;
+    setObservabilityContext({
+      userId: account.state === 'signed-in' ? (account.userId ?? null) : null,
+      workspaceId: account.activeWorkspace?.id ?? null,
+      workspaceRole: account.activeWorkspace?.role ?? null,
+      authMode: account.authMode ?? null,
+    });
+  }, [account]);
   const userName = account?.user?.name?.trim() || account?.user?.email?.trim() || t('Account');
   const workspaceLabel = account?.activeWorkspace?.name;
   const isDevMode = account?.authMode === 'dev';
