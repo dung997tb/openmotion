@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { observeStudioSavedAt } from '../utils/studioSaveState';
 import { useWorkspace } from './useWorkspace';
 import { I18nProvider, useI18n } from '../i18n/I18n';
 import { languages, translate } from '../i18n/messages';
@@ -267,4 +268,101 @@ it.each([false, true])('guards browser history navigation before replacing the p
     expect(location.href).toBe(new URL(originalUrl, location.origin).href);
     expect(workspace.navigationError?.message).toBe('Unsaved edit');
   } else expect(onNavigate).toHaveBeenCalledWith(new URL(targetUrl, location.origin).href, true);
+});
+
+
+const countReads = () => ({
+  status: fetcher.mock.calls.filter(([url]) => url.includes('/project/status?')).length,
+  catalog: fetcher.mock.calls.filter(([url]) => url.endsWith('/projects')).length,
+});
+const advance = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
+
+it('bounds idle reads and coalesces save notifications into one scoped status read', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    await advance(60_000);
+    expect(countReads()).toEqual({ status: 3, catalog: 2 });
+    act(() => {
+      observeStudioSavedAt(second, Date.now());
+      observeStudioSavedAt(first, Date.now());
+      observeStudioSavedAt(first, Date.now() + 1);
+    });
+    await advance(1800);
+    expect(countReads()).toEqual({ status: 4, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('pauses while hidden and coalesces foreground and online checks', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await advance(120_000);
+    expect(countReads()).toEqual({ status: 1, catalog: 1 });
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('online'));
+    await advance(0);
+    expect(countReads()).toEqual({ status: 2, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('refreshes only status for an active export and only the catalog for an empty session', async () => {
+  vi.useFakeTimers();
+  try {
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => url.includes('/project/status?')
+      ? Response.json({ ...status, exportJob: { id: 'render', state: 'running' } }) : original(url, init));
+    await mount(async () => {}, first);
+    await advance(5400);
+    expect(countReads()).toEqual({ status: 4, catalog: 1 });
+    fetcher.mockImplementation(original);
+    fetcher.mockClear();
+    history.replaceState(null, '', '/?session=waiting-session');
+    await mount(async () => {}, undefined, 'waiting-session');
+    await advance(5400);
+    expect(countReads()).toEqual({ status: 1, catalog: 4 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('waits for in-flight reads before reconciling a foreground event', async () => {
+  vi.useFakeTimers();
+  try {
+    const original = fetcher.getMockImplementation()!;
+    let finish!: () => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {
+      finish = () => resolve(Response.json(status));
+    }));
+    await mount(async () => {}, first);
+    window.dispatchEvent(new Event('online'));
+    await advance(1000);
+    expect(countReads()).toEqual({ status: 1, catalog: 2 });
+    fetcher.mockImplementation(original);
+    await act(async () => finish());
+    await advance(0);
+    expect(countReads()).toEqual({ status: 2, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('backs off only the failing endpoint and restores its idle cadence after recovery', async () => {
+  vi.useFakeTimers();
+  try {
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/project/status?')) throw new TypeError('Disconnected');
+      return original(url, init);
+    });
+    await mount(async () => {}, first);
+    await advance(1800);
+    await advance(3599);
+    expect(countReads()).toEqual({ status: 2, catalog: 1 });
+    expect(workspace.connectionError).toBe('Disconnected');
+    fetcher.mockImplementation(original);
+    await advance(1);
+    expect(workspace.connectionError).toBe('');
+    await advance(7200);
+    expect(countReads()).toEqual({ status: 3, catalog: 1 });
+  } finally { vi.useRealTimers(); }
 });
