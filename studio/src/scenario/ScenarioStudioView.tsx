@@ -123,6 +123,21 @@ export function ScenarioStudioView({
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Switching to another draft (or starting a new one) starts from that draft's brief.
+  // The first save of a fresh page creates the run and keeps what was typed.
+  const runIdRef = useRef(run?.id ?? null);
+  useEffect(() => {
+    const previous = runIdRef.current;
+    runIdRef.current = run?.id ?? null;
+    if (!previous || !run || previous === run.id) return;
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    dirty.current.clear();
+    const reset = Object.fromEntries(fieldIds.map(id => [id, briefText(run.brief, id)]));
+    latest.current = reset;
+    setValues(reset);
+    setHandedOffAt(null);
+  }, [fieldIds, run]);
+
   // Take remote brief values for fields the person is not editing.
   useEffect(() => {
     setValues(previous => {
@@ -133,15 +148,18 @@ export function ScenarioStudioView({
     });
   }, [fieldIds, run?.brief]);
 
+  /** Saves typed fields; resolves false when the brief could not be saved. */
   const flush = useCallback(async () => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-    if (!dirty.current.size) return;
+    if (!dirty.current.size) return true;
     const patch = Object.fromEntries([...dirty.current].map(id => [id, latest.current[id] ?? '']));
     try {
       await api.mutate('studio-brief', 'update_brief', { brief: patch });
       for (const id of Object.keys(patch)) if (latest.current[id] === patch[id]) dirty.current.delete(id);
+      return true;
     } catch {
       // useScenarioRun reports conflicts; the typed values stay so nothing is lost.
+      return false;
     }
   }, [api]);
 
@@ -179,7 +197,11 @@ export function ScenarioStudioView({
     }
     setMaking(true);
     try {
-      await flush();
+      // Only hand over a brief the run has saved, so the Agent never gets stale fields.
+      if (!(await flush())) {
+        toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
+        return;
+      }
       if (await onCopyAgentPrompt(latest.current.idea)) setHandedOffAt(Date.now());
     } finally {
       setMaking(false);

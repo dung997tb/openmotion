@@ -1142,6 +1142,7 @@ export function ScenarioWorkspace({
             <div className="om-agent-mode-state">{errorStateNode}</div>
           ) : (
             <ScenarioStudioView
+              key={scenario.id}
               scenario={scenario}
               run={run}
               api={stepApi}
