@@ -4,9 +4,9 @@ type TransportPosition = { time: number; playing: boolean };
 const pending = new WeakMap<HTMLIFrameElement, TransportPosition>();
 
 // Only an expired or replaced lease starts a new document in the same live iframe.
-export function rememberPreviewPosition(frame: HTMLIFrameElement) {
+export function rememberPreviewPosition(frame: HTMLIFrameElement, runtimeTime?: number) {
   const player = usePlayerStore.getState();
-  const time = player.isPlaying ? liveTime.latest() : player.currentTime;
+  const time = runtimeTime ?? (player.isPlaying ? liveTime.latest() : player.currentTime);
   pending.set(frame, { time, playing: player.isPlaying });
   if (player.isPlaying) player.requestPlayback(false);
 }

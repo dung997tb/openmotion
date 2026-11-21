@@ -38,6 +38,8 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       applyPreviewVariablesToUrl(url);
       let size = initialPortrait.current ? [1080, 1920] : [1920, 1080];
       let ready = false;
+      let runtimeTime: number | undefined;
+      let bridge: ReturnType<typeof createPreviewAdapter> | undefined;
       let loadId = 0;
       let startedAt = performance.now();
       let deadline: ReturnType<typeof setTimeout>;
@@ -57,9 +59,9 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         if (!passive) usePlayerStore.getState().markPreviewBooted();
       }
       function message(event: MessageEvent) {
-        if (ready || event.data?.type !== "timeline-state" || !(event.data.duration > 0)) return;
-        const adapter = createPreviewAdapter({ iframe: iframe!, expectedOrigin: props.origin });
-        if (!adapter.accepts(event)) return;
+        if (event.data?.type !== "timeline-state" || !bridge?.accepts(event)) return;
+        if (Number.isFinite(event.data.currentTime)) runtimeTime = event.data.currentTime;
+        if (ready || !(event.data.duration > 0)) return;
         ready = true;
         setError(undefined);
         clearTimeout(deadline);
@@ -83,7 +85,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       observer.observe(stage);
       window.addEventListener("message", message);
       lease.current = bindPreviewLease(url, props.origin, (next) => {
-        if (ready && !passive && !callbacks.current.noLoadTimeout) rememberPreviewPosition(iframe);
+        if (ready && !passive && !callbacks.current.noLoadTimeout) rememberPreviewPosition(iframe, runtimeTime);
         ready = false;
         setError(undefined);
         clearTimeout(deadline);
@@ -92,7 +94,9 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         loadId++;
         callbacks.current.onReadyToShowChange?.(false);
         callbacks.current.onCompositionLoadingChange?.(true);
+        runtimeTime = undefined;
         iframe.src = next.href;
+        bridge = createPreviewAdapter({ iframe, expectedOrigin: props.origin });
         deadline = setTimeout(() => fail("The composition preview did not become ready."), 15_000);
       }, fail);
       return () => {
