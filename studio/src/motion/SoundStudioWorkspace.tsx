@@ -2,7 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { assetMediaUrl, assetVersion, type AssetVersion, type LibraryAsset } from '../../../shared/asset-library';
-import type { AudioKind } from '../../../shared/audio-kind';
+import { classifyAudioKind, type AudioKind } from '../../../shared/audio-kind';
 import { resumableJob, type GenerationJob, type Model } from '../../../shared/gateway';
 import { formatDuration } from '../components/sidebar/assetHelpers';
 import { Menu, MenuItem, MenuSeparator } from '../components/ui/Menu';
@@ -34,6 +34,7 @@ import {
   SOUND_TABS,
   classifyAudioTrackTab,
   findSoundTab,
+  isSfxModel,
   type SoundLiveTabId,
   type SoundTabDefinition,
   type SoundTabId,
@@ -69,7 +70,7 @@ function buildAssetTrack(
   t: (s: string) => string,
 ): SoundPlayableTrack {
   const models = studio.catalog.catalog?.models;
-  const kind = classifyAudioTrackTab(version.model, models, version.source);
+  const kind = classifyAudioTrackTab(version.model, models, version.source, version.audioKind);
   const modelLabel = resolveAudioModelLabel(version.model, models);
   const voiceName = kind === 'speech'
     ? resolveSavedVoiceName(version.parameters?.voice, version.model, models, true)
@@ -118,7 +119,7 @@ function SoundGeneratingRow({
   const saving = job.phase === 'downloading' || job.phase === 'saving';
   const reconnecting = working && job.phase === 'reconnecting';
   const voiceName = resolveSavedVoiceName(job.parameters?.voice, job.model.id, models, true);
-  const tabKind = classifyAudioTrackTab(job.model.id, models);
+  const tabKind = classifyAudioKind(job.model.id, job.model.mode, 'generated', `${job.model.modelId} ${job.model.label}`);
   const primaryTitle = voiceName
     ?? (tabKind === 'sfx' ? t('Sound effects') : tabKind === 'speech' ? t('Speech') : t('Music'));
 
@@ -449,15 +450,26 @@ export function SoundStudioWorkspace({
       ? { [draft.model]: { values: { ...draft.parameters }, advanced: '{}' } }
       : {},
   );
+  const syncedDraftParamsRef = useRef<Record<string, unknown> | undefined>(
+    draft.model && draft.parameters ? draft.parameters : undefined,
+  );
 
-  // Sync parameter draft when cross-tab initial draft brings explicit parameters.
+  const { selected: selectedModel, preferred: preferredModel } = resolveSoundModels(studio, liveTab);
+  const activeModel = selectedModel ?? preferredModel;
+  const models = studio.catalog.catalog?.models;
+
+  // Sync parameter draft once when a cross-tab initial draft brings explicit parameters.
   useEffect(() => {
-    if (!draft.model || !draft.parameters || Object.keys(draft.parameters).length === 0) return;
+    if (!draft.parameters || Object.keys(draft.parameters).length === 0) return;
+    if (syncedDraftParamsRef.current === draft.parameters) return;
+    const targetModelId = draft.model ?? activeModel?.id;
+    if (!targetModelId) return;
+    syncedDraftParamsRef.current = draft.parameters;
     setParameterDrafts(current => {
-      if (current[draft.model!]) return current;
-      return { ...current, [draft.model!]: { values: { ...draft.parameters }, advanced: '{}' } };
+      const prev = current[targetModelId] ?? emptyParameters;
+      return { ...current, [targetModelId]: { ...prev, values: { ...prev.values, ...draft.parameters } } };
     });
-  }, [draft.model, draft.parameters]);
+  }, [draft.model, draft.parameters, activeModel?.id]);
 
   // Track any active audio job observed on screen so reload-recovered jobs transition cleanly
   // in-place to either their completed track row (with New badge) or an inline failed row.
@@ -471,10 +483,6 @@ export function SoundStudioWorkspace({
       return missing.length > 0 ? [...missing, ...current] : current;
     });
   }, [jobs]);
-
-  const { selected: selectedModel, preferred: preferredModel } = resolveSoundModels(studio, liveTab);
-  const activeModel = selectedModel ?? preferredModel;
-  const models = studio.catalog.catalog?.models;
 
   const featuredRecipe = SOUND_MUSIC_RECIPES[0];
   const featuredDemoTrack: SoundPlayableTrack = useMemo(() => ({
@@ -519,7 +527,7 @@ export function SoundStudioWorkspace({
 
   const filteredAssetTracks = useMemo(() => {
     if (typeFilter === 'all' || hasServerAudioKind) return allAssetTracks;
-    return allAssetTracks.filter(track => classifyAudioTrackTab(track.version?.model, models, track.version?.source) === typeFilter);
+    return allAssetTracks.filter(track => classifyAudioTrackTab(track.version?.model, models, track.version?.source, track.version?.audioKind) === typeFilter);
   }, [allAssetTracks, typeFilter, hasServerAudioKind, models]);
 
   // Unified stream jobs: in-progress, save-pending and resumable jobs always appear;
@@ -678,29 +686,74 @@ export function SoundStudioWorkspace({
   );
   const showSourceFilter = browser.source !== 'all' || (seenSources.generated && seenSources.upload);
 
-  const applyPromptToComposer = (text: string, notice?: string) => {
+  const applyStarterPrompt = (targetTab: SoundLiveTabId, text: string, notice: string) => {
+    if (targetTab !== activeTab && studio.selectSoundTab) {
+      studio.selectSoundTab(targetTab, { modality: 'audio', prompt: text, references: [] });
+      setMobileView('create');
+      requestAnimationFrame(() => promptRef.current?.focus());
+      onNotify(notice);
+      return;
+    }
+    if (targetTab !== liveTab && studio.reuseInScene) {
+      studio.reuseInScene(targetTab === 'speech' ? 'speech' : 'music', { modality: 'audio', prompt: text, references: [] });
+      onNotify(notice);
+      return;
+    }
     setDraft(current => ({ ...current, prompt: text }));
     setMobileView('create');
     requestAnimationFrame(() => promptRef.current?.focus());
-    if (notice) onNotify(notice);
+    onNotify(notice);
+  };
+
+  const resolveSfxStarterModel = (): Model | undefined => {
+    if (liveTab === 'sfx' && activeModel) return activeModel;
+    const gateway = studio.catalog.catalog;
+    const sfxModels = gateway?.models.filter(
+      model => model.modality === 'audio' && model.mode !== 'text-to-speech' && isSfxModel(model),
+    ) ?? [];
+    const availableSfx = sfxModels.filter(model =>
+      gateway?.status.providers.some(provider => provider.id === model.provider && provider.available),
+    );
+    return availableSfx[0] ?? sfxModels[0];
   };
 
   const applySfxStarter = (starter: SoundSfxStarter) => {
     const localizedPrompt = t(starter.prompt);
+    const targetModel = resolveSfxStarterModel();
     const nextValues: Record<string, unknown> = {
       duration_seconds: starter.durationSeconds,
       ...(starter.loop ? { loop: true } : {}),
     };
-    if (activeModel) {
+    if (targetModel) {
       setParameterDrafts(current => {
-        const prev = current[activeModel.id] ?? emptyParameters;
-        return { ...current, [activeModel.id]: { ...prev, values: { ...prev.values, ...nextValues } } };
+        const prev = current[targetModel.id] ?? emptyParameters;
+        return { ...current, [targetModel.id]: { ...prev, values: { ...prev.values, ...nextValues } } };
       });
+    }
+    const nextDraft: AssetDraft = {
+      modality: 'audio',
+      prompt: localizedPrompt,
+      ...(targetModel ? { model: targetModel.id } : {}),
+      parameters: nextValues,
+      references: [],
+    };
+    if (activeTab !== 'sfx' && studio.selectSoundTab) {
+      studio.selectSoundTab('sfx', nextDraft, targetModel?.id ?? null);
+      setMobileView('create');
+      requestAnimationFrame(() => promptRef.current?.focus());
+      onNotify(t('Prompt loaded into editor'));
+      return;
+    }
+    if (liveTab !== 'sfx' && studio.reuseInScene) {
+      studio.reuseInScene('music', nextDraft, targetModel?.id ?? null);
+      onNotify(t('Prompt loaded into editor'));
+      return;
     }
     setDraft(current => ({
       ...current,
       prompt: localizedPrompt,
-      ...(activeModel ? { model: activeModel.id, parameters: { ...(current.parameters ?? {}), ...nextValues } } : {}),
+      ...(targetModel ? { model: targetModel.id } : {}),
+      parameters: { ...(current.parameters ?? {}), ...nextValues },
     }));
     setMobileView('create');
     requestAnimationFrame(() => promptRef.current?.focus());
@@ -720,9 +773,14 @@ export function SoundStudioWorkspace({
     }
   };
 
-  const hydrateComposer = (prompt: string, modelId: string | undefined, parameters: Record<string, unknown> | undefined) => {
+  const hydrateComposer = (
+    prompt: string,
+    modelId: string | undefined,
+    parameters: Record<string, unknown> | undefined,
+    savedAudioKind?: AudioKind,
+  ) => {
     const matchedModel = modelId ? models?.find(m => m.id === modelId) : undefined;
-    const classified = classifyAudioTrackTab(modelId, models);
+    const classified = classifyAudioTrackTab(modelId, models, undefined, savedAudioKind);
     const targetTab: SoundLiveTabId = classified === 'upload' ? liveTab : classified;
 
     if (modelId && parameters && Object.keys(parameters).length > 0) {
@@ -769,11 +827,16 @@ export function SoundStudioWorkspace({
 
   const reuseTrack = (track: SoundPlayableTrack) => {
     if (!track.prompt) return;
-    hydrateComposer(track.prompt, track.version?.model, track.version?.parameters);
+    hydrateComposer(track.prompt, track.version?.model, track.version?.parameters, track.version?.audioKind);
   };
 
   const recreateJob = (job: GenerationJob) => {
-    hydrateComposer(job.prompt, job.model.id, job.parameters);
+    hydrateComposer(
+      job.prompt,
+      job.model.id,
+      job.parameters,
+      classifyAudioKind(job.model.id, job.model.mode, 'generated', `${job.model.modelId} ${job.model.label}`),
+    );
   };
 
   const handleCreated = (job: GenerationJob) => {
@@ -848,7 +911,7 @@ export function SoundStudioWorkspace({
     const progress = isCurrent && trackDuration > 0 ? Math.min(1, player.currentTime / trackDuration) : 0;
     const isFresh = newAssetIds.has(asset.id);
     const isSaving = updatingAssets.has(asset.id);
-    const trackKind = classifyAudioTrackTab(version.model, models, version.source);
+    const trackKind = classifyAudioTrackTab(version.model, models, version.source, version.audioKind);
     const modelLabel = resolveAudioModelLabel(version.model, models);
     const voiceName = trackKind === 'speech'
       ? resolveSavedVoiceName(version.parameters?.voice, version.model, models, true)
@@ -1314,10 +1377,7 @@ export function SoundStudioWorkspace({
                               type="button"
                               variant="plain"
                               className="om-nav-item om-sound-use-btn"
-                              onClick={() => {
-                                if (liveTab !== 'music') pivotToLiveTab('music');
-                                applyPromptToComposer(t(featuredRecipe.prompt), t('Prompt loaded into editor'));
-                              }}
+                              onClick={() => applyStarterPrompt('music', t(featuredRecipe.prompt), t('Prompt loaded into editor'))}
                             >
                               <RemixIcon name="add-line" size={14} />
                               {t('Use')}
@@ -1335,10 +1395,7 @@ export function SoundStudioWorkspace({
                               type="button"
                               variant="plain"
                               className="om-nav-item om-sound-use-btn"
-                              onClick={() => {
-                                if (liveTab !== 'music') pivotToLiveTab('music');
-                                applyPromptToComposer(t(recipe.prompt), t('Prompt loaded into editor'));
-                              }}
+                              onClick={() => applyStarterPrompt('music', t(recipe.prompt), t('Prompt loaded into editor'))}
                             >
                               <RemixIcon name="add-line" size={14} />
                               {t('Use')}
@@ -1364,10 +1421,7 @@ export function SoundStudioWorkspace({
                               type="button"
                               variant="plain"
                               className="om-nav-item om-sound-use-btn"
-                              onClick={() => {
-                                if (liveTab !== 'sfx') pivotToLiveTab('sfx');
-                                applySfxStarter(starter);
-                              }}
+                              onClick={() => applySfxStarter(starter)}
                             >
                               <RemixIcon name="add-line" size={14} />
                               {t('Use')}
@@ -1395,10 +1449,7 @@ export function SoundStudioWorkspace({
                                 type="button"
                                 variant="plain"
                                 className="om-nav-item om-sound-use-btn"
-                                onClick={() => {
-                                  if (liveTab !== 'speech') pivotToLiveTab('speech');
-                                  applyPromptToComposer(localized, t('Script loaded into editor'));
-                                }}
+                                onClick={() => applyStarterPrompt('speech', localized, t('Script loaded into editor'))}
                               >
                                 <RemixIcon name="add-line" size={14} />
                                 {t('Use')}

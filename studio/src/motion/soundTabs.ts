@@ -1,4 +1,4 @@
-import { classifyAudioKind, isSfxModelText, type AudioKind } from '../../../shared/audio-kind';
+import { classifyAudioKind, isAudioKind, isSfxModelText, type AudioKind } from '../../../shared/audio-kind';
 import type { Model } from '../../../shared/gateway';
 
 export type SoundLiveTabId = 'music' | 'sfx' | 'speech';
@@ -133,13 +133,14 @@ export function classifyAudioTrackTab(
   modelId: string | undefined,
   models: readonly Model[] | undefined,
   source?: string,
+  savedAudioKind?: AudioKind,
 ): AudioKind {
-  if (source === 'upload' || !modelId) return 'upload';
+  if (source === 'upload') return 'upload';
+  if (isAudioKind(savedAudioKind)) return savedAudioKind;
+  if (!modelId) return 'upload';
   const matched = models?.find(model => model.id === modelId);
   if (matched) {
-    if (matched.mode === 'text-to-speech') return 'speech';
-    if (isSfxModel(matched)) return 'sfx';
-    return 'music';
+    return classifyAudioKind(matched.id, matched.mode, source, `${matched.modelId} ${matched.label}`);
   }
   return classifyAudioKind(modelId, undefined, source);
 }

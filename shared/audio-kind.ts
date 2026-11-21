@@ -2,18 +2,22 @@ export type AudioKind = 'music' | 'sfx' | 'speech' | 'upload';
 
 export const AUDIO_KINDS: readonly AudioKind[] = ['music', 'sfx', 'speech', 'upload'];
 
+export function isAudioKind(value: unknown): value is AudioKind {
+  return typeof value === 'string' && (AUDIO_KINDS as readonly string[]).includes(value);
+}
+
 /** Identify dedicated sound-effects / foley endpoints without misclassifying music generators. */
 export function isSfxModelText(text: string): boolean {
   return /sound[-_ ]?effects?|\bsfx\b|foley|audio[-_ ]?effects?/i.test(text);
 }
 
-/** Shared audio domain classifier used by both server-side filtering and Sound Studio UI. */
-export function classifyAudioKind(modelId?: string, mode?: string, source?: string): AudioKind {
+/** Shared audio domain classifier used by both server-side persistence/filtering and Sound Studio UI. */
+export function classifyAudioKind(modelId?: string, mode?: string, source?: string, label?: string): AudioKind {
   if (source === 'upload' || !modelId) return 'upload';
   if (mode === 'text-to-speech') return 'speech';
-  const lower = modelId.toLowerCase();
-  if (isSfxModelText(lower)) return 'sfx';
-  if (/tts|speech|kokoro|voice|elevenlabs-v3/.test(lower)) return 'speech';
+  const combined = label ? `${modelId} ${label}` : modelId;
+  if (isSfxModelText(combined)) return 'sfx';
+  if (/tts|speech|kokoro|voice|elevenlabs-v3/i.test(modelId)) return 'speech';
   return 'music';
 }
 

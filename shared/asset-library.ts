@@ -7,6 +7,7 @@ export type AssetVersion = {
   id: string; createdAt: number; source: 'upload' | 'generated'; filename: string; name?: string;
   mimeType: string; bytes: number; sha256: string; width?: number; height?: number; duration?: number;
   waveform?: number[];
+  audioKind?: AudioKind;
   prompt?: string; model?: string; parameters?: Record<string, unknown>;
   references: AssetReference[]; parentVersionId?: string; jobId?: string; conversationId?: string;
   requestId?: string; requestHash?: string;

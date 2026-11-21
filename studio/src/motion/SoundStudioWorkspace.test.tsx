@@ -1048,10 +1048,37 @@ describe('SoundStudioWorkspace', () => {
     await act(async () => { infoBtn.click(); });
     expect(onOpenAsset).toHaveBeenCalledWith(speechAsset);
 
-    // Switching to an empty Music filter surfaces Music starters rather than a dead empty state.
+    // Switching to an empty Music filter surfaces Music starters rather than a dead empty state,
+    // and clicking Use forwards the prompt through selectSoundTab so draftKey switches preserve it.
     const musicFilter = [...host.querySelectorAll<HTMLButtonElement>('.om-sound-source-tabs button')].find(b => b.textContent === 'Music')!;
     await act(async () => { musicFilter.click(); });
     expect(host.querySelector('.om-sound-starters')).not.toBeNull();
     expect(host.querySelector('.om-sound-sample-row')).not.toBeNull();
+    const musicUseBtn = host.querySelector<HTMLButtonElement>('.om-sound-sample-row .om-sound-use-btn')!;
+    await act(async () => { musicUseBtn.click(); });
+    expect(studio.selectSoundTab).toHaveBeenCalledWith(
+      'music',
+      expect.objectContaining({ modality: 'audio', prompt: expect.stringContaining('soft piano') }),
+    );
+
+    // Switching to an empty SFX filter from the Speech tab forwards both cue and SFX parameters to the SFX model.
+    const sfxFilter = [...host.querySelectorAll<HTMLButtonElement>('.om-sound-source-tabs button')].find(b => b.textContent === 'Sound effects')!;
+    await act(async () => { sfxFilter.click(); });
+    const sfxUseBtn = host.querySelector<HTMLButtonElement>('.om-sound-starter-row .om-sound-use-btn')!;
+    await act(async () => { sfxUseBtn.click(); });
+    expect(studio.selectSoundTab).toHaveBeenCalledWith(
+      'sfx',
+      expect.objectContaining({
+        modality: 'audio',
+        prompt: expect.stringContaining('Crisp glassy UI confirmation tap'),
+        model: falSfx.id,
+        parameters: expect.objectContaining({ duration_seconds: 2 }),
+      }),
+      falSfx.id,
+    );
+
+    // Persisted audioKind overrides ID-only fallback even for opaque model IDs without catalog entries.
+    expect(classifyAudioTrackTab('opendesign:acme/narrator-v2', undefined, 'generated', 'speech')).toBe('speech');
+    expect(classifyAudioTrackTab('opendesign:acme/impact-v1', undefined, 'generated', 'sfx')).toBe('sfx');
   });
 });

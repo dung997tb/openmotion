@@ -398,14 +398,14 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
     setGamesView(false); setKind(next);
   }} />;
   const detailModels = studio?.catalog.catalog?.models;
-  const detailAudioKind = selected?.modality === 'audio' && version ? classifyAudioTrackTab(version.model, detailModels, version.source) : undefined;
+  const detailAudioKind = selected?.modality === 'audio' && version ? classifyAudioTrackTab(version.model, detailModels, version.source, version.audioKind) : undefined;
   const detailModelLabel = selected?.modality === 'audio' && version ? resolveAudioModelLabel(version.model, detailModels) : undefined;
   const detailVoiceName = detailAudioKind === 'speech' && version ? resolveSavedVoiceName(version.parameters?.voice, version.model, detailModels, true) : undefined;
   const detailDurationLabel = version?.duration && version.duration > 0 ? formatDuration(version.duration) : undefined;
   const editSoundAsset = () => {
     if (!selected || !version || !studio) return;
     tracking.reportAssetsClick('asset_detail', 'edit_version', { modality: selected.modality });
-    const classified = classifyAudioTrackTab(version.model, detailModels, version.source);
+    const classified = classifyAudioTrackTab(version.model, detailModels, version.source, version.audioKind);
     const targetTab = classified === 'upload' ? (studio.soundTab === 'sfx' || studio.soundTab === 'speech' ? studio.soundTab : 'music') : classified;
     const nextDraft: AssetDraft = {
       modality: 'audio',
