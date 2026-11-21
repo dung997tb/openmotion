@@ -474,7 +474,7 @@ export function scenarioStarterPage(
   const propsToRender = valueProps.length
     ? valueProps.slice(0, 5)
     : zh
-      ? ['一处输入创意，全链路复用素材', '版本化可回溯的页面与视觉资产', '一键打包网页、媒体与社媒文案']
+      ? ['一处输入灵感，全程共享素材', '网页与配图随时预览、一键替换', '一键打包网页、媒体与社媒文案']
       : ['Start from one brief and reuse every asset across steps', 'Versioned HTML pages with embedded local images', 'Export one organized ZIP package ready for delivery'];
 
   const propCards = propsToRender
@@ -695,7 +695,7 @@ const EN_CTAS = [
 
 const ZH_HOOKS = [
   '一眼爱上的 {subject}，完整视觉与亮点来了！',
-  '这次把 {subject} 做成了全链路成品，细节拉满。',
+  '这次把 {subject} 从灵感到成片一次搞定，细节拉满。',
   '关于 {subject}，你最关心的重点都在这一条：',
   '全新上线：{subject}，从画面到体验一次看个够。',
 ] as const;

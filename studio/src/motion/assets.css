@@ -62,10 +62,13 @@
 .om-asset-detail { display: grid; gap: var(--motion-space-16); margin-top: var(--motion-space-20); }
 .om-asset-detail .om-asset-preview { max-height: 45vh; }
 .om-asset-picker { margin-top: var(--motion-space-20); display: grid; gap: var(--motion-space-16); }
+.om-asset-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--motion-space-12); flex-wrap: wrap; }
+.om-asset-picker-bulk { display: flex; align-items: center; gap: var(--motion-space-8); }
 .om-asset-picker .om-asset-results { max-height: 45vh; overflow: auto; }
 .om-asset-picker-selection { display: flex; gap: var(--motion-space-12); align-items: center; flex-wrap: wrap; }
 .om-asset-picker-selection [role="combobox"] { width: 100px; }
 .om-asset-picker-selection strong { flex: 1; min-width: 100px; overflow-wrap: anywhere; }
+.om-asset-picker-footer-actions { display: flex; align-items: center; gap: var(--motion-space-8); margin-inline-start: auto; flex-wrap: wrap; }
 .om-asset-job { display: flex; justify-content: space-between; align-items: center; gap: var(--motion-space-12); padding: var(--motion-space-12); margin-block: var(--motion-space-8); }
 .om-asset-job > div { min-width: 0; overflow-wrap: anywhere; }
 @container asset-workspace (max-width: 1200px) {

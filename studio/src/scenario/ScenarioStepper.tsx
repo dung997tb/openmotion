@@ -96,14 +96,16 @@ export function ScenarioStepper({
                       <RemixIcon name={step.icon} size={14} />
                     </span>
                     <span className="om-scenario-step-tab-title">{t(step.title)}</span>
-                    <span
-                      className="om-scenario-step-status-glyph"
-                      data-status={status}
-                      title={t(glyph.label)}
-                      aria-label={t(glyph.label)}
-                    >
-                      <RemixIcon name={glyph.icon} size={status === 'in-progress' ? 9 : 14} />
-                    </span>
+                    {(status === 'in-progress' || status === 'skipped') && (
+                      <span
+                        className="om-scenario-step-status-glyph"
+                        data-status={status}
+                        title={t(glyph.label)}
+                        aria-label={t(glyph.label)}
+                      >
+                        <RemixIcon name={glyph.icon} size={status === 'in-progress' ? 9 : 14} />
+                      </span>
+                    )}
                     {pending > 0 && (
                       <span
                         className="om-scenario-step-pending-badge"

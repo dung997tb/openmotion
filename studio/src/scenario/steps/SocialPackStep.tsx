@@ -16,6 +16,7 @@ import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
 import { SocialPlatformGlyph } from './SocialPlatformGlyph';
+import { StepCapabilityBar } from './StepCapabilityBar';
 import {
   briefStringValue,
   buildStepAgentPrompt,
@@ -81,9 +82,11 @@ export function SocialPackStep({
   step,
   state,
   run,
+  active,
   api,
   pool,
   toast,
+  nav,
   renderExportMenu,
   renderIterations,
 }: StepProps) {
@@ -120,10 +123,17 @@ export function SocialPackStep({
 
   const activeIteration = useMemo(() => {
     if (state.activeIterationId) {
-      const active = state.iterations.find(iter => iter.id === state.activeIterationId);
-      if (active) return active;
+      const activeIter = state.iterations.find(
+        iter => iter.id === state.activeIterationId && iter.outputs.some(out => out.type === 'social'),
+      );
+      if (activeIter) return activeIter;
     }
-    return state.iterations.at(-1);
+    for (let i = state.iterations.length - 1; i >= 0; i -= 1) {
+      if (state.iterations[i].outputs.some(out => out.type === 'social')) {
+        return state.iterations[i];
+      }
+    }
+    return undefined;
   }, [state.iterations, state.activeIterationId]);
 
   const iterVariant = useMemo(() => {
@@ -262,8 +272,37 @@ export function SocialPackStep({
     toast.showToast(t('Downloaded social-posts.md'), 'info', 'feedback');
   };
 
+  const socialStepPrompt = useMemo(() => {
+    const product = briefStringValue(run?.brief ?? {}, 'productName')
+      || briefStringValue(run?.brief ?? {}, 'personaName')
+      || briefStringValue(run?.brief ?? {}, 'concept');
+    const idea = briefStringValue(run?.brief ?? {}, 'idea');
+    const visual = briefStringValue(run?.brief ?? {}, 'visualStyle');
+    return [
+      product ? `Social campaign visual for ${product}` : '',
+      idea,
+      visual,
+      selectedPlatforms.length ? `Platforms: ${selectedPlatforms.join(', ')} (${tone})` : '',
+    ]
+      .filter(Boolean)
+      .join('. ');
+  }, [run?.brief, selectedPlatforms, tone]);
+
   const handleCopyAgentPrompt = async () => {
-    const prompt = buildStepAgentPrompt(scenario, run, { stepId: step.id, locale, integration });
+    let ensuredRun = run;
+    if (!ensuredRun) {
+      try {
+        ensuredRun = await api.ensureRun();
+      } catch {
+        ensuredRun = null;
+      }
+    }
+    const prompt = buildStepAgentPrompt(scenario, ensuredRun, {
+      stepId: step.id,
+      stepPrompt: socialStepPrompt || undefined,
+      locale,
+      integration,
+    });
     const ok = await copyText(prompt);
     toast.showToast(
       ok ? t('Copied. Paste into your Agent.') : t('Could not copy to clipboard.'),
@@ -298,7 +337,7 @@ export function SocialPackStep({
             </span>
             <div>
               <h3 className="om-step-section-title">{t('Compose social posts')}</h3>
-              <p className="om-step-muted">{t('Pick your channels, attach visuals from the pool, and draft ready-to-post copy.')}</p>
+              <p className="om-step-muted">{t('Pick your channels, attach shared assets, and generate ready-to-post copy.')}</p>
             </div>
           </div>
         </div>
@@ -367,7 +406,7 @@ export function SocialPackStep({
             icon={<RemixIcon name="robot-line" size={14} />}
             onClick={() => void handleCopyAgentPrompt()}
           >
-            {t('Ask your Agent to write the copy')}
+            {t('Ask Agent to write')}
           </Button>
           <div className="om-step-toolbar-group">
             {posts.length > 0 && (
@@ -389,11 +428,26 @@ export function SocialPackStep({
               loading={drafting}
               onClick={() => void handleDraftPosts(posts.length ? lastVariant + 1 : 0)}
             >
-              {posts.length ? t('Regenerate') : t('Draft posts (offline)')}
+              {posts.length ? t('Regenerate') : t('Generate posts')}
             </Button>
           </div>
         </div>
       </section>
+
+      <StepCapabilityBar
+        scenario={scenario}
+        step={step}
+        state={state}
+        run={run}
+        active={active}
+        api={api}
+        pool={pool}
+        toast={toast}
+        nav={nav}
+        stepPrompt={socialStepPrompt}
+        allowQuickMedia
+        defaultModality="image"
+      />
 
       {posts.length > 0 && (
         <div className="om-step-social-list">
@@ -607,7 +661,25 @@ export function SocialPackStep({
       {renderIterations({
         renderOutput: (iteration: StepIteration) => {
           const iterPosts = extractPostsFromIteration(iteration);
-          if (!iterPosts.length) return <span className="om-step-muted">{t('No posts')}</span>;
+          if (!iterPosts.length) {
+            const mediaItems = iteration.outputs
+              .filter((out): out is { type: 'pool'; poolItemId: string } => out.type === 'pool')
+              .map(out => pool.byId.get(out.poolItemId))
+              .filter((item): item is PoolItem => Boolean(item));
+            if (mediaItems.length) {
+              return (
+                <div className="om-step-iter-thumbs">
+                  {mediaItems.slice(0, 4).map(item => (
+                    <span key={item.id} className="om-step-iter-pill">
+                      <RemixIcon name={poolKindIcon(item.kind)} size={13} />
+                      <span>{item.label}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            }
+            return <span className="om-step-muted">{t('No posts')}</span>;
+          }
           const labels = iterPosts.map(p => t(socialPlatforms.find(s => s.id === p.platform)?.label ?? p.platform));
           return (
             <div className="om-step-iter-text">

@@ -371,7 +371,7 @@ export function DesignScenePage({
                         onStartScenario();
                       }}
                     >
-                      {t('Start full-chain workflow')}
+                      {t('Start guided workflow')}
                       <RemixIcon name="arrow-right-line" size={16} />
                     </Button>
                   </div>

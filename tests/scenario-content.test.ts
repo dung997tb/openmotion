@@ -174,7 +174,7 @@ test('fillScenarioTemplate handles missing fields gracefully and prompt builders
   }
 
   const bf = findScenario('black-friday')!;
-  const runPrompt = scenarioRunAgentPrompt(bf, {
+  const runSummary = {
     id: '11111111-1111-4111-8111-111111111111',
     title: 'Holiday Tote',
     revision: 3,
@@ -186,17 +186,48 @@ test('fillScenarioTemplate handles missing fields gracefully and prompt builders
     },
     pool: [{
       id: '33333333-3333-4333-8333-333333333333',
-      kind: 'image',
+      kind: 'image' as const,
       label: 'Hero shot',
       stepId: 'product-images',
       pinned: true,
-      ref: { type: 'asset', assetId: '44444444-4444-4444-8444-444444444444', versionId: '55555555-5555-4555-8555-555555555555' },
+      ref: { type: 'asset' as const, assetId: '44444444-4444-4444-8444-444444444444', versionId: '55555555-5555-4555-8555-555555555555' },
     }],
-  }, { stepId: 'detail-page' });
+  };
+  const runPrompt = scenarioRunAgentPrompt(bf, runSummary, {
+    stepId: 'detail-page',
+    stepPrompt: 'Create a bold Black Friday landing page for Holiday Tote',
+  });
   assert.ok(runPrompt.includes('11111111-1111-4111-8111-111111111111'));
   assert.ok(runPrompt.includes('expectedRevision: 3'));
   assert.ok(runPrompt.includes('44444444-4444-4444-8444-444444444444@55555555-5555-4555-8555-555555555555'));
   assert.ok(runPrompt.includes('22222222-2222-4222-8222-222222222222'));
+  assert.ok(runPrompt.includes('Step write-back instructions:'));
+  assert.ok(runPrompt.includes('Current step prompt: Create a bold Black Friday landing page for Holiday Tote'));
+  assert.ok(runPrompt.includes('runId=11111111-1111-4111-8111-111111111111, expectedRevision=3, stepId="detail-page"'));
+  assert.ok(runPrompt.includes('command=add_pool'));
+  assert.ok(runPrompt.includes('command=link_design'));
+
+  const briefStepPrompt = scenarioRunAgentPrompt(bf, runSummary, {
+    stepId: 'brief',
+    stepPrompt: 'Refine Holiday Tote offer brief',
+  });
+  assert.ok(briefStepPrompt.includes('Step write-back instructions:'));
+  assert.ok(briefStepPrompt.includes('command=update_brief / command=add_iteration'));
+  assert.ok(briefStepPrompt.includes('stepId="brief"'));
+
+  const videoStepPrompt = scenarioRunAgentPrompt(bf, runSummary, {
+    stepId: 'sales-film',
+    stepPrompt: '30s Holiday Tote reveal video',
+  });
+  assert.ok(videoStepPrompt.includes('command=link_motion'));
+  assert.ok(videoStepPrompt.includes('stepId="sales-film"'));
+
+  const socialStepPrompt = scenarioRunAgentPrompt(bf, runSummary, {
+    stepId: 'social',
+    stepPrompt: 'Draft Black Friday social launch posts',
+  });
+  assert.ok(socialStepPrompt.includes('outputs: [{ type: "social", posts }]'));
+  assert.ok(socialStepPrompt.includes('stepId="social"'));
 
   assert.ok(briefMarkdown(bf, { productName: 'Tote' }).includes('## Product name'));
   const readme = runReadme(bf, {

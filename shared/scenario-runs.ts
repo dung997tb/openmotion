@@ -262,7 +262,7 @@ export const scenarioToolArguments = {
     alt: { type: 'string', maxLength: 400 },
     projectType: { enum: ['template', 'natural_language'] },
     requirements: { type: 'string', minLength: 1, maxLength: 8000 },
-    poolItemIds: { type: 'array', maxItems: 20, items: uuid },
+    poolItemIds: { type: 'array', maxItems: SCENARIO_LIMITS.poolItems, items: uuid },
     projectId: projectIdSchema,
     stepIds: { type: 'array', minItems: 1, maxItems: 20, items: stepIdSchema },
     activeOnly: { type: 'boolean' },
@@ -277,7 +277,7 @@ export const scenarioToolArguments = {
   })),
 };
 
-export const scenarioToolDescription = ' action=scenario takes a scenario command to orchestrate end-to-end scenario workflows (catalog, list, get, create, update_run, update_brief, update_step, add_pool, update_pool, remove_pool, add_iteration, generate, sync, cancel, promote, create_page, embed_image, link_design, create_motion, link_motion, export). Runs store pinned asset, Design Studio and Motion project references rather than copying bytes; pass stable requestId and expectedRevision on mutations, poll generate jobs with sync without resubmitting paid work, and call export to build a downloadable ZIP package.';
+export const scenarioToolDescription = ' action=scenario takes a scenario command to orchestrate end-to-end scenario workflows (catalog, list, get, create, update_run, update_brief, update_step, add_pool, update_pool, remove_pool, add_iteration, generate, sync, cancel, promote, create_page, embed_image, link_design, create_motion, link_motion, export). Runs store pinned asset, Design Studio and Motion project references rather than copying bytes; pass stable requestId and expectedRevision on mutations, poll generate jobs with sync without resubmitting paid work, and call export (optionally passing poolItemIds or stepIds) to build a downloadable ZIP package of selected shared assets or all deliverables.';
 
 export function parseScenarioError(message: string): { code: string; message: string } {
   const match = /^([A-Z][A-Z0-9_]{1,63}):\s*([\s\S]*)$/.exec(message.trim());

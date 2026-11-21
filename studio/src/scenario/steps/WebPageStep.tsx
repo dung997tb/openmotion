@@ -32,6 +32,7 @@ import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { ScenarioApiError } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
+import { StepCapabilityBar } from './StepCapabilityBar';
 import { copyText, extractErrorMessage, isScenarioConflictError } from './stepUtils';
 
 function targetToValue(target: HtmlImageTarget): string {
@@ -228,7 +229,13 @@ export function WebPageStep({
   }, [t]);
 
   // Reload project whenever designProjectId or latest design iteration revision changes
-  const latestDesignRevision = state.iterations.at(-1)?.design?.revision ?? null;
+  const latestDesignRevision = useMemo(() => {
+    for (let i = state.iterations.length - 1; i >= 0; i -= 1) {
+      const rev = state.iterations[i].design?.revision;
+      if (rev) return rev;
+    }
+    return null;
+  }, [state.iterations]);
   useEffect(() => {
     if (!active || !designProjectId) {
       if (!designProjectId) {
@@ -368,10 +375,19 @@ export function WebPageStep({
   };
 
   const handleCopyAgentDesignPrompt = async () => {
+    let ensuredRun = run;
+    if (!ensuredRun) {
+      try {
+        ensuredRun = await api.ensureRun();
+      } catch {
+        ensuredRun = null;
+      }
+    }
+
     if (project) {
       const prompt = designProjectPrompt(
         project,
-        `Update this page for the "${scenario.title}" workflow (runId=${run?.id ?? 'draft'}, step=${step.id}).`,
+        `Update this page for the "${scenario.title}" workflow (runId=${ensuredRun?.id ?? 'draft'}, expectedRevision=${ensuredRun?.revision ?? 1}, step=${step.id}). When done, link or refresh the revision via openmotion_assets_use (action=scenario, command=link_design, runId=${ensuredRun?.id ?? '<runId>'}, expectedRevision=${ensuredRun?.revision ?? 1}, stepId="${step.id}", designProjectId="${project.id}").`,
         { integration, language: locale },
       );
       const ok = await copyText(prompt);
@@ -379,7 +395,7 @@ export function WebPageStep({
       return;
     }
 
-    const imageRefs = pool.items
+    const imageRefs = (ensuredRun?.pool ?? pool.items)
       .filter(item => item.ref.type === 'asset' && item.kind === 'image')
       .map(item =>
         item.ref.type === 'asset'
@@ -390,10 +406,12 @@ export function WebPageStep({
 
     const briefLines = [
       pagePrompt.trim() ? `Page instructions:\n${pagePrompt.trim()}` : '',
-      briefMarkdown(scenario, run?.brief ?? {}),
-      run ? `Scenario runId: ${run.id} (link the resulting project via openmotion_assets_use action=scenario command=link_design stepId=${step.id})` : '',
+      briefMarkdown(scenario, ensuredRun?.brief ?? {}),
+      ensuredRun
+        ? `Scenario write-back: runId=${ensuredRun.id}, expectedRevision=${ensuredRun.revision}, stepId="${step.id}". Link the resulting Design project back via openmotion_assets_use (action=scenario, command=link_design, runId=${ensuredRun.id}, expectedRevision=${ensuredRun.revision}, stepId="${step.id}", designProjectId=<id>).`
+        : '',
       imageRefs.length
-        ? `Available pool images (embed with openmotion_design_edit action=import_asset):\n${imageRefs.join('\n')}`
+        ? `Available shared images (embed with openmotion_design_edit action=import_asset):\n${imageRefs.join('\n')}`
         : '',
     ].filter(Boolean).join('\n\n');
 
@@ -516,7 +534,7 @@ export function WebPageStep({
         {t('Open in Design editor')}
       </MenuItem>
       <MenuItem icon={<RemixIcon name="robot-line" size={14} />} onClick={() => void handleCopyAgentDesignPrompt()}>
-        {t('Copy Agent handoff')}
+        {t('Copy for Agent')}
       </MenuItem>
     </>
   ) : undefined;
@@ -627,7 +645,7 @@ export function WebPageStep({
             <BindingSlot
               slot="embedImages"
               label={t('Images to embed')}
-              hint={t('Optional. Pick product or hero images from the shared pool to place automatically.')}
+              hint={t('Optional. Attach images from your shared assets to place automatically.')}
               kinds={['image']}
               stepId={step.id}
               boundIds={boundEmbedIds}
@@ -644,7 +662,7 @@ export function WebPageStep({
               icon={<RemixIcon name="robot-line" size={14} />}
               onClick={() => void handleCopyAgentDesignPrompt()}
             >
-              {t('Ask your Agent to design it')}
+              {t('Ask Agent to design')}
             </Button>
             <Button
               variant="primary"
@@ -659,8 +677,23 @@ export function WebPageStep({
           </div>
         </section>
 
+        <StepCapabilityBar
+          scenario={scenario}
+          step={step}
+          state={state}
+          run={run}
+          active={active}
+          api={api}
+          pool={pool}
+          toast={toast}
+          nav={nav}
+          stepPrompt={pagePrompt}
+          allowQuickMedia
+          defaultModality="image"
+        />
+
         {(templatesLoading || templatesError || visibleTemplates.length > 0) && (
-          <section className="om-step-card" aria-label={t('Start from a Design template')}>
+          <section className="om-step-section" aria-label={t('Start from a Design template')}>
             <div className="om-step-section-head">
               <div className="om-brief-composer-lead">
                 <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
@@ -724,7 +757,7 @@ export function WebPageStep({
         )}
 
         {existingProjects.length > 0 && (
-          <section className="om-step-card" aria-label={t('Link an existing Design project')}>
+          <section className="om-step-section" aria-label={t('Link an existing Design project')}>
             <div className="om-step-section-head">
               <div className="om-brief-composer-lead">
                 <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
@@ -845,7 +878,7 @@ export function WebPageStep({
             </span>
             <div>
               <h3 className="om-step-section-title">{t('Embed images into this page')}</h3>
-              <p className="om-step-muted">{t('Import pool images as local project files and place them into HTML slots.')}</p>
+              <p className="om-step-muted">{t('Place your shared images directly into the page layout.')}</p>
             </div>
           </div>
           {boundImages.length > 0 && (
@@ -906,10 +939,26 @@ export function WebPageStep({
         )}
       </section>
 
+      <StepCapabilityBar
+        scenario={scenario}
+        step={step}
+        state={state}
+        run={run}
+        active={active}
+        api={api}
+        pool={pool}
+        toast={toast}
+        nav={nav}
+        stepPrompt={pagePrompt}
+        allowQuickMedia
+        defaultModality="image"
+        onAfterSync={() => loadLinkedProject(designProjectId)}
+      />
+
       {renderIterations({
         renderOutput: (iteration: StepIteration) => {
           if (!iteration.design) {
-            return <span className="om-step-muted">{t('Page revision')}</span>;
+            return <span className="om-step-muted">{t('Page version')}</span>;
           }
           const entry = project?.entry ?? 'index.html';
           const versionUrl = iteration.design.versionId

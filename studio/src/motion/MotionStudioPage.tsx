@@ -34,7 +34,7 @@ export function MotionStudioPage({ active, editorDisabled, onOpenEditor, onBackT
             reportCreativeClick('creative_studio', 'studio_bar', 'select_scene', { studio: 'motion', navTarget: 'workflows' });
             onStartScenario();
           }}>
-            {t('Start full-chain workflow')}<RemixIcon name="arrow-right-line" size={16} />
+            {t('Start guided workflow')}<RemixIcon name="arrow-right-line" size={16} />
           </Button>}
         </div>
       </div>

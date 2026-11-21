@@ -15,6 +15,7 @@ import type { ScenarioHost } from './scenario-runs.ts';
 export type ScenarioBundleOptions = {
   requestId: string;
   stepIds?: string[];
+  poolItemIds?: string[];
   activeOnly?: boolean;
   includeStandaloneHtml?: boolean;
   includeMotionSource?: boolean;
@@ -23,8 +24,11 @@ export type ScenarioBundleOptions = {
 type BundleReceiptFile = { inputHash: string; result: ScenarioBundleReceipt };
 
 export class BundleBuildError extends Error {
-  readonly code: 'INVALID_ARGUMENT' | 'STEP_NOT_FOUND' | 'LIMIT_EXCEEDED';
-  constructor(code: 'INVALID_ARGUMENT' | 'STEP_NOT_FOUND' | 'LIMIT_EXCEEDED', message: string) {
+  readonly code: 'INVALID_ARGUMENT' | 'STEP_NOT_FOUND' | 'POOL_ITEM_NOT_FOUND' | 'LIMIT_EXCEEDED';
+  constructor(
+    code: 'INVALID_ARGUMENT' | 'STEP_NOT_FOUND' | 'POOL_ITEM_NOT_FOUND' | 'LIMIT_EXCEEDED',
+    message: string,
+  ) {
     super(`${code}: ${message}`);
     this.code = code;
   }
@@ -68,7 +72,23 @@ export async function buildScenarioBundle(
   const includeStandaloneHtml = options.includeStandaloneHtml ?? true;
   const includeMotionSource = options.includeMotionSource ?? false;
 
-  const hasStepFilter = Array.isArray(options.stepIds) && options.stepIds.length > 0;
+  const hasPoolFilter = Array.isArray(options.poolItemIds) && options.poolItemIds.length > 0;
+  const selectedPoolIds: string[] = [];
+  if (hasPoolFilter) {
+    const poolById = new Map(run.pool.map(item => [item.id, item]));
+    const seenPool = new Set<string>();
+    for (const poolItemId of options.poolItemIds!) {
+      if (!poolById.has(poolItemId)) {
+        throw new BundleBuildError('POOL_ITEM_NOT_FOUND', `Pool item ${poolItemId} not found`);
+      }
+      if (!seenPool.has(poolItemId)) {
+        seenPool.add(poolItemId);
+        selectedPoolIds.push(poolItemId);
+      }
+    }
+  }
+
+  const hasStepFilter = !hasPoolFilter && Array.isArray(options.stepIds) && options.stepIds.length > 0;
   const selectedSteps: string[] = [];
   if (hasStepFilter) {
     const seen = new Set<string>();
@@ -81,21 +101,13 @@ export async function buildScenarioBundle(
         selectedSteps.push(stepId);
       }
     }
-  } else {
+  } else if (!hasPoolFilter) {
     for (const step of scenario.steps) selectedSteps.push(step.id);
   }
   const selectedSet = new Set(selectedSteps);
-  const contentStepIds = scenario.steps.filter(step => step.type !== 'export-hub').map(step => step.id);
+  const contentStepIds = scenario.steps.map(step => step.id);
   const coversAllContent = hasStepFilter && contentStepIds.every(id => selectedSet.has(id));
   const filtered = hasStepFilter && !coversAllContent;
-  if (coversAllContent) {
-    for (const step of scenario.steps) {
-      if (!selectedSet.has(step.id)) {
-        selectedSet.add(step.id);
-        selectedSteps.push(step.id);
-      }
-    }
-  }
 
   const root = path.join(path.resolve(dataDirectory), 'scenarios');
   const bundlesDir = path.join(root, 'bundles');
@@ -107,7 +119,8 @@ export async function buildScenarioBundle(
   const inputHash = sha256(JSON.stringify({
     runId: run.id,
     revision: run.revision,
-    stepIds: filtered ? selectedSteps : null,
+    stepIds: hasPoolFilter ? null : filtered ? selectedSteps : null,
+    poolItemIds: hasPoolFilter ? selectedPoolIds : null,
     activeOnly,
     includeStandaloneHtml,
     includeMotionSource,
@@ -166,102 +179,10 @@ export async function buildScenarioBundle(
       }
     };
 
-    // 1. Brief
-    for (const stepDef of scenario.steps) {
-      if (stepDef.type !== 'brief' || !selectedSet.has(stepDef.id)) continue;
-      recordStepOutput(stepDef.id, addEntry('brief/brief.md', Buffer.from(briefMarkdown(scenario, run.brief), 'utf8')));
-      recordStepOutput(stepDef.id, addEntry('brief/brief.json', Buffer.from(JSON.stringify(run.brief, null, 2), 'utf8')));
-
-      const stepState = run.steps[stepDef.id];
-      const activeIter = stepState?.iterations.find(it => it.id === stepState.activeIterationId)
-        ?? [...(stepState?.iterations ?? [])].reverse().find(it => it.outputs.some(out => out.type === 'script'));
-      const scriptOut = activeIter?.outputs.find((out): out is { type: 'script'; text: string } => out.type === 'script');
-      if (scriptOut?.text.trim()) {
-        recordStepOutput(stepDef.id, addEntry('brief/script.md', Buffer.from(scriptOut.text, 'utf8')));
-      }
-    }
-
-    // 2. Web pages (Design Studio projects)
-    const exportedDesignProjects = new Map<string, { targetStepId: string; paths: string[]; entryRel: string }>();
-    for (const stepDef of scenario.steps) {
-      if (stepDef.type !== 'web-page' || !selectedSet.has(stepDef.id)) continue;
-      const stepState = run.steps[stepDef.id];
-      const linkedStepId = stepDef.page?.linkedStepId;
-      const projectId = stepState?.links.designProjectId ?? (linkedStepId ? run.steps[linkedStepId]?.links.designProjectId : undefined);
-      if (!projectId) continue;
-
-      const existingExport = exportedDesignProjects.get(projectId);
-      if (existingExport) {
-        for (const rel of existingExport.paths) recordStepOutput(stepDef.id, rel);
-        continue;
-      }
-
-      // If another selected downstream step (like embed-images) targets this project, use the latest version.
-      const downstreamEmbedStep = scenario.steps.find(
-        other => other.page?.linkedStepId === stepDef.id && selectedSet.has(other.id) && run.steps[other.id]?.iterations.length,
-      );
-      const sourceStepState = downstreamEmbedStep ? run.steps[downstreamEmbedStep.id] : stepState;
-      const activeIter = sourceStepState?.iterations.find(it => it.id === sourceStepState.activeIterationId);
-      const versionId = activeIter?.design?.projectId === projectId ? activeIter.design.versionId : undefined;
-
-      const projectDetail = await host.design.get(projectId, host.origin());
-      const zipExport = await host.design.exportProject(projectId, { format: 'zip', versionId });
-      const unpacked = readProjectZip(zipExport.data);
-      const addedPaths: string[] = [];
-      let entryRel = `web/${stepDef.id}/${projectDetail.entry}`;
-      for (const [relPath, buf] of unpacked.entries()) {
-        const storedRel = addEntry(`web/${stepDef.id}/${cleanDesignPath(relPath)}`, buf);
-        addedPaths.push(storedRel);
-        if (relPath === projectDetail.entry) entryRel = storedRel;
-        recordStepOutput(stepDef.id, storedRel);
-      }
-      if (includeStandaloneHtml) {
-        const htmlExport = await host.design.exportProject(projectId, { format: 'html', versionId });
-        const standaloneRel = addEntry(`web/${stepDef.id}.standalone.html`, htmlExport.data);
-        addedPaths.push(standaloneRel);
-        recordStepOutput(stepDef.id, standaloneRel);
-      }
-
-      exportedDesignProjects.set(projectId, { targetStepId: stepDef.id, paths: addedPaths, entryRel });
-      for (const poolItem of run.pool) {
-        if (poolItem.ref.type === 'design' && poolItem.ref.projectId === projectId) {
-          poolExportPaths.set(poolItem.id, entryRel);
-        }
-      }
-    }
-
-    // 3. Media assets (pinned workspace asset library versions)
-    const selectedAssetPoolIds = new Set<string>();
-    for (const stepId of selectedSteps) {
-      const stepState = run.steps[stepId];
-      if (!stepState) continue;
-      for (const ids of Object.values(stepState.bindings)) {
-        for (const id of ids) selectedAssetPoolIds.add(id);
-      }
-      const itersToScan = activeOnly
-        ? stepState.iterations.filter(it => it.id === stepState.activeIterationId || (findScenarioStep(scenario, stepId)?.type === 'web-page' && it.inputs.length > 0))
-        : stepState.iterations;
-      for (const iter of itersToScan) {
-        for (const inputId of iter.inputs) selectedAssetPoolIds.add(inputId);
-        for (const out of iter.outputs) {
-          if (out.type === 'pool') selectedAssetPoolIds.add(out.poolItemId);
-        }
-      }
-      if (!activeOnly) {
-        for (const item of run.pool) {
-          if (item.stepId === stepId) selectedAssetPoolIds.add(item.id);
-        }
-      }
-    }
-    if (!filtered) {
-      for (const item of run.pool) {
-        if (item.pinned || item.stepId === null || !activeOnly) selectedAssetPoolIds.add(item.id);
-      }
-    }
-
-    for (const item of run.pool) {
-      if (item.ref.type !== 'asset') continue;
-      if (!selectedAssetPoolIds.has(item.id)) continue;
+    const addMediaPoolItem = async (
+      item: ScenarioRun['pool'][number],
+    ): Promise<string | null> => {
+      if (item.ref.type !== 'asset') return null;
       const resolved = await host.resolveAsset({ assetId: item.ref.assetId, versionId: item.ref.versionId });
       const data = await readFile(resolved.filename);
       const folder = item.kind === 'image' ? 'images' : item.kind === 'video' ? 'video' : 'audio';
@@ -269,62 +190,256 @@ export async function buildScenarioBundle(
       const labelSlug = slugify(item.label || resolved.asset.name || item.kind, item.kind);
       const storedRel = addEntry(`media/${folder}/${labelSlug}-${item.ref.versionId.slice(0, 8)}${ext}`, data);
       poolExportPaths.set(item.id, storedRel);
-      if (item.stepId && selectedSet.has(item.stepId)) {
-        recordStepOutput(item.stepId, storedRel);
+      return storedRel;
+    };
+
+    const addDesignProjectFiles = async (
+      projectId: string,
+      versionId: string | null | undefined,
+      folderSlug: string,
+      onPath?: (rel: string) => void,
+    ): Promise<{ paths: string[]; entryRel: string }> => {
+      const projectDetail = await host.design.get(projectId, host.origin());
+      const zipExport = await host.design.exportProject(projectId, { format: 'zip', versionId });
+      const unpacked = readProjectZip(zipExport.data);
+      const paths: string[] = [];
+      let entryRel = `web/${folderSlug}/${projectDetail.entry}`;
+      for (const [relPath, buf] of unpacked.entries()) {
+        const storedRel = addEntry(`web/${folderSlug}/${cleanDesignPath(relPath)}`, buf);
+        paths.push(storedRel);
+        if (relPath === projectDetail.entry) entryRel = storedRel;
+        onPath?.(storedRel);
       }
-    }
-
-    // 4. Social posts
-    for (const stepDef of scenario.steps) {
-      if (stepDef.type !== 'social-pack' || !selectedSet.has(stepDef.id)) continue;
-      const stepState = run.steps[stepDef.id];
-      const activeIter = stepState?.iterations.find(it => it.id === stepState.activeIterationId)
-        ?? [...(stepState?.iterations ?? [])].reverse().find(it => it.outputs.some(out => out.type === 'social'));
-      const socialOut = activeIter?.outputs.find((out): out is { type: 'social'; posts: SocialPost[] } => out.type === 'social');
-      if (!socialOut?.posts.length) continue;
-
-      recordStepOutput(stepDef.id, addEntry('social/posts.json', Buffer.from(JSON.stringify(socialOut.posts, null, 2), 'utf8')));
-      recordStepOutput(stepDef.id, addEntry('social/posts.md', Buffer.from(socialPostsMarkdown(socialOut.posts), 'utf8')));
-      for (const post of socialOut.posts) {
-        recordStepOutput(stepDef.id, addEntry(`social/${post.platform}.txt`, Buffer.from(formatPlatformText(post), 'utf8')));
+      if (includeStandaloneHtml) {
+        const htmlExport = await host.design.exportProject(projectId, { format: 'html', versionId });
+        const standaloneRel = addEntry(`web/${folderSlug}.standalone.html`, htmlExport.data);
+        paths.push(standaloneRel);
+        onPath?.(standaloneRel);
       }
-    }
+      return { paths, entryRel };
+    };
 
-    // 5. Motion projects
-    for (const stepDef of scenario.steps) {
-      if (!selectedSet.has(stepDef.id)) continue;
-      const stepState = run.steps[stepDef.id];
-      const projectId = stepState?.links.motionProjectId;
-      if (!projectId) continue;
-      const sessionId = stepState.links.motionSessionId ?? null;
+    const addMotionProjectFiles = async (
+      projectId: string,
+      sessionId: string | null,
+      fileSlug: string,
+      onPath?: (rel: string) => void,
+    ): Promise<string> => {
       const editorPath = sessionId ? sessionPath(sessionId, projectId) : `/#project/${encodeURIComponent(projectId)}`;
       const origin = host.origin().replace(/\/+$/, '');
       const metaRel = addEntry(
-        `motion/${stepDef.id}.json`,
+        `motion/${fileSlug}.json`,
         Buffer.from(JSON.stringify({ projectId, sessionId, editorUrl: origin ? origin + editorPath : editorPath }, null, 2), 'utf8'),
       );
-      recordStepOutput(stepDef.id, metaRel);
-      for (const poolItem of run.pool) {
-        if (poolItem.ref.type === 'motion' && poolItem.ref.projectId === projectId) {
-          poolExportPaths.set(poolItem.id, metaRel);
-        }
-      }
+      onPath?.(metaRel);
       if (includeMotionSource) {
-        const rawArchiveReq = `${options.requestId}-motion-${stepDef.id}`.replace(/[^A-Za-z0-9_-]/g, '-');
-        const archiveReqId = rawArchiveReq.length <= 100 ? rawArchiveReq : `sb-${sha256(`${options.requestId}:${stepDef.id}`).slice(0, 48)}`;
+        const rawArchiveReq = `${options.requestId}-motion-${fileSlug}`.replace(/[^A-Za-z0-9_-]/g, '-');
+        const archiveReqId = rawArchiveReq.length <= 100 ? rawArchiveReq : `sb-${sha256(`${options.requestId}:${fileSlug}:${projectId}`).slice(0, 48)}`;
         const archive = await host.exportMotionArchive({
           action: 'export',
           requestId: archiveReqId,
           projectIds: [projectId],
         });
         const archiveBytes = await readFile(archive.archivePath);
-        recordStepOutput(stepDef.id, addEntry(`motion/${stepDef.id}.openmotion.zip`, archiveBytes));
+        const zipRel = addEntry(`motion/${fileSlug}.openmotion.zip`, archiveBytes);
+        onPath?.(zipRel);
       }
-    }
+      return metaRel;
+    };
 
-    // 6. README.md (full package) and manifest.json (always first)
-    if (!filtered) {
-      addEntry('README.md', Buffer.from(runReadme(scenario, run, { origin: host.origin() }), 'utf8'));
+    let manifestPool = run.pool;
+
+    if (hasPoolFilter) {
+      const poolById = new Map(run.pool.map(item => [item.id, item]));
+      const selectedItems = selectedPoolIds
+        .map(id => poolById.get(id))
+        .filter((item): item is ScenarioRun['pool'][number] => Boolean(item));
+      const exportedDesignByKey = new Map<string, string>();
+      const exportedMotionByKey = new Map<string, string>();
+
+      for (const item of selectedItems) {
+        if (item.ref.type === 'asset') {
+          await addMediaPoolItem(item);
+        } else if (item.ref.type === 'design') {
+          const designKey = `${item.ref.projectId}:${item.ref.versionId ?? ''}`;
+          const cached = exportedDesignByKey.get(designKey);
+          if (cached) {
+            poolExportPaths.set(item.id, cached);
+          } else {
+            const folderSlug = slugify(item.label || item.ref.projectId, 'page');
+            const { entryRel } = await addDesignProjectFiles(item.ref.projectId, item.ref.versionId, folderSlug);
+            exportedDesignByKey.set(designKey, entryRel);
+            poolExportPaths.set(item.id, entryRel);
+          }
+        } else if (item.ref.type === 'motion') {
+          const motionKey = `${item.ref.projectId}:${item.ref.sessionId ?? ''}`;
+          const cached = exportedMotionByKey.get(motionKey);
+          if (cached) {
+            poolExportPaths.set(item.id, cached);
+          } else {
+            const fileSlug = slugify(item.label || item.ref.projectId, 'motion');
+            const metaRel = await addMotionProjectFiles(item.ref.projectId, item.ref.sessionId ?? null, fileSlug);
+            exportedMotionByKey.set(motionKey, metaRel);
+            poolExportPaths.set(item.id, metaRel);
+          }
+        } else if (item.ref.type === 'text') {
+          const textRef = item.ref;
+          const textSlug = slugify(item.label || textRef.stepId, 'text');
+          const iter = run.steps[textRef.stepId]?.iterations.find(it => it.id === textRef.iterationId);
+          const briefOut = iter?.outputs.find((out): out is { type: 'brief'; values: Record<string, string | string[]> } => out.type === 'brief');
+          const socialOut = iter?.outputs.find((out): out is { type: 'social'; posts: SocialPost[] } => out.type === 'social');
+          const scriptOut = iter?.outputs.find((out): out is { type: 'script'; text: string } => out.type === 'script');
+          if (briefOut) {
+            const mdRel = addEntry(`text/${textSlug}.md`, Buffer.from(briefMarkdown(scenario, briefOut.values), 'utf8'));
+            addEntry(`text/${textSlug}.json`, Buffer.from(JSON.stringify(briefOut.values, null, 2), 'utf8'));
+            poolExportPaths.set(item.id, mdRel);
+          } else if (socialOut) {
+            const mdRel = addEntry(`text/${textSlug}.md`, Buffer.from(socialPostsMarkdown(socialOut.posts), 'utf8'));
+            addEntry(`text/${textSlug}.json`, Buffer.from(JSON.stringify(socialOut.posts, null, 2), 'utf8'));
+            poolExportPaths.set(item.id, mdRel);
+          } else if (scriptOut) {
+            const mdRel = addEntry(`text/${textSlug}.md`, Buffer.from(scriptOut.text, 'utf8'));
+            poolExportPaths.set(item.id, mdRel);
+          } else {
+            const txtRel = addEntry(`text/${textSlug}.txt`, Buffer.from(`${item.label}\n`, 'utf8'));
+            poolExportPaths.set(item.id, txtRel);
+          }
+        }
+      }
+      manifestPool = selectedItems;
+    } else {
+      // 1. Brief
+      for (const stepDef of scenario.steps) {
+        if (stepDef.type !== 'brief' || !selectedSet.has(stepDef.id)) continue;
+        recordStepOutput(stepDef.id, addEntry('brief/brief.md', Buffer.from(briefMarkdown(scenario, run.brief), 'utf8')));
+        recordStepOutput(stepDef.id, addEntry('brief/brief.json', Buffer.from(JSON.stringify(run.brief, null, 2), 'utf8')));
+
+        const stepState = run.steps[stepDef.id];
+        const activeIter = stepState?.iterations.find(it => it.id === stepState.activeIterationId)
+          ?? [...(stepState?.iterations ?? [])].reverse().find(it => it.outputs.some(out => out.type === 'script'));
+        const scriptOut = activeIter?.outputs.find((out): out is { type: 'script'; text: string } => out.type === 'script');
+        if (scriptOut?.text.trim()) {
+          recordStepOutput(stepDef.id, addEntry('brief/script.md', Buffer.from(scriptOut.text, 'utf8')));
+        }
+      }
+
+      // 2. Web pages (Design Studio projects)
+      const exportedDesignProjects = new Map<string, { targetStepId: string; paths: string[]; entryRel: string }>();
+      for (const stepDef of scenario.steps) {
+        if (stepDef.type !== 'web-page' || !selectedSet.has(stepDef.id)) continue;
+        const stepState = run.steps[stepDef.id];
+        const linkedStepId = stepDef.page?.linkedStepId;
+        const projectId = stepState?.links.designProjectId ?? (linkedStepId ? run.steps[linkedStepId]?.links.designProjectId : undefined);
+        if (!projectId) continue;
+
+        const existingExport = exportedDesignProjects.get(projectId);
+        if (existingExport) {
+          for (const rel of existingExport.paths) recordStepOutput(stepDef.id, rel);
+          continue;
+        }
+
+        // If another selected downstream step (like embed-images) targets this project, use the latest version.
+        const downstreamEmbedStep = scenario.steps.find(
+          other => other.page?.linkedStepId === stepDef.id && selectedSet.has(other.id) && run.steps[other.id]?.iterations.length,
+        );
+        const sourceStepState = downstreamEmbedStep ? run.steps[downstreamEmbedStep.id] : stepState;
+        const activeIter = sourceStepState?.iterations.find(it => it.id === sourceStepState.activeIterationId);
+        const versionId = activeIter?.design?.projectId === projectId ? activeIter.design.versionId : undefined;
+
+        const { paths: addedPaths, entryRel } = await addDesignProjectFiles(
+          projectId,
+          versionId,
+          stepDef.id,
+          rel => recordStepOutput(stepDef.id, rel),
+        );
+
+        exportedDesignProjects.set(projectId, { targetStepId: stepDef.id, paths: addedPaths, entryRel });
+        for (const poolItem of run.pool) {
+          if (poolItem.ref.type === 'design' && poolItem.ref.projectId === projectId) {
+            poolExportPaths.set(poolItem.id, entryRel);
+          }
+        }
+      }
+
+      // 3. Media assets (pinned workspace asset library versions)
+      const selectedAssetPoolIds = new Set<string>();
+      for (const stepId of selectedSteps) {
+        const stepState = run.steps[stepId];
+        if (!stepState) continue;
+        for (const ids of Object.values(stepState.bindings)) {
+          for (const id of ids) selectedAssetPoolIds.add(id);
+        }
+        const itersToScan = activeOnly
+          ? stepState.iterations.filter(it => it.id === stepState.activeIterationId || (findScenarioStep(scenario, stepId)?.type === 'web-page' && it.inputs.length > 0))
+          : stepState.iterations;
+        for (const iter of itersToScan) {
+          for (const inputId of iter.inputs) selectedAssetPoolIds.add(inputId);
+          for (const out of iter.outputs) {
+            if (out.type === 'pool') selectedAssetPoolIds.add(out.poolItemId);
+          }
+        }
+        if (!activeOnly) {
+          for (const item of run.pool) {
+            if (item.stepId === stepId) selectedAssetPoolIds.add(item.id);
+          }
+        }
+      }
+      if (!filtered) {
+        for (const item of run.pool) {
+          if (item.pinned || item.stepId === null || !activeOnly) selectedAssetPoolIds.add(item.id);
+        }
+      }
+
+      for (const item of run.pool) {
+        if (item.ref.type !== 'asset') continue;
+        if (!selectedAssetPoolIds.has(item.id)) continue;
+        const storedRel = await addMediaPoolItem(item);
+        if (storedRel && item.stepId && selectedSet.has(item.stepId)) {
+          recordStepOutput(item.stepId, storedRel);
+        }
+      }
+
+      // 4. Social posts
+      for (const stepDef of scenario.steps) {
+        if (stepDef.type !== 'social-pack' || !selectedSet.has(stepDef.id)) continue;
+        const stepState = run.steps[stepDef.id];
+        const activeIter = stepState?.iterations.find(it => it.id === stepState.activeIterationId)
+          ?? [...(stepState?.iterations ?? [])].reverse().find(it => it.outputs.some(out => out.type === 'social'));
+        const socialOut = activeIter?.outputs.find((out): out is { type: 'social'; posts: SocialPost[] } => out.type === 'social');
+        if (!socialOut?.posts.length) continue;
+
+        recordStepOutput(stepDef.id, addEntry('social/posts.json', Buffer.from(JSON.stringify(socialOut.posts, null, 2), 'utf8')));
+        recordStepOutput(stepDef.id, addEntry('social/posts.md', Buffer.from(socialPostsMarkdown(socialOut.posts), 'utf8')));
+        for (const post of socialOut.posts) {
+          recordStepOutput(stepDef.id, addEntry(`social/${post.platform}.txt`, Buffer.from(formatPlatformText(post), 'utf8')));
+        }
+      }
+
+      // 5. Motion projects
+      for (const stepDef of scenario.steps) {
+        if (!selectedSet.has(stepDef.id)) continue;
+        const stepState = run.steps[stepDef.id];
+        const projectId = stepState?.links.motionProjectId;
+        if (!projectId) continue;
+        const sessionId = stepState.links.motionSessionId ?? null;
+        const metaRel = await addMotionProjectFiles(
+          projectId,
+          sessionId,
+          stepDef.id,
+          rel => recordStepOutput(stepDef.id, rel),
+        );
+        for (const poolItem of run.pool) {
+          if (poolItem.ref.type === 'motion' && poolItem.ref.projectId === projectId) {
+            poolExportPaths.set(poolItem.id, metaRel);
+          }
+        }
+      }
+
+      // 6. README.md (full package)
+      if (!filtered) {
+        addEntry('README.md', Buffer.from(runReadme(scenario, run, { origin: host.origin() }), 'utf8'));
+      }
+      manifestPool = run.pool.filter(item => !filtered || poolExportPaths.has(item.id));
     }
 
     const manifest = {
@@ -332,26 +447,27 @@ export async function buildScenarioBundle(
       scenario: { id: scenario.id, title: scenario.title, category: scenario.category },
       run: { id: run.id, title: run.title, revision: run.revision },
       exportedAt: new Date().toISOString(),
-      steps: scenario.steps
-        .filter(step => selectedSet.has(step.id))
-        .map(step => ({
-          id: step.id,
-          type: step.type,
-          status: run.steps[step.id]?.status ?? 'todo',
-          activeIterationId: run.steps[step.id]?.activeIterationId ?? null,
-          outputs: stepOutputs[step.id] ?? [],
-        })),
-      pool: run.pool
-        .filter(item => !filtered || poolExportPaths.has(item.id))
-        .map(item => ({
-          id: item.id,
-          kind: item.kind,
-          label: item.label,
-          source: item.source,
-          stepId: item.stepId,
-          ref: item.ref,
-          ...(poolExportPaths.has(item.id) ? { path: poolExportPaths.get(item.id) } : {}),
-        })),
+      ...(hasPoolFilter ? { selection: { poolItemIds: selectedPoolIds } } : {}),
+      steps: hasPoolFilter
+        ? []
+        : scenario.steps
+            .filter(step => selectedSet.has(step.id))
+            .map(step => ({
+              id: step.id,
+              type: step.type,
+              status: run.steps[step.id]?.status ?? 'todo',
+              activeIterationId: run.steps[step.id]?.activeIterationId ?? null,
+              outputs: stepOutputs[step.id] ?? [],
+            })),
+      pool: manifestPool.map(item => ({
+        id: item.id,
+        kind: item.kind,
+        label: item.label,
+        source: item.source,
+        stepId: item.stepId,
+        ref: item.ref,
+        ...(poolExportPaths.has(item.id) ? { path: poolExportPaths.get(item.id) } : {}),
+      })),
     };
     const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8');
     totalBytes += manifestBytes.length;

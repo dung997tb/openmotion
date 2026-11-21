@@ -19,6 +19,7 @@ import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import type { BriefPreset } from './briefPresets';
 import { BriefPromptComposer } from './BriefPromptComposer';
+import { StepCapabilityBar } from './StepCapabilityBar';
 import {
   buildStepAgentPrompt,
   computeDiscountSummary,
@@ -90,6 +91,7 @@ export function BriefStep({
   run,
   active,
   api,
+  pool,
   toast,
   nav,
   renderExportMenu,
@@ -234,16 +236,6 @@ export function BriefStep({
     scheduleAutosave();
   };
 
-  const nextStep = useMemo(() => {
-    const idx = scenario.steps.findIndex(s => s.id === step.id);
-    return idx >= 0 && idx + 1 < scenario.steps.length ? scenario.steps[idx + 1] : undefined;
-  }, [scenario.steps, step.id]);
-
-  const handleContinueNext = async () => {
-    await flushBriefSave();
-    if (nextStep) nav.selectStep(nextStep.id);
-  };
-
   const [savingRevision, setSavingRevision] = useState(false);
   const handleSaveRevision = async () => {
     setSavingRevision(true);
@@ -257,10 +249,10 @@ export function BriefStep({
           outputs: [{ type: 'brief', values: cleaned }],
         },
       });
-      toast.showToast(t('Brief revision saved'), 'info', 'feedback');
+      toast.showToast(t('Version saved'), 'info', 'feedback');
     } catch (error) {
       if (!isScenarioConflictError(error)) {
-        toast.showToast(extractErrorMessage(error, t('Could not save brief revision.')), 'error', 'feedback');
+        toast.showToast(extractErrorMessage(error, t('Could not save brief version.')), 'error', 'feedback');
       }
     } finally {
       setSavingRevision(false);
@@ -372,8 +364,32 @@ export function BriefStep({
     }
   };
 
+  const briefStepPrompt = useMemo(() => {
+    const parts = [
+      typeof values.productName === 'string' ? values.productName.trim() : '',
+      typeof values.personaName === 'string' ? values.personaName.trim() : '',
+      typeof values.concept === 'string' ? values.concept.trim() : '',
+      typeof values.idea === 'string' ? values.idea.trim() : '',
+      typeof values.visualStyle === 'string' ? values.visualStyle.trim() : '',
+    ].filter(Boolean);
+    return parts.join(' — ');
+  }, [values]);
+
   const handleCopyScriptHandoff = async () => {
-    const base = buildStepAgentPrompt(scenario, run, { stepId: step.id, locale, integration });
+    let ensuredRun = run;
+    if (!ensuredRun) {
+      try {
+        ensuredRun = await api.ensureRun();
+      } catch {
+        ensuredRun = null;
+      }
+    }
+    const base = buildStepAgentPrompt(scenario, ensuredRun, {
+      stepId: step.id,
+      stepPrompt: briefStepPrompt || undefined,
+      locale,
+      integration,
+    });
     const prompt = `${base}\n\nFocus on writing a tight, natural spoken episode script and save it via openmotion_assets_use action=scenario command=add_iteration (stepId=${step.id}, outputs=[{ type: "script", text }]).`;
     const ok = await copyText(prompt);
     toast.showToast(
@@ -557,38 +573,11 @@ export function BriefStep({
     <div className="om-step-body" data-step-body="brief">
       {renderExportMenu(exportMenuExtras)}
 
-      {isBlackFriday && (discountSummary || values.originalPrice || values.salePrice || values.promoCode) && (
-        <div className="om-step-card om-step-discount-banner" data-discount-preview="true">
-          <div className="om-step-discount-values">
-            <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
-              <RemixIcon name="flashlight-line" size={16} />
-            </span>
-            {typeof values.salePrice === 'string' && values.salePrice.trim() && (
-              <strong className="om-step-discount-sale">{values.salePrice.trim()}</strong>
-            )}
-            {typeof values.originalPrice === 'string' && values.originalPrice.trim() && (
-              <span className="om-step-discount-orig">{values.originalPrice.trim()}</span>
-            )}
-            {discountSummary && (
-              <span className="om-step-badge om-step-badge--accent" data-discount-badge="true">
-                {discountSummary.label}
-              </span>
-            )}
-            {typeof values.promoCode === 'string' && values.promoCode.trim() && (
-              <span className="om-step-code-chip">{t('Promo code')}: {values.promoCode.trim()}</span>
-            )}
-          </div>
-          {typeof values.saleWindow === 'string' && values.saleWindow.trim() && (
-            <span className="om-step-muted">{values.saleWindow.trim()}</span>
-          )}
-        </div>
-      )}
-
       {editorMode === 'guided' ? (
         <BriefPromptComposer
           scenario={scenario}
           values={values}
-          nextStep={nextStep}
+          discountBadge={isBlackFriday ? discountSummary?.label : undefined}
           savingRevision={savingRevision}
           autosaving={api.busy.has('brief-autosave')}
           onUpdateField={updateField}
@@ -596,7 +585,6 @@ export function BriefStep({
           onApplyPreset={handleApplyPreset}
           onClearAll={handleClearAll}
           onSaveRevision={() => void handleSaveRevision()}
-          onContinue={nextStep ? () => void handleContinueNext() : undefined}
           onSwitchToForm={() => setEditorMode('form')}
         />
       ) : (
@@ -604,37 +592,44 @@ export function BriefStep({
           <div className="om-brief-composer-head">
             <div className="om-step-toolbar-group">
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 icon={<RemixIcon name="save-line" size={14} />}
                 loading={savingRevision}
                 onClick={() => void handleSaveRevision()}
               >
-                {t('Save revision')}
+                {t('Save version')}
               </Button>
               {api.busy.has('brief-autosave') && (
                 <span className="om-step-muted">{t('Saving…')}</span>
               )}
             </div>
-            <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-pressed={false}
-                icon={<RemixIcon name="sparkling-line" size={13} />}
-                onClick={() => setEditorMode('guided')}
-              >
-                {t('Fill in the blanks')}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                aria-pressed={true}
-                icon={<RemixIcon name="equalizer-line" size={13} />}
-                onClick={() => {}}
-              >
-                {t('All fields')}
-              </Button>
+            <div className="om-brief-composer-head-actions">
+              {isBlackFriday && discountSummary && (
+                <span className="om-step-badge om-step-badge--accent" data-discount-badge="true">
+                  {discountSummary.label}
+                </span>
+              )}
+              <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={false}
+                  icon={<RemixIcon name="sparkling-line" size={13} />}
+                  onClick={() => setEditorMode('guided')}
+                >
+                  {t('Fill in the blanks')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-pressed={true}
+                  icon={<RemixIcon name="equalizer-line" size={13} />}
+                  onClick={() => {}}
+                >
+                  {t('All fields')}
+                </Button>
+              </div>
             </div>
           </div>
           <div className="om-step-form-grid">
@@ -671,7 +666,7 @@ export function BriefStep({
                 icon={<RemixIcon name="clipboard-line" size={14} />}
                 onClick={() => void handleCopyScriptHandoff()}
               >
-                {t('Copy Agent handoff (script)')}
+                {t('Ask Agent to write script')}
               </Button>
             </div>
           </div>
@@ -700,6 +695,20 @@ export function BriefStep({
           </div>
         </section>
       )}
+
+      <StepCapabilityBar
+        scenario={scenario}
+        step={step}
+        state={state}
+        run={run}
+        active={active}
+        api={api}
+        pool={pool}
+        toast={toast}
+        nav={nav}
+        stepPrompt={briefStepPrompt}
+        allowQuickMedia
+      />
 
       {isGemini && geminiHub && (
         <>
@@ -744,7 +753,7 @@ export function BriefStep({
             )}
           </section>
 
-          <section className="om-step-card" aria-label={t('Gemini 4 Neon inspiration')}>
+          <section className="om-step-section" aria-label={t('Gemini 4 Neon inspiration')}>
             <div className="om-step-section-head">
               <div className="om-brief-composer-lead">
                 <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
@@ -788,58 +797,52 @@ export function BriefStep({
       )}
 
       {downstreamSteps.length > 0 && (
-        <section className="om-step-card" aria-label={t('Downstream prompts')}>
-          <div className="om-step-section-head">
-            <div className="om-brief-composer-lead">
-              <span className="om-brief-composer-icon" data-tone="brief" aria-hidden="true">
-                <RemixIcon name="route-line" size={16} />
-              </span>
-              <div>
-                <h3 className="om-step-section-title">{t('Downstream prompts')}</h3>
-                <p className="om-step-muted">{t('Preview how this brief seeds each media step. Custom prompts stay untouched.')}</p>
-              </div>
-            </div>
-            <div className="om-step-toolbar-group">
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-expanded={promptsExpanded}
-                icon={<RemixIcon name={promptsExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
-                onClick={() => setPromptsExpanded(prev => !prev)}
-              >
-                {promptsExpanded ? t('Hide prompts') : t('Preview prompts')}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<RemixIcon name="check-line" size={14} />}
-                loading={applyingPrompts}
-                onClick={() => void handleApplyAllPrompts()}
-              >
-                {t('Apply to all steps')}
-              </Button>
-            </div>
-          </div>
+        <section className="om-step-disclosure" aria-label={t('Step prompts')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="om-step-disclosure-trigger"
+            aria-expanded={promptsExpanded}
+            icon={<RemixIcon name={promptsExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+            onClick={() => setPromptsExpanded(prev => !prev)}
+          >
+            <span>
+              {t('Later steps use this brief automatically')} · {promptsExpanded ? t('Hide prompts') : t('View prompts')}
+            </span>
+          </Button>
           {promptsExpanded && (
-            <div className="om-step-prompt-list">
-              {downstreamSteps.map(({ step: target, filled, userEdited }) => (
-                <div key={target.id} className="om-step-prompt-row">
-                  <div className="om-step-prompt-meta">
-                    <span className="om-step-inline-icon" data-step-type={target.type} aria-hidden="true">
-                      <RemixIcon name={target.icon} size={14} />
-                    </span>
-                    <strong>{t(target.title)}</strong>
-                    {userEdited && <span className="om-step-badge">{t('Edited')}</span>}
+            <div className="om-step-disclosure-body">
+              <div className="om-step-prompt-list">
+                {downstreamSteps.map(({ step: target, filled, userEdited }) => (
+                  <div key={target.id} className="om-step-prompt-row">
+                    <div className="om-step-prompt-meta">
+                      <span className="om-step-inline-icon" data-step-type={target.type} aria-hidden="true">
+                        <RemixIcon name={target.icon} size={14} />
+                      </span>
+                      <strong>{t(target.title)}</strong>
+                      {userEdited && <span className="om-step-badge">{t('Edited')}</span>}
+                    </div>
+                    <p className="om-step-prompt-preview">{filled || t('Fill brief fields to seed this prompt.')}</p>
                   </div>
-                  <p className="om-step-prompt-preview">{filled || t('Fill brief fields to seed this prompt.')}</p>
-                </div>
-              ))}
+                ))}
+              </div>
+              <div className="om-step-disclosure-actions">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<RemixIcon name="check-line" size={14} />}
+                  loading={applyingPrompts}
+                  onClick={() => void handleApplyAllPrompts()}
+                >
+                  {t('Apply to all steps')}
+                </Button>
+              </div>
             </div>
           )}
         </section>
       )}
 
-      {renderIterations({
+      {state.iterations.length > 0 && renderIterations({
         renderOutput: (iteration: StepIteration) => {
           const briefOut = iteration.outputs.find(
             (out): out is { type: 'brief'; values: Record<string, string | string[]> } => out.type === 'brief',
@@ -882,7 +885,7 @@ export function BriefStep({
               </div>
             );
           }
-          return <span className="om-step-muted">{t('Revision')}</span>;
+          return <span className="om-step-muted">{t('Version')}</span>;
         },
       })}
     </div>

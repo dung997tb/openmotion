@@ -162,7 +162,7 @@ export function BindingSlot({
     if (!id) return;
     const item = pool.byId.get(id);
     if (!item) {
-      toast.showToast(t('That asset is no longer in the pool.'), 'error', 'feedback');
+      toast.showToast(t('That asset is no longer in shared assets.'), 'error', 'feedback');
       return;
     }
     if (!kinds.includes(item.kind)) {
@@ -226,7 +226,7 @@ export function BindingSlot({
           disabled={busy}
           onClick={() => void handlePick()}
         >
-          {t('Pick from pool')}
+          {t('Choose assets')}
         </Button>
       </div>
 
@@ -250,8 +250,8 @@ export function BindingSlot({
       ) : (
         <p className="om-step-slot-empty">
           {required
-            ? t('Drop from the asset pool or pick an input to continue.')
-            : t('Optional. Drag from the asset pool or pick an input.')}
+            ? t('Drag assets here or choose from shared assets.')
+            : t('Optional. Drag assets here or choose from shared assets.')}
         </p>
       )}
     </div>

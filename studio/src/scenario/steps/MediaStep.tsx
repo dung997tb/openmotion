@@ -15,15 +15,13 @@ import { AssetAudioPreview } from '../../motion/AssetAudioPreview';
 import { AssetPicker } from '../../motion/AssetBrowser';
 import { uploadLibraryAsset } from '../../motion/assetClient';
 import { needsImage, sceneDestination, studioScenes, supportsScene } from '../../motion/creativeStudios';
-import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { useMediaCatalog } from '../../motion/useMediaCatalog';
 import { ScenarioApiError } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
 import { MotionPanel } from './MotionPanel';
+import { StepCapabilityBar } from './StepCapabilityBar';
 import {
-  buildStepAgentPrompt,
-  copyText,
   extractErrorMessage,
   isScenarioConflictError,
   jobStateLabel,
@@ -144,8 +142,7 @@ export function MediaStep(props: StepProps) {
     renderIterations,
   } = props;
 
-  const { t, locale } = useI18n();
-  const { info: integration } = useIntegrationInfo();
+  const { t } = useI18n();
   const modality: 'image' | 'video' | 'audio' =
     step.type === 'video' ? 'video' : step.type === 'audio' ? 'audio' : 'image';
 
@@ -429,16 +426,6 @@ export function MediaStep(props: StepProps) {
     }
   };
 
-  const handleCopyAgentHandoff = async () => {
-    const handoff = buildStepAgentPrompt(scenario, run, { stepId: step.id, locale, integration });
-    const ok = await copyText(handoff);
-    toast.showToast(
-      ok ? t('Copied. Paste into your Agent.') : t('Could not copy to clipboard.'),
-      ok ? 'info' : 'error',
-      'feedback',
-    );
-  };
-
   // Active / latest iteration & resolved pool outputs
   const activeIteration = useMemo(() => {
     if (state.activeIterationId) {
@@ -527,7 +514,7 @@ export function MediaStep(props: StepProps) {
             <div>
               <h3 className="om-step-section-title">{modalityTitle}</h3>
               <p className="om-step-muted">
-                {t('Pre-filled from your brief. Edit in plain language, attach pool references, or upload files.')}
+                {t('Pre-filled from your brief. Edit freely, attach reference images, or upload your own.')}
               </p>
             </div>
           </div>
@@ -664,7 +651,7 @@ export function MediaStep(props: StepProps) {
               <div>
                 <strong>{noModelMessage}</strong>
                 <p className="om-step-muted">
-                  {t('Connect a media provider to generate here, or bring in your own files to continue offline.')}
+                  {t('Connect a media provider to generate here, upload or choose workspace files, or copy an MCP prompt for your Agent below.')}
                 </p>
               </div>
             </div>
@@ -692,15 +679,7 @@ export function MediaStep(props: StepProps) {
                 icon={<RemixIcon name="folder-open-line" size={14} />}
                 onClick={() => setPickerOpen(true)}
               >
-                {t('Pick from workspace assets')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<RemixIcon name="clipboard-line" size={14} />}
-                onClick={() => void handleCopyAgentHandoff()}
-              >
-                {t('Copy Agent handoff')}
+                {t('Choose from workspace')}
               </Button>
             </div>
           </div>
@@ -777,7 +756,7 @@ export function MediaStep(props: StepProps) {
                   icon={<RemixIcon name="folder-open-line" size={14} />}
                   onClick={() => setPickerOpen(true)}
                 >
-                  {t('Pick from workspace assets')}
+                  {t('Choose from workspace')}
                 </Button>
               </div>
               <Button
@@ -953,6 +932,20 @@ export function MediaStep(props: StepProps) {
       ) : (
         generateWorkbench
       )}
+
+      <StepCapabilityBar
+        scenario={scenario}
+        step={step}
+        state={state}
+        run={run}
+        active={active}
+        api={api}
+        pool={pool}
+        toast={toast}
+        nav={nav}
+        stepPrompt={prompt}
+        allowQuickMedia={false}
+      />
 
       {renderIterations({
         renderOutput: (iteration: StepIteration) => {

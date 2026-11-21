@@ -49,7 +49,7 @@ const slides: FeaturedSlide[] = [{
   return { ...example, id, icon: scene.icon, subtitle: target.studio.title, hint: scene.hint, scene: { target, prompt: example.prompt }, scenario: 'design-full-chain' as ScenarioId };
 }), {
   id: 'ai-influencer',
-  title: 'AI influencer',
+  title: 'AI Influencer',
   subtitle: 'Roles',
   icon: 'user-3-line',
   hint: 'Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.',

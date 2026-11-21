@@ -212,6 +212,7 @@ export type PoolItemPreviewDialogProps = {
   item: PoolItem | null;
   run?: ScenarioRun | null;
   canUseInCurrentStep: boolean;
+  canDownloadMotion?: boolean;
   onClose(): void;
   onUseInCurrentStep?(item: PoolItem): void;
   onDownload?(item: PoolItem): void;
@@ -232,6 +233,7 @@ export function PoolItemPreviewDialog({
   item,
   run,
   canUseInCurrentStep,
+  canDownloadMotion = false,
   onClose,
   onUseInCurrentStep,
   onDownload,
@@ -271,7 +273,11 @@ export function PoolItemPreviewDialog({
   const pageUrl = designPreviewUrlForPoolItem(item);
   const fullText = item.ref.type === 'text' ? resolvePoolTextContent(item, run) : null;
   const canOpen = item.ref.type === 'asset' || item.ref.type === 'design' || item.ref.type === 'motion';
-  const canDownload = item.ref.type === 'asset' || item.ref.type === 'design' || item.ref.type === 'text';
+  const canDownload =
+    item.ref.type === 'asset' ||
+    item.ref.type === 'design' ||
+    item.ref.type === 'text' ||
+    (item.ref.type === 'motion' && canDownloadMotion);
 
   return (
     <Dialog.Root open onOpenChange={open => { if (!open) onClose(); }}>

@@ -8,7 +8,7 @@ export const scenarioCategories = [
 ] as const;
 export type ScenarioCategory = typeof scenarioCategories[number]['id'];
 
-export const scenarioStepTypes = ['brief', 'web-page', 'image', 'video', 'audio', 'social-pack', 'export-hub'] as const;
+export const scenarioStepTypes = ['brief', 'web-page', 'image', 'video', 'audio', 'social-pack'] as const;
 export type ScenarioStepType = typeof scenarioStepTypes[number];
 export type PoolKind = 'image' | 'video' | 'audio' | 'page' | 'motion' | 'text';
 
@@ -134,9 +134,9 @@ export const scenarioDefinitions = [
   {
     id: 'motion-full-chain',
     category: 'topic',
-    title: 'Motion Studio full chain',
-    subtitle: 'From an idea to an editable motion film, soundtrack and social cut-downs',
-    description: 'Plan a storyboard, generate or upload visual frames, build an editable Motion Studio film with matching audio, draft social cut-downs and export one complete package.',
+    title: 'Motion Studio',
+    subtitle: 'Turn an idea into a motion film, soundtrack, and social posts',
+    description: 'Plan a storyboard, create or upload visuals, build an editable Motion film with music, draft social posts, and download everything together.',
     badge: 'Top',
     icon: 'movie-line',
     links: ['motion-studio', 'template-library', 'skills'],
@@ -206,23 +206,14 @@ export const scenarioDefinitions = [
         produces: ['text'],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu'],
       },
-      {
-        id: 'export',
-        type: 'export-hub',
-        title: 'Package & export',
-        hint: 'Review every step and bundle assets, links and copy into one ZIP package.',
-        icon: 'download-2-line',
-        accepts: ['image', 'video', 'audio', 'page', 'motion', 'text'],
-        produces: [],
-      },
     ],
   },
   {
     id: 'gemini-4-neon',
     category: 'topic',
     title: 'Gemini 4 Neon',
-    subtitle: 'Write whole animations in code, then turn them into films and posts',
-    description: 'Start with a live HTML/canvas code animation, pair it with key stills and a companion motion film, then package social posts and source files together.',
+    subtitle: 'Write interactive animations in code, plus film and posts',
+    description: 'Create an interactive code animation, pair it with cover visuals and a companion film, then export your social posts and files together.',
     badge: 'New',
     icon: 'sparkling-line',
     links: ['model-hub:gemini-4', 'design-studio', 'motion-studio'],
@@ -246,7 +237,7 @@ export const scenarioDefinitions = [
         id: 'code-animation',
         type: 'web-page',
         title: 'Code animation',
-        hint: 'Create a live interactive HTML canvas starter or hand the brief to your Agent for Gemini-written code.',
+        hint: 'Create an interactive web animation, or let your Agent write custom Gemini code.',
         icon: 'code-s-slash-line',
         accepts: ['image'],
         produces: ['page'],
@@ -294,23 +285,14 @@ export const scenarioDefinitions = [
         produces: ['text'],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu', 'linkedin'],
       },
-      {
-        id: 'export',
-        type: 'export-hub',
-        title: 'Package & export',
-        hint: 'Download the live HTML page, stills, film metadata and social posts in one ZIP.',
-        icon: 'download-2-line',
-        accepts: ['image', 'video', 'audio', 'page', 'motion', 'text'],
-        produces: [],
-      },
     ],
   },
   {
     id: 'design-full-chain',
     category: 'topic',
-    title: 'Design Studio full chain',
-    subtitle: 'Web page, images, video and social posts from one idea',
-    description: 'Draft a responsive landing page in Design Studio, create hero visuals, embed those real images into the HTML project, add a promo video and export everything together.',
+    title: 'Design Studio',
+    subtitle: 'Go from idea to web page, visuals, promo video, and posts',
+    description: 'Create a landing page, generate hero visuals, place them right into your page, add a promo video, and download everything together.',
     badge: 'New',
     icon: 'layout-line',
     links: ['design-studio', 'motion-studio', 'template-library'],
@@ -336,7 +318,7 @@ export const scenarioDefinitions = [
         id: 'landing-page',
         type: 'web-page',
         title: 'Landing page',
-        hint: 'Generate an offline starter page, choose a Design template or link an existing project.',
+        hint: 'Describe your page, pick a starter layout, or connect an existing page.',
         icon: 'layout-line',
         accepts: ['image'],
         produces: ['page'],
@@ -362,7 +344,7 @@ export const scenarioDefinitions = [
         id: 'embed-images',
         type: 'web-page',
         title: 'Embed images',
-        hint: 'Import your chosen visuals into the landing page project as versioned local assets.',
+        hint: 'Place your chosen visuals right into your landing page.',
         icon: 'file-image-line',
         accepts: ['image', 'page'],
         produces: ['page'],
@@ -400,23 +382,14 @@ export const scenarioDefinitions = [
         produces: ['text'],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu', 'linkedin'],
       },
-      {
-        id: 'export',
-        type: 'export-hub',
-        title: 'Package & export',
-        hint: 'Package the HTML site with embedded assets, media files and social posts.',
-        icon: 'download-2-line',
-        accepts: ['image', 'video', 'audio', 'page', 'motion', 'text'],
-        produces: [],
-      },
     ],
   },
   {
     id: 'black-friday',
     category: 'campaign',
-    title: 'Black Friday e-commerce',
-    subtitle: 'Product images, detail page, 30s sales film, social posts and one package',
-    description: 'Run a full Black Friday campaign: shoot or upload product visuals, embed them into a high-conversion sale detail page, assemble a 30-second sales film and export social copy.',
+    title: 'Black Friday Sale',
+    subtitle: 'Product shots, sale page, 30s promo video, and social posts',
+    description: 'Create product photos, place them into a Black Friday sale page, make a 30-second promo video, and draft posts for every platform.',
     badge: 'Hot',
     icon: 'flashlight-line',
     links: ['black-friday-collection', 'design-studio', 'motion-studio', 'template-library', 'skills'],
@@ -471,7 +444,7 @@ export const scenarioDefinitions = [
         id: 'sales-film',
         type: 'video',
         title: '30s sales film',
-        hint: 'Generate a product clip or start from Black Friday Skills and stage references in Motion Studio.',
+        hint: 'Create a 30-second product promo video or pick a Black Friday style.',
         icon: 'clapperboard-line',
         accepts: ['image', 'audio'],
         produces: ['video', 'motion'],
@@ -493,23 +466,14 @@ export const scenarioDefinitions = [
         produces: ['text'],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu'],
       },
-      {
-        id: 'export',
-        type: 'export-hub',
-        title: 'Package & export',
-        hint: 'Bundle the sale page, product media, film project reference and social copy into one ZIP.',
-        icon: 'download-2-line',
-        accepts: ['image', 'video', 'audio', 'page', 'motion', 'text'],
-        produces: [],
-      },
     ],
   },
   {
     id: 'ai-influencer',
     category: 'role',
-    title: 'AI influencer',
-    subtitle: 'Script, persona visuals, link-in-bio page, voiced video and multi-platform posts',
-    description: 'Produce a recurring creator episode: outline the script, keep character visuals consistent, publish a link-in-bio hub, record voiceover, create a talking video and package multi-platform posts.',
+    title: 'AI Influencer',
+    subtitle: 'Script, persona visuals, bio page, talking video, and posts',
+    description: 'Write an episode script, keep your character consistent, build a link-in-bio page, record voiceover, create a talking video, and draft social posts.',
     badge: 'New',
     icon: 'user-3-line',
     links: ['design-studio', 'motion-studio', 'skills'],
@@ -595,15 +559,6 @@ export const scenarioDefinitions = [
         produces: ['text'],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu', 'linkedin'],
       },
-      {
-        id: 'export',
-        type: 'export-hub',
-        title: 'Package & export',
-        hint: 'Export the script, persona visuals, link-in-bio page, voiceover and social posts together.',
-        icon: 'download-2-line',
-        accepts: ['image', 'video', 'audio', 'page', 'motion', 'text'],
-        produces: [],
-      },
     ],
   },
 ] as const satisfies readonly ScenarioDefinition[];
@@ -687,8 +642,6 @@ function stepToolGuide(step: ScenarioStepDefinition): string {
       return 'Generate clips via openmotion_media_use + openmotion_assets_use, or create an editable film with openmotion_create_project, import pinned assets using openmotion_assets_use (action=import_to_project), and inspect with openmotion_open_preview.';
     case 'social-pack':
       return 'Save platform copy as a new iteration with openmotion_assets_use (action=scenario, command=add_iteration).';
-    case 'export-hub':
-      return 'Package active deliverables into one ZIP via openmotion_assets_use (action=scenario, command=export).';
   }
 }
 
@@ -717,7 +670,7 @@ export function scenarioAgentPrompt(
     '- Media discovery & generation: call openmotion_media_use (action=inspect, action=models), then openmotion_assets_use (action=generate, action=status) or scenario command=generate/sync.',
     '- HTML web pages: call openmotion_design_project (action=create/get/open), then openmotion_design_edit (action=write and action=import_asset) to author HTML and embed pinned workspace assets.',
     '- Editable Motion films: call openmotion_create_project, import selected pool versions via openmotion_assets_use (action=import_to_project), and deliver via openmotion_open_preview.',
-    '- Final package: call openmotion_assets_use with action=scenario, command=export to build the downloadable ZIP bundle.',
+    '- Export from Shared assets or header: call openmotion_assets_use with action=scenario, command=export (optionally passing poolItemIds or stepIds) to build a downloadable ZIP package of selected assets or all deliverables.',
     '',
     'Delivery & safety requirements:',
     '- Pass an explicit stable requestId on every mutating call and current expectedRevision on run and design edits.',
@@ -740,11 +693,48 @@ function formatPoolRef(ref: ScenarioRunSummaryForPrompt['pool'][number]['ref']):
   }
 }
 
-/** Run-bound variant: adds runId, the current brief, pinned pool refs, linked design/motion ids and remaining steps. */
+function stepWriteBackLines(
+  run: ScenarioRunSummaryForPrompt,
+  focusStep: ScenarioStepDefinition,
+  stepPrompt?: string,
+): string[] {
+  const trimmedPrompt = stepPrompt?.trim();
+  const lines: string[] = [
+    '',
+    'Step write-back instructions:',
+    trimmedPrompt ? `- Current step prompt: ${trimmedPrompt}` : '',
+    `- Generate images, videos, or audio directly into this step and Shared assets: openmotion_assets_use (action=scenario, command=generate, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", modality, model, prompt), then poll command=sync until completed.`,
+    `- Write an existing or workspace asset back into this step and Shared assets: openmotion_assets_use (action=scenario, command=add_pool, runId=${run.id}, expectedRevision=${run.revision}, items=[{ ref: { type: "asset", assetId, versionId }, stepId: "${focusStep.id}", source: "agent", label }]), plus command=add_iteration with outputs: [{ type: "pool", poolItemId }] when recording a new version in this step.`,
+  ].filter(Boolean);
+
+  if (focusStep.type === 'web-page') {
+    lines.push(
+      `- Author or update the HTML page via openmotion_design_project + openmotion_design_edit (action=write / action=import_asset), then link it back with openmotion_assets_use (action=scenario, command=link_design, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", designProjectId=<id>).`,
+    );
+  } else if (focusStep.type === 'brief') {
+    lines.push(
+      `- Save brief fields or scripts via openmotion_assets_use (action=scenario, command=update_brief / command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}"), plus command=add_pool for any accompanying visuals or videos.`,
+    );
+  } else if (focusStep.type === 'social-pack') {
+    lines.push(
+      `- Save platform posts via openmotion_assets_use (action=scenario, command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", iteration={ source: "agent", outputs: [{ type: "social", posts }] }), plus command=add_pool for any accompanying visuals or videos.`,
+    );
+  } else if (focusStep.type === 'video') {
+    lines.push(
+      `- For an editable Motion project: openmotion_create_project + openmotion_assets_use (action=import_to_project) + openmotion_assets_use (action=scenario, command=link_motion, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", projectId=<id>).`,
+    );
+  }
+  lines.push(
+    `- Package all deliverables or specific Shared assets into a ZIP via openmotion_assets_use (action=scenario, command=export, runId=${run.id}, requestId, poolItemIds=[...]).`,
+  );
+  return lines;
+}
+
+/** Run-bound variant: adds runId, the current brief, pinned pool refs, linked design/motion ids, remaining steps and step write-back commands. */
 export function scenarioRunAgentPrompt(
   scenario: ScenarioDefinition,
   run: ScenarioRunSummaryForPrompt,
-  options?: { stepId?: string; locale?: string | null; integration?: ScenarioPromptIntegration | null },
+  options?: { stepId?: string; stepPrompt?: string; locale?: string | null; integration?: ScenarioPromptIntegration | null },
 ): string {
   const focusStep = options?.stepId ? findScenarioStep(scenario, options.stepId) : undefined;
   const briefEntries = Object.entries(run.brief)
@@ -781,6 +771,7 @@ export function scenarioRunAgentPrompt(
     `- activeStepId: ${run.activeStepId}`,
     focusStep ? `- focusedStep: ${focusStep.id} (${focusStep.title} — ${focusStep.hint})` : null,
     remainingSteps.length ? `- remainingSteps: ${remainingSteps.join(', ')}` : '- remainingSteps: none',
+    ...(focusStep ? stepWriteBackLines(run, focusStep, options?.stepPrompt) : []),
     '',
     'Current brief:',
     ...(briefEntries.length ? briefEntries : ['- (no brief values recorded yet)']),

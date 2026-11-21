@@ -1,6 +1,5 @@
 import type { StepProps } from '../stepContract';
 import { BriefStep } from './BriefStep';
-import { ExportHubStep } from './ExportHubStep';
 import { MediaStep } from './MediaStep';
 import { SocialPackStep } from './SocialPackStep';
 import { WebPageStep } from './WebPageStep';
@@ -18,7 +17,5 @@ export function StepRouter(props: StepProps) {
       return <MediaStep {...props} />;
     case 'social-pack':
       return <SocialPackStep {...props} />;
-    case 'export-hub':
-      return <ExportHubStep {...props} />;
   }
 }

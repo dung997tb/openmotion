@@ -301,13 +301,21 @@
     "Topics, campaigns and roles": "专题、活动与角色",
     "Start workflow": "开始工作流",
     "End-to-end workflows": "端到端工作流",
-    "Topics, campaigns and roles that carry every asset from idea to export.": "按专题、活动与角色组织全链路创作，从创意到导出全程共享素材。",
+    "Topics, campaigns and roles that carry every asset from idea to export.": "按专题、活动与角色组织创作流程，从创意到导出全程共享素材。",
     "Recent runs": "最近运行",
     "Start full-chain workflow": "启动全链路工作流",
     "Start Gemini 4 Neon workflow": "启动 Gemini 4 Neon 工作流",
-    "Start Black Friday workflow": "启动黑五全链路工作流",
+    "Start Black Friday workflow": "启动黑五营销工作流",
     "AI influencer": "AI 博主",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "脚本、人设视觉、个人主页、口播视频与全平台社媒帖一站完成。"
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "脚本、人设视觉、个人主页、口播视频与全平台社媒帖一站完成。",
+    "Guided workflows": "引导式工作流",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "选定一个目标，从创意一路生成视觉画面、网页、视频与社媒文案。",
+    "Recent": "最近草稿",
+    "Start guided workflow": "开始引导式工作流",
+    "AI Influencer": "AI 博主",
+    "Featured": "精选",
+    "Recreate this template": "复刻模版",
+    "Templates could not be loaded.": "模板加载失败。"
   },
   "ja": {
     "Open Motion Editor": "Motion エディターを開く",
@@ -617,7 +625,15 @@
     "Start Gemini 4 Neon workflow": "Gemini 4 Neon ワークフローを開始",
     "Start Black Friday workflow": "ブラックフライデーのワークフローを開始",
     "AI influencer": "AI インフルエンサー",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "台本、ペルソナ画像、プロフィールページ、音声付き動画、各プラットフォーム向け投稿を一貫制作。"
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "台本、ペルソナ画像、プロフィールページ、音声付き動画、各プラットフォーム向け投稿を一貫制作。",
+    "Guided workflows": "ガイド付きワークフロー",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "目的を選ぶだけで、アイデアからビジュアル、Webページ、動画、SNS投稿まで一気に仕上げられます。",
+    "Recent": "最近",
+    "Start guided workflow": "ガイド付きワークフローを開始",
+    "AI Influencer": "AI インフルエンサー",
+    "Featured": "注目",
+    "Recreate this template": "このテンプレートを再現",
+    "Templates could not be loaded.": "テンプレートを読み込めませんでした。"
   },
   "ko": {
     "Open Motion Editor": "Motion 편집기 열기",
@@ -927,7 +943,15 @@
     "Start Gemini 4 Neon workflow": "Gemini 4 Neon 워크플로 시작",
     "Start Black Friday workflow": "블랙 프라이데이 워크플로 시작",
     "AI influencer": "AI 인플루언서",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "대본, 페르소나 비주얼, 링크인바이오 페이지, 음성 영상, 플랫폼별 게시물을 한 번에 완성합니다."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "대본, 페르소나 비주얼, 링크인바이오 페이지, 음성 영상, 플랫폼별 게시물을 한 번에 완성합니다.",
+    "Guided workflows": "가이드 워크플로",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "목표를 선택하고 아이디어에서 이미지, 웹페이지, 영상, SNS 게시물까지 한 번에 완성하세요.",
+    "Recent": "최근",
+    "Start guided workflow": "가이드 워크플로 시작",
+    "AI Influencer": "AI 인플루언서",
+    "Featured": "추천",
+    "Recreate this template": "이 템플릿 다시 만들기",
+    "Templates could not be loaded.": "템플릿을 불러올 수 없습니다."
   },
   "de": {
     "Open Motion Editor": "Motion-Editor öffnen",
@@ -1237,7 +1261,15 @@
     "Start Gemini 4 Neon workflow": "Gemini 4 Neon-Workflow starten",
     "Start Black Friday workflow": "Black-Friday-Workflow starten",
     "AI influencer": "KI-Influencer",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Skript, Persona-Visuals, Link-in-Bio-Seite, vertontes Video und Beiträge für jede Plattform."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Skript, Persona-Visuals, Link-in-Bio-Seite, vertontes Video und Beiträge für jede Plattform.",
+    "Guided workflows": "Geführte Workflows",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Ziel wählen und von der Idee direkt zu fertigen Visuals, Seiten, Videos und Beiträgen gelangen.",
+    "Recent": "Zuletzt",
+    "Start guided workflow": "Geführten Workflow starten",
+    "AI Influencer": "KI-Influencer",
+    "Featured": "Empfohlen",
+    "Recreate this template": "Diese Vorlage nachbauen",
+    "Templates could not be loaded.": "Vorlagen konnten nicht geladen werden."
   },
   "fr": {
     "Open Motion Editor": "Ouvrir l’éditeur Motion",
@@ -1547,7 +1579,15 @@
     "Start Gemini 4 Neon workflow": "Lancer le flux Gemini 4 Neon",
     "Start Black Friday workflow": "Lancer le flux Black Friday",
     "AI influencer": "Influenceur IA",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Script, visuels de persona, page link-in-bio, vidéo avec voix off et publications multiplateformes."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Script, visuels de persona, page link-in-bio, vidéo avec voix off et publications multiplateformes.",
+    "Guided workflows": "Flux guidés",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Choisissez un objectif et passez de l’idée aux visuels, pages, vidéos et publications.",
+    "Recent": "Récents",
+    "Start guided workflow": "Démarrer le flux guidé",
+    "AI Influencer": "Influenceur IA",
+    "Featured": "À la une",
+    "Recreate this template": "Recréer ce modèle",
+    "Templates could not be loaded.": "Impossible de charger les modèles."
   },
   "ru": {
     "Open Motion Editor": "Открыть редактор Motion",
@@ -1857,7 +1897,15 @@
     "Start Gemini 4 Neon workflow": "Запустить сценарий Gemini 4 Neon",
     "Start Black Friday workflow": "Запустить сценарий Чёрной пятницы",
     "AI influencer": "ИИ-блогер",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Сценарий, визуалы персонажа, страница-визитка, озвученное видео и посты для всех платформ."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Сценарий, визуалы персонажа, страница-визитка, озвученное видео и посты для всех платформ.",
+    "Guided workflows": "Пошаговые сценарии",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Выберите цель и пройдите путь от идеи до готовых изображений, страниц, видео и постов.",
+    "Recent": "Недавние",
+    "Start guided workflow": "Запустить пошаговый сценарий",
+    "AI Influencer": "ИИ-блогер",
+    "Featured": "Избранное",
+    "Recreate this template": "Воссоздать этот шаблон",
+    "Templates could not be loaded.": "Не удалось загрузить шаблоны."
   },
   "es": {
     "Open Motion Editor": "Abrir el editor de Motion",
@@ -2167,7 +2215,15 @@
     "Start Gemini 4 Neon workflow": "Iniciar flujo Gemini 4 Neon",
     "Start Black Friday workflow": "Iniciar flujo Black Friday",
     "AI influencer": "Influencer de IA",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Guion, visuales de persona, página de enlaces, video con voz y publicaciones para cada plataforma."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Guion, visuales de persona, página de enlaces, video con voz y publicaciones para cada plataforma.",
+    "Guided workflows": "Flujos guiados",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Elige un objetivo y pasa de la idea a visuales, páginas web, vídeos y publicaciones listas.",
+    "Recent": "Recientes",
+    "Start guided workflow": "Iniciar flujo guiado",
+    "AI Influencer": "Influencer IA",
+    "Featured": "Destacados",
+    "Recreate this template": "Recrear esta plantilla",
+    "Templates could not be loaded.": "No se pudieron cargar las plantillas."
   },
   "pt-BR": {
     "Open Motion Editor": "Abrir o editor do Motion",
@@ -2477,7 +2533,15 @@
     "Start Gemini 4 Neon workflow": "Iniciar fluxo Gemini 4 Neon",
     "Start Black Friday workflow": "Iniciar fluxo Black Friday",
     "AI influencer": "Influenciador de IA",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Roteiro, visuais de persona, página de links, vídeo narrado e posts para cada plataforma."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Roteiro, visuais de persona, página de links, vídeo narrado e posts para cada plataforma.",
+    "Guided workflows": "Fluxos guiados",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Escolha um objetivo e vá da ideia aos visuais, páginas, vídeos e postagens finais.",
+    "Recent": "Recentes",
+    "Start guided workflow": "Iniciar fluxo guiado",
+    "AI Influencer": "Influenciador IA",
+    "Featured": "Destaques",
+    "Recreate this template": "Recriar este modelo",
+    "Templates could not be loaded.": "Não foi possível carregar os modelos."
   },
   "it": {
     "Open Motion Editor": "Apri l’editor di Motion",
@@ -2787,7 +2851,15 @@
     "Start Gemini 4 Neon workflow": "Avvia flusso Gemini 4 Neon",
     "Start Black Friday workflow": "Avvia flusso Black Friday",
     "AI influencer": "Influencer IA",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Copione, visual del personaggio, pagina link-in-bio, video con voce e post per ogni piattaforma."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Copione, visual del personaggio, pagina link-in-bio, video con voce e post per ogni piattaforma.",
+    "Guided workflows": "Flussi guidati",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Scegli un obiettivo e passa dall’idea a immagini, pagine web, video e post pronti.",
+    "Recent": "Recenti",
+    "Start guided workflow": "Avvia flusso guidato",
+    "AI Influencer": "Influencer IA",
+    "Featured": "In evidenza",
+    "Recreate this template": "Ricrea questo modello",
+    "Templates could not be loaded.": "Impossibile caricare i modelli."
   },
   "tr": {
     "Open Motion Editor": "Motion düzenleyicisini aç",
@@ -3097,6 +3169,14 @@
     "Start Gemini 4 Neon workflow": "Gemini 4 Neon iş akışını başlat",
     "Start Black Friday workflow": "Black Friday iş akışını başlat",
     "AI influencer": "Yapay zeka içerik üreticisi",
-    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Senaryo, persona görselleri, bağlantı sayfası, seslendirmeli video ve tüm platformlar için gönderiler."
+    "Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.": "Senaryo, persona görselleri, bağlantı sayfası, seslendirmeli video ve tüm platformlar için gönderiler.",
+    "Guided workflows": "Rehberli iş akışları",
+    "Pick a goal and go from idea to finished visuals, pages, videos, and posts.": "Bir hedef seçin ve fikirden hazır görsellere, sayfalara, videolara ve gönderilere ulaşın.",
+    "Recent": "Son açılanlar",
+    "Start guided workflow": "Rehberli iş akışını başlat",
+    "AI Influencer": "Yapay Zeka Fenomeni",
+    "Featured": "Öne çıkanlar",
+    "Recreate this template": "Bu şablonu yeniden oluştur",
+    "Templates could not be loaded.": "Şablonlar yüklenemedi."
   }
 }

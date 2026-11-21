@@ -54,7 +54,7 @@ export function ScenarioMegaMenu({
               aria-label={t(category.label)}
               data-scenario-category={category.id}
             >
-              <div className="om-scenario-mega-column-head">
+              <div className="om-scenario-mega-column-head" data-category={category.id}>
                 <RemixIcon name={category.icon} size={14} aria-hidden="true" />
                 <h2>{t(category.label)}</h2>
               </div>
@@ -91,8 +91,8 @@ export function ScenarioMegaMenu({
       </div>
       <div className="om-scenario-mega-footer">
         {recentRuns.length > 0 && (
-          <div className="om-scenario-mega-recent" aria-label={t('Recent runs')}>
-            <span className="om-scenario-mega-recent-label">{t('Recent runs')}</span>
+          <div className="om-scenario-mega-recent" aria-label={t('Recent')}>
+            <span className="om-scenario-mega-recent-label">{t('Recent')}</span>
             {recentRuns.map(run => (
               <Button
                 key={run.id}

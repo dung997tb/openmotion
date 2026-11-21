@@ -180,7 +180,11 @@ function isProviderUnavailableMessage(message: string): boolean {
 }
 
 function summarizeRun(run: ScenarioRun): ScenarioRunSummary {
-  const stepStates = Object.values(run.steps);
+  const scenario = findScenario(run.scenarioId);
+  const validStepIds = scenario ? new Set(scenario.steps.map(step => step.id)) : null;
+  const stepStates = Object.entries(run.steps)
+    .filter(([stepId]) => !validStepIds || validStepIds.has(stepId))
+    .map(([, step]) => step);
   const doneSteps = stepStates.filter(step => step.status === 'done').length;
   let pendingJobs = 0;
   for (const step of stepStates) {
@@ -1691,6 +1695,7 @@ export class ScenarioRuns {
       runId: string;
       requestId: string;
       stepIds?: string[];
+      poolItemIds?: string[];
       activeOnly?: boolean;
       includeStandaloneHtml?: boolean;
       includeMotionSource?: boolean;
@@ -1703,6 +1708,7 @@ export class ScenarioRuns {
       const bundle = await buildScenarioBundle(this.dataDirectory, host, run, scenario, {
         requestId: input.requestId,
         stepIds: input.stepIds,
+        poolItemIds: input.poolItemIds,
         activeOnly: input.activeOnly,
         includeStandaloneHtml: input.includeStandaloneHtml,
         includeMotionSource: input.includeMotionSource,

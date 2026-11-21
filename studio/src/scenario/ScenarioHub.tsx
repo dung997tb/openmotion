@@ -79,7 +79,7 @@ export function ScenarioHub({
       const res = await scenarioClient.list({ limit: 12 });
       setRuns(res.runs ?? []);
     } catch (err) {
-      setRunsError(err instanceof Error ? err.message : t('Could not load recent workflow runs'));
+      setRunsError(err instanceof Error ? err.message : t('Could not load recent drafts'));
     } finally {
       setRunsLoading(false);
     }
@@ -106,10 +106,10 @@ export function ScenarioHub({
           changes: { archived: true },
         });
         setRuns(prev => prev.filter(item => item.id !== run.id));
-        toast.showToast(t('Run archived'), 'info', 'feedback');
+        toast.showToast(t('Draft archived'), 'info', 'feedback');
       } catch (err) {
         toast.showToast(
-          err instanceof Error ? err.message : t('Could not archive run'),
+          err instanceof Error ? err.message : t('Could not archive draft'),
           'error',
           'feedback',
         );
@@ -137,7 +137,7 @@ export function ScenarioHub({
           <div className="om-scenario-hub-hero-copy">
             <h1 className="om-title">{t('Workflows')}</h1>
             <p className="om-muted">
-              {t('Choose a topic, campaign, or role to move from an idea to finished visuals, pages, videos, social posts, and one exportable package.')}
+              {t('Pick a goal to go from an idea to visuals, pages, videos, social posts, and one download.')}
             </p>
           </div>
 
@@ -179,23 +179,23 @@ export function ScenarioHub({
           <div className="om-scenario-hub-runs-header">
             <div>
               <h2 id="om-scenario-recent-runs-heading" className="om-subtitle">
-                {t('Recent workflow runs')}
+                {t('Recent drafts')}
               </h2>
               <p className="om-muted">
-                {t('Pick up where you left off with all saved briefs, iterations, and shared assets intact.')}
+                {t('Pick up right where you left off — your notes, versions, and shared assets are all saved.')}
               </p>
             </div>
             <IconButton
               variant="ghost"
               size="sm"
-              aria-label={t('Refresh recent runs')}
+              aria-label={t('Refresh recent drafts')}
               onClick={() => void loadRuns()}
               icon={<RemixIcon name="refresh-line" size={16} />}
             />
           </div>
 
           {runsLoading ? (
-            <div className="om-scenario-runs-skeleton" role="status" aria-label={t('Loading recent runs')}>
+            <div className="om-scenario-runs-skeleton" role="status" aria-label={t('Loading recent drafts')}>
               <Skeleton className="om-scenario-run-skeleton-row" />
               <Skeleton className="om-scenario-run-skeleton-row" />
               <Skeleton className="om-scenario-run-skeleton-row" />
@@ -212,8 +212,8 @@ export function ScenarioHub({
             <div className="om-scenario-runs-empty">
               <PanelEmptyState
                 icon="route-line"
-                message={t('No workflow runs yet')}
-                description={t('Start any workflow above to save briefs, collect shared assets, and export deliverables.')}
+                message={t('No drafts yet')}
+                description={t('Start any workflow above to keep your ideas, visuals, and exports organized in one place.')}
               />
             </div>
           ) : (
@@ -262,7 +262,7 @@ export function ScenarioHub({
                         variant="ghost"
                         size="sm"
                         disabled={archivingId === run.id}
-                        aria-label={t('Archive run')}
+                        aria-label={t('Archive draft')}
                         onClick={() => void handleArchive(run)}
                         icon={<RemixIcon name="delete-bin-line" size={15} />}
                       />

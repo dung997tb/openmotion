@@ -5,10 +5,20 @@ import type { DesignProjectDetail } from '../../../../shared/design-project';
 import type { PoolItem } from '../../../../shared/scenario-runs';
 import { designClient } from '../../design/designClient';
 import { WebPageStep } from './WebPageStep';
-import { createStepProps, makeBaseRun, mountStep } from './stepTestHelpers';
+import { createStepProps, makeBaseRun, mountStep, setFieldValue } from './stepTestHelpers';
 
 vi.mock('../../motion/useIntegrationInfo', () => ({
   useIntegrationInfo: () => ({ info: { previewUrl: 'http://127.0.0.1:4197', dataDirectory: '/fixture/workspace' }, failed: false, retry: vi.fn() }),
+}));
+
+const mockMediaCatalog = vi.fn(() => ({
+  catalog: { status: { providers: [], agents: [], routes: {}, capabilities: [] }, models: [] },
+  failed: false,
+  retry: vi.fn(),
+}));
+
+vi.mock('../../motion/useMediaCatalog', () => ({
+  useMediaCatalog: (...args: unknown[]) => mockMediaCatalog(...args),
 }));
 
 beforeEach(() => {
@@ -233,6 +243,126 @@ describe('WebPageStep', () => {
       expect(mounted.container.textContent).toContain('Trading Analysis Dashboard');
     } finally {
       await mounted.unmount();
+    }
+  });
+
+  it('supports StepCapabilityBar Copy MCP prompt with ensureRun, quick media generation, and Sync reloading linked project', async () => {
+    const clipboardSpy = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardSpy },
+    });
+
+    vi.spyOn(designClient, 'listTemplates').mockResolvedValue({ items: [], nextCursor: null });
+    vi.spyOn(designClient, 'listProjects').mockResolvedValue({ projects: [] });
+    const getProjectSpy = vi.spyOn(designClient, 'getProject').mockResolvedValue({ project: makeDesignProject(rev1) });
+    const readFileSpy = vi.spyOn(designClient, 'readFile').mockResolvedValue({
+      path: 'index.html',
+      content: sampleHtml,
+      revision: rev1,
+      size: sampleHtml.length,
+      nextOffset: null,
+    });
+
+    mockMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: 'fal', label: 'fal', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' }],
+          agents: [],
+          routes: { image: 'fal:flux', video: 'fal:wan' },
+          capabilities: [
+            { modality: 'image', available: true, modelIds: ['fal:flux'], selectedModelId: 'fal:flux' },
+            { modality: 'video', available: true, modelIds: ['fal:wan'], selectedModelId: 'fal:wan' },
+          ],
+        },
+        models: [
+          { id: 'fal:flux', provider: 'fal', modelId: 'flux', label: 'Flux', modality: 'image', source: 'builtin' },
+          { id: 'fal:wan', provider: 'fal', modelId: 'wan', label: 'Wan', modality: 'video', source: 'builtin' },
+        ] as never,
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    // Unsaved draft: Copy MCP prompt calls ensureRun and copies step-scoped prompt.
+    const draftSetup = createStepProps('design-full-chain', 'landing-page', { run: null });
+    const draftMounted = await mountStep(<WebPageStep {...draftSetup.props} />);
+    try {
+      const assistBar = draftMounted.container.querySelector('[data-step-assist="landing-page"]')!;
+      const copyMcpBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Copy MCP prompt'))!;
+      await act(async () => {
+        copyMcpBtn.click();
+        await Promise.resolve();
+      });
+      expect(draftSetup.mocks.ensureRun).toHaveBeenCalledTimes(1);
+      expect(clipboardSpy).toHaveBeenCalledTimes(1);
+      const copied = clipboardSpy.mock.calls[0][0] as string;
+      expect(copied).toContain('11111111-1111-4111-8111-111111111111');
+      expect(copied).toContain('stepId="landing-page"');
+      expect(copied).toContain('command=add_pool');
+      expect(copied).toContain('command=link_design');
+    } finally {
+      await draftMounted.unmount();
+    }
+
+    // Linked project: quick-gen creates image/video job and Sync refreshes run + reloads linked Design project.
+    const linkedRun = makeBaseRun('design-full-chain', {
+      steps: { 'landing-page': { links: { designProjectId: projectId } } },
+    });
+    const linkedSetup = createStepProps('design-full-chain', 'landing-page', { run: linkedRun });
+    const linkedMounted = await mountStep(<WebPageStep {...linkedSetup.props} />);
+    try {
+      const initialGetCalls = getProjectSpy.mock.calls.length;
+      const initialReadCalls = readFileSpy.mock.calls.length;
+
+      const assistBar = linkedMounted.container.querySelector('[data-step-assist="landing-page"]')!;
+      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate image / video'))!;
+      await act(async () => { quickToggle.click(); });
+
+      const quickGen = linkedMounted.container.querySelector('[data-quick-gen="landing-page"]')!;
+      expect(quickGen).toBeTruthy();
+
+      const promptInput = quickGen.querySelector<HTMLTextAreaElement>('#quick-gen-prompt-landing-page')!;
+      await act(async () => { setFieldValue(promptInput, 'Hero geometric glass banner'); });
+
+      const generateBtn = Array.from(quickGen.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Generate')!;
+      await act(async () => {
+        generateBtn.click();
+        await Promise.resolve();
+      });
+      expect(linkedSetup.mocks.mutate).toHaveBeenCalledWith(
+        'quick-gen:landing-page:image',
+        'generate',
+        {
+          stepId: 'landing-page',
+          modality: 'image',
+          model: 'fal:flux',
+          prompt: 'Hero geometric glass banner',
+        },
+      );
+
+      getProjectSpy.mockResolvedValueOnce({ project: makeDesignProject(rev2) });
+      readFileSpy.mockResolvedValueOnce({
+        path: 'index.html',
+        content: sampleHtml,
+        revision: rev2,
+        size: sampleHtml.length,
+        nextOffset: null,
+      });
+
+      const syncBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Sync')!;
+      await act(async () => {
+        syncBtn.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(linkedSetup.mocks.refresh).toHaveBeenCalledTimes(1);
+      expect(getProjectSpy.mock.calls.length).toBeGreaterThan(initialGetCalls);
+      expect(readFileSpy.mock.calls.length).toBeGreaterThan(initialReadCalls);
+      expect(linkedSetup.mocks.showToast).toHaveBeenCalledWith('Synced latest assets', 'info', 'feedback');
+    } finally {
+      await linkedMounted.unmount();
     }
   });
 });

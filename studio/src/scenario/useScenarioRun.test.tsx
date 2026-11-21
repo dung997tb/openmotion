@@ -208,10 +208,10 @@ describe('useScenarioRun', () => {
     expect(latest.run?.id).toBe(RUN_ID_1);
     expect(onRunCreated).toHaveBeenCalledWith(RUN_ID_1, true);
     expect(onToast).toHaveBeenCalledWith(
-      'Resumed your latest run',
+      'Resumed your latest draft',
       'info',
       'feedback',
-      expect.objectContaining({ label: 'New run' }),
+      expect.objectContaining({ label: 'New draft' }),
     );
 
     // Invoking the toast action starts a brand new run.
@@ -451,5 +451,67 @@ describe('useScenarioRun', () => {
     });
     expect(latest.run?.title).toBe('Updated in Tab 2');
     expect(getCount).toBe(2);
+  });
+
+  it('refreshes the active run when visibilitychange restores visible state without pending jobs', async () => {
+    const rev1 = makeRun({ id: RUN_ID_1, revision: 1, title: 'Initial title' });
+    const rev2 = makeRun({ id: RUN_ID_1, revision: 2, title: 'Updated while hidden' });
+    let getCount = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const parsed = parsePhase1Call(init);
+      if (parsed.command === 'get') {
+        getCount += 1;
+        return jsonResponse({ run: getCount === 1 ? rev1 : rev2 });
+      }
+      return jsonResponse({ error: 'UNSUPPORTED: unexpected' }, 400);
+    });
+
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+
+    let latest!: UseScenarioRunResult;
+    renderHook(
+      {
+        scenarioId: 'black-friday',
+        runId: RUN_ID_1,
+        active: true,
+        locale: 'en',
+        t: msg => msg,
+        onRunCreated: vi.fn(),
+        onToast: vi.fn(),
+      },
+      value => {
+        latest = value;
+      },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latest.run?.title).toBe('Initial title');
+    expect(getCount).toBe(1);
+
+    // Becoming hidden should not trigger a refresh.
+    visibility = 'hidden';
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+    });
+    expect(getCount).toBe(1);
+
+    // Becoming visible again refreshes the run via scenarioClient.get.
+    visibility = 'visible';
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getCount).toBe(2);
+    expect(latest.run?.title).toBe('Updated while hidden');
   });
 });

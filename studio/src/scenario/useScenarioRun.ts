@@ -134,6 +134,7 @@ export function useScenarioRun({
   const intentRequestsRef = useRef<Map<string, { requestId: string; signature: string }>>(new Map());
   const busyCountsRef = useRef<Map<string, number>>(new Map());
   const syncInFlightRef = useRef(false);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
 
   const onRunCreatedRef = useRef(onRunCreated);
   onRunCreatedRef.current = onRunCreated;
@@ -252,12 +253,12 @@ export function useScenarioRun({
           setLoading(false);
           onRunCreatedRef.current(res.run.id, true);
           onToastRef.current(
-            tRef.current('Resumed your latest run'),
+            tRef.current('Resumed your latest draft'),
             'info',
             'feedback',
             {
               key: `scenario-resumed-${res.run.id}`,
-              label: tRef.current('New run'),
+              label: tRef.current('New draft'),
               onClick: async () => {
                 await startNewRunRef.current();
               },
@@ -271,7 +272,7 @@ export function useScenarioRun({
         setLoading(false);
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : tRef.current('Could not load workflow run');
+        const message = err instanceof Error ? err.message : tRef.current('Could not load workflow');
         setError(message);
         setLoading(false);
       }
@@ -311,18 +312,27 @@ export function useScenarioRun({
   }, [applyRun, beginBusy, endBusy, locale, scenarioId]);
 
   const refresh = useCallback(async (): Promise<void> => {
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current;
+    }
     const current = runRef.current;
     if (!current) return;
-    try {
-      const hasPending = countPendingJobs(current) > 0;
-      const res = hasPending ? await scenarioClient.sync(current.id) : await scenarioClient.get(current.id);
-      if (!mountedRef.current) return;
-      if (runRef.current?.id === res.run.id) {
-        applyRun(res.run, true);
+    const promise = (async () => {
+      try {
+        const hasPending = countPendingJobs(current) > 0;
+        const res = hasPending ? await scenarioClient.sync(current.id) : await scenarioClient.get(current.id);
+        if (!mountedRef.current) return;
+        if (runRef.current?.id === res.run.id) {
+          applyRun(res.run, true);
+        }
+      } catch {
+        // Background refresh failures stay silent; explicit user actions surface errors.
+      } finally {
+        refreshPromiseRef.current = null;
       }
-    } catch {
-      // Background refresh failures stay silent; explicit user actions surface errors.
-    }
+    })();
+    refreshPromiseRef.current = promise;
+    return promise;
   }, [applyRun]);
 
   const mutate = useCallback(
@@ -456,7 +466,7 @@ export function useScenarioRun({
     };
   }, [active, activeRunId, applyRun, pendingJobs]);
 
-  // Cross-tab refresh on window focus.
+  // Cross-tab refresh on window focus and tab visibility restore.
   useEffect(() => {
     if (!active || !activeRunId) return;
     const onFocus = () => {
@@ -464,9 +474,16 @@ export function useScenarioRun({
         void refresh();
       }
     };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && countPendingJobs(runRef.current) === 0) {
+        void refresh();
+      }
+    };
     window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [active, activeRunId, refresh]);
 

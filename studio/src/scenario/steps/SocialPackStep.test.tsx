@@ -9,6 +9,16 @@ vi.mock('../../motion/useIntegrationInfo', () => ({
   useIntegrationInfo: () => ({ info: { previewUrl: 'http://127.0.0.1:4197', dataDirectory: '/fixture/workspace' }, failed: false, retry: vi.fn() }),
 }));
 
+const mockMediaCatalog = vi.fn(() => ({
+  catalog: { status: { providers: [], agents: [], routes: {}, capabilities: [] }, models: [] },
+  failed: false,
+  retry: vi.fn(),
+}));
+
+vi.mock('../../motion/useMediaCatalog', () => ({
+  useMediaCatalog: (...args: unknown[]) => mockMediaCatalog(...args),
+}));
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -34,7 +44,7 @@ describe('SocialPackStep', () => {
     const mounted = await mountStep(<SocialPackStep {...props} />);
 
     try {
-      const draftBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Draft posts (offline)'))!;
+      const draftBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Generate posts'))!;
       await act(async () => { draftBtn.click(); });
 
       expect(mocks.mutate).toHaveBeenCalledWith(
@@ -128,6 +138,137 @@ describe('SocialPackStep', () => {
           }),
         }),
       );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('supports StepCapabilityBar Copy MCP prompt, Sync, and quick media generation without wiping drafted social posts', async () => {
+    const clipboardSpy = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardSpy },
+    });
+
+    mockMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: 'fal', label: 'fal', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' }],
+          agents: [],
+          routes: { image: 'fal:flux', video: 'fal:wan' },
+          capabilities: [
+            { modality: 'image', available: true, modelIds: ['fal:flux'], selectedModelId: 'fal:flux' },
+            { modality: 'video', available: true, modelIds: ['fal:wan'], selectedModelId: 'fal:wan' },
+          ],
+        },
+        models: [
+          { id: 'fal:flux', provider: 'fal', modelId: 'flux', label: 'Flux', modality: 'image', source: 'builtin' },
+          { id: 'fal:wan', provider: 'fal', modelId: 'wan', label: 'Wan', modality: 'video', source: 'builtin' },
+        ] as never,
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    // Unsaved draft: Copy MCP prompt ensures a run and writes social write-back instructions.
+    const draftSetup = createStepProps('black-friday', 'social', { run: null });
+    const draftMounted = await mountStep(<SocialPackStep {...draftSetup.props} />);
+    try {
+      const assistBar = draftMounted.container.querySelector('[data-step-assist="social"]')!;
+      const copyMcpBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Copy MCP prompt'))!;
+      await act(async () => {
+        copyMcpBtn.click();
+        await Promise.resolve();
+      });
+      expect(draftSetup.mocks.ensureRun).toHaveBeenCalledTimes(1);
+      expect(clipboardSpy).toHaveBeenCalledTimes(1);
+      const copied = clipboardSpy.mock.calls[0][0] as string;
+      expect(copied).toContain('11111111-1111-4111-8111-111111111111');
+      expect(copied).toContain('stepId="social"');
+      expect(copied).toContain('command=add_pool');
+      expect(copied).toContain('outputs: [{ type: "social", posts }]');
+    } finally {
+      await draftMounted.unmount();
+    }
+
+    // Saved run with drafted posts: generating quick media keeps existing social posts intact.
+    const socialIter: StepIteration = {
+      id: '88888888-8888-4888-8888-888888888888',
+      number: 1,
+      createdAt: 1700000000000,
+      source: 'local',
+      settings: { variant: 0, tone: 'bold', platforms: ['x'] },
+      inputs: [],
+      outputs: [{
+        type: 'social',
+        posts: [{ id: 'x-v1', platform: 'x', text: 'Existing X launch draft', hashtags: ['BlackFriday'], mediaPoolItemIds: [], aspect: '16:9' }],
+      }],
+    };
+    const mediaIter: StepIteration = {
+      id: '99999999-9999-4999-8999-999999999999',
+      number: 2,
+      createdAt: 1700000001000,
+      source: 'generated',
+      inputs: [],
+      outputs: [],
+      job: { jobId: 'job-social-vid', state: 'running', modality: 'video', model: 'fal:wan' },
+    };
+
+    const runWithPosts = makeBaseRun('black-friday', {
+      steps: {
+        social: { iterations: [socialIter], activeIterationId: socialIter.id },
+      },
+    });
+    const setup = createStepProps('black-friday', 'social', { run: runWithPosts });
+    const mounted = await mountStep(<SocialPackStep {...setup.props} />);
+    try {
+      const assistBar = mounted.container.querySelector('[data-step-assist="social"]')!;
+      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate image / video'))!;
+      await act(async () => { quickToggle.click(); });
+
+      const quickGen = mounted.container.querySelector('[data-quick-gen="social"]')!;
+      const videoChip = Array.from(quickGen.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Video')!;
+      await act(async () => { videoChip.click(); });
+
+      const promptInput = quickGen.querySelector<HTMLTextAreaElement>('#quick-gen-prompt-social')!;
+      await act(async () => { setFieldValue(promptInput, 'Short X social video loop'); });
+
+      const generateBtn = Array.from(quickGen.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Generate')!;
+      await act(async () => {
+        generateBtn.click();
+        await Promise.resolve();
+      });
+
+      expect(setup.mocks.mutate).toHaveBeenCalledWith(
+        'quick-gen:social:video',
+        'generate',
+        {
+          stepId: 'social',
+          modality: 'video',
+          model: 'fal:wan',
+          prompt: 'Short X social video loop',
+        },
+      );
+
+      // Simulate server appending the media generation iteration and pointing activeIterationId to it.
+      const runWithMedia = makeBaseRun('black-friday', {
+        steps: {
+          social: { iterations: [socialIter, mediaIter], activeIterationId: mediaIter.id },
+        },
+      });
+      const updated = createStepProps('black-friday', 'social', { run: runWithMedia });
+      await mounted.rerender(<SocialPackStep {...updated.props} />);
+
+      const xTextarea = mounted.container.querySelector<HTMLTextAreaElement>('[data-social-platform="x"] textarea');
+      expect(xTextarea?.value).toBe('Existing X launch draft');
+
+      const syncBtn = Array.from(mounted.container.querySelectorAll('[data-step-assist="social"] button')).find(b => b.textContent?.trim() === 'Sync')!;
+      await act(async () => {
+        syncBtn.click();
+        await Promise.resolve();
+      });
+      expect(updated.mocks.refresh).toHaveBeenCalledTimes(1);
+      expect(updated.mocks.showToast).toHaveBeenCalledWith('Synced latest assets', 'info', 'feedback');
     } finally {
       await mounted.unmount();
     }

@@ -223,7 +223,8 @@ export function MotionPanel({
   };
 
   const handleCopyMotionHandoff = async () => {
-    const prompt = buildStepAgentPrompt(scenario, run, { stepId: step.id, locale, integration });
+    const targetRun = run ?? await api.ensureRun().catch(() => null);
+    const prompt = buildStepAgentPrompt(scenario, targetRun, { stepId: step.id, locale, integration });
     const ok = await copyText(prompt);
     toast.showToast(
       ok ? t('Copied. Paste into your Agent.') : t('Could not copy to clipboard.'),
@@ -262,7 +263,7 @@ export function MotionPanel({
                 icon={<RemixIcon name="clipboard-line" size={14} />}
                 onClick={() => void handleCopyMotionHandoff()}
               >
-                {t('Copy Agent handoff')}
+                {t('Copy for Agent')}
               </Button>
             </div>
           </div>
@@ -270,7 +271,7 @@ export function MotionPanel({
       )}
 
       {templateSource === 'motion' && (
-        <section className="om-step-card" aria-label={t('Motion templates')}>
+        <section className="om-step-section" aria-label={t('Motion templates')}>
           <div className="om-step-section-head">
             <div className="om-brief-composer-lead">
               <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
@@ -343,7 +344,7 @@ export function MotionPanel({
       )}
 
       {templateSource === 'black-friday' && (
-        <section className="om-step-card" aria-label={t('Black Friday Skills and references')}>
+        <section className="om-step-section" aria-label={t('Black Friday Skills and references')}>
           <div className="om-step-section-head">
             <div className="om-brief-composer-lead">
               <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
@@ -440,7 +441,7 @@ export function MotionPanel({
               <p className="om-step-muted">
                 {selectedTemplate
                   ? t('Using: {title}', { title: selectedTemplate.title })
-                  : t('Creates an editable Motion Studio project and imports your checked pool assets.')}
+                  : t('Creates an editable Motion project with your selected assets.')}
               </p>
             </div>
           </div>
@@ -480,7 +481,7 @@ export function MotionPanel({
 
         <div className="om-step-field">
           <span className="om-step-field-label">
-            {t('Import pool assets ({count})', { count: selectedPoolIds.length })}
+            {t('Include shared assets ({count})', { count: selectedPoolIds.length })}
           </span>
           {importablePoolItems.length > 0 ? (
             <div className="om-step-checklist">
@@ -501,7 +502,7 @@ export function MotionPanel({
               })}
             </div>
           ) : (
-            <p className="om-step-muted">{t('No image, video or audio assets in the pool yet. You can import assets later in Motion Editor.')}</p>
+            <p className="om-step-muted">{t('No images, videos, or audio here yet — you can add assets later in Motion Editor.')}</p>
           )}
         </div>
 
@@ -518,7 +519,7 @@ export function MotionPanel({
       </section>
 
       {workspaceProjects.length > 0 && (
-        <section className="om-step-card" aria-label={t('Link another project')}>
+        <section className="om-step-section" aria-label={t('Link another project')}>
           <div className="om-step-section-head">
             <div className="om-brief-composer-lead">
               <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">

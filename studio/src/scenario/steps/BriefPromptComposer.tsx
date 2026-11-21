@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { useMemo } from 'react';
-import type { ScenarioBriefField, ScenarioDefinition, ScenarioStepDefinition } from '../../../../shared/scenarios';
+import type { ScenarioBriefField, ScenarioDefinition } from '../../../../shared/scenarios';
 import { Select } from '../../components/ui';
 import { FilterChip } from '../../components/ui/FilterChip';
 import { useI18n } from '../../i18n/I18n';
@@ -13,10 +13,12 @@ import {
 } from './briefPresets';
 import { SocialPlatformGlyph } from './SocialPlatformGlyph';
 
+const OFFER_HIGHLIGHT_FIELDS = new Set(['originalPrice', 'salePrice', 'discountPercent', 'promoCode']);
+
 export type BriefPromptComposerProps = {
   scenario: ScenarioDefinition;
   values: Record<string, string | string[]>;
-  nextStep?: ScenarioStepDefinition;
+  discountBadge?: string;
   savingRevision: boolean;
   autosaving: boolean;
   onUpdateField: (fieldId: string, value: string | string[]) => void;
@@ -24,14 +26,13 @@ export type BriefPromptComposerProps = {
   onApplyPreset: (preset: BriefPreset) => void;
   onClearAll: () => void;
   onSaveRevision: () => void;
-  onContinue?: () => void;
   onSwitchToForm: () => void;
 };
 
 export function BriefPromptComposer({
   scenario,
   values,
-  nextStep,
+  discountBadge,
   savingRevision,
   autosaving,
   onUpdateField,
@@ -39,7 +40,6 @@ export function BriefPromptComposer({
   onApplyPreset,
   onClearAll,
   onSaveRevision,
-  onContinue,
   onSwitchToForm,
 }: BriefPromptComposerProps) {
   const { t, locale } = useI18n();
@@ -54,8 +54,6 @@ export function BriefPromptComposer({
   const tokens = useMemo(() => parseSentenceTemplate(localizedTemplate), [localizedTemplate]);
   const presets = useMemo(() => briefPresetsFor(scenario.id, locale), [scenario.id, locale]);
 
-  const toneField = fieldsById.get('tone');
-  const languageField = fieldsById.get('language');
   const platformField = fieldsById.get('platformFocus');
 
   const hasAnyText = useMemo(
@@ -81,28 +79,35 @@ export function BriefPromptComposer({
             <RemixIcon name="sparkling-line" size={16} />
           </span>
           <p className="om-step-muted">
-            {t('Fill in the highlighted blanks, or pick an example below to get started quickly.')}
+            {t('Fill in the highlighted blanks, or pick an example.')}
           </p>
         </div>
-        <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
-          <Button
-            variant="secondary"
-            size="sm"
-            aria-pressed={true}
-            icon={<RemixIcon name="sparkling-line" size={13} />}
-            onClick={() => {}}
-          >
-            {t('Fill in the blanks')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-pressed={false}
-            icon={<RemixIcon name="equalizer-line" size={13} />}
-            onClick={onSwitchToForm}
-          >
-            {t('All fields')}
-          </Button>
+        <div className="om-brief-composer-head-actions">
+          {discountBadge && (
+            <span className="om-step-badge om-step-badge--accent" data-discount-badge="true">
+              {discountBadge}
+            </span>
+          )}
+          <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-pressed={true}
+              icon={<RemixIcon name="sparkling-line" size={13} />}
+              onClick={() => {}}
+            >
+              {t('Fill in the blanks')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={false}
+              icon={<RemixIcon name="equalizer-line" size={13} />}
+              onClick={onSwitchToForm}
+            >
+              {t('All fields')}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -144,6 +149,7 @@ export function BriefPromptComposer({
               data-filled={filled ? 'true' : undefined}
               data-required={field.required ? 'true' : undefined}
               data-wide={isWide ? 'true' : undefined}
+              data-highlight={OFFER_HIGHLIGHT_FIELDS.has(field.id) ? 'offer' : undefined}
               title={t(field.label)}
             >
               <span className="om-blank-sizer" aria-hidden="true">{sizerText}</span>
@@ -164,29 +170,6 @@ export function BriefPromptComposer({
             </span>
           );
         })}
-      </div>
-
-      <div className="om-brief-presets">
-        <span className="om-brief-presets-label">{t('Try an example')}</span>
-        <div className="om-step-chip-list">
-          {presets.map(preset => (
-            <Button
-              key={preset.id}
-              variant="ghost"
-              size="sm"
-              className="om-brief-preset-chip"
-              icon={<RemixIcon name="sparkling-line" size={13} />}
-              onClick={() => onApplyPreset(preset)}
-            >
-              {preset.label}
-            </Button>
-          ))}
-          {hasAnyText && (
-            <Button variant="ghost" size="sm" onClick={onClearAll}>
-              {t('Clear')}
-            </Button>
-          )}
-        </div>
       </div>
 
       {platformField && platformField.options && (
@@ -219,32 +202,31 @@ export function BriefPromptComposer({
         </div>
       )}
 
-      <div className="om-brief-composer-bar">
-        <div className="om-brief-composer-controls">
-          {toneField && toneField.options && (
-            <div className="om-brief-compact-select">
-              <Select
-                label={t(toneField.label)}
-                value={typeof values.tone === 'string' && values.tone ? values.tone : toneField.options[0]?.id ?? ''}
-                options={toneField.options.map(opt => ({ value: opt.id, label: t(opt.label) }))}
-                onCommit={next => onUpdateField('tone', next)}
-              />
-            </div>
-          )}
-          {languageField && languageField.options && (
-            <div className="om-brief-compact-select">
-              <Select
-                label={t(languageField.label)}
-                value={typeof values.language === 'string' && values.language ? values.language : languageField.options[0]?.id ?? ''}
-                options={languageField.options.map(opt => ({ value: opt.id, label: t(opt.label) }))}
-                onCommit={next => onUpdateField('language', next)}
-              />
-            </div>
-          )}
-          {autosaving && <span className="om-step-muted">{t('Saving…')}</span>}
+      <div className="om-brief-composer-foot">
+        <div className="om-brief-presets">
+          <span className="om-brief-presets-label">{t('Try:')}</span>
+          <div className="om-step-chip-list">
+            {presets.map(preset => (
+              <Button
+                key={preset.id}
+                variant="ghost"
+                size="sm"
+                className="om-brief-preset-chip"
+                onClick={() => onApplyPreset(preset)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+            {hasAnyText && (
+              <Button variant="ghost" size="sm" onClick={onClearAll}>
+                {t('Clear')}
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="om-step-toolbar-group">
+          {autosaving && <span className="om-step-muted">{t('Saving…')}</span>}
           <Button
             variant="ghost"
             size="sm"
@@ -252,19 +234,8 @@ export function BriefPromptComposer({
             loading={savingRevision}
             onClick={onSaveRevision}
           >
-            {t('Save revision')}
+            {t('Save version')}
           </Button>
-          {nextStep && onContinue && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<RemixIcon name={nextStep.icon} size={14} />}
-              onClick={onContinue}
-            >
-              {t('Next: {step}', { step: t(nextStep.title) })}
-              <RemixIcon name="arrow-right-line" size={14} />
-            </Button>
-          )}
         </div>
       </div>
     </section>

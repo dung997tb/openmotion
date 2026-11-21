@@ -204,7 +204,7 @@ describe('AssetPoolPanel', () => {
       },
     ]);
     expect(props.toast.showToast).toHaveBeenCalledWith(
-      'Added 1 file(s) to workflow pool',
+      'Added 1 file(s) to shared assets',
       'info',
       'feedback',
     );
@@ -354,5 +354,259 @@ describe('AssetPoolPanel', () => {
     });
 
     expect(document.querySelector('.om-asset-picker')).toBeTruthy();
+  });
+
+  it('supports export selection bar, Export popover options, Sync assets, and Collapse shared assets', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    const onExportBundle = vi.fn().mockResolvedValue(null);
+    const onCopySummaryJson = vi.fn().mockResolvedValue(undefined);
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    const onToggleCollapsed = vi.fn();
+
+    const props = baseProps({
+      onExportBundle,
+      onCopySummaryJson,
+      onRefresh,
+      onToggleCollapsed,
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <AssetPoolPanel {...props} />
+        </I18nProvider>,
+      );
+    });
+
+    // Header actions: Sync assets and Collapse shared assets.
+    const syncBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Sync assets"]')!;
+    const collapseBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse shared assets"]')!;
+    await act(async () => {
+      syncBtn.click();
+      collapseBtn.click();
+    });
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+
+    // Enter export selection mode, select all visible items, and click Export (3).
+    const selectToggleBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-bar button')).find(
+      btn => btn.textContent?.trim() === 'Select',
+    )!;
+    await act(async () => { selectToggleBtn.click(); });
+
+    const selBar = container.querySelector<HTMLElement>('.om-scenario-pool-selection-bar')!;
+    expect(selBar).toBeTruthy();
+
+    const selectAllBtn = Array.from(selBar.querySelectorAll<HTMLButtonElement>('button')).find(
+      btn => btn.textContent?.trim() === 'Select all',
+    )!;
+    await act(async () => { selectAllBtn.click(); });
+    expect(selBar.textContent).toContain('3 selected');
+
+    const exportSelectedBtn = Array.from(selBar.querySelectorAll<HTMLButtonElement>('button')).find(
+      btn => btn.textContent?.includes('Export (3)'),
+    )!;
+    await act(async () => {
+      exportSelectedBtn.click();
+      await Promise.resolve();
+    });
+    expect(onExportBundle).toHaveBeenCalledWith({
+      poolItemIds: [IMG_ITEM_1.id, IMG_ITEM_2.id, TEXT_ITEM.id],
+      activeOnly: true,
+      includeStandaloneHtml: true,
+      includeMotionSource: false,
+    });
+
+    // Open Export popover and trigger Copy summary (JSON).
+    const exportMenuTrigger = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-primary button')).find(
+      btn => btn.textContent?.trim() === 'Export',
+    )!;
+    await act(async () => {
+      exportMenuTrigger.click();
+      await Promise.resolve();
+    });
+    const copySummaryBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-scenario-export-popover button')).find(
+      btn => btn.textContent?.includes('Copy summary (JSON)'),
+    )!;
+    expect(copySummaryBtn).toBeTruthy();
+    await act(async () => {
+      copySummaryBtn.click();
+      await Promise.resolve();
+    });
+    expect(onCopySummaryJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports direct single-item export for media and Motion projects', async () => {
+    const motionItem: PoolItem = {
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      kind: 'motion',
+      ref: { type: 'motion', projectId: 'project', sessionId: 'session-1' },
+      label: 'Launch Motion Cut',
+      source: 'step-output',
+      stepId: 'sales-film',
+      tags: [],
+      pinned: false,
+      addedAt: 1700000003000,
+    };
+    const onExportBundle = vi.fn().mockResolvedValue(null);
+    const props = baseProps({ items: [IMG_ITEM_1, motionItem], onExportBundle });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <AssetPoolPanel {...props} />
+        </I18nProvider>,
+      );
+    });
+
+    const imgExportBtn = container.querySelector<HTMLButtonElement>(`button[aria-label="Export ${IMG_ITEM_1.label}"]`)!;
+    await act(async () => { imgExportBtn.click(); });
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    const motionExportBtn = container.querySelector<HTMLButtonElement>(`button[aria-label="Export ${motionItem.label}"]`)!;
+    await act(async () => { motionExportBtn.click(); });
+    expect(onExportBundle).toHaveBeenCalledWith({
+      poolItemIds: [motionItem.id],
+      includeMotionSource: true,
+    });
+  });
+
+  it('supports Export all (ZIP) options and multi-select / import-all from workspace and Design projects', async () => {
+    const mockAssets = [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'Studio Hero.png',
+        modality: 'image',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        currentVersionId: '22222222-2222-4222-8222-222222222222',
+        versions: [{ id: '22222222-2222-4222-8222-222222222222', source: 'upload', mimeType: 'image/png', createdAt: Date.now() }],
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        name: 'Product Detail.png',
+        modality: 'image',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        currentVersionId: '44444444-4444-4444-8444-444444444444',
+        versions: [{ id: '44444444-4444-4444-8444-444444444444', source: 'generated', mimeType: 'image/png', createdAt: Date.now() }],
+      },
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/motion-api/design/projects')) {
+        return new Response(
+          JSON.stringify({
+            projects: [
+              { id: 'd1111111-1111-4111-8111-111111111111', title: 'Landing V1', scenario: 'landing-page', versionId: null, revision: 'a'.repeat(64) },
+              { id: 'd2222222-2222-4222-8222-222222222222', title: 'Sale Page', scenario: 'landing-page', versionId: null, revision: 'b'.repeat(64) },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ assets: mockAssets, total: 2, nextOffset: null }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const onAddItems = vi.fn().mockResolvedValue(['p1', 'p2']);
+    const onExportBundle = vi.fn().mockResolvedValue(null);
+    const props = baseProps({ items: [], onAddItems, onExportBundle });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <AssetPoolPanel {...props} />
+        </I18nProvider>,
+      );
+    });
+
+    // Export popover options -> Export all (ZIP)
+    const exportMenuTrigger = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-primary button'))
+      .find(b => b.textContent?.trim() === 'Export')!;
+    await act(async () => {
+      exportMenuTrigger.click();
+      await Promise.resolve();
+    });
+    const motionOpt = document.querySelector<HTMLElement>('[aria-label="Include Motion project source"]')!;
+    const motionLabel = motionOpt.closest('label');
+    await act(async () => {
+      if (motionLabel) {
+        motionLabel.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+      } else {
+        motionOpt.click();
+      }
+    });
+    expect(motionOpt.getAttribute('aria-checked')).toBe('true');
+    const exportAllZipBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-scenario-export-actions button'))
+      .find(b => b.textContent?.includes('Export all (ZIP)'))!;
+    await act(async () => { exportAllZipBtn.click(); });
+    expect(onExportBundle).toHaveBeenCalledWith({
+      activeOnly: true,
+      includeStandaloneHtml: true,
+      includeMotionSource: true,
+    });
+
+    // Open workspace AssetPicker in multi-select mode -> Select all (2) -> Import (2)
+    const pickBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find(btn => btn.textContent?.includes('Pick from workspace'))!;
+    await act(async () => {
+      pickBtn.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const selectAllWorkspaceBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-asset-picker button'))
+      .find(b => b.textContent?.includes('Select all (2)'))!;
+    await act(async () => { selectAllWorkspaceBtn.click(); });
+    const importWorkspaceBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-asset-picker button'))
+      .find(b => b.textContent?.includes('Import (2)'))!;
+    await act(async () => {
+      importWorkspaceBtn.click();
+      await Promise.resolve();
+    });
+    expect(onAddItems).toHaveBeenCalledWith([
+      expect.objectContaining({ label: 'Studio Hero.png', source: 'workspace' }),
+      expect.objectContaining({ label: 'Product Detail.png', source: 'workspace' }),
+    ]);
+
+    // Open Import -> Import Design pages… -> Select all (2) -> Import (2)
+    const importTrigger = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-primary button'))
+      .find(b => b.textContent?.trim() === 'Import')!;
+    await act(async () => {
+      importTrigger.click();
+      await Promise.resolve();
+    });
+    const designMenuItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      .find(el => el.textContent?.includes('Import Design pages'))!;
+    await act(async () => {
+      designMenuItem.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const selectAllDesignBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-scenario-picker-toolbar button'))
+      .find(b => b.textContent?.includes('Select all (2)'))!;
+    await act(async () => { selectAllDesignBtn.click(); });
+    const importDesignBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-scenario-picker-footer button'))
+      .find(b => b.textContent?.includes('Import (2)'))!;
+    await act(async () => {
+      importDesignBtn.click();
+      await Promise.resolve();
+    });
+    expect(onAddItems).toHaveBeenLastCalledWith([
+      expect.objectContaining({ label: 'Landing V1', ref: expect.objectContaining({ type: 'design' }) }),
+      expect.objectContaining({ label: 'Sale Page', ref: expect.objectContaining({ type: 'design' }) }),
+    ]);
   });
 });

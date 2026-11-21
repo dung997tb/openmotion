@@ -88,7 +88,7 @@ export function IterationHistory({
           </h3>
         </header>
         <p className="om-muted om-scenario-history-empty-copy">
-          {t('No versions yet. Generate, upload, or save a revision in {step} to track and compare iterations.', {
+          {t('No saved versions yet. Generate, upload, or save in {step} to compare versions side by side.', {
             step: t(step.title),
           })}
         </p>

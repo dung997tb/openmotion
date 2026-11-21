@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { assetMediaUrl, type AssetReference, type LibraryAsset } from '../../../shared/asset-library';
 import { findDesignScenario, type DesignProject } from '../../../shared/design-project';
-import type { PoolItem, PoolRef, ScenarioRun } from '../../../shared/scenario-runs';
+import type { PoolItem, PoolRef, ScenarioBundleReceipt, ScenarioRun } from '../../../shared/scenario-runs';
 import type { PoolKind, ScenarioDefinition, ScenarioStepDefinition } from '../../../shared/scenarios';
 import { Checkbox } from '../components/ui/Checkbox';
 import { FilterChip } from '../components/ui/FilterChip';
@@ -31,6 +31,13 @@ export type PoolPickRequest = {
   selected: string[];
 };
 
+export type PoolExportOptions = {
+  poolItemIds?: string[];
+  activeOnly?: boolean;
+  includeStandaloneHtml?: boolean;
+  includeMotionSource?: boolean;
+};
+
 export type AssetPoolPanelProps = {
   scenario: ScenarioDefinition;
   run: ScenarioRun | null;
@@ -39,6 +46,9 @@ export type AssetPoolPanelProps = {
   highlightedIds: ReadonlySet<string>;
   open: boolean;
   onOpenChange(open: boolean): void;
+  collapsed?: boolean;
+  onToggleCollapsed?(): void;
+  onRefresh?(): Promise<void> | void;
   pickRequest: PoolPickRequest | null;
   onConfirmPick(ids: string[]): void;
   onCancelPick(): void;
@@ -53,8 +63,13 @@ export type AssetPoolPanelProps = {
   onUseInCurrentStep(item: PoolItem): Promise<void>;
   onOpenDesignProject(id: string): void;
   onOpenMotionProject(id: string): Promise<boolean>;
+  onExportBundle?(options?: PoolExportOptions): Promise<ScenarioBundleReceipt | null>;
+  exportingBundle?: boolean;
+  onCopySummaryJson?(): Promise<void> | void;
   toast: Pick<ReturnType<typeof useToast>, 'showToast'>;
 };
+
+const MAX_POOL_ADD_BATCH = 50;
 
 type KindFilter = 'all' | PoolKind;
 
@@ -122,6 +137,9 @@ export function AssetPoolPanel({
   highlightedIds,
   open,
   onOpenChange,
+  collapsed = false,
+  onToggleCollapsed,
+  onRefresh,
   pickRequest,
   onConfirmPick,
   onCancelPick,
@@ -131,6 +149,9 @@ export function AssetPoolPanel({
   onUseInCurrentStep,
   onOpenDesignProject,
   onOpenMotionProject,
+  onExportBundle,
+  exportingBundle = false,
+  onCopySummaryJson,
   toast,
 }: AssetPoolPanelProps) {
   const { t } = useI18n();
@@ -140,17 +161,27 @@ export function AssetPoolPanel({
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [stepFilters, setStepFilters] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [importingProjects, setImportingProjects] = useState(false);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   const [assetPickerBusy, setAssetPickerBusy] = useState(false);
   const [designPickerOpen, setDesignPickerOpen] = useState(false);
   const [designProjects, setDesignProjects] = useState<DesignProject[]>([]);
   const [designLoading, setDesignLoading] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
+  const [selectedDesignIds, setSelectedDesignIds] = useState<string[]>([]);
   const [motionPickerOpen, setMotionPickerOpen] = useState(false);
+  const [selectedMotionIds, setSelectedMotionIds] = useState<string[]>([]);
   const [previewItem, setPreviewItem] = useState<PoolItem | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [draftPickIds, setDraftPickIds] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
+  const [exportPopoverOpen, setExportPopoverOpen] = useState(false);
+  const [exportActiveOnly, setExportActiveOnly] = useState(true);
+  const [exportStandaloneHtml, setExportStandaloneHtml] = useState(true);
+  const [exportMotionSource, setExportMotionSource] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -160,10 +191,31 @@ export function AssetPoolPanel({
   useEffect(() => {
     if (pickRequest) {
       setDraftPickIds(pickRequest.selected);
+      setSelectionMode(false);
     } else {
       setDraftPickIds([]);
     }
   }, [pickRequest]);
+
+  // Prune stale selected export IDs whenever pool items change.
+  useEffect(() => {
+    const validIds = new Set(items.map(item => item.id));
+    setSelectedExportIds(prev => {
+      const next = prev.filter(id => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+    if (items.length === 0) {
+      setSelectionMode(false);
+    }
+  }, [items]);
+
+  useEffect(() => {
+    if (!designPickerOpen) setSelectedDesignIds([]);
+  }, [designPickerOpen]);
+
+  useEffect(() => {
+    if (!motionPickerOpen) setSelectedMotionIds([]);
+  }, [motionPickerOpen]);
 
   useEffect(() => {
     if (renamingId) {
@@ -263,9 +315,28 @@ export function AssetPoolPanel({
     setStepFilters([]);
   };
 
-  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = '';
+  const addItemsBatched = useCallback(
+    async (
+      entries: {
+        ref: PoolRef;
+        label?: string;
+        tags?: string[];
+        stepId?: string | null;
+        source: PoolItem['source'];
+      }[],
+    ): Promise<string[]> => {
+      const ids: string[] = [];
+      for (let i = 0; i < entries.length; i += MAX_POOL_ADD_BATCH) {
+        const chunk = entries.slice(i, i + MAX_POOL_ADD_BATCH);
+        const added = await onAddItems(chunk);
+        ids.push(...added);
+      }
+      return ids;
+    },
+    [onAddItems],
+  );
+
+  const uploadFilesToPool = async (files: File[]) => {
     if (files.length === 0) return;
 
     setUploading(true);
@@ -292,9 +363,9 @@ export function AssetPoolPanel({
       }
 
       if (toAdd.length > 0) {
-        await onAddItems(toAdd);
+        await addItemsBatched(toAdd);
         toast.showToast(
-          t('Added {count} file(s) to workflow pool', { count: toAdd.length }),
+          t('Added {count} file(s) to shared assets', { count: toAdd.length }),
           'info',
           'feedback',
         );
@@ -309,7 +380,7 @@ export function AssetPoolPanel({
     } catch (err) {
       if (!isScenarioConflictError(err)) {
         toast.showToast(
-          err instanceof Error ? err.message : t('Could not add uploaded files to pool'),
+          err instanceof Error ? err.message : t('Could not add uploaded files'),
           'error',
           'feedback',
         );
@@ -319,11 +390,20 @@ export function AssetPoolPanel({
     }
   };
 
-  const handleWorkspaceAssetPick = async (reference: AssetReference, asset: LibraryAsset) => {
+  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    await uploadFilesToPool(files);
+  };
+
+  const handleWorkspaceAssetsImport = async (
+    picked: { reference: AssetReference; asset: LibraryAsset }[],
+  ) => {
+    if (picked.length === 0) return;
     setAssetPickerBusy(true);
     try {
-      await onAddItems([
-        {
+      await addItemsBatched(
+        picked.map(({ reference, asset }) => ({
           ref: {
             type: 'asset',
             assetId: reference.assetId,
@@ -332,14 +412,20 @@ export function AssetPoolPanel({
           label: asset.name,
           stepId: null,
           source: 'workspace',
-        },
-      ]);
+        })),
+      );
       setAssetPickerOpen(false);
-      toast.showToast(t('Added to workflow pool'), 'info', 'feedback');
+      toast.showToast(
+        picked.length === 1
+          ? t('Added to shared assets')
+          : t('Imported {count} asset(s)', { count: picked.length }),
+        'info',
+        'feedback',
+      );
     } catch (err) {
       if (!isScenarioConflictError(err)) {
         toast.showToast(
-          err instanceof Error ? err.message : t('Could not add asset to pool'),
+          err instanceof Error ? err.message : t('Could not add asset'),
           'error',
           'feedback',
         );
@@ -349,10 +435,12 @@ export function AssetPoolPanel({
     }
   };
 
-  const handleAddDesignProject = async (project: DesignProject) => {
+  const handleImportDesignProjects = async (projects: DesignProject[]) => {
+    if (projects.length === 0) return;
+    setImportingProjects(true);
     try {
-      await onAddItems([
-        {
+      await addItemsBatched(
+        projects.map(project => ({
           ref: {
             type: 'design',
             projectId: project.id,
@@ -362,10 +450,16 @@ export function AssetPoolPanel({
           label: project.title,
           stepId: null,
           source: 'workspace',
-        },
-      ]);
+        })),
+      );
       setDesignPickerOpen(false);
-      toast.showToast(t('Added Design project to pool'), 'info', 'feedback');
+      toast.showToast(
+        projects.length === 1
+          ? t('Added Design project')
+          : t('Imported {count} Design page(s)', { count: projects.length }),
+        'info',
+        'feedback',
+      );
     } catch (err) {
       if (!isScenarioConflictError(err)) {
         toast.showToast(
@@ -374,13 +468,17 @@ export function AssetPoolPanel({
           'feedback',
         );
       }
+    } finally {
+      setImportingProjects(false);
     }
   };
 
-  const handleAddMotionProject = async (project: { id: string; title: string }) => {
+  const handleImportMotionProjects = async (projects: { id: string; title: string }[]) => {
+    if (projects.length === 0) return;
+    setImportingProjects(true);
     try {
-      await onAddItems([
-        {
+      await addItemsBatched(
+        projects.map(project => ({
           ref: {
             type: 'motion',
             projectId: project.id,
@@ -389,10 +487,16 @@ export function AssetPoolPanel({
           label: project.title,
           stepId: null,
           source: 'workspace',
-        },
-      ]);
+        })),
+      );
       setMotionPickerOpen(false);
-      toast.showToast(t('Added Motion project to pool'), 'info', 'feedback');
+      toast.showToast(
+        projects.length === 1
+          ? t('Added Motion project')
+          : t('Imported {count} Motion project(s)', { count: projects.length }),
+        'info',
+        'feedback',
+      );
     } catch (err) {
       if (!isScenarioConflictError(err)) {
         toast.showToast(
@@ -401,8 +505,13 @@ export function AssetPoolPanel({
           'feedback',
         );
       }
+    } finally {
+      setImportingProjects(false);
     }
   };
+
+  const canDownloadItem = (item: PoolItem): boolean =>
+    item.ref.type !== 'motion' || Boolean(onExportBundle);
 
   const handleDownloadItem = async (item: PoolItem) => {
     try {
@@ -423,6 +532,11 @@ export function AssetPoolPanel({
         const text = resolvePoolTextContent(item, run);
         const safeName = item.label.toLowerCase().replace(/[^a-z0-9-_]+/g, '-') || 'note';
         downloadText(`${safeName}.txt`, text);
+      } else if (item.ref.type === 'motion' && onExportBundle) {
+        await onExportBundle({
+          poolItemIds: [item.id],
+          includeMotionSource: true,
+        });
       }
     } catch (err) {
       toast.showToast(
@@ -539,22 +653,94 @@ export function AssetPoolPanel({
     });
   };
 
+  const toggleExportItem = (itemId: string) => {
+    setSelectedExportIds(prev =>
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId],
+    );
+  };
+
+  const toggleSelectAllVisibleForExport = () => {
+    const visibleIds = visibleItems.map(item => item.id);
+    if (visibleIds.length === 0) return;
+    setSelectedExportIds(prev => {
+      const prevSet = new Set(prev);
+      const allSelected = visibleIds.every(id => prevSet.has(id));
+      if (allSelected) {
+        return prev.filter(id => !visibleIds.includes(id));
+      }
+      const next = [...prev];
+      for (const id of visibleIds) {
+        if (!prevSet.has(id)) next.push(id);
+      }
+      return next;
+    });
+  };
+
+  const handleExportSelected = async () => {
+    const selectedSet = new Set(selectedExportIds);
+    const chosen = items.filter(item => selectedSet.has(item.id));
+    if (chosen.length === 0) return;
+    if (chosen.length === 1) {
+      await handleDownloadItem(chosen[0]);
+      return;
+    }
+    if (onExportBundle) {
+      await onExportBundle({
+        poolItemIds: chosen.map(item => item.id),
+        activeOnly: exportActiveOnly,
+        includeStandaloneHtml: exportStandaloneHtml,
+        includeMotionSource: exportMotionSource,
+      });
+    }
+  };
+
   const motionProjects = useMemo(
     () => (chrome?.workspace.projects ?? []).filter(project => !project.trashedAt),
     [chrome?.workspace.projects],
   );
 
   const hasActiveFilters = kindFilter !== 'all' || stepFilters.length > 0;
+  const visibleSelectedExportCount = useMemo(() => {
+    const selectedSet = new Set(selectedExportIds);
+    return visibleItems.filter(item => selectedSet.has(item.id)).length;
+  }, [selectedExportIds, visibleItems]);
+  const allVisibleSelectedForExport =
+    visibleItems.length > 0 && visibleSelectedExportCount === visibleItems.length;
+  const exportSelectionActive = !pickRequest && (selectionMode || selectedExportIds.length > 0);
+  const selectedExportSet = useMemo(() => new Set(selectedExportIds), [selectedExportIds]);
+
+  const hasExternalFiles = (event: DragEvent<HTMLElement>) =>
+    !pickRequest && Array.from(event.dataTransfer?.types ?? []).includes('Files');
 
   const panelBody = (
-    <div className="om-scenario-pool-inner">
+    <div
+      className="om-scenario-pool-inner"
+      data-file-drop-active={fileDragActive ? 'true' : undefined}
+      onDragOver={event => {
+        if (!hasExternalFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setFileDragActive(true);
+      }}
+      onDragLeave={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setFileDragActive(false);
+        }
+      }}
+      onDrop={event => {
+        setFileDragActive(false);
+        if (pickRequest || !event.dataTransfer?.files?.length) return;
+        event.preventDefault();
+        void uploadFilesToPool(Array.from(event.dataTransfer.files));
+      }}
+    >
       <input
         ref={fileInputRef}
         type="file"
         multiple
         accept="image/*,video/*,audio/*"
         className="om-scenario-hidden-file-input"
-        aria-label={t('Upload files to workflow pool')}
+        aria-label={t('Upload files to shared assets')}
         onChange={event => void handleFileUpload(event)}
       />
 
@@ -563,22 +749,61 @@ export function AssetPoolPanel({
           <span className="om-scenario-pool-header-icon" aria-hidden="true">
             <RemixIcon name="stack-line" size={14} />
           </span>
-          <h2 className="om-scenario-pool-title">{t('Shared asset pool')}</h2>
+          <h2 className="om-scenario-pool-title">{t('Shared assets')}</h2>
           <span className="om-badge">{items.length}</span>
         </div>
         <div className="om-scenario-pool-header-actions">
+          {onRefresh && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label={t('Sync assets')}
+              title={t('Sync assets')}
+              onClick={() => void onRefresh()}
+              icon={<RemixIcon name="refresh-line" size={14} />}
+            />
+          )}
+
+          {layoutMode === 'docked' && onToggleCollapsed && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label={t('Collapse shared assets')}
+              title={t('Collapse shared assets')}
+              onClick={onToggleCollapsed}
+              icon={<RemixIcon name="side-bar-line" size={15} />}
+            />
+          )}
+
+          {layoutMode !== 'docked' && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label={t('Close shared assets')}
+              onClick={() => onOpenChange(false)}
+              icon={<RemixIcon name="close-line" size={16} />}
+            />
+          )}
+        </div>
+      </header>
+
+      <div className="om-scenario-pool-actions-bar">
+        <div className="om-scenario-pool-actions-primary">
           <Menu
-            align="end"
-            aria-label={t('Add to shared asset pool')}
+            align="start"
+            aria-label={t('Import shared assets')}
             trigger={
               <Button
                 variant="secondary"
                 size="sm"
                 type="button"
-                loading={uploading}
-                icon={<RemixIcon name="add-line" size={14} />}
+                loading={uploading || importingProjects}
+                icon={<RemixIcon name="upload-2-line" size={14} />}
               >
-                {t('Add')}
+                {t('Import')}
               </Button>
             }
           >
@@ -592,37 +817,240 @@ export function AssetPoolPanel({
               icon={<RemixIcon name="folder-open-line" size={14} />}
               onClick={() => setAssetPickerOpen(true)}
             >
-              {t('From workspace assets…')}
+              {t('Import from workspace…')}
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="layout-line" size={14} />}
               onClick={() => setDesignPickerOpen(true)}
             >
-              {t('From a Design project…')}
+              {t('Import Design pages…')}
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="movie-line" size={14} />}
               onClick={() => setMotionPickerOpen(true)}
             >
-              {t('From a Motion project…')}
+              {t('Import Motion projects…')}
             </MenuItem>
           </Menu>
 
-          {layoutMode !== 'docked' && (
-            <IconButton
+          {onExportBundle && (
+            <Popover
+              align="start"
+              open={exportPopoverOpen}
+              onOpenChange={setExportPopoverOpen}
+              aria-label={t('Export options')}
+              className="om-scenario-export-popover"
+              trigger={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  loading={exportingBundle}
+                  icon={<RemixIcon name="download-2-line" size={14} />}
+                >
+                  {t('Export')}
+                </Button>
+              }
+            >
+              <div className="om-scenario-popover-body">
+                <div className="om-scenario-export-actions">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    type="button"
+                    loading={exportingBundle}
+                    icon={<RemixIcon name="download-2-line" size={14} />}
+                    onClick={() => {
+                      setExportPopoverOpen(false);
+                      void onExportBundle({
+                        activeOnly: exportActiveOnly,
+                        includeStandaloneHtml: exportStandaloneHtml,
+                        includeMotionSource: exportMotionSource,
+                      });
+                    }}
+                  >
+                    {t('Export all (ZIP)')}
+                  </Button>
+
+                  {selectedExportIds.length > 0 ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      type="button"
+                      disabled={exportingBundle}
+                      onClick={() => {
+                        setExportPopoverOpen(false);
+                        void handleExportSelected();
+                      }}
+                    >
+                      {t('Export selected ({count})', { count: selectedExportIds.length })}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      type="button"
+                      disabled={items.length === 0}
+                      onClick={() => {
+                        setSelectionMode(true);
+                        setExportPopoverOpen(false);
+                      }}
+                    >
+                      {t('Select assets to export')}
+                    </Button>
+                  )}
+
+                  {hasActiveFilters && visibleItems.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      type="button"
+                      disabled={exportingBundle}
+                      onClick={() => {
+                        setExportPopoverOpen(false);
+                        void onExportBundle({
+                          poolItemIds: visibleItems.map(item => item.id),
+                          activeOnly: exportActiveOnly,
+                          includeStandaloneHtml: exportStandaloneHtml,
+                          includeMotionSource: exportMotionSource,
+                        });
+                      }}
+                    >
+                      {t('Export filtered ({count})', { count: visibleItems.length })}
+                    </Button>
+                  )}
+                </div>
+
+                <div className="om-scenario-export-options">
+                  <div className="om-scenario-popover-option">
+                    <Checkbox
+                      aria-label={t('Active outputs only')}
+                      checked={exportActiveOnly}
+                      onCheckedChange={checked => setExportActiveOnly(Boolean(checked))}
+                    />
+                    <span
+                      className="om-scenario-popover-option-label"
+                      onClick={() => setExportActiveOnly(prev => !prev)}
+                    >
+                      {t('Active outputs only')}
+                    </span>
+                  </div>
+                  <div className="om-scenario-popover-option">
+                    <Checkbox
+                      aria-label={t('Standalone HTML')}
+                      checked={exportStandaloneHtml}
+                      onCheckedChange={checked => setExportStandaloneHtml(Boolean(checked))}
+                    />
+                    <span
+                      className="om-scenario-popover-option-label"
+                      onClick={() => setExportStandaloneHtml(prev => !prev)}
+                    >
+                      {t('Standalone HTML')}
+                    </span>
+                  </div>
+                  <div className="om-scenario-popover-option">
+                    <Checkbox
+                      aria-label={t('Include Motion project source')}
+                      checked={exportMotionSource}
+                      onCheckedChange={checked => setExportMotionSource(Boolean(checked))}
+                    />
+                    <span
+                      className="om-scenario-popover-option-label"
+                      onClick={() => setExportMotionSource(prev => !prev)}
+                    >
+                      {t('Include Motion project source')}
+                    </span>
+                  </div>
+                </div>
+
+                {onCopySummaryJson && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    icon={<RemixIcon name="file-copy-line" size={14} />}
+                    onClick={() => {
+                      setExportPopoverOpen(false);
+                      void onCopySummaryJson();
+                    }}
+                  >
+                    {t('Copy summary (JSON)')}
+                  </Button>
+                )}
+              </div>
+            </Popover>
+          )}
+        </div>
+
+        {!pickRequest && items.length > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            aria-pressed={selectionMode}
+            icon={<RemixIcon name={selectionMode ? 'check-line' : 'checkbox-blank-line'} size={14} />}
+            onClick={() => {
+              if (selectionMode) {
+                setSelectionMode(false);
+                setSelectedExportIds([]);
+              } else {
+                setSelectionMode(true);
+              }
+            }}
+          >
+            {t(selectionMode ? 'Done' : 'Select')}
+          </Button>
+        )}
+      </div>
+
+      {fileDragActive && (
+        <div className="om-scenario-pool-drop-hint" role="status">
+          <RemixIcon name="upload-2-line" size={16} />
+          <span>{t('Drop files to upload to shared assets')}</span>
+        </div>
+      )}
+
+      {exportSelectionActive && (
+        <div className="om-scenario-pool-selection-bar" role="region" aria-label={t('Export selected assets')}>
+          <div className="om-scenario-pool-selection-meta">
+            <strong>{t('{count} selected', { count: selectedExportIds.length })}</strong>
+            <Button
               variant="ghost"
               size="sm"
               type="button"
-              aria-label={t('Close asset pool')}
-              onClick={() => onOpenChange(false)}
-              icon={<RemixIcon name="close-line" size={16} />}
-            />
-          )}
+              disabled={visibleItems.length === 0}
+              onClick={toggleSelectAllVisibleForExport}
+            >
+              {t(allVisibleSelectedForExport ? 'Deselect all' : 'Select all')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => {
+                setSelectionMode(false);
+                setSelectedExportIds([]);
+              }}
+            >
+              {t('Done')}
+            </Button>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            type="button"
+            loading={exportingBundle}
+            disabled={selectedExportIds.length === 0 || (!onExportBundle && selectedExportIds.length > 1)}
+            icon={<RemixIcon name="download-2-line" size={14} />}
+            onClick={() => void handleExportSelected()}
+          >
+            {t('Export ({count})', { count: selectedExportIds.length })}
+          </Button>
         </div>
-      </header>
+      )}
 
       {pickRequest && (
-        <div className="om-scenario-pick-banner" role="region" aria-label={t('Pick from pool')}>
+        <div className="om-scenario-pick-banner" role="region" aria-label={t('Choose assets')}>
           <div className="om-scenario-pick-banner-copy">
             <strong>{t('Select assets for {slot}', { slot: pickRequest.slot })}</strong>
             <span className="om-muted">
@@ -811,8 +1239,8 @@ export function AssetPoolPanel({
           <div className="om-scenario-pool-empty">
             <PanelEmptyState
               icon="stack-line"
-              message={t('Shared asset pool is empty')}
-              description={t('Add files, import workspace assets, or generate in any step. Everything you make lands here.')}
+              message={t('No shared assets yet')}
+              description={t('Upload files, pick from your workspace, or generate in any step — everything you create appears here.')}
             />
             <div className="om-scenario-pool-empty-actions">
               <Button
@@ -839,7 +1267,7 @@ export function AssetPoolPanel({
           <div className="om-scenario-pool-empty">
             <PanelEmptyState
               icon="filter-3-line"
-              message={t('No matching pool items')}
+              message={t('No matching assets')}
               description={t('Try clearing filters or add a matching asset.')}
             />
             {hasActiveFilters && (
@@ -855,6 +1283,8 @@ export function AssetPoolPanel({
             {visibleItems.map(item => {
               const isHighlighted = highlightedIds.has(item.id);
               const isSelectedForPick = draftPickIds.includes(item.id);
+              const isSelectedForExport = !pickRequest && selectedExportSet.has(item.id);
+              const isCardSelected = pickRequest ? isSelectedForPick : isSelectedForExport;
               const pickLimitReached =
                 pickRequest !== null &&
                 pickRequest.max !== undefined &&
@@ -881,7 +1311,7 @@ export function AssetPoolPanel({
                   data-kind={item.kind}
                   data-pinned={item.pinned || undefined}
                   data-highlighted={isHighlighted || undefined}
-                  data-selected={isSelectedForPick || undefined}
+                  data-selected={isCardSelected || undefined}
                   draggable={!pickRequest}
                   onDragStart={event => {
                     if (pickRequest) return;
@@ -891,13 +1321,26 @@ export function AssetPoolPanel({
                 >
                   <div className="om-scenario-pool-card-media">
                     <PoolThumb item={item} run={run} size="md" hoverPreview />
-                    {pickRequest && (
+                    {pickRequest ? (
                       <div className="om-scenario-pool-card-check">
                         <Checkbox
                           aria-label={t('Select {label}', { label: item.label })}
                           checked={isSelectedForPick}
                           disabled={pickLimitReached}
                           onCheckedChange={() => togglePickItem(item.id)}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className="om-scenario-pool-card-check"
+                        data-export-select="true"
+                        data-checked={isSelectedForExport ? 'true' : undefined}
+                        data-selection-mode={exportSelectionActive ? 'true' : undefined}
+                      >
+                        <Checkbox
+                          aria-label={t('Select {label}', { label: item.label })}
+                          checked={isSelectedForExport}
+                          onCheckedChange={() => toggleExportItem(item.id)}
                         />
                       </div>
                     )}
@@ -933,6 +1376,17 @@ export function AssetPoolPanel({
                       )}
 
                       <div className="om-scenario-pool-card-controls">
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          disabled={!canDownloadItem(item)}
+                          aria-label={t('Export {label}', { label: item.label })}
+                          title={t('Export')}
+                          onClick={() => void handleDownloadItem(item)}
+                          icon={<RemixIcon name="download-2-line" size={14} />}
+                        />
+
                         <IconButton
                           variant="ghost"
                           size="sm"
@@ -977,7 +1431,7 @@ export function AssetPoolPanel({
                           </MenuItem>
                           <MenuItem
                             icon={<RemixIcon name="download-2-line" size={14} />}
-                            disabled={item.ref.type === 'motion'}
+                            disabled={!canDownloadItem(item)}
                             onClick={() => void handleDownloadItem(item)}
                           >
                             {t('Download')}
@@ -1036,15 +1490,25 @@ export function AssetPoolPanel({
     </div>
   );
 
+  const toggleSelectedProjectId = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    projectId: string,
+  ) => {
+    setter(prev =>
+      prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId],
+    );
+  };
+
   const dialogs = (
     <>
       {assetPickerOpen && (
         <AssetPicker
-          title="Add from workspace assets"
-          confirmLabel="Add to workflow pool"
+          multiple
+          title="Import from workspace"
+          confirmLabel="Import to shared assets"
           busy={assetPickerBusy}
           onClose={() => setAssetPickerOpen(false)}
-          onPick={(reference, asset) => void handleWorkspaceAssetPick(reference, asset)}
+          onPickMany={picked => void handleWorkspaceAssetsImport(picked)}
         />
       )}
 
@@ -1058,7 +1522,7 @@ export function AssetPoolPanel({
               onKeyDown={event => event.stopPropagation()}
             >
               <header className="om-scenario-preview-header">
-                <Dialog.Title className="om-subtitle">{t('Add from a Design project')}</Dialog.Title>
+                <Dialog.Title className="om-subtitle">{t('Import Design pages')}</Dialog.Title>
                 <IconButton
                   variant="ghost"
                   size="sm"
@@ -1067,6 +1531,40 @@ export function AssetPoolPanel({
                   icon={<RemixIcon name="close-line" size={18} />}
                 />
               </header>
+              {designProjects.length > 0 && !designLoading && !designError && (
+                <div className="om-scenario-picker-toolbar">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    disabled={importingProjects}
+                    onClick={() =>
+                      setSelectedDesignIds(prev =>
+                        prev.length === designProjects.length ? [] : designProjects.map(p => p.id),
+                      )
+                    }
+                  >
+                    {t(
+                      selectedDesignIds.length === designProjects.length
+                        ? 'Deselect all'
+                        : 'Select all ({count})',
+                      { count: designProjects.length },
+                    )}
+                  </Button>
+                  {selectedDesignIds.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      disabled={importingProjects}
+                      onClick={() => setSelectedDesignIds([])}
+                    >
+                      {t('Clear')}
+                    </Button>
+                  )}
+                  <span className="om-muted">{t('{count} selected', { count: selectedDesignIds.length })}</span>
+                </div>
+              )}
               <div className="om-scenario-picker-list">
                 {designLoading ? (
                   <div className="om-scenario-runs-skeleton">
@@ -1088,23 +1586,61 @@ export function AssetPoolPanel({
                     description={t('Create a web page in a workflow step or in Design Studio first.')}
                   />
                 ) : (
-                  designProjects.map(project => (
-                    <Button
-                      key={project.id}
-                      variant="plain"
-                      type="button"
-                      className="om-scenario-picker-row"
-                      onClick={() => void handleAddDesignProject(project)}
-                    >
-                      <RemixIcon name="layout-line" size={16} />
-                      <span className="om-scenario-picker-row-title">{project.title}</span>
-                      <span className="om-badge">
-                        {t(findDesignScenario(project.scenario)?.label ?? project.scenario)}
-                      </span>
-                    </Button>
-                  ))
+                  designProjects.map(project => {
+                    const checked = selectedDesignIds.includes(project.id);
+                    return (
+                      <div
+                        key={project.id}
+                        className="om-scenario-picker-row om-scenario-picker-select-row"
+                        data-selected={checked || undefined}
+                      >
+                        <Checkbox
+                          aria-label={project.title}
+                          checked={checked}
+                          onCheckedChange={() => toggleSelectedProjectId(setSelectedDesignIds, project.id)}
+                        />
+                        <RemixIcon name="layout-line" size={16} />
+                        <span
+                          className="om-scenario-picker-row-title"
+                          onClick={() => toggleSelectedProjectId(setSelectedDesignIds, project.id)}
+                        >
+                          {project.title}
+                        </span>
+                        <span className="om-badge">
+                          {t(findDesignScenario(project.scenario)?.label ?? project.scenario)}
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
+              {designProjects.length > 0 && !designLoading && !designError && (
+                <footer className="om-scenario-picker-footer">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    disabled={importingProjects}
+                    onClick={() => void handleImportDesignProjects(designProjects)}
+                  >
+                    {t('Import all ({count})', { count: designProjects.length })}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    type="button"
+                    loading={importingProjects}
+                    disabled={selectedDesignIds.length === 0 || importingProjects}
+                    onClick={() =>
+                      void handleImportDesignProjects(
+                        designProjects.filter(project => selectedDesignIds.includes(project.id)),
+                      )
+                    }
+                  >
+                    {t('Import ({count})', { count: selectedDesignIds.length })}
+                  </Button>
+                </footer>
+              )}
             </Dialog.Popup>
           </Dialog.Portal>
         </Dialog.Root>
@@ -1120,7 +1656,7 @@ export function AssetPoolPanel({
               onKeyDown={event => event.stopPropagation()}
             >
               <header className="om-scenario-preview-header">
-                <Dialog.Title className="om-subtitle">{t('Add from a Motion project')}</Dialog.Title>
+                <Dialog.Title className="om-subtitle">{t('Import Motion projects')}</Dialog.Title>
                 <IconButton
                   variant="ghost"
                   size="sm"
@@ -1129,6 +1665,40 @@ export function AssetPoolPanel({
                   icon={<RemixIcon name="close-line" size={18} />}
                 />
               </header>
+              {motionProjects.length > 0 && (
+                <div className="om-scenario-picker-toolbar">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    disabled={importingProjects}
+                    onClick={() =>
+                      setSelectedMotionIds(prev =>
+                        prev.length === motionProjects.length ? [] : motionProjects.map(p => p.id),
+                      )
+                    }
+                  >
+                    {t(
+                      selectedMotionIds.length === motionProjects.length
+                        ? 'Deselect all'
+                        : 'Select all ({count})',
+                      { count: motionProjects.length },
+                    )}
+                  </Button>
+                  {selectedMotionIds.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      disabled={importingProjects}
+                      onClick={() => setSelectedMotionIds([])}
+                    >
+                      {t('Clear')}
+                    </Button>
+                  )}
+                  <span className="om-muted">{t('{count} selected', { count: selectedMotionIds.length })}</span>
+                </div>
+              )}
               <div className="om-scenario-picker-list">
                 {motionProjects.length === 0 ? (
                   <PanelEmptyState
@@ -1137,20 +1707,58 @@ export function AssetPoolPanel({
                     description={t('Create a Motion project from the video step or Motion Studio first.')}
                   />
                 ) : (
-                  motionProjects.map(project => (
-                    <Button
-                      key={project.id}
-                      variant="plain"
-                      type="button"
-                      className="om-scenario-picker-row"
-                      onClick={() => void handleAddMotionProject(project)}
-                    >
-                      <RemixIcon name="film-line" size={16} />
-                      <span className="om-scenario-picker-row-title">{project.title}</span>
-                    </Button>
-                  ))
+                  motionProjects.map(project => {
+                    const checked = selectedMotionIds.includes(project.id);
+                    return (
+                      <div
+                        key={project.id}
+                        className="om-scenario-picker-row om-scenario-picker-select-row"
+                        data-selected={checked || undefined}
+                      >
+                        <Checkbox
+                          aria-label={project.title}
+                          checked={checked}
+                          onCheckedChange={() => toggleSelectedProjectId(setSelectedMotionIds, project.id)}
+                        />
+                        <RemixIcon name="film-line" size={16} />
+                        <span
+                          className="om-scenario-picker-row-title"
+                          onClick={() => toggleSelectedProjectId(setSelectedMotionIds, project.id)}
+                        >
+                          {project.title}
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
+              {motionProjects.length > 0 && (
+                <footer className="om-scenario-picker-footer">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    disabled={importingProjects}
+                    onClick={() => void handleImportMotionProjects(motionProjects)}
+                  >
+                    {t('Import all ({count})', { count: motionProjects.length })}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    type="button"
+                    loading={importingProjects}
+                    disabled={selectedMotionIds.length === 0 || importingProjects}
+                    onClick={() =>
+                      void handleImportMotionProjects(
+                        motionProjects.filter(project => selectedMotionIds.includes(project.id)),
+                      )
+                    }
+                  >
+                    {t('Import ({count})', { count: selectedMotionIds.length })}
+                  </Button>
+                </footer>
+              )}
             </Dialog.Popup>
           </Dialog.Portal>
         </Dialog.Root>
@@ -1160,6 +1768,7 @@ export function AssetPoolPanel({
         item={previewItem}
         run={run}
         canUseInCurrentStep={Boolean(previewItem && currentStep.accepts.includes(previewItem.kind))}
+        canDownloadMotion={Boolean(onExportBundle)}
         onClose={() => setPreviewItem(null)}
         onUseInCurrentStep={item => void onUseInCurrentStep(item)}
         onDownload={item => void handleDownloadItem(item)}
@@ -1202,7 +1811,7 @@ export function AssetPoolPanel({
         )}
         <aside
           id="om-scenario-pool"
-          aria-label={t('Shared asset pool')}
+          aria-label={t('Shared assets')}
           className="om-scenario-pool om-scenario-pool--drawer"
           data-open={open ? 'true' : 'false'}
           hidden={!open}
@@ -1218,8 +1827,9 @@ export function AssetPoolPanel({
     <>
       <aside
         id="om-scenario-pool"
-        aria-label={t('Shared asset pool')}
+        aria-label={t('Shared assets')}
         className="om-scenario-pool om-scenario-pool--docked"
+        hidden={Boolean(collapsed)}
       >
         {panelBody}
       </aside>

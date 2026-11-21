@@ -43,7 +43,7 @@ Follow [the shared UI rules](AGENTS.md#ui-design-system-and-interaction-feedback
 
 ## Scenario workflows and guided UX
 
-Follow [Scenario workflows and guided UX](AGENTS.md#scenario-workflows-and-guided-ux) for every workflow-oriented surface or multi-step creation flow. Keep every step simple, natural and approachable so users can complete the entire chain effortlessly: prefer a single fill-in-the-blank composer with one-click examples over raw multi-field forms, give every creation step a clear prompt/input box and one obvious primary action rather than a bare template wall, keep templates scenario-relevant and secondary, and show calm neutral guidance instead of stacked warnings for normal unstarted steps.
+Follow [Scenario workflows and guided UX](AGENTS.md#scenario-workflows-and-guided-ux) for every workflow-oriented surface or multi-step creation flow. Keep every step simple, natural and approachable so users can complete the entire workflow effortlessly: prefer a single fill-in-the-blank composer with one-click examples over raw multi-field forms, give every creation step a clear prompt/input box and one obvious primary action rather than a bare template wall, keep templates scenario-relevant and secondary, show calm neutral guidance instead of stacked warnings for normal unstarted steps, speak plain product language without technical jargon (no "full chain", "pool", "handoff" or "manifest"), keep hierarchy flat without nested boxes inside boxes, and pair direct model generation with step-scoped MCP write-back and sync.
 
 ## Product documentation
 

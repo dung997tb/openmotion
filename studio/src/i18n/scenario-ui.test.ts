@@ -32,13 +32,18 @@ describe('scenario workflow i18n resources', () => {
     }
     const navKeys = [
       'Workflows', 'Topics', 'Campaigns', 'Roles', 'All workflows', 'Topics, campaigns and roles',
-      'Start workflow', 'End-to-end workflows', 'Recent runs', 'Start full-chain workflow',
-      'Start Gemini 4 Neon workflow', 'Start Black Friday workflow', 'AI influencer',
+      'Start workflow', 'Guided workflows', 'Recent', 'Start guided workflow',
+      'Start Gemini 4 Neon workflow', 'Start Black Friday workflow', 'AI Influencer',
+      'Pick a goal and go from idea to finished visuals, pages, videos, and posts.',
+      'Featured', 'Recreate this template', 'Templates could not be loaded.',
     ];
     for (const key of navKeys) {
       const value = studioNavigationUi['zh-CN'][key as keyof typeof studioNavigationUi['zh-CN']];
       expect(value, `studio-navigation-ui.json: ${key}`).toBeTruthy();
       expect(value, `studio-navigation-ui.json: ${key}`).not.toContain('工程');
+      for (const locale of nonEnglishLocales) {
+        expect(translate(locale, key).trim(), `${locale}: ${key}`).not.toBe('');
+      }
     }
     const mcpKeys = [
       'Run an end-to-end scenario workflow',
@@ -78,6 +83,77 @@ describe('scenario workflow i18n resources', () => {
       expect(isKnownMessage(source), `missing zh-CN mapping for "${source}"`).toBe(true);
       for (const locale of nonEnglishLocales) {
         expect(translate(locale, source).trim(), `${locale}: ${source}`).not.toBe('');
+      }
+    }
+  });
+
+  it('covers StepCapabilityBar, Shared assets sidebar, and export/import controls across all 10 non-English locales', () => {
+    const uiStrings = [
+      'Hot',
+      'Shared assets',
+      'Shared assets ({count})',
+      'Show shared assets ({count})',
+      'Hide shared assets',
+      'Collapse shared assets',
+      'Resize shared assets panel',
+      'Sync assets',
+      'Synced latest assets',
+      'Agent tools',
+      'Models and Agent tools',
+      'Create with models or an Agent',
+      'Work with your Agent via MCP',
+      'Generate image / video',
+      'Copy MCP prompt',
+      'Copied MCP prompt. Paste into your Agent to write assets back into this step.',
+      'Sync',
+      'Media type',
+      'Attach reference image',
+      'Change reference image',
+      'Describe the image to generate',
+      'Describe the video clip to generate',
+      '{count} generating',
+      'Generation started. New assets will appear in Shared assets.',
+      'Import',
+      'Import ({count})',
+      'Import all ({count})',
+      'Import from workspace',
+      'Import from workspace…',
+      'Import to shared assets',
+      'Import Design pages',
+      'Import Design pages…',
+      'Import Motion projects',
+      'Import Motion projects…',
+      'Select',
+      'Select all',
+      'Select all ({count})',
+      'Deselect all',
+      'Export',
+      'Export ({count})',
+      'Export all',
+      'Export all (ZIP)',
+      'Export selected ({count})',
+      'Export filtered ({count})',
+      'Export options',
+      'Export ready',
+      'Could not build export ZIP',
+      'Summary JSON copied',
+      'Copy summary (JSON)',
+      'Copy for Agent',
+      'That asset is no longer in shared assets.',
+      'Could not save brief version.',
+      'Page version',
+      'Version',
+    ];
+
+    for (const source of uiStrings) {
+      expect(isKnownMessage(source), `missing zh-CN mapping for "${source}"`).toBe(true);
+      expect(translate('zh-CN', source), `zh-CN: ${source}`).not.toBe(source);
+      for (const locale of nonEnglishLocales) {
+        const translated = translate(locale, source);
+        expect(translated.trim(), `${locale}: ${source}`).not.toBe('');
+        if (!(source === 'Version' && (locale === 'de' || locale === 'fr'))) {
+          expect(translated, `${locale}: ${source} was not localized`).not.toBe(source);
+        }
       }
     }
   });

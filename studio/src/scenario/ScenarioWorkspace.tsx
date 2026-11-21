@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -46,6 +47,45 @@ import './scenario.css';
 export type { ScenarioWorkspaceProps };
 
 const HIGHLIGHT_DURATION_MS = 1500;
+const POOL_WIDTH_STORAGE_KEY = 'opendesign.scenario.poolWidth';
+const POOL_COLLAPSED_STORAGE_KEY = 'opendesign.scenario.poolCollapsed';
+const DEFAULT_POOL_WIDTH = 320;
+const MIN_POOL_WIDTH = 240;
+const MAX_POOL_WIDTH = 520;
+const POOL_KEYBOARD_STEP = 20;
+
+function maxPoolWidthFor(containerWidth: number): number {
+  if (!Number.isFinite(containerWidth) || containerWidth <= 0) {
+    return MAX_POOL_WIDTH;
+  }
+  return Math.max(MIN_POOL_WIDTH, Math.min(MAX_POOL_WIDTH, Math.floor(containerWidth * 0.45)));
+}
+
+function clampPoolWidth(width: number, maxWidth: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_POOL_WIDTH;
+  return Math.max(MIN_POOL_WIDTH, Math.min(maxWidth, Math.round(width)));
+}
+
+function readStoredPoolWidth(): number {
+  try {
+    const raw = localStorage.getItem(POOL_WIDTH_STORAGE_KEY);
+    if (!raw) return DEFAULT_POOL_WIDTH;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed)
+      ? clampPoolWidth(parsed, MAX_POOL_WIDTH)
+      : DEFAULT_POOL_WIDTH;
+  } catch {
+    return DEFAULT_POOL_WIDTH;
+  }
+}
+
+function readStoredPoolCollapsed(): boolean {
+  try {
+    return localStorage.getItem(POOL_COLLAPSED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function primarySlotForStep(step: ScenarioStepDefinition, kind: PoolKind): string {
   switch (step.type) {
@@ -107,6 +147,15 @@ export function ScenarioWorkspace({
   const { info: integration } = useIntegrationInfo();
 
   const [poolOpen, setPoolOpen] = useState(false);
+  const [exportingBundle, setExportingBundle] = useState(false);
+  const [poolWidth, setPoolWidth] = useState<number>(readStoredPoolWidth);
+  const [poolCollapsed, setPoolCollapsed] = useState<boolean>(readStoredPoolCollapsed);
+  const [resizingPool, setResizingPool] = useState(false);
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0
+      ? window.innerWidth
+      : 1280,
+  );
   const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [scenarioRuns, setScenarioRuns] = useState<ScenarioRunSummary[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
@@ -117,8 +166,80 @@ export function ScenarioWorkspace({
   const [exportMenuHost, setExportMenuHost] = useState<HTMLDivElement | null>(null);
   const [stepOwnsExportMenu, setStepOwnsExportMenu] = useState(false);
 
+  const workspaceRef = useRef<HTMLElement>(null);
+  const poolDragRef = useRef<{ x: number; width: number } | null>(null);
+  const latestDragWidthRef = useRef<number>(poolWidth);
   const highlightTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pickResolveRef = useRef<((ids: string[] | null) => void) | null>(null);
+
+  useEffect(() => {
+    const node = workspaceRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rectWidth = node.getBoundingClientRect().width;
+      const nextWidth =
+        rectWidth > 0
+          ? rectWidth
+          : typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0
+            ? window.innerWidth
+            : 0;
+      if (nextWidth > 0) {
+        setContainerWidth(nextWidth);
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const maxPoolWidth = useMemo(() => maxPoolWidthFor(containerWidth), [containerWidth]);
+  const effectivePoolWidth = useMemo(
+    () => clampPoolWidth(poolWidth, maxPoolWidth),
+    [maxPoolWidth, poolWidth],
+  );
+
+  const persistPoolWidth = useCallback((width: number) => {
+    try {
+      localStorage.setItem(POOL_WIDTH_STORAGE_KEY, String(width));
+    } catch {
+      // Ignore storage errors (e.g., private browsing or disabled storage).
+    }
+  }, []);
+
+  const commitPoolWidth = useCallback(
+    (nextWidth: number) => {
+      const clamped = clampPoolWidth(nextWidth, maxPoolWidth);
+      setPoolWidth(clamped);
+      latestDragWidthRef.current = clamped;
+      persistPoolWidth(clamped);
+    },
+    [maxPoolWidth, persistPoolWidth],
+  );
+
+  const updatePoolCollapsed = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setPoolCollapsed(prev => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      try {
+        localStorage.setItem(POOL_COLLAPSED_STORAGE_KEY, resolved ? 'true' : 'false');
+      } catch {
+        // Ignore storage errors.
+      }
+      return resolved;
+    });
+  }, []);
+
+  const togglePoolCollapsed = useCallback(() => {
+    updatePoolCollapsed(prev => !prev);
+  }, [updatePoolCollapsed]);
+
+  const finishPoolResize = useCallback(() => {
+    if (!poolDragRef.current) return;
+    poolDragRef.current = null;
+    setResizingPool(false);
+    persistPoolWidth(latestDragWidthRef.current);
+  }, [persistPoolWidth]);
 
   const highlight = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
@@ -232,10 +353,10 @@ export function ScenarioWorkspace({
   const handleNewRun = useCallback(async () => {
     try {
       await startNewRun();
-      toast.showToast(t('Started a new run'), 'info', 'feedback');
+      toast.showToast(t('Started a new draft'), 'info', 'feedback');
     } catch (err) {
       toast.showToast(
-        err instanceof Error ? err.message : t('Could not start a new run'),
+        err instanceof Error ? err.message : t('Could not start a new draft'),
         'error',
         'feedback',
       );
@@ -246,11 +367,11 @@ export function ScenarioWorkspace({
     async (title: string) => {
       try {
         await mutate('rename-run', 'update_run', { changes: { title } });
-        toast.showToast(t('Run renamed'), 'info', 'feedback');
+        toast.showToast(t('Draft renamed'), 'info', 'feedback');
       } catch (err) {
         if (!isScenarioConflictError(err)) {
           toast.showToast(
-            err instanceof Error ? err.message : t('Could not rename run'),
+            err instanceof Error ? err.message : t('Could not rename draft'),
             'error',
             'feedback',
           );
@@ -263,12 +384,12 @@ export function ScenarioWorkspace({
   const handleArchiveRun = useCallback(async () => {
     try {
       await mutate('archive-run', 'update_run', { changes: { archived: true } });
-      toast.showToast(t('Run archived'), 'info', 'feedback');
+      toast.showToast(t('Draft archived'), 'info', 'feedback');
       onOpenHub();
     } catch (err) {
       if (!isScenarioConflictError(err)) {
         toast.showToast(
-          err instanceof Error ? err.message : t('Could not archive run'),
+          err instanceof Error ? err.message : t('Could not archive draft'),
           'error',
           'feedback',
         );
@@ -292,19 +413,103 @@ export function ScenarioWorkspace({
     [t, toast],
   );
 
-  const handleCopyAgentHandoff = useCallback(() => {
-    const prompt = run
-      ? scenarioRunAgentPrompt(scenario, run, { locale, integration })
-      : scenarioAgentPrompt(scenario, { locale, integration });
-    void copyToClipboard(prompt, t('Copied. Paste into your Agent.'));
-  }, [copyToClipboard, integration, locale, run, scenario, t]);
-
-  const handleExportBundleJump = useCallback(() => {
-    const exportStep = scenario.steps.find(step => step.type === 'export-hub');
-    if (exportStep) {
-      selectStep(exportStep.id);
+  const handleCopyAgentHandoff = useCallback(async () => {
+    let ensuredRun = run;
+    if (!ensuredRun) {
+      try {
+        ensuredRun = await ensureRun();
+      } catch {
+        ensuredRun = null;
+      }
     }
-  }, [scenario.steps, selectStep]);
+    const prompt = ensuredRun
+      ? scenarioRunAgentPrompt(scenario, ensuredRun, { locale, integration })
+      : scenarioAgentPrompt(scenario, { locale, integration });
+    await copyToClipboard(prompt, t('Copied. Paste into your Agent.'));
+  }, [copyToClipboard, ensureRun, integration, locale, run, scenario, t]);
+
+  const handleExportBundle = useCallback(
+    async (options?: {
+      poolItemIds?: string[];
+      activeOnly?: boolean;
+      includeStandaloneHtml?: boolean;
+      includeMotionSource?: boolean;
+    }): Promise<ScenarioBundleReceipt | null> => {
+      if (exportingBundle) return null;
+      setExportingBundle(true);
+      try {
+        const res = await mutate<{ bundle: ScenarioBundleReceipt }>(
+          `export-bundle:${Date.now()}`,
+          'export',
+          {
+            activeOnly: options?.activeOnly ?? true,
+            includeStandaloneHtml: options?.includeStandaloneHtml ?? true,
+            includeMotionSource: options?.includeMotionSource ?? false,
+            ...(options?.poolItemIds?.length ? { poolItemIds: options.poolItemIds } : {}),
+          },
+        );
+        const downloadUrl = bundleDownloadUrl(res.bundle.bundleId);
+        const triggerDownload = () => {
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = res.bundle.filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        };
+        triggerDownload();
+        toast.showToast(
+          t('Export ready'),
+          'info',
+          'feedback',
+          {
+            key: `download-${res.bundle.bundleId}`,
+            label: t('Download'),
+            onClick: triggerDownload,
+          },
+        );
+        return res.bundle;
+      } catch (err) {
+        if (!isScenarioConflictError(err)) {
+          toast.showToast(
+            err instanceof Error ? err.message : t('Could not build export ZIP'),
+            'error',
+            'feedback',
+          );
+        }
+        return null;
+      } finally {
+        setExportingBundle(false);
+      }
+    },
+    [exportingBundle, mutate, t, toast],
+  );
+
+  const handleCopySummaryJson = useCallback(async () => {
+    const payload = {
+      scenarioId: scenario.id,
+      runId: run?.id ?? null,
+      revision: run?.revision ?? null,
+      title: run?.title ?? scenario.title,
+      brief: run?.brief ?? {},
+      steps: scenario.steps.map(stepDef => ({
+        id: stepDef.id,
+        title: stepDef.title,
+        status: run?.steps[stepDef.id]?.status ?? 'todo',
+        activeIterationId: run?.steps[stepDef.id]?.activeIterationId ?? null,
+        links: run?.steps[stepDef.id]?.links ?? {},
+      })),
+      sharedAssets: (run?.pool ?? []).map(item => ({
+        id: item.id,
+        kind: item.kind,
+        label: item.label,
+        stepId: item.stepId,
+        pinned: item.pinned,
+        ref: item.ref,
+      })),
+    };
+    await copyToClipboard(JSON.stringify(payload, null, 2), t('Summary JSON copied'));
+  }, [copyToClipboard, run, scenario, t]);
 
   const handleStatusChange = useCallback(
     async (status: string) => {
@@ -332,12 +537,13 @@ export function ScenarioWorkspace({
         pickResolveRef.current(null);
       }
       setPoolOpen(true);
+      updatePoolCollapsed(false);
       return new Promise<string[] | null>(resolve => {
         pickResolveRef.current = resolve;
         setPickState({ request: opts, resolve });
       });
     },
-    [],
+    [updatePoolCollapsed],
   );
 
   const handleConfirmPick = useCallback((ids: string[]) => {
@@ -474,11 +680,30 @@ export function ScenarioWorkspace({
   }, [activeStepState, copyToClipboard, t]);
 
   const handleCopyStepAgentHandoff = useCallback(async () => {
-    const prompt = run
-      ? scenarioRunAgentPrompt(scenario, run, { stepId: activeStep.id, locale, integration })
+    let ensuredRun = run;
+    if (!ensuredRun) {
+      try {
+        ensuredRun = await ensureRun();
+      } catch {
+        ensuredRun = null;
+      }
+    }
+    const stepPrompt = resolveStepPrompt(activeStepState) || undefined;
+    const prompt = ensuredRun
+      ? scenarioRunAgentPrompt(scenario, ensuredRun, {
+          stepId: activeStep.id,
+          stepPrompt,
+          locale,
+          integration,
+        })
       : scenarioAgentPrompt(scenario, { locale, integration });
     await copyToClipboard(prompt, t('Copied. Paste into your Agent.'));
-  }, [activeStep.id, copyToClipboard, integration, locale, run, scenario, t]);
+  }, [activeStep.id, activeStepState, copyToClipboard, ensureRun, integration, locale, run, scenario, t]);
+
+  const handleRefresh = useCallback(async () => {
+    await refresh();
+    toast.showToast(t('Synced latest assets'), 'info', 'feedback');
+  }, [refresh, t, toast]);
 
   const handlePromoteIteration = useCallback(
     async (iterationId: string) => {
@@ -725,7 +950,9 @@ export function ScenarioWorkspace({
 
   return (
     <section
+      ref={workspaceRef}
       className="om-scenario-workspace"
+      style={{ '--om-scenario-pool-width': `${effectivePoolWidth}px` } as CSSProperties}
       data-scenario-workspace={scenario.id}
       data-run-id={run?.id ?? runId ?? ''}
       data-step-id={activeStep.id}
@@ -746,10 +973,13 @@ export function ScenarioWorkspace({
         onOpenHub={onOpenHub}
         breadcrumb={breadcrumb}
         poolOpen={poolOpen}
+        poolCollapsed={poolCollapsed}
         poolCount={poolItems.length}
         onTogglePool={() => setPoolOpen(prev => !prev)}
-        onCopyAgentHandoff={handleCopyAgentHandoff}
-        onExportBundle={handleExportBundleJump}
+        onTogglePoolCollapsed={togglePoolCollapsed}
+        onCopyAgentHandoff={() => void handleCopyAgentHandoff()}
+        onExportBundle={() => void handleExportBundle()}
+        exporting={exportingBundle}
         busy={busy}
       />
 
@@ -760,7 +990,10 @@ export function ScenarioWorkspace({
         onSelectStep={selectStep}
       />
 
-      <div className="om-scenario-body">
+      <div
+        className="om-scenario-body"
+        data-pool-collapsed={poolCollapsed ? 'true' : 'false'}
+      >
         <main className="om-scenario-workbench">
           {loading ? (
             <div className="om-scenario-loading" role="status" aria-label={t('Loading workflow…')}>
@@ -771,14 +1004,14 @@ export function ScenarioWorkspace({
           ) : error ? (
             <div className="om-scenario-error-panel" role="alert">
               <RemixIcon name="error-warning-line" size={28} />
-              <h2 className="om-subtitle">{t('Could not load workflow run')}</h2>
+              <h2 className="om-subtitle">{t('Could not load workflow')}</h2>
               <p className="om-muted">{error}</p>
               <div className="om-scenario-error-actions">
                 <Button variant="primary" size="sm" onClick={reload}>
                   {t('Retry')}
                 </Button>
                 <Button variant="secondary" size="sm" onClick={() => void handleNewRun()}>
-                  {t('New run')}
+                  {t('New draft')}
                 </Button>
               </div>
             </div>
@@ -878,6 +1111,57 @@ export function ScenarioWorkspace({
           )}
         </main>
 
+        <div
+          className="om-scenario-pool-resizer"
+          role="separator"
+          tabIndex={0}
+          aria-label={t('Resize shared assets panel')}
+          aria-orientation="vertical"
+          aria-valuemin={MIN_POOL_WIDTH}
+          aria-valuemax={maxPoolWidth}
+          aria-valuenow={effectivePoolWidth}
+          data-dragging={resizingPool ? 'true' : undefined}
+          hidden={poolCollapsed}
+          onDoubleClick={() => commitPoolWidth(DEFAULT_POOL_WIDTH)}
+          onKeyDown={event => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              commitPoolWidth(effectivePoolWidth + POOL_KEYBOARD_STEP);
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              commitPoolWidth(effectivePoolWidth - POOL_KEYBOARD_STEP);
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              commitPoolWidth(maxPoolWidth);
+            } else if (event.key === 'End') {
+              event.preventDefault();
+              commitPoolWidth(MIN_POOL_WIDTH);
+            }
+          }}
+          onPointerDown={event => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            poolDragRef.current = { x: event.clientX, width: effectivePoolWidth };
+            latestDragWidthRef.current = effectivePoolWidth;
+            setResizingPool(true);
+            try {
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+            } catch {
+              // Ignore if synthetic pointer events do not register an active pointer id.
+            }
+          }}
+          onPointerMove={event => {
+            const drag = poolDragRef.current;
+            if (!drag) return;
+            const next = clampPoolWidth(drag.width + (drag.x - event.clientX), maxPoolWidth);
+            latestDragWidthRef.current = next;
+            setPoolWidth(next);
+          }}
+          onPointerUp={finishPoolResize}
+          onPointerCancel={finishPoolResize}
+          onLostPointerCapture={finishPoolResize}
+        />
+
         <AssetPoolPanel
           scenario={scenario}
           run={run}
@@ -886,6 +1170,9 @@ export function ScenarioWorkspace({
           highlightedIds={highlightedIds}
           open={poolOpen}
           onOpenChange={setPoolOpen}
+          collapsed={poolCollapsed}
+          onToggleCollapsed={togglePoolCollapsed}
+          onRefresh={handleRefresh}
           pickRequest={pickState?.request ?? null}
           onConfirmPick={handleConfirmPick}
           onCancelPick={handleCancelPick}
@@ -895,6 +1182,9 @@ export function ScenarioWorkspace({
           onUseInCurrentStep={handleUseInCurrentStep}
           onOpenDesignProject={onOpenDesignProject}
           onOpenMotionProject={onOpenMotionProject}
+          onExportBundle={handleExportBundle}
+          exportingBundle={exportingBundle}
+          onCopySummaryJson={handleCopySummaryJson}
           toast={stepToast}
         />
       </div>

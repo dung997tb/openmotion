@@ -38,6 +38,18 @@
   color: var(--motion-dim);
 }
 
+.om-scenario-mega-column-head[data-category="topic"] svg {
+  color: var(--motion-creative-video);
+}
+
+.om-scenario-mega-column-head[data-category="campaign"] svg {
+  color: var(--motion-creative-audio);
+}
+
+.om-scenario-mega-column-head[data-category="role"] svg {
+  color: var(--motion-creative-agent);
+}
+
 .om-scenario-mega-list {
   display: grid;
   gap: var(--motion-space-6);
@@ -51,18 +63,17 @@
   gap: var(--motion-space-10);
   width: 100%;
   min-width: 0;
-  padding: var(--motion-space-6);
+  padding: var(--motion-space-8);
   border-radius: var(--motion-radius-lg);
-  border: 1px solid transparent;
-  background: var(--motion-panel);
+  border: 0;
+  background: transparent;
   color: var(--motion-strong);
   text-align: start;
-  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard), border-color var(--motion-duration-fast) var(--motion-ease-standard);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 [data-motion-studio] .om-scenario-mega-tile:hover {
   background: var(--motion-hover);
-  border-color: var(--motion-border-subtle);
 }
 
 [data-motion-studio] .om-scenario-mega-tile:hover .om-scenario-mega-title strong {
@@ -71,7 +82,6 @@
 
 [data-motion-studio] .om-scenario-mega-tile[aria-current="page"] {
   background: var(--motion-accent-soft);
-  border-color: var(--motion-accent);
 }
 
 [data-motion-studio] .om-scenario-mega-tile:focus-visible {
@@ -85,7 +95,7 @@
   flex-shrink: 0;
   margin-bottom: 0;
   border-radius: var(--motion-radius-md);
-  border: 1px solid var(--motion-border-subtle);
+  border: 0;
   background: var(--motion-inset);
   overflow: hidden;
   position: relative;
@@ -163,7 +173,7 @@
   padding: 0 var(--motion-space-8);
   border-radius: var(--motion-radius-md);
   background: var(--motion-raised);
-  border: 1px solid var(--motion-border-subtle);
+  border: 0;
   color: var(--motion-text);
   font-size: var(--motion-text-xs);
 }

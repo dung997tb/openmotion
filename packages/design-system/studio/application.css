@@ -5,6 +5,7 @@
 [data-motion-studio] .om-select-option { border-radius: var(--motion-radius-md); margin-block: var(--motion-space-2); }
 [data-motion-studio] .om-select-list[data-rich] .om-select-option { min-height: var(--motion-control); height: auto; padding: var(--motion-space-6) var(--motion-space-8); gap: var(--motion-space-8); font-size: var(--motion-text-sm); }
 [data-motion-studio] .om-select-option[data-selected] { background: light-dark(var(--motion-nav-hover), var(--motion-chrome-active)); }
+:root[data-motion-ui] .om-select-option:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--motion-border-strong); }
 [data-motion-studio] .om-select-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--motion-muted); }
 [data-motion-studio] .om-select-icon .om-avatar { width: var(--motion-space-20); height: var(--motion-space-20); font-size: var(--motion-text-xs); }
 [data-motion-studio] .om-select-option-copy { flex: 1; min-width: 0; display: grid; gap: var(--motion-space-2); }

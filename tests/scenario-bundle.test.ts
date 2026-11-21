@@ -211,10 +211,8 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
     assert.ok(entries.has(`${prefix}social/posts.json`), 'social/posts.json present');
     assert.ok(entries.has(`${prefix}social/posts.md`), 'social/posts.md present');
 
-    // Passing all non-export-hub stepIds is treated as a full bundle (includes README.md + unattached pool files)
-    const allContentStepIds = findScenario('design-full-chain')!.steps
-      .filter(step => step.type !== 'export-hub')
-      .map(step => step.id);
+    // Passing all stepIds is treated as a full bundle (includes README.md + unattached pool files)
+    const allContentStepIds = findScenario('design-full-chain')!.steps.map(step => step.id);
     const allStepsExport = await callScenario(api, {
       command: 'export',
       runId: run.id,
@@ -230,6 +228,62 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
       allStepsKeys.some(k => k.startsWith(`${allStepsPrefix}media/images/brand-mark-`) && k.endsWith('.png')),
       'Unattached pool asset present when all content steps are selected',
     );
+
+    // Focused export: single poolItemId exports only manifest.json (with selection) + that asset
+    const singlePoolExport = await callScenario(api, {
+      command: 'export',
+      runId: run.id,
+      requestId: 'bundle-export-single-pool-item',
+      poolItemIds: [heroPoolId],
+    });
+    const singleEntries = readProjectZip(await readFile(singlePoolExport.bundle.archivePath));
+    const singleKeys = [...singleEntries.keys()];
+    const singlePrefix = singleKeys[0].split('/')[0] + '/';
+    const singleManifest = JSON.parse(singleEntries.get(`${singlePrefix}manifest.json`)!.toString('utf8'));
+    assert.deepEqual(singleManifest.selection, { poolItemIds: [heroPoolId] });
+    assert.equal(singleManifest.pool.length, 1);
+    assert.equal(singleKeys.length, 2, `Expected manifest + 1 asset, got: ${singleKeys.join(', ')}`);
+    assert.ok(singleKeys.some(k => k.startsWith(`${singlePrefix}media/images/nova-hero-`)));
+
+    // Focused export: multi-select poolItemIds exports heterogeneous items (image + Design page)
+    const pagePoolItem = run.pool.find((item: { kind: string }) => item.kind === 'page');
+    assert.ok(pagePoolItem, 'Design page item present in run pool');
+    const multiPoolExport = await callScenario(api, {
+      command: 'export',
+      runId: run.id,
+      requestId: 'bundle-export-multi-pool-items',
+      poolItemIds: [heroPoolId, pagePoolItem.id],
+      includeStandaloneHtml: true,
+    });
+    const multiEntries = readProjectZip(await readFile(multiPoolExport.bundle.archivePath));
+    const multiKeys = [...multiEntries.keys()];
+    const multiPrefix = multiKeys[0].split('/')[0] + '/';
+    assert.ok(!multiEntries.has(`${multiPrefix}README.md`), 'Focused pool export omits README.md');
+    assert.ok(!multiKeys.some(k => k.startsWith(`${multiPrefix}brief/`)), 'Focused pool export omits brief/');
+    assert.ok(!multiKeys.some(k => k.startsWith(`${multiPrefix}social/`)), 'Focused pool export omits social/');
+    assert.ok(multiKeys.some(k => k.startsWith(`${multiPrefix}media/images/nova-hero-`)));
+    assert.ok(multiKeys.some(k => k.startsWith(`${multiPrefix}web/`) && k.endsWith('/index.html')));
+
+    // Unknown poolItemId rejects with POOL_ITEM_NOT_FOUND
+    const badPoolRes = await api('/motion-api/phase1/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'openmotion_assets_use',
+        arguments: {
+          action: 'scenario',
+          scenario: {
+            command: 'export',
+            runId: run.id,
+            requestId: 'bundle-export-missing-pool',
+            poolItemIds: ['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'],
+          },
+        },
+      }),
+    });
+    assert.equal(badPoolRes.ok, false);
+    const badPoolBody = await badPoolRes.json();
+    assert.match(String(badPoolBody.error ?? ''), /POOL_ITEM_NOT_FOUND/);
 
     // Filtered export: stepIds: ['social'] contains only social outputs and manifest
     const socialOnly = await callScenario(api, {

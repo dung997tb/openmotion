@@ -64,7 +64,7 @@ export function StepExportMenu({
         disabled={!run || busy}
         onClick={() => void onExportStepPackage()}
       >
-        {t('Download step package (.zip)')}
+        {t('Download step (.zip)')}
       </MenuItem>
 
       {extraItems && (
@@ -86,7 +86,7 @@ export function StepExportMenu({
         icon={<RemixIcon name="robot-line" size={14} />}
         onClick={() => void onCopyStepAgentHandoff()}
       >
-        {t('Copy Agent handoff for this step')}
+        {t('Copy step for Agent')}
       </MenuItem>
     </Menu>
   );

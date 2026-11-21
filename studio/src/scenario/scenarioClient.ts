@@ -203,6 +203,7 @@ export const scenarioClient = {
     runId: string;
     requestId: string;
     stepIds?: string[];
+    poolItemIds?: string[];
     activeOnly?: boolean;
     includeStandaloneHtml?: boolean;
     includeMotionSource?: boolean;

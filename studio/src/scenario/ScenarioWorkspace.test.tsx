@@ -60,6 +60,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  localStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -70,12 +71,14 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+  localStorage.clear();
   vi.restoreAllMocks();
 });
 
 describe('ScenarioWorkspace', () => {
-  it('renders Black Friday steps in order, updates route on stepper click, jumps to export hub, and renders toasts in feedback layer', async () => {
+  it('renders Black Friday steps in order, updates route on stepper click, exports bundle on Export all click, and renders toasts in feedback layer', async () => {
     const run = makeRun();
+    const commands: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.includes('/motion-api/integration')) {
@@ -83,8 +86,23 @@ describe('ScenarioWorkspace', () => {
       }
       const body = JSON.parse(String(init?.body ?? '{}'));
       const command = body.arguments?.scenario?.command;
+      commands.push(command);
       if (command === 'get') return jsonResponse({ run });
       if (command === 'list') return jsonResponse({ runs: [], nextOffset: null });
+      if (command === 'export') {
+        return jsonResponse({
+          run,
+          bundle: {
+            bundleId: 'bundle-1',
+            filename: 'holiday-tote.zip',
+            bytes: 256,
+            sha256: 'a'.repeat(64),
+            archivePath: '/fixture/data/scenarios/bundles/bundle-1.zip',
+            downloadUrl: '/motion-api/scenario/bundle/bundle-1',
+            entries: 3,
+          },
+        });
+      }
       return jsonResponse({ run });
     });
 
@@ -122,7 +140,7 @@ describe('ScenarioWorkspace', () => {
       await Promise.resolve();
     });
 
-    // All 6 Black Friday steps render in exact order as tabs.
+    // All 5 Black Friday steps render in exact order as tabs.
     const tabs = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'));
     expect(tabs.map(tab => tab.getAttribute('data-tab-id'))).toEqual([
       'brief',
@@ -130,7 +148,6 @@ describe('ScenarioWorkspace', () => {
       'detail-page',
       'sales-film',
       'social',
-      'export',
     ]);
 
     // Clicking a stepper tab pushes the step patch into the route callback.
@@ -140,17 +157,20 @@ describe('ScenarioWorkspace', () => {
     });
     expect(onRoute).toHaveBeenCalledWith({ run: RUN_ID, step: 'detail-page' }, false);
 
-    // Clicking the Export bundle primary CTA jumps to the export-hub step.
+    // Clicking Export all triggers scenario export and displays Export ready toast.
     const exportCta = container.querySelector<HTMLButtonElement>('.om-scenario-export-cta')!;
     expect(exportCta).toBeTruthy();
     await act(async () => {
       exportCta.click();
+      await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(onRoute).toHaveBeenLastCalledWith({ run: RUN_ID, step: 'export' }, false);
+    expect(commands).toContain('export');
+    expect(document.querySelector('.motion-feedback-layer [role="status"]')?.textContent).toContain('Export ready');
 
-    // Copy Agent handoff copies the prompt and renders a floating toast in .motion-feedback-layer.
+    // Copy for Agent copies the prompt and renders a floating toast in .motion-feedback-layer.
     const copyButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(btn =>
-      btn.textContent?.includes('Copy Agent handoff'),
+      btn.textContent?.includes('Copy for Agent'),
     )!;
     await act(async () => {
       copyButton.click();
@@ -158,8 +178,10 @@ describe('ScenarioWorkspace', () => {
     });
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText.mock.calls[0][0]).toContain(RUN_ID);
-    const toastStatus = document.querySelector('.motion-feedback-layer [role="status"]');
-    expect(toastStatus?.textContent).toContain('Copied. Paste into your Agent.');
+    const feedbackText = Array.from(document.querySelectorAll('.motion-feedback-layer [role="status"]'))
+      .map(el => el.textContent)
+      .join('\n');
+    expect(feedbackText).toContain('Copied. Paste into your Agent.');
   });
 
   it('renders ScenarioHub category tabs and recent runs with resume and archive actions', async () => {
@@ -220,8 +242,8 @@ describe('ScenarioWorkspace', () => {
     });
     expect(onOpenScenario).toHaveBeenCalledWith('black-friday', RUN_ID);
 
-    // Archive button archives the run and removes it from the list.
-    const archiveBtn = row.querySelector<HTMLButtonElement>('button[aria-label="Archive run"]')!;
+    // Archive button archives the draft and removes it from the list.
+    const archiveBtn = row.querySelector<HTMLButtonElement>('button[aria-label="Archive draft"]')!;
     await act(async () => {
       archiveBtn.click();
       await Promise.resolve();
@@ -348,5 +370,199 @@ describe('ScenarioWorkspace', () => {
     });
     const comparePanel = container.querySelector('.om-scenario-compare-panel');
     expect(comparePanel?.textContent).toContain('Compare v2 and v1');
+  });
+
+  it('supports desktop shared assets separator keyboard & pointer resizing within 240..520, dblclick reset to 320, and localStorage persistence', async () => {
+    const run = makeRun();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/motion-api/integration')) {
+        return jsonResponse({ previewUrl: 'http://127.0.0.1:4173', dataDirectory: '/fixture/data' });
+      }
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const command = body.arguments?.scenario?.command;
+      if (command === 'get') return jsonResponse({ run });
+      return jsonResponse({ run });
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <ScenarioWorkspace
+            scenarioId="black-friday"
+            runId={RUN_ID}
+            stepId="brief"
+            active
+            onRoute={vi.fn()}
+            onExplore={vi.fn()}
+            onOpenHub={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn().mockResolvedValue(true)}
+            onOpenModelHub={vi.fn()}
+            onOpenBlackFriday={vi.fn()}
+            onOpenTemplateLibrary={vi.fn()}
+            onOpenStudioScene={vi.fn()}
+            onOpenProviders={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const workspace = container.querySelector<HTMLElement>('.om-scenario-workspace')!;
+    const separator = container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize shared assets panel"]')!;
+    expect(separator).toBeTruthy();
+    expect(separator.getAttribute('aria-valuenow')).toBe('320');
+    expect(workspace.style.getPropertyValue('--om-scenario-pool-width')).toBe('320px');
+
+    // ArrowLeft widens (+20 -> 340) and persists.
+    await act(async () => {
+      separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('340');
+    expect(localStorage.getItem('opendesign.scenario.poolWidth')).toBe('340');
+
+    // ArrowRight narrows (-20 -> 320), and Home/End clamp to 520 / 240.
+    await act(async () => {
+      separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('320');
+
+    await act(async () => {
+      separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('520');
+    expect(localStorage.getItem('opendesign.scenario.poolWidth')).toBe('520');
+
+    await act(async () => {
+      separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('520');
+
+    await act(async () => {
+      separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('240');
+    expect(localStorage.getItem('opendesign.scenario.poolWidth')).toBe('240');
+
+    await act(async () => {
+      separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('240');
+
+    // Double-click resets to 320.
+    await act(async () => {
+      separator.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('320');
+    expect(localStorage.getItem('opendesign.scenario.poolWidth')).toBe('320');
+
+    // Pointer drag left widens by delta and persists on pointerup.
+    await act(async () => {
+      separator.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 600, pointerId: 1, bubbles: true }));
+    });
+    await act(async () => {
+      separator.dispatchEvent(new PointerEvent('pointermove', { clientX: 520, pointerId: 1, bubbles: true }));
+    });
+    await act(async () => {
+      separator.dispatchEvent(new PointerEvent('pointerup', { clientX: 520, pointerId: 1, bubbles: true }));
+    });
+    expect(separator.getAttribute('aria-valuenow')).toBe('400');
+    expect(workspace.style.getPropertyValue('--om-scenario-pool-width')).toBe('400px');
+    expect(localStorage.getItem('opendesign.scenario.poolWidth')).toBe('400');
+  });
+
+  it('supports desktop collapse/reopen toggle persisted in localStorage and auto-expands on requestPick', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    const run = makeRun({ activeStepId: 'detail-page' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/motion-api/integration')) {
+        return jsonResponse({ previewUrl: 'http://127.0.0.1:4173', dataDirectory: '/fixture/data' });
+      }
+      if (url.includes('/motion-api/design')) {
+        return jsonResponse({ items: [], nextCursor: null, projects: [] });
+      }
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const command = body.arguments?.scenario?.command;
+      if (command === 'get') return jsonResponse({ run });
+      return jsonResponse({ run });
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <ScenarioWorkspace
+            scenarioId="black-friday"
+            runId={RUN_ID}
+            stepId="detail-page"
+            active
+            onRoute={vi.fn()}
+            onExplore={vi.fn()}
+            onOpenHub={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn().mockResolvedValue(true)}
+            onOpenModelHub={vi.fn()}
+            onOpenBlackFriday={vi.fn()}
+            onOpenTemplateLibrary={vi.fn()}
+            onOpenStudioScene={vi.fn()}
+            onOpenProviders={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const bodyEl = container.querySelector<HTMLElement>('.om-scenario-body')!;
+    const poolAside = container.querySelector<HTMLElement>('#om-scenario-pool')!;
+    expect(bodyEl.getAttribute('data-pool-collapsed')).toBe('false');
+    expect(poolAside.hidden).toBe(false);
+
+    // Collapse via panel collapse button.
+    const collapseBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse shared assets"]')!;
+    await act(async () => { collapseBtn.click(); });
+    expect(bodyEl.getAttribute('data-pool-collapsed')).toBe('true');
+    expect(poolAside.hidden).toBe(true);
+    expect(localStorage.getItem('opendesign.scenario.poolCollapsed')).toBe('true');
+
+    // Reopen via header toggle button.
+    const showBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Show shared assets (0)"]')!;
+    expect(showBtn).toBeTruthy();
+    await act(async () => { showBtn.click(); });
+    expect(bodyEl.getAttribute('data-pool-collapsed')).toBe('false');
+    expect(poolAside.hidden).toBe(false);
+    expect(localStorage.getItem('opendesign.scenario.poolCollapsed')).toBe('false');
+
+    // Collapse again, then trigger requestPick via BindingSlot's Choose assets button -> auto-expands.
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Collapse shared assets"]')!.click();
+    });
+    expect(poolAside.hidden).toBe(true);
+
+    const chooseAssetsBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-step-binding-slot button')).find(
+      btn => btn.textContent?.includes('Choose assets'),
+    )!;
+    expect(chooseAssetsBtn).toBeTruthy();
+    await act(async () => { chooseAssetsBtn.click(); });
+
+    expect(bodyEl.getAttribute('data-pool-collapsed')).toBe('false');
+    expect(poolAside.hidden).toBe(false);
+    expect(localStorage.getItem('opendesign.scenario.poolCollapsed')).toBe('false');
+    expect(poolAside.textContent).toContain('Select assets for embedImages');
   });
 });

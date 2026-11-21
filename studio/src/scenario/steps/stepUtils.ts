@@ -120,7 +120,7 @@ export function computeDiscountSummary(
 export function buildStepAgentPrompt(
   scenario: ScenarioDefinition,
   run: ScenarioRun | null,
-  options: { stepId?: string; locale?: string | null; integration?: ScenarioPromptIntegration | null } = {},
+  options: { stepId?: string; stepPrompt?: string; locale?: string | null; integration?: ScenarioPromptIntegration | null } = {},
 ): string {
   if (run) {
     return scenarioRunAgentPrompt(scenario, run, options);

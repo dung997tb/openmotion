@@ -43,8 +43,18 @@ describe('BriefStep', () => {
     const mounted = await mountStep(<BriefStep {...props} />);
 
     try {
+      expect(mounted.container.querySelector('.om-step-discount-banner')).toBeNull();
       expect(mounted.container.querySelector('[data-discount-badge]')?.textContent).toContain('40% OFF');
       expect(mounted.container.textContent).toContain('BF40');
+
+      // Empty Version history stays hidden when a draft has no saved versions yet.
+      expect(mounted.container.querySelector('[data-test-iterations="true"]')).toBeNull();
+      // Guided composer keeps a single Next button in the workspace footer (none inside the composer).
+      expect(
+        Array.from(mounted.container.querySelectorAll('[data-brief-composer="guided"] button')).some(b =>
+          b.textContent?.includes('Next:'),
+        ),
+      ).toBe(false);
 
       const productInput = mounted.container.querySelector<HTMLInputElement>('#brief-black-friday-productName')!;
       expect(productInput.value).toBe('Weekender Tote');
@@ -92,7 +102,7 @@ describe('BriefStep', () => {
     const mounted = await mountStep(<BriefStep {...props} />);
 
     try {
-      const saveBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Save revision'))!;
+      const saveBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Save version'))!;
       await act(async () => { saveBtn.click(); });
       expect(mocks.mutate).toHaveBeenCalledWith(
         'brief-revision',
@@ -106,13 +116,19 @@ describe('BriefStep', () => {
         }),
       );
 
-      // Apply to all steps skips product-images (promptEdited: true) and updates sales-film
+      // Expand Step prompts disclosure, then Apply to all steps skips product-images (promptEdited: true) and updates sales-film
+      const viewPromptsBtn = Array.from(mounted.container.querySelectorAll('button')).find(b =>
+        b.textContent?.includes('View prompts'),
+      )!;
+      await act(async () => { viewPromptsBtn.click(); });
+
       const applyBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Apply to all steps'))!;
       await act(async () => { applyBtn.click(); });
       const seedCalls = mocks.mutate.mock.calls.filter(call => call[1] === 'update_step');
       expect(seedCalls.map(c => (c[2] as { stepId: string }).stepId)).toEqual(['sales-film']);
 
-      // Restore from iteration history
+      // Version history is visible when iterations exist; restore works.
+      expect(mounted.container.querySelector('[data-test-iterations="true"]')).toBeTruthy();
       const restoreBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Restore')!;
       await act(async () => { restoreBtn.click(); });
       expect(mocks.mutate).toHaveBeenCalledWith(
@@ -231,10 +247,10 @@ describe('BriefStep', () => {
       expect(mounted.container.querySelector('.om-step-form-grid')).toBeNull();
       expect(mounted.container.querySelectorAll('.om-blank-wrap').length).toBeGreaterThanOrEqual(7);
 
-      // Downstream prompts start collapsed until expanded
+      // Step prompts start collapsed behind a one-line disclosure until expanded
       expect(mounted.container.querySelector('.om-step-prompt-list')).toBeNull();
-      const previewPromptsBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Preview prompts'))!;
-      await act(async () => { previewPromptsBtn.click(); });
+      const viewPromptsBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('View prompts'))!;
+      await act(async () => { viewPromptsBtn.click(); });
       expect(mounted.container.querySelector('.om-step-prompt-list')).toBeTruthy();
 
       // Click a one-click example preset chip to fill all blanks instantly
@@ -263,6 +279,103 @@ describe('BriefStep', () => {
       expect(mounted.container.querySelector<HTMLInputElement>('#brief-black-friday-productName')?.value).toBe('Holiday Weekender Tote');
     } finally {
       await mounted.unmount();
+    }
+  });
+
+  it('supports StepCapabilityBar Copy MCP prompt with ensureRun, quick image/video generation, and Sync', async () => {
+    const clipboardSpy = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardSpy },
+    });
+
+    mockMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: 'fal', label: 'fal', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' }],
+          agents: [],
+          routes: { image: 'fal:flux', video: 'fal:wan' },
+          capabilities: [
+            { modality: 'image', available: true, modelIds: ['fal:flux'], selectedModelId: 'fal:flux' },
+            { modality: 'video', available: true, modelIds: ['fal:wan'], selectedModelId: 'fal:wan' },
+          ],
+        },
+        models: [
+          { id: 'fal:flux', provider: 'fal', modelId: 'flux', label: 'Flux', modality: 'image', source: 'builtin' },
+          { id: 'fal:wan', provider: 'fal', modelId: 'wan', label: 'Wan', modality: 'video', source: 'builtin' },
+        ] as never,
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    // Unsaved draft: Copy MCP prompt calls ensureRun and copies step-scoped write-back instructions.
+    const draftSetup = createStepProps('black-friday', 'brief', { run: null });
+    const draftMounted = await mountStep(<BriefStep {...draftSetup.props} />);
+    try {
+      const assistBar = draftMounted.container.querySelector('[data-step-assist="brief"]')!;
+      const copyMcpBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Copy MCP prompt'))!;
+      await act(async () => {
+        copyMcpBtn.click();
+        await Promise.resolve();
+      });
+      expect(draftSetup.mocks.ensureRun).toHaveBeenCalledTimes(1);
+      expect(clipboardSpy).toHaveBeenCalledTimes(1);
+      const copied = clipboardSpy.mock.calls[0][0] as string;
+      expect(copied).toContain('11111111-1111-4111-8111-111111111111');
+      expect(copied).toContain('stepId="brief"');
+      expect(copied).toContain('command=add_pool');
+      expect(copied).toContain('command=update_brief');
+    } finally {
+      await draftMounted.unmount();
+    }
+
+    // Saved run: quick-gen expands, switches modality, calls generate, and Sync invokes refresh.
+    const run = makeBaseRun('black-friday', {
+      brief: { productName: 'Holiday Tote', idea: 'Full-grain leather tote' },
+    });
+    const savedSetup = createStepProps('black-friday', 'brief', { run });
+    const savedMounted = await mountStep(<BriefStep {...savedSetup.props} />);
+    try {
+      const assistBar = savedMounted.container.querySelector('[data-step-assist="brief"]')!;
+      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate image / video'))!;
+      await act(async () => { quickToggle.click(); });
+
+      const quickGen = savedMounted.container.querySelector('[data-quick-gen="brief"]')!;
+      expect(quickGen).toBeTruthy();
+
+      const videoChip = Array.from(quickGen.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Video')!;
+      await act(async () => { videoChip.click(); });
+
+      const promptInput = quickGen.querySelector<HTMLTextAreaElement>('#quick-gen-prompt-brief')!;
+      await act(async () => { setFieldValue(promptInput, '15s Holiday Tote reveal'); });
+
+      const generateBtn = Array.from(quickGen.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Generate')!;
+      await act(async () => {
+        generateBtn.click();
+        await Promise.resolve();
+      });
+
+      expect(savedSetup.mocks.mutate).toHaveBeenCalledWith(
+        'quick-gen:brief:video',
+        'generate',
+        {
+          stepId: 'brief',
+          modality: 'video',
+          model: 'fal:wan',
+          prompt: '15s Holiday Tote reveal',
+        },
+      );
+
+      const syncBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Sync')!;
+      await act(async () => {
+        syncBtn.click();
+        await Promise.resolve();
+      });
+      expect(savedSetup.mocks.refresh).toHaveBeenCalledTimes(1);
+      expect(savedSetup.mocks.showToast).toHaveBeenCalledWith('Synced latest assets', 'info', 'feedback');
+    } finally {
+      await savedMounted.unmount();
     }
   });
 });

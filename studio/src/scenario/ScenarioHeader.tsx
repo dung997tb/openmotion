@@ -25,10 +25,13 @@ export type ScenarioHeaderProps = {
   onOpenHub(): void;
   breadcrumb?: ReactNode;
   poolOpen: boolean;
+  poolCollapsed?: boolean;
   poolCount: number;
   onTogglePool(): void;
+  onTogglePoolCollapsed?(): void;
   onCopyAgentHandoff(): void;
   onExportBundle(): void;
+  exporting?: boolean;
   busy: ReadonlySet<string>;
 };
 
@@ -46,10 +49,13 @@ export function ScenarioHeader({
   onOpenHub,
   breadcrumb,
   poolOpen,
+  poolCollapsed = false,
   poolCount,
   onTogglePool,
+  onTogglePoolCollapsed,
   onCopyAgentHandoff,
   onExportBundle,
+  exporting = false,
   busy,
 }: ScenarioHeaderProps) {
   const { t, formatDate } = useI18n();
@@ -136,11 +142,11 @@ export function ScenarioHeader({
 
         <div className="om-scenario-header-switcher">
           {renaming ? (
-            <FieldInput
+              <FieldInput
               ref={renameInputRef}
               density="compact"
               className="om-scenario-rename-input"
-              aria-label={t('Rename run')}
+              aria-label={t('Rename')}
               value={draftTitle}
               maxLength={120}
               onChange={event => setDraftTitle(event.target.value)}
@@ -157,7 +163,7 @@ export function ScenarioHeader({
             />
           ) : (
             <Menu
-              aria-label={t('Switch workflow run')}
+              aria-label={t('Switch draft')}
               onOpenChange={open => {
                 if (open) onLoadRuns();
               }}
@@ -179,9 +185,9 @@ export function ScenarioHeader({
               }
             >
               {runsLoading ? (
-                <MenuItem disabled>{t('Loading runs…')}</MenuItem>
+                <MenuItem disabled>{t('Loading…')}</MenuItem>
               ) : runs.length === 0 ? (
-                <MenuItem disabled>{t('No saved runs yet')}</MenuItem>
+                <MenuItem disabled>{t('No saved drafts yet')}</MenuItem>
               ) : (
                 runs.map(item => (
                   <MenuItem
@@ -205,14 +211,14 @@ export function ScenarioHeader({
                 icon={<RemixIcon name="add-line" size={14} />}
                 onClick={onNewRun}
               >
-                {t('New run')}
+                {t('New draft')}
               </MenuItem>
               <MenuItem
                 icon={<RemixIcon name="edit-line" size={14} />}
                 disabled={!run}
                 onClick={beginRename}
               >
-                {t('Rename run')}
+                {t('Rename')}
               </MenuItem>
               <MenuItem
                 icon={<RemixIcon name="delete-bin-line" size={14} />}
@@ -220,7 +226,7 @@ export function ScenarioHeader({
                 disabled={!run}
                 onClick={() => void onArchiveRun()}
               >
-                {t('Archive run')}
+                {t('Archive')}
               </MenuItem>
             </Menu>
           )}
@@ -233,12 +239,39 @@ export function ScenarioHeader({
           size="sm"
           type="button"
           className="om-scenario-pool-toggle"
-          aria-label={t('Shared asset pool ({count})', { count: poolCount })}
+          aria-label={t('Shared assets ({count})', { count: poolCount })}
           aria-expanded={poolOpen}
           aria-controls="om-scenario-pool"
           onClick={onTogglePool}
           icon={<RemixIcon name="side-bar-line" size={16} />}
         />
+
+        {onTogglePoolCollapsed && (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            className="om-scenario-pool-desktop-toggle"
+            icon={<RemixIcon name={poolCollapsed ? 'side-bar-line' : 'side-bar-fill'} size={15} />}
+            aria-expanded={!poolCollapsed}
+            aria-controls="om-scenario-pool"
+            aria-label={
+              poolCollapsed
+                ? t('Show shared assets ({count})', { count: poolCount })
+                : t('Hide shared assets')
+            }
+            title={
+              poolCollapsed
+                ? t('Show shared assets ({count})', { count: poolCount })
+                : t('Hide shared assets')
+            }
+            onClick={onTogglePoolCollapsed}
+          >
+            {poolCollapsed
+              ? t('Shared assets ({count})', { count: poolCount })
+              : t('Shared assets')}
+          </Button>
+        )}
 
         <Button
           variant="secondary"
@@ -248,7 +281,7 @@ export function ScenarioHeader({
           icon={<RemixIcon name="robot-line" size={15} />}
           onClick={onCopyAgentHandoff}
         >
-          {t('Copy Agent handoff')}
+          {t('Copy for Agent')}
         </Button>
 
         <Button
@@ -256,10 +289,11 @@ export function ScenarioHeader({
           size="sm"
           type="button"
           className="om-scenario-export-cta"
+          loading={exporting}
           icon={<RemixIcon name="download-2-line" size={15} />}
           onClick={onExportBundle}
         >
-          {t('Export bundle')}
+          {t('Export all')}
         </Button>
 
         <div className="om-scenario-narrow-overflow">
@@ -280,27 +314,27 @@ export function ScenarioHeader({
               icon={<RemixIcon name="robot-line" size={14} />}
               onClick={onCopyAgentHandoff}
             >
-              {t('Copy Agent handoff')}
+              {t('Copy for Agent')}
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="download-2-line" size={14} />}
               onClick={onExportBundle}
             >
-              {t('Export bundle')}
+              {t('Export all')}
             </MenuItem>
             <MenuSeparator />
             <MenuItem
               icon={<RemixIcon name="add-line" size={14} />}
               onClick={onNewRun}
             >
-              {t('New run')}
+              {t('New draft')}
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="edit-line" size={14} />}
               disabled={!run}
               onClick={beginRename}
             >
-              {t('Rename run')}
+              {t('Rename')}
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="delete-bin-line" size={14} />}
@@ -308,7 +342,7 @@ export function ScenarioHeader({
               disabled={!run}
               onClick={() => void onArchiveRun()}
             >
-              {t('Archive run')}
+              {t('Archive')}
             </MenuItem>
             <MenuSeparator />
             <MenuItem
