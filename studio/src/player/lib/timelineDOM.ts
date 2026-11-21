@@ -104,6 +104,10 @@ export function createTimelineElementFromManifestClip(params: {
     selectorIndex =
       doc && selector ? getTimelineElementSelectorIndex(doc, hostEl, selector) : undefined;
     sourceFile = getTimelineElementSourceFile(hostEl);
+  } else if (!doc && clip.authored) {
+    ({ domId, hfId, sourceFile } = clip.authored);
+    if (domId) selector = `#${CSS.escape(domId)}`;
+    else if (hfId) selector = `[data-hf-id="${CSS.escape(hfId)}"]`;
   }
 
   const identity = buildTimelineElementIdentity({
@@ -184,6 +188,11 @@ export function createTimelineElementFromManifestClip(params: {
       entry.track = -100000 + fallbackIndex;
       entry.authoredTrack = 0;
     }
+  }
+  if (!doc && clip.authored) {
+    entry.hidden = clip.authored.hidden || undefined;
+    entry.timelineLocked = clip.authored.timelineLocked || undefined;
+    entry.muted = clip.authored.muted || undefined;
   }
   if (clip.assetUrl) entry.src = clip.assetUrl;
   if (clip.kind === "composition" && clip.compositionId) {

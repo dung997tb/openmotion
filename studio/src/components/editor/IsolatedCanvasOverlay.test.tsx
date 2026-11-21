@@ -114,6 +114,63 @@ it.each(["replacement", "navigation"])("ignores a late finish after frame %s", a
   expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
 });
 
+async function openText() {
+  act(() => canvas.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: 60, clientY: 60 })));
+  const pick = messages.findLast(message => message.type === "inline-text" && message.phase === "pick")!;
+  expect(pick).toMatchObject({ x: 0.25, y: 0.5 });
+  await reply("pick", result);
+  expect(messages.at(-1)).toMatchObject({ type: "inline-text", phase: "open", editId: pick.editId });
+  return pick;
+}
+
+function finishText(pick: PreviewBridgeMessage, override: Record<string, unknown> = {}) {
+  window.dispatchEvent(new MessageEvent("message", {
+    source: frame.contentWindow, origin,
+    data: { ...pick, source: PREVIEW_BRIDGE_SOURCE, type: "inline-text-finished",
+      changed: true, html: "<b>Updated</b>", ...override },
+  }));
+}
+
+it("persists one text edit against the file and element picked by the user", async () => {
+  state.commitDomEditPatchBatches.mockResolvedValue({ changed: true, durable: true });
+  const pick = await openText();
+  await act(async () => {
+    // A frame may supply the new markup. It cannot pick another write target on finish.
+    finishText(pick, { sourceFile: "index.html", elementId: "other" });
+    finishText(pick);
+  });
+  expect(state.commitDomEditPatchBatches).toHaveBeenCalledExactlyOnceWith([{
+    sourceFile: result.sourceFile, ifMatch: '"sha256:' + result.sha256 + '"',
+    patches: [{ target: { id: result.elementId }, operations: [{ type: "rich-text", property: "", value: "<b>Updated</b>" }] }],
+  }], { label: "Edit text", coalesceKey: pick.editId });
+  expect(messages.at(-1)).toMatchObject({ phase: "commit", editId: pick.editId });
+});
+
+it("never saves an unrequested text edit or a completion from a replaced document", async () => {
+  const pick = await openText();
+  await act(async () => finishText(pick, { editId: "unrequested" }));
+  vi.mocked(frame.getAttribute).mockReturnValue(origin + "/api/projects/project-1/preview?pt=two");
+  await act(async () => finishText(pick));
+  expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
+});
+
+it("outlines only the verified frame's layer selection at its scaled coordinates", () => {
+  const selection = { geometry: { x: 12, y: 15, width: 32, height: 20 }, viewport: { width: 100, height: 50 } };
+  const deliver = (token: string) => act(() => {
+    window.dispatchEvent(new MessageEvent("message", { origin, source: frame.contentWindow, data: {
+      version: 1, source: PREVIEW_BRIDGE_SOURCE, type: "select-element", projectId: "project-1", token,
+      layerKey: "doc:1", selection,
+    }}));
+  });
+  deliver("stale");
+  expect(canvas.firstElementChild).toBeNull();
+  deliver("one");
+  const style = (canvas.firstElementChild as HTMLElement).style;
+  expect([style.left, style.top, style.width, style.height]).toEqual(["34px", "40px", "64px", "40px"]);
+  act(() => frame.dispatchEvent(new Event("load")));
+  expect(canvas.firstElementChild).toBeNull();
+});
+
 it("shows the released bounds even when the initial pick arrives after pointerup", async () => {
   pointer("pointerdown", 60);
   pointer("pointermove", 72);

@@ -286,8 +286,9 @@ export function applySoftReloadFinalization(
   currentTime: number,
 ): boolean {
   const win = iframe?.contentWindow as IframeWindow | null;
-  if (!win?.__hfForceTimelineRebind) return false;
+  if (!iframe?.contentDocument || !win) return false;
   try {
+    if (!win.__hfForceTimelineRebind) return false;
     if (win.__hfSuppressSceneMutations) {
       win.__hfSuppressSceneMutations(() => finalizeSoftReload(win, currentTime));
     } else {

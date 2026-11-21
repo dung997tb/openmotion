@@ -1,6 +1,9 @@
+import { createPreviewAdapter } from "../../player/lib/previewAdapter";
+import { MAX_LAYER_ROWS } from "../../../../shared/preview-layer";
 import { Button } from "open-design-ui/button";
-import { IconButton } from "open-design-ui/icon-button";
-import { Tooltip } from "../ui/Tooltip";
+import { LayerRow } from "./LayerRow";
+import { IsolatedLayersPanel } from "./IsolatedLayersPanel";
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
 import { PanelEmptyState } from "../ui/PanelEmptyState";
 import { useMvpEditor } from "../../motion/StudioHost";
 import { RemixIcon } from "../../icons/RemixIcons";
@@ -27,16 +30,7 @@ import { usePlayerStore, liveTime } from "../../player";
 import {
   findMatchingTimelineElementId,
 } from "../../utils/studioHelpers";
-import {
-  Film,
-  Folder,
-  ImageIcon,
-  Layers,
-  Music,
-  Square,
-  Type,
-  Vector,
-} from "../../icons/SystemIcons";
+import { Layers } from "../../icons/SystemIcons";
 import { isCompositionHost, layerKindOf } from "./layerKind";
 import { useLayerDrag, isLayerDraggable, type LayerReorderEvent } from "./useLayerDrag";
 import { getVisibleLayers, sortLayersByZIndex } from "./layersPanelSort";
@@ -48,21 +42,6 @@ import { useLayerReorderTimelineMirror } from "../nle/useCanvasZOrderTimelineMir
 import { runZLaneGesture } from "../nle/zLaneGesture";
 import { useLayerRevealOverride } from "./useLayerRevealOverride";
 
-// Rows this panel renders before it stops. A display budget, not a document limit.
-const LAYERS_PANEL_MAX_ROWS = 80;
-
-const [CARET, ICON, GAP] = [16, 20, 6];
-const CHILD_INDENT = CARET + GAP + ICON + GAP;
-
-const KIND_ICON = {
-  image: ImageIcon,
-  video: Film,
-  audio: Music,
-  vector: Vector,
-  group: Folder,
-  text: Type,
-  shape: Square,
-} as const;
 
 /**
  * A trailing-rAF + cooldown throttle: `invoke` runs `run` at most once per
@@ -117,6 +96,15 @@ function useLayersPanelHost(host: LayersPanelHost | undefined): LayersPanelHost 
 
 // fallow-ignore-next-line complexity
 export const LayersPanel = memo(function LayersPanel({ host }: { host?: LayersPanelHost }) {
+  const resolved = useLayersPanelHost(host);
+  const liveFrame = useLivePreviewIframe();
+  const frame = resolved.previewIframeRef.current ?? liveFrame;
+  const isolatedOrigin = isolatedPreviewOrigin();
+  if (isolatedOrigin && (!host || (frame && createPreviewAdapter({ iframe: frame }).targetOrigin === isolatedOrigin))) return <IsolatedLayersPanel iframe={frame} />;
+  return <LocalLayersPanel host={resolved} />;
+});
+
+const LocalLayersPanel = memo(function LocalLayersPanel({ host }: { host: LayersPanelHost }) {
   const mvp = useMvpEditor();
   const { t } = useI18n();
   const {
@@ -127,7 +115,7 @@ export const LayersPanel = memo(function LayersPanel({ host }: { host?: LayersPa
     compositionLoading,
     timelineElements,
     isPlaying,
-  } = useLayersPanelHost(host);
+  } = host;
   // Flashless z commits (canvas menu, timeline lane-drag z-sync) mutate iframe
   // z-indexes with no reload and no refreshKey bump — while paused, nothing
   // else re-collects, so the panel's z-sorted order would go stale.
@@ -177,7 +165,7 @@ export const LayersPanel = memo(function LayersPanel({ host }: { host?: LayersPa
       { activeCompositionPath: activeCompPath, isMasterView, activeGroupElement },
       // How many rows this panel is willing to render, nothing more. Hit-testing
       // callers deliberately take the whole document instead.
-      LAYERS_PANEL_MAX_ROWS,
+      MAX_LAYER_ROWS,
     );
     setLayers(sortLayersByZIndex(items));
   }, [previewIframeRef, activeCompPath, isMasterView, activeGroupElement, setActiveGroupElement]);
@@ -289,8 +277,7 @@ export const LayersPanel = memo(function LayersPanel({ host }: { host?: LayersPa
     [resolveSelection, updateDomEditHoverSelection],
   );
 
-  const toggleCollapse = useCallback((key: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleCollapse = useCallback((key: string) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
@@ -452,8 +439,6 @@ export const LayersPanel = memo(function LayersPanel({ host }: { host?: LayersPa
           const hasChildren = layer.childCount > 0;
           const isCompHost = isCompositionHost(layer.element);
           const kind = layerKindOf(layer.element, hasChildren);
-          const KindIcon = KIND_ICON[kind];
-          const kindName = kind[0].toUpperCase() + kind.slice(1);
           const hint = draggable
             ? layer.element.hasAttribute("data-hf-group")
               ? "Double-click to enter group"
@@ -461,60 +446,14 @@ export const LayersPanel = memo(function LayersPanel({ host }: { host?: LayersPa
             : "This layer can't be reordered";
 
           return (
-            <Tooltip label={hint ? t(hint) : undefined} wrap key={layer.key}><div
-              data-layer-index={index}
-              role="button"
-              tabIndex={0}
-              onClick={() => !dragKey && handleSelectLayer(layer)}
-              onDoubleClick={() => !dragKey && handleLayerDoubleClick(layer)}
-              onPointerDown={(e) => handleRowPointerDown(index, e)}
-              onPointerEnter={() => !dragKey && handleLayerHover(layer)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleSelectLayer(layer);
-                }
-              }}
-              className={`group mx-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors ${
-                isDragged
-                  ? "opacity-40"
-                  : selected
-                    ? mvp ? "bg-panel-hover text-panel-text-1" : "bg-panel-accent/14 text-accent-ink"
-                    : "text-panel-text-2 hover:bg-panel-hover/40 hover:text-panel-text-1"
-              } ${dragKey ? "cursor-grabbing" : "cursor-pointer"}`}
-              style={{ paddingLeft: 8 + layer.depth * CHILD_INDENT }}
-            >
-              {hasChildren ? (
-                <IconButton variant="plain"
-                  type="button"
-                  onClick={(e) => toggleCollapse(layer.key, e)}
-                  aria-expanded={!isCollapsed}
-                  aria-label={isCollapsed ? t("Expand children") : t("Collapse children")}
-                  className="relative flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-neutral-500 hover:text-neutral-300 before:absolute before:-inset-1.5 before:content-['']"
-                  icon={<RemixIcon name="arrow-right-s-line" size={12} className={`transition-transform ${isCollapsed ? "" : "rotate-90"}`} />}
-                />
-              ) : null}
-              <Tooltip label={hint ? `${t(kindName)} · ${t(hint)}` : t(kindName)} wrap><span
-                data-layer-kind={kind}
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${
-                  mvp
-                    ? selected ? "bg-panel-hover text-panel-text-1" : "bg-panel-hover text-panel-text-4"
-                    : selected
-                    ? "bg-panel-accent/18 text-accent-ink"
-                    : isCompHost
-                      ? "bg-on text-accent-ink"
-                      : "bg-panel-hover text-panel-text-4"
-                }`}
-              >
-                <KindIcon size={12} />
-              </span></Tooltip>
-              <span className="min-w-0 flex-1 truncate text-[11px]">{layer.label}</span>
-              {hasChildren && (
-                <span className="text-[9px] tabular-nums text-panel-text-5">
-                  {layer.childCount}
-                </span>
-              )}
-            </div></Tooltip>
+            <LayerRow key={layer.key} index={index} label={layer.label} depth={layer.depth}
+              childCount={layer.childCount} kind={kind} isCompHost={isCompHost} isCollapsed={isCollapsed}
+              selected={selected} isDragged={isDragged} dragging={Boolean(dragKey)} hint={hint}
+              onSelect={() => { if (!dragKey) void handleSelectLayer(layer); }}
+              onDoubleClick={() => { if (!dragKey) void handleLayerDoubleClick(layer); }}
+              onPointerDown={e => handleRowPointerDown(index, e)}
+              onPointerEnter={() => { if (!dragKey) void handleLayerHover(layer); }}
+              onToggle={() => toggleCollapse(layer.key)} />
           );
         })}
         {insertionLineY != null && (

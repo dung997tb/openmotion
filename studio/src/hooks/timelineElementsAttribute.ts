@@ -61,6 +61,7 @@ export function useSetElementsAttribute({
   writeProjectFile,
   recordEdit,
   previewIframeRef,
+  reloadPreview,
   pendingTimelineEditPathRef,
   isRecordingRef,
 }: UseTimelineElementVisibilityEditingInput) {
@@ -91,7 +92,7 @@ export function useSetElementsAttribute({
           ]),
         );
         for (const path of byFile.keys()) pendingTimelineEditPathRef.current.add(path);
-        await saveProjectFilesWithHistory({
+        const changedPaths = await saveProjectFilesWithHistory({
           projectId,
           label,
           files,
@@ -99,7 +100,9 @@ export function useSetElementsAttribute({
           writeFile: writeProjectFile,
           recordEdit,
         });
-        patchLive(previewIframeRef.current, edits, attr, activeCompPath);
+        const iframe = previewIframeRef.current;
+        patchLive(iframe, edits, attr, activeCompPath);
+        if (changedPaths.length && iframe && !iframe.contentDocument) reloadPreview?.();
         if (attr === "data-timeline-locked") useCaptionWorkspace.getState().changed();
         return { status: "saved" };
       } catch (error) {
@@ -115,6 +118,7 @@ export function useSetElementsAttribute({
       writeProjectFile,
       recordEdit,
       previewIframeRef,
+      reloadPreview,
       pendingTimelineEditPathRef,
       isRecordingRef,
     ],

@@ -11,6 +11,7 @@
 
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { ClipManifestClip, IframeWindow, PlaybackAdapter } from "../lib/playbackTypes";
+import { rememberIsolatedManifest } from "../lib/isolatedTimelineManifest";
 import { hasTimelinePerformanceFixtureLease } from "../lib/timelinePerformanceFixture";
 import { acceptStudioRuntimeMessage, postRuntimeControlMessage } from "../lib/runtimeProtocol";
 import {
@@ -86,6 +87,7 @@ function acceptedPreviewMessage(
   if (isPreviewBridgeMessageValue(data) && data.source === PREVIEW_BRIDGE_SOURCE) {
     const adapter = iframe ? createPreviewAdapter({ iframe }) : null;
     if (!adapter?.accepts(e)) return null;
+    if (data.type === "layer-tree" || data.type === "response") return null;
     return projectTimelineUrls(normalizeBridgeMessage(data), adapter);
   }
   if (data?.source !== "hf-preview") return null;
@@ -94,7 +96,10 @@ function acceptedPreviewMessage(
     const adapter = createPreviewAdapter({ iframe });
     if (adapter.token && !adapter.sameOrigin) {
       if (e.origin !== adapter.targetOrigin || e.source !== iframe.contentWindow) return null;
-      return projectTimelineUrls(data, adapter);
+      // The runtime posts immediately after replacing __clipManifest. Ask the
+      // project frame to bind those rows to their authored nodes before installing them.
+      adapter.send("handshake", { timelineOnly: true });
+      return null;
     }
   }
   return data;
@@ -115,9 +120,11 @@ function projectTimelineUrls(data: PreviewMessage, preview: ReturnType<typeof cr
     local.hash = url.hash;
     return local.href;
   }
-  return { ...data, clips: data.clips.map((clip: ClipManifestClip) => ({
+  const clips = data.clips.map((clip: ClipManifestClip) => ({
     ...clip, assetUrl: projectUrl(clip.assetUrl), compositionSrc: projectUrl(clip.compositionSrc),
-  })) };
+  }));
+  if (!preview.sameOrigin) rememberIsolatedManifest(clips, preview);
+  return { ...data, clips };
 }
 
 function normalizeBridgeMessage(data: PreviewBridgeMessage): PreviewMessage {
