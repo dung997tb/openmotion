@@ -45,7 +45,7 @@ export function useMyGames(active: boolean): MyGames {
 // Titles follow Game Studio: the game's own translation, 做同款 drafts and option-only drafts are shown readably.
 import { useGameTitle } from './GameStudio';
 
-const statusLabels: Record<GameCard['status'], string> = { draft: 'Agent is running', building: 'Agent is running', ready: 'Ready to publish', failed: 'Not finished', published: 'Published' };
+const statusLabels: Record<GameCard['status'], string> = { draft: 'Waiting for your Agent', building: 'Agent is running', ready: 'Ready to publish', failed: 'Not finished', published: 'Published' };
 
 /** Game Studio opens the game's detail page from `?page=game&game=<id>`. */
 export function openGameStudio(id?: string) {

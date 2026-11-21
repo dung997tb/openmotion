@@ -684,7 +684,7 @@ it('shows games made in Game Studio above the library and in their own category'
   expect(section.querySelector('h2')?.textContent).toBe('Games');
   // Only the user's own games, newest first; a composed draft brief is shown as its chosen options.
   expect([...section.querySelectorAll('.om-asset-tile strong')].map(node => node.textContent)).toEqual(['Cyberpunk · Pixel art · Shooter', 'Station Defense']);
-  expect([...section.querySelectorAll('.om-asset-game-status')].map(node => node.textContent)).toEqual(['Agent is running', 'Published']);
+  expect([...section.querySelectorAll('.om-asset-game-status')].map(node => node.textContent)).toEqual(['Waiting for your Agent', 'Published']);
   expect(container.textContent).toContain('Picture A');
 
   await click('View all');

@@ -10,7 +10,7 @@ import { RemixIcon } from '../../icons/RemixIcons';
 import { WorkspaceBack } from '../WorkspaceBack';
 import { MotionIcon } from '../icons';
 import { Tooltip } from '../../components/ui/Tooltip';
-import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
+import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
 import './gameStudio.css';
 
 type Menu = 'genre' | 'style' | 'setting';
@@ -269,7 +269,8 @@ const trailersEnabled = false;
 const trailerSteps: Record<'recording' | 'composing' | 'rendering' | 'ready' | 'failed', string> = {
   recording: 'Recording gameplay…', composing: 'Cutting the trailer…', rendering: 'Rendering video…', ready: 'Watch the trailer', failed: 'Make a trailer' };
 
-const statusLabels: Partial<Record<GameCard['status'], string>> = { draft: 'Agent is running', building: 'Agent is running', ready: 'Ready to publish', failed: 'Not finished' };
+// A draft waits for the user's Agent until the Agent itself sets building (openmotion_game_set_status).
+const statusLabels: Partial<Record<GameCard['status'], string>> = { draft: 'Waiting for your Agent', building: 'Agent is running', ready: 'Ready to publish', failed: 'Not finished' };
 
 function GameTile({ game, locale, onOpen }: { game: GameCard; locale: string; onOpen: () => void }) {
   const { t } = useI18n();
@@ -281,7 +282,7 @@ function GameTile({ game, locale, onOpen }: { game: GameCard; locale: string; on
   return <article className="om-game-tile" data-status={game.status} data-orientation={game.orientation === 'portrait' ? 'portrait' : undefined}>
     <Button variant="plain" className="om-game-tile-cover" onClick={onOpen} aria-label={label}>
       {cover ? <img src={cover} alt="" loading="lazy" decoding="async" /> : <span className="om-game-tile-placeholder">{title}</span>}
-      {status && <span className="om-game-status" data-tone={game.status}>{(game.status === 'building' || game.status === 'draft') && <RemixIcon name="loader-4-line" size={13} />}{t(status)}</span>}
+      {status && <span className="om-game-status" data-tone={game.status}>{game.status === 'building' && <RemixIcon name="loader-4-line" size={13} />}{t(status)}</span>}
       {game.external && !game.external.embeddable && <span className="om-game-status"><RemixIcon name="external-link-line" size={13} />{t('External link')}</span>}
       {game.multiplayer && <span className="om-game-badge"><RemixIcon name="group-line" size={13} />{t('{count} players', { count: game.maxPlayers })}</span>}
     </Button>
@@ -413,8 +414,9 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
         </span>
       </header>
       <div ref={stage} className="om-game-stage" data-orientation={game.orientation === 'portrait' && playable && view === 'preview' ? 'portrait' : undefined}>
-        {!playable ? <div className="om-game-waiting"><RemixIcon name={game.status === 'failed' ? 'error-warning-line' : 'loader-4-line'} size={28} />
-            <strong>{game.status === 'failed' ? t('The Agent stopped before finishing this game.') : t('Agent is running…')}</strong>
+        {!playable && game.status !== 'building' ? <GameHandoff game={game} notify={notify} />
+          : !playable ? <div className="om-game-waiting"><RemixIcon name="loader-4-line" size={28} />
+            <strong>{t('Agent is running…')}</strong>
             <span className="om-muted">{t('The game will load here when it is ready.')}</span></div>
           : view === 'code' ? <pre className="om-game-code" tabIndex={0}>{source ?? t('Loading game…')}</pre>
           : view === 'trailer' && trailerReady ? <video className="om-game-trailer-video" src={trailer!.videoUrl!.replace(/^\/api\//, '/motion-api/')} controls autoPlay playsInline />
@@ -486,14 +488,51 @@ function GameSidebar({ games, openId, onOpen }: { games: GameCard[]; openId: str
     <nav className="om-game-sidebar-list">
       {shown.map(game => {
         const cover = coverUrl(game) ?? genreCovers[game.genre];
-        const status = pending(game) ? t('Agent is running') : game.status === 'failed' ? t('Not finished') : game.status === 'ready' ? t('Ready to publish') : t('Finished');
+        const status = game.status === 'draft' ? t('Waiting for your Agent') : game.status === 'building' ? t('Agent is running') : game.status === 'failed' ? t('Not finished') : game.status === 'ready' ? t('Ready to publish') : t('Finished');
         return <Button key={game.id} variant="plain" className="om-game-sidebar-row" aria-label={collapsed ? `${title(game)} · ${status}` : undefined} aria-current={openId === game.id ? 'page' : undefined} onClick={() => onOpen(game)}>
           <span className="om-game-sidebar-thumb">{cover && <img src={cover} alt="" />}{collapsed && pending(game) && <RemixIcon name="loader-4-line" size={12} />}</span>
           {!collapsed && <span className="om-game-sidebar-text"><strong>{title(game)}</strong>
-            <span className="om-muted" data-tone={game.status}>{pending(game) && <RemixIcon name="loader-4-line" size={12} />}{status}</span></span>}
+            <span className="om-muted" data-tone={game.status}>{game.status === 'building' && <RemixIcon name="loader-4-line" size={12} />}{status}</span></span>}
         </Button>;
       })}
       {!games.length && !collapsed && <p className="om-muted om-game-sidebar-empty">{t('Games you make appear here.')}</p>}
     </nav>
   </aside>;
+}
+
+/**
+ * Handoff for a draft (or a game the Agent stopped on): OpenMotion does not run its own game Agent, so the user's
+ * MCP Agent receives the complete instruction — game id, brief and execution steps — by opening Codex with it
+ * prefilled or by copying it into any other Agent. The page switches to "Agent is running" once the Agent sets building.
+ */
+function GameHandoff({ game, notify }: { game: GameCard; notify: (message: string, tone: 'info' | 'error') => void }) {
+  const { t } = useI18n();
+  const [instruction, setInstruction] = useState<string | null>(() => storedInstruction(game.id));
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void gameApi.handoff(game.id).then(handoff => { if (!live) return; setInstruction(handoff.agentInstruction); rememberInstruction(game.id, handoff.agentInstruction); }).catch(() => { /* keep the stored copy, if any */ });
+    return () => { live = false; };
+  }, [game.id]);
+  const copy = async () => {
+    if (!instruction) return;
+    try { await navigator.clipboard.writeText(instruction); setCopied(true); notify(t('Instruction copied'), 'info'); }
+    catch { notify(t('Could not copy. Select the instruction and copy it.'), 'error'); }
+  };
+  const stopped = game.status === 'failed';
+  return <div className="om-game-handoff" data-tone={game.status}>
+    <RemixIcon name={stopped ? 'error-warning-line' : 'robot-line'} size={26} />
+    <strong>{stopped ? t('The Agent stopped before finishing this game.') : t('Hand this game to your Agent')}</strong>
+    <ol className="om-game-handoff-steps">
+      <li>{t('Open Codex, Claude Code or another Agent connected to OpenMotion MCP.')}</li>
+      <li>{t('Send the instruction below. It names this game, the brief and the steps.')}</li>
+      <li>{t('This page shows “Agent is running” once the Agent starts, and the game when it is ready.')}</li>
+    </ol>
+    <div className="om-game-handoff-actions">
+      {/* Copy works with every Agent; the Codex link needs the Codex desktop app and only prefills a new chat (it does not send). */}
+      <Button variant="ghost" className="om-button h-auto" data-primary disabled={!instruction} onClick={() => void copy()}><RemixIcon name={copied ? 'check-line' : 'file-copy-line'} size={15} />{copied ? t('Instruction copied') : t('Copy instruction')}</Button>
+      <a className="om-button om-game-handoff-link" title={t('Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.')} aria-disabled={!instruction || undefined} href={instruction ? `codex://new?prompt=${encodeURIComponent(instruction)}` : undefined}><RemixIcon name="external-link-line" size={15} />{t('Open in Codex')}</a>
+    </div>
+    <pre className="om-game-handoff-text" tabIndex={0} aria-label={t('Agent instruction')}>{instruction ?? t('Loading instruction…')}</pre>
+  </div>;
 }
