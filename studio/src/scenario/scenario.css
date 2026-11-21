@@ -4434,3 +4434,383 @@
     position: static;
   }
 }
+
+/* Studio product: an entry in the brief, and a Higgsfield-style dialog of product cards. */
+.om-studio-product-entry,
+.om-studio-product-selected {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-12);
+  width: 100%;
+  padding: var(--motion-space-10);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-raised);
+  text-align: left;
+}
+
+.om-studio-product-entry {
+  border-style: dashed;
+}
+
+.om-studio-product-entry:hover {
+  border-color: var(--motion-border-strong);
+  background: var(--motion-hover);
+}
+
+.om-studio-product-entry-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--motion-radius-full);
+  background: var(--motion-inset);
+  color: var(--motion-strong);
+}
+
+.om-studio-product-cover {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-inset);
+  color: var(--motion-dim);
+}
+
+.om-studio-product-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.om-studio-product-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: var(--motion-space-2);
+}
+
+.om-studio-product-copy small {
+  color: var(--motion-dim);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-product-copy strong {
+  overflow: hidden;
+  color: var(--motion-strong);
+  font-size: var(--motion-text-sm);
+  font-weight: var(--motion-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-studio-product-copy > span {
+  overflow: hidden;
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+  line-height: var(--motion-leading-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-studio-product-entry .om-studio-product-copy > span {
+  white-space: normal;
+}
+
+.om-studio-product-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-12);
+  width: min(960px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 64px));
+  padding: var(--motion-space-16);
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--motion-border);
+  border-radius: var(--motion-radius-step-20);
+  background: var(--motion-bg);
+  box-shadow: var(--motion-shadow-lg);
+}
+
+.om-studio-product-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+}
+
+.om-studio-product-dialog-head .om-subtitle {
+  flex: 1;
+  margin: 0;
+}
+
+.om-studio-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: max-content;
+  gap: var(--motion-space-12);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--motion-space-12);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-panel);
+}
+
+.om-studio-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-6);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--motion-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.om-studio-product-card-art {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-raised);
+  color: var(--motion-dim);
+}
+
+.om-studio-product-card-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.om-studio-product-card:hover .om-studio-product-card-art {
+  border-color: var(--motion-border-strong);
+}
+
+.om-studio-product-card[aria-pressed="true"] .om-studio-product-card-art {
+  border-color: var(--motion-accent);
+  box-shadow: 0 0 0 1px var(--motion-accent);
+}
+
+.om-studio-product-card-add .om-studio-product-card-art {
+  border-style: dashed;
+}
+
+.om-studio-product-card strong {
+  overflow: hidden;
+  font-size: var(--motion-text-sm);
+  font-weight: var(--motion-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-studio-product-card-add strong {
+  text-align: center;
+}
+
+.om-studio-product-empty {
+  display: grid;
+  grid-column: 1 / -1;
+  justify-items: center;
+  gap: var(--motion-space-4);
+  padding: var(--motion-space-48) var(--motion-space-16);
+  color: var(--motion-muted);
+  font-size: var(--motion-text-sm);
+  text-align: center;
+}
+
+.om-studio-product-empty strong {
+  color: var(--motion-strong);
+}
+
+.om-studio-product-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--motion-space-16);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.om-studio-product-media {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-8);
+  min-width: 0;
+}
+
+.om-studio-product-drop {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  width: 100%;
+  max-height: 420px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px dashed var(--motion-border);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-panel);
+  color: var(--motion-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.om-studio-product-drop[data-has-image="true"] {
+  border-style: solid;
+}
+
+.om-studio-product-drop:hover,
+.om-studio-product-drop[data-dragging="true"] {
+  border-color: var(--motion-accent);
+}
+
+.om-studio-product-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.om-studio-product-drop-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--motion-space-6);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-product-drop-empty strong {
+  color: var(--motion-strong);
+  font-size: var(--motion-text-sm);
+}
+
+.om-studio-product-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--motion-space-6);
+}
+
+.om-studio-product-strip-item,
+.om-studio-product-strip-add {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: var(--motion-radius-md);
+}
+
+.om-studio-product-strip-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.om-studio-product-strip-remove {
+  position: absolute;
+  top: var(--motion-space-2);
+  right: var(--motion-space-2);
+}
+
+.om-studio-product-strip-add {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--motion-border);
+  background: var(--motion-panel);
+  color: var(--motion-muted);
+  cursor: pointer;
+}
+
+.om-studio-product-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-12);
+  min-width: 0;
+}
+
+.om-studio-product-fields label {
+  display: grid;
+  gap: var(--motion-space-4);
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-product-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--motion-space-6);
+  margin-top: auto;
+}
+
+@media (max-width: 767px) {
+  .om-studio-product-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Outputs this time: every deliverable is on by default; untick to skip it for this run. */
+.om-studio-choose {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--motion-space-6);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.om-studio-choose legend {
+  margin-bottom: var(--motion-space-6);
+  padding: 0;
+  color: var(--motion-strong);
+  font-size: var(--motion-text-sm);
+  font-weight: var(--motion-weight-semibold);
+}
+
+.om-studio-choose-item {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-6);
+  min-width: 0;
+  padding: var(--motion-space-6) var(--motion-space-8);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-md);
+  color: var(--motion-text);
+  font-size: var(--motion-text-sm);
+  cursor: pointer;
+}
+
+.om-studio-choose-item:hover {
+  background: var(--motion-hover);
+}
+
+.om-studio-choose-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-studio-output[data-output-state="skipped"] {
+  opacity: 0.45;
+}
+
+.om-studio-output[data-output-state="skipped"] .om-studio-output-art > img {
+  filter: grayscale(1);
+}
+
+/* A deliverable card is a status tile; only a made output opens a preview. */
+div.om-studio-output {
+  cursor: default;
+}
+
+div.om-studio-output:hover {
+  border-color: var(--motion-border-subtle);
+}

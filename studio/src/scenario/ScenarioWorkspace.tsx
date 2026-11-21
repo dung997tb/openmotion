@@ -1152,7 +1152,6 @@ export function ScenarioWorkspace({
               onCopyAgentPrompt={handleCopyAgentPrompt}
               onExportBundle={handleExportBundle}
               exportingBundle={exportingBundle}
-              onOpenStep={handleOpenStepInManual}
               onSwitchToManual={() => handleModeChange('manual')}
               onOpenMcp={onOpenMcp}
             />

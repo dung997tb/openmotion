@@ -2,24 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { Button } from 'open-design-ui/button';
 import type { ScenarioBriefField, ScenarioDefinition, ScenarioStepDefinition } from '../../../shared/scenarios';
 import type { PoolItem, PoolRef, ScenarioBundleReceipt, ScenarioRun, ScenarioStepState } from '../../../shared/scenario-runs';
+import { Checkbox } from '../components/ui/Checkbox';
 import { FieldInput, FieldTextarea } from '../components/ui/FormField';
 import type { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { uploadLibraryAsset } from '../motion/assetClient';
 import type { PoolExportOptions } from './AssetPoolPanel';
-import { PoolThumb } from './PoolItemPreview';
+import { PoolItemPreviewDialog, PoolThumb } from './PoolItemPreview';
 import { buildShowcaseSlides } from './ScenarioStage';
 import { scenarioStudio, studioDeliverables } from './scenarioStudios';
 import type { ScenarioRunApi } from './stepContract';
 import { briefPresetsFor } from './steps/briefPresets';
+import { productBrief, readProducts, studioUsesProduct, type StudioProduct } from './productLibrary';
+import { StudioProductPicker } from './StudioProductPicker';
 
 const AUTOSAVE_DELAY_MS = 800;
 /** After the kit is handed to the Agent, check for returned outputs this often, for at most this long. */
 const HANDOFF_POLL_MS = 8000;
 const HANDOFF_POLL_LIMIT_MS = 15 * 60 * 1000;
 
-type DeliverableState = 'waiting' | 'making' | 'ready' | 'failed';
+type DeliverableState = 'waiting' | 'making' | 'ready' | 'failed' | 'skipped';
 
 export type ScenarioStudioViewProps = {
   scenario: ScenarioDefinition;
@@ -27,12 +30,11 @@ export type ScenarioStudioViewProps = {
   api: ScenarioRunApi;
   toast: Pick<ReturnType<typeof useToast>, 'showToast'>;
   poolItems: PoolItem[];
-  onAddPoolItems(items: { ref: PoolRef; label?: string; stepId?: string | null; source: PoolItem['source'] }[]): Promise<string[]>;
+  onAddPoolItems(items: { ref: PoolRef; label?: string; tags?: string[]; stepId?: string | null; source: PoolItem['source'] }[]): Promise<string[]>;
   /** Resolves false when the brief could not be copied, so the hand-off note is not shown. */
   onCopyAgentPrompt(customPrompt?: string): Promise<boolean>;
   onExportBundle(options?: PoolExportOptions): Promise<ScenarioBundleReceipt | null>;
   exportingBundle: boolean;
-  onOpenStep(stepId: string): void;
   onSwitchToManual(): void;
   onOpenMcp(example?: string): void;
 };
@@ -53,6 +55,7 @@ function latestIteration(state: ScenarioStepState | undefined) {
 }
 
 export function deliverableState(state: ScenarioStepState | undefined): DeliverableState {
+  if (state?.status === 'skipped') return 'skipped';
   const iteration = latestIteration(state);
   if (iteration?.job && (iteration.job.state === 'queued' || iteration.job.state === 'running')) return 'making';
   if (iteration?.job?.state === 'failed') return 'failed';
@@ -61,15 +64,20 @@ export function deliverableState(state: ScenarioStepState | undefined): Delivera
   return 'waiting';
 }
 
-const stateLabels: Record<DeliverableState, string> = { waiting: 'Not started', making: 'In the making', ready: 'Ready', failed: 'Needs a retry' };
+const stateLabels: Record<DeliverableState, string> = { waiting: 'Not started', making: 'In the making', ready: 'Ready', failed: 'Needs a retry', skipped: 'Not this time' };
 
-function DeliverableCard({ step, state, run, poolById, example, onOpen }: {
+/** Status to restore when a deliverable is chosen again: keep a finished output, otherwise start over. */
+export const restoredStatus = (state: ScenarioStepState | undefined): ScenarioStepState['status'] =>
+  latestIteration(state)?.outputs.length ? 'done' : 'todo';
+
+function DeliverableCard({ step, state, run, poolById, example, onPreview }: {
   step: ScenarioStepDefinition;
   state: ScenarioStepState | undefined;
   run: ScenarioRun | null;
   poolById: Map<string, PoolItem>;
   example: string | undefined;
-  onOpen(): void;
+  /** Opens a made output full size; the workflow itself opens only from Fine-tune each step. */
+  onPreview(item: PoolItem): void;
 }) {
   const { t } = useI18n();
   const status = deliverableState(state);
@@ -79,9 +87,8 @@ function DeliverableCard({ step, state, run, poolById, example, onOpen }: {
     .find((item): item is PoolItem => Boolean(item))
     ?? run?.pool.find(item => item.stepId === step.id);
   const posts = iteration?.outputs.find(output => output.type === 'social');
-  return (
-    <Button variant="plain" className="om-studio-output" data-studio-output={step.id} data-output-state={status} onClick={onOpen}
-      aria-label={`${t(step.title)} · ${t(stateLabels[status])}`}>
+  const body = (
+    <>
       <span className="om-studio-output-art" aria-hidden="true">
         {poolItem ? <PoolThumb item={poolItem} run={run} size="lg" />
           : posts && posts.type === 'social' ? <span className="om-studio-output-text">
@@ -97,12 +104,20 @@ function DeliverableCard({ step, state, run, poolById, example, onOpen }: {
         <strong>{t(step.title)}</strong>
         <span className="om-studio-output-state" data-output-state={status}>{t(stateLabels[status])}</span>
       </span>
+    </>
+  );
+  return poolItem ? (
+    <Button variant="plain" className="om-studio-output" data-studio-output={step.id} data-output-state={status}
+      aria-label={`${t('Preview')} · ${t(step.title)}`} onClick={() => onPreview(poolItem)}>
+      {body}
     </Button>
+  ) : (
+    <div className="om-studio-output" data-studio-output={step.id} data-output-state={status}>{body}</div>
   );
 }
 
 export function ScenarioStudioView({
-  scenario, run, api, toast, poolItems, onAddPoolItems, onCopyAgentPrompt, onExportBundle, exportingBundle, onOpenStep, onSwitchToManual, onOpenMcp,
+  scenario, run, api, toast, poolItems, onAddPoolItems, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
 }: ScenarioStudioViewProps) {
   const { t, locale } = useI18n();
   const studio = scenarioStudio(scenario.id);
@@ -111,7 +126,14 @@ export function ScenarioStudioView({
   const examples = useMemo(() => new Map(buildShowcaseSlides(scenario).map(slide => [slide.stepId, slide.poster])), [scenario]);
   const presets = useMemo(() => briefPresetsFor(scenario.id, locale), [scenario.id, locale]);
   const poolById = useMemo(() => new Map(poolItems.map(item => [item.id, item])), [poolItems]);
-  const references = useMemo(() => poolItems.filter(item => item.stepId === null && (item.source === 'upload' || item.source === 'workspace')), [poolItems]);
+  const references = useMemo(() => poolItems.filter(item => item.stepId === null && !item.tags.includes('product') && (item.source === 'upload' || item.source === 'workspace')), [poolItems]);
+  const briefFieldIds = useMemo(() => new Set(scenario.briefFields.map(field => field.id)), [scenario]);
+  const usesProduct = studioUsesProduct(briefFieldIds);
+  const productFor = (brief: Record<string, string | string[]> | undefined) => {
+    const name = briefText(brief, 'productName');
+    return name ? readProducts().find(product => product.name === name) ?? null : null;
+  };
+  const [product, setProduct] = useState<StudioProduct | null>(() => usesProduct ? productFor(run?.brief) : null);
 
   const fieldIds = useMemo(() => ['idea', ...inputFields.map(field => field.id)], [inputFields]);
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fieldIds.map(id => [id, briefText(run?.brief, id)])));
@@ -136,6 +158,8 @@ export function ScenarioStudioView({
     latest.current = reset;
     setValues(reset);
     setHandedOffAt(null);
+    if (usesProduct) setProduct(productFor(run.brief));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldIds, run]);
 
   // Take remote brief values for fields the person is not editing.
@@ -186,6 +210,47 @@ export function ScenarioStudioView({
     return () => clearInterval(id);
   }, [api, handedOffAt]);
 
+  // Deliverables people chose for this run; an unticked one is saved on the run as skipped.
+  const chosen = deliverables.filter(step => run?.steps[step.id]?.status !== 'skipped');
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<PoolItem | null>(null);
+  const toggleDeliverable = async (stepId: string, include: boolean) => {
+    if (toggling) return;
+    if (!include && chosen.length <= 1) {
+      toast.showToast(t('Keep at least one output'), 'error', 'feedback');
+      return;
+    }
+    setToggling(stepId);
+    try {
+      await api.ensureRun();
+      await api.mutate(`studio-output:${stepId}:${include ? 'on' : 'off'}`, 'update_step', {
+        stepId,
+        status: include ? restoredStatus(run?.steps[stepId]) : 'skipped',
+      });
+    } catch {
+      // useScenarioRun reports conflicts and failures; the checkbox stays as saved.
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  /** A picked product fills the brief and puts its photos in the run's Assets for every step. */
+  const selectProduct = async (next: StudioProduct) => {
+    setProduct(next);
+    update(productBrief(next, briefFieldIds));
+    const known = new Set(poolItems.flatMap(item => item.ref.type === 'asset' ? [item.ref.assetId + '/' + item.ref.versionId] : []));
+    const items = next.images
+      .filter(image => !known.has(image.assetId + '/' + image.versionId))
+      .map(image => ({ ref: { type: 'asset' as const, assetId: image.assetId, versionId: image.versionId }, label: `${next.name} · ${image.name}`, tags: ['product'], stepId: null, source: 'upload' as const }));
+    if (!items.length) return;
+    try {
+      await api.ensureRun();
+      await onAddPoolItems(items);
+    } catch {
+      toast.showToast(t('Could not add the product photos'), 'error', 'feedback');
+    }
+  };
+
   /** Leave the studio only after the typed brief is saved, so nothing typed is lost. */
   const leaveAfterSave = async (leave: () => void) => {
     if (await flush()) { leave(); return; }
@@ -193,10 +258,14 @@ export function ScenarioStudioView({
   };
 
   const missing = [{ id: 'idea', label: 'Core idea' }, ...inputFields].filter(field => !(values[field.id] ?? '').trim());
-  const readyCount = deliverables.filter(step => deliverableState(run?.steps[step.id]) === 'ready').length;
+  const readyCount = chosen.filter(step => deliverableState(run?.steps[step.id]) === 'ready').length;
 
   const makeKit = async () => {
     if (making) return;
+    if (usesProduct && !(values.productName ?? '').trim()) {
+      toast.showToast(t('Choose or add a product first'), 'error', 'feedback');
+      return;
+    }
     if (missing.length) {
       toast.showToast(t('Fill in {field} first', { field: t(missing[0].label) }), 'error', 'feedback');
       return;
@@ -241,6 +310,7 @@ export function ScenarioStudioView({
       <section className="om-studio-input" aria-label={t('Your brief')}>
         <h1>{t(studio.title)}</h1>
         <p className="om-studio-input-hint">{t(studio.inputHint)}</p>
+        {usesProduct && <StudioProductPicker selected={product} onSelect={next => void selectProduct(next)} toast={toast} />}
         <FieldTextarea
           className="om-studio-idea"
           rows={4}
@@ -250,8 +320,8 @@ export function ScenarioStudioView({
           placeholder={t(scenario.briefFields.find(field => field.id === 'idea')?.placeholder ?? 'Describe what you want to create and the outcome you want.')}
           onChange={event => update({ idea: event.target.value })}
         />
-        {inputFields.length > 0 && <div className="om-studio-fields">
-          {inputFields.map(field => (
+        {inputFields.some(field => !(usesProduct && field.id === 'productName')) && <div className="om-studio-fields">
+          {inputFields.filter(field => !(usesProduct && field.id === 'productName')).map(field => (
             <FieldInput key={field.id} density="compact" aria-label={t(field.label)} value={values[field.id] ?? ''}
               placeholder={t(field.label)} maxLength={field.maxLength} onChange={event => update({ [field.id]: event.target.value })} />
           ))}
@@ -264,6 +334,20 @@ export function ScenarioStudioView({
             {uploading ? t('Uploading…') : t('Add reference images')}
           </Button>
         </div>
+        <fieldset className="om-studio-choose">
+          <legend>{t('Outputs this time')}</legend>
+          {deliverables.map(step => {
+            const included = run?.steps[step.id]?.status !== 'skipped';
+            return (
+              <label key={step.id} className="om-studio-choose-item" data-studio-choose={step.id}>
+                <Checkbox aria-label={t(step.title)} checked={included} disabled={toggling !== null}
+                  onCheckedChange={checked => void toggleDeliverable(step.id, checked)} />
+                <RemixIcon name={step.icon} size={14} aria-hidden="true" />
+                <span>{t(step.title)}</span>
+              </label>
+            );
+          })}
+        </fieldset>
         {presets.length > 0 && <div className="om-studio-presets">
           <span>{t('Try:')}</span>
           {presets.map(preset => (
@@ -286,7 +370,7 @@ export function ScenarioStudioView({
       <section className="om-studio-outputs" aria-label={t('Your kit')}>
         <header>
           <h2>{t('Your kit')}</h2>
-          <span className="om-studio-progress">{t('{ready} of {total} ready', { ready: readyCount, total: deliverables.length })}</span>
+          <span className="om-studio-progress">{t('{ready} of {total} ready', { ready: readyCount, total: chosen.length })}</span>
           <Button variant="secondary" size="sm" icon={<RemixIcon name="download-2-line" size={14} />} disabled={!run || readyCount === 0 || exportingBundle}
             onClick={() => void onExportBundle()}>
             {t('Download the kit')}
@@ -295,9 +379,10 @@ export function ScenarioStudioView({
         <div className="om-studio-output-grid">
           {deliverables.map(step => (
             <DeliverableCard key={step.id} step={step} state={run?.steps[step.id]} run={run} poolById={poolById}
-              example={examples.get(step.id)} onOpen={() => void leaveAfterSave(() => onOpenStep(step.id))} />
+              example={examples.get(step.id)} onPreview={setPreviewItem} />
           ))}
         </div>
+        <PoolItemPreviewDialog item={previewItem} run={run} canUseInCurrentStep={false} onClose={() => setPreviewItem(null)} />
         <Button variant="plain" size="sm" className="om-studio-workflow-link" icon={<RemixIcon name="route-line" size={14} />} onClick={() => void leaveAfterSave(onSwitchToManual)}>
           {t('Fine-tune each step')}
         </Button>
