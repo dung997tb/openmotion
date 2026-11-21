@@ -1110,3 +1110,13 @@ test('any workspace draft returns a complete Agent handoff; templates do not',()
   const remix=await service.remix('racer'); const again=await service.handoff(remix.game.id);
   assert.equal(again.agentInstruction,remix.agentInstruction); assert.match(again.agentInstruction,/remix game/);
 }));
+
+test('game tools use the runtime root that the host passes, so packaged builds find puppeteer-core and hyperframes',()=>fixture(async(_,workspace)=>{
+  const runtime=path.join(workspace,'installed-runtime');
+  const created=await dispatchGameTool('openmotion_game_create',{...brief},workspace,runtime);
+  assert.equal(gameProjectsFor(workspace).runtimeRoot,runtime);
+  // Without a runtime root the existing service keeps the last one; a fresh workspace falls back to the plugin root.
+  assert.notEqual(gameProjectsFor(path.join(workspace,'other')).runtimeRoot,runtime);
+  // Playtest resolves puppeteer-core from the runtime root: an empty runtime fails there, not in the plugin checkout.
+  await assert.rejects(dispatchGameTool('openmotion_game_playtest',{id:created.game.id,clients:1,durationMs:0},workspace,runtime),/puppeteer-core/);
+}));

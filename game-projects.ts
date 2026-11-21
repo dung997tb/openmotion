@@ -305,6 +305,12 @@ export class GameProjects {
   root: string;
   templates: string;
   kits: string;
+  /**
+   * Where npm dependencies (puppeteer-core, hyperframes, gsap) are installed. Packaged builds ship without node_modules
+   * and install them under the data directory (ensureRuntime), so callers pass that root; source checkouts fall back
+   * to the plugin root. Native components stay under the plugin root either way.
+   */
+  runtimeRoot: string = pluginRoot;
   private pending: Promise<unknown> = Promise.resolve();
   constructor(workspace: string, templates = templatesRoot, kits = kitsRoot) { this.root = path.resolve(workspace, 'games'); this.templates = templates; this.kits = kits; }
   // Serialize mutations so concurrent requests cannot lose counts or race publication validation.
@@ -655,7 +661,7 @@ export class GameProjects {
   protected async composeTrailer(game:GameCard,root:string,clips:string[],onProject:(id:string)=>Promise<void>):Promise<string> {
     const {Phase1Service}=await import('./phase1.ts');
     const store=new WorkspaceStore(path.dirname(this.root));
-    const phase1=new Phase1Service(store,pluginRoot,{origin:()=> 'http://127.0.0.1',nativeUrl:()=>undefined,openProject:async()=>{},mutation:async task=>task(),cancel:async()=>{throw new Error('Trailer composition does not cancel exports');}});
+    const phase1=new Phase1Service(store,this.runtimeRoot,{origin:()=> 'http://127.0.0.1',nativeUrl:()=>undefined,openProject:async()=>{},mutation:async task=>task(),cancel:async()=>{throw new Error('Trailer composition does not cancel exports');}});
     const title=((game.i18n?.['zh-CN']?.title||game.title)+' · Trailer').replace(/[\x00-\x1f]/g,' ').slice(0,100);
     const created=await phase1.call('openmotion_create_project',{projectType:'natural_language',title,namingLanguage:'zh-CN',requirements:`Editable gameplay trailer for local game ${game.id}. Title, gameplay highlights and Play now end card. Silent capture; no music generated.`,requestId:randomUUID()});
     const projectId=created.projectId as string;await onProject(projectId);
@@ -680,10 +686,10 @@ export class GameProjects {
   }
   protected async renderTrailer(projectId:string):Promise<string> {
     // Preflight existing files so exportExpectation's ensureRuntime(false) cannot install dependencies.
-    const installed=JSON.parse(await readFile(path.join(pluginRoot,'node_modules/hyperframes/package.json'),'utf8'));
+    const installed=JSON.parse(await readFile(path.join(this.runtimeRoot,'node_modules/hyperframes/package.json'),'utf8'));
     if(installed.version!==HYPERFRAMES_VERSION)throw new GameError('The pinned HyperFrames runtime is not installed; trailer rendering did not install anything.');
-    await access(path.join(pluginRoot,'node_modules/gsap/dist/gsap.min.js'));
-    await access(path.join(pluginRoot,'node_modules/hyperframes/dist/studio/index.html'));
+    await access(path.join(this.runtimeRoot,'node_modules/gsap/dist/gsap.min.js'));
+    await access(path.join(this.runtimeRoot,'node_modules/hyperframes/dist/studio/index.html'));
     const {nativeRuntimeStatus}=await import('./scripts/npm-runtime.mjs');const native=await nativeRuntimeStatus(pluginRoot);
     if(native.managed&&!native.capabilities.export)throw new GameError('Existing native export components are unavailable. Prepare them separately; this trailer did not download or install anything.');
     const store=new WorkspaceStore(path.dirname(this.root)),project=store.forProject(projectId);
@@ -695,7 +701,7 @@ export class GameProjects {
       if(current?.state==='completed')return project.exportPath(current);
       if(current&&['failed','cancelled'].includes(current.state))throw new GameError('Trailer export failed: '+(current.error??current.state));
       // MCP-only hosts may have no periodic server worker; drain earlier queued exports too.
-      if(current?.state==='pending')await renderNext(store,pluginRoot);
+      if(current?.state==='pending')await renderNext(store,this.runtimeRoot);
       await new Promise(resolve=>setTimeout(resolve,500));
     }
     throw new GameError('Trailer rendering timed out; inspect the native export job before retrying.');
@@ -777,7 +783,7 @@ export class GameProjects {
     const closeRooms=attachGameRooms(server,path.dirname(this.root));
     try {
       const executablePath=await browserExecutable();
-      const puppeteer=await browserAutomation(fileURLToPath(new URL('./',import.meta.url)));
+      const puppeteer=await browserAutomation(this.runtimeRoot);
       profile=await mkdtemp(path.join(tmpdir(),'openmotion-game-chrome-'));
       await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
       const address=server.address();if(!address||typeof address==='string')throw new GameError('Local game server failed to listen');
@@ -936,9 +942,12 @@ export class GameRuntime {
   }
 }
 const services = new Map<string, GameProjects>();
-export function gameProjectsFor(workspace: string) { const key = path.resolve(workspace); if (!services.has(key)) services.set(key,new GameProjects(key)); return services.get(key)!; }
-export async function dispatchGameTool(name: string, args: any, workspace: string) {
-  const service = gameProjectsFor(workspace);
+export function gameProjectsFor(workspace: string, runtimeRoot?: string) {
+  const key = path.resolve(workspace); if (!services.has(key)) services.set(key,new GameProjects(key));
+  const service = services.get(key)!; if (runtimeRoot) service.runtimeRoot = runtimeRoot; return service;
+}
+export async function dispatchGameTool(name: string, args: any, workspace: string, runtimeRoot?: string) {
+  const service = gameProjectsFor(workspace, runtimeRoot);
   switch (name.replace(/^(?:openmotion|motion)_game_/,'')) {
     case 'create': return service.create(args.brief ?? args);
     case 'get': return service.detail(args.id);
@@ -955,12 +964,12 @@ export async function dispatchGameTool(name: string, args: any, workspace: strin
     default: throw new GameError('Unknown game tool');
   }
 }
-export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: URL, workspace: string, input: (req: IncomingMessage, maxBytes?: number) => Promise<any>) {
+export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: URL, workspace: string, input: (req: IncomingMessage, maxBytes?: number) => Promise<any>, runtimeRoot?: string) {
   const prefix = /^\/(?:api|motion-api)\/games(?=\/|$)/.exec(url.pathname)?.[0];
   if (!prefix) return false;
   const json = (status: number, data: unknown) => { res.writeHead(status, { 'Content-Type':'application/json', 'Cache-Control':'no-store' }); res.end(JSON.stringify(data)); return true; };
   try {
-    const service = gameProjectsFor(workspace), parts = url.pathname.slice(prefix.length).split('/').filter(Boolean).map(decodeURIComponent);
+    const service = gameProjectsFor(workspace, runtimeRoot), parts = url.pathname.slice(prefix.length).split('/').filter(Boolean).map(decodeURIComponent);
     if (!parts.length) { if (req.method === 'GET') return json(200, await service.catalog()); if (req.method === 'POST') return json(201,await service.create(await input(req, LIMIT))); }
     const [id, action, ...rest] = parts;
     if (parts.length === 1) { if (req.method === 'GET') return json(200,await service.get(id)); if (req.method === 'DELETE') return json(200,await service.delete(id)); }
