@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.spyOn(frame, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 200, 100));
   state.previewIframeRef.current = frame;
   messages = [];
+  state.commitDomEditPatchBatches.mockReset().mockResolvedValue({ durable: true, changed: true });
   vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(message => { messages.push(message); });
   root = createRoot(host);
   act(() => root.render(<IsolatedCanvasOverlay />));
@@ -90,6 +91,7 @@ it("captures a scaled drag, commits once on release and uses the shown file vers
       { type: "inline-style", property: "top", value: "34px" },
     ] }],
   }], { label: "Move layer", coalesceKey: messages[0]?.gestureId });
+  expect(messages.at(-1)).toMatchObject({ phase: "commit", gestureId: messages[0]?.gestureId, changed: true });
 });
 
 it.each(["pointercancel", "lostpointercapture"])("cancels before release on %s", async type => {
@@ -167,4 +169,46 @@ it("outlines only the verified frame's layer selection at its scaled coordinates
   expect([style.left, style.top, style.width, style.height]).toEqual(["34px", "40px", "64px", "40px"]);
   act(() => frame.dispatchEvent(new Event("load")));
   expect(canvas.firstElementChild).toBeNull();
+});
+
+it("shows the released bounds even when the initial pick arrives after pointerup", async () => {
+  pointer("pointerdown", 60);
+  pointer("pointermove", 72);
+  pointer("pointerup", 90);
+  await reply("start", { geometry: { x: 1, y: 2, width: 20, height: 10 }, viewport: { width: 200, height: 100 } });
+  expect((canvas.firstElementChild as HTMLElement).style.left).toBe("41px");
+  await reply("finish", result);
+});
+
+it.each(["rejection", "unmatched"])("rolls back only the failed gesture on %s", async outcome => {
+  const saving = Promise.withResolvers<{ durable: boolean; changed: boolean }>();
+  state.commitDomEditPatchBatches.mockReturnValueOnce(saving.promise);
+  pointer("pointerdown", 60);
+  pointer("pointerup", 90);
+  await reply("start", null);
+  await reply("finish", result);
+  const first = messages[0]?.gestureId;
+  expect(messages.map(message => message.phase)).toEqual(["start", "finish"]);
+
+  pointer("pointerdown", 70);
+  const second = messages.at(-1)?.gestureId;
+  expect(second).not.toEqual(first);
+  await reply("start", { geometry: { x: 1, y: 2, width: 20, height: 10 }, viewport: { width: 200, height: 100 } });
+  await act(async () => {
+    if (outcome === "rejection") saving.reject(new Error("save failed"));
+    else saving.resolve({ durable: false, changed: false });
+  });
+  expect(messages.at(-1)).toMatchObject({ phase: "cancel", gestureId: first });
+  expect(canvas.firstElementChild).not.toBeNull();
+  pointer("pointermove", 80);
+  expect(messages.at(-1)).toMatchObject({ phase: "move", gestureId: second });
+});
+
+it("cancels a finish with an invalid write target", async () => {
+  pointer("pointerdown", 60);
+  pointer("pointerup", 90);
+  await reply("start", null);
+  await reply("finish", { ...result, sourceFile: "../index.html" });
+  expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
+  expect(messages.at(-1)).toMatchObject({ phase: "cancel", gestureId: messages[0]?.gestureId });
 });

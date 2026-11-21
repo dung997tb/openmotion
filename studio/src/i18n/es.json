@@ -736,6 +736,7 @@
   "Code": "Código",
   "Catalog": "Biblioteca de componentes",
   "Preview": "Vista previa",
+  "Preview builders are busy. Try again shortly.": "El servicio de vista previa está ocupado. Vuelve a intentarlo en unos instantes.",
   "Timeline": "Línea de tiempo",
   "Design": "Diseño",
   "Layers": "Capas",

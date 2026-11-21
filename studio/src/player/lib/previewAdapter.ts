@@ -13,6 +13,7 @@ export const PREVIEW_BRIDGE_VERSION = 1 as const;
 
 export type PreviewBridgeMessageType =
   | "preview-ready"
+  | "preview-build-busy"
   | "select-element"
   | "selection-geometry"
   | "edit-element"

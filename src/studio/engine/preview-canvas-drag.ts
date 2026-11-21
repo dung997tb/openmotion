@@ -2,10 +2,14 @@
  * Studio owns pointer capture and authorizes the final source write. */
 export const PREVIEW_CANVAS_DRAG = `
   let drag = null;
+  const pendingDrags = new Map();
 
-  function resetDrag() {
-    if (drag) Object.assign(drag.element.style, drag.original);
-    drag = null;
+  function restoreStyles(element, original, applied) {
+    for (const [property, { value, priority }] of Object.entries(original)) {
+      // A runtime animation or another edit may have since taken over this property.
+      if (applied && (element.style[property] !== applied[property] || element.style.getPropertyPriority(property))) continue;
+      element.style.setProperty(property, value, priority);
+    }
   }
 
   function measureDragAxes(element, left, top, makeRelative, original) {
@@ -21,7 +25,7 @@ export const PREVIEW_CANVAS_DRAG = `
     element.style.left = left + 'px';
     element.style.top = (top + 32) + 'px';
     const vertical = element.getBoundingClientRect();
-    Object.assign(element.style, original);
+    restoreStyles(element, original);
 
     const a = (horizontal.x - zero.x) / 32;
     const b = (horizontal.y - zero.y) / 32;
@@ -37,7 +41,7 @@ export const PREVIEW_CANVAS_DRAG = `
   }
 
   function startDrag(message) {
-    resetDrag();
+    if (drag) return null;
     const hit = document.elementFromPoint(message.x * innerWidth, message.y * innerHeight);
     const element = hit?.closest('[id],[data-hf-id]');
     if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement ||
@@ -48,7 +52,10 @@ export const PREVIEW_CANVAS_DRAG = `
 
     const style = getComputedStyle(element);
     const makeRelative = style.position === 'static';
-    const original = { position: element.style.position, left: element.style.left, top: element.style.top };
+    const properties = makeRelative ? ['left', 'top', 'position'] : ['left', 'top'];
+    const original = Object.fromEntries(properties.map(property => [property, {
+      value: element.style[property], priority: element.style.getPropertyPriority(property)
+    }]));
     const left = makeRelative ? 0 : parseFloat(style.left) || 0;
     const top = makeRelative ? 0 : parseFloat(style.top) || 0;
     const axes = measureDragAxes(element, left, top, makeRelative, original);
@@ -60,12 +67,22 @@ export const PREVIEW_CANVAS_DRAG = `
 
   function canvasDrag(message) {
     if (message.phase === 'start') return startDrag(message);
-    if (!drag || message.gestureId !== drag.id) return null;
-    if (message.phase === 'cancel' || !drag.element.isConnected ||
-        !Number.isFinite(message.dx) || !Number.isFinite(message.dy)) {
-      resetDrag();
+    const pending = pendingDrags.get(message.gestureId);
+    if (pending && (message.phase === 'commit' || message.phase === 'cancel')) {
+      if (message.phase === 'cancel') restoreStyles(pending.element, pending.original, pending.applied);
+      // A changed file needs the digest from the authoritative replacement frame.
+      if (message.phase === 'cancel' || !message.changed) sourceVersions[pending.selection.sourceFile] = pending.sha256;
+      pendingDrags.delete(message.gestureId);
       return null;
     }
+    if (!drag || message.gestureId !== drag.id) return null;
+    if (message.phase === 'cancel') {
+      if (drag.applied) restoreStyles(drag.element, drag.original, drag.applied);
+      drag = null;
+      return null;
+    }
+    if (!drag.element.isConnected || !['move', 'finish'].includes(message.phase) ||
+        !Number.isFinite(message.dx) || !Number.isFinite(message.dy)) return null;
 
     const dx = message.dx * innerWidth, dy = message.dy * innerHeight;
     const { a, b, c, d, determinant } = drag.axes;
@@ -74,12 +91,15 @@ export const PREVIEW_CANVAS_DRAG = `
     if (drag.makeRelative) drag.element.style.position = 'relative';
     drag.element.style.left = left + 'px';
     drag.element.style.top = top + 'px';
+    drag.applied = { left: drag.element.style.left, top: drag.element.style.top, position: drag.element.style.position };
     if (message.phase !== 'finish') return null;
-
     const { sourceFile, elementId, hfId } = drag.selection;
-    const result = { sourceFile, elementId, hfId, sha256: sourceVersions[sourceFile],
-      left, top, makeRelative: drag.makeRelative };
-    resetDrag();
-    return result;
+    const { makeRelative } = drag;
+    const sha256 = sourceVersions[sourceFile];
+    // A second edit of this source needs a confirmed base. Other source files remain editable.
+    delete sourceVersions[sourceFile];
+    pendingDrags.set(drag.id, { ...drag, sha256 });
+    drag = null;
+    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative };
   }
 `;
