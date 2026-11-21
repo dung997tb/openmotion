@@ -382,17 +382,15 @@ export async function commitWholePathOffset(
 
   let kfs = effectiveAnim.keyframes?.keyframes ?? [];
   if (kfs.length === 0) {
-    const fromProps = effectiveAnim.fromProperties ?? {};
-    const toProps = effectiveAnim.properties ?? {};
-    const startX =
-      typeof fromProps.x === "number" ? fromProps.x : typeof toProps.x === "number" ? 0 : 0;
-    const startY =
-      typeof fromProps.y === "number" ? fromProps.y : typeof toProps.y === "number" ? 0 : 0;
-    const endX = typeof toProps.x === "number" ? toProps.x : startX;
-    const endY = typeof toProps.y === "number" ? toProps.y : startY;
+    const fromProps = effectiveAnim.method === "from" ? effectiveAnim.properties : effectiveAnim.fromProperties ?? {};
+    const toProps = effectiveAnim.method === "from" ? {} : effectiveAnim.properties;
+    const startX = typeof fromProps.x === "number" ? fromProps.x : 0;
+    const startY = typeof fromProps.y === "number" ? fromProps.y : 0;
+    const endX = typeof toProps.x === "number" ? toProps.x : effectiveAnim.method === "from" ? 0 : startX;
+    const endY = typeof toProps.y === "number" ? toProps.y : effectiveAnim.method === "from" ? 0 : startY;
     kfs = [
-      { percentage: 0, properties: { x: startX, y: startY } },
-      { percentage: 100, properties: { x: endX, y: endY } },
+      { percentage: 0, properties: { ...fromProps, x: startX, y: startY } },
+      { percentage: 100, properties: { ...toProps, x: endX, y: endY } },
     ];
   }
 
