@@ -1120,3 +1120,63 @@ test('game tools use the runtime root that the host passes, so packaged builds f
   // Playtest resolves puppeteer-core from the runtime root: an empty runtime fails there, not in the plugin checkout.
   await assert.rejects(dispatchGameTool('openmotion_game_playtest',{id:created.game.id,clients:1,durationMs:0},workspace,runtime),/puppeteer-core/);
 }));
+
+test('catalog reports an unreadable game folder instead of failing, and a failed create leaves no orphan',()=>fixture(async(service,workspace)=>{
+  const { game }=await service.create(brief);
+  await mkdir(path.join(service.root,'orphan-without-game-json'));
+  await mkdir(path.join(service.root,'malformed')); await writeFile(path.join(service.root,'malformed','game.json'),'{ not json');
+  const catalog=await service.catalog();
+  assert.deepEqual(catalog.games.map(card=>card.id),[game.id]);
+  assert.deepEqual(catalog.issues?.map(issue=>issue.id).sort(),['malformed','orphan-without-game-json']);
+  // A kit that cannot be copied (here a symlink, which project files never follow) aborts create and removes its folder.
+  const kits=await mkdtemp(path.join(tmpdir(),'openmotion-broken-kits-'));
+  try {
+    await mkdir(path.join(kits,'arcade-2d'));
+    await writeFile(path.join(kits,'arcade-2d','index.html'),'<!doctype html>'); await writeFile(path.join(kits,'arcade-2d','logic.js'),starterLogic);
+    await symlink(path.join(kits,'arcade-2d','logic.js'),path.join(kits,'arcade-2d','linked.js'));
+    const broken=new GameProjects(workspace,service.templates,kits);
+    await assert.rejects(broken.create(brief));
+    assert.deepEqual((await service.catalog()).games.map(card=>card.id),[game.id]);
+    assert.equal((await service.catalog()).issues?.length,2);
+  } finally { await rm(kits,{recursive:true,force:true}); }
+}));
+
+test('single-player games run the bounded logic.js smoke check before publication',()=>fixture(async(_,workspace)=>{
+  const service=new GameProjects(workspace,path.join(workspace,'templates'),path.resolve('templates/game-kits'));
+  const { game }=await service.create(brief);
+  assert.equal(JSON.parse(await readFile(path.join(service.root,game.id,'game.json'),'utf8')).kit,'arcade-2d');
+  assert.equal((await service.validate(game.id)).passed,true);
+  await service.write(game.id,[{path:'logic.js',content:'export const meta = { minPlayers: 1, maxPlayers: 1, tickRate: 20 };\nexport function setup( {'}]);
+  const broken=await service.validate(game.id);
+  assert.equal(broken.passed,false); assert(broken.diagnostics.some(item=>item.path==='logic.js'));
+  await service.status(game.id,'ready'); await assert.rejects(service.publish(game.id),/validation failed/);
+  // The kit client imports logic.js, so deleting it is reported rather than treated as optional.
+  await rm(path.join(service.root,game.id,'logic.js'));
+  assert((await service.validate(game.id)).diagnostics.some(item=>item.path==='logic.js'));
+}));
+
+test('the single-player smoke check respects validateAction, as live play does',()=>fixture(async(_,workspace)=>{
+  const service=new GameProjects(workspace,path.join(workspace,'templates'),path.resolve('templates/game-kits'));
+  const { game }=await service.create(brief);
+  await service.write(game.id,[{path:'logic.js',content:`export const meta = { minPlayers: 1, maxPlayers: 1, tickRate: 20 };
+export function setup(players){ return { players, t: 0 }; }
+export function validateAction(state, player, action){ return action.type === 'move'; }
+export function applyAction(state, player, action){ if (action.type !== 'move') throw new Error('unsupported'); return state; }
+export function tick(state){ return { ...state, t: state.t + 1 }; }
+export function viewFor(state){ return state; }
+export function isGameOver(){ return { over: false }; }`}]);
+  assert.deepEqual((await service.validate(game.id)).diagnostics,[]);
+}));
+
+test('the smoke check stops when the game ends, as live play does',()=>fixture(async(_,workspace)=>{
+  const service=new GameProjects(workspace,path.join(workspace,'templates'),path.resolve('templates/game-kits'));
+  const { game }=await service.create(brief);
+  await service.write(game.id,[{path:'logic.js',content:`export const meta = { minPlayers: 1, maxPlayers: 1, tickRate: 20 };
+export function setup(players){ return { players, t: 0, board: [1] }; }
+export function validateAction(){ return true; }
+export function applyAction(state){ return state; }
+export function tick(state){ if (state.t >= 10) throw new Error('ticked after the game ended'); return { ...state, t: state.t + 1 }; }
+export function viewFor(state){ return state; }
+export function isGameOver(state){ return { over: state.t >= 10 }; }`}]);
+  assert.deepEqual((await service.validate(game.id)).diagnostics,[]);
+}));

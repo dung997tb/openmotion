@@ -196,7 +196,7 @@ test('the existing standalone gate rejects failed, cancelled, skipped and missin
 // keeps it visible: a new test file must either be scheduled or added here deliberately.
 const unscheduledSuites = [
   'asset-routing.test.ts', 'assets-use.test.ts', 'brand-story-tracking.test.ts', 'browser.test.ts',
-  'codex-host-handoff.test.ts', 'cold-start.test.ts', 'final-video-delivery.test.ts', 'final-video-ui.test.ts', 'game-projects.test.ts',
+  'codex-host-handoff.test.ts', 'cold-start.test.ts', 'final-video-delivery.test.ts', 'final-video-ui.test.ts',
   'inline-video-preview.test.ts', 'inline-video-result.test.ts', 'install-public-skill.test.ts', 'integration.test.ts',
   'legacy.test.ts', 'library-skill-catalog.test.ts', 'lint.test.ts', 'mcp-client.test.ts', 'mcp-config.test.ts', 'mcp.test.ts', 'media-save.test.ts',
   'onboarding-recovery.test.ts', 'page-metadata.test.ts', 'phase1-runtime.test.ts', 'phase1-shared.test.ts',
