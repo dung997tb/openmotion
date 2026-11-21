@@ -3,6 +3,8 @@ import { useI18n } from '../i18n/I18n';
 import { projectHref, requestedProject, sessionHref } from './workspaceRouting';
 import { availableSession, type CreativeSession, type CreationMode } from '../../../shared/session';
 import { isWorkspaceSettingsPage, preservePresentation } from '../../../shared/workspace-url';
+import { activeWorkspaceInterval, watchWorkspaceRead } from './workspaceRefresh';
+import { getStudioSaveSnapshot, subscribeStudioSaves } from '../utils/studioSaveState';
 import { diagnosticFetch } from './diagnosticRequests';
 import { initializeWorkspaceHistory, WORKSPACE_LOCATION_CHANGED, workspaceHistoryIndex, workspaceHistorySession, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { readWorkspacePage } from './workspacePageRouting';
@@ -134,31 +136,48 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
   }, [navigate, projectId, sessionId, waitForSaves]);
   useEffect(() => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    async function poll() {
-      try {
-        const [data, catalog] = await Promise.all([
-          request<WorkspaceStatus>(workspaceStatusPath, { signal: controller.signal }),
-          motionApi<ProjectCatalog>('/projects', { signal: controller.signal }).then(catalog => {
-            if (!controller.signal.aborted) updateCatalog(catalog);
-            return catalog;
-          }),
-        ]);
-        if (controller.signal.aborted) return;
-        if (projectId && data.projectId !== projectId && !acting.current) {
-          throw new Error('项目状态与当前页面不匹配，请重新打开对应项目。');
-        }
-        const savedSession = !projectId && sessionId ? catalog.sessions?.find(item => item.id === sessionId) : undefined;
-        const session = savedSession && availableSession(savedSession, new Set(catalog.projects.filter(project => project.trashedAt).map(project => project.id)));
+    let statusError: string | undefined, catalogError: string | undefined;
+    const settled = () => {
+      setConnectionError(statusError || catalogError || '');
+      if (statusError !== undefined && catalogError !== undefined) setCheckingConnection(false);
+    };
+    const refreshStatus = watchWorkspaceRead(controller.signal, async () => {
+      const data = await request<WorkspaceStatus>(workspaceStatusPath, { signal: controller.signal });
+      if (controller.signal.aborted) return Infinity;
+      if (projectId && data.projectId !== projectId && !acting.current) {
+        throw new Error('项目状态与当前页面不匹配，请重新打开对应项目。');
+      }
+      setStatus(data);
+      const exporting = data.exportJob?.state === 'pending' || data.exportJob?.state === 'running';
+      return exporting ? activeWorkspaceInterval : 30_000;
+    }, error => { statusError = error; settled(); });
+
+    watchWorkspaceRead(controller.signal, async () => {
+      const catalog = await motionApi<ProjectCatalog>('/projects', { signal: controller.signal });
+      if (controller.signal.aborted) return Infinity;
+      updateCatalog(catalog);
+      const awaitingArtifact = !projectId && sessionId && !isWorkspaceSettingsPage(location.search, location.hash);
+      if (awaitingArtifact) {
+        const saved = catalog.sessions?.find(item => item.id === sessionId);
+        const session = saved && availableSession(saved, new Set(catalog.projects.filter(project => project.trashedAt).map(project => project.id)));
         const generated = session?.artifacts.find(item => item.id === session.activeArtifactId) ?? session?.artifacts.at(-1);
-        if (generated && !acting.current && !isWorkspaceSettingsPage(location.search, location.hash)) { navigate(sessionHref(sessionId!, generated.projectId, true), true); return; }
-        setStatus(data); setConnectionError('');
-      } catch (err) { if (!controller.signal.aborted) setConnectionError((err as Error).message); }
-      finally { if (!controller.signal.aborted) setCheckingConnection(false); }
-      if (!controller.signal.aborted) timer = setTimeout(poll, 1800);
-    }
-    void poll();
-    return () => { controller.abort(); clearTimeout(timer); };
+        if (generated && !acting.current) {
+          navigate(sessionHref(sessionId!, generated.projectId, true), true);
+          return Infinity;
+        }
+      }
+      return awaitingArtifact ? activeWorkspaceInterval : 60_000;
+    }, error => { catalogError = error; settled(); });
+
+    // Local writes and server-backed history both update the project save store.
+    let savedAt = getStudioSaveSnapshot(projectId ?? null).savedAt;
+    const unsubscribe = subscribeStudioSaves(() => {
+      const next = getStudioSaveSnapshot(projectId ?? null).savedAt;
+      if (next === savedAt) return;
+      savedAt = next;
+      refreshStatus(activeWorkspaceInterval);
+    });
+    return () => { controller.abort(); unsubscribe(); };
   }, [projectId, sessionId, updateCatalog, request, connectionCheck, navigate]);
 
   const transition = useCallback(async (path?: string, options?: { instruction?: string; mode?: string; templateId?: string; projectId?: string }, sessionRoute = false, revealArtifact = true) => {
