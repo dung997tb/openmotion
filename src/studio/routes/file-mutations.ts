@@ -664,7 +664,8 @@ export function createStudioFileMutationsRoutes(
     }
     const current = await deps.files.readTextFile(auth, projectId, filePath);
     if (!current) return c.json({ error: 'Target file not found', path: filePath }, 404);
-    return c.json({ ok: true, result: probeElementInSource(current.content, body.target) });
+    const exists = probeElementInSource(current.content, body.target);
+    return c.json({ ok: true, exists, result: exists });
   });
 
   // POST /api/projects/:id/file-mutations/probe-elements/* — Read-only batch source probe.
@@ -678,7 +679,8 @@ export function createStudioFileMutationsRoutes(
     }
     const current = await deps.files.readTextFile(auth, projectId, filePath);
     if (!current) return c.json({ error: 'Target file not found', path: filePath }, 404);
-    return c.json({ ok: true, results: probeElementsInSource(current.content, body.targets) });
+    const exists = probeElementsInSource(current.content, body.targets);
+    return c.json({ ok: true, exists, results: exists });
   });
 
   // POST /api/projects/:id/file-mutations/duplicate-element/* — Clone element & GSAP animations.

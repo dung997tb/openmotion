@@ -966,6 +966,14 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
       initialFiles: [{ path: 'index.html', content: initialHtml }],
     });
 
+    const probe = await env.studioApp.request(
+      `/api/projects/${created.projectId}/file-mutations/probe-elements/index.html`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: [{ id: 'headline' }, { id: 'missing' }] }) },
+    );
+    assert.equal(probe.status, 200);
+    assert.deepEqual(await probe.json(), { ok: true, exists: [true, false], results: [true, false] });
+
     // DOM patch-element
     const patchRes = await env.studioApp.request(
       `/api/projects/${created.projectId}/file-mutations/patch-element/index.html`,
