@@ -15,6 +15,7 @@ export type {
   PlayerHandleTimeListener,
 } from "./hooks/usePlayerHandle";
 export { resolveIframe } from "./lib/timelineDOM";
+export { createBridgePlaybackAdapter } from "./lib/playbackAdapter";
 export {
   createPreviewAdapter,
   isPreviewBridgeMessageValue,
