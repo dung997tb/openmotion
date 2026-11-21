@@ -395,7 +395,7 @@
   display: inline-grid;
   align-items: center;
   vertical-align: baseline;
-  min-width: 84px;
+  min-width: 56px;
   max-width: 100%;
   margin: 0 var(--motion-space-2);
   border-radius: var(--motion-radius-md);
@@ -406,7 +406,7 @@
 }
 
 .om-blank-wrap[data-wide="true"] {
-  min-width: 180px;
+  min-width: 140px;
 }
 
 .om-blank-wrap[data-required="true"]:not([data-filled="true"]) {
@@ -446,8 +446,9 @@
   visibility: hidden;
   white-space: pre;
   pointer-events: none;
-  max-width: 460px;
+  max-width: 560px;
   overflow: hidden;
+  padding-right: var(--motion-space-12);
 }
 
 .om-blank-input {

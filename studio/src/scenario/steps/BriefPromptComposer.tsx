@@ -137,6 +137,7 @@ export function BriefPromptComposer({
               <input
                 id={`brief-${scenario.id}-${field.id}`}
                 type={field.kind === 'url' ? 'url' : 'text'}
+                size={1}
                 className="om-blank-input"
                 value={strVal}
                 maxLength={field.maxLength}
