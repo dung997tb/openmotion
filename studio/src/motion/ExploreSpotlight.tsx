@@ -10,6 +10,7 @@ import { findModelHub } from './modelHubs';
 import { motionSkills, motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
+import { releaseMediaElement } from '../utils/releaseMediaElement';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
 
@@ -55,6 +56,10 @@ function FeaturedClip({ src, playing }: { src: string; playing: boolean }) {
     if (playing) void video.play().catch(() => { /* The poster remains available if autoplay is blocked. */ });
     else video.pause();
   }, [playing, videoSource]);
+  useEffect(() => {
+    const video = player.current;
+    return () => releaseMediaElement(video);
+  }, [videoSource, failed]);
   return videoSource && !failed ? <video ref={player} src={videoSource} muted loop playsInline preload="none" aria-hidden="true"
     style={{ opacity: ready ? 1 : 0 }} onLoadedData={() => setReady(true)} onError={() => setFailed(true)} /> : null;
 }

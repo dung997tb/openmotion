@@ -13,9 +13,9 @@ export async function browserRequest(endpoint: string, data?: unknown, method = 
 }
 
 /** Only pixels and whitelisted input cross this boundary; web documents never run in the workspace DOM. */
-export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabId: string; url: string; onState: (state: WebPageState) => void }>(function WebBrowser({ sessionId, tabId, url, onState }, ref) {
+export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabId: string; url: string; endpoint?: string; onState: (state: WebPageState) => void }>(function WebBrowser({ sessionId, tabId, url, endpoint: customEndpoint, onState }, ref) {
   const { t } = useI18n();
-  const endpoint = browserEndpoint(sessionId, tabId);
+  const endpoint = customEndpoint ?? browserEndpoint(sessionId, tabId);
   const surface = useRef<HTMLDivElement>(null), keyboard = useRef<HTMLTextAreaElement>(null);
   const picture = useRef<HTMLImageElement>(null), ready = useRef(false), queue = useRef(Promise.resolve());
   const report = useRef(onState), initialUrl = useRef(url), composing = useRef(false), pointerTime = useRef(0);
@@ -34,11 +34,14 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
     let disposed = false, events: EventSource | undefined, timer: ReturnType<typeof setTimeout> | undefined;
     let observer: ResizeObserver | undefined;
     ready.current = false; setError(''); setHasFrame(false);
-    void (async () => {
-      await browserRequest(endpoint, { url: initialUrl.current });
-      if (disposed) return;
-      if (attempt > 0) await browserRequest(`${endpoint}/command`, { action: 'navigate', url: initialUrl.current });
-      ready.current = true;
+
+    const stopStream = () => {
+      events?.close();
+      events = undefined;
+    };
+
+    const startStream = () => {
+      if (disposed || events || (typeof document !== 'undefined' && document.hidden)) return;
       events = new EventSource(`${endpoint}/events`);
       events.addEventListener('state', event => {
         if (disposed) return;
@@ -51,6 +54,21 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
         setHasFrame(true);
       });
       events.onerror = () => { if (!disposed) setError(t('Browser connection interrupted. Retry to reconnect.')); };
+    };
+
+    const onVisibilityChange = () => {
+      if (disposed) return;
+      if (document.hidden) stopStream();
+      else if (ready.current) startStream();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    void (async () => {
+      await browserRequest(endpoint, { url: initialUrl.current });
+      if (disposed) return;
+      if (attempt > 0) await browserRequest(`${endpoint}/command`, { action: 'navigate', url: initialUrl.current });
+      ready.current = true;
+      startStream();
       const resize = () => {
         clearTimeout(timer); timer = setTimeout(() => {
           const bounds = surface.current?.getBoundingClientRect();
@@ -59,7 +77,15 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
       };
       observer = new ResizeObserver(resize); observer.observe(surface.current!); resize();
     })().catch(reason => { if (!disposed) setError(reason.message); });
-    return () => { disposed = true; ready.current = false; events?.close(); observer?.disconnect(); clearTimeout(timer); };
+    return () => {
+      disposed = true;
+      ready.current = false;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      stopStream();
+      observer?.disconnect();
+      clearTimeout(timer);
+      picture.current?.removeAttribute('src');
+    };
   }, [endpoint, attempt, t]);
   const point = (x: number, y: number) => {
     const bounds = picture.current!.getBoundingClientRect();

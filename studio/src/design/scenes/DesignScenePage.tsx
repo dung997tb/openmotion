@@ -107,7 +107,9 @@ export function DesignScenePage({
     setMention(null);
     setPreviewTemplate(null);
     if (!scenario || scenario.examples.length <= 1) return;
-    const id = window.setInterval(() => setPlaceholderIndex(i => (i + 1) % scenario.examples.length), 6000);
+    const id = window.setInterval(() => {
+      if (!document.hidden) setPlaceholderIndex(i => (i + 1) % scenario.examples.length);
+    }, 6000);
     return () => window.clearInterval(id);
   }, [scenario?.id]);
 
@@ -397,6 +399,7 @@ export function DesignScenePage({
                       event.currentTarget.querySelector<HTMLButtonElement>('.om-design-card-open')?.click();
                     }}>
                       <ScaledPreviewThumb
+                        active={previewTemplate === null}
                         src={tpl.previewUrl}
                         title={tpl.title}
                         badge={tpl.category !== tpl.scenario ? tpl.category : undefined}
