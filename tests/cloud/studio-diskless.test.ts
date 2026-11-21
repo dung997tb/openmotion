@@ -975,7 +975,10 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
       title: 'Animated title', initialFiles: [{ path: scene, content: html }, { path: 'index.html', content: '<html></html>' }],
     });
     const base = `/api/projects/${project.projectId}`;
-    const read = () => env.studioApp.request(`${base}/gsap-animations/${scene}`).then(response => response.json());
+    const read = async () => {
+      const response = await env.studioApp.request(`${base}/gsap-animations/${scene}`);
+      return response.json();
+    };
     const { animations } = await read();
     const mutation = await env.studioApp.request(`${base}/gsap-mutations/${scene}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
