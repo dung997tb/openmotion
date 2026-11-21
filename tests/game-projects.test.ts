@@ -379,8 +379,8 @@ test('dependency-free GLB inspector reads Mage and Knight animation names and du
   const run=promisify(execFile);
   for (const [name,triangles] of [['Mage',5683],['Knight',6952]] as const) {
     const {stdout}=await run(process.execPath,['scripts/game-glb-inspect.mjs',`templates/game-kits/characters/${name}.glb`]);
-    const result=JSON.parse(stdout);assert.equal(result.triangleCount,triangles);assert.equal(result.boneCount,41);assert.equal(result.animations.length,76);
-    for(const clip of ['Idle','Running_A','Spellcast_Shoot','Hit_A','Death_A']) assert(result.animations.some((c:any)=>c.name===clip&&c.duration>0),clip);
+    const result=JSON.parse(stdout);assert.equal(result.triangleCount,triangles);assert.equal(result.boneCount,41);assert.equal(result.animations.length,12);
+    for(const clip of ['Idle','Walking_A','Running_A','Jump_Full_Short','Dodge_Forward','Spellcast_Shoot','1H_Melee_Attack_Chop','1H_Ranged_Shoot','Block','Hit_A','Death_A','Cheer']) assert(result.animations.some((c:any)=>c.name===clip&&c.duration>0),clip);
     assert.match(await readFile(new URL('characters/README.md',kitRoot),'utf8'),/Spellcast_Shoot/);
   }
 });
