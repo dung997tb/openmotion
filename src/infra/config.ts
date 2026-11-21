@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  DEFAULT_TRACES_SAMPLE_RATE,
+  parseSentryDsn,
+} from '../../packages/observability/config.ts';
 
 const booleanEnv = z.preprocess((value) => {
   if (typeof value === 'boolean') return value;
@@ -94,6 +98,12 @@ const rawConfigSchema = z.object({
   RENDER_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
   BLOB_GC_GRACE_SECONDS: z.coerce.number().int().min(0).default(604_800),
   HISTORY_COALESCE_WINDOW_MS: z.coerce.number().int().min(0).default(4000),
+
+  // Cloud web observability (Sentry DSN injected into Studio HTML at runtime; empty = disabled)
+  SENTRY_WEB_DSN: optionalUrl,
+  SENTRY_ENVIRONMENT: optionalNonEmptyString,
+  SENTRY_RELEASE: optionalNonEmptyString,
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(DEFAULT_TRACES_SAMPLE_RATE),
 });
 
 export type AppConfig = z.infer<typeof rawConfigSchema>;
@@ -137,6 +147,12 @@ export function parseConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error(
       'INVALID_CONFIG: MODEL_GATEWAY_MODE=opendesign requires OPENDESIGN_S2S_API_KEY (or set MODEL_GATEWAY_MODE=mock for local dev/tests).',
+    );
+  }
+
+  if (config.SENTRY_WEB_DSN && !parseSentryDsn(config.SENTRY_WEB_DSN)) {
+    throw new Error(
+      'INVALID_CONFIG: SENTRY_WEB_DSN must be a valid Sentry DSN URL (https://<public-key>@<host>/<project-id>, or loopback http:// for local testing).',
     );
   }
 

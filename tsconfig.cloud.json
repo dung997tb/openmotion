@@ -10,6 +10,9 @@
     "shared/version.ts",
     "shared/browser-executable.ts",
     "shared/project-validation.ts",
+    "packages/observability/config.ts",
+    "packages/observability/sanitize.ts",
+    "packages/observability/index.ts",
     "tests/cloud/**/*.ts"
   ]
 }

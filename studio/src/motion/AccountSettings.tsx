@@ -23,6 +23,7 @@ export interface CloudWorkspaceSummary {
 }
 
 export interface CloudAccountSummary extends AccountSummary {
+  userId?: string;
   authMode?: 'oidc' | 'dev';
   authMethod?: 'session_cookie' | 'pat' | 'oauth_bearer' | 'oidc_jwt' | 'dev_bypass';
   activeWorkspace?: CloudWorkspaceSummary | null;
@@ -114,6 +115,7 @@ function normalizeAccountSummary(raw: CloudSummaryApiResponse): CloudAccountSumm
   if (raw.state) {
     return {
       state: raw.state,
+      userId: raw.user?.id,
       consoleUrl,
       user: raw.user ? { name: raw.user.name ?? raw.user.displayName ?? undefined, email: raw.user.email ?? undefined } : undefined,
       plan: raw.plan,
@@ -133,6 +135,7 @@ function normalizeAccountSummary(raw: CloudSummaryApiResponse): CloudAccountSumm
   const plan = raw.billing?.plan ?? raw.user?.planTier ?? undefined;
   return {
     state: authenticated ? 'signed-in' : 'signed-out',
+    userId: raw.user?.id,
     consoleUrl,
     user: raw.user
       ? {

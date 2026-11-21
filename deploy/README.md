@@ -102,7 +102,28 @@ All runtime variables are validated strictly by [`src/infra/config.ts`](../src/i
 | `S3_PRESIGN_CACHE_WINDOW_SEC` | `3600` | UTC time-window alignment (seconds) for cacheable `immutable` Presigned GET URLs on content-addressed blobs/proxies/thumbnails. |
 | `BLOB_GC_GRACE_SECONDS` | `604800` | 7-day grace period (seconds) before Mark-and-Sweep CAS GC physically deletes verified-unreferenced blobs. |
 | `HISTORY_COALESCE_WINDOW_MS` | `4000` | Edit-window duration (ms) for coalescing rapid interactive Studio edits into the head unpinned version (`0` disables coalescing). |
+| `SENTRY_WEB_DSN` | *(empty)* | Optional Sentry public DSN injected into Studio `index.html` at runtime by `api` (via `@openmotion/observability`). Leave empty to disable web Sentry completely. |
+| `SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` | `NODE_ENV` / `openmotion@<version>` | Runtime Sentry environment and release labels injected alongside `SENTRY_WEB_DSN`. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.1` | Browser performance tracing sample rate in `[0, 1]` (`0` disables performance traces while keeping error capture). |
 | `RENDER_SHM_SIZE` / `RENDER_MEM_LIMIT` | `512m` / `2g` | Chromium `/dev/shm` and container memory limit on `worker-render`. Raise to `1g`–`2g` / `4g` on `>= 8 GiB` hosts. |
+
+### Web Sentry SourceMaps & Observability Guide
+
+Production images never ship `.map` files (`deploy/Dockerfile` strips `*.map` from `prod-base`, and `api` returns `404` for `*.map` when `NODE_ENV=production`). To build `api` with embedded deterministic Debug IDs, export matching hidden `.js.map` files from the shared BuildKit cache, and upload them externally via `sentry-cli`:
+
+```bash
+SHA="$(git rev-parse --short HEAD)"
+IMAGE_TAG="openmotion-${SHA}"
+SENTRY_RELEASE="openmotion@${SHA}"
+
+docker buildx build -f deploy/Dockerfile --target api --build-arg STUDIO_SOURCEMAP=hidden -t "openmotion-api:${IMAGE_TAG}" .
+docker buildx build -f deploy/Dockerfile --target studio-sourcemaps --build-arg STUDIO_SOURCEMAP=hidden --output type=local,dest=./dist/studio-sourcemaps .
+
+sentry-cli sourcemaps upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" --release "$SENTRY_RELEASE" --url-prefix "~/editor-assets" ./dist/studio-sourcemaps
+rm -rf ./dist/studio-sourcemaps
+```
+
+See the full configuration, privacy, metrics, and troubleshooting guide in [`docs/sentry-observability.md`](../docs/sentry-observability.md).
 
 ## Kubernetes + KEDA Deployment (`deploy/k8s/`)
 

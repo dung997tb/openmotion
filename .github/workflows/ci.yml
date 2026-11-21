@@ -221,6 +221,7 @@ jobs:
         run: |
           npm run build:studio
           npm run build:tracking
+          npm run build:observability
       - name: Install FFmpeg for cloud media worker tests
         if: steps.scope.outputs.full == 'true'
         run: |

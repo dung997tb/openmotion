@@ -296,6 +296,30 @@ spec:
                   name: openmotion-config
                   key: HISTORY_COALESCE_WINDOW_MS
                   optional: true
+            - name: SENTRY_WEB_DSN
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: SENTRY_WEB_DSN
+                  optional: true
+            - name: SENTRY_ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: SENTRY_ENVIRONMENT
+                  optional: true
+            - name: SENTRY_RELEASE
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: SENTRY_RELEASE
+                  optional: true
+            - name: SENTRY_TRACES_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: SENTRY_TRACES_SAMPLE_RATE
+                  optional: true
           livenessProbe:
             httpGet:
               path: /api/health/live

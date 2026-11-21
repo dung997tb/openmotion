@@ -18,6 +18,10 @@ import {
   readBrandCatalog,
 } from '../../gateway/brand-catalog.ts';
 import { publicDesignFiles, resolveDesignSystemFile } from '../../packages/design-system/index.js';
+import {
+  buildBrowserObservabilityConfig,
+  injectRuntimeConfigIntoHtml,
+} from '../../packages/observability/config.ts';
 import { compositionCanvasSource, type CanvasFit, type CanvasRatio } from '../../shared/composition-canvas.ts';
 import {
   agentGuide,
@@ -340,7 +344,12 @@ export async function serveStaticAsset(
   pathname: string,
   runtimeRoot = DEFAULT_RUNTIME_ROOT,
   headOnly = false,
+  options: { allowSourcemaps?: boolean } = {},
 ): Promise<Response | null> {
+  if (options.allowSourcemaps === false && pathname.toLowerCase().endsWith('.map')) {
+    return null;
+  }
+
   // 1. Design system package assets (supports both `/design-system/*` and `/web/design-system/*`).
   const designFile = resolveDesignSystemFile(pathname);
   if (designFile) {
@@ -2149,8 +2158,24 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   // 4. Static Design System, Studio Assets, MCP UI & Read-Only Vendor GSAP
   // -------------------------------------------------------------------------
 
+  const allowSourcemaps = config.NODE_ENV !== 'production';
+  const browserObservabilityConfig = buildBrowserObservabilityConfig({
+    dsn: config.SENTRY_WEB_DSN,
+    environment: config.SENTRY_ENVIRONMENT ?? config.NODE_ENV,
+    release: config.SENTRY_RELEASE ?? `openmotion@${VERSION}`,
+    tracesSampleRate: config.SENTRY_TRACES_SAMPLE_RATE,
+    previewOrigin: previewHostIsolationEnabled && previewOriginUrl ? previewOriginUrl.origin : null,
+    appVersion: VERSION,
+    deploymentMode: 'cloud-container',
+  });
+
   const handleStaticPath = async (c: Context) => {
-    const response = await serveStaticAsset(new URL(c.req.url).pathname, runtimeRoot, c.req.method === 'HEAD');
+    const response = await serveStaticAsset(
+      new URL(c.req.url).pathname,
+      runtimeRoot,
+      c.req.method === 'HEAD',
+      { allowSourcemaps },
+    );
     if (response) return response;
     return c.notFound();
   };
@@ -2594,6 +2619,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
 
     // Attempt exact static file under studio/build first (e.g. /assets/*, /manifest.json).
     if (pathname !== '/' && path.extname(pathname)) {
+      if (!allowSourcemaps && pathname.toLowerCase().endsWith('.map')) {
+        return c.notFound();
+      }
       const resolved = resolveSafeSubpath(studioBuildDir, pathname);
       if (resolved) {
         const asset = await readStaticResponse(resolved, {
@@ -2605,12 +2633,23 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
       return c.notFound();
     }
 
-    // SPA index.html fallback for client-side routes.
-    const indexResponse = await readStaticResponse(path.join(studioBuildDir, 'index.html'), {
-      cacheControl: 'no-cache',
-      headOnly,
-    });
-    if (indexResponse) return indexResponse;
+    // SPA index.html fallback for client-side routes, with runtime observability config injected when enabled.
+    try {
+      const rawHtml = await readFile(path.join(studioBuildDir, 'index.html'), 'utf8');
+      const renderedHtml = injectRuntimeConfigIntoHtml(rawHtml, browserObservabilityConfig);
+      const bytes = Buffer.from(renderedHtml, 'utf8');
+      return new Response(headOnly ? null : bytes, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': String(bytes.byteLength),
+          'Cache-Control': 'no-cache',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
 
     return new Response('OpenMotion Studio has not been built yet. Run npm run build:studio.', {
       status: 503,
@@ -2758,6 +2797,7 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
     s3PresignCacheWindowSec: config.S3_PRESIGN_CACHE_WINDOW_SEC,
     authMode: config.AUTH_MODE,
     modelGatewayMode: config.MODEL_GATEWAY_MODE,
+    sentryWebEnabled: Boolean(config.SENTRY_WEB_DSN),
     version: VERSION,
     designSystemFiles: publicDesignFiles.length,
   });

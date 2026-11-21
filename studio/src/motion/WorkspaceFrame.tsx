@@ -35,6 +35,7 @@ import { StudioConnectionToast } from '../components/StudioConnectionToast';
 import { ErrorNotice } from '../components/ui/ErrorNotice';
 import { isConnectionFailure } from '../components/ui/errorNoticeMessage';
 import { preservePresentation, workspacePresentation } from '../../../shared/workspace-url';
+import { setObservabilityContext } from '@openmotion/observability/browser';
 import { trackMotion } from './tracking';
 import { ApplicationHeader, WorkspaceUtilityActions } from './ApplicationChrome';
 import { SettingsCenter, type SettingsSection } from './SettingsCenter';
@@ -135,6 +136,34 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1000);
   const [projectQuery, setProjectQuery] = useState('');
   const editorRoute = !settings && !pageOpen;
+  useEffect(() => {
+    const activePage = settings
+      ? `settings:${settings}`
+      : assetsOpen
+        ? 'assets'
+        : skillsOpen
+          ? 'skills'
+          : templatesPage
+            ? 'templates'
+            : page.motion
+              ? 'motion'
+              : page.explore
+                ? 'explore'
+                : page.modelOverview
+                  ? 'model_overview'
+                  : page.modelHub
+                    ? 'model_hub'
+                    : page.designScene
+                      ? 'design_scene'
+                      : page.studio
+                        ? 'creative_studio'
+                        : 'editor';
+    setObservabilityContext({
+      projectId: projectId ?? null,
+      sessionId: sessionId ?? null,
+      page: activePage,
+    });
+  }, [projectId, sessionId, settings, assetsOpen, skillsOpen, templatesPage, page.motion, page.explore, page.modelOverview, page.modelHub, page.designScene, page.studio]);
   const editorActive = editorRoute && !connectionsOpen;
   const motionTemplatesOpen = page.motion && !templatesPage && !settings;
   const workspaceRoute = editorRoute || motionTemplatesOpen;

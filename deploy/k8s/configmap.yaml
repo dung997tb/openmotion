@@ -66,3 +66,9 @@ data:
 
   # Catalog CAS sync
   CATALOG_SYNC_FETCH_REMOTE: "true"
+
+  # Cloud web observability (Sentry DSN injected into Studio SPA HTML; empty = disabled)
+  SENTRY_WEB_DSN: ""
+  SENTRY_ENVIRONMENT: "production"
+  SENTRY_RELEASE: ""
+  SENTRY_TRACES_SAMPLE_RATE: "0.1"

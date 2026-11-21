@@ -14,7 +14,17 @@ RUN npm ci --no-audit --no-fund
 
 COPY . .
 ARG STUDIO_SOURCEMAP=false
-RUN STUDIO_SOURCEMAP=${STUDIO_SOURCEMAP} npm run build:studio && npm run build:tracking
+ARG SENTRY_DEBUG_IDS=
+RUN STUDIO_SOURCEMAP="${STUDIO_SOURCEMAP}" \
+    SENTRY_DEBUG_IDS="${SENTRY_DEBUG_IDS}" \
+    npm run build:studio \
+  && rm -rf /app/studio-prod-build /app/studio-sourcemaps \
+  && cp -a /app/studio/build /app/studio-prod-build \
+  && find /app/studio-prod-build -type f -name '*.map' -delete \
+  && mkdir -p /app/studio-sourcemaps \
+  && find /app/studio/build/editor-assets -maxdepth 1 -type f \( -name '*.js' -o -name '*.js.map' \) -exec cp -p {} /app/studio-sourcemaps/ \; \
+  && npm run build:tracking \
+  && npm run build:observability
 
 # -----------------------------------------------------------------------------
 # Stage 2: fonts-catalog — deterministic font catalog baked identically into
@@ -72,6 +82,7 @@ COPY library/skills/ ./library/skills/
 COPY docs/transcripts.md ./docs/transcripts.md
 COPY packages/design-system/ ./packages/design-system/
 COPY packages/motion-package/ ./packages/motion-package/
+COPY packages/observability/ ./packages/observability/
 COPY templates/ ./templates/
 COPY web/ ./web/
 COPY mcp-ui/template-recommendations/manifest.json \
@@ -84,11 +95,12 @@ COPY mcp-ui/template-recommendations/project-previews/ ./mcp-ui/template-recomme
 COPY scripts/verify-export.ts scripts/init-s3.ts scripts/lint-project.mjs scripts/zip.mjs ./scripts/
 COPY hyperframes.ts server.ts template-library.ts LICENSE ./
 
-# Built frontend, MCP Apps card bundle, and compiled tracking artifacts.
-COPY --from=deps-build /app/studio/build ./studio/build
+# Built frontend (strictly stripped of `.map` files), MCP Apps card bundle, and compiled tracking/observability artifacts.
+COPY --from=deps-build /app/studio-prod-build ./studio/build
 COPY --from=deps-build /app/web/inline-video.html ./web/inline-video.html
 COPY --from=deps-build /app/mcp-ui/template-recommendations/build ./mcp-ui/template-recommendations/build
 COPY --from=deps-build /app/tracking/dist ./tracking/dist
+COPY --from=deps-build /app/packages/observability/dist ./packages/observability/dist
 
 # -----------------------------------------------------------------------------
 # Target 1: api — stateless, diskless HTTP/SSE/MCP server (NO Chromium/FFmpeg)
@@ -183,3 +195,11 @@ ENV NODE_ENV=production \
 USER node
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "--experimental-strip-types", "scripts/sync-catalog-cas.ts"]
+
+# -----------------------------------------------------------------------------
+# Target 5: studio-sourcemaps — scratch export stage for CI Sentry uploads.
+# Build alongside `api` with `--build-arg STUDIO_SOURCEMAP=hidden` and export via
+# `--target studio-sourcemaps --output type=local,dest=./dist/studio-sourcemaps`.
+# -----------------------------------------------------------------------------
+FROM scratch AS studio-sourcemaps
+COPY --from=deps-build /app/studio-sourcemaps/ /
