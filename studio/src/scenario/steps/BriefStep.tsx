@@ -17,6 +17,8 @@ import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { useMediaCatalog } from '../../motion/useMediaCatalog';
 import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
+import type { BriefPreset } from './briefPresets';
+import { BriefPromptComposer } from './BriefPromptComposer';
 import {
   buildStepAgentPrompt,
   computeDiscountSummary,
@@ -105,6 +107,8 @@ export function BriefStep({
   const [values, setValues] = useState<Record<string, string | string[]>>(() =>
     initialBriefValues(scenario.briefFields, run?.brief, locale),
   );
+  const [editorMode, setEditorMode] = useState<'guided' | 'form'>('guided');
+  const [promptsExpanded, setPromptsExpanded] = useState(false);
   const dirtyFieldsRef = useRef<Set<string>>(new Set());
   const activeFieldRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -209,6 +213,35 @@ export function BriefStep({
     dirtyFieldsRef.current.add(fieldId);
     setValues(prev => ({ ...prev, [fieldId]: value }));
     scheduleAutosave();
+  };
+
+  const handleApplyPreset = (preset: BriefPreset) => {
+    const merged = initialBriefValues(scenario.briefFields, preset.values, locale);
+    for (const field of scenario.briefFields) {
+      dirtyFieldsRef.current.add(field.id);
+    }
+    setValues(merged);
+    scheduleAutosave();
+    toast.showToast(t('Example applied'), 'info', 'feedback');
+  };
+
+  const handleClearAll = () => {
+    const cleared = initialBriefValues(scenario.briefFields, {}, locale);
+    for (const field of scenario.briefFields) {
+      dirtyFieldsRef.current.add(field.id);
+    }
+    setValues(cleared);
+    scheduleAutosave();
+  };
+
+  const nextStep = useMemo(() => {
+    const idx = scenario.steps.findIndex(s => s.id === step.id);
+    return idx >= 0 && idx + 1 < scenario.steps.length ? scenario.steps[idx + 1] : undefined;
+  }, [scenario.steps, step.id]);
+
+  const handleContinueNext = async () => {
+    await flushBriefSave();
+    if (nextStep) nav.selectStep(nextStep.id);
   };
 
   const [savingRevision, setSavingRevision] = useState(false);
@@ -522,25 +555,7 @@ export function BriefStep({
 
   return (
     <div className="om-step-body" data-step-body="brief">
-      <div className="om-step-toolbar">
-        <div className="om-step-toolbar-group">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<RemixIcon name="save-line" size={14} />}
-            loading={savingRevision}
-            onClick={() => void handleSaveRevision()}
-          >
-            {t('Save revision')}
-          </Button>
-          {api.busy.has('brief-autosave') && (
-            <span className="om-step-muted">{t('Saving…')}</span>
-          )}
-        </div>
-        <div className="om-step-toolbar-group">
-          {renderExportMenu(exportMenuExtras)}
-        </div>
-      </div>
+      {renderExportMenu(exportMenuExtras)}
 
       {isBlackFriday && (discountSummary || values.originalPrice || values.salePrice || values.promoCode) && (
         <div className="om-step-card om-step-discount-banner" data-discount-preview="true">
@@ -566,9 +581,52 @@ export function BriefStep({
         </div>
       )}
 
-      <section className="om-step-card om-step-form-grid" aria-label={t('Brief details')}>
-        {scenario.briefFields.map(renderField)}
-      </section>
+      {editorMode === 'guided' ? (
+        <BriefPromptComposer
+          scenario={scenario}
+          values={values}
+          nextStep={nextStep}
+          savingRevision={savingRevision}
+          autosaving={api.busy.has('brief-autosave')}
+          onUpdateField={updateField}
+          onFocusField={fieldId => { activeFieldRef.current = fieldId; }}
+          onApplyPreset={handleApplyPreset}
+          onClearAll={handleClearAll}
+          onSaveRevision={() => void handleSaveRevision()}
+          onContinue={nextStep ? () => void handleContinueNext() : undefined}
+          onSwitchToForm={() => setEditorMode('form')}
+        />
+      ) : (
+        <section className="om-step-card om-brief-form-card" data-brief-composer="form" aria-label={t('Brief details')}>
+          <div className="om-brief-composer-head">
+            <div className="om-step-toolbar-group">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<RemixIcon name="save-line" size={14} />}
+                loading={savingRevision}
+                onClick={() => void handleSaveRevision()}
+              >
+                {t('Save revision')}
+              </Button>
+              {api.busy.has('brief-autosave') && (
+                <span className="om-step-muted">{t('Saving…')}</span>
+              )}
+            </div>
+            <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
+              <Button variant="ghost" size="sm" aria-pressed={false} onClick={() => setEditorMode('guided')}>
+                {t('Fill in the blanks')}
+              </Button>
+              <Button variant="secondary" size="sm" aria-pressed={true} onClick={() => {}}>
+                {t('All fields')}
+              </Button>
+            </div>
+          </div>
+          <div className="om-step-form-grid">
+            {scenario.briefFields.map(renderField)}
+          </div>
+        </section>
+      )}
 
       {isAiInfluencer && (
         <section className="om-step-card" aria-label={t('Episode script')}>
@@ -706,27 +764,40 @@ export function BriefStep({
               <h3 className="om-step-section-title">{t('Downstream prompts')}</h3>
               <p className="om-step-muted">{t('Preview how this brief seeds each media step. Custom prompts stay untouched.')}</p>
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={applyingPrompts}
-              onClick={() => void handleApplyAllPrompts()}
-            >
-              {t('Apply to all steps')}
-            </Button>
+            <div className="om-step-toolbar-group">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={promptsExpanded}
+                icon={<RemixIcon name={promptsExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+                onClick={() => setPromptsExpanded(prev => !prev)}
+              >
+                {promptsExpanded ? t('Hide prompts') : t('Preview prompts')}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={applyingPrompts}
+                onClick={() => void handleApplyAllPrompts()}
+              >
+                {t('Apply to all steps')}
+              </Button>
+            </div>
           </div>
-          <div className="om-step-prompt-list">
-            {downstreamSteps.map(({ step: target, filled, userEdited }) => (
-              <div key={target.id} className="om-step-prompt-row">
-                <div className="om-step-prompt-meta">
-                  <RemixIcon name={target.icon} size={14} />
-                  <strong>{t(target.title)}</strong>
-                  {userEdited && <span className="om-step-badge">{t('Edited')}</span>}
+          {promptsExpanded && (
+            <div className="om-step-prompt-list">
+              {downstreamSteps.map(({ step: target, filled, userEdited }) => (
+                <div key={target.id} className="om-step-prompt-row">
+                  <div className="om-step-prompt-meta">
+                    <RemixIcon name={target.icon} size={14} />
+                    <strong>{t(target.title)}</strong>
+                    {userEdited && <span className="om-step-badge">{t('Edited')}</span>}
+                  </div>
+                  <p className="om-step-prompt-preview">{filled || t('Fill brief fields to seed this prompt.')}</p>
                 </div>
-                <p className="om-step-prompt-preview">{filled || t('Fill brief fields to seed this prompt.')}</p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 

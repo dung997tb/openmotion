@@ -336,6 +336,183 @@
   color: var(--motion-dim);
 }
 
+/* --- Guided fill-in-the-blanks brief composer --- */
+.om-brief-composer {
+  gap: var(--motion-space-16);
+  padding: var(--motion-space-20);
+  background: var(--motion-panel);
+  border: 1px solid var(--motion-border);
+  border-radius: var(--motion-radius-xl);
+}
+
+.om-brief-form-card {
+  gap: var(--motion-space-16);
+}
+
+.om-brief-composer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--motion-space-10);
+}
+
+.om-brief-composer-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  min-width: 0;
+}
+
+.om-brief-composer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-accent-soft);
+  color: var(--motion-accent);
+  flex-shrink: 0;
+}
+
+.om-brief-sentence {
+  padding: var(--motion-space-16) var(--motion-space-18);
+  background: var(--motion-bg);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-lg);
+  font-size: var(--motion-text-body);
+  line-height: 2.35;
+  color: var(--motion-text);
+  word-break: break-word;
+}
+
+.om-brief-sentence-text {
+  color: var(--motion-text);
+}
+
+.om-blank-wrap {
+  display: inline-grid;
+  align-items: center;
+  vertical-align: baseline;
+  min-width: 84px;
+  max-width: 100%;
+  margin: 0 var(--motion-space-2);
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-inset);
+  border: 1px dashed var(--motion-border-strong);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.om-blank-wrap[data-wide="true"] {
+  min-width: 180px;
+}
+
+.om-blank-wrap[data-required="true"]:not([data-filled="true"]) {
+  background: var(--motion-accent-soft);
+  border-color: var(--motion-accent);
+}
+
+.om-blank-wrap[data-filled="true"] {
+  background: var(--motion-raised);
+  border-style: solid;
+  border-color: var(--motion-border);
+}
+
+.om-blank-wrap:hover {
+  border-color: var(--motion-focus);
+}
+
+.om-blank-wrap:focus-within {
+  border-style: solid;
+  border-color: var(--motion-accent);
+  outline: 2px solid var(--motion-accent);
+  outline-offset: 1px;
+  background: var(--motion-raised);
+}
+
+.om-blank-sizer,
+.om-blank-input {
+  grid-area: 1 / 1;
+  font: inherit;
+  font-size: var(--motion-text-md);
+  line-height: 1.45;
+  padding: var(--motion-space-4) var(--motion-space-8);
+  min-width: 0;
+}
+
+.om-blank-sizer {
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+  max-width: 460px;
+  overflow: hidden;
+}
+
+.om-blank-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--motion-strong);
+  font-weight: var(--motion-weight-medium);
+  outline: none;
+}
+
+.om-blank-input::placeholder {
+  color: var(--motion-placeholder);
+  font-weight: var(--motion-weight-regular);
+}
+
+.om-blank-select {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 0 var(--motion-space-2);
+  min-width: 108px;
+}
+
+.om-brief-presets,
+.om-brief-inline-platforms {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--motion-space-8);
+}
+
+.om-brief-presets-label {
+  font-size: var(--motion-text-xs);
+  font-weight: var(--motion-weight-medium);
+  color: var(--motion-dim);
+  white-space: nowrap;
+}
+
+.om-brief-preset-chip {
+  background: var(--motion-bg);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-pill);
+}
+
+.om-brief-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--motion-space-10);
+  padding-top: var(--motion-space-12);
+  border-top: 1px solid var(--motion-border-subtle);
+}
+
+.om-brief-composer-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--motion-space-8);
+}
+
+.om-brief-compact-select {
+  min-width: 136px;
+}
+
 /* --- Brief extras --- */
 .om-step-discount-banner {
   flex-direction: row;

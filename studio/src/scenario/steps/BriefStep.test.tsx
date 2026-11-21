@@ -219,4 +219,50 @@ describe('BriefStep', () => {
       await mounted.unmount();
     }
   });
+
+  it('defaults to the guided fill-in-the-blanks composer, applies one-click example presets, and toggles to All fields', async () => {
+    vi.useFakeTimers();
+    const { props, mocks } = createStepProps('black-friday', 'brief', { run: null });
+    const mounted = await mountStep(<BriefStep {...props} />);
+
+    try {
+      // Guided fill-in-the-blanks sentence is active by default (no 12-box form grid yet)
+      expect(mounted.container.querySelector('[data-brief-composer="guided"]')).toBeTruthy();
+      expect(mounted.container.querySelector('.om-step-form-grid')).toBeNull();
+      expect(mounted.container.querySelectorAll('.om-blank-wrap').length).toBeGreaterThanOrEqual(7);
+
+      // Downstream prompts start collapsed until expanded
+      expect(mounted.container.querySelector('.om-step-prompt-list')).toBeNull();
+      const previewPromptsBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Preview prompts'))!;
+      await act(async () => { previewPromptsBtn.click(); });
+      expect(mounted.container.querySelector('.om-step-prompt-list')).toBeTruthy();
+
+      // Click a one-click example preset chip to fill all blanks instantly
+      const presetBtn = mounted.container.querySelector<HTMLButtonElement>('.om-brief-preset-chip')!;
+      expect(presetBtn).toBeTruthy();
+      await act(async () => { presetBtn.click(); });
+
+      expect(mocks.showToast).toHaveBeenCalledWith('Example applied', 'info', 'feedback');
+      expect(mounted.container.querySelector<HTMLInputElement>('#brief-black-friday-productName')?.value).toBe('Holiday Weekender Tote');
+      expect(mounted.container.querySelector('[data-discount-badge]')?.textContent).toContain('39% OFF');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(850); });
+      expect(mocks.mutate).toHaveBeenCalledWith(
+        'brief-autosave',
+        'update_brief',
+        expect.objectContaining({
+          brief: expect.objectContaining({ productName: 'Holiday Weekender Tote', promoCode: 'BF40' }),
+        }),
+      );
+
+      // Toggle to All fields reveals the full structured form synced with the filled values
+      const allFieldsBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.trim() === 'All fields')!;
+      await act(async () => { allFieldsBtn.click(); });
+      expect(mounted.container.querySelector('[data-brief-composer="form"]')).toBeTruthy();
+      expect(mounted.container.querySelector('.om-step-form-grid')).toBeTruthy();
+      expect(mounted.container.querySelector<HTMLInputElement>('#brief-black-friday-productName')?.value).toBe('Holiday Weekender Tote');
+    } finally {
+      await mounted.unmount();
+    }
+  });
 });
