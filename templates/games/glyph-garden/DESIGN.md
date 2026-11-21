@@ -11,7 +11,7 @@ A small swap becomes a cascading moonlit bloom: a gentle match-3 puzzle with fin
 
 ## Art
 
-`garden.webp` is the layered moon-garden setting; `blooms.png` is an original five-flower transparent sprite sheet. The cover uses the setting and lettered title. Moonlight, bloom particles, cascade score floats and restrained shake provide feedback.
+`garden.webp` is the layered moon-garden setting; `blooms.webp` is an original five-flower transparent sprite sheet. The cover uses the setting and lettered title. Moonlight, bloom particles, cascade score floats and restrained shake provide feedback.
 
 ## Implementation and verification boundary
 

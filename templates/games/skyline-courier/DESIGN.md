@@ -11,7 +11,7 @@ Carry three parcels through a rainlit skyline: a short parkour route combining m
 
 ## Art
 
-`city.webp` is an original layered neon city; `courier.png` is an original transparent helmeted courier. Perspective roof caps and side faces provide a dimensional, 2.5D presentation. The cover uses the courier and city. Rain, trails, delivery glows, particles and camera easing add motion.
+`city.webp` is an original layered neon city; `courier.webp` is an original transparent helmeted courier. Perspective roof caps and side faces provide a dimensional, 2.5D presentation. The cover uses the courier and city. Rain, trails, delivery glows, particles and camera easing add motion.
 
 The offline route simulation completed all three deliveries using only movement/jump inputs, with zero falls and approximately 80 seconds remaining. This establishes route reachability under the implemented physics, not human/browser acceptance or a fully rendered 3D engine.
 
