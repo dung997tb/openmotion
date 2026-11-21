@@ -98,6 +98,7 @@ export function useTimelineEditing({
     writeProjectFile,
     recordEdit,
     previewIframeRef,
+    reloadPreview,
     pendingTimelineEditPathRef,
     isRecordingRef,
     forceReloadSdkSession,
@@ -110,6 +111,7 @@ export function useTimelineEditing({
     writeProjectFile,
     recordEdit,
     previewIframeRef,
+    reloadPreview,
     pendingTimelineEditPathRef,
     isRecordingRef,
     forceReloadSdkSession,
@@ -145,6 +147,7 @@ export function useTimelineEditing({
     writeProjectFile,
     recordEdit,
     previewIframeRef,
+    reloadPreview,
     pendingTimelineEditPathRef,
     isRecordingRef,
   });

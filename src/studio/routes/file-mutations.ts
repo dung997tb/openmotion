@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { CloudError, isCloudError } from '../../contracts/errors.ts';
@@ -34,7 +35,7 @@ import {
   type SourceMutationTarget,
   type UnwrapChildTrack,
 } from '../engine/source-mutations.ts';
-import { createWriteToken, formatVersionFromSha256, sha256Hex } from '../etag.ts';
+import { createWriteToken, fileContentVersion, formatVersionFromSha256, sha256Hex } from '../etag.ts';
 
 function readTargetPath(url: string, marker: string, fallback = 'index.html'): string {
   const raw = extractWildcardPath(url, marker);
@@ -494,7 +495,7 @@ export function createStudioFileMutationsRoutes(
     const auth = await getAuthContext(c, deps, { scope: 'projects:write', minRole: 'editor' });
     const projectId = c.req.param('id');
     const body = (await c.req.json().catch(() => null)) as {
-      files?: Array<{ path: string; cuts: AtomicCutTarget[] }>;
+      files?: Array<{ path: string; expectedVersion?: string; targets?: AtomicCutTarget[]; cuts?: AtomicCutTarget[] }>;
     } | null;
 
     if (!body || !Array.isArray(body.files)) {
@@ -530,23 +531,36 @@ export function createStudioFileMutationsRoutes(
       if (before === null) {
         return c.json({ ok: false, outcome: 'failed', error: `File not found: ${safePath}` }, 404);
       }
-      const cutRes = applyAtomicCutsToHtml(before, entry.cuts ?? [], takenIds);
+      const targets = entry.targets ?? entry.cuts;
+      if (!Array.isArray(targets) || !targets.length || targets.some(cut => !cut?.target ||
+          !Number.isFinite(cut.splitTime) || !Number.isFinite(cut.elementStart) || !(cut.elementDuration > 0))) {
+        return c.json({ ok: false, outcome: 'failed', error: `Invalid split targets for ${safePath}` }, 400);
+      }
+      const beforeVersion = fileContentVersion(before);
+      if (entry.expectedVersion !== undefined && entry.expectedVersion !== beforeVersion) {
+        return c.json({ ok: false, outcome: 'conflict', error: `File changed before cut: ${safePath}` }, 409);
+      }
+      const cutRes = applyAtomicCutsToHtml(before, targets, takenIds);
+      if (cutRes.splitCount !== targets.length) {
+        return c.json({ ok: false, outcome: 'conflict', error: `Split target changed: ${safePath}` }, 409);
+      }
+      const after = stampHfIdsInPlace(cutRes.after);
       for (const id of cutRes.rightHalfIds) takenIds.add(id);
 
-      const version = formatVersionFromSha256(sha256Hex(cutRes.after));
+      const version = fileContentVersion(after);
       results.push({
         path: safePath,
         before,
-        after: cutRes.after,
+        after,
         version,
         writeToken,
         splitCount: cutRes.splitCount,
         skippedSelectors: cutRes.skippedSelectors,
       });
 
-      if (cutRes.after !== before) {
-        commitOps.push({ op: 'upsert_text', path: safePath, content: cutRes.after, stampHfIds: true });
-        preconditions.push({ path: safePath, ifMatch: formatVersionFromSha256(sha256Hex(before)) });
+      if (after !== before) {
+        commitOps.push({ op: 'upsert_text', path: safePath, content: after });
+        preconditions.push({ path: safePath, ifMatch: beforeVersion });
       }
     }
 

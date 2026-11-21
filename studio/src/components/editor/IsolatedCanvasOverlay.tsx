@@ -1,3 +1,6 @@
+import { useIsolatedInlineText } from "./useIsolatedInlineText";
+import { isIsolatedSourceTarget, isolatedPatchTarget, type IsolatedSourceTarget } from "./isolatedSourceTarget";
+import { useIsolatedLayerBounds } from "./useIsolatedLayerBounds";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { useDomEditActionsContext } from "../../contexts/DomEditContext";
 import { useStudioShellContext } from "../../contexts/StudioContext";
@@ -19,11 +22,7 @@ interface Drag {
   bounds?: Box;
 }
 
-interface DragResult {
-  sourceFile: string;
-  sha256: string;
-  elementId?: string;
-  hfId?: string;
+interface DragResult extends IsolatedSourceTarget {
   left: number;
   top: number;
   makeRelative: boolean;
@@ -33,12 +32,7 @@ type Box = { x: number; y: number; width: number; height: number };
 interface Pick { geometry: Box; viewport: { width: number; height: number } }
 
 function validResult(result: DragResult | null): result is DragResult {
-  if (!result || typeof result.sourceFile !== "string" || !/\.html?$/i.test(result.sourceFile)) return false;
-  const safePath = result.sourceFile.split("/").every(part => part && part !== "." && part !== "..");
-  const stableId = [result.hfId, result.elementId].some(id => typeof id === "string" && id.length > 0);
-  return safePath && stableId && !/[\\:%?#\u0000-\u001f]/.test(result.sourceFile)
-    && typeof result.sha256 === "string" && /^[0-9a-f]{64}$/.test(result.sha256)
-    && Number.isFinite(result.left) && Number.isFinite(result.top);
+  return isIsolatedSourceTarget(result) && Number.isFinite(result.left) && Number.isFinite(result.top);
 }
 
 function positionPatch(result: DragResult) {
@@ -50,8 +44,8 @@ function positionPatch(result: DragResult) {
     { type: "inline-style", property: "left", value: result.left + "px" },
     { type: "inline-style", property: "top", value: result.top + "px" },
   );
-  const target = typeof result.hfId === "string" && result.hfId ? { hfId: result.hfId } : { id: result.elementId };
-  return { sourceFile: result.sourceFile, ifMatch: '"sha256:' + result.sha256 + '"', patches: [{ target, operations }] };
+  const { sourceFile, ifMatch, target } = isolatedPatchTarget(result);
+  return { sourceFile, ifMatch, patches: [{ target, operations }] };
 }
 
 /** Input and persistence stay in Studio. The scoped frame only measures and previews layout. */
@@ -60,9 +54,11 @@ export function IsolatedCanvasOverlay() {
   const { commitDomEditPatchBatches } = useDomEditActionsContext();
   const { previewIframeRef, projectId, showToast, writeBlockedReason } = useStudioShellContext();
   const select = usePlayerStore(state => state.activeTool === "select");
+  const text = useIsolatedInlineText(previewIframeRef, projectId, select && !writeBlockedReason);
   const drag = useRef<Drag | null>(null);
   const lastPick = useRef<Drag | null>(null);
   const [box, setBox] = useState<Box | null>(null);
+  const overlay = useIsolatedLayerBounds(previewIframeRef, projectId, setBox);
 
   const observedFrame = useRef<HTMLIFrameElement | null>(null);
   const cancel = useCallback(() => {
@@ -142,7 +138,8 @@ export function IsolatedCanvasOverlay() {
   }
 
   if (!select || writeBlockedReason) return null;
-  return <div className="absolute inset-0 z-10 touch-none pointer-events-auto" aria-label={t("Composition canvas")}
+  return <div ref={overlay} className="absolute inset-0 z-10 touch-none pointer-events-auto" aria-label={t("Composition canvas")}
+    style={text.editing ? { pointerEvents: "none" } : undefined} onDoubleClick={text.open}
     onPointerDown={begin} onPointerMove={event => update(event, "move")}
     onPointerUp={event => update(event, "finish")} onPointerCancel={event => update(event, "cancel")}
     onLostPointerCapture={event => update(event, "cancel")}>

@@ -1,6 +1,8 @@
 import { hasOnlyFormattingChildren } from "./domEditInlineText";
 
-export type LayerKind = "image" | "video" | "audio" | "vector" | "group" | "text" | "shape";
+import type { PreviewLayerKind } from "../../../../shared/preview-layer";
+
+export type LayerKind = PreviewLayerKind;
 
 export function isCompositionHost(el: Element): boolean {
   return el.hasAttribute("data-composition-src") || el.hasAttribute("data-composition-file");

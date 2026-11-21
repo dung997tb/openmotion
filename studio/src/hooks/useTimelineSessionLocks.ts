@@ -4,6 +4,7 @@ import type { TimelineEditCallbacks } from '../player/components/timelineCallbac
 import { findTimelineElementInIframe } from './timelineEditingHelpers';
 import { usePlayerStore } from '../player/store/playerStore';
 import { buildProjectApiPath } from '../utils/projectRouting';
+import { isCurrentIsolatedManifest } from '../player/lib/isolatedTimelineManifest';
 import { encodePreviewPath } from '../player/components/thumbnailUtils';
 
 type Input = {
@@ -14,6 +15,30 @@ type Input = {
   ready: boolean;
   save: NonNullable<TimelineEditCallbacks['onSetElementsAttributeQuiet']>;
 };
+
+// A new iframe.src can point to the destination while its outgoing document and
+// store snapshot are still on screen. Wait for discovery for the actual destination.
+function savedLocks(
+  iframe: HTMLIFrameElement,
+  previewPath: string,
+  elements: readonly TimelineElement[],
+  activeCompPath: string | null,
+): readonly TimelineElement[] | null {
+  if (!iframe.contentDocument) {
+    const { clipManifest } = usePlayerStore.getState();
+    if (!isCurrentIsolatedManifest(iframe, clipManifest)
+        || new URL(iframe.src).pathname !== previewPath) return null;
+    return elements.filter(element => element.timelineLocked);
+  }
+
+  if (new URL(iframe.contentDocument.URL).pathname !== previewPath) return null;
+  const resolved = elements.map(element => ({
+    element, node: findTimelineElementInIframe(iframe, element, activeCompPath),
+  }));
+  if (!resolved.some(item => item.node)) return null;
+  return resolved.filter(({ element, node }) =>
+    element.timelineLocked || node?.hasAttribute('data-timeline-locked')).map(item => item.element);
+}
 
 /** Locks protect one editing session; a new Studio page releases the previous session's locks.
  * Use the ordinary queued, conflict-checked source save so captions and public operations
@@ -29,20 +54,13 @@ export function useTimelineSessionLocks({ projectId, activeCompPath, elements, i
     const path = activeCompPath || 'index.html';
     const previewPath = buildProjectApiPath(projectId, path === 'index.html'
       ? '/preview' : `/preview/comp/${encodePreviewPath(path)}`);
-    try {
-      // Read the loaded document, not iframe.src (which changes before load).
-      if (new URL(iframe.contentDocument?.URL || '').pathname !== previewPath) return;
-    } catch { return; }
-    const key = JSON.stringify([projectId, activeCompPath || 'index.html']);
+    const key = JSON.stringify([projectId, path]);
     if (initialized.current.has(key)) return;
-    const resolved = elements.map(element => ({ element,
-      node: findTimelineElementInIframe(iframe, element, activeCompPath) }));
-    // Wait for the actual composition document, rather than consuming the first empty iframe.
-    if (!resolved.some(item => item.node)) return;
+    const locked = savedLocks(iframe, previewPath, elements, activeCompPath);
+    if (!locked) return;
     initialized.current.add(key);
-    const locked = resolved.filter(({ element, node }) => element.timelineLocked || node?.hasAttribute('data-timeline-locked'));
     if (!locked.length) return;
     // The save path reports failures and only patches DOM/store after a successful write.
-    void save(locked.map(({ element }) => ({ element, value: null })), 'data-timeline-locked', 'Release previous session track locks');
+    void save(locked.map(element => ({ element, value: null })), 'data-timeline-locked', 'Release previous session track locks');
   }, [projectId, activeCompPath, elements, iframe, ready, save]);
 }

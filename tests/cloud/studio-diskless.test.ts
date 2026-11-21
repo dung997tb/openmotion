@@ -826,6 +826,37 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('applies Studio split targets atomically at the requested file version and returns stored history bytes', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const html = '<html><body><img id="clip" data-start="0" data-duration="4" data-track-index="1"></body></html>';
+    const file = (path: string) => env.files.readTextFile(env.auth, projectId, path);
+    await env.files.commitChanges(env.auth, { projectId, ops: ['index.html', 'other.html'].map(path => ({
+      op: 'upsert_text', path, content: html,
+    })) });
+    const expectedVersion = fileContentVersion(html);
+    const targets = [{ target: { id: 'clip' }, originalId: 'clip', splitTime: 2, elementStart: 0, elementDuration: 4 }];
+    const split = (files: unknown[]) => env.studioApp.request(`/api/projects/${projectId}/file-mutations/split-batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }),
+    });
+    const root = { path: 'index.html', expectedVersion, targets };
+    assert.equal((await split([root, { ...root, path: 'other.html', expectedVersion: 'stale' }])).status, 409);
+    assert.equal((await file('index.html'))?.content, html);
+    assert.equal((await split([root, { ...root, path: 'other.html', targets: [{ ...targets[0], target: { id: 'gone' } }] }])).status, 409);
+    assert.equal((await file('index.html'))?.content, html);
+    const result = await split([root, { path: 'other.html', cuts: targets }]);
+    assert.equal(result.status, 200);
+    const body = await result.json() as { files: Array<{ path: string; before: string; after: string; version: string; splitCount: number }> };
+    for (const output of body.files) {
+      const saved = await file(output.path);
+      assert.equal(output.splitCount, 1);
+      assert.equal(output.before, html);
+      assert.match(output.after, /id="clip-split/);
+      assert.equal(output.after, saved?.content);
+      assert.equal(output.version, saved?.version);
+    }
+  });
+
   it('enforces exact strong ETag "sha256:...", If-Match, 428, 409, ?optional=1, and DELETED_VERSION', async () => {
     const env = createStudioTestEnv();
     const created = await env.workspace.createProject(env.auth, { title: 'ETag Studio' });

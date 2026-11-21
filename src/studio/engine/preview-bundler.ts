@@ -1,3 +1,6 @@
+import { PREVIEW_TIMELINE_MANIFEST } from './preview-timeline-manifest.ts';
+import { PREVIEW_LAYERS } from './preview-layers.ts';
+import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
 import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
 import { createHash } from 'node:crypto';
 import {
@@ -474,35 +477,43 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
       width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
       fps:window.__clipManifest&&window.__clipManifest.fps,
       durationInFrames:window.__clipManifest&&Number(window.__clipManifest.durationInFrames)||0,
-      clips:includeManifest&&window.__clipManifest&&Array.isArray(window.__clipManifest.clips)&&window.__clipManifest.clips.length?window.__clipManifest.clips:undefined};
+      clips:includeManifest&&window.__clipManifest&&Array.isArray(window.__clipManifest.clips)?authoredTimelineClips(window.__clipManifest.clips):undefined};
+  }
+  function sourceFileForElement(element){
+    var owner=element.parentElement&&element.parentElement.closest('[data-composition-file],[data-composition-src]');
+    return (owner&&(owner.getAttribute('data-composition-file')||owner.getAttribute('data-composition-src'))) || ${JSON.stringify(compositionPath).replace(/</g, '\\u003c')};
   }
   function describe(element){
     if(!element || element.nodeType!==1) return null;
     var rect=element.getBoundingClientRect();
     var text=(element.innerText||element.textContent||'').replace(/\\s+/g,' ').trim().slice(0,240);
     var hfId=element.getAttribute('data-hf-id');
-    var scope=element.matches('[data-composition-src],[data-hf-scene]')?element.parentElement:element;
-    var owner=scope&&scope.closest('[data-composition-file],[data-composition-src]');
-    var sourceFile=(owner&&(owner.getAttribute('data-composition-file')||owner.getAttribute('data-composition-src'))) || ${JSON.stringify(compositionPath).replace(/</g, '\\u003c')};
-    return {elementId:element.id||null,hfId:hfId,sourceFile:sourceFile,
+    return {elementId:element.id||null,hfId:hfId,sourceFile:sourceFileForElement(element),
       selector:element.id?'#'+CSS.escape(element.id):hfId?'[data-hf-id="'+CSS.escape(hfId)+'"]':null,
       tagName:element.tagName.toLowerCase(),text:text||null,textContent:element.textContent,
       geometry:{x:rect.left,y:rect.top,width:rect.width,height:rect.height},
       viewport:{width:innerWidth,height:innerHeight}};
   }
   var sourceVersions=${JSON.stringify(sourceVersions).replace(/</g, '\\u003c')};
+  ${PREVIEW_TIMELINE_MANIFEST}
   ${PREVIEW_CANVAS_DRAG}
+  ${PREVIEW_INLINE_TEXT}
+  ${PREVIEW_LAYERS}
   function respond(requestId,result,error){
     post('response',error?{ok:false,error:String(error)}:{ok:true,result:result},requestId);
   }
-  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','canvas-drag']}); post('timeline-state',timeline(true)); }
+  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','canvas-drag']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
     if(!message || message.source!==PARENT || message.version!==VERSION || message.projectId!==projectId || message.token!==token) return;
     var requestId=message.requestId;
     try {
-      if(message.type==='handshake'){ ready(); respond(requestId,{ready:true}); return; }
+      if(message.type==='handshake'){
+        if(message.timelineOnly) post('timeline-state',timeline(true));
+        else { ready(); respond(requestId,{ready:true}); }
+        return;
+      }
       if(message.type==='playback-control'){
         var p=player(), action=message.action;
         if(!p) throw new Error('Preview player is not ready');
@@ -512,8 +523,16 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
         else throw new Error('Unsupported playback action');
         post('timeline-state',timeline()); respond(requestId,timeline()); return;
       }
+      if(message.type==='layer-tree'){ previewLayerTree(message); return; }
+      if(message.type==='layer-select'){ respond(requestId,selectPreviewLayer(message)); return; }
+      if(message.type==='inline-text'){
+        var textTarget=editInlineText(message);
+        if(message.phase==='pick') respond(requestId,textTarget);
+        return;
+      }
       if(message.type==='canvas-drag'){
         var result=canvasDrag(message);
+        if(message.phase==='start' && result) reportLayerSelection(drag.element,drag.selection);
         if(message.phase==='start' || message.phase==='finish') respond(requestId,result);
         return;
       }

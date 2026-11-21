@@ -5,6 +5,9 @@ import { trackedRoot, cleanupMounted } from '../components/ui/mountHost.testHelp
 import { useTimelineSessionLocks } from './useTimelineSessionLocks';
 import type { TimelineElement } from '../player/store/timelineElement';
 import { usePlayerStore } from '../player/store/playerStore';
+import { rememberIsolatedManifest } from '../player/lib/isolatedTimelineManifest';
+import { createPreviewAdapter } from '../player/lib/previewAdapter';
+import type { ClipManifestClip } from '../player/lib/playbackTypes';
 import { useCompositionStack } from '../components/nle/useCompositionStack';
 
 const clip: TimelineElement = { id: 'cue', domId: 'cue', tag: 'div', start: 0, duration: 1, track: 0 };
@@ -95,5 +98,32 @@ it.each([false, true])('waits for destination discovery during real navigation (
   expect(state.save).toHaveBeenCalledExactlyOnceWith([{ element: destinationClip, value: null }], 'data-timeline-locked', 'Release previous session track locks');
   // A newly applied lock survives subsequent rediscovery in this page.
   await act(async () => usePlayerStore.getState().setElements([{ ...destinationClip }]));
+  expect(state.save).toHaveBeenCalledTimes(1);
+});
+
+it('waits for an authenticated manifest of the active composition before releasing isolated locks', async () => {
+  const { state, Probe } = setup();
+  const iframe = document.createElement('iframe');
+  iframe.src = 'https://preview.example/api/projects/p1/preview/comp/other.html?pt=test';
+  state.iframe = iframe;
+  state.elements = [{ ...clip, timelineLocked: true }];
+  const clips: ClipManifestClip[] = [];
+  usePlayerStore.getState().setClipManifest(clips);
+  rememberIsolatedManifest(clips, createPreviewAdapter({ iframe }));
+  const host = mountHost(<Probe />);
+  expect(state.save).not.toHaveBeenCalled();
+
+  iframe.src = 'https://preview.example/api/projects/p1/preview?pt=test';
+  state.elements = [...state.elements];
+  await act(async () => host.root.render(<Probe />));
+  expect(state.save).not.toHaveBeenCalled();
+
+  rememberIsolatedManifest(clips, createPreviewAdapter({ iframe }));
+  state.elements = [...state.elements];
+  await act(async () => host.root.render(<Probe />));
+  expect(state.save).toHaveBeenCalledExactlyOnceWith([{ element: state.elements[0], value: null }],
+    'data-timeline-locked', 'Release previous session track locks');
+  state.elements = [{ ...clip, timelineLocked: true }];
+  await act(async () => host.root.render(<Probe />));
   expect(state.save).toHaveBeenCalledTimes(1);
 });
