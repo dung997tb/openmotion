@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { assetMediaUrl, assetVersion, type AssetVersion, type LibraryAsset } from '../../../shared/asset-library';
 import { classifyAudioKind, type AudioKind } from '../../../shared/audio-kind';
 import { resumableJob, type GenerationJob, type Model } from '../../../shared/gateway';
+import { generationOptions } from '../../../shared/generation-options';
 import { formatDuration } from '../components/sidebar/assetHelpers';
 import { Menu, MenuItem, MenuSeparator } from '../components/ui/Menu';
 import { Select } from '../components/ui/Select';
@@ -93,6 +94,21 @@ function buildAssetTrack(
     downloadUrl: `${assetMediaUrl(asset.id, version.id)}?download=1`,
     asset,
     version,
+  };
+}
+
+function parameterDraftFromParams(params: Record<string, unknown>, model?: Model): ParameterDraft {
+  const structuredKeys = new Set(model ? (generationOptions(model, false)?.fields.map(field => field.key) ?? []) : []);
+  const values: Record<string, unknown> = {};
+  const extra: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    if (structuredKeys.has(key)) values[key] = value;
+    else extra[key] = value;
+  }
+  return {
+    values,
+    advanced: Object.keys(extra).length > 0 ? JSON.stringify(extra, null, 2) : '{}',
   };
 }
 
@@ -445,31 +461,40 @@ export function SoundStudioWorkspace({
   const [seenSources, setSeenSources] = useState<{ generated: boolean; upload: boolean }>({ generated: false, upload: false });
   const [sessionJobIds, setSessionJobIds] = useState<string[]>([]);
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
-  const [parameterDrafts, setParameterDrafts] = useState<Record<string, ParameterDraft>>(() =>
-    draft.model && draft.parameters
-      ? { [draft.model]: { values: { ...draft.parameters }, advanced: '{}' } }
-      : {},
-  );
-  const syncedDraftParamsRef = useRef<Record<string, unknown> | undefined>(
-    draft.model && draft.parameters ? draft.parameters : undefined,
-  );
-
   const { selected: selectedModel, preferred: preferredModel } = resolveSoundModels(studio, liveTab);
   const activeModel = selectedModel ?? preferredModel;
   const models = studio.catalog.catalog?.models;
+  const initialParamModel = draft.model ? models?.find(model => model.id === draft.model) : activeModel;
+  const currentDraftKey = studio.draftKey ?? `sound/${activeTab}`;
 
-  // Sync parameter draft once when a cross-tab initial draft brings explicit parameters.
+  const [parameterDrafts, setParameterDrafts] = useState<Record<string, ParameterDraft>>(() =>
+    initialParamModel && draft.parameters && Object.keys(draft.parameters).length > 0
+      ? { [initialParamModel.id]: parameterDraftFromParams(draft.parameters, initialParamModel) }
+      : {},
+  );
+  const seededDraftKeyRef = useRef<string | undefined>(
+    !draft.parameters || Object.keys(draft.parameters).length === 0 || initialParamModel
+      ? currentDraftKey
+      : undefined,
+  );
+
+  // Seed parameter drafts once per draftKey transition (e.g. cross-tab starter or Recreate),
+  // splitting structured fields from raw Advanced JSON so local JSON edits never leak into values.
   useEffect(() => {
-    if (!draft.parameters || Object.keys(draft.parameters).length === 0) return;
-    if (syncedDraftParamsRef.current === draft.parameters) return;
-    const targetModelId = draft.model ?? activeModel?.id;
-    if (!targetModelId) return;
-    syncedDraftParamsRef.current = draft.parameters;
-    setParameterDrafts(current => {
-      const prev = current[targetModelId] ?? emptyParameters;
-      return { ...current, [targetModelId]: { ...prev, values: { ...prev.values, ...draft.parameters } } };
-    });
-  }, [draft.model, draft.parameters, activeModel?.id]);
+    if (seededDraftKeyRef.current === currentDraftKey) return;
+    if (!draft.parameters || Object.keys(draft.parameters).length === 0) {
+      seededDraftKeyRef.current = currentDraftKey;
+      return;
+    }
+    const targetModel = (draft.model ? models?.find(model => model.id === draft.model) : undefined) ?? activeModel;
+    if (!targetModel) return;
+    seededDraftKeyRef.current = currentDraftKey;
+    const seeded = parameterDraftFromParams(draft.parameters, targetModel);
+    setParameterDrafts(current => ({
+      ...current,
+      [targetModel.id]: seeded,
+    }));
+  }, [currentDraftKey, draft.model, draft.parameters, models, activeModel]);
 
   // Track any active audio job observed on screen so reload-recovered jobs transition cleanly
   // in-place to either their completed track row (with New badge) or an inline failed row.
@@ -787,7 +812,7 @@ export function SoundStudioWorkspace({
       const key = matchedModel?.id ?? modelId;
       setParameterDrafts(current => ({
         ...current,
-        [key]: { values: { ...parameters }, advanced: '{}' },
+        [key]: parameterDraftFromParams(parameters, matchedModel),
       }));
     }
 

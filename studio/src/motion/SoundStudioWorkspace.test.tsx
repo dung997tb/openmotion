@@ -957,7 +957,8 @@ describe('SoundStudioWorkspace', () => {
     await act(async () => { rachelCard.click(); });
     expect(host.querySelector('input[aria-label="Custom voice ID"]')).toBeNull();
 
-    // 3. Unknown third-party BYOK model without structured fields retains the raw JSON fallback.
+    // 3. Unknown third-party BYOK model without structured fields retains the raw JSON fallback,
+    // and editing or clearing raw JSON never leaves sticky values behind.
     const customByokSpeech: Model = {
       id: 'fal:custom/tts-v1',
       provider: 'fal',
@@ -968,9 +969,37 @@ describe('SoundStudioWorkspace', () => {
       source: 'manual',
     };
     const byokStudio = makeStudio('speech', customByokSpeech.id, ['fal'], [customByokSpeech]);
-    await renderSound(byokStudio, { assets: [] });
+    await renderSound(byokStudio, { assets: [], initialPrompt: 'Raw JSON test.' });
     expect(host.querySelector('.om-sound-advanced')).not.toBeNull();
-    expect(host.querySelector('textarea[aria-label="Model parameters"]')).not.toBeNull();
+    const jsonBox = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Model parameters"]')!;
+    expect(jsonBox).not.toBeNull();
+
+    const setTextarea = async (value: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+        setter.call(jsonBox, value);
+        jsonBox.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+
+    await setTextarea('{"speed": 1.2}');
+    await setTextarea('{"speed": 1.5}');
+    assetRequestMock.mockClear();
+    await act(async () => { host.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.click(); });
+    expect(assetRequestMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'generate',
+      model: customByokSpeech.id,
+      parameters: { speed: 1.5 },
+    }));
+
+    await setTextarea('{}');
+    assetRequestMock.mockClear();
+    await act(async () => { host.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.click(); });
+    expect(assetRequestMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'generate',
+      model: customByokSpeech.id,
+      parameters: {},
+    }));
   });
 
   it('keeps Sound Studio translations complete across all supported locales without invalid terminology', () => {
