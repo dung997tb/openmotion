@@ -167,7 +167,7 @@ it('opens the reference-link form from each category without changing browsing o
   const intro = host.querySelector('.om-gallery-intro')!;
   const trigger = button(actionLabel, intro);
   const actions = intro.querySelector('.om-gallery-intro-actions')!;
-  expect(actions.querySelector('a')?.textContent).toBe('Submit video');
+  expect(actions.querySelector('a')?.textContent).toBe('Submit template');
   expect(actions.querySelector('a')?.classList.contains('om-gallery-submit')).toBe(true);
   expect(button('Surprise me', actions).classList.contains('om-gallery-surprise')).toBe(true);
   expect(actions.nextElementSibling?.contains(trigger)).toBe(true);
@@ -724,7 +724,7 @@ it('does not duplicate a brand when the catalog has no author identity', async (
 
 it('copies contribution instructions with the selected template without opening another dialog', async () => {
   await mount();
-  expect(host.querySelector('a[href="https://github.com/nexu-io/openmotion/blob/main/CONTRIBUTING.md"]')?.textContent).toContain('Submit video');
+  expect(host.querySelector('a[href="https://github.com/nexu-io/openmotion/blob/main/CONTRIBUTING.md"]')?.textContent).toContain('Submit template');
   await act(async () => preview('First'));
   await act(async () => button('Recreate and submit').click());
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('First (one)'));

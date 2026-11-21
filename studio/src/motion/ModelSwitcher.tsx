@@ -9,7 +9,7 @@ import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { gatewayRequest } from './gatewayClient';
 import { useProviderDirectory, notifyProvidersChanged } from './useProviderDirectory';
-import { kindLabels, typeIcons } from './ModelEditor';
+import { modelKindLabel, typeIcons } from './ModelEditor';
 import { ProviderAvatar, ModelAvatar, SettingsError, SettingsLoading } from './settingsPrimitives';
 import { DefaultAgentCard } from './AgentSettings';
 import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
@@ -23,7 +23,7 @@ export function ModelSwitcher({ openSettings, capability, label }: { openSetting
   </Popover>;
 }
 function ModelChoices({ capability, close, openSettings }: { capability?: ModelKind; close: () => void; openSettings: () => void }) {
-  const { t } = useI18n(), directory = useProviderDirectory(), toast = useToast();
+  const { t, locale } = useI18n(), directory = useProviderDirectory(), toast = useToast();
   const [query, setQuery] = useState(''), [kind, setKind] = useState<ModelKind>(capability ?? 'image'), [providerId, setProviderId] = useState('all'), [busy, setBusy] = useState(false);
   const [mode, setMode] = useState('media');
   const available = directory.data?.providers.filter(provider => provider.available) ?? [];
@@ -37,7 +37,7 @@ function ModelChoices({ capability, close, openSettings }: { capability?: ModelK
     finally { setBusy(false); }
   }
   return <>{!capability && <div className="om-choice-tabs"><Button variant="plain" className="om-nav-item" aria-pressed={mode === 'media'} onClick={() => setMode('media')}><RemixIcon name="image-line" size={15} />{t('Media models')}</Button><Button variant="plain" className="om-nav-item" aria-pressed={mode === 'agent'} onClick={() => setMode('agent')}><RemixIcon name="terminal-box-line" size={15} />{t('Agent & model')}</Button></div>}{mode === 'agent' ? <DefaultAgentCard compact /> : <><h2 className="om-subtitle">{t('Select model')}</h2><label className="om-field"><RemixIcon name="search-line" size={16} /><input type="search" aria-label={t('Search models')} placeholder={t('Search models…')} value={query} onChange={event => setQuery(event.target.value)} /></label>
-    <div className="om-settings-actions">{!capability && <Menu modal={false} trigger={<Button variant="ghost" className="om-button h-auto"><RemixIcon name={typeIcons[kind]} size={15} />{t(kindLabels[kind])}<RemixIcon name="arrow-down-s-line" size={14} /></Button>}><MenuRadioGroup value={kind} onValueChange={value => setKind(value as ModelKind)}>{modelKinds.map(value => <MenuRadioItem closeOnClick key={value} value={value}><RemixIcon name={typeIcons[value]} size={15} />{t(kindLabels[value])}</MenuRadioItem>)}</MenuRadioGroup></Menu>}
+    <div className="om-settings-actions">{!capability && <Menu modal={false} trigger={<Button variant="ghost" className="om-button h-auto"><RemixIcon name={typeIcons[kind]} size={15} />{modelKindLabel(kind, t, locale)}<RemixIcon name="arrow-down-s-line" size={14} /></Button>}><MenuRadioGroup value={kind} onValueChange={value => setKind(value as ModelKind)}>{modelKinds.map(value => <MenuRadioItem closeOnClick key={value} value={value}><RemixIcon name={typeIcons[value]} size={15} />{modelKindLabel(value, t, locale)}</MenuRadioItem>)}</MenuRadioGroup></Menu>}
       <Menu modal={false} trigger={<Button variant="ghost" className="om-button h-auto"><span className="om-provider-menu-label">{selectedProvider ? <ProviderAvatar name={selectedProvider.label} provider={selectedProvider} /> : <RemixIcon name="cloud-line" size={15} />}{selectedProvider?.label || t('All providers')}</span><RemixIcon name="arrow-down-s-line" size={14} /></Button>}><MenuRadioGroup value={providerId} onValueChange={value => setProviderId(String(value))}><MenuRadioItem closeOnClick value="all"><RemixIcon name="cloud-line" size={15} />{t('All providers')}</MenuRadioItem>{available.map(provider => <MenuRadioItem closeOnClick key={provider.id} value={provider.id}><span className="om-provider-menu-label"><ProviderAvatar name={provider.label} provider={provider} />{provider.label}</span></MenuRadioItem>)}</MenuRadioGroup></Menu>
     </div>
     {directory.error ? <SettingsError retry={directory.refresh} /> : !directory.data ? <SettingsLoading /> : <div className="om-model-choice-list">{models.map(model => <Button variant="plain" key={model.id} className="om-nav-item" aria-pressed={directory.data?.defaults[kind] === model.id} disabled={busy} onClick={() => void choose(model.id)}><ModelAvatar name={model.label} modelId={model.modelId} provider={available.find(provider => provider.id === model.provider)} /><span className="om-model-choice-label"><strong>{model.label}</strong><small className="om-muted">{available.find(provider => provider.id === model.provider)?.label}</small></span>{directory.data?.defaults[kind] === model.id && <RemixIcon name="check-line" size={16} />}</Button>)}{!models.length && <div className="om-empty om-muted">{t('No enabled models. Connect a provider or sync its models.')}</div>}</div>}

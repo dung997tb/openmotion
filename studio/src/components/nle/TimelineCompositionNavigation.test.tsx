@@ -23,7 +23,7 @@ it("returns one level at a time, blocks loading clicks and contains double-click
   render(1);
   expect(host.querySelector("nav")).toBeNull();
   render(3);
-  expect(host.querySelector("nav")?.textContent).toBe("logo");
+  expect(host.querySelector('[aria-current="location"]')?.textContent).toBe("logo");
   expect(host.querySelector("button")?.getAttribute("aria-label")).toBe("Back to parent composition");
   act(() => host.querySelector("button")!.click());
   expect(onNavigate).toHaveBeenLastCalledWith(1);

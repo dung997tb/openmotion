@@ -176,7 +176,7 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
           </div>{featured?.cover?.poster && <Button variant="plain" className="om-specialty-feature" onClick={() => open(featured, 1)}>
             <img src={featured.cover.poster} alt="" /><span className="om-button om-media-caption">{t(featured.title)}<RemixIcon name="arrow-right-line" size={16} /></span>
           </Button>}
-        </section> : <section className="om-gallery-intro om-skills-intro">
+        </section> : <section className="om-gallery-intro om-gallery-page-intro om-skills-intro">
           <h1>{t('Teach your Agent new moves.')}</h1>
           <div className="om-skills-heading-actions">
             <SkillSubmissionLink />
