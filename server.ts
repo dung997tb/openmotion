@@ -1,3 +1,4 @@
+import { gameHttp, attachGameRooms } from './game-projects.ts';
 import type { ExportFailure } from './tracking/tool-fields.ts';
 import { toolFailureFields } from './tracking/tool-fields.ts';
 import { transcriptsFor, closeTranscripts } from './gateway/transcription.ts';
@@ -55,6 +56,8 @@ import { TaskLedger } from './tracking/task-ledger.ts';
 import { WorkRounds, workRoundMode } from './inline-video.ts';
 import { brandKitHttp } from './gateway/brand-http.ts';
 import { brandKitsFor } from './gateway/brand-kits.ts';
+import { AssetLibrary } from './gateway/asset-library.ts';
+import { scenarioHttp } from './gateway/scenario-http.ts';
 import { designHttp } from './design-projects.ts';
 
 const sharedStore = new WorkspaceStore();
@@ -594,9 +597,12 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       return json(res, 405, { error: 'Unsupported conversation request' });
     }
     if (motionRequest && url.pathname.startsWith('/api/project-archives/') && await projectArchiveHttp(req, res, url, store.workspaceStore ?? store, context.runtimeRoot)) return;
+    if (motionRequest && url.pathname.startsWith('/api/scenarios/') && await scenarioHttp(req, res, url, store.workspaceStore ?? store)) return;
     if (motionRequest && url.pathname.startsWith('/api/assets/') && await assetHttp(req, res, url, store)) return;
     if (motionRequest && await brandKitHttp(req, res, url, store.directory, input)) return;
-    if (motionRequest && url.pathname.startsWith('/api/design/') && await designHttp(req, res, url, (store.workspaceStore ?? store).directory, originUrl, input)) return;
+    const editorUrl = `http://${host || 'localhost'}/#project/${store.projectId}`;
+    if ((url.pathname === '/api/games' || url.pathname.startsWith('/api/games/')) && await gameHttp(req, res, url, (store.workspaceStore ?? store).directory, input, context.runtimeRoot)) return;
+    if (motionRequest && url.pathname.startsWith('/api/design/') && await designHttp(req, res, url, (store.workspaceStore ?? store).directory, new URL(editorUrl).origin, input, ref => new AssetLibrary(store.workspaceStore ?? store).resolve(ref))) return;
     if (motionRequest && ['/api/diagnostics', '/api/diagnostics/events'].includes(url.pathname)) {
       // Downloads are POST-only: cross-origin links must not trigger a collection.
       if (req.method !== 'POST') return json(res, 405, { error: 'POST_REQUIRED' });
@@ -1040,6 +1046,7 @@ export async function startServer(store = sharedStore, port = Number(process.env
   };
   if (options.editor !== false) await context.ensureStudio();
   const server = createServer((req, res) => { void (async () => { if (!options.privateHandler || !await options.privateHandler(req, res)) await handler(req, res, store, context); })().catch(error => { if (!res.headersSent) json(res, 500, { error: (error as Error).message }); else res.destroy(); }); });
+  attachGameRooms(server, (store.workspaceStore ?? store).directory);
   try {
     const listen = (target: number) => new Promise<void>((resolve, reject) => {
       server.once('error', reject);

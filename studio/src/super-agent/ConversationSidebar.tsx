@@ -25,7 +25,7 @@ export function ConversationSidebar({
   conversations: SuperAgentChatSummary[];
   activeId: string | null;
   loading: boolean;
-  agentStatus: { label: string; ready: boolean; count: number; loading?: boolean };
+  agentStatus: { label: string; detail?: string; ready: boolean; count: number; loading?: boolean };
   onSelect: (id: string) => void;
   onCreate: () => void;
   onTogglePin: (id: string, pinned: boolean) => void;
@@ -114,7 +114,7 @@ export function ConversationSidebar({
         >
           {statusTone === 'idle' ? (
             <span className="om-sa-chat-icon" aria-hidden="true">
-              <RemixIcon name={item.pinned ? 'poker-diamonds-fill' : 'chat-3-line'} size={14} />
+              <RemixIcon name={item.pinned ? 'sparkling-fill' : 'chat-1-line'} size={14} />
             </span>
           ) : (
             <span className="om-sa-chat-dot" data-state={statusTone} aria-hidden="true" />
@@ -212,7 +212,7 @@ export function ConversationSidebar({
           className="om-sa-new-chat-btn"
           onClick={onCreate}
         >
-          <RemixIcon name="edit-box-line" size={15} />
+          <RemixIcon name="edit-line" size={15} />
           <span>{t('New conversation')}</span>
         </Button>
       </div>
@@ -220,13 +220,13 @@ export function ConversationSidebar({
       <div className="om-sa-chat-list" aria-busy={loading}>
         {pinned.length > 0 && (
           <section className="om-sa-chat-group" aria-label={t('Pinned')}>
-            <h2 className="om-eyebrow">{t('Pinned')}</h2>
+            <h2 className="om-sa-chat-group-title">{t('Pinned')}</h2>
             {pinned.map(renderRow)}
           </section>
         )}
 
-        <section className="om-sa-chat-group" aria-label={t('Recent')}>
-          {pinned.length > 0 && <h2 className="om-eyebrow">{t('Recent')}</h2>}
+        <section className="om-sa-chat-group" aria-label={t(pinned.length > 0 ? 'Recent' : 'Conversations')}>
+          <h2 className="om-sa-chat-group-title">{t(pinned.length > 0 ? 'Recent' : 'Conversations')}</h2>
           {loading && !conversations.length ? (
             <div className="om-sa-chat-skeletons" aria-hidden="true">
               <Skeleton style={{ width: '88%', height: 32 }} />
@@ -344,7 +344,7 @@ export function ConversationSidebar({
             ) : (
               <>
                 <strong>{agentStatus.label}</strong>
-                <small>{t(agentStatus.ready ? 'Local Agent connected' : 'Configure Local Agent')}</small>
+                <small>{agentStatus.detail ?? t(agentStatus.ready ? 'Local Agent connected' : 'Configure Local Agent')}</small>
               </>
             )}
           </span>

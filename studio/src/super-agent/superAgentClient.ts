@@ -42,6 +42,7 @@ export async function listSuperAgentChats() {
 
 export async function createSuperAgentChat(body: {
   title?: string;
+  runtimeId?: string;
   engine?: SuperAgentEngine;
   model?: string;
   permissionMode?: SuperAgentPermissionMode;

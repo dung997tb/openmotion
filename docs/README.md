@@ -27,6 +27,7 @@
 - [browser-runtime.md](browser-runtime.md)
 - [design-system.md](design-system.md)
 - [Design Studio: HTML projects, annotations, versions and Open Design round-trip](design-studio.md)
+- [Scenario workflows: Topics, Campaigns, Roles and shared asset pool](scenario-workflows.md)
 - [editor-fork.md](editor-fork.md)
 - [hyperframes.md](hyperframes.md)
 - [mcp-phase1-tools.md](mcp-phase1-tools.md)

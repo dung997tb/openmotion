@@ -207,7 +207,7 @@ for (const [summary, heading, action] of [
   await mount('account');
   const guide = document.querySelector('.om-plan-guide')!;
   expect(guide.querySelector('.om-plan-guide-head h2')?.textContent).toBe(heading);
-  expect(guide.textContent).toContain('Images'); expect(guide.textContent).toContain('Music'); expect(guide.textContent).toContain('Annual offer');
+  expect(guide.textContent).toContain('Images'); expect(guide.textContent).toContain('Music'); expect(guide.textContent).toContain('Multimodal from $14/mo');
   expect(guide.textContent).toContain(action);
   expect(document.querySelector('.om-account-callout')).toBeNull();
   expect(document.querySelector('.om-provider-detail-inner > .om-settings-tags')).toBeNull();
@@ -327,4 +327,202 @@ it('signs in in place even before the account summary loads', async () => {
   await act(async () => click('Sign in with OpenDesign'));
   expect(posts).toEqual(['/motion-api/settings/account/login']);
   expect(openAccount).not.toHaveBeenCalled();
+});
+
+it('merges configured account identity into the header, exposes modality tabs, pins defaults and prioritizes configured providers', async () => {
+  const configuredAccount = {
+    ...account,
+    kinds: ['text', 'image', 'video', 'audio'],
+    configured: true,
+    enabled: true,
+    available: true,
+    reason: 'Included with your account',
+  };
+  const providers = [
+    configuredAccount,
+    { id: 'fal', label: 'fal.ai', protocol: 'media', category: 'multimodal', kinds: ['image', 'video'], configured: false, enabled: false, available: false },
+    { id: 'cloud', label: 'OpenDesign Cloud', protocol: 'media', category: 'multimodal', kinds: ['image', 'video'], configured: true, enabled: true, available: true },
+  ];
+  const models = [
+    { id: 'account:claude-fable-5', provider: 'account', modelId: 'claude-fable-5', label: 'claude-fable-5', kind: 'text', enabled: true, source: 'live' },
+    { id: 'account:flux-pro', provider: 'account', modelId: 'flux-pro-1.1', label: 'FLUX Pro', kind: 'image', enabled: true, source: 'live' },
+  ];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => /\/settings\/account(\?|$)/.test(String(url))
+    ? Response.json({ consoleUrl: 'https://console.example', state: 'signed-in', plan: 'plus', user: { email: 'creator@example.com' } })
+    : Response.json({ providers, models, defaults: { image: 'account:flux-pro' } })));
+  await mount('account');
+
+  // Configured providers float right beneath OpenDesign.
+  const sidebarNames = [...document.querySelectorAll('.om-provider-item-name')].map(node => node.firstChild?.textContent);
+  expect(sidebarNames).toEqual(['OpenDesign', 'OpenDesign Cloud', 'fal.ai']);
+
+  // Paid configured account folds plan, status, identity and Manage account into the header without an extra callout card.
+  const header = document.querySelector('.om-provider-header')!;
+  expect(header.querySelector('.om-provider-plan-badge')?.textContent).toBe('Plus');
+  expect(header.querySelector('.om-provider-status-badge')?.textContent).toBe('Configured');
+  expect(header.querySelector('.om-provider-meta')?.textContent).toBe('creator@example.com · Your account');
+  const manageBtn = [...header.querySelectorAll('button')].find(btn => btn.textContent?.includes('Manage account'))!;
+  expect(manageBtn.hasAttribute('data-primary')).toBe(false);
+  expect(document.querySelector('.om-account-callout')).toBeNull();
+  expect(document.querySelector('.om-provider-detail-inner > .om-settings-tags')).toBeNull();
+
+  // Active default model pins to the top of default order and highlights; managed account rows show one clean display name with raw ID in tooltip.
+  const rows = [...document.querySelectorAll('.om-model-row')];
+  expect(rows[0].querySelector('.om-model-name strong')?.textContent).toBe('FLUX Pro');
+  expect(rows[0].querySelector('.om-model-name strong')?.getAttribute('title')).toBe('flux-pro-1.1');
+  expect(rows[0].querySelector('.om-model-name .om-model-id')).toBeNull();
+  expect(rows[0].querySelector('.om-model-default-button')?.getAttribute('data-active')).toBe('true');
+  expect(rows[1].querySelector('.om-model-name strong')?.textContent).toBe('claude-fable-5');
+  expect(rows[1].querySelector('.om-model-name strong')?.getAttribute('title')).toBeNull();
+  expect(rows[1].querySelector('.om-model-name small')).toBeNull();
+  expect(rows[1].querySelector('.om-model-default-button')?.getAttribute('data-active')).toBeNull();
+
+  // Modality tabs switch directly between All, Text and Image, and heading avoids duplicating total count.
+  expect(document.querySelector('.om-model-section h2')?.textContent).toBe('Models');
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  expect(tabs.map(tab => tab.textContent)).toEqual(['All2', 'Text1', 'Image1']);
+  await act(async () => tabs[1].click());
+  expect([...document.querySelectorAll('.om-model-row .om-model-name strong')].map(el => el.textContent)).toEqual(['claude-fable-5']);
+});
+
+it('hides model edit menu for managed account/agent providers, renders verified media capabilities and ignores stale descriptive overrides', async () => {
+  const configuredAccount = {
+    ...account,
+    kinds: ['text', 'image', 'video', 'audio'],
+    configured: true,
+    enabled: true,
+    available: true,
+    reason: 'Included with your account',
+  };
+  const codex = { id: 'codex', label: 'Codex', protocol: 'agent', category: 'local', kinds: ['image'], configured: true, enabled: true, available: true, reason: 'Signed in' };
+  const fal = { id: 'fal', label: 'fal.ai', protocol: 'media', category: 'multimodal', kinds: ['image', 'video', 'audio'], configured: true, enabled: true, available: true, baseUrl: 'https://fal.run', baseUrlEditable: false };
+  const models = [
+    {
+      id: 'account:gpt-image-2.6-sunburst',
+      provider: 'account',
+      modelId: 'gpt-image-2.6-sunburst',
+      label: 'gpt-image-2.6-sunburst',
+      kind: 'image',
+      mode: 'text-to-image',
+      enabled: true,
+      source: 'live',
+      supportsImageReference: true,
+      maxInputImages: 16,
+      // Legacy stale overrides from earlier editor versions must not render fake badges.
+      capabilities: ['reasoning', 'tools'],
+      inputs: ['vision', 'audio'],
+      contextWindow: 1_000_000,
+    },
+    {
+      id: 'account:brand-new-image',
+      provider: 'account',
+      modelId: 'brand-new-image',
+      label: 'brand-new-image',
+      kind: 'image',
+      enabled: true,
+      source: 'live',
+    },
+    {
+      id: 'account:byteplus-tts-2',
+      provider: 'account',
+      modelId: 'byteplus-tts-2',
+      label: 'BytePlus Voice',
+      kind: 'audio',
+      mode: 'text-to-speech',
+      enabled: true,
+      source: 'builtin',
+    },
+    {
+      id: 'codex:image-generation',
+      provider: 'codex',
+      modelId: 'image-generation',
+      label: 'Codex Image',
+      kind: 'image',
+      mode: 'text-to-image',
+      supportsImageReference: true,
+      enabled: true,
+      source: 'builtin',
+    },
+    {
+      id: 'fal:fal-ai/flux/schnell',
+      provider: 'fal',
+      modelId: 'fal-ai/flux/schnell',
+      label: 'FLUX Schnell',
+      kind: 'image',
+      mode: 'text-to-image',
+      enabled: true,
+      source: 'builtin',
+    },
+  ];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => /\/settings\/account(\?|$)/.test(String(url))
+    ? Response.json({ consoleUrl: 'https://console.example', state: 'signed-in', plan: 'plus', user: { email: 'creator@example.com' } })
+    : Response.json({ providers: [configuredAccount, codex, fal], models, defaults: {} })));
+  await mount();
+
+  // OpenDesign account rows hide the Model options / Edit menu, resolve one clean friendly name (keeping raw ID in tooltip), and render verified capabilities only.
+  expect(document.querySelector('[aria-label="Model options"]')).toBeNull();
+  const accountRows = [...document.querySelectorAll('.om-model-row')];
+  expect(accountRows[0].querySelector('.om-model-title strong')?.textContent).toBe('GPT Image 2.6 Sunburst');
+  expect(accountRows[0].querySelector('.om-model-title strong')?.getAttribute('title')).toBe('gpt-image-2.6-sunburst');
+  expect(accountRows[0].querySelector('.om-model-title .om-model-id')).toBeNull();
+  expect(accountRows[0].querySelector('.om-model-capabilities')?.textContent).toBe('Image editing (up to 16) · Transparent background');
+  expect(accountRows[0].textContent).not.toContain('Reasoning');
+  expect(accountRows[0].textContent).not.toContain('context tokens');
+  // Brand-new model without capability metadata keeps its raw ID without duplicating an inline ID or empty capability row.
+  expect(accountRows[1].querySelector('.om-model-title strong')?.textContent).toBe('brand-new-image');
+  expect(accountRows[1].querySelector('.om-model-title .om-model-id')).toBeNull();
+  expect(accountRows[1].querySelector('.om-model-capabilities')).toBeNull();
+  expect(accountRows[2].querySelector('.om-model-title strong')?.textContent).toBe('BytePlus Voice');
+  expect(accountRows[2].querySelector('.om-model-title strong')?.getAttribute('title')).toBe('byteplus-tts-2');
+  expect(accountRows[2].querySelector('.om-model-title .om-model-id')).toBeNull();
+  expect(accountRows[2].querySelector('.om-model-capabilities')?.textContent).toBe('Speech');
+
+  // Local Agent (Codex) rows also omit Model options, remove duplicate Sync models & single-model search, and display verified capabilities.
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.om-provider-item')].find(el => el.textContent?.includes('Codex'))!.click());
+  expect(document.querySelector('[aria-label="Model options"]')).toBeNull();
+  expect(document.querySelector('.om-agent-status-bar')?.textContent).toContain('Signed in');
+  expect(document.querySelector('.om-model-section')?.textContent).not.toContain('Sync models');
+  expect(document.querySelector('[aria-label="Search models"]')).toBeNull();
+  expect(document.querySelector('.om-model-capabilities')?.textContent).toBe('Image editing · Transparent background');
+
+  // Media providers (fal.ai) retain Model options and keep informative endpoint paths inline beside friendly labels.
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.om-provider-item')].find(el => el.textContent?.includes('fal.ai'))!.click());
+  expect(document.querySelector('[aria-label="Model options"]')).not.toBeNull();
+  expect(document.querySelector('.om-model-title strong')?.textContent).toBe('FLUX Schnell');
+  expect(document.querySelector('.om-model-title .om-model-id')?.textContent).toBe('fal-ai/flux/schnell');
+});
+
+it('groups and pins Official channels together, sinks setupRequired providers without empty model sections, and discloses non-media protocol limits', async () => {
+  const providers = [
+    { ...account, configured: true, enabled: true, available: true, reason: 'Included with your account' },
+    { id: 'codex', label: 'Codex', protocol: 'agent', category: 'local', kinds: ['image'], configured: true, enabled: true, available: true, reason: 'Local Codex is ready' },
+    { id: 'comfyui', label: 'ComfyUI', protocol: 'openai', category: 'local', kinds: ['text', 'image'], configured: false, enabled: false, available: false, setupRequired: true, reason: 'Local workflow integration required' },
+    { id: 'opendesign', label: 'OpenDesign Cloud', protocol: 'media', category: 'multimodal', kinds: ['image', 'video', 'audio'], configured: false, enabled: false, available: false, baseUrl: '', baseUrlEditable: true, reason: 'Add API key' },
+    { id: 'gemini', label: 'Gemini', protocol: 'google', category: 'multimodal', kinds: ['text', 'image'], configured: false, enabled: false, available: false, baseUrl: 'https://generativelanguage.googleapis.com/v1beta', baseUrlEditable: true, reason: 'Add API key' },
+  ];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => /\/settings\/account(\?|$)/.test(String(url))
+    ? Response.json({ consoleUrl: 'https://console.example', state: 'signed-in', plan: 'plus', user: { email: 'creator@example.com' } })
+    : Response.json({ providers, models: [], defaults: {} })));
+  await mount();
+
+  // Official channels stay pinned together above Codex/BYOK even when OpenDesign Cloud is unconfigured, and setupRequired sinks last.
+  const sidebarNames = [...document.querySelectorAll('.om-provider-item-name')].map(node => node.firstChild?.textContent);
+  expect(sidebarNames).toEqual(['OpenDesign', 'OpenDesign Cloud', 'Codex', 'Gemini', 'ComfyUI']);
+  expect(document.querySelector('.om-provider-divider')).not.toBeNull();
+  expect(document.querySelectorAll('.om-provider-items .om-official-badge')).toHaveLength(2);
+  expect(document.querySelector('.om-provider-header .om-official-badge')?.textContent).toBe('Official');
+
+  // OpenDesign Cloud shows its Official badge and explicit Official API role.
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.om-provider-item')].find(el => el.textContent?.includes('OpenDesign Cloud'))!.click());
+  expect(document.querySelector('.om-provider-header .om-official-badge')?.textContent).toBe('Official');
+  expect(document.querySelector('.om-provider-meta')?.textContent).toBe('Official API · API key');
+
+  // Google Gemini discloses its non-media protocol boundary before the user enters a key.
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.om-provider-item')].find(el => el.textContent?.includes('Gemini'))!.click());
+  expect(document.querySelector('.om-provider-meta')?.textContent).toBe('Google Gemini');
+  expect(document.querySelector('.om-provider-notice')?.textContent).toContain('image, video and audio generation are not executed through it');
+
+  // Setup-required providers (ComfyUI) hide the dead Models 0 section.
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.om-provider-item')].find(el => el.textContent?.includes('ComfyUI'))!.click());
+  expect(document.querySelector('.om-model-section')).toBeNull();
 });

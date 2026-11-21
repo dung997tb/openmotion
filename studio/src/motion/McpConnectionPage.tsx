@@ -19,8 +19,10 @@ import { SettingsError, SettingsLoading } from './settingsPrimitives';
 import { useIntegrationInfo } from './useIntegrationInfo';
 import { GITHUB_REPOSITORY } from './githubRepository';
 import { McpTemplateShowcase } from './McpTemplateShowcase';
+import { HorizontalRail } from './HorizontalRail';
 import { useCommunityLink } from './CommunityLink';
 import { findTechniqueStudio } from '../../../shared/studio-catalog';
+import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
 import { studioSkillDefaults, skillShotPrompt, localizedSkillPrompt, motionSkills } from './skillCatalog';
 import { mcpCapabilities, mcpScenarios, searchRecoveryExample, platformExportExample, mcpBenefits, mcpReviewGuide, mcpFaq, mcpWorkflowComparison, mcpClientComparison } from './mcpCapabilities';
 import { mcpClients as clients, supportsLocalConnection } from './mcpClients';
@@ -88,6 +90,8 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
       instruction = [prompt, t(item.prompt), skillShotPrompt(example, studioSkillDefaults(studio.id), t)].join('\n\n');
     } else if (item.id === 'review-comments') instruction = reviewCommentsPrompt({ projectId, dataDirectory: info?.dataDirectory, previewUrl: info?.previewUrl });
     else if (item.id === 'transcript') instruction = `${prompt}\n\n${transcriptExamplePrompt(info, locale)}`;
+    else if (item.id === 'scenario-black-friday') instruction = `${prompt}\n\n${scenarioAgentPrompt(findScenario('black-friday')!, { locale, integration: info })}`;
+    else if (item.id === 'scenario-workflows' || item.id === 'scenario-agent-writeback') instruction = `${prompt}\n\n${t(item.prompt)}`;
     else if (item.id === 'anime-opening') instruction = [prompt, t(item.prompt)].join('\n\n');
     else if (item.id === 'search-recovery') instruction = `${prompt}\n\n${searchRecoveryExample(t)}`;
     else if (item.id === 'platform-export') instruction = platformExportExample(locale, info ?? undefined);
@@ -103,13 +107,15 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
     setClientId(selected.id);
     click('mcp_client', 'client_tab', { mcp_client: selected.id });
   }} render={<Container ref={page} className="om-mcp-page" data-in-settings={inSettings || undefined} aria-labelledby="mcp-title" onKeyDown={event => event.stopPropagation()} />}>
+    {breadcrumb}
     <div className="om-page-back-row om-mcp-client-row">
-      <TabsList className="om-mcp-client-tabs" aria-label={t('Agent client')}>
-        {clients.filter(supportsLocalConnection).map(item => <Tab value={item.id} key={item.id}><McpClientAvatar client={item} /><span>{t(item.name)}</span></Tab>)}
-      </TabsList>
+      <HorizontalRail label="Agent client" viewportClassName="om-mcp-client-viewport" selection={client.id} plainArrows>
+        <TabsList className="om-mcp-client-tabs" aria-label={t('Agent client')}>
+          {clients.filter(supportsLocalConnection).map(item => <Tab value={item.id} key={item.id}><McpClientAvatar client={item} /><span>{t(item.name)}</span></Tab>)}
+        </TabsList>
+      </HorizontalRail>
     </div>
     <div className="om-mcp-content">
-      {breadcrumb}
       <section className="om-mcp-hero om-mcp-section">
         <div className="om-mcp-art" aria-hidden="true">
           <div className="om-mcp-art-tile om-mcp-art-left"><McpClientAvatar key={client.id} client={client} /></div>

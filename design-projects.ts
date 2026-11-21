@@ -37,7 +37,24 @@ const READ_LIMIT_DEFAULT = 200_000;
 const IGNORED_DIRS = new Set(['node_modules', '.git', '__MACOSX', 'dist', 'build', '.next']);
 
 const TEXT_EXTS = new Set(['html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'json', 'md', 'markdown', 'txt', 'svg', 'xml', 'csv', 'yaml', 'yml', 'glsl', 'vert', 'frag']);
+const BINARY_IMPORT_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'ico', 'bmp', 'svg', 'woff', 'woff2', 'ttf', 'otf', 'mp3', 'wav', 'ogg', 'mp4', 'webm']);
 const IMPORT_EXTS = new Set([...TEXT_EXTS, 'png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'ico', 'bmp', 'woff', 'woff2', 'ttf', 'otf', 'pdf', 'mp3', 'wav', 'ogg', 'mp4', 'webm', 'wasm', 'map', 'webmanifest']);
+
+export type DesignAssetResolver = (ref: { assetId: string; versionId: string }) => Promise<{
+  asset: { id: string; name: string; modality: string };
+  version: { id: string; filename: string; name?: string; mimeType: string; bytes: number; sha256: string };
+  filename: string;
+}>;
+
+function slugifyAssetName(raw: string): string {
+  const slug = raw
+    .toLowerCase()
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return slug || 'asset';
+}
 
 const MIME_BY_EXT: Record<string, string> = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
@@ -959,6 +976,104 @@ export class DesignProjects {
     }));
   }
 
+  async importBinaryFile(id: string, input: {
+    requestId: string;
+    expectedRevision: string;
+    sourcePath: string;
+    expectedSha256?: string;
+    path?: string;
+    name?: string;
+    versionId?: string;
+    summary?: string;
+    source?: 'agent' | 'manual' | 'import';
+  }, origin = ''): Promise<{ project: DesignProjectDetail; version: DesignVersion; path: string }> {
+    const pid = validateId(id);
+    if (typeof input.sourcePath !== 'string' || !input.sourcePath.trim()) {
+      throw new DesignError('INVALID_ARGUMENT', 'sourcePath is required');
+    }
+    const sourceExt = path.extname(input.sourcePath).slice(1).toLowerCase();
+    if (!BINARY_IMPORT_EXTS.has(sourceExt)) {
+      throw new DesignError('INVALID_ARGUMENT', `Unsupported binary asset extension: .${sourceExt || 'none'}`);
+    }
+    const defaultSlug = slugifyAssetName(input.name ?? path.basename(input.sourcePath, `.${sourceExt}`));
+    const suffix = (input.versionId ?? input.expectedSha256 ?? randomUUID()).slice(0, 8);
+    const safePath = cleanDesignPath(input.path ?? `assets/${defaultSlug}-${suffix}.${sourceExt}`);
+    const targetExt = path.extname(safePath).slice(1).toLowerCase();
+    if (!BINARY_IMPORT_EXTS.has(targetExt)) {
+      throw new DesignError('INVALID_ARGUMENT', `Unsupported destination asset extension: .${targetExt || 'none'}`);
+    }
+
+    let bytes: Buffer;
+    let handle;
+    try {
+      handle = await open(input.sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') throw new DesignError('NOT_FOUND', 'Source asset file not found');
+      throw new DesignError('INVALID_ARGUMENT', 'Unable to open source asset file');
+    }
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new DesignError('INVALID_ARGUMENT', 'Source asset must be a regular file');
+      if (!info.size) throw new DesignError('INVALID_ARGUMENT', 'Source asset file is empty');
+      if (info.size > MAX_IMPORT_FILE_BYTES) {
+        throw new DesignError('INVALID_ARGUMENT', `Binary asset exceeds ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB limit`);
+      }
+      const chunks: Buffer[] = [];
+      let total = 0;
+      for await (const chunk of handle.createReadStream({ autoClose: false })) {
+        total += chunk.length;
+        if (total > MAX_IMPORT_FILE_BYTES) {
+          throw new DesignError('INVALID_ARGUMENT', `Binary asset exceeds ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB limit`);
+        }
+        chunks.push(chunk);
+      }
+      bytes = Buffer.concat(chunks);
+    } finally {
+      await handle.close();
+    }
+
+    const actualSha = sha256(bytes);
+    if (input.expectedSha256 && actualSha !== input.expectedSha256) {
+      throw new DesignError('INVALID_ARGUMENT', 'Source asset checksum mismatch');
+    }
+
+    return this.lock(() => this.idempotent(
+      `import-asset:${pid}`,
+      input.requestId,
+      { expectedRevision: input.expectedRevision, sha256: actualSha, path: safePath },
+      async () => {
+        const catalog = await this.readCatalog();
+        const stored = catalog.projects.find(p => p.id === pid && !p.trashedAt);
+        if (!stored) throw new DesignError('NOT_FOUND', `Design project ${pid} not found`);
+        const dir = this.projectDir(pid);
+        const currentFiles = await this.scanFiles(dir);
+        const currentRevision = computeRevision(currentFiles);
+        if (input.expectedRevision !== currentRevision) {
+          throw new DesignError('VERSION_CONFLICT', `Expected revision ${input.expectedRevision}, current revision is ${currentRevision}`);
+        }
+        if (!currentFiles.some(f => f.path === safePath) && currentFiles.length >= MAX_FILES) {
+          throw new DesignError('INVALID_ARGUMENT', 'Project exceeds file count limit');
+        }
+        const full = path.join(dir, safePath);
+        await mkdir(path.dirname(full), { recursive: true });
+        const tmp = `${full}.${randomUUID()}.tmp`;
+        await writeFile(tmp, bytes);
+        await rename(tmp, full);
+
+        const nextFiles = await this.scanFiles(dir);
+        stored.updatedAt = Date.now();
+        await this.saveCatalog(catalog);
+        const version = await this.appendVersion(pid, nextFiles, {
+          source: input.source ?? 'manual',
+          summary: input.summary ?? `Imported ${safePath}`,
+          entry: stored.entry,
+        });
+        return { project: await this.hydrate(stored, origin), version, path: safePath };
+      },
+    ));
+  }
+
   async listVersions(id: string, opts: { cursor?: string; limit?: number } = {}): Promise<{ versions: DesignVersion[]; currentVersionId: string | null; nextCursor: string | null }> {
     const pid = validateId(id);
     const catalog = await this.readCatalog();
@@ -1474,6 +1589,51 @@ function injectThumbPerfGuard(buf: Buffer, notifyReady = false): Buffer {
   return Buffer.from(injected, 'utf8');
 }
 
+async function importResolvedAsset(
+  service: DesignProjects,
+  projectId: string,
+  input: {
+    requestId: string;
+    expectedRevision: string;
+    assetId: string;
+    versionId: string;
+    path?: string;
+    summary?: string;
+    source: 'agent' | 'manual';
+  },
+  origin: string,
+  resolveAsset?: DesignAssetResolver,
+) {
+  if (!resolveAsset) throw new DesignError('UNSUPPORTED', 'Workspace asset import is not available in this context');
+  if (!input.expectedRevision || !input.assetId || !input.versionId) {
+    throw new DesignError('INVALID_ARGUMENT', 'expectedRevision, assetId and versionId are required');
+  }
+  let resolved;
+  try {
+    resolved = await resolveAsset({ assetId: input.assetId, versionId: input.versionId });
+  } catch (error) {
+    const message = (error as Error)?.message ?? 'Workspace asset not found';
+    if (/ASSET_NOT_FOUND|ASSET_VERSION_UNAVAILABLE/i.test(message)) {
+      throw new DesignError('NOT_FOUND', message);
+    }
+    throw error;
+  }
+  const ext = path.extname(resolved.filename).toLowerCase();
+  const slug = slugifyAssetName(resolved.asset.name || resolved.version.name || 'asset');
+  const defaultPath = `assets/${slug}-${resolved.version.id.slice(0, 8)}${ext}`;
+  return service.importBinaryFile(projectId, {
+    requestId: input.requestId,
+    expectedRevision: input.expectedRevision,
+    sourcePath: resolved.filename,
+    expectedSha256: resolved.version.sha256,
+    path: input.path ?? defaultPath,
+    name: resolved.asset.name,
+    versionId: resolved.version.id,
+    summary: input.summary ?? `Imported asset ${resolved.asset.name}`,
+    source: input.source,
+  }, origin);
+}
+
 export async function designHttp(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1481,6 +1641,7 @@ export async function designHttp(
   dataDirectory: string,
   origin: string,
   input: (req: IncomingMessage, limit?: number) => Promise<any>,
+  resolveAsset?: DesignAssetResolver,
 ): Promise<boolean> {
   if (!url.pathname.startsWith('/api/design/')) return false;
   const service = designProjectsFor(dataDirectory);
@@ -1625,6 +1786,20 @@ export async function designHttp(
       return sendJson(200, await service.write(writeMatch[1], { ...body, requestId: body?.requestId || randomUUID() }, origin));
     }
 
+    const importAssetMatch = /^projects\/([^/]+)\/import-asset$/.exec(sub);
+    if (importAssetMatch && req.method === 'POST') {
+      const body = await input(req, 32 * 1024);
+      return sendJson(200, await importResolvedAsset(service, importAssetMatch[1], {
+        requestId: body?.requestId || randomUUID(),
+        expectedRevision: body?.expectedRevision,
+        assetId: body?.assetId,
+        versionId: body?.versionId,
+        path: body?.path,
+        summary: body?.summary,
+        source: 'manual',
+      }, origin, resolveAsset));
+    }
+
     const versionsMatch = /^projects\/([^/]+)\/versions$/.exec(sub);
     if (versionsMatch && req.method === 'GET') {
       return sendJson(200, await service.listVersions(versionsMatch[1], { cursor: url.searchParams.get('cursor') ?? undefined }));
@@ -1674,7 +1849,13 @@ export async function designHttp(
   }
 }
 
-export async function dispatchDesignTool(name: string, args: any, dataDirectory: string, origin: string): Promise<unknown> {
+export async function dispatchDesignTool(
+  name: string,
+  args: any,
+  dataDirectory: string,
+  origin: string,
+  resolveAsset?: DesignAssetResolver,
+): Promise<unknown> {
   const service = designProjectsFor(dataDirectory);
   const catalog = designCatalog();
 
@@ -1804,6 +1985,17 @@ export async function dispatchDesignTool(name: string, args: any, dataDirectory:
       case 'restore_version': {
         if (!args.versionId || !args.expectedRevision) throw new DesignError('INVALID_ARGUMENT', 'versionId and expectedRevision are required');
         return service.restoreVersion(args.projectId, args.versionId, { requestId: args.requestId || randomUUID(), expectedRevision: args.expectedRevision }, origin);
+      }
+      case 'import_asset': {
+        return importResolvedAsset(service, args.projectId, {
+          requestId: args.requestId || randomUUID(),
+          expectedRevision: args.expectedRevision,
+          assetId: args.assetId,
+          versionId: args.versionId,
+          path: args.path,
+          summary: args.summary,
+          source: 'agent',
+        }, origin, resolveAsset);
       }
       default: throw new DesignError('INVALID_ARGUMENT', `Unknown edit action: ${args.action}`);
     }

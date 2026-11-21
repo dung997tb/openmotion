@@ -3,21 +3,23 @@ import { ExploreCoverImage } from './ExploreCoverImage';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { findMediaStudio } from '../../../shared/studio-catalog';
-import { motionStudio, studioDestination, type StudioDestination, type StudioScene } from './creativeStudios';
+import { mediaEditorDestination, motionStudio, type StudioDestination, type StudioScene } from './creativeStudios';
 import { sceneExamples } from './sceneShowcase';
 import { findModelHub } from './modelHubs';
 import { motionSkills, motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
+import type { ScenarioId } from '../../../shared/scenarios';
+import aiInfluencerMarketing from './scene-art/ai-influencer-marketing.webp';
+import './scenarioNavigation.css';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
 
 /** Scenes the Explore feed leaves out because they are featured here; unchanged from main so the feed stays as it was. */
-export const featuredSceneIds: readonly StudioScene['id'][] = ['shot-image', 'text-to-video', 'text-to-image'];
+export const featuredSceneIds: readonly StudioScene['id'][] = ['text-to-video', 'text-to-image'];
 /** Spotlight scenes open with their Studio's scene tabs. */
-const spotlightScenes = [studioDestination(findMediaStudio('design')!, 'text-to-image')];
+const spotlightScenes = [mediaEditorDestination('text-to-image')];
 const slideDuration = 6000;
 const blackFridayPoster = motionSkills.find(skill => skill.id === 'openmotion-sale-carousel')?.cover?.poster ?? '';
 interface FeaturedSlide {
@@ -25,23 +27,35 @@ interface FeaturedSlide {
   scene?: { target: StudioDestination; prompt: string };
   /** Opens a model hub page instead of a studio. */
   hub?: string;
+  /** Launches the matching end-to-end scenario workflow. */
+  scenario?: ScenarioId;
 }
 const geminiHub = findModelHub('gemini-4')!;
 const slides: FeaturedSlide[] = [{
   id: motionStudio.id, title: motionStudio.title, subtitle: 'Motion design', icon: motionStudio.icon,
   hint: 'Animate type and shapes, then edit their timing on the timeline.', poster: motionStudioCover?.poster ?? '', clip: motionStudioCover?.video,
+  scenario: 'motion-full-chain',
 }, {
   id: 'black-friday', title: 'Black Friday collection', subtitle: 'Template library', icon: 'film-line',
   hint: 'Browse Black Friday video references and Skills for your sale.', poster: blackFridayPoster,
+  scenario: 'black-friday',
 }, {
   id: 'hub-' + geminiHub.id, title: geminiHub.latestModel, subtitle: geminiHub.eyebrow, icon: 'sparkling-line', poster: geminiHub.poster, hub: geminiHub.id,
-  hint: geminiHub.summary,
+  hint: geminiHub.summary, scenario: 'gemini-4-neon',
 }, ...spotlightScenes.map(target => {
   const { scene } = target;
   const { id } = scene;
   const example = sceneExamples[id][0];
-  return { ...example, id, icon: scene.icon, subtitle: target.studio.title, hint: scene.hint, scene: { target, prompt: example.prompt } };
-})];
+  return { ...example, id, icon: scene.icon, subtitle: target.studio.title, hint: scene.hint, scene: { target, prompt: example.prompt }, scenario: 'design-full-chain' as ScenarioId };
+}), {
+  id: 'ai-influencer',
+  title: 'Virtual Creator Episode',
+  subtitle: 'Roles',
+  icon: 'user-3-line',
+  hint: 'Script, consistent persona visuals, bio page, voiceover, and talking video',
+  poster: aiInfluencerMarketing,
+  scenario: 'ai-influencer',
+}];
 
 function FeaturedClip({ src, playing }: { src: string; playing: boolean }) {
   const player = useRef<HTMLVideoElement>(null);
@@ -64,10 +78,11 @@ function FeaturedClip({ src, playing }: { src: string; playing: boolean }) {
     style={{ opacity: ready ? 1 : 0 }} onLoadedData={() => setReady(true)} onError={() => setFailed(true)} /> : null;
 }
 
-export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub }: {
+export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub, onStartScenario }: {
   active: boolean; onNavigate: (target: StudioDestination, prompt: string) => void;
   onOpenMotionEditor: () => void; motionEditorDisabled: boolean;
   onOpenBlackFriday: (trigger: HTMLButtonElement) => void; onModelHub: (id: string) => void;
+  onStartScenario?: (id: ScenarioId) => void;
 }) {
   const { t } = useI18n();
   const root = useRef<HTMLElement>(null);
@@ -118,6 +133,8 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
       const current = i === index;
       const scene = slide.scene;
       const blackFriday = slide.id === 'black-friday';
+      const motionSlide = slide.id === motionStudio.id;
+      const showWorkflowPrimary = Boolean(slide.scenario && onStartScenario);
       // A hub slide is clickable as a whole; its button stays the keyboard entry.
       return <div key={slide.id} className="om-feature-slide" data-scene={slide.id} data-clickable={slide.hub ? 'true' : undefined} aria-hidden={!current} inert={!current}
         onClick={slide.hub ? event => { if ((event.target as Element).closest('button')) return; track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); } : undefined}>
@@ -129,16 +146,29 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
         <div className="om-discovery-hero-copy">
           <span><RemixIcon name={slide.icon} size={16} />{t(slide.subtitle)}</span>
           <h2>{t(slide.title)}</h2><p>{t(slide.hint)}</p>
-          {slide.hub ? <Button variant="ghost" className="om-button h-auto" data-primary="media" onClick={() => { track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); }}>
-            {t('Try {model} now', { model: slide.title })}<RemixIcon name="arrow-right-line" size={16} />
-          </Button> : blackFriday ? <Button variant="ghost" className="om-button h-auto" data-primary="media" onClick={event => { track('slide_action', { slide: slide.id, position: i }); onOpenBlackFriday(event.currentTarget); }}>
-            {t('View collection')}<RemixIcon name="arrow-right-line" size={16} />
-          </Button> : <Button variant="ghost" type="button" className="om-button h-auto" data-primary="media" disabled={!scene && motionEditorDisabled} onClick={() => {
-            track('slide_action', { slide: slide.id, position: i, ...(scene ? destinationTarget(scene.target) : { studio: motionStudio.id }) });
-            if (scene) onNavigate(scene.target, t(scene.prompt)); else onOpenMotionEditor();
-          }}>
-            {scene ? t(scene.target.scene.label) : t('Open in Motion Editor')}<RemixIcon name="arrow-right-line" size={16} />
-          </Button>}
+          <div className="om-hero-actions">
+            {showWorkflowPrimary && <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="workflow" data-primary="media" onClick={() => {
+              track('slide_action', { slide: slide.id, position: i, navTarget: 'workflow' });
+              onStartScenario!(slide.scenario!);
+            }}>
+              {t('Start workflow')}<RemixIcon name="arrow-right-line" size={16} />
+            </Button>}
+            {slide.hub ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} onClick={() => { track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); }}>
+              {t('Try {model} now', { model: slide.title })}<RemixIcon name="arrow-right-line" size={16} />
+            </Button> : blackFriday ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} onClick={event => { track('slide_action', { slide: slide.id, position: i }); onOpenBlackFriday(event.currentTarget); }}>
+              {t('View collection')}<RemixIcon name="arrow-right-line" size={16} />
+            </Button> : scene ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} onClick={() => {
+              track('slide_action', { slide: slide.id, position: i, ...destinationTarget(scene.target) });
+              onNavigate(scene.target, t(scene.prompt));
+            }}>
+              {t(scene.target.scene.label)}<RemixIcon name="arrow-right-line" size={16} />
+            </Button> : motionSlide ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} disabled={motionEditorDisabled} onClick={() => {
+              track('slide_action', { slide: slide.id, position: i, studio: motionStudio.id });
+              onOpenMotionEditor();
+            }}>
+              {t('Open in Motion Editor')}<RemixIcon name="arrow-right-line" size={16} />
+            </Button> : null}
+          </div>
         </div>
       </div>;
     })}

@@ -148,7 +148,7 @@ function sameOriginRelativeUrl(raw: unknown): string | undefined {
   return trimmed;
 }
 
-const assetModelsTool = {
+const assetModelsTool: AgentDynamicToolDef = {
   type: 'function',
   name: 'openmotion_asset_models',
   description: 'Read configured media models, supported reference capabilities, provider availability and advisory account mediaEntitlement hints. Pass refreshAccount=true after user confirms signing in or upgrading. Does not generate or spend credits.',
@@ -165,7 +165,7 @@ const assetModelsTool = {
   },
 };
 
-const workspaceResourcesTool = {
+const workspaceResourcesTool: AgentDynamicToolDef = {
   type: 'function',
   name: 'openmotion_workspace_resources',
   description: 'Search and list the unified OpenMotion workspace resource hub (Assets, Brand Kits, Motion Templates, Design Templates, Creative Skills, Design Skills, Design Projects, Motion Projects) so you can pick the best inputs and starting points.',
@@ -180,7 +180,7 @@ const workspaceResourcesTool = {
   },
 };
 
-const readWorkflowTool = {
+const readWorkflowTool: AgentDynamicToolDef = {
   type: 'function',
   name: 'openmotion_read_workflow',
   description: 'Read packaged OpenMotion workflow and Skill instructions (production, director, template, recreate, video-to-template, media, design).',
@@ -194,7 +194,7 @@ const readWorkflowTool = {
   },
 };
 
-const presentArtifactTool = {
+const presentArtifactTool: AgentDynamicToolDef = {
   type: 'function',
   name: 'openmotion_present_artifact',
   description: 'Open or refresh an artifact tab in the right-hand Browser Artifact Viewer for the user (HTML design project/game/website/deck, Motion Studio project, MP4 export, image/video/audio asset, Brand Kit, or http/https web page).',

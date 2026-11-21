@@ -1,5 +1,6 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LOCAL_DIRECT_RUNTIME_ID, type AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { assetMediaUrl } from '../../../shared/asset-library';
 import { designRoutes } from '../../../shared/design-project';
 import type {
@@ -13,6 +14,7 @@ import type {
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
+import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
 import { useLocalAgents } from '../motion/useLocalAgents';
 import { ArtifactBrowserPane, NEW_VIEWER_TAB_ID, safeBrowserTabId } from './ArtifactBrowserPane';
 import { ConversationSidebar } from './ConversationSidebar';
@@ -171,7 +173,32 @@ export function SuperAgentWorkspace({
   const { t } = useI18n();
   const { toasts, showToast, dismissToast } = useToast();
   const { data: agentDir, refresh: refreshAgents } = useLocalAgents();
+  const { data: runtimesDir, refresh: refreshRuntimes } = useAgentRuntimes();
   const agents = agentDir?.agents ?? [];
+
+  const availableRuntimes = useMemo<AgentRuntimeInfo[]>(() => {
+    if (runtimesDir?.runtimes) {
+      return runtimesDir.runtimes.map(rt =>
+        rt.kind === 'local-direct' && agents.length > 0
+          ? {
+              ...rt,
+              agents,
+              runnableAgentIds: agents.filter(a => a.installed && a.auth !== 'signed-out').map(a => a.id),
+            }
+          : rt,
+      );
+    }
+    return [
+      {
+        id: LOCAL_DIRECT_RUNTIME_ID,
+        kind: 'local-direct',
+        name: 'This computer',
+        status: 'online',
+        agents,
+        runnableAgentIds: agents.filter(a => a.installed && a.auth !== 'signed-out').map(a => a.id),
+      },
+    ];
+  }, [runtimesDir, agents]);
 
   const [conversations, setConversations] = useState<SuperAgentChatSummary[]>([]);
   const [loadingList, setLoadingList] = useState(() => Boolean(active));
@@ -274,11 +301,36 @@ export function SuperAgentWorkspace({
   }, []);
 
   useEffect(() => {
+    if (!runtimesDir) return;
+    const online = runtimesDir.runtimes.filter(item => item.status === 'online');
+    if (!online.length) return;
+    const busy = activeChat?.state === 'running' || activeChat?.state === 'waiting';
+    if (busy) return;
+
+    const currentValid = selection.runtimeId && online.some(item => item.id === selection.runtimeId);
+    if (currentValid) return;
+
+    const preferred =
+      (runtimesDir.defaultRuntimeId && online.find(item => item.id === runtimesDir.defaultRuntimeId))
+      ?? (!runtimesDir.localDirectAvailable ? online.find(item => item.runnableAgentIds.length > 0) ?? online[0] : undefined);
+    if (!preferred) return;
+
+    const firstEngine = preferred.runnableAgentIds[0] ?? preferred.agents[0]?.id ?? selection.engine;
+    setSelection({
+      runtimeId: preferred.id,
+      engine: firstEngine,
+      model: 'default',
+      reasoning: 'default',
+    });
+  }, [runtimesDir, activeChat, selection.runtimeId, selection.engine]);
+
+  useEffect(() => {
     if (!active) return;
     refreshConversations();
     refreshResources();
     refreshAgents();
-  }, [active, refreshConversations, refreshResources, refreshAgents]);
+    refreshRuntimes();
+  }, [active, refreshConversations, refreshResources, refreshAgents, refreshRuntimes]);
 
   // Apply chat snapshot and sync tabs / agent choices
   const applyChatSnapshot = useCallback((next: SuperAgentChat, isInitialLoad = false) => {
@@ -288,6 +340,7 @@ export function SuperAgentWorkspace({
 
     if (isInitialLoad && next.messages.length > 0) {
       setSelection({
+        ...(next.runtimeId ? { runtimeId: next.runtimeId } : {}),
         engine: next.engine,
         model: next.model || 'default',
         reasoning: next.reasoning || 'default',
@@ -369,6 +422,7 @@ export function SuperAgentWorkspace({
   const ensureChatCreated = useCallback(async (): Promise<SuperAgentChat> => {
     if (activeChat) return activeChat;
     const created = await createSuperAgentChat({
+      ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
       engine: selection.engine,
       model: selection.model !== 'default' ? selection.model : undefined,
       permissionMode,
@@ -376,11 +430,12 @@ export function SuperAgentWorkspace({
     applyChatSnapshot(created.conversation, true);
     onChatIdChange(created.conversation.id, true);
     return created.conversation;
-  }, [activeChat, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange]);
+  }, [activeChat, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange]);
 
   const handleCreateConversation = async () => {
     try {
       const created = await createSuperAgentChat({
+        ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
         engine: selection.engine,
         model: selection.model !== 'default' ? selection.model : undefined,
         permissionMode,
@@ -455,6 +510,7 @@ export function SuperAgentWorkspace({
       const result = await startSuperAgentTurn(target.id, {
         requestId,
         text,
+        ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
         engine: selection.engine,
         model: selection.model,
         reasoning: selection.reasoning,
@@ -579,13 +635,24 @@ export function SuperAgentWorkspace({
     }
   };
 
-  const agentsLoaded = agentDir !== null;
+  const agentsLoaded = agentDir !== null || runtimesDir !== null;
+  const openRuntimes = useCallback(() => {
+    openAgentRuntimesSettings();
+    onOpenAgentSettings();
+  }, [onOpenAgentSettings]);
+
   const agentStatus = useMemo(() => {
     if (!agentsLoaded) {
-      return { label: t('Local Agents'), ready: false, count: 0, loading: true };
+      return { label: t('Local Agents'), detail: t('Checking Agent runtimes…'), ready: false, count: 0, loading: true };
     }
-    const readyAgents = agents.filter(item => item.installed && item.auth !== 'signed-out');
-    if (readyAgents.length > 0) {
+    const readyOnlineRuntimes = availableRuntimes.filter(rt => rt.status === 'online' && rt.runnableAgentIds.length > 0);
+    const selectedRuntime = availableRuntimes.find(rt => rt.id === selection.runtimeId && rt.status === 'online');
+    const targetRuntime = selectedRuntime ?? readyOnlineRuntimes[0] ?? availableRuntimes.find(rt => rt.status === 'online');
+    const readyAgents = targetRuntime
+      ? targetRuntime.agents.filter(item => item.installed && item.auth !== 'signed-out')
+      : [];
+
+    if (readyOnlineRuntimes.length > 0 && readyAgents.length > 0) {
       const activeFirst = [
         ...readyAgents.filter(item => item.id === selection.engine),
         ...readyAgents.filter(item => item.id !== selection.engine),
@@ -593,15 +660,33 @@ export function SuperAgentWorkspace({
       const label = activeFirst.length <= 2
         ? activeFirst.map(a => a.label).join(' · ')
         : `${activeFirst[0].label} · +${activeFirst.length - 1}`;
+      const detail =
+        readyOnlineRuntimes.length > 1
+          ? t('{count} runtimes connected', { count: readyOnlineRuntimes.length })
+          : targetRuntime?.kind === 'local-bridge'
+            ? t('Bridge · {name}', { name: targetRuntime.name })
+            : targetRuntime?.kind === 'remote-service'
+              ? t('Hosted · {name}', { name: targetRuntime.name })
+              : t('Local Agent connected');
       return {
         label,
+        detail,
         ready: true,
         count: readyAgents.length,
         loading: false,
       };
     }
-    return { label: t('No Agent connected'), ready: false, count: 0, loading: false };
-  }, [agents, agentsLoaded, t]);
+
+    return {
+      label: t('No Agent connected'),
+      detail: runtimesDir && !runtimesDir.localDirectAvailable
+        ? t('Connect local machine or service')
+        : t('Configure Local Agent'),
+      ready: false,
+      count: 0,
+      loading: false,
+    };
+  }, [availableRuntimes, agentsLoaded, selection.runtimeId, selection.engine, runtimesDir, t]);
 
   const startResize = (clientX: number) => {
     const currentWidth = viewerWidth
@@ -645,7 +730,13 @@ export function SuperAgentWorkspace({
       onRename={(id, title) => handleRename(id, title)}
       onDelete={id => void handleDelete(id)}
       onCollapse={() => setSidebarOpen(false)}
-      onOpenAgentSettings={onOpenAgentSettings}
+      onOpenAgentSettings={() => {
+        if (!agentStatus.ready && runtimesDir && !runtimesDir.localDirectAvailable) {
+          openRuntimes();
+        } else {
+          onOpenAgentSettings();
+        }
+      }}
     />
   );
 
@@ -689,6 +780,8 @@ export function SuperAgentWorkspace({
             attachments={attachments}
             agents={agents}
             agentsLoaded={agentsLoaded}
+            runtimes={availableRuntimes}
+            localDirectAvailable={runtimesDir?.localDirectAvailable ?? true}
             selection={selection}
             permissionMode={permissionMode}
             onRetryLoad={() => setChatRetry(value => value + 1)}
@@ -712,6 +805,7 @@ export function SuperAgentWorkspace({
             onPreviewAttachment={att => void handleOpenResource(att)}
             onCopyText={code => void handleCopyText(code)}
             onOpenAgentSettings={onOpenAgentSettings}
+            onOpenRuntimeSettings={openRuntimes}
             onOpenModelSettings={onOpenModelSettings}
             onOpenMcp={onOpenMcp}
             onError={message => showToast(message)}

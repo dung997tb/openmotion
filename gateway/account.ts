@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, rm } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -16,6 +16,8 @@ import { apiJson, ProviderError, retryRead, type Fetcher } from './network.ts';
 import { cloudImageParameters, uploadInputs } from './opendesign.ts';
 import type { ProviderContext } from './providers.ts';
 import { resumableDownload, type DownloadProgress } from './resumable-download.ts';
+import { accountDirectory } from './account-directory.ts';
+import { withProcessLock } from '../shared/process-lock.ts';
 import { connectorRuntime, connectorVersion, ConnectorUnavailable, installConnector, manualInstallCommand, verifyConnector, type ConnectorProblem } from './account-connector.ts';
 
 const execute = promisify(execFile);
@@ -163,7 +165,7 @@ export class OpenDesignAccount {
   private connectorProblem?: ConnectorProblem;
   private attempt?: AccountAttempt;
   // Retain the last verified plan internally through transient billing failures to detect upgrades on recovery.
-  private billing?: { plan: string; balance: string | null };
+  private billing?: { plan: string; balance: string | null; keyId?: string };
   private billingRequestId = 0;
   private billingModelRefresh?: Promise<unknown>;
   private billingUnavailable = false;
@@ -171,6 +173,7 @@ export class OpenDesignAccount {
   /** Control key the account service rejected; cleared by a successful read or a new sign-in. */
   private rejectedKeyId?: string;
   private cachedModels: DirectoryModel[] = [];
+  private cachedIdentity?: string;
   private modelRequestId = 0;
   /** In-flight `logout --retry-pending`. The connector rewrites the credentials file, so sign-in and sign-out wait for it. */
   private revoking?: Promise<void>;
@@ -186,15 +189,107 @@ export class OpenDesignAccount {
   private closing = new AbortController();
   private runtime?: string;
   readonly directory: string;
+  /** Account state shared by every workspace of this user (see account-directory.ts). */
+  readonly root: string;
   readonly options: AccountOptions;
-  constructor(directory: string, options: AccountOptions = {}) { this.directory = directory; this.options = options; this.home = path.join(directory, 'account', 'credentials'); }
+  private adoption?: Promise<void>;
+  constructor(directory: string, options: AccountOptions = {}) {
+    this.directory = directory; this.options = options; this.root = accountDirectory(directory); this.home = path.join(this.root, 'credentials');
+  }
+  /**
+   * Workspaces used to keep their own sign-in. Once per process, a workspace that still holds one hands it to the shared
+   * directory when nothing is signed in there and it is newer than the shared directory's last sign-in or sign-out, and
+   * drops its copy either way, so neither a sign-out nor an older sign-in of another workspace can bring it back.
+   */
+  private adopt() {
+    return this.adoption ??= (async () => {
+      const own = path.join(path.resolve(this.directory), 'account'), legacy = path.join(own, 'credentials', 'config.json');
+      const profile = (await readSettings<CredentialsFile>(legacy, {}).catch(() => ({} as CredentialsFile))).profiles?.prod;
+      if (!hasCredentials(profile) && !profile?.pendingLogin) return;
+      // The same directory spelled differently (case, links, short names) must not be taken for a legacy copy and removed.
+      const same = await Promise.all([stat(own, { bigint: true }), stat(this.root, { bigint: true })])
+        .then(([a, b]) => a.dev === b.dev && a.ino === b.ino, () => false);
+      if (same) return;
+      await withProcessLock(path.join(this.root, 'adopt.lock'), async () => {
+        // Every sign-in, cancel and sign-out writes the shared session file. A workspace sign-in made after that last
+        // change is newer than whatever the shared directory decided; an older one was already superseded or signed out.
+        const missing = () => undefined;
+        const [session, shared, workspace] = await Promise.all([stat(path.join(this.root, 'session.json')).catch(missing),
+          stat(path.join(this.home, 'config.json')).catch(missing), stat(legacy).catch(missing)]);
+        if (!workspace) return;
+        if (!shared && (!session || workspace.mtimeMs > session.mtimeMs) && hasCredentials(profile)) {
+          await this.moveLegacyAccount(own, legacy);
+        }
+        for (const file of [legacy, path.join(own, 'session.json'), path.join(own, 'models.json')]) await rm(file, { force: true });
+      });
+    })().catch(error => { (this.options.log ?? console.error)('OpenDesign account could not be moved to the shared directory: ' + (error as Error).message); });
+  }
+  /**
+   * Copies a workspace's legacy account files into temporary paths under the shared directory before renaming them into
+   * place, rolling back any committed file on error so the workspace keeps its only copy and no shared marker is left.
+   */
+  private async moveLegacyAccount(own: string, legacy: string) {
+    await mkdir(this.home, { recursive: true, mode: 0o700 });
+    const suffix = '.' + randomUUID() + '.tmp';
+    const plan = [
+      { source: path.join(own, 'session.json'), target: path.join(this.root, 'session.json'), optional: true },
+      { source: path.join(own, 'models.json'), target: path.join(this.root, 'models.json'), optional: true },
+      { source: legacy, target: path.join(this.home, 'config.json'), optional: false },
+    ];
+    const staged: Array<{ temp: string; target: string; backup?: string }> = [];
+    const committed: Array<{ target: string; backup?: string }> = [];
+    try {
+      for (const entry of plan) {
+        const temp = entry.target + suffix;
+        try { await copyFile(entry.source, temp); }
+        catch (error) {
+          await rm(temp, { force: true }).catch(() => {});
+          if (entry.optional && (error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        staged.push({ temp, target: entry.target });
+        await chmod(temp, 0o600);
+      }
+      // The session and catalogue go first, so a reader that finds the credentials also finds their session.
+      for (const item of staged) {
+        const backup = item.target + '.bak' + suffix;
+        const backedUp = await rename(item.target, backup).then(() => true, (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return false;
+          throw error;
+        });
+        if (backedUp) item.backup = backup;
+        try { await rename(item.temp, item.target); }
+        catch (error) {
+          if (backedUp) await rename(backup, item.target).catch(() => {});
+          throw error;
+        }
+        committed.push({ target: item.target, backup: item.backup });
+      }
+    } catch (error) {
+      for (const item of committed.reverse()) {
+        if (item.backup) await rename(item.backup, item.target).catch(() => {});
+        else await rm(item.target, { force: true }).catch(() => {});
+      }
+      for (const item of staged) {
+        await rm(item.temp, { force: true }).catch(() => {});
+        if (item.backup) await rm(item.backup, { force: true }).catch(() => {});
+      }
+      throw error;
+    }
+    for (const item of committed) {
+      if (item.backup) await rm(item.backup, { force: true }).catch(() => {});
+    }
+  }
   private env() {
     // A different application's environment keys must not override this account session.
     const env: NodeJS.ProcessEnv = { ...process.env, AMR_HOME: this.home, OPEN_DESIGN_AMR_PROFILE: 'prod', VELA_PROFILE: 'prod' };
     for (const key of ['VELA_RUNTIME_KEY', 'VELA_CONTROL_KEY', 'VELA_LINK_URL', 'VELA_API_URL', 'OD_AMR_ENDPOINT_BINDING']) delete env[key];
     return env;
   }
-  private credentials() { return readSettings<CredentialsFile>(path.join(this.home, 'config.json'), {}); }
+  private async credentials() {
+    await this.adopt();
+    return readSettings<CredentialsFile>(path.join(this.home, 'config.json'), {});
+  }
   private async profile(): Promise<Profile | undefined> { return (await this.credentials()).profiles?.prod; }
   /** Retries revocations the connector could not deliver at sign-out; the file is removed once nothing is left to revoke. */
   private retryRevocations() {
@@ -253,7 +348,8 @@ export class OpenDesignAccount {
   prefetch() { void this.prepare().catch(() => {}); }
   async run(args: string[], signal?: AbortSignal) {
     if (this.options.run) return this.options.run(args, signal);
-    try { const { stdout } = await execute(await this.resolveRuntime(), args, { env: this.env(), timeout: 120_000, signal, maxBuffer: 2 * 1024 * 1024 }); return stdout; }
+    // A workspace can be signed in through the shared account before its own connector is prepared.
+    try { const { stdout } = await execute(await this.resolveRuntime().catch(() => this.prepare()), args, { env: this.env(), timeout: 120_000, signal, maxBuffer: 2 * 1024 * 1024 }); return stdout; }
     catch (error) { throw new AccountRequestError(String((error as { stderr?: unknown }).stderr ?? '')); }
   }
   async summary(refresh = false): Promise<AccountSummary> {
@@ -270,7 +366,7 @@ export class OpenDesignAccount {
     const rejected = signedIn && this.rejectedKeyId === profile!.controlKeyId;
     const browser = this.attempt?.stages.find(entry => entry.startsWith('browser_open_result:'))?.split(':')[1];
     return { state: this.connecting ? 'authorizing' : rejected ? 'reauth-required' : signedIn ? 'signed-in' : 'signed-out',
-      ...(signedIn ? { user: { name: profile?.user?.name, email: profile?.user?.email }, ...(rejected || this.billingUnavailable ? {} : this.billing), billingUnavailable: this.billingUnavailable, ...(this.billingError ? { billingError: { ...this.billingError } } : {}) } : {}),
+      ...(signedIn ? { user: { name: profile?.user?.name, email: profile?.user?.email }, ...(rejected || this.billingUnavailable || this.billing?.keyId !== profile!.controlKeyId ? {} : { plan: this.billing!.plan, balance: this.billing!.balance }), billingUnavailable: this.billingUnavailable, ...(this.billingError ? { billingError: { ...this.billingError } } : {}) } : {}),
       ...(this.connecting ? { authorizationUrl: this.authorizationUrl, userCode: this.userCode, ...(browser ? { browserOpened: browser === 'success' } : {}), ...(this.syncing ? { syncing: true } : {}) } : {}),
       ...(this.attempt ? { attempt: { ...this.attempt, stages: [...this.attempt.stages] } } : {}),
       error: this.error, errorCode: this.errorCode, consoleUrl,
@@ -310,8 +406,10 @@ export class OpenDesignAccount {
       const balance = typeof data.totalAvailableCreditsUsd === 'string' ? data.totalAvailableCreditsUsd
         : typeof data.balanceUsd === 'string' ? data.balanceUsd : null;
       const plan = tier || 'free';
-      const upgraded = planMediaEntitlement(this.billing?.plan) === 'not-included' && planMediaEntitlement(plan) === 'included';
-      this.billing = { plan, balance };
+      // A plan read for another key (another workspace signed in again) is not an upgrade of this one.
+      const previous = this.billing?.keyId === profile.controlKeyId ? this.billing?.plan : undefined;
+      const upgraded = planMediaEntitlement(previous) === 'not-included' && planMediaEntitlement(plan) === 'included';
+      this.billing = { plan, balance, keyId: profile.controlKeyId };
       this.billingUnavailable = false; this.billingError = undefined; this.rejectedKeyId = undefined;
       if (upgraded) {
         const sync = this.models(true).catch(() => {}).finally(() => {
@@ -355,8 +453,8 @@ export class OpenDesignAccount {
     await mkdir(this.home, { recursive: true, mode: 0o700 });
     if (generation !== this.generation) return;
     await this.commit(generation, async () => {
-      await writeSettings(path.join(this.directory, 'account', 'session.json'), {});
-      await writeSettings(path.join(this.directory, 'account', 'models.json'), []);
+      await writeSettings(path.join(this.root, 'session.json'), {});
+      await writeSettings(path.join(this.root, 'models.json'), []);
     });
     const binary = await this.prepare().catch(error => {
       throw new SignInFailure('connector_unavailable', error instanceof ConnectorUnavailable ? error : new ConnectorUnavailable('start_failed', error));
@@ -383,7 +481,7 @@ export class OpenDesignAccount {
     if (!signedInProfile(profile)) throw new SignInFailure('credentials_rejected');
     if (generation !== this.generation) return;
     this.syncing = true;
-    await this.commit(generation, () => writeSettings(path.join(this.directory, 'account', 'session.json'), { id: randomUUID() }));
+    await this.commit(generation, () => writeSettings(path.join(this.root, 'session.json'), { id: randomUUID() }));
     if (generation !== this.generation) return;
     await this.models(true).catch(() => { this.error = 'Signed in, but the model catalogue could not be synced. Retry in Model providers.'; });
     if (generation !== this.generation) return;
@@ -486,8 +584,8 @@ export class OpenDesignAccount {
     if (connecting) {
       if (this.attempt) this.finish(this.attempt, 'cancelled');
       await this.commit(generation, async () => {
-        await writeSettings(path.join(this.directory, 'account', 'session.json'), {});
-        await writeSettings(path.join(this.directory, 'account', 'models.json'), []);
+        await writeSettings(path.join(this.root, 'session.json'), {});
+        await writeSettings(path.join(this.root, 'models.json'), []);
         this.cachedModels = [];
       });
     }
@@ -502,8 +600,8 @@ export class OpenDesignAccount {
       this.billing = undefined; this.billingModelRefresh = undefined; this.cachedModels = []; this.error = undefined; this.errorCode = undefined; this.connectorProblem = undefined; this.attempt = undefined;
       this.billingUnavailable = false; this.billingError = undefined; this.rejectedKeyId = undefined;
       await this.commit(this.generation, async () => {
-        await writeSettings(path.join(this.directory, 'account', 'session.json'), {});
-        await writeSettings(path.join(this.directory, 'account', 'models.json'), []);
+        await writeSettings(path.join(this.root, 'session.json'), {});
+        await writeSettings(path.join(this.root, 'models.json'), []);
       });
       await this.revoking;
       let revocationPending = false;
@@ -519,9 +617,11 @@ export class OpenDesignAccount {
   }
   async models(refresh = false): Promise<DirectoryModel[]> {
     const generation = this.generation;
-    if (!(await this.profile())?.runtimeKey || !(await this.identity()) || generation !== this.generation) return [];
+    const identity = await this.identity();
+    if (!(await this.profile())?.runtimeKey || !identity || generation !== this.generation) return [];
     if (!refresh) {
-      const stored = this.cachedModels.length ? this.cachedModels : await readSettings<DirectoryModel[]>(path.join(this.directory, 'account', 'models.json'), []);
+      // Another workspace may have signed in again since this catalogue was cached.
+      const stored = this.cachedModels.length && this.cachedIdentity === identity ? this.cachedModels : await readSettings<DirectoryModel[]>(path.join(this.root, 'models.json'), []);
       return generation === this.generation ? withBuiltinAudio(stored) : [];
     }
     const requestId = ++this.modelRequestId;
@@ -551,13 +651,14 @@ export class OpenDesignAccount {
     if (generation !== this.generation) return [];
     await this.commit(generation, async () => {
       // A sync started before the upgrade must not replace the newly entitled catalogue.
-      if (requestId !== this.modelRequestId) return;
-      this.cachedModels = [...new Map(models.map(model => [model.id, model])).values()];
-      await writeSettings(path.join(this.directory, 'account', 'models.json'), this.cachedModels);
+      // Nor may a catalogue read before another workspace signed in again replace the new account's.
+      if (requestId !== this.modelRequestId || await this.identity() !== identity) return;
+      this.cachedModels = [...new Map(models.map(model => [model.id, model])).values()]; this.cachedIdentity = identity;
+      await writeSettings(path.join(this.root, 'models.json'), this.cachedModels);
     });
     return generation === this.generation ? withBuiltinAudio(this.cachedModels) : [];
   }
-  async identity() { return (await readSettings<{ id?: string }>(path.join(this.directory, 'account', 'session.json'), {})).id; }
+  async identity() { await this.adopt(); return (await readSettings<{ id?: string }>(path.join(this.root, 'session.json'), {})).id; }
   async mediaModels(): Promise<Model[]> {
     return (await this.models()).filter(model => model.enabled && ['image', 'video', 'audio'].includes(model.kind)).map(model => {
       const maxInputs = model.kind === 'video' && model.maxInputImages === undefined && Number.isInteger(model.nativeOptions?.max_input_images) && (model.nativeOptions!.max_input_images as number) > 0 ? 1 : model.maxInputImages;

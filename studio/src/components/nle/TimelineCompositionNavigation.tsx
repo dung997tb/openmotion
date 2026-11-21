@@ -15,7 +15,7 @@ export function TimelineCompositionNavigation({ stack, onNavigate, disabled = fa
   const parent = stack[stack.length - 2];
 
   return (
-    <nav className="motion-timeline-composition-nav" aria-label={t("Composition navigation")} onDoubleClick={(event) => event.stopPropagation()}>
+    <nav className="motion-timeline-composition-nav om-breadcrumb" aria-label={t("Composition navigation")} onDoubleClick={(event) => event.stopPropagation()}>
       <Button variant="plain"
         type="button"
         className="motion-timeline-composition-back"
@@ -28,7 +28,7 @@ export function TimelineCompositionNavigation({ stack, onNavigate, disabled = fa
         }}
       >
         <ArrowLeft size={14} />
-        <span>{current.label}</span>
+        <span aria-current="location">{current.label}</span>
       </Button>
     </nav>
   );

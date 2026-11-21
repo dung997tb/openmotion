@@ -55,7 +55,7 @@ export function AgentSettings() {
         className="om-nav-item om-provider-item om-runtime-nav-entry"
         aria-current={selected === RUNTIMES_VIEW_ID ? 'page' : undefined}
         onClick={() => {
-          tracking.reportSettingsClick('local_agents', 'select_runtimes');
+          tracking.reportSettingsClick('local_agents', 'select_agent', { agent: RUNTIMES_VIEW_ID });
           setSelected(RUNTIMES_VIEW_ID);
           setDetail(true);
         }}
@@ -68,7 +68,7 @@ export function AgentSettings() {
           </span>
         )}
       </Button>
-      <div className="om-provider-search"><label className="om-field"><RemixIcon name="search-line" size={16} /><input type="search" aria-label={t('Search Agents')} placeholder={t('Search Agents…')} value={query} onChange={event => setQuery(event => event.target.value)} /></label>
+      <div className="om-provider-search"><label className="om-field"><RemixIcon name="search-line" size={16} /><input type="search" aria-label={t('Search Agents')} placeholder={t('Search Agents…')} value={query} onChange={event => setQuery(event.target.value)} /></label>
         <Menu tooltip={t('Filter Agents')} modal={false} trigger={<IconButton variant="ghost" className="motion-icon-button" aria-label={t('Filter Agents')} icon={<RemixIcon name="filter-3-line" size={16} />} />}><MenuRadioGroup value={filter} onValueChange={value => setFilter(String(value))}>{[['all', 'All Agents'], ['installed', 'Installed'], ['missing', 'Not installed']].map(([value, label]) => <MenuRadioItem key={value} value={value}>{t(label)}</MenuRadioItem>)}</MenuRadioGroup></Menu>
       </div>
       <div className="om-provider-list-caption"><span className="om-eyebrow">{t('Local Agents')} · {agents.length}</span><Tooltip label={t('Rescan installation')} wrap><IconButton variant="ghost" className="motion-icon-button" aria-label={t('Rescan installation')} onClick={() => { tracking.reportSettingsClick('local_agents', 'rescan_agents'); directory.refresh(); }} icon={<RemixIcon name="refresh-line" size={14} />} /></Tooltip></div>
