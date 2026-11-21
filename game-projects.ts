@@ -829,7 +829,10 @@ export class GameProjects {
           window.WebSocket=class extends Original{constructor(...args){super(...args);this.addEventListener('message',event=>{try{const m=JSON.parse(event.data);if(m.type==='joined'){joined();probe.playerCount=m.players?.length??0;}if(m.type==='state'&&m.view?.players)probe.playerCount=Object.values(m.view.players).filter(p=>p.connected!==false).length;}catch{}});}};
           function frame(){probe.frames++;try{const state=window.__omGame?.getState();if(state?.selfId&&state.players?.[state.selfId]&&state.players[state.selfId].connected!==false)joined();}catch{}requestAnimationFrame(frame);}requestAnimationFrame(frame);
         })();`);
-        await page.goto(origin+game.playUrl+(game.multiplayer?'?room='+encodeURIComponent(room):''),{waitUntil:'networkidle0',timeout:20000});
+        // Live games may keep polling while playable. Wait for document resources,
+        // then use the canvas, room and startup checks instead of network silence.
+        await page.goto(origin+game.playUrl+(game.multiplayer?'?room='+encodeURIComponent(room):''),{waitUntil:'load',timeout:20000});
+        await page.waitForSelector('canvas, #game',{visible:true,timeout:5000});
         if(game.multiplayer)await page.waitForFunction('window.__openmotionGameProbe.roomJoined',{timeout:5000}).catch(()=>{});
         const autoJoin=await page.evaluate(()=>{const p=(window as any).__openmotionGameProbe;return {joined:p.roomJoined,elapsedMs:p.joinedAtMs as number|null};});
         return {consoleErrors,failedRequests,autoJoin};

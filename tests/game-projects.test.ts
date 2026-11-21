@@ -684,6 +684,27 @@ test('solo downed player respawns after five seconds and area skills damage only
   state=logic.applyAction(state,'solo',{type:'skill',skill:'nova'},ctx);assert.equal(state.enemies[0].hp,2);assert.equal(state.enemies[1].hp,5);
 });
 
+test('headless capture reaches a playable canvas while background polling remains active',async t=>fixture(async(service)=>{
+  if(!await browserExecutable().catch(()=>undefined)){t.skip('Local Chrome is unavailable; no browser download attempted');return;}
+  const {game}=await service.create(brief);
+  await service.write(game.id,[
+    {path:'index.html',content:'<!doctype html><canvas id="game" width="1280" height="720"></canvas><script src="./client.js"></script>'},
+    {path:'client.js',content:`const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');let heartbeats=0;
+      window.__omGame={getState:()=>({running:true,heartbeats})};
+      function frame(){ctx.fillStyle='#246';ctx.fillRect(0,0,canvas.width,canvas.height);requestAnimationFrame(frame);}frame();
+      setInterval(()=>fetch('./heartbeat.txt?tick='+Date.now()).then(response=>{if(response.ok)heartbeats++;}).catch(()=>{}),100);`},
+    {path:'heartbeat.txt',content:'alive'},
+  ]);
+  try{
+    const cover=await service.captureCover(game.id,{delayMs:500});
+    assert.deepEqual(gameCoverDimensions(await readFile(cover.screenshotPath),'.png'),{width:1280,height:720});
+    assert(cover.diagnostics.authoritative?.state.heartbeats>=2,'Background requests must still complete while capturing');
+    assert(cover.diagnostics.metrics.fpsEstimate>0);
+    assert.equal(cover.diagnostics.consoleErrors.length,0,JSON.stringify(cover.diagnostics.consoleErrors));
+    assert.equal(cover.diagnostics.failedRequests.length,0,JSON.stringify(cover.diagnostics.failedRequests));
+  }catch(error){if(/EPERM|EACCES|Operation not permitted|Failed to launch|sandbox|MachPortRendezvous|bootstrap_check_in/i.test(String(error))){t.skip('Sandbox blocks local Chrome or loopback: '+String(error).slice(0,300));return;}throw error;}
+}));
+
 test('server headless capture/playtest use isolated clients and canvas-only output when Chrome and loopback are available',async t=>fixture(async(service)=>{
   if(!await browserExecutable().catch(()=>undefined)){t.skip('Local Chrome is unavailable; no browser download attempted');return;}
   const {game}=await service.create({...brief,genre:'shooter',style:'3d',multiplayer:true});
