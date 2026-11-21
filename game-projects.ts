@@ -4,7 +4,8 @@ import { mkdir, readdir, readFile, writeFile, rename, rm, lstat, realpath, copyF
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
-import { createRequire } from 'node:module';
+// Vendored so packaged builds, which ship without node_modules, can still parse game logic.
+import { parse as parseModule } from './shared/vendor/acorn.mjs';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { mkdtemp } from 'node:fs/promises';
@@ -873,8 +874,7 @@ export class GameRuntime {
   private optionalExports = new Set<string>();
   meta: { minPlayers: number; maxPlayers: number; tickRate: number };
   constructor(source: string, seed: string) {
-    const { parse } = createRequire(import.meta.url)('acorn') as typeof import('acorn');
-    const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+    const ast = parseModule(source, { ecmaVersion: 'latest', sourceType: 'module' });
     const inspect = (node: any): void => {
       if (!node || typeof node !== 'object') return;
       const member = node.type === 'MemberExpression' && node.object?.type === 'Identifier';
