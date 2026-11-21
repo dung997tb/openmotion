@@ -171,6 +171,14 @@
 }
 [data-motion-studio] .om-button[data-primary="media"]:enabled:active { background: var(--motion-video-overlay); }
 [data-motion-studio] .om-button[data-primary="media"]:focus-visible { outline-color: var(--motion-overlay-ink); }
+[data-motion-studio] .om-button[data-primary="brand"]:enabled,
+[data-motion-studio] .om-button[data-primary="brand"]:enabled:hover {
+  color: var(--motion-neutral-n11);
+  background: var(--motion-brand);
+  border-color: var(--motion-brand);
+}
+[data-motion-studio] .om-button[data-primary="brand"]:enabled:hover { filter: brightness(.96); }
+[data-motion-studio] .om-button[data-primary="brand"]:focus-visible { outline-color: var(--motion-neutral-n0); }
 [data-motion-studio] .om-button[data-primary="media"][data-blurred] {
   -webkit-backdrop-filter: blur(var(--motion-space-8));
   backdrop-filter: blur(var(--motion-space-8));

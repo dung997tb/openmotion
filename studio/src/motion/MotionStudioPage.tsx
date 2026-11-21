@@ -23,7 +23,7 @@ export function MotionStudioPage({ active, editorDisabled, onOpenEditor, onBackT
       <div className="om-discovery-hero-copy">
         <h1>{t('Motion Studio')}</h1>
         <p>{t('Animate type and shapes, then edit their timing on the timeline.')}</p>
-        <Button variant="ghost" type="button" className="om-button h-auto" data-primary="media" disabled={editorDisabled} onClick={() => {
+        <Button variant="ghost" type="button" className="om-button h-auto" data-primary="brand" disabled={editorDisabled} onClick={() => {
           reportCreativeClick('creative_studio', 'studio_bar', 'open_editor', { studio: 'motion' });
           onOpenEditor();
         }}>
