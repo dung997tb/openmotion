@@ -1561,13 +1561,7 @@ function createMcpDomainPorts(deps: {
 
     catalog: {
       async listTemplates(_auth, _args) {
-        const page = await deps.catalog.listTemplates({ category: 'all', offset: 0, limit: 500 });
-        return {
-          source: 'cloud-catalog-cas',
-          catalogVersion: page.catalogVersion,
-          total: page.total,
-          templates: page.items,
-        };
+        return { source: 'cloud-catalog-cas', ...await deps.catalog.listAllTemplates() };
       },
 
       async getTemplate(_auth, args) {
