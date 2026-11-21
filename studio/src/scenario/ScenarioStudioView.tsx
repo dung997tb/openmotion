@@ -32,6 +32,7 @@ export type ScenarioStudioViewProps = {
   poolItems: PoolItem[];
   onAddPoolItems(items: { ref: PoolRef; label?: string; tags?: string[]; stepId?: string | null; source: PoolItem['source'] }[]): Promise<string[]>;
   /** Resolves false when the brief could not be copied, so the hand-off note is not shown. */
+  onRemovePoolItem(poolItemId: string): Promise<void>;
   onCopyAgentPrompt(customPrompt?: string): Promise<boolean>;
   onExportBundle(options?: PoolExportOptions): Promise<ScenarioBundleReceipt | null>;
   exportingBundle: boolean;
@@ -117,7 +118,7 @@ function DeliverableCard({ step, state, run, poolById, example, onPreview }: {
 }
 
 export function ScenarioStudioView({
-  scenario, run, api, toast, poolItems, onAddPoolItems, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
+  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
 }: ScenarioStudioViewProps) {
   const { t, locale } = useI18n();
   const studio = scenarioStudio(scenario.id);
@@ -239,13 +240,17 @@ export function ScenarioStudioView({
     setProduct(next);
     update(productBrief(next, briefFieldIds));
     const known = new Set(poolItems.flatMap(item => item.ref.type === 'asset' ? [item.ref.assetId + '/' + item.ref.versionId] : []));
+    // Photos of a previously picked product leave this run; other reference images stay.
+    const keep = new Set(next.images.map(image => image.assetId + '/' + image.versionId));
+    const stale = poolItems.filter(item => item.tags.includes('product') && !(item.ref.type === 'asset' && keep.has(item.ref.assetId + '/' + item.ref.versionId)));
     const items = next.images
       .filter(image => !known.has(image.assetId + '/' + image.versionId))
       .map(image => ({ ref: { type: 'asset' as const, assetId: image.assetId, versionId: image.versionId }, label: `${next.name} · ${image.name}`, tags: ['product'], stepId: null, source: 'upload' as const }));
-    if (!items.length) return;
+    if (!items.length && !stale.length) return;
     try {
       await api.ensureRun();
-      await onAddPoolItems(items);
+      for (const item of stale) await onRemovePoolItem(item.id);
+      if (items.length) await onAddPoolItems(items);
     } catch {
       toast.showToast(t('Could not add the product photos'), 'error', 'feedback');
     }
@@ -372,7 +377,7 @@ export function ScenarioStudioView({
           <h2>{t('Your kit')}</h2>
           <span className="om-studio-progress">{t('{ready} of {total} ready', { ready: readyCount, total: chosen.length })}</span>
           <Button variant="secondary" size="sm" icon={<RemixIcon name="download-2-line" size={14} />} disabled={!run || readyCount === 0 || exportingBundle}
-            onClick={() => void onExportBundle()}>
+            onClick={() => void onExportBundle({ stepIds: ['brief', ...chosen.map(step => step.id)].filter(id => scenario.steps.some(step => step.id === id)) })}>
             {t('Download the kit')}
           </Button>
         </header>

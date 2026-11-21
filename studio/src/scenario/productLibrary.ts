@@ -61,8 +61,9 @@ export function removeProduct(id: string): StudioProduct[] {
 export function productBrief(product: StudioProduct, fieldIds: ReadonlySet<string>): Record<string, string> {
   const brief: Record<string, string> = {};
   if (fieldIds.has('productName')) brief.productName = product.name;
-  if (fieldIds.has('productDescription') && product.description) brief.productDescription = product.description;
-  if (fieldIds.has('pageUrl') && product.url) brief.pageUrl = product.url;
+  // Write empty values too, so switching products never keeps the previous product's details or link.
+  if (fieldIds.has('productDescription')) brief.productDescription = product.description;
+  if (fieldIds.has('pageUrl')) brief.pageUrl = product.url;
   return brief;
 }
 

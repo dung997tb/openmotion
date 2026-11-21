@@ -607,6 +607,7 @@ export function ScenarioWorkspace({
   const handleExportBundle = useCallback(
     async (options?: {
       poolItemIds?: string[];
+      stepIds?: string[];
       activeOnly?: boolean;
       includeStandaloneHtml?: boolean;
       includeMotionSource?: boolean;
@@ -622,6 +623,7 @@ export function ScenarioWorkspace({
             includeStandaloneHtml: options?.includeStandaloneHtml ?? true,
             includeMotionSource: options?.includeMotionSource ?? false,
             ...(options?.poolItemIds?.length ? { poolItemIds: options.poolItemIds } : {}),
+            ...(!options?.poolItemIds?.length && options?.stepIds?.length ? { stepIds: options.stepIds } : {}),
           },
         );
         const downloadUrl = bundleDownloadUrl(res.bundle.bundleId);
@@ -1149,6 +1151,7 @@ export function ScenarioWorkspace({
               toast={stepToast}
               poolItems={poolItems}
               onAddPoolItems={handleAddPoolItems}
+              onRemovePoolItem={handleRemovePoolItem}
               onCopyAgentPrompt={handleCopyAgentPrompt}
               onExportBundle={handleExportBundle}
               exportingBundle={exportingBundle}
