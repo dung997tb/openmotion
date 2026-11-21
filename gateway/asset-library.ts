@@ -6,6 +6,8 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import type { WorkspaceStore } from '../workspace.ts';
 import { MAX_ASSET_BYTES } from '../shared/asset-limits.ts';
+import { AUDIO_KINDS, classifyAudioKind } from '../shared/audio-kind.ts';
+import { knownSpeechVoiceName } from '../shared/generation-options.ts';
 import { assetVersion, type AssetListInput, type AssetReference, type AssetVersion, type LibraryAsset, type LibraryGeneration } from '../shared/asset-library.ts';
 import { probeLibraryMedia } from './asset-probe.ts';
 
@@ -34,13 +36,25 @@ export class AssetLibrary {
   async list(input: AssetListInput = {}) {
     const { offset = 0, limit = 60 } = input;
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid asset pagination');
-    if (input.modality && !['image', 'video', 'audio'].includes(input.modality) || input.source && !['upload', 'generated'].includes(input.source)
+    if (input.modality && !['image', 'video', 'audio'].includes(input.modality)
+      || input.audioKind && !AUDIO_KINDS.includes(input.audioKind)
+      || input.source && !['upload', 'generated'].includes(input.source)
       || input.sort && !['newest', 'oldest', 'name'].includes(input.sort) || input.query && (typeof input.query !== 'string' || input.query.length > 200)) throw new Error('Invalid asset filter');
     const names = await readdir(await this.file('records')).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; });
     const query = input.query?.trim().toLocaleLowerCase();
     const all = (await Promise.all(names.filter(name => name.endsWith('.json') && libraryId(name.slice(0, -5))).map(name => this.get(name.slice(0, -5)))))
-      .filter(asset => Boolean(asset.trashedAt) === Boolean(input.trash) && (!input.modality || asset.modality === input.modality)
-        && (!input.source || assetVersion(asset)?.source === input.source) && (!query || `${asset.name} ${asset.versions.map(v => `${v.prompt ?? ''} ${v.model ?? ''}`).join(' ')}`.toLocaleLowerCase().includes(query)))
+      .filter(asset => {
+        const current = assetVersion(asset);
+        if (Boolean(asset.trashedAt) !== Boolean(input.trash)) return false;
+        if (input.modality && asset.modality !== input.modality) return false;
+        if (input.audioKind && (asset.modality !== 'audio' || classifyAudioKind(current?.model, undefined, current?.source) !== input.audioKind)) return false;
+        if (input.source && current?.source !== input.source) return false;
+        if (query) {
+          const haystack = `${asset.name} ${asset.versions.map(v => `${v.prompt ?? ''} ${v.model ?? ''} ${typeof v.parameters?.voice === 'string' ? v.parameters.voice : ''} ${knownSpeechVoiceName(v.parameters?.voice) ?? ''}`).join(' ')}`.toLocaleLowerCase();
+          if (!haystack.includes(query)) return false;
+        }
+        return true;
+      })
       .sort((a, b) => input.sort === 'name' ? a.name.localeCompare(b.name) : input.sort === 'oldest' ? a.updatedAt - b.updatedAt : b.updatedAt - a.updatedAt);
     return { assets: all.slice(offset, offset + limit), total: all.length, nextOffset: offset + limit < all.length ? offset + limit : null };
   }
@@ -103,7 +117,7 @@ export class AssetLibrary {
       await rename(prepared.file, target);
       const now = Date.now();
       const version: AssetVersion = { ...input.version, id: versionId, createdAt: now, filename, name: input.name, mimeType: media.mimeType, bytes, sha256,
-        ...(media.width ? { width: media.width, height: media.height } : {}), ...(media.duration ? { duration: media.duration } : {}) };
+        ...(media.width ? { width: media.width, height: media.height } : {}), ...(media.duration ? { duration: media.duration } : {}), ...(media.waveform ? { waveform: media.waveform } : {}) };
       const asset: LibraryAsset = existing ?? { id, name: assetName(input.name), modality: media.modality, createdAt: now, updatedAt: now, currentVersionId: versionId, versions: [] };
       asset.versions.push(version); asset.currentVersionId = versionId; asset.updatedAt = now;
       await atomicAssetJson(await this.file(`records/${id}.json`), asset);
