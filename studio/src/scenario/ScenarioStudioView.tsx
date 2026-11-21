@@ -71,49 +71,47 @@ const stateLabels: Record<DeliverableState, string> = { waiting: 'Not started', 
 export const restoredStatus = (state: ScenarioStepState | undefined): ScenarioStepState['status'] =>
   latestIteration(state)?.outputs.length ? 'done' : 'todo';
 
-function DeliverableCard({ step, state, run, poolById, example, onPreview }: {
+/** Everything a step has made so far: its pool items, newest first, plus text outputs of the shown version. */
+function stepOutputs(step: ScenarioStepDefinition, state: ScenarioStepState | undefined, run: ScenarioRun | null, poolById: Map<string, PoolItem>) {
+  const seen = new Set<string>();
+  const items: PoolItem[] = [];
+  const add = (item: PoolItem | undefined) => { if (item && !seen.has(item.id)) { seen.add(item.id); items.push(item); } };
+  for (const iteration of [...(state?.iterations ?? [])].reverse()) {
+    for (const output of iteration.outputs) if (output.type === 'pool') add(poolById.get(output.poolItemId));
+  }
+  for (const item of run?.pool ?? []) if (item.stepId === step.id) add(item);
+  const iteration = latestIteration(state);
+  const posts = iteration?.outputs.flatMap(output => output.type === 'social' ? output.posts : []) ?? [];
+  const scripts = iteration?.outputs.flatMap(output => output.type === 'script' ? [output.text] : []) ?? [];
+  return { items, posts, scripts };
+}
+
+/** A deliverable tab: the top row switches which output is shown below. */
+function DeliverableTab({ step, state, cover, example, selected, onSelect }: {
   step: ScenarioStepDefinition;
   state: ScenarioStepState | undefined;
-  run: ScenarioRun | null;
-  poolById: Map<string, PoolItem>;
+  cover: { item: PoolItem; run: ScenarioRun | null } | null;
   example: string | undefined;
-  /** Opens a made output full size; the workflow itself opens only from Fine-tune each step. */
-  onPreview(item: PoolItem): void;
+  selected: boolean;
+  onSelect(): void;
 }) {
   const { t } = useI18n();
   const status = deliverableState(state);
-  const iteration = latestIteration(state);
-  const poolItem = iteration?.outputs
-    .map(output => output.type === 'pool' ? poolById.get(output.poolItemId) : undefined)
-    .find((item): item is PoolItem => Boolean(item))
-    ?? run?.pool.find(item => item.stepId === step.id);
-  const posts = iteration?.outputs.find(output => output.type === 'social');
-  const body = (
-    <>
+  return (
+    <Button variant="plain" role="tab" aria-selected={selected} className="om-studio-output" data-studio-output={step.id}
+      data-output-state={status} onClick={onSelect}>
       <span className="om-studio-output-art" aria-hidden="true">
-        {poolItem ? <PoolThumb item={poolItem} run={run} size="lg" />
-          : posts && posts.type === 'social' ? <span className="om-studio-output-text">
-            <RemixIcon name="chat-1-line" size={20} />
-            <strong>{t('{count} posts', { count: posts.posts.length })}</strong>
-          </span>
+        {cover ? <PoolThumb item={cover.item} run={cover.run} size="lg" />
           : example ? <img src={example} alt="" loading="lazy" />
           : <RemixIcon name={step.icon} size={24} />}
-        {!poolItem && !posts && example && <span className="om-studio-output-example">{t('Example output')}</span>}
+        {!cover && example && <span className="om-studio-output-example">{t('Example output')}</span>}
       </span>
       <span className="om-studio-output-meta">
         <RemixIcon name={step.icon} size={14} aria-hidden="true" />
         <strong>{t(step.title)}</strong>
         <span className="om-studio-output-state" data-output-state={status}>{t(stateLabels[status])}</span>
       </span>
-    </>
-  );
-  return poolItem ? (
-    <Button variant="plain" className="om-studio-output" data-studio-output={step.id} data-output-state={status}
-      aria-label={`${t('Preview')} · ${t(step.title)}`} onClick={() => onPreview(poolItem)}>
-      {body}
     </Button>
-  ) : (
-    <div className="om-studio-output" data-studio-output={step.id} data-output-state={status}>{body}</div>
   );
 }
 
@@ -215,6 +213,8 @@ export function ScenarioStudioView({
   const chosen = deliverables.filter(step => run?.steps[step.id]?.status !== 'skipped');
   const [toggling, setToggling] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<PoolItem | null>(null);
+  const [shownStepId, setShownStepId] = useState<string | null>(null);
+  const shownStep = deliverables.find(step => step.id === shownStepId) ?? chosen[0] ?? deliverables[0];
   const toggleDeliverable = async (stepId: string, include: boolean) => {
     if (toggling) return;
     if (!include && chosen.length <= 1) {
@@ -236,9 +236,18 @@ export function ScenarioStudioView({
   };
 
   /** A picked product fills the brief and puts its photos in the run's Assets for every step. */
-  const selectProduct = async (next: StudioProduct) => {
+  // Product switches run one after another against the latest Assets, and the hand-off waits for them.
+  const poolRef = useRef(poolItems);
+  poolRef.current = poolItems;
+  const productSync = useRef<Promise<boolean>>(Promise.resolve(true));
+  const selectProduct = (next: StudioProduct) => {
     setProduct(next);
     update(productBrief(next, briefFieldIds));
+    productSync.current = productSync.current.then(() => syncProductPhotos(next));
+    return productSync.current;
+  };
+  const syncProductPhotos = async (next: StudioProduct) => {
+    const poolItems = poolRef.current;
     const known = new Set(poolItems.flatMap(item => item.ref.type === 'asset' ? [item.ref.assetId + '/' + item.ref.versionId] : []));
     // Photos of a previously picked product leave this run; other reference images stay.
     const keep = new Set(next.images.map(image => image.assetId + '/' + image.versionId));
@@ -246,19 +255,21 @@ export function ScenarioStudioView({
     const items = next.images
       .filter(image => !known.has(image.assetId + '/' + image.versionId))
       .map(image => ({ ref: { type: 'asset' as const, assetId: image.assetId, versionId: image.versionId }, label: `${next.name} · ${image.name}`, tags: ['product'], stepId: null, source: 'upload' as const }));
-    if (!items.length && !stale.length) return;
+    if (!items.length && !stale.length) return true;
     try {
       await api.ensureRun();
       for (const item of stale) await onRemovePoolItem(item.id);
       if (items.length) await onAddPoolItems(items);
+      return true;
     } catch {
       toast.showToast(t('Could not add the product photos'), 'error', 'feedback');
+      return false;
     }
   };
 
   /** Leave the studio only after the typed brief is saved, so nothing typed is lost. */
   const leaveAfterSave = async (leave: () => void) => {
-    if (await flush()) { leave(); return; }
+    if ((await productSync.current) && (await flush())) { leave(); return; }
     toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
   };
 
@@ -278,6 +289,7 @@ export function ScenarioStudioView({
     setMaking(true);
     try {
       // Only hand over a brief the run has saved, so the Agent never gets stale fields.
+      if (!(await productSync.current)) return;
       if (!(await flush())) {
         toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
         return;
@@ -381,12 +393,71 @@ export function ScenarioStudioView({
             {t('Download the kit')}
           </Button>
         </header>
-        <div className="om-studio-output-grid">
-          {deliverables.map(step => (
-            <DeliverableCard key={step.id} step={step} state={run?.steps[step.id]} run={run} poolById={poolById}
-              example={examples.get(step.id)} onPreview={setPreviewItem} />
-          ))}
+        <div className="om-studio-output-grid" role="tablist" aria-label={t('Your kit')}>
+          {deliverables.map(step => {
+            const first = stepOutputs(step, run?.steps[step.id], run, poolById).items[0];
+            return (
+              <DeliverableTab key={step.id} step={step} state={run?.steps[step.id]} example={examples.get(step.id)}
+                cover={first ? { item: first, run } : null} selected={step.id === shownStep?.id} onSelect={() => setShownStepId(step.id)} />
+            );
+          })}
         </div>
+        {shownStep && (() => {
+          const state = run?.steps[shownStep.id];
+          const status = deliverableState(state);
+          const { items, posts, scripts } = stepOutputs(shownStep, state, run, poolById);
+          const empty = !items.length && !posts.length && !scripts.length;
+          return (
+            <div className="om-studio-output-panel" role="tabpanel" data-studio-output-panel={shownStep.id}>
+              <header>
+                <RemixIcon name={shownStep.icon} size={16} aria-hidden="true" />
+                <strong>{t(shownStep.title)}</strong>
+                <span className="om-studio-output-state" data-output-state={status}>{t(stateLabels[status])}</span>
+                {!empty && <span className="om-studio-output-count">{t('{count} outputs', { count: items.length + posts.length + scripts.length })}</span>}
+              </header>
+              {empty ? (
+                <div className="om-studio-output-empty">
+                  {examples.get(shownStep.id) && (
+                    <span className="om-studio-output-empty-art">
+                      <img src={examples.get(shownStep.id)} alt="" />
+                      <span className="om-studio-output-example">{t('Example output')}</span>
+                    </span>
+                  )}
+                  <p>{status === 'skipped' ? t('Not made this time. Tick it under Outputs this time to include it.')
+                    : status === 'making' ? t('In the making. It appears here as soon as it is ready.')
+                    : t('Nothing made yet. Click Make the full kit and it appears here.')}</p>
+                </div>
+              ) : (
+                <>
+                  {items.length > 0 && (
+                    <div className="om-studio-output-items">
+                      {items.map(item => (
+                        <Button key={item.id} variant="plain" className="om-studio-output-item" aria-label={`${t('Preview')} · ${item.label}`}
+                          onClick={() => setPreviewItem(item)}>
+                          <PoolThumb item={item} run={run} size="lg" />
+                          <span>{item.label}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                  {posts.length > 0 && (
+                    <div className="om-studio-output-posts">
+                      {posts.map(post => (
+                        <article key={post.id} className="om-studio-output-post">
+                          <strong>{post.platform}</strong>
+                          {post.title && <h3>{post.title}</h3>}
+                          <p>{post.text}</p>
+                          {post.hashtags.length > 0 && <span>{post.hashtags.map(tag => '#' + tag.replace(/^#/, '')).join(' ')}</span>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  {scripts.map((text, index) => <pre key={index} className="om-studio-output-script">{text}</pre>)}
+                </>
+              )}
+            </div>
+          );
+        })()}
         <PoolItemPreviewDialog item={previewItem} run={run} canUseInCurrentStep={false} onClose={() => setPreviewItem(null)} />
         <Button variant="plain" size="sm" className="om-studio-workflow-link" icon={<RemixIcon name="route-line" size={14} />} onClick={() => void leaveAfterSave(onSwitchToManual)}>
           {t('Fine-tune each step')}

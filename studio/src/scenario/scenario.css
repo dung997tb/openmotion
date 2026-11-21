@@ -4814,3 +4814,146 @@ div.om-studio-output {
 div.om-studio-output:hover {
   border-color: var(--motion-border-subtle);
 }
+
+/* Deliverable tabs on top, the chosen deliverable's outputs below. */
+.om-studio-output[aria-selected="true"] {
+  border-color: var(--motion-accent);
+  box-shadow: 0 0 0 1px var(--motion-accent);
+}
+
+.om-studio-output-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-12);
+  min-height: 220px;
+  padding: var(--motion-space-14);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-inset);
+}
+
+.om-studio-output-panel > header {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  color: var(--motion-strong);
+  font-size: var(--motion-text-sm);
+}
+
+.om-studio-output-count {
+  margin-left: auto;
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-output-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--motion-space-10);
+  padding: var(--motion-space-8) 0;
+  color: var(--motion-muted);
+  font-size: var(--motion-text-sm);
+  text-align: center;
+}
+
+.om-studio-output-empty p {
+  margin: 0;
+}
+
+.om-studio-output-empty-art {
+  position: relative;
+  width: min(480px, 100%);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--motion-radius-md);
+}
+
+.om-studio-output-empty-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.7;
+}
+
+.om-studio-output-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--motion-space-10);
+}
+
+.om-studio-output-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-6);
+  min-width: 0;
+  padding: var(--motion-space-6);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-raised);
+  color: var(--motion-text);
+  font-size: var(--motion-text-xs);
+  text-align: left;
+}
+
+.om-studio-output-item:hover {
+  border-color: var(--motion-border-strong);
+}
+
+.om-studio-output-item > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-studio-output-posts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--motion-space-10);
+}
+
+.om-studio-output-post {
+  display: grid;
+  align-content: start;
+  gap: var(--motion-space-6);
+  padding: var(--motion-space-10);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-raised);
+  color: var(--motion-text);
+  font-size: var(--motion-text-sm);
+  line-height: var(--motion-leading-body);
+}
+
+.om-studio-output-post strong {
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+  text-transform: uppercase;
+}
+
+.om-studio-output-post h3,
+.om-studio-output-post p {
+  margin: 0;
+}
+
+.om-studio-output-post > span {
+  color: var(--motion-accent);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-output-script {
+  margin: 0;
+  padding: var(--motion-space-10);
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-raised);
+  color: var(--motion-text);
+  font-size: var(--motion-text-sm);
+  white-space: pre-wrap;
+}
+
+/* The deliverable tabs always stay one row; narrow screens scroll it sideways. */
+.om-studio-output-grid[role="tablist"] {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 1fr);
+  overflow-x: auto;
+}

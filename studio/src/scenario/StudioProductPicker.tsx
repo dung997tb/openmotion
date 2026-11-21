@@ -10,8 +10,8 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { uploadLibraryAsset } from '../motion/assetClient';
 import { MAX_PRODUCT_IMAGES, readProducts, saveProduct, type StudioProduct, type StudioProductImage } from './productLibrary';
 
-type Draft = { name: string; url: string; description: string; images: StudioProductImage[] };
-const emptyDraft: Draft = { name: '', url: '', description: '', images: [] };
+type Draft = { key: string; name: string; url: string; description: string; images: StudioProductImage[] };
+const newDraft = (): Draft => ({ key: crypto.randomUUID(), name: '', url: '', description: '', images: [] });
 
 const imageUrl = (image: StudioProductImage) => assetMediaUrl(image.assetId, image.versionId);
 
@@ -41,6 +41,7 @@ export function StudioProductPicker({ selected, onSelect, toast }: {
   const addImages = async (files: File[]) => {
     const images = files.filter(file => file.type.startsWith('image/'));
     if (!images.length || !draft) return;
+    const draftKey = draft.key;
     const room = MAX_PRODUCT_IMAGES - draft.images.length;
     if (images.length > room) toast.showToast(t('Up to {count} product photos', { count: MAX_PRODUCT_IMAGES }), 'error', 'feedback');
     setUploading(true);
@@ -54,7 +55,8 @@ export function StudioProductPicker({ selected, onSelect, toast }: {
           toast.showToast(t('Could not upload {name}', { name: file.name }), 'error', 'feedback');
         }
       }
-      setDraft(current => current ? { ...current, images: [...current.images, ...added].slice(0, MAX_PRODUCT_IMAGES) } : current);
+      // Photos land only in the draft that started the upload, never in one opened after cancelling it.
+      setDraft(current => current && current.key === draftKey ? { ...current, images: [...current.images, ...added].slice(0, MAX_PRODUCT_IMAGES) } : current);
     } finally {
       setUploading(false);
     }
@@ -200,7 +202,7 @@ export function StudioProductPicker({ selected, onSelect, toast }: {
               </div>
             ) : (
               <div className="om-studio-product-grid">
-                <Button variant="plain" className="om-studio-product-card om-studio-product-card-add" data-product-add onClick={() => setDraft(emptyDraft)}>
+                <Button variant="plain" className="om-studio-product-card om-studio-product-card-add" data-product-add onClick={() => setDraft(newDraft())}>
                   <span className="om-studio-product-card-art"><span className="om-studio-product-entry-icon"><RemixIcon name="add-line" size={18} /></span></span>
                   <strong>{t('Add a product')}</strong>
                 </Button>

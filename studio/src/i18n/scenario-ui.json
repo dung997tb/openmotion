@@ -992,7 +992,11 @@
     "Products you add appear here and work in every product studio.": "你添加的产品都会显示在这里，所有产品类工作室都能用。",
     "Back": "返回",
     "Cancel": "取消",
-    "Preview": "预览"
+    "Preview": "预览",
+    "{count} outputs": "{count} 个产出",
+    "Not made this time. Tick it under Outputs this time to include it.": "本次不生成。在左侧「本次产出」里勾选即可加入。",
+    "In the making. It appears here as soon as it is ready.": "制作中，做好后会立刻出现在这里。",
+    "Nothing made yet. Click Make the full kit and it appears here.": "还没有产出。点「一键生成整套」后会出现在这里。"
   },
   "ja": {
     "$129": "¥19,800",
@@ -1987,7 +1991,11 @@
     "Products you add appear here and work in every product studio.": "追加した商品はここに表示され、すべての商品系スタジオで使えます。",
     "Back": "戻る",
     "Cancel": "キャンセル",
-    "Preview": "プレビュー"
+    "Preview": "プレビュー",
+    "{count} outputs": "{count} 件の出力",
+    "Not made this time. Tick it under Outputs this time to include it.": "今回は作成しません。左の「今回の出力」でチェックすると追加されます。",
+    "In the making. It appears here as soon as it is ready.": "作成中です。完成するとすぐここに表示されます。",
+    "Nothing made yet. Click Make the full kit and it appears here.": "まだ出力はありません。「一式を作成」を押すとここに表示されます。"
   },
   "ko": {
     "$129": "₩169,000",
@@ -2982,7 +2990,11 @@
     "Products you add appear here and work in every product studio.": "추가한 상품이 여기에 표시되며 모든 상품 스튜디오에서 쓸 수 있습니다.",
     "Back": "뒤로",
     "Cancel": "취소",
-    "Preview": "미리보기"
+    "Preview": "미리보기",
+    "{count} outputs": "결과물 {count}개",
+    "Not made this time. Tick it under Outputs this time to include it.": "이번엔 만들지 않습니다. 왼쪽 「이번 결과물」에서 체크하면 포함됩니다.",
+    "In the making. It appears here as soon as it is ready.": "제작 중입니다. 완성되면 바로 여기에 표시됩니다.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "아직 결과물이 없습니다. 「한 세트 만들기」를 누르면 여기에 표시됩니다."
   },
   "de": {
     "$129": "129 €",
@@ -3977,7 +3989,11 @@
     "Products you add appear here and work in every product studio.": "Hinzugefügte Produkte erscheinen hier und funktionieren in jedem Produkt-Studio.",
     "Back": "Zurück",
     "Cancel": "Abbrechen",
-    "Preview": "Vorschau"
+    "Preview": "Vorschau",
+    "{count} outputs": "{count} Ergebnisse",
+    "Not made this time. Tick it under Outputs this time to include it.": "Diesmal nicht erstellt. Unter „Diesmal erstellen“ anhaken, um es aufzunehmen.",
+    "In the making. It appears here as soon as it is ready.": "In Arbeit. Es erscheint hier, sobald es fertig ist.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Noch nichts erstellt. Klicke auf „Ganzes Kit erstellen“, dann erscheint es hier."
   },
   "fr": {
     "$129": "129 €",
@@ -4972,7 +4988,11 @@
     "Products you add appear here and work in every product studio.": "Les produits ajoutés apparaissent ici et servent dans chaque studio produit.",
     "Back": "Retour",
     "Cancel": "Annuler",
-    "Preview": "Aperçu"
+    "Preview": "Aperçu",
+    "{count} outputs": "{count} livrables",
+    "Not made this time. Tick it under Outputs this time to include it.": "Pas créé cette fois. Cochez-le dans « Livrables cette fois » pour l’inclure.",
+    "In the making. It appears here as soon as it is ready.": "En cours. Il apparaît ici dès qu’il est prêt.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Rien de créé pour l’instant. Cliquez sur « Créer le kit complet » et il apparaîtra ici."
   },
   "ru": {
     "$129": "129 $",
@@ -5967,7 +5987,11 @@
     "Products you add appear here and work in every product studio.": "Добавленные товары появляются здесь и работают во всех товарных студиях.",
     "Back": "Назад",
     "Cancel": "Отмена",
-    "Preview": "Просмотр"
+    "Preview": "Просмотр",
+    "{count} outputs": "Результатов: {count}",
+    "Not made this time. Tick it under Outputs this time to include it.": "В этот раз не создаётся. Отметьте его в «Что создать сейчас», чтобы добавить.",
+    "In the making. It appears here as soon as it is ready.": "В работе. Появится здесь, как только будет готово.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Пока ничего нет. Нажмите «Создать весь набор», и результат появится здесь."
   },
   "es": {
     "$129": "$129",
@@ -6962,7 +6986,11 @@
     "Products you add appear here and work in every product studio.": "Los productos que añadas aparecen aquí y sirven en cada estudio de producto.",
     "Back": "Atrás",
     "Cancel": "Cancelar",
-    "Preview": "Vista previa"
+    "Preview": "Vista previa",
+    "{count} outputs": "{count} resultados",
+    "Not made this time. Tick it under Outputs this time to include it.": "No se crea esta vez. Márcalo en «Resultados esta vez» para incluirlo.",
+    "In the making. It appears here as soon as it is ready.": "En curso. Aparecerá aquí en cuanto esté listo.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Aún no hay nada. Pulsa «Crear el kit completo» y aparecerá aquí."
   },
   "pt-BR": {
     "$129": "R$ 599",
@@ -7957,7 +7985,11 @@
     "Products you add appear here and work in every product studio.": "Os produtos adicionados aparecem aqui e funcionam em todo estúdio de produto.",
     "Back": "Voltar",
     "Cancel": "Cancelar",
-    "Preview": "Pré-visualizar"
+    "Preview": "Pré-visualizar",
+    "{count} outputs": "{count} entregas",
+    "Not made this time. Tick it under Outputs this time to include it.": "Não será criado desta vez. Marque em «Entregas desta vez» para incluir.",
+    "In the making. It appears here as soon as it is ready.": "Em produção. Aparece aqui assim que ficar pronto.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Nada criado ainda. Clique em «Criar o kit completo» e aparecerá aqui."
   },
   "it": {
     "$129": "129 €",
@@ -8952,7 +8984,11 @@
     "Products you add appear here and work in every product studio.": "I prodotti aggiunti compaiono qui e valgono in ogni studio prodotto.",
     "Back": "Indietro",
     "Cancel": "Annulla",
-    "Preview": "Anteprima"
+    "Preview": "Anteprima",
+    "{count} outputs": "{count} risultati",
+    "Not made this time. Tick it under Outputs this time to include it.": "Non creato questa volta. Spuntalo in «Risultati questa volta» per includerlo.",
+    "In the making. It appears here as soon as it is ready.": "In lavorazione. Comparirà qui appena pronto.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Ancora niente. Clicca «Crea il kit completo» e comparirà qui."
   },
   "tr": {
     "$129": "129 $",
@@ -9947,6 +9983,10 @@
     "Products you add appear here and work in every product studio.": "Eklediğin ürünler burada görünür ve tüm ürün stüdyolarında kullanılır.",
     "Back": "Geri",
     "Cancel": "İptal",
-    "Preview": "Önizleme"
+    "Preview": "Önizleme",
+    "{count} outputs": "{count} çıktı",
+    "Not made this time. Tick it under Outputs this time to include it.": "Bu sefer oluşturulmuyor. Eklemek için «Bu seferki çıktılar»da işaretle.",
+    "In the making. It appears here as soon as it is ready.": "Hazırlanıyor. Hazır olunca hemen burada görünür.",
+    "Nothing made yet. Click Make the full kit and it appears here.": "Henüz bir şey yok. «Tüm kiti oluştur»a tıkla, burada görünür."
   }
 }
