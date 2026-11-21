@@ -262,10 +262,11 @@ export function MotionPanel({
               <Button
                 variant="secondary"
                 size="sm"
-                icon={<RemixIcon name="clipboard-line" size={14} />}
+                icon={<RemixIcon name="plug-line" size={14} />}
+                title={t('Copy MCP prompt')}
                 onClick={() => void handleCopyMotionHandoff()}
               >
-                {t('Copy for Agent')}
+                MCP
               </Button>
             </div>
           </div>

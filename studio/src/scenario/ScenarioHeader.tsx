@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import type {
-  ScenarioDefinition,
-  ScenarioWorkspaceMode,
+import {
+  cleanLegacyScenarioTitle,
+  type ScenarioDefinition,
+  type ScenarioWorkspaceMode,
 } from '../../../shared/scenarios';
 import type { ScenarioRun, ScenarioRunSummary } from '../../../shared/scenario-runs';
 import { FieldInput } from '../components/ui/FormField';
@@ -13,21 +14,8 @@ import { RemixIcon } from '../icons/RemixIcons';
 
 const QUICK_RUN_MENU_LIMIT = 5;
 
-const LEGACY_TITLE_PREFIXES: readonly [RegExp, string][] = [
-  [/^Motion Studio full chain\b/i, 'Motion Studio'],
-  [/^Design Studio full chain\b/i, 'Design Studio'],
-  [/^Black Friday e-commerce\b/i, 'Black Friday Sale'],
-];
-
 function cleanDraftTitle(title: string): string {
-  let out = title.trim();
-  for (const [pattern, replacement] of LEGACY_TITLE_PREFIXES) {
-    if (pattern.test(out)) {
-      out = out.replace(pattern, replacement);
-      break;
-    }
-  }
-  return out;
+  return cleanLegacyScenarioTitle(title);
 }
 
 function escapeRegExp(value: string): string {
@@ -429,10 +417,11 @@ export function ScenarioHeader({
             size="sm"
             type="button"
             className="om-scenario-desktop-action"
-            icon={<RemixIcon name="robot-line" size={15} />}
+            icon={<RemixIcon name="plug-line" size={15} />}
+            title={t('Copy MCP prompt')}
             onClick={onCopyAgentHandoff}
           >
-            {t('Copy for Agent')}
+            MCP
           </Button>
         )}
 
@@ -463,10 +452,10 @@ export function ScenarioHeader({
             }
           >
             <MenuItem
-              icon={<RemixIcon name="robot-line" size={14} />}
+              icon={<RemixIcon name="plug-line" size={14} />}
               onClick={onCopyAgentHandoff}
             >
-              {t('Copy for Agent')}
+              MCP
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="download-2-line" size={14} />}

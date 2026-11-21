@@ -48,10 +48,10 @@ const slides: FeaturedSlide[] = [{
   return { ...example, id, icon: scene.icon, subtitle: target.studio.title, hint: scene.hint, scene: { target, prompt: example.prompt }, scenario: 'design-full-chain' as ScenarioId };
 }), {
   id: 'ai-influencer',
-  title: 'AI Influencer',
+  title: 'Virtual Creator Episode',
   subtitle: 'Roles',
   icon: 'user-3-line',
-  hint: 'Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.',
+  hint: 'Script, consistent persona visuals, bio page, voiceover, and talking video',
   poster: aiInfluencerMarketing,
   scenario: 'ai-influencer',
 }];

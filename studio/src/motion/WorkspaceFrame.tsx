@@ -202,7 +202,6 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   useEffect(() => setSidebarOpen(editorRoute && !narrow), [editorRoute, narrow]);
   const navigationCollapsed = !editorActive;
   const toggleSidebar = useCallback(() => setSidebarOpen(open => !open), []);
-  const openMotionTemplates = () => { navigatePage({ motion: true, templates: false }); if (narrow) setSidebarOpen(false); };
   const openEditor = () => { navigatePage({ motion: false, templates: false }); if (narrow) setSidebarOpen(false); };
   const [assetsVisited, setAssetsVisited] = useState(assetsOpen);
   useEffect(() => { if (assetsOpen) setAssetsVisited(true); }, [assetsOpen]);
@@ -269,16 +268,21 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   // Hiding a notice never clears an editor's write guard. New errors reset the dismissal.
   const visibleNotice = notice && dismissedNotice !== noticeKey;
   if (!notice && dismissedNotice !== null) setDismissedNotice(null);
+  const openLibrary: WorkspaceChrome['openLibrary'] = (trigger, template, collection) => {
+    if (templatesPage && !page.creators && page.templateCollection === (collection ?? null) && !template) return;
+    libraryTrigger.current = trigger ?? null;
+    workspace.clearError();
+    const openCollection = Boolean(collection) || !template;
+    cardPreview.current = !openCollection && template ? { template, locale } : null;
+    navigatePage({ templates: openCollection, template: template?.id ?? null, templateCollection: openCollection ? (collection ?? null) : null, creators: false, creator: null, ...(page.templateCollection === 'black-friday' && { skill: null }) },
+      false, collection === 'black-friday' && page.explore && !connectionsOpen ? 'from-page' : undefined);
+  };
+  const openMotionTemplates = (trigger?: HTMLElement) => {
+    openLibrary(trigger);
+    if (narrow) setSidebarOpen(false);
+  };
   const value: WorkspaceChrome = { workspace, switchingDisabled, saveState: editorState?.saveState || saveState, registerEditor, beforeViewChange,
-    openLibrary: (trigger, template, collection) => {
-      if (templatesPage && !page.creators && page.templateCollection === (collection ?? null) && !template) return;
-      libraryTrigger.current = trigger ?? null;
-      workspace.clearError();
-      const openCollection = Boolean(collection) || !template;
-      cardPreview.current = !openCollection && template ? { template, locale } : null;
-      navigatePage({ templates: openCollection, template: template?.id ?? null, templateCollection: openCollection ? (collection ?? null) : null, creators: false, creator: null, ...(page.templateCollection === 'black-friday' && { skill: null }) },
-        false, collection === 'black-friday' && page.explore && !connectionsOpen ? 'from-page' : undefined);
-    },
+    openLibrary,
     openConnections: entry => {
       connectionEntry.current = entry;
       navigatePage({ settings: 'mcp', templates: false }, false, 'from-page');
@@ -567,7 +571,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
 function WorkspaceSidebar({ archives, currentId, close, expand, query, setQuery, onNavigate, openSettings, openTemplates }: {
   archives: ProjectArchiveActions; currentId?: string; close: () => void; expand?: () => void; query: string; setQuery: (query: string) => void; onNavigate?: () => void;
   openSettings: (section: SettingsSection) => void;
-  openTemplates: () => void;
+  openTemplates: (trigger?: HTMLElement) => void;
 }) {
   const { t } = useI18n();
   const { workspace, switchingDisabled } = useWorkspaceChrome();
@@ -615,8 +619,10 @@ function WorkspaceSidebar({ archives, currentId, close, expand, query, setQuery,
       </DisclosureRow>)}
     </nav>
     <div className="motion-sidebar-footer">
-      <Button variant="plain" type="button" className="om-nav-item" onClick={() => { openTemplates(); onNavigate?.(); }}><RemixIcon name="movie-line" size={18} />{t('Motion templates')}</Button>
-      <Button variant="plain" className="om-nav-item" type="button" onClick={archives.showManager}><RemixIcon name="folder-open-line" size={18} />{t('All projects')}</Button>
+      <div className="motion-sidebar-footer-actions">
+        <Button variant="plain" type="button" className="om-nav-item" onClick={event => { openTemplates(event.currentTarget); onNavigate?.(); }}><RemixIcon name="movie-line" size={18} />{t('Motion templates')}</Button>
+        <Button variant="plain" className="om-nav-item" type="button" aria-expanded={archives.open} data-active={archives.open || undefined} onClick={archives.showManager}><RemixIcon name="folder-open-line" size={18} />{t('All projects')}</Button>
+      </div>
       <WorkspaceUtilityActions openSettings={section => { close(); openSettings(section); }} />
     </div>
   </aside>;

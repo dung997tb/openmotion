@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import type { ScenarioRun, ScenarioRunSummary, StepIteration } from '../../../shared/scenario-runs';
-import { findScenario, scenarioSkills } from '../../../shared/scenarios';
+import { findScenario, scenarioDefinitions, scenarioSkills } from '../../../shared/scenarios';
 import { I18nProvider } from '../i18n/I18n';
 import { IterationHistory } from './IterationHistory';
 import { ScenarioHub } from './ScenarioHub';
+import { buildShowcaseSlides } from './ScenarioStage';
 import { ScenarioWorkspace } from './ScenarioWorkspace';
 
 const RUN_ID = '11111111-1111-4111-8111-111111111111';
@@ -168,9 +169,9 @@ describe('ScenarioWorkspace', () => {
     expect(commands).toContain('export');
     expect(document.querySelector('.motion-feedback-layer [role="status"]')?.textContent).toContain('Export ready');
 
-    // Copy for Agent copies the prompt and renders a floating toast in .motion-feedback-layer.
+    // MCP copies the prompt and renders a floating toast in .motion-feedback-layer.
     const copyButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(btn =>
-      btn.textContent?.includes('Copy for Agent'),
+      btn.textContent?.trim() === 'MCP',
     )!;
     await act(async () => {
       copyButton.click();
@@ -878,7 +879,7 @@ describe('ScenarioWorkspace', () => {
     expect(showcaseSection.querySelector('.om-agent-showcase-preview')).toBeTruthy();
 
     const copySection = container.querySelector<HTMLElement>('[data-agent-section="copy-agent"]')!;
-    expect(copySection.querySelector('button')?.textContent).toContain('Copy for Agent');
+    expect(copySection.querySelector('button')?.textContent?.trim()).toBe('MCP');
 
     const skillsSection = container.querySelector<HTMLElement>('[data-agent-section="skills-workflow"]')!;
     expect(skillsSection.textContent).toContain('Skills workflow');
@@ -1230,7 +1231,7 @@ describe('ScenarioWorkspace', () => {
 
     const dialog = document.querySelector<HTMLElement>('[data-scenario-run-history="black-friday"]')!;
     expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain('Black Friday Sale · Run history');
+    expect(dialog.textContent).toContain('Black Friday Promo Kit · Run history');
     expect(dialog.querySelectorAll('[data-history-run]')).toHaveLength(7);
 
     // Click "Keep latest 5" -> archives the 2 older non-active drafts cleanly.
@@ -1386,5 +1387,35 @@ describe('ScenarioWorkspace', () => {
       agentBtn.click();
     });
     expect(document.querySelector('.om-scenario-capability-popover')?.textContent).toContain('Copy MCP prompt');
+  });
+
+  it('provides a unique bespoke stage preview poster and matching aspect ratio for every step across all workflows', () => {
+    const seenPosters = new Set<string>();
+    let totalSteps = 0;
+
+    for (const scenario of scenarioDefinitions) {
+      const slides = buildShowcaseSlides(scenario);
+      expect(slides).toHaveLength(scenario.steps.length);
+
+      for (const [index, slide] of slides.entries()) {
+        const step = scenario.steps[index];
+        expect(slide.stepId).toBe(step.id);
+        expect(slide.poster).toBeTruthy();
+        expect(seenPosters.has(slide.poster)).toBe(false);
+        seenPosters.add(slide.poster);
+
+        if (step.type === 'audio') {
+          expect(slide.aspect).toBe('square');
+        } else if (scenario.id === 'ai-influencer' && step.id === 'talking-video') {
+          expect(slide.aspect).toBe('portrait');
+        } else {
+          expect(slide.aspect).toBe('landscape');
+        }
+        totalSteps += 1;
+      }
+    }
+
+    expect(totalSteps).toBe(27);
+    expect(seenPosters.size).toBe(27);
   });
 });

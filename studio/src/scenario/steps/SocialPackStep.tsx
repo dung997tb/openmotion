@@ -404,10 +404,10 @@ export function SocialPackStep({
           <Button
             variant="secondary"
             size="sm"
-            icon={<RemixIcon name="robot-line" size={14} />}
+            icon={<RemixIcon name="plug-line" size={14} />}
             onClick={() => void handleCopyAgentPrompt()}
           >
-            {t('Ask Agent to write')}
+            {t('Write via MCP')}
           </Button>
           <div className="om-step-toolbar-group">
             {posts.length > 0 && (

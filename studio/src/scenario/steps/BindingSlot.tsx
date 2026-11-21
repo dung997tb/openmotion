@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useState, type DragEvent } from 'react';
+import { useId, useState, type DragEvent } from 'react';
 import { assetMediaUrl } from '../../../../shared/asset-library';
 import type { PoolItem } from '../../../../shared/scenario-runs';
 import type { PoolKind } from '../../../../shared/scenarios';
@@ -96,6 +96,7 @@ export function BindingSlot({
   onChanged,
 }: BindingSlotProps) {
   const { t } = useI18n();
+  const labelId = useId();
   const [dragOver, setDragOver] = useState(false);
   const [picking, setPicking] = useState(false);
   const busy = disabled || picking || api.busy.has(`bind:${slot}`);
@@ -193,21 +194,22 @@ export function BindingSlot({
 
   return (
     <div
-      className="om-step-binding-slot"
+      className="om-step-field om-step-binding-slot"
       data-slot={slot}
       data-pool-kind={primaryKind}
       data-has-items={resolvedItems.length > 0 ? 'true' : undefined}
       data-drag-over={dragOver ? 'true' : undefined}
+      data-picking={picking ? 'true' : undefined}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="om-step-binding-head">
+      <div className="om-step-field-label-row om-step-binding-head">
         <div className="om-step-binding-meta">
           <span className="om-step-binding-icon" data-pool-kind={primaryKind} aria-hidden="true">
             <RemixIcon name={poolKindIcon(primaryKind)} size={13} />
           </span>
-          <span className="om-step-binding-label">
+          <span id={labelId} className="om-step-field-label om-step-binding-label">
             {label}
             {required && <span className="om-step-required" aria-hidden="true">*</span>}
           </span>
@@ -216,11 +218,58 @@ export function BindingSlot({
               {resolvedItems.length}/{max}
             </span>
           )}
-          {hint && <span className="om-step-muted">{hint}</span>}
         </div>
+        {(hint || !required) && (
+          <span className="om-step-field-hint">
+            {hint ?? t('Optional')}
+          </span>
+        )}
+      </div>
+
+      <div
+        className="om-step-binding-control"
+        role="group"
+        aria-labelledby={labelId}
+      >
+        <div className="om-step-binding-content">
+          {resolvedItems.length > 0 ? (
+            <div className="om-step-chip-list">
+              {resolvedItems.map(({ id, item }) => {
+                const isVisual =
+                  item!.ref.type === 'asset' && (item!.kind === 'image' || item!.kind === 'video');
+                return (
+                  <span
+                    key={id}
+                    className={isVisual ? 'om-step-bound-thumb-card' : 'om-step-bound-chip'}
+                    data-pool-item-id={id}
+                    title={item!.label}
+                  >
+                    <SlotThumb item={item!} />
+                    {!isVisual && <span className="om-step-bound-chip-label">{item!.label}</span>}
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      className={isVisual ? 'om-step-bound-thumb-remove' : undefined}
+                      disabled={busy}
+                      aria-label={t('Remove {label}', { label: item!.label })}
+                      icon={<RemixIcon name="close-line" size={12} />}
+                      onClick={() => handleRemove(id)}
+                    />
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="om-step-slot-empty">
+              {t('Drag assets here or choose from Assets.')}
+            </p>
+          )}
+        </div>
+
         <Button
           variant="secondary"
           size="sm"
+          className="om-step-binding-pick-btn"
           icon={<RemixIcon name="stack-line" size={14} />}
           loading={picking}
           disabled={busy}
@@ -229,41 +278,6 @@ export function BindingSlot({
           {t('Choose assets')}
         </Button>
       </div>
-
-      {resolvedItems.length > 0 ? (
-        <div className="om-step-chip-list">
-          {resolvedItems.map(({ id, item }) => {
-            const isVisual =
-              item!.ref.type === 'asset' && (item!.kind === 'image' || item!.kind === 'video');
-            return (
-              <span
-                key={id}
-                className={isVisual ? 'om-step-bound-thumb-card' : 'om-step-bound-chip'}
-                data-pool-item-id={id}
-                title={item!.label}
-              >
-                <SlotThumb item={item!} />
-                {!isVisual && <span className="om-step-bound-chip-label">{item!.label}</span>}
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  className={isVisual ? 'om-step-bound-thumb-remove' : undefined}
-                  disabled={busy}
-                  aria-label={t('Remove {label}', { label: item!.label })}
-                  icon={<RemixIcon name="close-line" size={12} />}
-                  onClick={() => handleRemove(id)}
-                />
-              </span>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="om-step-slot-empty">
-          {required
-            ? t('Drag assets here or choose from Assets.')
-            : t('Optional. Drag assets here or choose from Assets.')}
-        </p>
-      )}
     </div>
   );
 }

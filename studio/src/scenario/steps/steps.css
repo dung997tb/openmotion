@@ -17,8 +17,14 @@
   flex-direction: column;
   gap: var(--motion-space-16);
   min-width: 0;
+  max-width: 100%;
   color: var(--motion-text);
   font-family: var(--motion-font-sans);
+}
+
+.om-step-body > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .om-step-toolbar {
@@ -422,32 +428,21 @@
   font-weight: var(--motion-weight-medium);
 }
 
-/* --- Binding slots --- */
+/* --- Binding slots (form-field style aligned with Prompt/Input) --- */
 .om-step-slots-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--motion-space-10);
+  gap: var(--motion-space-12);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .om-step-binding-slot {
   display: flex;
   flex-direction: column;
-  gap: var(--motion-space-8);
-  padding: var(--motion-space-10) var(--motion-space-12);
-  background: var(--motion-inset);
-  border: 1px solid transparent;
-  border-radius: var(--motion-radius-lg);
-  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
-    background-color var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.om-step-binding-slot[data-has-items="true"] {
-  background: color-mix(in srgb, var(--om-tone, var(--motion-accent)) 6%, var(--motion-inset));
-}
-
-.om-step-binding-slot[data-drag-over="true"] {
-  border-color: var(--om-tone, var(--motion-accent));
-  background: color-mix(in srgb, var(--om-tone, var(--motion-accent)) 12%, var(--motion-panel));
+  gap: var(--motion-space-6);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .om-step-binding-head {
@@ -455,32 +450,29 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: var(--motion-space-8);
+  gap: var(--motion-space-4) var(--motion-space-8);
+  min-width: 0;
 }
 
 .om-step-binding-meta {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--motion-space-6);
+  min-width: 0;
 }
 
 .om-step-binding-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--motion-radius-sm);
-  background: color-mix(in srgb, var(--om-tone, var(--motion-accent)) 14%, var(--motion-panel));
-  border: 0;
-  color: var(--om-tone, var(--motion-accent));
+  color: var(--om-tone, var(--motion-muted));
   flex-shrink: 0;
 }
 
 .om-step-binding-label {
   font-size: var(--motion-text-sm);
-  font-weight: var(--motion-weight-semibold);
+  font-weight: var(--motion-weight-medium);
   color: var(--motion-strong);
 }
 
@@ -488,6 +480,55 @@
   font-size: var(--motion-text-xs);
   color: var(--motion-dim);
   font-variant-numeric: tabular-nums;
+}
+
+.om-step-binding-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--motion-space-8);
+  min-height: var(--motion-control);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: var(--motion-space-6) var(--motion-space-8) var(--motion-space-6) var(--motion-space-10);
+  background: var(--motion-bg);
+  border: 1px solid var(--motion-border);
+  border-radius: var(--motion-radius-md);
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.om-step-binding-control:hover {
+  border-color: var(--motion-border-strong);
+}
+
+.om-step-binding-slot[data-picking="true"] .om-step-binding-control,
+.om-step-binding-control:focus-within {
+  outline: none;
+  border-color: var(--motion-focus);
+  box-shadow: 0 0 0 2px var(--motion-accent-soft);
+}
+
+.om-step-binding-slot[data-drag-over="true"] .om-step-binding-control {
+  border-style: dashed;
+  border-color: var(--om-tone, var(--motion-accent));
+  background: color-mix(in srgb, var(--om-tone, var(--motion-accent)) 6%, var(--motion-bg));
+}
+
+.om-step-binding-content {
+  flex: 1 1 160px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.om-step-binding-pick-btn {
+  flex-shrink: 0;
 }
 
 .om-step-chip-list {
@@ -578,8 +619,9 @@
 
 .om-step-slot-empty {
   margin: 0;
-  font-size: var(--motion-text-xs);
-  color: var(--motion-dim);
+  font-size: var(--motion-text-sm);
+  color: var(--motion-placeholder);
+  line-height: var(--motion-leading-body);
 }
 
 /* --- Guided fill-in-the-blanks brief composer --- */
@@ -1054,6 +1096,10 @@
 .om-page-composer,
 .om-media-composer,
 .om-social-composer {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: var(--motion-space-12);
   padding: var(--motion-space-14);
   background: var(--motion-raised);
@@ -1231,6 +1277,15 @@
   flex-direction: column;
   gap: var(--motion-space-16);
   margin-top: var(--motion-space-12);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  outline: none;
+}
+
+.om-step-tab-panel:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 .om-step-controls-skeleton {

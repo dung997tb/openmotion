@@ -512,23 +512,24 @@ export function MediaStep(props: StepProps) {
       ? t('Upload videos')
       : t('Upload audio');
 
-  const exportMenuExtras = (
-    <>
-      {activeDownloadableAssets.length > 0 && (
-        <MenuItem icon={<RemixIcon name="download-2-line" size={14} />} onClick={handleDownloadActiveFiles}>
-          {t('Download active files')}
-        </MenuItem>
-      )}
-      {state.links.motionProjectId && (
-        <MenuItem
-          icon={<RemixIcon name="movie-line" size={14} />}
-          onClick={() => void nav.openMotionProject(state.links.motionProjectId!)}
-        >
-          {t('Open in Motion Editor')}
-        </MenuItem>
-      )}
-    </>
-  );
+  const exportMenuExtras =
+    activeDownloadableAssets.length > 0 || state.links.motionProjectId ? (
+      <>
+        {activeDownloadableAssets.length > 0 && (
+          <MenuItem icon={<RemixIcon name="download-2-line" size={14} />} onClick={handleDownloadActiveFiles}>
+            {t('Download active files')}
+          </MenuItem>
+        )}
+        {state.links.motionProjectId && (
+          <MenuItem
+            icon={<RemixIcon name="movie-line" size={14} />}
+            onClick={() => void nav.openMotionProject(state.links.motionProjectId!)}
+          >
+            {t('Open in Motion Editor')}
+          </MenuItem>
+        )}
+      </>
+    ) : null;
 
   const modalityIcon = modality === 'image'
     ? 'image-line'

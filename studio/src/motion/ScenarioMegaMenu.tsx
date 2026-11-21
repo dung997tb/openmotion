@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import {
+  cleanLegacyScenarioTitle,
   findScenario,
   scenarioCategories,
   scenariosByCategory,
@@ -125,16 +126,17 @@ export function ScenarioMegaMenu({
             <div className="om-scenario-mega-recent-list">
               {recentRuns.map(run => {
                 const def = findScenario(run.scenarioId);
+                const displayTitle = cleanLegacyScenarioTitle(run.title);
                 return (
                   <Button
                     key={run.id}
                     variant="plain"
                     className="om-nav-item om-scenario-mega-run"
-                    title={def ? `${t(def.title)} · ${run.title}` : run.title}
+                    title={def ? `${t(def.title)} · ${displayTitle}` : displayTitle}
                     onClick={() => onSelect(run.scenarioId, run.id)}
                   >
                     <RemixIcon name={def?.icon ?? 'time-line'} size={13} aria-hidden="true" />
-                    <span className="om-scenario-mega-run-title">{run.title}</span>
+                    <span className="om-scenario-mega-run-title">{displayTitle}</span>
                   </Button>
                 );
               })}

@@ -14,9 +14,7 @@ import { IconButton } from 'open-design-ui/icon-button';
 import {
   scenarioConcisePrompt,
   findScenarioStep,
-  scenarioAgentPrompt,
   scenarioCategories,
-  scenarioRunAgentPrompt,
   type PoolKind,
   type ScenarioStepDefinition,
   type ScenarioWorkspaceMode,
@@ -31,7 +29,6 @@ import type {
   StepIteration,
 } from '../../../shared/scenario-runs';
 import { Popover } from '../components/ui/Popover';
-import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
@@ -48,7 +45,7 @@ import { ScenarioRunHistoryDialog } from './ScenarioRunHistoryDialog';
 import { ScenarioStage } from './ScenarioStage';
 import { ScenarioStepper } from './ScenarioStepper';
 import type { ScenarioWorkspaceProps, StepOutputPanelMeta, StepProps } from './stepContract';
-import { resolveStepPrompt, StepExportMenu } from './StepExportMenu';
+import { resolveStepPrompt } from './StepExportMenu';
 import { StepRouter } from './steps/StepRouter';
 import { isScenarioConflictError } from './steps/stepUtils';
 import { countStepPendingJobs, emptyStepState, useScenarioRun } from './useScenarioRun';
@@ -145,26 +142,6 @@ function primarySlotForStep(step: ScenarioStepDefinition, kind: PoolKind): strin
   }
 }
 
-function StepExportMenuPortal({
-  host,
-  onMountChange,
-  children,
-}: {
-  host: HTMLElement | null;
-  onMountChange: (mounted: boolean) => void;
-  children: ReactNode;
-}) {
-  useLayoutEffect(() => {
-    onMountChange(true);
-    return () => onMountChange(false);
-  }, [onMountChange]);
-
-  if (host) {
-    return createPortal(children, host);
-  }
-  return <>{children}</>;
-}
-
 type StepOutputToolbarState = {
   mounted: boolean;
   status?: 'running' | 'failed' | 'ready';
@@ -256,8 +233,6 @@ export function ScenarioWorkspace({
     request: PoolPickRequest;
     resolve: (ids: string[] | null) => void;
   } | null>(null);
-  const [exportMenuHost, setExportMenuHost] = useState<HTMLDivElement | null>(null);
-  const [stepOwnsExportMenu, setStepOwnsExportMenu] = useState(false);
   const [outputHost, setOutputHost] = useState<HTMLDivElement | null>(null);
   const [outputPopoverOpen, setOutputPopoverOpen] = useState(false);
   const [outputMeta, setOutputMeta] = useState<StepOutputToolbarState>({ mounted: false });
@@ -709,26 +684,6 @@ export function ScenarioWorkspace({
     await copyToClipboard(JSON.stringify(payload, null, 2), t('Summary JSON copied'));
   }, [copyToClipboard, run, scenario, t]);
 
-  const handleStatusChange = useCallback(
-    async (status: string) => {
-      try {
-        await mutate(`status:${activeStep.id}`, 'update_step', {
-          stepId: activeStep.id,
-          status: status as ScenarioStepState['status'],
-        });
-      } catch (err) {
-        if (!isScenarioConflictError(err)) {
-          toast.showToast(
-            err instanceof Error ? err.message : t('Could not update step status'),
-            'error',
-            'feedback',
-          );
-        }
-      }
-    },
-    [activeStep.id, mutate, t, toast],
-  );
-
   const requestPick = useCallback(
     (opts: PoolPickRequest): Promise<string[] | null> => {
       if (pickResolveRef.current) {
@@ -834,69 +789,6 @@ export function ScenarioWorkspace({
     },
     [activeStep, activeStepState.bindings, mutate, t, toast],
   );
-
-  const handleExportStepPackage = useCallback(async () => {
-    try {
-      const res = await mutate<{ bundle: ScenarioBundleReceipt }>(
-        `export-step:${activeStep.id}`,
-        'export',
-        { stepIds: [activeStep.id], activeOnly: true },
-      );
-      const downloadUrl = bundleDownloadUrl(res.bundle.bundleId);
-      toast.showToast(
-        t('Step export ready'),
-        'info',
-        'feedback',
-        {
-          key: `step-bundle-${res.bundle.bundleId}`,
-          label: t('Download'),
-          onClick: () => {
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = res.bundle.filename;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-          },
-        },
-      );
-    } catch (err) {
-      if (!isScenarioConflictError(err)) {
-        toast.showToast(
-          err instanceof Error ? err.message : t('Could not build step export'),
-          'error',
-          'feedback',
-        );
-      }
-    }
-  }, [activeStep.id, mutate, t, toast]);
-
-  const handleCopyStepPrompt = useCallback(async () => {
-    const prompt = resolveStepPrompt(activeStepState);
-    if (!prompt) return;
-    await copyToClipboard(prompt, t('Copied prompt'));
-  }, [activeStepState, copyToClipboard, t]);
-
-  const handleCopyStepAgentHandoff = useCallback(async () => {
-    let ensuredRun = run;
-    if (!ensuredRun) {
-      try {
-        ensuredRun = await ensureRun();
-      } catch {
-        ensuredRun = null;
-      }
-    }
-    const stepPrompt = resolveStepPrompt(activeStepState) || undefined;
-    const prompt = ensuredRun
-      ? scenarioRunAgentPrompt(scenario, ensuredRun, {
-          stepId: activeStep.id,
-          stepPrompt,
-          locale,
-          integration,
-        })
-      : scenarioAgentPrompt(scenario, { locale, integration });
-    await copyToClipboard(prompt, t('Copied. Paste into your Agent.'));
-  }, [activeStep.id, activeStepState, copyToClipboard, ensureRun, integration, locale, run, scenario, t]);
 
   const handleRefresh = useCallback(async () => {
     await refresh();
@@ -1023,34 +915,7 @@ export function ScenarioWorkspace({
     [activeStep.id, mutate, t, toast],
   );
 
-  const renderExportMenu = useCallback(
-    (extraItems?: ReactNode) => (
-      <StepExportMenuPortal host={exportMenuHost} onMountChange={setStepOwnsExportMenu}>
-        <StepExportMenu
-          scenario={scenario}
-          step={activeStep}
-          state={activeStepState}
-          run={run}
-          extraItems={extraItems}
-          busy={busy.has(`export-step:${activeStep.id}`)}
-          onExportStepPackage={handleExportStepPackage}
-          onCopyPrompt={handleCopyStepPrompt}
-          onCopyStepAgentHandoff={handleCopyStepAgentHandoff}
-        />
-      </StepExportMenuPortal>
-    ),
-    [
-      activeStep,
-      activeStepState,
-      busy,
-      exportMenuHost,
-      handleCopyStepAgentHandoff,
-      handleCopyStepPrompt,
-      handleExportStepPackage,
-      run,
-      scenario,
-    ],
-  );
+  const renderExportMenu = useCallback(() => null, []);
 
   const updateOutputMeta = useCallback((next: StepOutputToolbarState) => {
     setOutputMeta(prev =>
@@ -1189,16 +1054,6 @@ export function ScenarioWorkspace({
       togglePoolCollapsed();
     }
   }, [poolCollapsed, togglePoolCollapsed, updatePoolCollapsed]);
-
-  const statusOptions = useMemo(
-    () => [
-      { value: 'todo', label: t('To do') },
-      { value: 'in-progress', label: t('In progress') },
-      { value: 'done', label: t('Done') },
-      { value: 'skipped', label: t('Skipped') },
-    ],
-    [t],
-  );
 
   const loadingStateNode = (
     <div className="om-scenario-loading" role="status" aria-label={t('Loading workflow…')}>
@@ -1581,35 +1436,6 @@ export function ScenarioWorkspace({
                       {activeStep.optional && (
                         <span className="om-badge">{t('Optional')}</span>
                       )}
-                    </div>
-
-                    <div className="om-scenario-step-controls">
-                      <div className="om-scenario-status-select">
-                        <Select
-                          label={t('Step status')}
-                          value={activeStepState.status}
-                          options={statusOptions}
-                          disabled={busy.has(`status:${activeStep.id}`)}
-                          onCommit={value => void handleStatusChange(value)}
-                        />
-                      </div>
-                      <div
-                        ref={setExportMenuHost}
-                        className="om-scenario-step-export-slot"
-                      >
-                        {!stepOwnsExportMenu && (
-                          <StepExportMenu
-                            scenario={scenario}
-                            step={activeStep}
-                            state={activeStepState}
-                            run={run}
-                            busy={busy.has(`export-step:${activeStep.id}`)}
-                            onExportStepPackage={handleExportStepPackage}
-                            onCopyPrompt={handleCopyStepPrompt}
-                            onCopyStepAgentHandoff={handleCopyStepAgentHandoff}
-                          />
-                        )}
-                      </div>
                     </div>
                   </div>
                   <p className="om-scenario-step-hint">{t(activeStep.hint)}</p>

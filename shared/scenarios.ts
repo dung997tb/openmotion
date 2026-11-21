@@ -158,9 +158,9 @@ export const scenarioDefinitions = [
   {
     id: 'motion-full-chain',
     category: 'topic',
-    title: 'Motion Studio',
-    subtitle: 'Turn an idea into a motion film, soundtrack, and social posts',
-    description: 'Plan a storyboard, create or upload visuals, build an editable Motion film with music, draft social posts, and download everything together.',
+    title: 'Idea to Motion Film',
+    subtitle: 'Storyboard, animated film, soundtrack, and social posts from one brief',
+    description: 'Turn a rough idea into a planned storyboard, editable motion film, matched soundtrack, and ready-to-share social posts.',
     badge: 'Top',
     icon: 'movie-line',
     links: ['motion-studio', 'template-library', 'skills'],
@@ -301,9 +301,9 @@ export const scenarioDefinitions = [
   {
     id: 'gemini-4-neon',
     category: 'topic',
-    title: 'Gemini 4 Neon',
-    subtitle: 'Write interactive animations in code, plus film and posts',
-    description: 'Create an interactive code animation, pair it with cover visuals and a companion film, then export your social posts and files together.',
+    title: 'Interactive Code Animation',
+    subtitle: 'Live HTML/Canvas animation, cover stills, companion video, and posts',
+    description: 'Generate an interactive coded animation, pair it with cover stills and a companion video, then package social posts together.',
     badge: 'New',
     icon: 'sparkling-line',
     links: ['model-hub:gemini-4', 'design-studio', 'motion-studio'],
@@ -452,9 +452,9 @@ export const scenarioDefinitions = [
   {
     id: 'design-full-chain',
     category: 'topic',
-    title: 'Design Studio',
-    subtitle: 'Go from idea to web page, visuals, promo video, and posts',
-    description: 'Create a landing page, generate hero visuals, place them right into your page, add a promo video, and download everything together.',
+    title: 'Landing Page & Launch Kit',
+    subtitle: 'Landing page, custom hero visuals, promo video, and launch posts',
+    description: 'Build a responsive landing page with embedded hero visuals, turn them into a launch promo video, and draft channel-ready posts.',
     badge: 'New',
     icon: 'layout-line',
     links: ['design-studio', 'motion-studio', 'template-library'],
@@ -618,9 +618,9 @@ export const scenarioDefinitions = [
   {
     id: 'black-friday',
     category: 'campaign',
-    title: 'Black Friday Sale',
-    subtitle: 'Product shots, sale page, 30s promo video, and social posts',
-    description: 'Create product photos, place them into a Black Friday sale page, make a 30-second promo video, and draft posts for every platform.',
+    title: 'Black Friday Promo Kit',
+    subtitle: 'Product photos, conversion sale page, 30s promo video, and social posts',
+    description: 'Produce studio product shots, embed them into a Black Friday sale page, build a 30-second promo film, and draft countdown posts.',
     badge: 'Hot',
     icon: 'flashlight-line',
     links: ['black-friday-collection', 'design-studio', 'motion-studio', 'template-library', 'skills'],
@@ -772,9 +772,9 @@ export const scenarioDefinitions = [
   {
     id: 'ai-influencer',
     category: 'role',
-    title: 'AI Influencer',
-    subtitle: 'Script, persona visuals, bio page, talking video, and posts',
-    description: 'Write an episode script, keep your character consistent, build a link-in-bio page, record voiceover, create a talking video, and draft social posts.',
+    title: 'Virtual Creator Episode',
+    subtitle: 'Script, consistent persona visuals, bio page, voiceover, and talking video',
+    description: 'Produce a complete creator episode: write the script, keep your persona consistent, build a link-in-bio page, generate voiceover and a talking video, and draft social posts.',
     badge: 'New',
     icon: 'user-3-line',
     links: ['design-studio', 'motion-studio', 'skills'],
@@ -935,6 +935,29 @@ export const findScenarioStep = (scenario: ScenarioDefinition, stepId: unknown):
 
 export const scenariosByCategory = (category: ScenarioCategory): ScenarioDefinition[] =>
   scenarioDefinitions.filter(scenario => scenario.category === category);
+
+const LEGACY_SCENARIO_TITLE_PREFIXES: readonly [RegExp, string][] = [
+  [/^Motion Studio full chain\b/i, 'Idea to Motion Film'],
+  [/^Motion Studio\b(?=\s*[·•-]\s*\d{4}-\d{2}-\d{2}|$)/i, 'Idea to Motion Film'],
+  [/^Gemini 4 Neon\b(?=\s*[·•-]\s*\d{4}-\d{2}-\d{2}|$)/i, 'Interactive Code Animation'],
+  [/^Design Studio full chain\b/i, 'Landing Page & Launch Kit'],
+  [/^Design Studio\b(?=\s*[·•-]\s*\d{4}-\d{2}-\d{2}|$)/i, 'Landing Page & Launch Kit'],
+  [/^Black Friday e-commerce\b/i, 'Black Friday Promo Kit'],
+  [/^Black Friday Sale\b(?=\s*[·•-]\s*\d{4}-\d{2}-\d{2}|$)/i, 'Black Friday Promo Kit'],
+  [/^AI Influencer\b(?=\s*[·•-]\s*\d{4}-\d{2}-\d{2}|$)/i, 'Virtual Creator Episode'],
+];
+
+/** Normalizes legacy auto-generated default draft titles to current semantic workflow titles. */
+export function cleanLegacyScenarioTitle(title: string): string {
+  let out = title.trim();
+  for (const [pattern, replacement] of LEGACY_SCENARIO_TITLE_PREFIXES) {
+    if (pattern.test(out)) {
+      out = out.replace(pattern, replacement);
+      break;
+    }
+  }
+  return out;
+}
 
 function formatBriefValue(raw: string | string[] | undefined): string {
   if (Array.isArray(raw)) {

@@ -54,7 +54,7 @@ export function PricingEntry({ trackingPage }: { trackingPage: CreativePage }) {
         </span>
       ) : (
         <span className={styles.cornerBadge} aria-hidden="true">
-          <span className={styles.cornerBadgeText}>Free credit</span>
+          <span className={styles.cornerBadgeText}>{t('Free credits')}</span>
         </span>
       )}
     </a>

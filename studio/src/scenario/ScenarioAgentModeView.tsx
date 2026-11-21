@@ -841,11 +841,11 @@ export function ScenarioAgentModeView({
         </section>
       </div>
 
-      <aside className="om-agent-mode-sidebar" aria-label={t('Agent handoff')}>
+      <aside className="om-agent-mode-sidebar" aria-label={t('MCP instructions')}>
         <section
           className="om-agent-copy-panel"
           data-agent-section="copy-agent"
-          aria-label={t('Copy for Agent')}
+          aria-label="MCP"
         >
           <Button
             variant="primary"
@@ -853,10 +853,11 @@ export function ScenarioAgentModeView({
             type="button"
             className="om-agent-copy-primary"
             loading={copying}
-            icon={<RemixIcon name="robot-line" size={16} />}
+            icon={<RemixIcon name="plug-line" size={16} />}
+            title={t('Copy MCP prompt')}
             onClick={() => void handleCopyClick()}
           >
-            {t('Copy for Agent')}
+            MCP
           </Button>
           <p className="om-agent-copy-subtitle">
             {t('Copies concise metadata, attached Assets, and this workflow’s Skills for your Agent.')}

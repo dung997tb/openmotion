@@ -8,11 +8,11 @@ Workflows are organized into three categories under **Workflows** in the top nav
 
 | Category | Workflow / Scenario ID | Title | Ordered steps |
 | --- | --- | --- | --- |
-| **Topics** (`topic`) | `motion-full-chain` | Motion Studio | Brief → Storyboard → Motion film → Soundtrack → Social posts |
-| **Topics** (`topic`) | `gemini-4-neon` | Gemini 4 Neon | Brief → Code animation → Key stills → Film & motion → Social posts |
-| **Topics** (`topic`) | `design-full-chain` | Design Studio | Brief → Landing page → Page images → Embed images → Promo video → Social posts |
-| **Campaigns** (`campaign`) | `black-friday` | Black Friday Sale | Brief → Product images → Detail page → 30s sales film → Social posts |
-| **Roles** (`role`) | `ai-influencer` | AI Influencer | Brief & script → Persona visuals → Link-in-bio page → Voiceover & audio → Talking video → Social posts |
+| **Topics** (`topic`) | `motion-full-chain` | Idea to Motion Film | Brief → Storyboard → Motion film → Soundtrack → Social posts |
+| **Topics** (`topic`) | `gemini-4-neon` | Interactive Code Animation | Brief → Code animation → Key stills → Film & motion → Social posts |
+| **Topics** (`topic`) | `design-full-chain` | Landing Page & Launch Kit | Brief → Landing page → Page images → Embed images → Promo video → Social posts |
+| **Campaigns** (`campaign`) | `black-friday` | Black Friday Promo Kit | Brief → Product images → Detail page → 30s sales film → Social posts |
+| **Roles** (`role`) | `ai-influencer` | Virtual Creator Episode | Brief & script → Persona visuals → Link-in-bio page → Voiceover & audio → Talking video → Social posts |
 
 Every step carries curated `ScenarioSkillRef` bindings (`step.skills[]`) identifying either a curated Studio library Skill (`source: 'library'`, loaded via `openmotion_get_skill(skillId)`) or a workflow resource guide (`source: 'workflow'`, loaded via MCP `resources/read` on `resourceUri` such as `openmotion://workflow/*`). Existing Studio destinations (Motion Studio, Design Studio, Cinema Studio, Model Hub, Black Friday collection, Template library, Skills) remain directly reachable from navigation and context links inside each workflow.
 

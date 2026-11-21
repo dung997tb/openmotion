@@ -474,11 +474,34 @@ it('switches studios and restores a scene through history while retaining the ed
   expect(location.hash).toContain('t=12');
 });
 
-it('shows Motion templates without the projects sidebar and returns to the retained editor', async () => {
+it('opens the Template library directly from sidebar Motion templates and returns to the retained editor', async () => {
   await mount();
   const draft = container.querySelector<HTMLInputElement>('[aria-label="Editor draft"]')!;
   draft.value = 'Keep this edit';
   await click('Motion templates');
+  expect(page()).toMatchObject({ motion: false, templates: true, templateCollection: null });
+  expect(container.querySelector('#om-project-navigation')).toBeNull();
+  expect(button('Open project list')).toBeUndefined();
+  expect(container.querySelector('main[aria-label="Motion templates"] .om-discovery-hero')).toBeNull();
+  expect(container.querySelector('[data-workspace-gallery] .om-gallery-page-label')?.textContent).toBe('Template library');
+  const template = container.querySelector<HTMLButtonElement>('[data-workspace-gallery] [data-template-id="product-promo"] button')!;
+  await act(async () => template.click());
+  expect(page()).toMatchObject({ motion: false, templates: true, template: 'product-promo' });
+  await click('Close template preview');
+  await click('Close template library');
+  expect(page()).toMatchObject({ motion: false, templates: false, template: null });
+  expect(container.querySelector<HTMLElement>('.motion-workspace-content')?.hidden).toBe(false);
+  expect(container.querySelector('#om-project-navigation')?.getAttribute('aria-hidden')).toBe('false');
+  expect(container.querySelector('[aria-label="Editor draft"]')).toBe(draft);
+  expect(draft.value).toBe('Keep this edit');
+  expect(location.hash).toContain('t=12');
+});
+
+it('shows Motion Studio landing from the header, opens templates, and returns to the retained editor', async () => {
+  await mount();
+  const draft = container.querySelector<HTMLInputElement>('[aria-label="Editor draft"]')!;
+  draft.value = 'Keep this edit';
+  await click('Motion Studio');
   expect(page()).toMatchObject({ motion: true, templates: false });
   expect(container.querySelector('#om-project-navigation')).toBeNull();
   expect(button('Open project list')).toBeUndefined();
@@ -501,6 +524,21 @@ it('shows Motion templates without the projects sidebar and returns to the retai
   expect(container.querySelector('[aria-label="Editor draft"]')).toBe(draft);
   expect(draft.value).toBe('Keep this edit');
   expect(location.hash).toContain('t=12');
+});
+
+it('tracks active and expanded state on the sidebar All projects action while the dialog is open', async () => {
+  await mount();
+  const allProjects = button('All projects');
+  expect(allProjects.getAttribute('aria-expanded')).toBe('false');
+  expect(allProjects.getAttribute('data-active')).toBeNull();
+  await click('All projects');
+  expect(document.querySelector('[role=dialog]')?.textContent).toContain('All projects');
+  expect(allProjects.getAttribute('aria-expanded')).toBe('true');
+  expect(allProjects.getAttribute('data-active')).toBe('true');
+  await act(async () => document.querySelector<HTMLButtonElement>('[role=dialog] button[aria-label="Close"]')!.click());
+  expect(document.querySelector('[role=dialog]')).toBeNull();
+  expect(allProjects.getAttribute('aria-expanded')).toBe('false');
+  expect(allProjects.getAttribute('data-active')).toBeNull();
 });
 
 it('browses the complete Motion catalog in batches and filters by its existing tags', async () => {

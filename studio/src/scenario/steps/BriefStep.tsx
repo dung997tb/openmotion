@@ -700,10 +700,10 @@ export function BriefStep({
                   <Button
                     variant="ghost"
                     size="sm"
-                    icon={<RemixIcon name="clipboard-line" size={14} />}
+                    icon={<RemixIcon name="plug-line" size={14} />}
                     onClick={() => void handleCopyScriptHandoff()}
                   >
-                    {t('Ask Agent to write script')}
+                    {t('Write script via MCP')}
                   </Button>
                 </div>
               </div>

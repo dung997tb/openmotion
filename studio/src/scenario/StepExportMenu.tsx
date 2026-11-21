@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Children, Fragment, isValidElement, type ReactNode } from 'react';
 import { Button } from 'open-design-ui/button';
 import type { ScenarioDefinition, ScenarioStepDefinition } from '../../../shared/scenarios';
 import type { ScenarioRun, ScenarioStepState } from '../../../shared/scenario-runs';
@@ -28,6 +28,15 @@ export function resolveStepPrompt(state: ScenarioStepState): string {
   return '';
 }
 
+function hasRenderableNode(node: ReactNode): boolean {
+  return Children.toArray(node).some(child => {
+    if (isValidElement<{ children?: ReactNode }>(child) && child.type === Fragment) {
+      return hasRenderableNode(child.props.children);
+    }
+    return child !== null && child !== undefined && typeof child !== 'boolean';
+  });
+}
+
 export function StepExportMenu({
   step,
   state,
@@ -40,6 +49,7 @@ export function StepExportMenu({
 }: StepExportMenuProps) {
   const { t } = useI18n();
   const hasPrompt = resolveStepPrompt(state).length > 0;
+  const hasExtras = hasRenderableNode(extraItems);
 
   return (
     <Menu
@@ -67,7 +77,7 @@ export function StepExportMenu({
         {t('Download step (.zip)')}
       </MenuItem>
 
-      {extraItems && (
+      {hasExtras && (
         <>
           <MenuSeparator />
           {extraItems}
@@ -83,10 +93,10 @@ export function StepExportMenu({
         {t('Copy prompt')}
       </MenuItem>
       <MenuItem
-        icon={<RemixIcon name="robot-line" size={14} />}
+        icon={<RemixIcon name="plug-line" size={14} />}
         onClick={() => void onCopyStepAgentHandoff()}
       >
-        {t('Copy step for Agent')}
+        MCP
       </MenuItem>
     </Menu>
   );

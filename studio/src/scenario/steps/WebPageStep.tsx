@@ -535,8 +535,8 @@ export function WebPageStep({
       <MenuItem icon={<RemixIcon name="external-link-line" size={14} />} onClick={() => nav.openDesignProject(project.id)}>
         {t('Open in Design editor')}
       </MenuItem>
-      <MenuItem icon={<RemixIcon name="robot-line" size={14} />} onClick={() => void handleCopyAgentDesignPrompt()}>
-        {t('Copy for Agent')}
+      <MenuItem icon={<RemixIcon name="plug-line" size={14} />} onClick={() => void handleCopyAgentDesignPrompt()}>
+        MCP
       </MenuItem>
     </>
   ) : undefined;
@@ -661,10 +661,10 @@ export function WebPageStep({
             <Button
               variant="secondary"
               size="sm"
-              icon={<RemixIcon name="robot-line" size={14} />}
+              icon={<RemixIcon name="plug-line" size={14} />}
               onClick={() => void handleCopyAgentDesignPrompt()}
             >
-              {t('Ask Agent to design')}
+              {t('Design via MCP')}
             </Button>
             <Button
               variant="primary"
@@ -865,10 +865,10 @@ export function WebPageStep({
           <Button
             variant="ghost"
             size="sm"
-            icon={<RemixIcon name="robot-line" size={14} />}
+            icon={<RemixIcon name="plug-line" size={14} />}
             onClick={() => void handleCopyAgentDesignPrompt()}
           >
-            {t('Ask your Agent')}
+            {t('Design via MCP')}
           </Button>
           {renderExportMenu(exportMenuExtras)}
         </div>

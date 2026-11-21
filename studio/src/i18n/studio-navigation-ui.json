@@ -322,7 +322,9 @@
     "Refund Policy": "退款政策",
     "Social channels": "社交与媒体渠道",
     "Legal and policy links": "条款与政策链接",
-    "Image creation": "图片创作"
+    "Image creation": "图片创作",
+    "Virtual Creator Episode": "AI 博主口播内容包",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "从口播脚本、固定形象、个人主页、配音到口播成片与分发帖"
   },
   "ja": {
     "Open Motion Editor": "Motion エディターを開く",
@@ -647,7 +649,9 @@
     "Refund Policy": "返金ポリシー",
     "Social channels": "公式SNS・チャンネル",
     "Legal and policy links": "規約・ポリシー",
-    "Image creation": "画像の作成"
+    "Image creation": "画像の作成",
+    "Virtual Creator Episode": "バーチャルクリエイター動画パック",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "台本、一貫した人物ビジュアル、プロフィールページ、音声、トーキング動画まで一貫制作"
   },
   "ko": {
     "Open Motion Editor": "Motion 편집기 열기",
@@ -972,7 +976,9 @@
     "Refund Policy": "환불 정책",
     "Social channels": "소셜 채널",
     "Legal and policy links": "약관 및 정책",
-    "Image creation": "이미지 생성"
+    "Image creation": "이미지 생성",
+    "Virtual Creator Episode": "버추얼 크리에이터 에피소드",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "스크립트, 일관된 페르소나 비주얼, 프로필 페이지, 보이스오버, 토킹 영상"
   },
   "de": {
     "Open Motion Editor": "Motion-Editor öffnen",
@@ -1297,7 +1303,9 @@
     "Refund Policy": "Rückerstattungsrichtlinie",
     "Social channels": "Soziale Kanäle",
     "Legal and policy links": "Rechtliches & Richtlinien",
-    "Image creation": "Bilderstellung"
+    "Image creation": "Bilderstellung",
+    "Virtual Creator Episode": "Virtuelle Creator-Episode",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Skript, konsistente Persona-Visuals, Bio-Seite, Voiceover und Talking-Video"
   },
   "fr": {
     "Open Motion Editor": "Ouvrir l’éditeur Motion",
@@ -1622,7 +1630,9 @@
     "Refund Policy": "Politique de remboursement",
     "Social channels": "Réseaux sociaux",
     "Legal and policy links": "Mentions légales et politiques",
-    "Image creation": "Création d’images"
+    "Image creation": "Création d’images",
+    "Virtual Creator Episode": "Épisode de créateur virtuel",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Script, visuels de persona cohérents, page bio, voix off et vidéo face caméra"
   },
   "ru": {
     "Open Motion Editor": "Открыть редактор Motion",
@@ -1947,7 +1957,9 @@
     "Refund Policy": "Политика возврата",
     "Social channels": "Социальные сети",
     "Legal and policy links": "Правовая информация и политики",
-    "Image creation": "Создание изображений"
+    "Image creation": "Создание изображений",
+    "Virtual Creator Episode": "Выпуск виртуального креатора",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Сценарий, единый образ персонажа, био-страница, озвучка и разговорное видео"
   },
   "es": {
     "Open Motion Editor": "Abrir el editor de Motion",
@@ -2272,7 +2284,9 @@
     "Refund Policy": "Política de reembolso",
     "Social channels": "Canales sociales",
     "Legal and policy links": "Enlaces legales y políticas",
-    "Image creation": "Creación de imágenes"
+    "Image creation": "Creación de imágenes",
+    "Virtual Creator Episode": "Episodio de creador virtual",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Guion, visuales coherentes del personaje, página bio, voz en off y video hablado"
   },
   "pt-BR": {
     "Open Motion Editor": "Abrir o editor do Motion",
@@ -2597,7 +2611,9 @@
     "Refund Policy": "Política de reembolso",
     "Social channels": "Canais sociais",
     "Legal and policy links": "Links legais e políticas",
-    "Image creation": "Criação de imagens"
+    "Image creation": "Criação de imagens",
+    "Virtual Creator Episode": "Episódio de criador virtual",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Roteiro, visuais consistentes da persona, página bio, narração e vídeo falado"
   },
   "it": {
     "Open Motion Editor": "Apri l’editor di Motion",
@@ -2922,7 +2938,9 @@
     "Refund Policy": "Politica di rimborso",
     "Social channels": "Canali social",
     "Legal and policy links": "Link legali e normative",
-    "Image creation": "Creazione di immagini"
+    "Image creation": "Creazione di immagini",
+    "Virtual Creator Episode": "Episodio creator virtuale",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Copione, visual coerenti del personaggio, pagina bio, voce fuori campo e video parlato"
   },
   "tr": {
     "Open Motion Editor": "Motion düzenleyicisini aç",
@@ -3247,6 +3265,8 @@
     "Refund Policy": "İade Politikası",
     "Social channels": "Sosyal kanallar",
     "Legal and policy links": "Yasal ve politika bağlantıları",
-    "Image creation": "Görsel oluşturma"
+    "Image creation": "Görsel oluşturma",
+    "Virtual Creator Episode": "Sanal içerik üreticisi bölümü",
+    "Script, consistent persona visuals, bio page, voiceover, and talking video": "Senaryo, tutarlı karakter görselleri, biyografi sayfası, seslendirme ve konuşan video"
   }
 }

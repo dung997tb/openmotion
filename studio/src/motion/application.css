@@ -33,7 +33,7 @@
 [data-motion-studio] .om-app-header-actions .om-header-icon { width: var(--motion-control-sm); padding-inline: 0; justify-content: center; }
 .om-app-header-links { display: flex; align-items: center; gap: var(--motion-space-8); }
 .motion-sidebar-utilities { display: flex; align-items: center; justify-content: flex-start; gap: var(--motion-space-12); padding-top: var(--motion-space-12); }
-.motion-sidebar-footer > .om-nav-item { padding-inline: var(--motion-space-4); }
+.motion-sidebar-footer-actions { display: flex; flex-direction: column; gap: var(--motion-space-4); }
 .motion-session-heading-actions { display: flex; align-items: center; gap: var(--motion-space-4); }
 .motion-project-navigation-trigger { display: inline-flex; flex-shrink: 0; }
 .motion-project-navigation-trigger[hidden] { display: none; }

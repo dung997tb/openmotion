@@ -15,17 +15,36 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { AssetAudioPreview } from '../motion/AssetAudioPreview';
-import { gemini4Videos } from '../motion/gemini4Videos';
-import { findModelHub } from '../motion/modelHubs';
 import ambientPiano from '../motion/scene-art/ambient-piano.webp';
-import komonaSunset from '../motion/scene-art/komona-sunset.webp';
-import lunarShot from '../motion/scene-art/lunar-shot-still.webp';
-import speakerRoom from '../motion/scene-art/speaker-room.webp';
-import aiInfluencerMarketing from '../motion/scene-art/ai-influencer-marketing.webp';
-import studioGlassSculpture from '../motion/scene-art/studio-glass-sculpture.jpg';
-import { archivedSkillPoster, motionSkills, motionStudioCover } from '../motion/skillCatalog';
 import { designPreviewUrlForPoolItem, resolvePoolTextContent } from './PoolItemPreview';
 import { scenarioCover } from './scenarioCovers';
+import bfBriefArt from './stage-art/bf-brief.webp';
+import bfDetailPageArt from './stage-art/bf-detail-page.webp';
+import bfProductImagesArt from './stage-art/bf-product-images.webp';
+import bfSalesFilmArt from './stage-art/bf-sales-film.webp';
+import bfSocialArt from './stage-art/bf-social.webp';
+import designBriefArt from './stage-art/design-brief.webp';
+import designEmbedImagesArt from './stage-art/design-embed-images.webp';
+import designLandingPageArt from './stage-art/design-landing-page.webp';
+import designPageImagesArt from './stage-art/design-page-images.webp';
+import designPromoVideoArt from './stage-art/design-promo-video.webp';
+import designSocialArt from './stage-art/design-social.webp';
+import geminiBriefArt from './stage-art/gemini-brief.webp';
+import geminiCodeAnimationArt from './stage-art/gemini-code-animation.webp';
+import geminiFilmArt from './stage-art/gemini-film.webp';
+import geminiSocialArt from './stage-art/gemini-social.webp';
+import geminiStillsArt from './stage-art/gemini-stills.webp';
+import infBriefArt from './stage-art/inf-brief.webp';
+import infHomePageArt from './stage-art/inf-home-page.webp';
+import infPersonaArt from './stage-art/inf-persona.webp';
+import infSocialArt from './stage-art/inf-social.webp';
+import infTalkingVideoArt from './stage-art/inf-talking-video.webp';
+import infVoiceArt from './stage-art/inf-voice.webp';
+import motionBriefArt from './stage-art/motion-brief.webp';
+import motionFilmArt from './stage-art/motion-film.webp';
+import motionSocialArt from './stage-art/motion-social.webp';
+import motionSoundtrackArt from './stage-art/motion-soundtrack.webp';
+import motionStoryboardArt from './stage-art/motion-storyboard.webp';
 import { poolKindIcon } from './steps/stepUtils';
 
 export type ScenarioStageProps = {
@@ -63,92 +82,58 @@ type AssetSlide = {
 
 type StageSlide = ShowcaseSlide | AssetSlide;
 
-function skillCoverById(id: string): { poster?: string; video?: string } | undefined {
-  return motionSkills.find(skill => skill.id === id)?.cover;
-}
+type StageExampleMedia = {
+  poster: string;
+  video?: string;
+  aspect?: 'portrait' | 'landscape' | 'square';
+};
+
+const stageExampleMedia: Record<ScenarioId, Record<string, StageExampleMedia>> = {
+  'motion-full-chain': {
+    brief: { poster: motionBriefArt, aspect: 'landscape' },
+    storyboard: { poster: motionStoryboardArt, aspect: 'landscape' },
+    'motion-film': { poster: motionFilmArt, aspect: 'landscape' },
+    soundtrack: { poster: motionSoundtrackArt, aspect: 'square' },
+    social: { poster: motionSocialArt, aspect: 'landscape' },
+  },
+  'gemini-4-neon': {
+    brief: { poster: geminiBriefArt, aspect: 'landscape' },
+    'code-animation': { poster: geminiCodeAnimationArt, aspect: 'landscape' },
+    stills: { poster: geminiStillsArt, aspect: 'landscape' },
+    film: { poster: geminiFilmArt, aspect: 'landscape' },
+    social: { poster: geminiSocialArt, aspect: 'landscape' },
+  },
+  'design-full-chain': {
+    brief: { poster: designBriefArt, aspect: 'landscape' },
+    'landing-page': { poster: designLandingPageArt, aspect: 'landscape' },
+    'page-images': { poster: designPageImagesArt, aspect: 'landscape' },
+    'embed-images': { poster: designEmbedImagesArt, aspect: 'landscape' },
+    'promo-video': { poster: designPromoVideoArt, aspect: 'landscape' },
+    social: { poster: designSocialArt, aspect: 'landscape' },
+  },
+  'black-friday': {
+    brief: { poster: bfBriefArt, aspect: 'landscape' },
+    'product-images': { poster: bfProductImagesArt, aspect: 'landscape' },
+    'detail-page': { poster: bfDetailPageArt, aspect: 'landscape' },
+    'sales-film': { poster: bfSalesFilmArt, aspect: 'landscape' },
+    social: { poster: bfSocialArt, aspect: 'landscape' },
+  },
+  'ai-influencer': {
+    brief: { poster: infBriefArt, aspect: 'landscape' },
+    persona: { poster: infPersonaArt, aspect: 'landscape' },
+    'home-page': { poster: infHomePageArt, aspect: 'landscape' },
+    voice: { poster: infVoiceArt, aspect: 'square' },
+    'talking-video': { poster: infTalkingVideoArt, aspect: 'portrait' },
+    social: { poster: infSocialArt, aspect: 'landscape' },
+  },
+};
 
 export function buildShowcaseSlides(scenario: ScenarioDefinition): ShowcaseSlide[] {
   const defaultPoster = scenarioCover(scenario.id);
+  const byStep = stageExampleMedia[scenario.id] ?? {};
 
-  const presetMedia: Record<
-    ScenarioId,
-    readonly { poster: string; video?: string; aspect?: 'portrait' | 'landscape' | 'square' }[]
-  > = {
-    'motion-full-chain': [
-      {
-        poster: motionStudioCover?.poster || defaultPoster,
-        video: motionStudioCover?.video,
-        aspect: 'landscape',
-      },
-      { poster: studioGlassSculpture, aspect: 'portrait' },
-      {
-        poster: skillCoverById('anatomy-reveal')?.poster || archivedSkillPoster('anatomy-reveal'),
-        video: skillCoverById('anatomy-reveal')?.video,
-        aspect: 'landscape',
-      },
-      { poster: ambientPiano, aspect: 'square' },
-      { poster: archivedSkillPoster('design-styles'), aspect: 'landscape' },
-    ],
-    'gemini-4-neon': [
-      {
-        poster: findModelHub('gemini-4')?.poster || defaultPoster,
-        aspect: 'landscape',
-      },
-      ...gemini4Videos.slice(0, 5).map(video => ({
-        poster: video.poster || defaultPoster,
-        video: video.video || undefined,
-        aspect: (video.ratio === '9:16' || video.ratio === '3:4'
-          ? 'portrait'
-          : video.ratio === '1:1'
-            ? 'square'
-            : 'landscape') as 'portrait' | 'landscape' | 'square',
-      })),
-    ],
-    'design-full-chain': [
-      { poster: archivedSkillPoster('color-pop-poster'), aspect: 'landscape' },
-      { poster: komonaSunset, aspect: 'portrait' },
-      { poster: archivedSkillPoster('design-styles'), aspect: 'landscape' },
-      {
-        poster: skillCoverById('motion')?.poster || archivedSkillPoster('motion-design-skill'),
-        video: skillCoverById('motion')?.video,
-        aspect: 'landscape',
-      },
-      { poster: studioGlassSculpture, aspect: 'portrait' },
-    ],
-    'black-friday': [
-      {
-        poster: skillCoverById('openmotion-sale-carousel')?.poster || defaultPoster,
-        video: skillCoverById('openmotion-sale-carousel')?.video,
-        aspect: 'landscape',
-      },
-      { poster: studioGlassSculpture, aspect: 'portrait' },
-      {
-        poster: skillCoverById('openmotion-sale-promo')?.poster || archivedSkillPoster('sale-promo'),
-        video: skillCoverById('openmotion-sale-promo')?.video,
-        aspect: 'landscape',
-      },
-      {
-        poster:
-          skillCoverById('openmotion-sale-countdown')?.poster ||
-          archivedSkillPoster('sale-countdown'),
-        video: skillCoverById('openmotion-sale-countdown')?.video,
-        aspect: 'landscape',
-      },
-      { poster: archivedSkillPoster('sale-carousel'), aspect: 'landscape' },
-    ],
-    'ai-influencer': [
-      { poster: aiInfluencerMarketing, aspect: 'landscape' },
-      { poster: speakerRoom, aspect: 'portrait' },
-      { poster: archivedSkillPoster('design-styles'), aspect: 'landscape' },
-      { poster: ambientPiano, aspect: 'square' },
-      { poster: lunarShot, aspect: 'portrait' },
-      { poster: komonaSunset, aspect: 'portrait' },
-    ],
-  };
-
-  const mediaList = presetMedia[scenario.id] ?? [];
-  return scenario.steps.map((step, index) => {
-    const media = mediaList[index] ?? mediaList[0] ?? { poster: defaultPoster };
+  return scenario.steps.map(step => {
+    const media = byStep[step.id] ?? { poster: defaultPoster };
     return {
       id: `showcase:${scenario.id}:${step.id}`,
       kind: 'showcase',
@@ -548,34 +533,16 @@ export function ScenarioStage({
 
     if (currentSlide.kind === 'showcase') {
       const showVideo = Boolean(currentSlide.video) && videoFailedId !== currentSlide.id;
-      return (
-        <>
-          {showVideo && currentSlide.video ? (
-            <StageVideoPlayer
-              src={currentSlide.video}
-              poster={currentSlide.poster}
-              active={active}
-              title={t(currentSlide.title)}
-              onFallback={() => setVideoFailedId(currentSlide.id)}
-            />
-          ) : (
-            <StagePosterImage src={currentSlide.poster} alt={t(currentSlide.title)} />
-          )}
-          <div className="om-scenario-stage-caption-row">
-            <span className="om-scenario-stage-pill" data-step-type={currentSlide.stepType}>
-              <RemixIcon name={currentSlide.icon} size={13} />
-              <span>{t(currentSlide.title)}</span>
-              <span className="om-scenario-stage-pill-sep" aria-hidden="true">·</span>
-              <span className="om-scenario-stage-pill-muted">{t('Example preview')}</span>
-            </span>
-            {activeStepGenerating && (
-              <span className="om-scenario-stage-pill om-scenario-stage-pill--live" role="status">
-                <RemixIcon name="loader-4-line" size={13} className="om-scenario-spin" />
-                <span>{t('Generating…')}</span>
-              </span>
-            )}
-          </div>
-        </>
+      return showVideo && currentSlide.video ? (
+        <StageVideoPlayer
+          src={currentSlide.video}
+          poster={currentSlide.poster}
+          active={active}
+          title={t(currentSlide.title)}
+          onFallback={() => setVideoFailedId(currentSlide.id)}
+        />
+      ) : (
+        <StagePosterImage src={currentSlide.poster} alt={t(currentSlide.title)} />
       );
     }
 
@@ -800,6 +767,23 @@ export function ScenarioStage({
       aria-label={t('Workflow preview stage')}
     >
       <div className="om-scenario-stage-viewport">
+        {currentSlide?.kind === 'showcase' && (
+          <div className="om-scenario-stage-showcase-bar">
+            <span className="om-scenario-stage-pill" data-step-type={currentSlide.stepType}>
+              <RemixIcon name={currentSlide.icon} size={13} />
+              <span>{t(currentSlide.title)}</span>
+              <span className="om-scenario-stage-pill-sep" aria-hidden="true">·</span>
+              <span className="om-scenario-stage-pill-muted">{t('Example preview')}</span>
+            </span>
+            {activeStepGenerating && (
+              <span className="om-scenario-stage-pill om-scenario-stage-pill--live" role="status">
+                <RemixIcon name="loader-4-line" size={13} className="om-scenario-spin" />
+                <span>{t('Generating…')}</span>
+              </span>
+            )}
+          </div>
+        )}
+
         <div
           className="om-scenario-stage-hero"
           data-aspect={heroAspect}
