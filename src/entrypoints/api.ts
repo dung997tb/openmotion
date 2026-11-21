@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import { serve, type ServerType } from '@hono/node-server';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { Redis } from 'ioredis';
@@ -73,6 +73,7 @@ import type { StoragePort } from '../contracts/storage.ts';
 import { createDbHandle, type Database, type DbHandle } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { jobs } from '../db/schema/jobs.ts';
+import { projectGrants, projects } from '../db/schema/projects.ts';
 import { getConfig, type AppConfig } from '../infra/config.ts';
 import { createLogger, type Logger } from '../infra/logger.ts';
 import { QueueService } from '../infra/queues.ts';
@@ -703,17 +704,98 @@ function createCloudMediaJobsPort(deps: {
     auth: AuthContext,
     query: { projectId?: string; limit?: number; offset?: number },
   ): Promise<Record<string, unknown>> => {
-    if (query.projectId && isUuid(query.projectId) && auth.authMethod === 'oauth_bearer') {
-      await loadProjectOrThrow(deps.db, auth.workspaceId, query.projectId, { allowTrashed: true, auth });
-    }
     const limit = Math.min(Math.max(1, query.limit ?? 50), 100);
     const offset = Math.max(0, query.offset ?? 0);
+    const rawProjectId = typeof query.projectId === 'string' ? query.projectId.trim() : '';
+
+    if (auth.authMethod === 'oauth_bearer') {
+      if (rawProjectId) {
+        if (!isUuid(rawProjectId)) {
+          return { jobs: [], total: 0, offset, limit };
+        }
+        await loadProjectOrThrow(deps.db, auth.workspaceId, rawProjectId, { allowTrashed: true, auth });
+        const rows = await deps.db
+          .select()
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.workspaceId, auth.workspaceId),
+              eq(jobs.kind, 'media_generate'),
+              eq(jobs.projectId, rawProjectId),
+            ),
+          )
+          .orderBy(desc(jobs.createdAt))
+          .limit(limit)
+          .offset(offset);
+        return {
+          jobs: rows.map(serializeJob),
+          total: rows.length,
+          offset,
+          limit,
+        };
+      }
+
+      if (!auth.clientId) {
+        return { jobs: [], total: 0, offset, limit };
+      }
+
+      const grantedRows = await deps.db
+        .select({ projectId: projectGrants.projectId })
+        .from(projectGrants)
+        .where(
+          and(
+            eq(projectGrants.workspaceId, auth.workspaceId),
+            eq(projectGrants.userId, auth.userId),
+            eq(projectGrants.clientId, auth.clientId),
+            isNull(projectGrants.revokedAt),
+          ),
+        );
+
+      const candidateProjectIds = [...new Set(grantedRows.map((row) => row.projectId))];
+      if (candidateProjectIds.length === 0) {
+        return { jobs: [], total: 0, offset, limit };
+      }
+
+      const accessibleProjects = await deps.db
+        .select({ id: projects.id, ownerUserId: projects.ownerUserId })
+        .from(projects)
+        .where(and(eq(projects.workspaceId, auth.workspaceId), inArray(projects.id, candidateProjectIds)));
+
+      const grantedProjectIds = accessibleProjects
+        .filter((project) => !project.ownerUserId || project.ownerUserId === auth.userId)
+        .map((project) => project.id);
+      if (grantedProjectIds.length === 0) {
+        return { jobs: [], total: 0, offset, limit };
+      }
+
+      const rows = await deps.db
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.workspaceId, auth.workspaceId),
+            eq(jobs.kind, 'media_generate'),
+            inArray(jobs.projectId, grantedProjectIds),
+          ),
+        )
+        .orderBy(desc(jobs.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+      return {
+        jobs: rows.map(serializeJob),
+        total: rows.length,
+        offset,
+        limit,
+      };
+    }
+
     const predicate =
-      query.projectId && isUuid(query.projectId)
+      rawProjectId && isUuid(rawProjectId)
         ? and(
             eq(jobs.workspaceId, auth.workspaceId),
             eq(jobs.kind, 'media_generate'),
-            eq(jobs.projectId, query.projectId),
+            eq(jobs.projectId, rawProjectId),
           )
         : and(eq(jobs.workspaceId, auth.workspaceId), eq(jobs.kind, 'media_generate'));
 
@@ -808,6 +890,9 @@ function createCloudMediaJobsPort(deps: {
     if (!existing) {
       throw new CloudError('NOT_FOUND', `Media job '${jobId}' not found`, { status: 404, applied: false });
     }
+    if (existing.projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, existing.projectId, { allowTrashed: true, auth });
+    }
     if (!existing.remoteId || existing.remoteTerminal || existing.state !== 'failed') {
       throw new CloudError(
         'INVALID_ARGUMENT',
@@ -855,6 +940,9 @@ function createCloudMediaJobsPort(deps: {
       .limit(1);
     if (!existing) {
       throw new CloudError('NOT_FOUND', `Media job '${jobId}' not found`, { status: 404, applied: false });
+    }
+    if (existing.projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, existing.projectId, { allowTrashed: true, auth });
     }
     if (!existing.savePending) {
       throw new CloudError('INVALID_ARGUMENT', 'Media job does not have a pending save to retry.', {

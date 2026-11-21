@@ -121,16 +121,6 @@ export function AuthRecoveryNotice({
         className="om-auth-recovery-banner"
         role="alert"
         data-kind={recovery.kind}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          padding: '10px 16px',
-          background: isUnavailable ? 'rgba(217, 119, 6, 0.14)' : 'rgba(220, 38, 38, 0.12)',
-          borderBottom: '1px solid var(--motion-border-subtle, rgba(255,255,255,0.12))',
-          fontSize: '13px',
-        }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <RemixIcon name={isUnavailable ? 'wifi-off-line' : 'lock-line'} size={16} />
@@ -164,16 +154,6 @@ export function AuthRecoveryNotice({
         className="om-auth-recovery-banner"
         role="status"
         data-kind="pending_draft"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          padding: '10px 16px',
-          background: 'rgba(37, 99, 235, 0.12)',
-          borderBottom: '1px solid var(--motion-border-subtle, rgba(255,255,255,0.12))',
-          fontSize: '13px',
-        }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <RemixIcon name="history-line" size={16} />

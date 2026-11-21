@@ -24,12 +24,12 @@ function oidcConfig(overrides: Record<string, string> = {}) {
     REDIS_URL: 'redis://127.0.0.1:6379',
     APP_PUBLIC_ORIGIN: 'https://motion.example.test',
     AUTH_MODE: 'oidc',
-    SESSION_SECRET: '0123456789abcdef0123456789abcdef_secret',
+    SESSION_SECRET: '0'.repeat(32),
     OIDC_ISSUER: 'https://amr-api.example.test/api/auth',
     OIDC_CLIENT_ID: 'openmotion-cloud',
-    OIDC_CLIENT_SECRET: 'openmotion-client-secret-0123456789abcdef',
+    OIDC_CLIENT_SECRET: 'ephemeral-test-client-secret',
     OPENDESIGN_API_URL: 'https://amr-api.example.test',
-    OPENDESIGN_INTERNAL_API_TOKEN: 'internal-secret-token',
+    OPENDESIGN_INTERNAL_API_TOKEN: 'ephemeral-internal-token',
     OAUTH_DCR_RATE_LIMIT_PER_MIN: '3',
     MODEL_GATEWAY_MODE: 'mock',
     ...overrides,
@@ -48,7 +48,7 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
     const mockFetch: typeof fetch = async (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       const headers = new Headers(init?.headers);
-      assert.equal(headers.get('x-internal-token'), 'internal-secret-token');
+      assert.equal(headers.get('x-internal-token'), 'ephemeral-internal-token');
       assert.equal(headers.get('authorization'), null);
       lookupCalls.push(url);
 
@@ -98,7 +98,7 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
 
     const amrIdentity = new AmrIdentityClient({
       apiUrl: 'https://amr-api.example.test',
-      internalToken: 'internal-secret-token',
+      internalToken: 'ephemeral-internal-token',
       cache,
       cacheTtlSec: 60,
       fetcher: mockFetch,
@@ -266,8 +266,48 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
     });
     assert.equal(rateLimited.status, 429);
 
-    // 4. Complete OAuth authorize + consent + token exchange for Codex CLI
+    // 4a. Consent deny response includes RFC 9207 `iss` parameter alongside error and state
     const { codeVerifier, codeChallenge } = generatePkcePair();
+    const denyAuthzUrl =
+      `/oauth/authorize?client_id=${encodeURIComponent(client.client_id)}` +
+      `&redirect_uri=${encodeURIComponent('http://127.0.0.1:51234/callback/abc123def456')}` +
+      `&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}` +
+      `&code_challenge_method=S256&state=st-deny&resource=${encodeURIComponent('https://motion.example.test/mcp')}`;
+
+    const denyConsentRes = await app.request(denyAuthzUrl, {
+      headers: { Cookie: `om_session=${session.token}` },
+    });
+    assert.equal(denyConsentRes.status, 200);
+    const denyHtml = await denyConsentRes.text();
+    const denyTokenMatch = denyHtml.match(/name="consent_token" value="([^"]+)"/);
+    assert.ok(denyTokenMatch);
+
+    const denyRes = await app.request('/oauth/authorize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: `om_session=${session.token}`,
+        Origin: 'https://motion.example.test',
+      },
+      body: new URLSearchParams({
+        consent_token: denyTokenMatch[1],
+        client_id: client.client_id,
+        redirect_uri: 'http://127.0.0.1:51234/callback/abc123def456',
+        response_type: 'code',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        state: 'st-deny',
+        resource: 'https://motion.example.test/mcp',
+        decision: 'deny',
+      }).toString(),
+    });
+    assert.equal(denyRes.status, 302);
+    const denyCallbackUrl = new URL(denyRes.headers.get('location')!);
+    assert.equal(denyCallbackUrl.searchParams.get('error'), 'access_denied');
+    assert.equal(denyCallbackUrl.searchParams.get('state'), 'st-deny');
+    assert.equal(denyCallbackUrl.searchParams.get('iss'), 'https://motion.example.test');
+
+    // 4b. Complete OAuth authorize + consent + token exchange for Codex CLI
     const authzUrl =
       `/oauth/authorize?client_id=${encodeURIComponent(client.client_id)}` +
       `&redirect_uri=${encodeURIComponent('http://127.0.0.1:51234/callback/abc123def456')}` +
@@ -393,7 +433,7 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
     const gateway = new OpenDesignModelGateway({
       apiUrl: 'https://amr-api.example.test',
       linkUrl: 'https://amr-link.example.test',
-      internalToken: 'internal-secret-token',
+      internalToken: 'ephemeral-internal-token',
       billingSyncEnabled: true,
       fetcher: async (input, init) => {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -427,7 +467,7 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
     assert.equal(summary.balanceUsd, '12.50');
     assert.equal(summary.hasBalance, true);
     assert.equal(seen[0].url, 'https://amr-api.example.test/api/internal/billing/summary/app-user-9');
-    assert.equal(seen[0].headers['x-internal-token'], 'internal-secret-token');
+    assert.equal(seen[0].headers['x-internal-token'], 'ephemeral-internal-token');
     assert.equal(seen[0].headers['x-vela-workspace-id'], 'amr-ws-9');
     assert.equal(seen[0].headers.authorization, undefined);
   });

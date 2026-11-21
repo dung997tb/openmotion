@@ -22,7 +22,7 @@ import {
   projectVersionFiles,
   projectVersions,
 } from '../db/schema/project-files.ts';
-import { projects, sessions } from '../db/schema/projects.ts';
+import { projectGrants, projects, sessions } from '../db/schema/projects.ts';
 import type { Logger } from '../infra/logger.ts';
 import type { HotTextCache } from '../infra/redis.ts';
 import { catalogBlobKey } from '../infra/storage.ts';
@@ -1208,6 +1208,7 @@ export class CatalogService implements CatalogPort {
         asInsert(projects, {
           id: projectId,
           workspaceId: ctx.workspaceId,
+          ownerUserId: ctx.userId,
           sessionId,
           artifactId,
           title,
@@ -1231,6 +1232,31 @@ export class CatalogService implements CatalogPort {
           updatedAt: now,
         }),
       );
+
+      // Spec: when an OAuth agent creates a new project (including from a template),
+      // automatically grant that connection access to the created project.
+      if (ctx.authMethod === 'oauth_bearer' && ctx.clientId) {
+        await tx
+          .insert(projectGrants)
+          .values(
+            asInsert(projectGrants, {
+              projectId,
+              userId: ctx.userId,
+              workspaceId: ctx.workspaceId,
+              clientId: ctx.clientId,
+              grantedAt: now,
+              revokedAt: null,
+            }),
+          )
+          .onConflictDoUpdate({
+            target: [projectGrants.projectId, projectGrants.userId, projectGrants.clientId],
+            set: asUpdate(projectGrants, {
+              workspaceId: ctx.workspaceId,
+              grantedAt: now,
+              revokedAt: null,
+            }),
+          });
+      }
 
       await tx.insert(projectFiles).values(
         validatedFiles.map((file) =>

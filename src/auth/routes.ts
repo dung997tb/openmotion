@@ -523,6 +523,7 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
       const denyUrl = new URL(validated.redirectUri);
       denyUrl.searchParams.set('error', 'access_denied');
       if (validated.state) denyUrl.searchParams.set('state', validated.state);
+      if (oauthCfg.issuer) denyUrl.searchParams.set('iss', oauthCfg.issuer);
       return c.redirect(denyUrl.toString(), 302);
     }
 
