@@ -27,6 +27,7 @@ import type { Logger } from '../infra/logger.ts';
 import type { HotTextCache } from '../infra/redis.ts';
 import { catalogBlobKey } from '../infra/storage.ts';
 import {
+  compareFeaturedTemplates,
   isEditableTemplate,
   templatePage,
   templateWorkflow,
@@ -639,7 +640,7 @@ export class CatalogService implements CatalogPort {
     this.presignGetTtlSec = deps.presignGetTtlSec ?? DEFAULT_PRESIGN_GET_TTL_SEC;
   }
 
-  async listTemplates(options: CatalogListOptions = {}): Promise<CatalogListResult> {
+  private async loadTemplateIndex(options: Pick<CatalogListOptions, 'kind' | 'locale'>) {
     const baseQuery = this.db.select().from(catalogTemplates);
     const rows = options.kind
       ? await baseQuery
@@ -657,6 +658,16 @@ export class CatalogService implements CatalogPort {
     const builtinRows = rows.filter((row) => row.kind === 'builtin').sort((a, b) => a.sortOrder - b.sortOrder);
     const ordered = [...prismRows, ...builtinRows];
     const items = ordered.map((row) => projectRowToGalleryTemplate(row, locale));
+    return { items, catalogVersion: ordered[0]?.catalogVersion ?? 'empty' };
+  }
+
+  async listAllTemplates() {
+    const { items, catalogVersion } = await this.loadTemplateIndex({});
+    return { templates: items.sort(compareFeaturedTemplates), catalogVersion, total: items.length };
+  }
+
+  async listTemplates(options: CatalogListOptions = {}): Promise<CatalogListResult> {
+    const { items, catalogVersion } = await this.loadTemplateIndex(options);
     const visible = options.covered ? items.filter((item) => Boolean(item.posterUrl)) : items;
 
     let page: TemplatePage;
@@ -676,7 +687,6 @@ export class CatalogService implements CatalogPort {
       );
     }
 
-    const catalogVersion = ordered[0]?.catalogVersion ?? 'empty';
     return {
       ...page,
       catalogTotal: items.length,

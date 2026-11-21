@@ -930,7 +930,7 @@ describe('Cloud API Entrypoint — Auth Isolation & First-Access Welcome Bootstr
 
 describe('Cloud API Entrypoint — End-to-End Product, Studio & Streamable HTTP /mcp', () => {
   it('creates a project, edits via /mcp, reads via Diskless Studio, and enforces MCP limits & P2 codes', async () => {
-    const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const { app, config, pgClient } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const mcpHeaders = {
       Authorization: `Bearer ${config.DEV_PAT}`,
       'Content-Type': 'application/json',
@@ -1007,6 +1007,23 @@ describe('Cloud API Entrypoint — End-to-End Product, Studio & Streamable HTTP 
     const tools = (listPayload.result?.tools ?? []) as Array<{ name: string }>;
     assert.equal(tools.length, phase1Tools.length);
     assert.equal(tools.length, 22);
+
+    // MCP discovery returns the whole index, including entries beyond Studio's page limit.
+    const templateIds = Array.from({ length: 501 }, (_, i) => `mcp-template-${i}`);
+    for (const [sortOrder, id] of templateIds.entries()) {
+      pgClient.seed('catalog_templates', {
+        id, kind: 'builtin', sort_order: sortOrder, catalog_version: 'mcp-e2e',
+        metadata: { title: id }, updated_at: new Date().toISOString(),
+      });
+    }
+    const catalog = await callMcp(20, 'tools/call', { name: 'openmotion_list_templates', arguments: {} });
+    assert.equal(catalog.result?.isError, undefined);
+    const index = catalog.result?.structuredContent as {
+      catalogVersion: string; total: number; templates: Array<{ id: string }>;
+    };
+    assert.equal(index.catalogVersion, 'mcp-e2e');
+    assert.equal(index.total, templateIds.length);
+    assert.deepEqual(index.templates.map(template => template.id), templateIds);
 
     // 5. openmotion_get_project (without projectId) lists workspace projects including our created one
     const listProjectsRes = await callMcp(3, 'tools/call', {
