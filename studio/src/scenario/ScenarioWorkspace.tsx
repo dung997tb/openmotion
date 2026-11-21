@@ -787,10 +787,23 @@ export function ScenarioWorkspace({
               <header className="om-scenario-step-header">
                 <div className="om-scenario-step-heading">
                   <div className="om-scenario-step-title-line">
-                    <span className="om-scenario-step-badge-icon" aria-hidden="true">
-                      <RemixIcon name={activeStep.icon} size={18} />
+                    <span
+                      className="om-scenario-step-badge-icon"
+                      data-step-type={activeStep.type}
+                      aria-hidden="true"
+                    >
+                      <RemixIcon name={activeStep.icon} size={20} />
                     </span>
                     <h2 className="om-scenario-step-title">{t(activeStep.title)}</h2>
+                    <span
+                      className="om-scenario-step-counter"
+                      data-step-type={activeStep.type}
+                    >
+                      {t('Step {current} / {total}', {
+                        current: activeStepIndex + 1,
+                        total: scenario.steps.length,
+                      })}
+                    </span>
                     {activeStep.optional && (
                       <span className="om-badge">{t('Optional')}</span>
                     )}
@@ -852,6 +865,7 @@ export function ScenarioWorkspace({
                       variant="primary"
                       size="sm"
                       type="button"
+                      icon={<RemixIcon name={nextStep.icon} size={14} />}
                       onClick={() => selectStep(nextStep.id)}
                     >
                       <span>{t('Next: {step}', { step: t(nextStep.title) })}</span>

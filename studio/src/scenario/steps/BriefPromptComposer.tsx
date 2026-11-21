@@ -11,6 +11,7 @@ import {
   parseSentenceTemplate,
   type BriefPreset,
 } from './briefPresets';
+import { SocialPlatformGlyph } from './SocialPlatformGlyph';
 
 export type BriefPromptComposerProps = {
   scenario: ScenarioDefinition;
@@ -76,7 +77,7 @@ export function BriefPromptComposer({
     >
       <div className="om-brief-composer-head">
         <div className="om-brief-composer-lead">
-          <span className="om-brief-composer-icon" aria-hidden="true">
+          <span className="om-brief-composer-icon" data-tone="brief" aria-hidden="true">
             <RemixIcon name="sparkling-line" size={16} />
           </span>
           <p className="om-step-muted">
@@ -84,10 +85,22 @@ export function BriefPromptComposer({
           </p>
         </div>
         <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
-          <Button variant="secondary" size="sm" aria-pressed={true} onClick={() => {}}>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-pressed={true}
+            icon={<RemixIcon name="sparkling-line" size={13} />}
+            onClick={() => {}}
+          >
             {t('Fill in the blanks')}
           </Button>
-          <Button variant="ghost" size="sm" aria-pressed={false} onClick={onSwitchToForm}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={false}
+            icon={<RemixIcon name="equalizer-line" size={13} />}
+            onClick={onSwitchToForm}
+          >
             {t('All fields')}
           </Button>
         </div>
@@ -189,6 +202,7 @@ export function BriefPromptComposer({
                 <FilterChip
                   key={opt.id}
                   active={selected}
+                  className="om-step-platform-chip"
                   onClick={() => {
                     const next = selected
                       ? current.filter(id => id !== opt.id)
@@ -196,7 +210,8 @@ export function BriefPromptComposer({
                     onUpdateField(platformField.id, next);
                   }}
                 >
-                  {t(opt.label)}
+                  <SocialPlatformGlyph platform={opt.id} size="sm" />
+                  <span>{t(opt.label)}</span>
                 </FilterChip>
               );
             })}
@@ -243,6 +258,7 @@ export function BriefPromptComposer({
             <Button
               variant="primary"
               size="sm"
+              icon={<RemixIcon name={nextStep.icon} size={14} />}
               onClick={onContinue}
             >
               {t('Next: {step}', { step: t(nextStep.title) })}

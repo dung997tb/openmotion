@@ -122,7 +122,10 @@ export function ScenarioHeader({
             <div className="om-scenario-header-title-row">
               <h1 className="om-scenario-header-title">{t(scenario.title)}</h1>
               {category && (
-                <span className="om-badge om-scenario-header-category">
+                <span
+                  className="om-badge om-scenario-header-category"
+                  data-category={scenario.category}
+                >
                   <RemixIcon name={category.icon} size={12} />
                   <span>{t(category.label)}</span>
                 </span>

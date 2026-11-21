@@ -62,7 +62,7 @@ export function ScenarioCard({ scenario, variant, onStart, meta }: ScenarioCardP
         <div className="om-scenario-card-body">
           <div className="om-scenario-card-eyebrow">
             {category && (
-              <span className="om-scenario-card-category">
+              <span className="om-scenario-card-category" data-category={scenario.category}>
                 <RemixIcon name={category.icon} size={12} />
                 <span>{t(category.label)}</span>
               </span>
@@ -81,6 +81,7 @@ export function ScenarioCard({ scenario, variant, onStart, meta }: ScenarioCardP
                 <span
                   key={step.id}
                   className="om-scenario-step-chip"
+                  data-step-type={step.type}
                   title={t(step.title)}
                 >
                   <RemixIcon name={step.icon} size={12} />

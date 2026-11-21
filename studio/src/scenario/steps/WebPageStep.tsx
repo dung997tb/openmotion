@@ -107,21 +107,21 @@ function buildDefaultPagePrompt(
 
 const PAGE_QUICK_CHIPS: Record<string, readonly { id: string; en: string; zh: string; appendEn: string; appendZh: string }[]> = {
   sale: [
-    { id: 'countdown', en: '+ Countdown banner', zh: '+ 倒计时横幅', appendEn: 'Add a top countdown urgency banner.', appendZh: '加入顶部倒计时促销横幅。' },
-    { id: 'gallery', en: '+ Multi-angle gallery', zh: '+ 多角度商品图集', appendEn: 'Include a multi-angle product photo gallery.', appendZh: '加入多角度商品实拍画廊。' },
-    { id: 'reviews', en: '+ Buyer reviews & FAQ', zh: '+ 买家好评与 FAQ', appendEn: 'Add customer reviews and shipping FAQ.', appendZh: '加入真实评价与发货售后 FAQ。' },
+    { id: 'countdown', en: 'Countdown banner', zh: '倒计时横幅', appendEn: 'Add a top countdown urgency banner.', appendZh: '加入顶部倒计时促销横幅。' },
+    { id: 'gallery', en: 'Multi-angle gallery', zh: '多角度商品图集', appendEn: 'Include a multi-angle product photo gallery.', appendZh: '加入多角度商品实拍画廊。' },
+    { id: 'reviews', en: 'Buyer reviews & FAQ', zh: '买家好评与 FAQ', appendEn: 'Add customer reviews and shipping FAQ.', appendZh: '加入真实评价与发货售后 FAQ。' },
   ],
   'link-in-bio': [
-    { id: 'newsletter', en: '+ Newsletter signup', zh: '+ 订阅入口', appendEn: 'Include an email newsletter signup card.', appendZh: '加入邮件/社群订阅卡片。' },
-    { id: 'social-row', en: '+ Social links', zh: '+ 全平台社媒入口', appendEn: 'Highlight all social platform links at the top.', appendZh: '顶部突出展示全平台社媒入口。' },
+    { id: 'newsletter', en: 'Newsletter signup', zh: '订阅入口', appendEn: 'Include an email newsletter signup card.', appendZh: '加入邮件/社群订阅卡片。' },
+    { id: 'social-row', en: 'Social links', zh: '全平台社媒入口', appendEn: 'Highlight all social platform links at the top.', appendZh: '顶部突出展示全平台社媒入口。' },
   ],
   'code-animation': [
-    { id: 'cursor', en: '+ Cursor reactive', zh: '+ 鼠标跟随交互', appendEn: 'Make motion react smoothly to pointer movement.', appendZh: '支持鼠标滑动实时交互反馈。' },
-    { id: 'loop', en: '+ Seamless 15s loop', zh: '+ 无缝循环动画', appendEn: 'Design as a seamless loop ready for video capture.', appendZh: '设计为适合录屏成片的无缝循环动画。' },
+    { id: 'cursor', en: 'Cursor reactive', zh: '鼠标跟随交互', appendEn: 'Make motion react smoothly to pointer movement.', appendZh: '支持鼠标滑动实时交互反馈。' },
+    { id: 'loop', en: 'Seamless 15s loop', zh: '无缝循环动画', appendEn: 'Design as a seamless loop ready for video capture.', appendZh: '设计为适合录屏成片的无缝循环动画。' },
   ],
   landing: [
-    { id: 'pricing', en: '+ Pricing section', zh: '+ 价格方案区', appendEn: 'Add a clear pricing comparison section.', appendZh: '加入清晰的价格方案对比区。' },
-    { id: 'social-proof', en: '+ Testimonials', zh: '+ 客户口碑', appendEn: 'Include customer logos and testimonials.', appendZh: '加入客户案例与评价模块。' },
+    { id: 'pricing', en: 'Pricing section', zh: '价格方案区', appendEn: 'Add a clear pricing comparison section.', appendZh: '加入清晰的价格方案对比区。' },
+    { id: 'social-proof', en: 'Testimonials', zh: '客户口碑', appendEn: 'Include customer logos and testimonials.', appendZh: '加入客户案例与评价模块。' },
   ],
 };
 
@@ -564,10 +564,10 @@ export function WebPageStep({
       <div className="om-step-body" data-step-body="web-page">
         {renderExportMenu()}
 
-        <section className="om-step-card om-page-composer" data-page-composer="true" aria-label={t('Describe your page')}>
+        <section className="om-step-card om-page-composer" data-page-composer="true" data-tone="web-page" aria-label={t('Describe your page')}>
           <div className="om-brief-composer-head">
             <div className="om-brief-composer-lead">
-              <span className="om-brief-composer-icon" aria-hidden="true">
+              <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
                 <RemixIcon name="layout-line" size={16} />
               </span>
               <div>
@@ -602,7 +602,10 @@ export function WebPageStep({
                     variant={activeChip ? 'secondary' : 'ghost'}
                     size="sm"
                     className="om-brief-preset-chip"
+                    data-tone="web-page"
+                    data-active={activeChip ? 'true' : undefined}
                     aria-pressed={activeChip}
+                    icon={<RemixIcon name={activeChip ? 'check-line' : 'add-line'} size={13} />}
                     onClick={() => {
                       setPromptTouched(true);
                       setPagePrompt(prev => {
@@ -659,14 +662,20 @@ export function WebPageStep({
         {(templatesLoading || templatesError || visibleTemplates.length > 0) && (
           <section className="om-step-card" aria-label={t('Start from a Design template')}>
             <div className="om-step-section-head">
-              <div>
-                <h3 className="om-step-section-title">{t('Or pick a starting layout')}</h3>
-                <p className="om-step-muted">{t('Pick a starter layout and customize it in this workflow or in Design Studio.')}</p>
+              <div className="om-brief-composer-lead">
+                <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
+                  <RemixIcon name="grid-line" size={16} />
+                </span>
+                <div>
+                  <h3 className="om-step-section-title">{t('Or pick a starting layout')}</h3>
+                  <p className="om-step-muted">{t('Pick a starter layout and customize it in this workflow or in Design Studio.')}</p>
+                </div>
               </div>
               {(hasMoreTemplates || showAllTemplates) && (
                 <Button
                   variant="ghost"
                   size="sm"
+                  icon={<RemixIcon name="apps-2-line" size={14} />}
                   onClick={() => setShowAllTemplates(prev => !prev)}
                 >
                   {showAllTemplates
@@ -717,9 +726,14 @@ export function WebPageStep({
         {existingProjects.length > 0 && (
           <section className="om-step-card" aria-label={t('Link an existing Design project')}>
             <div className="om-step-section-head">
-              <div>
-                <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
-                <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+              <div className="om-brief-composer-lead">
+                <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
+                  <RemixIcon name="link" size={16} />
+                </span>
+                <div>
+                  <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
+                  <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+                </div>
               </div>
             </div>
             <div className="om-step-link-row">
@@ -825,9 +839,14 @@ export function WebPageStep({
 
       <section className="om-step-card" aria-label={t('Embed images')}>
         <div className="om-step-section-head">
-          <div>
-            <h3 className="om-step-section-title">{t('Embed images into this page')}</h3>
-            <p className="om-step-muted">{t('Import pool images as local project files and place them into HTML slots.')}</p>
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="image" aria-hidden="true">
+              <RemixIcon name="file-image-line" size={16} />
+            </span>
+            <div>
+              <h3 className="om-step-section-title">{t('Embed images into this page')}</h3>
+              <p className="om-step-muted">{t('Import pool images as local project files and place them into HTML slots.')}</p>
+            </div>
           </div>
           {boundImages.length > 0 && (
             <Button

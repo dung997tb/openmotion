@@ -560,6 +560,9 @@ export function BriefStep({
       {isBlackFriday && (discountSummary || values.originalPrice || values.salePrice || values.promoCode) && (
         <div className="om-step-card om-step-discount-banner" data-discount-preview="true">
           <div className="om-step-discount-values">
+            <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
+              <RemixIcon name="flashlight-line" size={16} />
+            </span>
             {typeof values.salePrice === 'string' && values.salePrice.trim() && (
               <strong className="om-step-discount-sale">{values.salePrice.trim()}</strong>
             )}
@@ -614,10 +617,22 @@ export function BriefStep({
               )}
             </div>
             <div className="om-step-segmented" role="group" aria-label={t('Brief editor mode')}>
-              <Button variant="ghost" size="sm" aria-pressed={false} onClick={() => setEditorMode('guided')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-pressed={false}
+                icon={<RemixIcon name="sparkling-line" size={13} />}
+                onClick={() => setEditorMode('guided')}
+              >
                 {t('Fill in the blanks')}
               </Button>
-              <Button variant="secondary" size="sm" aria-pressed={true} onClick={() => {}}>
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-pressed={true}
+                icon={<RemixIcon name="equalizer-line" size={13} />}
+                onClick={() => {}}
+              >
                 {t('All fields')}
               </Button>
             </div>
@@ -631,9 +646,14 @@ export function BriefStep({
       {isAiInfluencer && (
         <section className="om-step-card" aria-label={t('Episode script')}>
           <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Episode script')}</h3>
-              <p className="om-step-muted">{t('Used automatically as the speech prompt in the voiceover step.')}</p>
+            <div className="om-brief-composer-lead">
+              <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
+                <RemixIcon name="voiceprint-line" size={16} />
+              </span>
+              <div>
+                <h3 className="om-step-section-title">{t('Episode script')}</h3>
+                <p className="om-step-muted">{t('Used automatically as the speech prompt in the voiceover step.')}</p>
+              </div>
             </div>
             <div className="om-step-toolbar-group">
               <Button
@@ -685,9 +705,14 @@ export function BriefStep({
         <>
           <section className="om-step-card" aria-label={t('Gemini 4 availability')}>
             <div className="om-step-section-head">
-              <div>
-                <h3 className="om-step-section-title">{t('Gemini 4 availability')}</h3>
-                <p className="om-step-muted">{t(geminiHub.summary)}</p>
+              <div className="om-brief-composer-lead">
+                <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                  <RemixIcon name="sparkling-line" size={16} />
+                </span>
+                <div>
+                  <h3 className="om-step-section-title">{t('Gemini 4 availability')}</h3>
+                  <p className="om-step-muted">{t(geminiHub.summary)}</p>
+                </div>
               </div>
               <Button
                 variant="secondary"
@@ -721,9 +746,14 @@ export function BriefStep({
 
           <section className="om-step-card" aria-label={t('Gemini 4 Neon inspiration')}>
             <div className="om-step-section-head">
-              <div>
-                <h3 className="om-step-section-title">{t('Gemini 4 Neon inspiration')}</h3>
-                <p className="om-step-muted">{t('Explore community code animations in the Gemini 4 hub.')}</p>
+              <div className="om-brief-composer-lead">
+                <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                  <RemixIcon name="movie-line" size={16} />
+                </span>
+                <div>
+                  <h3 className="om-step-section-title">{t('Gemini 4 Neon inspiration')}</h3>
+                  <p className="om-step-muted">{t('Explore community code animations in the Gemini 4 hub.')}</p>
+                </div>
               </div>
               <Button
                 variant="ghost"
@@ -760,9 +790,14 @@ export function BriefStep({
       {downstreamSteps.length > 0 && (
         <section className="om-step-card" aria-label={t('Downstream prompts')}>
           <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Downstream prompts')}</h3>
-              <p className="om-step-muted">{t('Preview how this brief seeds each media step. Custom prompts stay untouched.')}</p>
+            <div className="om-brief-composer-lead">
+              <span className="om-brief-composer-icon" data-tone="brief" aria-hidden="true">
+                <RemixIcon name="route-line" size={16} />
+              </span>
+              <div>
+                <h3 className="om-step-section-title">{t('Downstream prompts')}</h3>
+                <p className="om-step-muted">{t('Preview how this brief seeds each media step. Custom prompts stay untouched.')}</p>
+              </div>
             </div>
             <div className="om-step-toolbar-group">
               <Button
@@ -777,6 +812,7 @@ export function BriefStep({
               <Button
                 variant="secondary"
                 size="sm"
+                icon={<RemixIcon name="check-line" size={14} />}
                 loading={applyingPrompts}
                 onClick={() => void handleApplyAllPrompts()}
               >
@@ -789,7 +825,9 @@ export function BriefStep({
               {downstreamSteps.map(({ step: target, filled, userEdited }) => (
                 <div key={target.id} className="om-step-prompt-row">
                   <div className="om-step-prompt-meta">
-                    <RemixIcon name={target.icon} size={14} />
+                    <span className="om-step-inline-icon" data-step-type={target.type} aria-hidden="true">
+                      <RemixIcon name={target.icon} size={14} />
+                    </span>
                     <strong>{t(target.title)}</strong>
                     {userEdited && <span className="om-step-badge">{t('Edited')}</span>}
                   </div>

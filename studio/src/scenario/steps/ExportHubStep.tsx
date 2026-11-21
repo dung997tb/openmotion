@@ -228,20 +228,19 @@ export function ExportHubStep({
 
   return (
     <div className="om-step-body" data-step-body="export-hub">
-      <div className="om-step-toolbar">
-        <div className="om-step-toolbar-group">
-          <span className="om-step-muted">
-            {t('{total} pool assets · {pinned} pinned', { total: poolStats.total, pinned: poolStats.pinned })}
-          </span>
-        </div>
-        <div className="om-step-toolbar-group">
-          {renderExportMenu()}
-        </div>
-      </div>
+      {renderExportMenu()}
 
       <section className="om-step-card" aria-label={t('Step overview')}>
         <div className="om-step-section-head">
-          <h3 className="om-step-section-title">{t('Step overview')}</h3>
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="brief" aria-hidden="true">
+              <RemixIcon name="route-line" size={16} />
+            </span>
+            <h3 className="om-step-section-title">{t('Step overview')}</h3>
+          </div>
+          <span className="om-step-muted">
+            {t('{total} pool assets · {pinned} pinned', { total: poolStats.total, pinned: poolStats.pinned })}
+          </span>
         </div>
         <div className="om-step-overview-grid">
           {contentSteps.map(stepDef => {
@@ -251,10 +250,17 @@ export function ExportHubStep({
             const outputCount = activeIter?.outputs.length ?? 0;
 
             return (
-              <div key={stepDef.id} className="om-step-overview-card" data-overview-step={stepDef.id}>
+              <div
+                key={stepDef.id}
+                className="om-step-overview-card"
+                data-overview-step={stepDef.id}
+                data-step-type={stepDef.type}
+              >
                 <div className="om-step-overview-head">
                   <span className="om-step-overview-title">
-                    <RemixIcon name={stepDef.icon} size={15} />
+                    <span className="om-step-overview-icon" data-step-type={stepDef.type} aria-hidden="true">
+                      <RemixIcon name={stepDef.icon} size={14} />
+                    </span>
                     <strong>{t(stepDef.title)}</strong>
                   </span>
                   <span className="om-step-badge" data-status={status}>{t(stepStatusLabel(status))}</span>
@@ -268,6 +274,7 @@ export function ExportHubStep({
                   <Button
                     variant="secondary"
                     size="sm"
+                    icon={<RemixIcon name="arrow-right-up-line" size={14} />}
                     onClick={() => nav.selectStep(stepDef.id)}
                   >
                     {t('Open step')}
@@ -290,13 +297,20 @@ export function ExportHubStep({
 
       <section className="om-step-card" aria-label={t('Pool summary and readiness')}>
         <div className="om-step-section-head">
-          <h3 className="om-step-section-title">{t('Pool summary')}</h3>
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
+              <RemixIcon name="stack-line" size={16} />
+            </span>
+            <h3 className="om-step-section-title">{t('Pool summary')}</h3>
+          </div>
           <span className="om-step-badge">{t('{count} pinned', { count: poolStats.pinned })}</span>
         </div>
         <div className="om-step-pool-stats">
           {POOL_KIND_ORDER.map(kind => (
-            <div key={kind} className="om-step-pool-stat">
-              <RemixIcon name={poolKindIcon(kind)} size={14} />
+            <div key={kind} className="om-step-pool-stat" data-pool-kind={kind}>
+              <span className="om-step-pool-stat-icon" data-pool-kind={kind} aria-hidden="true">
+                <RemixIcon name={poolKindIcon(kind)} size={13} />
+              </span>
               <span>{t(poolKindLabel(kind))}</span>
               <strong>{poolStats.byKind[kind]}</strong>
             </div>
@@ -307,13 +321,16 @@ export function ExportHubStep({
             {readinessNotes.map(note => (
               <div key={note.key} className="om-step-readiness-row">
                 <div className="om-step-readiness-copy">
-                  <RemixIcon name="information-line" size={14} />
+                  <span className="om-step-readiness-icon" aria-hidden="true">
+                    <RemixIcon name="information-line" size={15} />
+                  </span>
                   <span>{note.text}</span>
                 </div>
                 {note.stepId && note.actionLabel && (
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="sm"
+                    icon={<RemixIcon name="arrow-right-line" size={13} />}
                     onClick={() => nav.selectStep(note.stepId!)}
                   >
                     {note.actionLabel}
@@ -327,9 +344,14 @@ export function ExportHubStep({
 
       <section className="om-step-card" aria-label={t('Full ZIP package')}>
         <div className="om-step-section-head">
-          <div>
-            <h3 className="om-step-section-title">{t('Build full ZIP package')}</h3>
-            <p className="om-step-muted">{t('Bundles manifest, brief, web pages with embedded assets, media and social posts.')}</p>
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="export-hub" aria-hidden="true">
+              <RemixIcon name="download-2-line" size={16} />
+            </span>
+            <div>
+              <h3 className="om-step-section-title">{t('Build full ZIP package')}</h3>
+              <p className="om-step-muted">{t('Bundles manifest, brief, web pages with embedded assets, media and social posts.')}</p>
+            </div>
           </div>
         </div>
 
@@ -368,9 +390,14 @@ export function ExportHubStep({
               <FilterChip
                 key={stepDef.id}
                 active={selectedStepIds.includes(stepDef.id)}
+                className="om-step-icon-chip"
+                data-step-type={stepDef.type}
                 onClick={() => toggleStepSelection(stepDef.id)}
               >
-                {t(stepDef.title)}
+                <span className="om-step-chip-icon" data-step-type={stepDef.type} aria-hidden="true">
+                  <RemixIcon name={stepDef.icon} size={13} />
+                </span>
+                <span>{t(stepDef.title)}</span>
               </FilterChip>
             ))}
           </div>
@@ -410,9 +437,14 @@ export function ExportHubStep({
 
       <section className="om-step-card" aria-label={t('Agent handoff')}>
         <div className="om-step-section-head">
-          <div>
-            <h3 className="om-step-section-title">{t('Agent handoff')}</h3>
-            <p className="om-step-muted">{t('Hand this run and all pinned asset references to an external Agent via MCP.')}</p>
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+              <RemixIcon name="robot-line" size={16} />
+            </span>
+            <div>
+              <h3 className="om-step-section-title">{t('Agent handoff')}</h3>
+              <p className="om-step-muted">{t('Hand this run and all pinned asset references to an external Agent via MCP.')}</p>
+            </div>
           </div>
         </div>
         <div className="om-step-toolbar-group">

@@ -15,6 +15,7 @@ import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
+import { SocialPlatformGlyph } from './SocialPlatformGlyph';
 import {
   briefStringValue,
   buildStepAgentPrompt,
@@ -287,44 +288,21 @@ export function SocialPackStep({
 
   return (
     <div className="om-step-body" data-step-body="social-pack">
-      <div className="om-step-toolbar">
-        <div className="om-step-toolbar-group">
-          <Button
-            variant={posts.length ? 'secondary' : 'primary'}
-            size="sm"
-            icon={<RemixIcon name={posts.length ? 'refresh-line' : 'sparkling-line'} size={14} />}
-            loading={drafting}
-            onClick={() => void handleDraftPosts(posts.length ? lastVariant + 1 : 0)}
-          >
-            {posts.length ? t('Regenerate') : t('Draft posts (offline)')}
-          </Button>
-          {posts.length > 0 && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<RemixIcon name="save-line" size={14} />}
-              loading={saving}
-              disabled={!dirty}
-              onClick={() => void handleSaveEdits()}
-            >
-              {t('Save edits')}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<RemixIcon name="robot-line" size={14} />}
-            onClick={() => void handleCopyAgentPrompt()}
-          >
-            {t('Ask your Agent to write the copy')}
-          </Button>
-        </div>
-        <div className="om-step-toolbar-group">
-          {renderExportMenu(exportMenuExtras)}
-        </div>
-      </div>
+      {renderExportMenu(exportMenuExtras)}
 
-      <section className="om-step-card" aria-label={t('Social pack settings')}>
+      <section className="om-step-card om-social-composer" data-tone="social-pack" aria-label={t('Social pack settings')}>
+        <div className="om-brief-composer-head">
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="social-pack" aria-hidden="true">
+              <RemixIcon name="chat-1-line" size={16} />
+            </span>
+            <div>
+              <h3 className="om-step-section-title">{t('Compose social posts')}</h3>
+              <p className="om-step-muted">{t('Pick your channels, attach visuals from the pool, and draft ready-to-post copy.')}</p>
+            </div>
+          </div>
+        </div>
+
         <div className="om-step-field">
           <span className="om-step-field-label">{t('Platforms')}</span>
           <div className="om-step-chip-list" role="group" aria-label={t('Platforms')}>
@@ -335,9 +313,11 @@ export function SocialPackStep({
                 <FilterChip
                   key={platformId}
                   active={selectedPlatforms.includes(platformId)}
+                  className="om-step-platform-chip"
                   onClick={() => togglePlatform(platformId)}
                 >
-                  {t(spec.label)}
+                  <SocialPlatformGlyph platform={platformId} size="sm" />
+                  <span>{t(spec.label)}</span>
                 </FilterChip>
               );
             })}
@@ -379,6 +359,40 @@ export function SocialPackStep({
           api={api}
           toast={toast}
         />
+
+        <div className="om-brief-composer-bar">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RemixIcon name="robot-line" size={14} />}
+            onClick={() => void handleCopyAgentPrompt()}
+          >
+            {t('Ask your Agent to write the copy')}
+          </Button>
+          <div className="om-step-toolbar-group">
+            {posts.length > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<RemixIcon name="save-line" size={14} />}
+                loading={saving}
+                disabled={!dirty}
+                onClick={() => void handleSaveEdits()}
+              >
+                {t('Save edits')}
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<RemixIcon name={posts.length ? 'refresh-line' : 'sparkling-line'} size={14} />}
+              loading={drafting}
+              onClick={() => void handleDraftPosts(posts.length ? lastVariant + 1 : 0)}
+            >
+              {posts.length ? t('Regenerate') : t('Draft posts (offline)')}
+            </Button>
+          </div>
+        </div>
       </section>
 
       {posts.length > 0 && (
@@ -401,6 +415,7 @@ export function SocialPackStep({
                 <div className="om-step-social-editor">
                   <div className="om-step-section-head">
                     <div className="om-step-toolbar-group">
+                      <SocialPlatformGlyph platform={post.platform} size="md" />
                       <h3 className="om-step-section-title">{t(spec.label)}</h3>
                       <span className="om-step-badge">{post.aspect}</span>
                     </div>
@@ -553,7 +568,10 @@ export function SocialPackStep({
 
                 <aside className="om-step-social-preview" aria-label={t('{platform} preview', { platform: t(spec.label) })}>
                   <div className="om-step-social-preview-head">
-                    <strong>{t(spec.label)}</strong>
+                    <span className="om-step-social-preview-brand">
+                      <SocialPlatformGlyph platform={post.platform} size="sm" />
+                      <strong>{t(spec.label)}</strong>
+                    </span>
                     <span className="om-step-muted">{post.aspect}</span>
                   </div>
                   {leadMedia && (

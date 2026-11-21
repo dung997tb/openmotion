@@ -560,7 +560,9 @@ export function AssetPoolPanel({
 
       <header className="om-scenario-pool-header">
         <div className="om-scenario-pool-title-group">
-          <RemixIcon name="stack-line" size={16} />
+          <span className="om-scenario-pool-header-icon" aria-hidden="true">
+            <RemixIcon name="stack-line" size={14} />
+          </span>
           <h2 className="om-scenario-pool-title">{t('Shared asset pool')}</h2>
           <span className="om-badge">{items.length}</span>
         </div>
@@ -657,8 +659,13 @@ export function AssetPoolPanel({
               <FilterChip
                 key={filter.id}
                 active={kindFilter === filter.id}
+                className="om-scenario-kind-chip"
+                data-pool-kind={filter.id}
                 onClick={() => setKindFilter(filter.id)}
               >
+                <span className="om-scenario-kind-chip-icon" aria-hidden="true">
+                  <RemixIcon name={filter.icon} size={12} />
+                </span>
                 <span>{t(filter.label)}</span>
                 <span className="om-scenario-chip-count">{kindCounts[filter.id]}</span>
               </FilterChip>
@@ -1007,7 +1014,16 @@ export function AssetPoolPanel({
                     </div>
 
                     <div className="om-scenario-pool-card-badges">
-                      <span className="om-badge">{t(KIND_BADGE_LABELS[item.kind])}</span>
+                      <span
+                        className="om-badge om-scenario-pool-kind-badge"
+                        data-pool-kind={item.kind}
+                      >
+                        <RemixIcon
+                          name={KIND_FILTERS.find(f => f.id === item.kind)?.icon ?? 'file-line'}
+                          size={11}
+                        />
+                        <span>{t(KIND_BADGE_LABELS[item.kind])}</span>
+                      </span>
                       <span className="om-badge">{sourceBadge}</span>
                     </div>
                   </div>

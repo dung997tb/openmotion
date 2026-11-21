@@ -59,7 +59,7 @@ function SlotThumb({ item }: { item: PoolItem }) {
     );
   }
   return (
-    <span className="om-step-slot-icon" aria-hidden="true">
+    <span className="om-step-slot-icon" data-pool-kind={item.kind} aria-hidden="true">
       <RemixIcon name={poolKindIcon(item.kind)} size={14} />
     </span>
   );
@@ -189,10 +189,14 @@ export function BindingSlot({
     .map(id => ({ id, item: pool.byId.get(id) ?? null }))
     .filter(entry => entry.item !== null);
 
+  const primaryKind = kinds[0] ?? 'image';
+
   return (
     <div
       className="om-step-binding-slot"
       data-slot={slot}
+      data-pool-kind={primaryKind}
+      data-has-items={resolvedItems.length > 0 ? 'true' : undefined}
       data-drag-over={dragOver ? 'true' : undefined}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -200,6 +204,9 @@ export function BindingSlot({
     >
       <div className="om-step-binding-head">
         <div className="om-step-binding-meta">
+          <span className="om-step-binding-icon" data-pool-kind={primaryKind} aria-hidden="true">
+            <RemixIcon name={poolKindIcon(primaryKind)} size={13} />
+          </span>
           <span className="om-step-binding-label">
             {label}
             {required && <span className="om-step-required" aria-hidden="true">*</span>}

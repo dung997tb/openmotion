@@ -504,9 +504,45 @@ export function MediaStep(props: StepProps) {
     </>
   );
 
+  const modalityIcon = modality === 'image'
+    ? 'image-line'
+    : modality === 'video'
+      ? 'movie-line'
+      : (isSpeechMode ? 'voiceprint-line' : 'music-2-line');
+
+  const modalityTitle = modality === 'image'
+    ? t('Create images')
+    : modality === 'video'
+      ? t('Create video')
+      : t('Create audio');
+
   const generateWorkbench = (
     <>
-      <section className="om-step-card" aria-label={t('Generator settings')}>
+      <section className="om-step-card om-media-composer" data-tone={modality} aria-label={t('Generator settings')}>
+        <div className="om-brief-composer-head">
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone={modality} aria-hidden="true">
+              <RemixIcon name={modalityIcon} size={16} />
+            </span>
+            <div>
+              <h3 className="om-step-section-title">{modalityTitle}</h3>
+              <p className="om-step-muted">
+                {t('Pre-filled from your brief. Edit in plain language, attach pool references, or upload files.')}
+              </p>
+            </div>
+          </div>
+          {currentScene && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RemixIcon name="external-link-line" size={14} />}
+              onClick={() => nav.openStudioScene(sceneDestination(currentScene), prompt)}
+            >
+              {t('Open full generator')}
+            </Button>
+          )}
+        </div>
+
         {sceneIds.length > 1 && (
           <div className="om-step-chip-list" role="group" aria-label={t('Mode')}>
             {sceneIds.map(id => {
@@ -514,13 +550,21 @@ export function MediaStep(props: StepProps) {
               const label = modality === 'audio'
                 ? (id === 'speech' ? t('Voiceover (speech)') : t('Music'))
                 : t(sceneDef?.label ?? id);
+              const chipIcon = modality === 'audio'
+                ? (id === 'speech' ? 'voiceprint-line' : 'music-2-line')
+                : (sceneDef?.icon ?? modalityIcon);
               return (
                 <FilterChip
                   key={id}
                   active={activeSceneId === id}
+                  className="om-step-icon-chip"
+                  data-tone={modality}
                   onClick={() => setActiveSceneId(id)}
                 >
-                  {label}
+                  <span className="om-step-chip-icon" data-tone={modality} aria-hidden="true">
+                    <RemixIcon name={chipIcon} size={13} />
+                  </span>
+                  <span>{label}</span>
                 </FilterChip>
               );
             })}
@@ -612,9 +656,11 @@ export function MediaStep(props: StepProps) {
         ) : !catalog && !providerUnavailable ? (
           <Skeleton className="om-step-controls-skeleton" />
         ) : noProvider ? (
-          <div className="om-step-provider-card" data-provider-setup="true">
+          <div className="om-step-provider-card" data-provider-setup="true" data-tone={modality}>
             <div className="om-step-provider-head">
-              <RemixIcon name="plug-line" size={18} />
+              <span className="om-brief-composer-icon" data-tone={modality} aria-hidden="true">
+                <RemixIcon name="plug-line" size={16} />
+              </span>
               <div>
                 <strong>{noModelMessage}</strong>
                 <p className="om-step-muted">
@@ -883,29 +929,19 @@ export function MediaStep(props: StepProps) {
         onChange={e => void handleFileChange(e)}
       />
 
-      <div className="om-step-toolbar">
-        <div className="om-step-toolbar-group">
-          {currentScene && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<RemixIcon name="external-link-line" size={14} />}
-              onClick={() => nav.openStudioScene(sceneDestination(currentScene), prompt)}
-            >
-              {t('Open full generator')}
-            </Button>
-          )}
-        </div>
-        <div className="om-step-toolbar-group">
-          {renderExportMenu(exportMenuExtras)}
-        </div>
-      </div>
+      {renderExportMenu(exportMenuExtras)}
 
       {hasMotionTab ? (
         <Tabs value={videoTab} onValueChange={next => setVideoTab(next === 'motion' ? 'motion' : 'generate')}>
           <TabsList aria-label={t('Video creation mode')}>
-            <Tab value="generate">{t('Generate clip')}</Tab>
-            <Tab value="motion">{t('Motion project')}</Tab>
+            <Tab value="generate" className="om-step-mode-tab" data-tone="video">
+              <RemixIcon name="sparkling-line" size={14} />
+              <span>{t('Generate clip')}</span>
+            </Tab>
+            <Tab value="motion" className="om-step-mode-tab" data-tone="video">
+              <RemixIcon name="movie-line" size={14} />
+              <span>{t('Motion project')}</span>
+            </Tab>
           </TabsList>
           <TabPanel value="generate" className="om-step-tab-panel">
             {generateWorkbench}

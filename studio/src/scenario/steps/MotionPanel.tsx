@@ -38,7 +38,7 @@ function PoolAssetThumb({ item }: { item: PoolItem }) {
     );
   }
   return (
-    <span className="om-step-slot-icon" aria-hidden="true">
+    <span className="om-step-slot-icon" data-pool-kind={item.kind} aria-hidden="true">
       <RemixIcon name={poolKindIcon(item.kind)} size={14} />
     </span>
   );
@@ -238,7 +238,7 @@ export function MotionPanel({
         <section className="om-step-card om-step-linked-motion" aria-label={t('Linked Motion project')}>
           <div className="om-step-section-head">
             <div className="om-step-linked-motion-info">
-              <span className="om-step-slot-icon" aria-hidden="true">
+              <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
                 <RemixIcon name="movie-line" size={16} />
               </span>
               <div>
@@ -272,9 +272,14 @@ export function MotionPanel({
       {templateSource === 'motion' && (
         <section className="om-step-card" aria-label={t('Motion templates')}>
           <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Start from a Motion template')}</h3>
-              <p className="om-step-muted">{t('Optional. Pick a template or leave blank to create a fresh project.')}</p>
+            <div className="om-brief-composer-lead">
+              <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                <RemixIcon name="movie-line" size={16} />
+              </span>
+              <div>
+                <h3 className="om-step-section-title">{t('Start from a Motion template')}</h3>
+                <p className="om-step-muted">{t('Optional. Pick a template or leave blank to create a fresh project.')}</p>
+              </div>
             </div>
             <Button
               variant="ghost"
@@ -340,9 +345,14 @@ export function MotionPanel({
       {templateSource === 'black-friday' && (
         <section className="om-step-card" aria-label={t('Black Friday Skills and references')}>
           <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Black Friday Skills and stage references')}</h3>
-              <p className="om-step-muted">{t('Choose a Black Friday Skill or campaign reference to guide your 30s sales film.')}</p>
+            <div className="om-brief-composer-lead">
+              <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
+                <RemixIcon name="flashlight-line" size={16} />
+              </span>
+              <div>
+                <h3 className="om-step-section-title">{t('Black Friday Skills and stage references')}</h3>
+                <p className="om-step-muted">{t('Choose a Black Friday Skill or campaign reference to guide your 30s sales film.')}</p>
+              </div>
             </div>
             <Button
               variant="secondary"
@@ -421,13 +431,18 @@ export function MotionPanel({
 
       <section className="om-step-card" aria-label={t('Create Motion project')}>
         <div className="om-step-section-head">
-          <div>
-            <h3 className="om-step-section-title">{t('Create Motion project')}</h3>
-            <p className="om-step-muted">
-              {selectedTemplate
-                ? t('Using: {title}', { title: selectedTemplate.title })
-                : t('Creates an editable Motion Studio project and imports your checked pool assets.')}
-            </p>
+          <div className="om-brief-composer-lead">
+            <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+              <RemixIcon name="clapperboard-line" size={16} />
+            </span>
+            <div>
+              <h3 className="om-step-section-title">{t('Create Motion project')}</h3>
+              <p className="om-step-muted">
+                {selectedTemplate
+                  ? t('Using: {title}', { title: selectedTemplate.title })
+                  : t('Creates an editable Motion Studio project and imports your checked pool assets.')}
+              </p>
+            </div>
           </div>
           {selectedTemplate && (
             <Button variant="ghost" size="sm" onClick={() => setSelectedTemplate(null)}>
@@ -505,9 +520,14 @@ export function MotionPanel({
       {workspaceProjects.length > 0 && (
         <section className="om-step-card" aria-label={t('Link another project')}>
           <div className="om-step-section-head">
-            <div>
-              <h3 className="om-step-section-title">{t('Link another project')}</h3>
-              <p className="om-step-muted">{t('Connect an existing Motion project from this workspace.')}</p>
+            <div className="om-brief-composer-lead">
+              <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                <RemixIcon name="link" size={16} />
+              </span>
+              <div>
+                <h3 className="om-step-section-title">{t('Link another project')}</h3>
+                <p className="om-step-muted">{t('Connect an existing Motion project from this workspace.')}</p>
+              </div>
             </div>
           </div>
           <div className="om-step-link-row">
