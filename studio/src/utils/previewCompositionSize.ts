@@ -13,7 +13,11 @@ export function readPreviewCompositionSize(
     const root =
       doc?.querySelector("[data-composition-id][data-width][data-height]") ??
       doc?.querySelector("[data-width][data-height]");
-    if (!root) return null;
+    if (!root) {
+      if (!iframe?.width || !iframe.height || doc) return null;
+      const width = Number(iframe.width), height = Number(iframe.height);
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
     const width = Number.parseInt(root.getAttribute("data-width") ?? "", 10);
     const height = Number.parseInt(root.getAttribute("data-height") ?? "", 10);
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {

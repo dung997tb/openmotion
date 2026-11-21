@@ -23,6 +23,9 @@ export async function initS3Bucket(env: NodeJS.ProcessEnv = process.env): Promis
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  if (env.PREVIEW_PUBLIC_ORIGIN?.trim()) {
+    extraOrigins.push(new URL(env.PREVIEW_PUBLIC_ORIGIN).origin);
+  }
   const allowedOrigins = resolveCorsAllowedOrigins(publicOrigin, extraOrigins);
 
   const storage = new StorageService({

@@ -46,6 +46,7 @@ export interface StudioQueuesPort {
 
 export interface StudioVariables {
   auth: AuthContext;
+  previewAssetBase?: string;
 }
 
 export interface DisklessStudioDeps {

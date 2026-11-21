@@ -1,3 +1,5 @@
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
+import { IsolatedHoverPlayer } from "../../player/components/IsolatedHoverPlayer";
 import { IconButton } from "open-design-ui/icon-button";
 import { RemixIcon } from "../../icons/RemixIcons";
 import { useI18n } from "../../i18n/I18n";
@@ -193,6 +195,7 @@ function CompCard({
   previewBooted: boolean;
 }) {
   const { t } = useI18n();
+  const previewOrigin = isolatedPreviewOrigin();
   const [hovered, setHovered] = useState(false);
   const [stageSize, setStageSize] = useState(DEFAULT_PREVIEW_STAGE);
   const [livePreviewLoaded, setLivePreviewLoaded] = useState(false);
@@ -263,8 +266,8 @@ function CompCard({
   const thumbnailOffsetY = (CARD_H - stageSize.height * previewScale) / 2;
 
   useEffect(() => {
-    if (hovered) requestIframePlaybackSync(true);
-  }, [hovered, requestIframePlaybackSync]);
+    if (hovered && !previewOrigin) requestIframePlaybackSync(true);
+  }, [hovered, previewOrigin, requestIframePlaybackSync]);
 
   useEffect(() => {
     if (livePreviewLoaded) postFrameDisplayScale(iframeRef.current);
@@ -350,7 +353,13 @@ function CompCard({
             }`}
           />
         )}
-        {hovered && (
+        {hovered && previewOrigin && (
+          <div className="absolute inset-0 pointer-events-none" style={{ visibility: livePreviewLoaded ? "visible" : "hidden" }}>
+            <IsolatedHoverPlayer source={previewUrl} origin={previewOrigin} onReady={setLivePreviewLoaded}
+              onError={() => setLivePreviewLoaded(false)} />
+          </div>
+        )}
+        {hovered && !previewOrigin && (
           <iframe
             ref={iframeRef}
             src={previewUrl}

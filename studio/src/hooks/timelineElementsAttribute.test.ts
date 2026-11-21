@@ -60,6 +60,33 @@ describe("useSetElementsAttribute", () => {
     act(() => root.unmount());
   });
 
+  it("refreshes the isolated track after a saved lock, while a conflict keeps it locked", async () => {
+    const iframe = document.createElement("iframe");
+    const cue = clip("cue");
+    usePlayerStore.setState({ elements: [cue] });
+    const reloadPreview = vi.fn();
+    let write!: ReturnType<typeof useSetElementsAttribute>;
+    function Probe() {
+      write = useSetElementsAttribute({
+        projectIdRef: { current: "p1" }, activeCompPath: "index.html",
+        writeProjectFile: vi.fn(), recordEdit: vi.fn(), showToast: vi.fn(),
+        previewIframeRef: { current: iframe }, pendingTimelineEditPathRef: { current: new Set() },
+        reloadPreview,
+      });
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+    act(() => root.render(createElement(Probe)));
+    vi.mocked(saveProjectFilesWithHistory).mockResolvedValueOnce(["index.html"]);
+    await act(async () => { await write([{ element: cue, value: "" }], "data-timeline-locked", "Lock"); });
+    expect(reloadPreview).toHaveBeenCalledTimes(1);
+    vi.mocked(saveProjectFilesWithHistory).mockRejectedValueOnce(new Error("Conflict"));
+    await act(async () => { await write([{ element: cue, value: null }], "data-timeline-locked", "Unlock"); });
+    expect(usePlayerStore.getState().elements[0].timelineLocked).toBe(true);
+    expect(reloadPreview).toHaveBeenCalledTimes(1);
+    act(() => root.unmount());
+  });
+
   it.each([false, true])("syncs saved track mute and unmute with monitor mute=%s", async (audioMuted) => {
     const iframe = document.createElement("iframe");
     document.body.append(iframe);

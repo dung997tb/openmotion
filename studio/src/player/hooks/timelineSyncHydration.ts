@@ -29,6 +29,7 @@ import {
   autoHealMissingCompositionIds,
   normalizePreviewViewport,
 } from "../lib/timelineIframeHelpers";
+import { createPreviewAdapter } from "../lib/previewAdapter";
 import { inspectStudioRuntimeMessage } from "../lib/runtimeProtocol";
 
 /** Reject non-finite, non-positive, and absurdly large (loop-inflated) values. */
@@ -396,6 +397,7 @@ export function isPreviewReadinessMessage(
 ): boolean {
   if (!isFromPreviewFrame(e, iframe)) return false;
   const data = e.data;
+  if (iframe && data?.type === "timeline-state") return createPreviewAdapter({ iframe }).accepts(e);
   if (data?.source !== "hf-preview") return false;
   if (data?.type !== "state" && data?.type !== "timeline") return false;
   return inspectStudioRuntimeMessage(data).status !== "unsupported";

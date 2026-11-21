@@ -104,6 +104,46 @@ describe("toggleTimelineTrackHidden", () => {
     ]);
   });
 
+  it("refreshes an isolated preview once after commit and preserves it on write conflict", async () => {
+    const iframe = document.createElement("iframe");
+    const files = new Map([["index.html", '<div id="hero" data-duration="2"></div>']]);
+    stubProjectFiles(files);
+    const hero = element({ id: "hero", domId: "hero" });
+    usePlayerStore.getState().setElements([hero]);
+    const reloadPreview = vi.fn();
+    const recordEdit = vi.fn();
+    const input = {
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [hero],
+      track: 0,
+      previewIframe: iframe, // no accessible document
+      reloadPreview,
+      recordEdit,
+      pendingTimelineEditPathRef: { current: new Set<string>() },
+    };
+
+    await toggleTimelineTrackHidden({
+      ...input,
+      hidden: true,
+      writeProjectFile: async (path, content) => {
+        expect(reloadPreview).not.toHaveBeenCalled();
+        files.set(path, content);
+      },
+    });
+    expect(files.get("index.html")).toContain('data-hidden=""');
+    expect(usePlayerStore.getState().elements[0].hidden).toBe(true);
+    expect(reloadPreview).toHaveBeenCalledTimes(1);
+    await expect(toggleTimelineTrackHidden({
+      ...input,
+      hidden: false,
+      writeProjectFile: async () => { throw new Error("Conflict"); },
+    })).rejects.toThrow("Conflict");
+    expect(usePlayerStore.getState().elements[0].hidden).toBe(true);
+    expect(reloadPreview).toHaveBeenCalledTimes(1);
+    expect(recordEdit).toHaveBeenCalledTimes(1);
+  });
+
   it("removes data-hidden from every element on the track", async () => {
     const files = new Map([
       [

@@ -34,7 +34,8 @@ export const SHADOW_READY_TIMEOUT_MS = 15_000;
 export const SHADOW_READY_BUDGETS = 3;
 
 function restoreSeekPainted(iframe: HTMLIFrameElement | null): Promise<void> | undefined {
-  const win = iframe?.contentWindow as IframeWindow | null | undefined;
+  if (!iframe?.contentDocument) return;
+  const win = iframe.contentWindow as IframeWindow | null;
   return win?.__hfWaitForSeekCompletion?.().catch(() => {});
 }
 
@@ -162,7 +163,7 @@ export function useShadowPreviewReload({
   );
 
   const gestureSavesOnScreen = useCallback(() => {
-    const liveDoc = iframeRef.current?.contentDocument;
+    const liveDoc = iframeRef.current?.contentDocument ?? iframeRef.current?.ownerDocument;
     return liveDoc ? studioManualEditSavesIn(liveDoc) : 0;
   }, [iframeRef]);
 
@@ -185,7 +186,7 @@ export function useShadowPreviewReload({
   // shows the file before it: once that write has landed, a fresh one loads instead.
   const heldOrStale = useCallback(
     (gen: number) => {
-      const liveDoc = iframeRef.current?.contentDocument;
+      const liveDoc = iframeRef.current?.contentDocument ?? iframeRef.current?.ownerDocument;
       if (liveDoc && isStudioManualEditGestureLiveIn(liveDoc))
         return waitThenRetry(gen, "gesture", (retry) =>
           afterStudioManualEditGestures(liveDoc, retry),

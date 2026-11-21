@@ -75,6 +75,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-http://127.0.0.1:4173}
+      PREVIEW_PUBLIC_ORIGIN: ${PREVIEW_PUBLIC_ORIGIN:-}
       S3_ENDPOINT: http://s3:9000
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -166,8 +167,10 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       WORKER_ROLE: api
       PORT: ${PORT:-4173}
+      PREVIEW_TOKEN_TTL_SEC: ${PREVIEW_TOKEN_TTL_SEC:-900}
       BIND_HOST: 0.0.0.0
       APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-http://127.0.0.1:4173}
+      PREVIEW_PUBLIC_ORIGIN: ${PREVIEW_PUBLIC_ORIGIN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgres://${POSTGRES_USER:-openmotion}:${POSTGRES_PASSWORD:-openmotion_local_dev}@postgres:5432/${POSTGRES_DB:-openmotion}
       PG_POOL_MAX: ${PG_POOL_MAX:-20}

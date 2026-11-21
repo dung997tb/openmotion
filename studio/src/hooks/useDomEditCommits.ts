@@ -319,6 +319,7 @@ export function useDomEditCommits({
   });
 
   return {
+    commitDomEditPatchBatches,
     resolveImportedFontAsset,
     handleDomStyleCommit,
     handleDomStyleCommitForSelection,

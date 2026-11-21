@@ -1,7 +1,10 @@
 const REDACTED = '[redacted]';
 
+const PREVIEW_CREDENTIAL = /(?:om_pt_[\w-]+\.[\w-]+|om_pl_[\w-]{43})/g;
+
 const SENSITIVE_QUERY_KEYS = new Set([
   'preview_token',
+  'pt',
   'token',
   'access_token',
   'id_token',
@@ -121,7 +124,7 @@ function isSensitiveQueryKey(key: string): boolean {
  */
 export function sanitizeUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl;
-  const trimmed = rawUrl.trim();
+  const trimmed = rawUrl.trim().replace(PREVIEW_CREDENTIAL, REDACTED);
   const isRelative = trimmed.startsWith('/');
   try {
     const parsed = new URL(trimmed, isRelative ? 'https://openmotion.invalid' : undefined);
@@ -150,7 +153,7 @@ export function sanitizeUrl(rawUrl: string): string {
  * Redacts credentials, tokens, private keys, email addresses, and sensitive URL query params from free text.
  */
 export function sanitizeText(value: string): string {
-  let text = String(value);
+  let text = String(value).replace(PREVIEW_CREDENTIAL, REDACTED);
   text = text
     .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\r\n]*PRIVATE KEY-----|$)/g, '[redacted private key]')
     .replace(/((?:set-cookie|cookie|authorization|proxy-authorization)\s*:\s*)[^\r\n]+/gi, `$1${REDACTED}`)

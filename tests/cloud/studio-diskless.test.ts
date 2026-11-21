@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { ensureHfIds } from '@hyperframes/parsers/hf-ids';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { PreviewBuildBusy, PreviewDocumentCache } from '../../src/studio/engine/preview-document-cache.ts';
 import { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { Hono } from 'hono';
+import type { StudioVariables } from '../../src/studio/context.ts';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { AuthContext } from '../../src/contracts/auth.ts';
 import type { RenderWorkerHealth } from '../../src/contracts/events.ts';
@@ -44,7 +49,7 @@ import {
   type StudioQueuesPort,
   type VirtualFileRecord,
 } from '../../src/studio/index.ts';
-import { compThumbnailKey, exportKey, thumbnailKey } from '../../src/infra/storage.ts';
+import { compThumbnailKey, derivedAssetKey, exportKey, thumbnailKey } from '../../src/infra/storage.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -826,6 +831,55 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('splits a legacy anonymous clip using its preview-stamped hf-id', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const html = '<html><body><img data-start="0" data-duration="4"></body></html>';
+    const hfId = ensureHfIds(html).match(/<img[^>]*data-hf-id="([^"]+)"/)?.[1];
+    assert.ok(hfId);
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: 'index.html', content: html }] });
+    const response = await env.studioApp.request(`/api/projects/${projectId}/file-mutations/split-batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [{ path: 'index.html', expectedVersion: fileContentVersion(html),
+        targets: [{ target: { hfId }, splitTime: 2, elementStart: 0, elementDuration: 4 }] }] }),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json() as { files: Array<{ splitCount: number; before: string }> };
+    assert.equal(result.files[0]!.before, html);
+    assert.equal(result.files[0]!.splitCount, 1);
+  });
+
+  it('applies Studio split targets atomically at the requested file version and returns stored history bytes', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const html = '<html><body><img id="clip" data-start="0" data-duration="4" data-track-index="1"></body></html>';
+    const file = (path: string) => env.files.readTextFile(env.auth, projectId, path);
+    await env.files.commitChanges(env.auth, { projectId, ops: ['index.html', 'other.html'].map(path => ({
+      op: 'upsert_text', path, content: html,
+    })) });
+    const expectedVersion = fileContentVersion(html);
+    const targets = [{ target: { id: 'clip' }, originalId: 'clip', splitTime: 2, elementStart: 0, elementDuration: 4 }];
+    const split = (files: unknown[]) => env.studioApp.request(`/api/projects/${projectId}/file-mutations/split-batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }),
+    });
+    const root = { path: 'index.html', expectedVersion, targets };
+    assert.equal((await split([root, { ...root, path: 'other.html', expectedVersion: 'stale' }])).status, 409);
+    assert.equal((await file('index.html'))?.content, html);
+    assert.equal((await split([root, { ...root, path: 'other.html', targets: [{ ...targets[0], target: { id: 'gone' } }] }])).status, 409);
+    assert.equal((await file('index.html'))?.content, html);
+    const result = await split([root, { path: 'other.html', cuts: targets }]);
+    assert.equal(result.status, 200);
+    const body = await result.json() as { files: Array<{ path: string; before: string; after: string; version: string; splitCount: number }> };
+    for (const output of body.files) {
+      const saved = await file(output.path);
+      assert.equal(output.splitCount, 1);
+      assert.equal(output.before, html);
+      assert.match(output.after, /id="clip-split/);
+      assert.equal(output.after, saved?.content);
+      assert.equal(output.version, saved?.version);
+    }
+  });
+
   it('enforces exact strong ETag "sha256:...", If-Match, 428, 409, ?optional=1, and DELETED_VERSION', async () => {
     const env = createStudioTestEnv();
     const created = await env.workspace.createProject(env.auth, { title: 'ETag Studio' });
@@ -986,6 +1040,41 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     });
     assert.equal(mutation.status, 200);
     assert.equal((await read()).animations[0].properties.x, 55);
+  });
+
+  it('saves a canvas drag against the displayed source and rolls back unmatched batches', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth, {
+      title: 'Canvas drag',
+      initialFiles: [{ path: 'index.html', content: '<html><body><div id="title">Title</div></body></html>' }],
+    });
+    const current = async () => (await env.files.loadVirtualProject(env.auth, projectId)).readText('index.html')!;
+    const before = await current();
+    const drag = (ids: string[], ifMatch: string) => env.studioApp.request(
+      `/api/projects/${projectId}/file-mutations/patch-element-batches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batches: [{
+          sourceFile: 'index.html', ifMatch,
+          patches: ids.map(id => ({ target: { id }, operations: [{ type: 'inline-style', property: 'left', value: '42px' }] })),
+        }] }),
+      },
+    );
+    const version = fileContentVersion(before);
+    const unmatched = await drag(['title', 'missing'], version);
+    assert.equal(unmatched.status, 200);
+    const rejected = await unmatched.json();
+    assert.equal(rejected.durable, false);
+    assert.deepEqual(rejected.files[0].matched, [true, false]);
+    assert.equal(rejected.files[0].after, before);
+    assert.equal(await current(), before);
+    const saved = await drag(['title'], version);
+    assert.equal(saved.status, 200);
+    const result = await saved.json();
+    assert.deepEqual(result.files[0].matched, [true]);
+    assert.equal(result.files[0].before, before);
+    assert.match(await current(), /left:\s*42px/);
+    assert.equal((await drag(['title'], version)).status, 409);
   });
 
   it('executes DOM file-mutations and GSAP AST mutations + rollback purely in memory via PG', async () => {
@@ -1195,6 +1284,91 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(retryRender.status, 200);
     const retryRenderJson = (await retryRender.json()) as { settings: { variables?: Record<string, unknown> } };
     assert.deepEqual(retryRenderJson.settings.variables, { theme: 'dark' });
+  });
+
+  it('shares preview builds, validates ETags before loading files, and isolates document variants and edits', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth, { title: 'Preview cache' });
+    const url = `/api/projects/${projectId}/preview`;
+    const loads = t.mock.method(env.files, 'loadVirtualProject');
+    const results = await Promise.all(Array.from({ length: 8 }, () => env.studioApp.request(url)));
+    assert.ok(results.every(response => response.status === 200));
+    assert.equal(loads.mock.callCount(), 1);
+    const etag = results[0]!.headers.get('etag')!;
+    assert.equal((await env.studioApp.request(url, { headers: { 'If-None-Match': etag } })).status, 304);
+    assert.equal(loads.mock.callCount(), 1);
+
+    for (const suffix of ['?capture=1', '?variables=%7B%22theme%22%3A%22red%22%7D', '/comp/index.html']) {
+      const variant = await env.studioApp.request(url + suffix, { headers: { 'If-None-Match': etag } });
+      assert.equal(variant.status, 200);
+      assert.notEqual(variant.headers.get('etag'), etag);
+    }
+    assert.equal(loads.mock.callCount(), 4);
+    await env.files.commitChanges(env.auth, {
+      projectId, ops: [{ op: 'upsert_text', path: 'index.html', content: '<html><body>fresh-revision</body></html>' }],
+    });
+    const updated = await env.studioApp.request(url, { headers: { 'If-None-Match': etag } });
+    assert.equal(updated.status, 200);
+    assert.match(await updated.text(), /fresh-revision/);
+    assert.notEqual(updated.headers.get('etag'), etag);
+    assert.equal(loads.mock.callCount(), 5);
+    const missingUrl = url + '/comp/missing.html';
+    assert.equal((await env.studioApp.request(missingUrl, { headers: { 'If-None-Match': etag } })).status, 404);
+    await env.files.commitChanges(env.auth, {
+      projectId, ops: [{ op: 'upsert_text', path: 'missing.html', content: '<html><body>created</body></html>' }],
+    });
+    assert.equal((await env.studioApp.request(missingUrl)).status, 200);
+
+  });
+
+  it('signals retryable overload to an isolated document through the authenticated bridge', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const projectPath = `/api/projects/${projectId}/preview`;
+    const app = new Hono<{ Variables: StudioVariables }>();
+    app.use('*', async (c, next) => { c.set('previewAssetBase', 'https://preview.test/base/'); await next(); });
+    app.route('/', env.studioApp);
+    t.mock.method(PreviewDocumentCache.prototype, 'get', () => { throw new PreviewBuildBusy(); });
+    const busy = await app.request(projectPath + '?pt=example-token');
+    assert.equal(busy.status, 503);
+    assert.equal(busy.headers.get('retry-after'), '1');
+    assert.match(busy.headers.get('content-type')!, /text\/html/);
+    assert.equal(busy.headers.get('cache-control'), 'no-store');
+    const script = (await busy.text()).match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script);
+    const parent = { postMessage: t.mock.fn() };
+    runInNewContext(script, { window: { parent }, URL, document: { referrer: 'https://studio.test/' },
+      location: { href: 'https://preview.test' + projectPath + '?pt=example-token' } });
+    assert.equal(parent.postMessage.mock.callCount(), 1);
+    const [message, origin] = parent.postMessage.mock.calls[0]!.arguments as unknown as [Record<string, unknown>, string];
+    assert.deepEqual({ ...message }, { source: 'openmotion-preview-bridge', version: 1, type: 'preview-build-busy',
+      projectId, token: 'example-token', retryAfterMs: 1000 });
+    assert.equal(origin, 'https://studio.test');
+  });
+
+  it('late-binds scoped roots and import maps while preserving authored base resolution', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const path = `/api/projects/${projectId}/preview`;
+    const app = new Hono<{ Variables: StudioVariables }>();
+    let base = '';
+    app.use('*', async (c, next) => { c.set('previewAssetBase', base); await next(); });
+    app.route('/', env.studioApp);
+    for (const href of ['assets/styles/', '../other/', '.', 'https://external.example/static/']) {
+      await env.files.commitChanges(env.auth, { projectId, ops: [{
+        op: 'upsert_text', path: 'index.html',
+        content: `<html><head><base href="${href}"></head><body><img src="/poster.png"></body></html>`,
+      }] });
+      for (const lease of ['grant-a', 'grant-b']) {
+        base = `https://preview.example${path}/~assets/${lease}/`;
+        const response = await app.request(path);
+        assert.equal(response.status, 200);
+        const html = await response.text();
+        assert.equal(html.match(/<base href="([^"]+)"/)?.[1], new URL(href, base).href);
+        assert.ok(html.includes(base + 'poster.png'));
+        assert.ok(html.includes(JSON.stringify({ imports: { '/': base, [base]: base } })));
+      }
+    }
   });
 
   it('verifies #41 fixes: HTTP /preview + /preview/comp/* 200, real /api/runtime.js, worker-render resultJson interop, RBAC/scopes, HEAD thumbnails, PUT selection, GET open-in-desktop, and multi-file upload', async () => {
@@ -1605,5 +1779,219 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
         .get('location')
         ?.startsWith(`https://s3.local/workspaces/${env.auth.workspaceId}/blobs/${tamperedVideoSha}`),
     );
+  });
+
+  it('serves /sprite/* (202 pending -> 200 manifest), /sprite-sheet/:idx/* (HEAD 200 / GET 302), silent /peaks/*, and assetMetadata on GET /api/projects/:id', async () => {
+    const env = createStudioTestEnv();
+    const created = await env.workspace.createProject(env.auth, { title: 'Sprite & Metadata Test' });
+
+    const videoBytes = Buffer.alloc(1024, 0x33);
+    const silentBytes = Buffer.alloc(512, 0x44);
+    const failedBytes = Buffer.alloc(256, 0x55);
+
+    await env.files.commitChanges(env.auth, {
+      projectId: created.projectId,
+      ops: [
+        { op: 'upsert_binary', path: 'assets/hero.mp4', data: videoBytes, mimeType: 'video/mp4' },
+        { op: 'upsert_binary', path: 'assets/silent.mp4', data: silentBytes, mimeType: 'video/mp4' },
+        { op: 'upsert_binary', path: 'assets/broken.mp4', data: failedBytes, mimeType: 'video/mp4' },
+      ],
+      source: 'studio',
+      summary: 'Add test videos',
+    });
+
+    const videoSha = sha256Hex(videoBytes);
+    const silentSha = sha256Hex(silentBytes);
+    const failedSha = sha256Hex(failedBytes);
+
+    const blobs = env.pgClient.rows('workspace_blobs');
+    const heroBlob = blobs.find((b) => b.sha256 === videoSha)!;
+    heroBlob.metadata = {
+      modality: 'video',
+      durationSec: 18.5,
+      width: 1920,
+      height: 1080,
+      hasAudio: true,
+      hasVideo: true,
+      thumbnailReady: true,
+    };
+    const silentBlob = blobs.find((b) => b.sha256 === silentSha)!;
+    silentBlob.metadata = {
+      modality: 'video',
+      durationSec: 6.0,
+      width: 1280,
+      height: 720,
+      hasAudio: false,
+      hasVideo: true,
+    };
+    const failedBlob = blobs.find((b) => b.sha256 === failedSha)!;
+    failedBlob.metadata = {
+      modality: 'video',
+      sprite: {
+        status: 'failed',
+        manifestKey: '',
+        frameCount: 0,
+        frameWidth: 0,
+        frameHeight: 0,
+        durationSec: 0,
+        intervalSec: 0,
+        sheetCount: 0,
+        generatedAt: '2026-11-21T00:00:00.000Z',
+      },
+    };
+
+    // 1. Cold sprite request -> 202 pending + enqueues generate_video_sprite
+    env.enqueued.length = 0;
+    const pendingRes = await env.studioApp.request(`/api/projects/${created.projectId}/sprite/assets/hero.mp4`);
+    assert.equal(pendingRes.status, 202);
+    const pendingBody = (await pendingRes.json()) as { pending: boolean; sha256: string };
+    assert.equal(pendingBody.pending, true);
+    assert.equal(pendingBody.sha256, videoSha);
+    assert.ok(env.enqueued.some((j) => j.name === 'generate_video_sprite'));
+
+    // 2. Failed sprite -> 404 unavailable (allows immediate client fallback)
+    const failedRes = await env.studioApp.request(`/api/projects/${created.projectId}/sprite/assets/broken.mp4`);
+    assert.equal(failedRes.status, 404);
+
+    // 3. Cached sprite manifest + WebP sheet -> 200 manifest with rewritten sheet URL, HEAD 200 & GET 302 on sheet
+    const sheetKey = derivedAssetKey(env.auth.workspaceId, videoSha, 'sprite-0.webp');
+    const manifestKey = derivedAssetKey(env.auth.workspaceId, videoSha, 'sprite-manifest.json');
+    await env.storage.putObject(sheetKey, Buffer.from('RIFF....WEBP'), 'image/webp');
+    await env.storage.putObject(
+      manifestKey,
+      Buffer.from(
+        JSON.stringify({
+          version: 1,
+          sha256: videoSha,
+          durationSec: 18.5,
+          frameCount: 18,
+          frameWidth: 160,
+          frameHeight: 90,
+          intervalSec: 1.028,
+          columns: 10,
+          rows: 6,
+          sheets: [
+            {
+              index: 0,
+              s3Key: sheetKey,
+              startFrame: 0,
+              frameCount: 18,
+              columns: 10,
+              rows: 2,
+              width: 1600,
+              height: 180,
+            },
+          ],
+        }),
+      ),
+      'application/json',
+    );
+    (heroBlob.metadata as Record<string, unknown>).sprite = {
+      status: 'ready',
+      manifestKey,
+      frameCount: 18,
+      frameWidth: 160,
+      frameHeight: 90,
+      durationSec: 18.5,
+      intervalSec: 1.028,
+      sheetCount: 1,
+      generatedAt: '2026-11-21T00:00:00.000Z',
+    };
+
+    const hitRes = await env.studioApp.request(`/api/projects/${created.projectId}/sprite/assets/hero.mp4`);
+    assert.equal(hitRes.status, 200);
+    const hitBody = (await hitRes.json()) as {
+      pending: boolean;
+      frameCount: number;
+      sheets: Array<{ index: number; url: string }>;
+    };
+    assert.equal(hitBody.pending, false);
+    assert.equal(hitBody.frameCount, 18);
+    assert.equal(
+      hitBody.sheets[0].url,
+      `/api/projects/${created.projectId}/sprite-sheet/0/assets/hero.mp4`,
+    );
+
+    const headSheet = await env.studioApp.request(
+      `/api/projects/${created.projectId}/sprite-sheet/0/assets/hero.mp4`,
+      { method: 'HEAD' },
+    );
+    assert.equal(headSheet.status, 200);
+    assert.equal(headSheet.headers.get('content-type'), 'image/webp');
+
+    const getSheet = await env.studioApp.request(
+      `/api/projects/${created.projectId}/sprite-sheet/0/assets/hero.mp4`,
+    );
+    assert.equal(getSheet.status, 302);
+    assert.ok(getSheet.headers.get('location')?.startsWith(`https://s3.local/${sheetKey}`));
+
+    // 4. Silent video /peaks/* fast-path returns 200 empty peaks without queuing a job
+    env.enqueued.length = 0;
+    const silentPeaksRes = await env.studioApp.request(`/api/projects/${created.projectId}/peaks/assets/silent.mp4`);
+    assert.equal(silentPeaksRes.status, 200);
+    const silentPeaks = (await silentPeaksRes.json()) as { hasAudio: boolean; peaks: number[]; bins: number[] };
+    assert.equal(silentPeaks.hasAudio, false);
+    assert.deepEqual(silentPeaks.peaks, []);
+    assert.deepEqual(silentPeaks.bins, []);
+    assert.equal(env.enqueued.length, 0);
+
+    // 5. GET /api/projects/:id includes assetMetadata summary & optimizationStatus without extra queries
+    const projRes = await env.studioApp.request(`/api/projects/${created.projectId}`);
+    assert.equal(projRes.status, 200);
+    const projBody = (await projRes.json()) as {
+      assetMetadata?: Record<
+        string,
+        {
+          duration?: number;
+          width?: number;
+          height?: number;
+          hasAudio?: boolean;
+          spriteStatus?: string;
+          thumbnailReady?: boolean;
+          optimizationStatus?: 'optimizing' | 'ready';
+        }
+      >;
+    };
+    assert.equal(projBody.assetMetadata?.['assets/hero.mp4']?.duration, 18.5);
+    assert.equal(projBody.assetMetadata?.['assets/hero.mp4']?.spriteStatus, 'ready');
+    assert.equal(projBody.assetMetadata?.['assets/hero.mp4']?.thumbnailReady, true);
+    // Sprite is ready but previewProxy hasn't completed yet -> optimizing
+    assert.equal(projBody.assetMetadata?.['assets/hero.mp4']?.optimizationStatus, 'optimizing');
+    assert.equal(projBody.assetMetadata?.['assets/silent.mp4']?.hasAudio, false);
+    assert.equal(projBody.assetMetadata?.['assets/silent.mp4']?.optimizationStatus, 'optimizing');
+
+    // Once proxy also finishes, hero.mp4 transitions cleanly to optimizationStatus === 'ready'
+    (heroBlob.metadata as Record<string, unknown>).previewProxy = { status: 'ready' };
+    const projReadyRes = await env.studioApp.request(`/api/projects/${created.projectId}`);
+    assert.equal(projReadyRes.status, 200);
+    const projReadyBody = (await projReadyRes.json()) as {
+      assetMetadata?: Record<string, { optimizationStatus?: 'optimizing' | 'ready' }>;
+    };
+    assert.equal(projReadyBody.assetMetadata?.['assets/hero.mp4']?.optimizationStatus, 'ready');
+
+    // 6. GET /api/projects/:id/media/metadata skips media_probe for vector SVG files
+    await env.files.commitChanges(env.auth, {
+      projectId: created.projectId,
+      ops: [
+        {
+          op: 'upsert_text',
+          path: 'assets/favicon.svg',
+          content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"></svg>',
+          mimeType: 'image/svg+xml',
+        },
+      ],
+      source: 'studio',
+      summary: 'Add SVG favicon',
+    });
+    env.enqueued.length = 0;
+    const svgMetaRes = await env.studioApp.request(
+      `/api/projects/${created.projectId}/media/metadata?path=assets/favicon.svg`,
+    );
+    assert.equal(svgMetaRes.status, 200);
+    const svgMetaBody = (await svgMetaRes.json()) as { pending: boolean; metadata: unknown; mimeType: string };
+    assert.equal(svgMetaBody.pending, false);
+    assert.equal(svgMetaBody.metadata, null);
+    assert.equal(svgMetaBody.mimeType, 'image/svg+xml');
+    assert.equal(env.enqueued.length, 0);
   });
 });

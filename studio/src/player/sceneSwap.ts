@@ -115,7 +115,13 @@ export function sceneSwapFor(
   iframe: HTMLIFrameElement,
 ): ((url: string, isCurrent: () => boolean, cancel?: AbortSignal) => Promise<void>) | null {
   const win = iframe.contentWindow as SwapWindow | null;
-  const swap = win?.__hfSwapScenes;
+  let swap: SwapWindow["__hfSwapScenes"];
+  try {
+    swap = win?.__hfSwapScenes;
+  } catch {
+    // A cross-origin frame refreshes through the shadow player.
+    return null;
+  }
   if (typeof swap !== "function") return null;
   return async (url, isCurrent, cancel) => {
     if (cancel?.aborted) throw cancel.reason;

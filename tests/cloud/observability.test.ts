@@ -126,6 +126,12 @@ describe('@openmotion/observability sanitization & noise filtering', () => {
     assert.ok(!cleanedPreview.includes('secret123'));
     assert.ok(cleanedPreview.includes('mode=live'));
 
+    const assetToken = 'om_pt_synthetic.signature';
+    const assetPath = `/api/projects/p1/preview/~assets/${assetToken}/test.css`;
+    assert.ok(!sanitizeUrl(assetPath).includes(assetToken));
+    assert.ok(!sanitizeUrl('/preview?pt=secret123').includes('secret123'));
+    assert.ok(!sanitizeText(`Fetch failed at ${assetPath}`).includes(assetToken));
+
     const s3Url =
       'https://s3.example.com/bucket/blob?X-Amz-Signature=deadbeef&X-Amz-Credential=cred123&v=1';
     const cleanedS3 = sanitizeUrl(s3Url);

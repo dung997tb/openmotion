@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { access, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { and, eq } from 'drizzle-orm';
 import sharp from 'sharp';
 import { extractStandaloneEntryFromIndex } from '@hyperframes/core/compiler';
@@ -44,6 +46,8 @@ import {
 } from './render-env.ts';
 
 const HYDRATION_CONCURRENCY = 8;
+const HYDRATION_LARGE_FILE_BYTES = 10 * 1024 * 1024;
+const HYDRATION_LARGE_FILE_CONCURRENCY = 2;
 const RENDER_TIMEOUT_MS = 25 * 60_000;
 const THUMBNAIL_TIMEOUT_MS = 90_000;
 const PROGRESS_PUBLISH_MIN_INTERVAL_MS = 500;
@@ -60,8 +64,109 @@ export interface HydratedSnapshotFile {
 export interface HydratedWorkspaceResult {
   projectDir: string;
   fileCount: number;
+  skippedUnreferencedCount?: number;
   injectedManualEdits: boolean;
   injectedStudioMotion: boolean;
+}
+
+const ALWAYS_HYDRATE_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.html',
+  '.htm',
+  '.css',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.json',
+  '.svg',
+  '.xml',
+  '.txt',
+  '.md',
+  '.vtt',
+  '.srt',
+  '.csv',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.glsl',
+  '.vert',
+  '.frag',
+]);
+
+const REFERENCE_SCAN_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.html',
+  '.htm',
+  '.css',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.svg',
+  '.vtt',
+  '.srt',
+]);
+
+const LAZY_MEDIA_MIN_BYTES = 256 * 1024;
+const MAX_SCAN_FILE_BYTES = 2 * 1024 * 1024;
+const DYNAMIC_MEDIA_INTERPOLATION_REGEX =
+  /\$\{[^}]+\}[^`'"\n]{0,32}\.(mp4|mov|webm|m4v|qt|mp3|wav|m4a|aac|flac|ogg|png|jpe?g|webp|gif|avif)\b/i;
+
+function isAlwaysHydratedSnapshotFile(file: HydratedSnapshotFile): boolean {
+  const safePath = projectPath(file.path);
+  if (safePath.startsWith('.hyperframes/')) return true;
+  if (file.sizeBytes <= LAZY_MEDIA_MIN_BYTES) return true;
+  const ext = path.posix.extname(safePath).toLowerCase();
+  return ALWAYS_HYDRATE_EXTENSIONS.has(ext);
+}
+
+function decodePercentSequencesSafe(input: string): string {
+  return input.replace(/(?:%[0-9A-Fa-f]{2})+/g, (segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  });
+}
+
+/**
+ * Determine which large binary media candidates are referenced by any hydrated text/code/manifest
+ * files in the composition workspace. Uses conservative substring matching (full path, URL-encoded
+ * path, and bare basename) plus a dynamic `${...}.ext` interpolation fallback so referenced assets
+ * are never accidentally skipped while unreferenced library uploads (>256 KiB) stay out of `/tmp`.
+ */
+export function selectReferencedMediaCandidates(
+  candidates: readonly HydratedSnapshotFile[],
+  textSources: readonly string[],
+): HydratedSnapshotFile[] {
+  if (candidates.length === 0) return [];
+  const rawCorpus = textSources.join('\n');
+  if (!rawCorpus) return [];
+  const decodedCorpus = decodePercentSequencesSafe(rawCorpus);
+
+  if (DYNAMIC_MEDIA_INTERPOLATION_REGEX.test(rawCorpus)) {
+    return [...candidates];
+  }
+
+  return candidates.filter((file) => {
+    const safePath = projectPath(file.path);
+    const base = path.posix.basename(safePath);
+    const encodedPath = safePath
+      .split('/')
+      .map((seg) => encodeURIComponent(seg))
+      .join('/');
+    const encodedBase = encodeURIComponent(base);
+    return (
+      rawCorpus.includes(safePath) ||
+      decodedCorpus.includes(safePath) ||
+      rawCorpus.includes(encodedPath) ||
+      rawCorpus.includes(base) ||
+      decodedCorpus.includes(base) ||
+      rawCorpus.includes(encodedBase)
+    );
+  });
 }
 
 export interface RenderExportDeps {
@@ -216,57 +321,134 @@ export async function hydrateSnapshotFilesToDir(params: {
   projectDir: string;
   compositionPath: string;
   files: readonly HydratedSnapshotFile[];
+  onlyReferencedMedia?: boolean;
 }): Promise<HydratedWorkspaceResult> {
   const resolvedRoot = path.resolve(params.projectDir);
   await mkdir(resolvedRoot, { recursive: true, mode: 0o700 });
 
-  let cursor = 0;
-  const workerCount = Math.min(HYDRATION_CONCURRENCY, Math.max(1, params.files.length));
-
-  const runWorker = async () => {
-    for (;;) {
-      const idx = cursor;
-      cursor += 1;
-      if (idx >= params.files.length) return;
-      const file = params.files[idx];
-
-      // Strict path normalization & directory containment check (zero path traversal).
-      const safeRelPath = projectPath(file.path);
-      const destPath = path.resolve(resolvedRoot, safeRelPath);
-      if (destPath !== resolvedRoot && !destPath.startsWith(`${resolvedRoot}${path.sep}`)) {
-        throw new CloudError('INVALID_PATH', `Snapshot path escapes hydration directory: ${file.path}`, {
-          status: 400,
-        });
-      }
-
-      const s3Key =
-        file.blobScope === 'catalog'
-          ? catalogBlobKey(file.sha256)
-          : workspaceBlobKey(params.workspaceId, file.sha256);
-
-      const bytes = await params.storage.getObjectBuffer(s3Key);
-      const actualSha = createHash('sha256').update(bytes).digest('hex');
-      if (actualSha !== file.sha256) {
-        throw new CloudError(
-          'STORAGE_ERROR',
-          `Hydrated CAS blob digest mismatch for ${safeRelPath}: expected ${file.sha256}, got ${actualSha}`,
-          { status: 500 },
-        );
-      }
-
-      await mkdir(path.dirname(destPath), { recursive: true, mode: 0o700 });
-      await writeFile(destPath, bytes, { mode: 0o600 });
+  let largeActive = 0;
+  const largeWaiters: Array<() => void> = [];
+  const acquireLargeSlot = async () => {
+    if (largeActive >= HYDRATION_LARGE_FILE_CONCURRENCY) {
+      await new Promise<void>((resolve) => largeWaiters.push(resolve));
     }
+    largeActive += 1;
+  };
+  const releaseLargeSlot = () => {
+    largeActive = Math.max(0, largeActive - 1);
+    const next = largeWaiters.shift();
+    if (next) next();
   };
 
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  const hydrateBatch = async (batch: readonly HydratedSnapshotFile[]): Promise<void> => {
+    if (batch.length === 0) return;
+    let cursor = 0;
+    const workerCount = Math.min(HYDRATION_CONCURRENCY, Math.max(1, batch.length));
+
+    const runWorker = async () => {
+      for (;;) {
+        const idx = cursor;
+        cursor += 1;
+        if (idx >= batch.length) return;
+        const file = batch[idx];
+
+        // Strict path normalization & directory containment check (zero path traversal).
+        const safeRelPath = projectPath(file.path);
+        const destPath = path.resolve(resolvedRoot, safeRelPath);
+        if (destPath !== resolvedRoot && !destPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+          throw new CloudError('INVALID_PATH', `Snapshot path escapes hydration directory: ${file.path}`, {
+            status: 400,
+          });
+        }
+
+        const s3Key =
+          file.blobScope === 'catalog'
+            ? catalogBlobKey(file.sha256)
+            : workspaceBlobKey(params.workspaceId, file.sha256);
+
+        await mkdir(path.dirname(destPath), { recursive: true, mode: 0o700 });
+
+        const isLarge = file.sizeBytes >= HYDRATION_LARGE_FILE_BYTES;
+        if (isLarge) {
+          await acquireLargeSlot();
+        }
+        try {
+          const { stream } = await params.storage.getObjectStream(s3Key);
+          const hash = createHash('sha256');
+          const hasher = new Transform({
+            transform(chunk: Buffer, _encoding, callback) {
+              const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+              hash.update(buf);
+              callback(null, buf);
+            },
+          });
+          await pipeline(stream, hasher, createWriteStream(destPath, { mode: 0o600 }));
+          const actualSha = hash.digest('hex');
+          if (actualSha !== file.sha256) {
+            await rm(destPath, { force: true }).catch(() => {});
+            throw new CloudError(
+              'STORAGE_ERROR',
+              `Hydrated CAS blob digest mismatch for ${safeRelPath}: expected ${file.sha256}, got ${actualSha}`,
+              { status: 500 },
+            );
+          }
+        } catch (error) {
+          await rm(destPath, { force: true }).catch(() => {});
+          throw error;
+        } finally {
+          if (isLarge) {
+            releaseLargeSlot();
+          }
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  };
+
+  let hydratedCount = 0;
+  let skippedUnreferencedCount = 0;
+
+  if (params.onlyReferencedMedia) {
+    const alwaysFiles: HydratedSnapshotFile[] = [];
+    const lazyCandidates: HydratedSnapshotFile[] = [];
+    for (const file of params.files) {
+      if (isAlwaysHydratedSnapshotFile(file)) {
+        alwaysFiles.push(file);
+      } else {
+        lazyCandidates.push(file);
+      }
+    }
+
+    await hydrateBatch(alwaysFiles);
+    hydratedCount += alwaysFiles.length;
+
+    if (lazyCandidates.length > 0) {
+      const textSources: string[] = [];
+      for (const file of alwaysFiles) {
+        const safeRelPath = projectPath(file.path);
+        const ext = path.posix.extname(safeRelPath).toLowerCase();
+        if (!REFERENCE_SCAN_EXTENSIONS.has(ext) || file.sizeBytes > MAX_SCAN_FILE_BYTES) continue;
+        const text = await readFile(path.resolve(resolvedRoot, safeRelPath), 'utf8').catch(() => '');
+        if (text) textSources.push(text);
+      }
+      const referencedMedia = selectReferencedMediaCandidates(lazyCandidates, textSources);
+      skippedUnreferencedCount = lazyCandidates.length - referencedMedia.length;
+      await hydrateBatch(referencedMedia);
+      hydratedCount += referencedMedia.length;
+    }
+  } else {
+    await hydrateBatch(params.files);
+    hydratedCount = params.files.length;
+  }
 
   // Inject studio manual edits & studio motion render parity scripts into the ephemeral HTML copy (#9 §6.3).
   const parity = await injectStudioRenderParityIntoHydratedDir(resolvedRoot, params.compositionPath);
 
   return {
     projectDir: resolvedRoot,
-    fileCount: params.files.length,
+    fileCount: hydratedCount,
+    skippedUnreferencedCount,
     injectedManualEdits: parity.injectedManualEdits,
     injectedStudioMotion: parity.injectedStudioMotion,
   };
@@ -595,6 +777,7 @@ export async function processExportRenderJob(
         sizeBytes: Number(row.sizeBytes),
         mimeType: row.mimeType,
       })),
+      onlyReferencedMedia: true,
     });
 
     abortController.signal.throwIfAborted();
@@ -951,6 +1134,7 @@ export async function processRenderThumbnailJob(
       projectDir,
       compositionPath: payload.compositionPath,
       files: snapshotFiles,
+      onlyReferencedMedia: true,
     });
 
     const renderEnv = buildRenderSubprocessEnv({

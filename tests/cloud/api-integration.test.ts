@@ -1945,7 +1945,8 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.throws(() => makeConfig({ HISTORY_COALESCE_WINDOW_MS: '-1' }), /INVALID_CONFIG/);
   });
 
-  it('enforces strict preview host isolation (403 PREVIEW_ORIGIN_ISOLATED), ignores cookies, and validates scoped preview tokens', async () => {
+  it('enforces strict preview host isolation (403 PREVIEW_ORIGIN_ISOLATED), ignores cookies, and validates scoped preview tokens', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     const fixture = createApiFixture({
       config: {
         AUTH_MODE: 'oidc',
@@ -2089,7 +2090,42 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.equal(viaQuery.headers.get('referrer-policy'), 'no-referrer');
     assert.equal(viaQuery.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(viaQuery.headers.get('set-cookie'), null);
-    assert.match(await viaQuery.text(), /Project Alpha/);
+    const previewHtml = await viaQuery.text();
+    assert.match(previewHtml, /Project Alpha/);
+    const base = previewHtml.match(/<base href="([^"]+)"/)?.[1];
+    assert.ok(base);
+    const assetUrl = new URL('index.html', base);
+    assert.equal(assetUrl.origin, minted.previewOrigin);
+    const previewHeaders = { Host: assetUrl.host };
+    const assetResponse = await app.request(assetUrl.href, { headers: previewHeaders });
+    assert.equal(assetResponse.status, 200);
+    assert.match(await assetResponse.text(), /Project Alpha/);
+    const assetHead = await app.request(assetUrl.href, { method: 'HEAD', headers: previewHeaders });
+    assert.equal(assetHead.status, 200);
+    assert.equal(await assetHead.text(), '');
+    const foreignAsset = await app.request(assetUrl.href.replace(projectA, projectB), { headers: previewHeaders });
+    assert.equal(foreignAsset.status, 401);
+    const sameOriginHtml = await app.request(`/api/projects/${projectA}/preview`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.ok(!(await sameOriginHtml.text()).includes('~assets/'));
+    assert.match(sameOriginHtml.headers.get('content-security-policy') ?? '', /sandbox/);
+    const mainAsset = await app.request(`/api/projects/${projectA}/preview/index.html`, {
+      headers: { Cookie: cookieHeader },
+    });
+    assert.match(mainAsset.headers.get('content-security-policy') ?? '', /script-src 'none'/);
+    const nav = (path: string, site: string) => app.request(path, {
+      headers: { Cookie: cookieHeader, 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': site },
+    });
+    const documentPath = `/api/projects/${projectA}/preview/comp/index.html?capture=1`;
+    const mainNavigation = await nav(documentPath, 'same-origin');
+    assert.equal(mainNavigation.status, 302);
+    const isolatedLocation = new URL(mainNavigation.headers.get('location')!);
+    assert.equal(isolatedLocation.origin, minted.previewOrigin);
+    assert.equal(isolatedLocation.searchParams.get('capture'), '1');
+    assert.ok(verifyPreviewToken(isolatedLocation.searchParams.get('pt'), secret, { expectedProjectId: projectA }));
+    assert.equal((await nav(documentPath, 'same-site')).status, 403);
+    assert.equal((await nav(documentPath, 'cross-site')).status, 403);
 
     const viaHeader = await app.request(`/api/projects/${projectA}/preview`, {
       headers: {
@@ -2116,6 +2152,45 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
       { headers: { Host: 'preview.openmotion.test' } },
     );
     assert.equal(expiredRes.status, 401);
+    const expiredAsset = await app.request(assetUrl.href.replace(minted.token, expired.token), { headers: previewHeaders });
+    assert.equal(expiredAsset.status, 401);
+
+    // A live Studio session renews asset URLs without replacing the loaded document.
+    const leaseRequest = async (id: string, assetLease: true | string) => {
+      const response = await app.request(`/api/projects/${id}/preview-token`, {
+        method: 'POST', headers: mainMutateHeaders, body: JSON.stringify({ assetLease }),
+      });
+      assert.equal(response.status, 200);
+      return response.json() as Promise<{ token: string; assetLease: string; previewUrl: string }>;
+    };
+    const initial = await leaseRequest(projectA, true);
+    const leaseDocument = await app.request(initial.previewUrl, { headers: previewHeaders });
+    const leaseBase = (await leaseDocument.text()).match(/<base href="([^"]+)"/)?.[1];
+    assert.ok(leaseBase?.includes(initial.assetLease));
+    const secondLease = await leaseRequest(projectA, true);
+    const otherDocument = await app.request(secondLease.previewUrl, {
+      headers: { ...previewHeaders, 'If-None-Match': leaseDocument.headers.get('etag')! },
+    });
+    assert.equal(otherDocument.status, 200);
+    const otherHtml = await otherDocument.text();
+    assert.ok(otherHtml.includes(secondLease.assetLease));
+    assert.ok(!otherHtml.includes(initial.assetLease));
+    assert.notEqual(otherDocument.headers.get('etag'), leaseDocument.headers.get('etag'));
+    const leaseAssetUrl = new URL('index.html', leaseBase);
+    assert.equal((await app.request(leaseAssetUrl.href, { headers: previewHeaders })).status, 200);
+    const foreignLease = await leaseRequest(projectB, initial.assetLease);
+    assert.notEqual(foreignLease.assetLease, initial.assetLease);
+    assert.equal((await app.request(leaseAssetUrl.href.replace(projectA, projectB), { headers: previewHeaders })).status, 401);
+    assert.equal((await app.request(initial.previewUrl.replace(initial.token, initial.assetLease), { headers: previewHeaders })).status, 401);
+    t.mock.timers.tick(600_000);
+    const renewed = await leaseRequest(projectA, initial.assetLease);
+    assert.equal(renewed.assetLease, initial.assetLease);
+    t.mock.timers.tick(301_000);
+    assert.equal((await app.request(initial.previewUrl, { headers: previewHeaders })).status, 401);
+    assert.equal((await app.request(leaseAssetUrl.href, { headers: previewHeaders })).status, 200);
+    t.mock.timers.tick(600_000);
+    assert.equal((await app.request(leaseAssetUrl.href, { headers: previewHeaders })).status, 401);
+    assert.notEqual((await leaseRequest(projectA, initial.assetLease)).assetLease, initial.assetLease);
 
     // 6. Preview token is NEVER accepted as a Bearer token on main-origin /motion-api/* or /mcp
     const mainApiWithPreviewToken = await app.request('/motion-api/projects', {

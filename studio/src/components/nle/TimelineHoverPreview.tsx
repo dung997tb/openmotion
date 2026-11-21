@@ -1,3 +1,5 @@
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
+import { IsolatedHoverPlayer } from "../../player/components/IsolatedHoverPlayer";
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { loadPlayerModule } from '../../player/components/Player';
 import { usePlayerStore } from '../../player/store/playerStore';
@@ -18,12 +20,14 @@ interface HoverPlayer extends HTMLElement {
 /** A separate, silent runtime. The editor's live iframe and playhead are never sought. */
 function HoverFrame({ source, time, width, height }: { source: string; time: number; width: number; height: number }) {
   const { t } = useI18n();
+  const previewOrigin = isolatedPreviewOrigin();
   const host = useRef<HTMLDivElement>(null);
   const player = useRef<HoverPlayer | null>(null);
   const latestTime = useRef(time);
   latestTime.current = time;
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   useEffect(() => {
+    if (previewOrigin) return;
     let disposed = false, failed = false;
     let cleanup: (() => void) | undefined;
     const fail = () => {
@@ -62,10 +66,13 @@ function HoverFrame({ source, time, width, height }: { source: string; time: num
       };
     }).catch(fail);
     return () => { disposed = true; clearTimeout(deadline); cleanup?.(); };
-  }, [source, width, height]);
+  }, [source, width, height, previewOrigin]);
   useEffect(() => { if (player.current?.ready) player.current.seek(time); }, [time]);
   return <div className="motion-timeline-hover-frame" style={{ aspectRatio: `${width} / ${height}` }} data-hover-preview-status={status}>
-    <div ref={host} className="absolute inset-0" style={{ visibility: status === 'ready' ? 'visible' : 'hidden' }} />
+    <div ref={host} className="absolute inset-0" style={{ visibility: status === 'ready' ? 'visible' : 'hidden' }}>
+      {previewOrigin && <IsolatedHoverPlayer source={source} origin={previewOrigin} time={time}
+        onReady={ready => setStatus(ready ? 'ready' : 'loading')} onError={() => setStatus('error')} />}
+    </div>
     {status === 'loading' && <Skeleton className="absolute inset-0" />}
     {status === 'error' && <span>{t('Frame preview unavailable. Move away and try again.')}</span>}
   </div>;

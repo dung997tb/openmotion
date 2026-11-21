@@ -161,7 +161,12 @@ export function useTimelinePlayer({
         const preview = createPreviewAdapter({ iframe });
         if (preview.token) {
           const current = bridgeAdapterRef.current.get(iframe);
-          if (current) return current;
+          if (current?.token === preview.token) return current;
+          for (const [previousFrame, cached] of bridgeAdapterRef.current) {
+            if (previousFrame !== iframe && previousFrame.isConnected) continue;
+            cached.dispose();
+            bridgeAdapterRef.current.delete(previousFrame);
+          }
           const adapter = createBridgePlaybackAdapter(preview);
           bridgeAdapterRef.current.set(iframe, adapter);
           return adapter;

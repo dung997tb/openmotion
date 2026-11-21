@@ -61,10 +61,12 @@ import {
   PREVIEW_TOKEN_QUERY_PARAM,
   buildPreviewAuthContext,
   extractPreviewToken,
+  previewAssetBase,
   resolvePreviewTokenSecret,
   signPreviewToken,
   verifyPreviewToken,
 } from '../auth/preview-token.ts';
+import { isAssetLease, renewAssetLease, resolveAssetWorkspace } from '../auth/preview-asset-lease.ts';
 import { hasMinRole, hasScope, type AuthContext } from '../contracts/auth.ts';
 import { CloudError, featureDeferredP2, isCloudError } from '../contracts/errors.ts';
 import type { StoragePort } from '../contracts/storage.ts';
@@ -1814,6 +1816,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     db,
     storage,
     queues,
+    eventBus,
     presignPutTtlSec: config.S3_PRESIGN_PUT_TTL_SEC,
     presignGetTtlSec: config.S3_PRESIGN_GET_TTL_SEC,
   });
@@ -1828,6 +1831,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     store: createPgImportAssetsStore(db),
     storage,
     queues,
+    eventBus,
     config,
   });
   const mediaJobs = createCloudMediaJobsPort({ db, queues, eventBus, assets });
@@ -2076,11 +2080,13 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
         );
       }
 
-      const rawPreviewToken = extractPreviewToken(c.req.raw);
-      const verified = rawPreviewToken
-        ? verifyPreviewToken(rawPreviewToken, previewTokenSecret, { expectedProjectId: projectId })
-        : null;
-      if (!verified) {
+      const pathCredential = /^\/api\/projects\/[^/]+\/preview\/~assets\/([^/]+)\//.exec(pathname)?.[1];
+      const credential = pathCredential ?? extractPreviewToken(c.req.raw);
+      const signed = verifyPreviewToken(credential, previewTokenSecret, { expectedProjectId: projectId });
+      const workspaceId = isAssetLease(pathCredential)
+        ? await resolveAssetWorkspace(authCache, projectId, pathCredential)
+        : signed?.wid;
+      if (!workspaceId || !credential) {
         return applyIsolatedPreviewHeaders(
           c.json(
             {
@@ -2096,7 +2102,8 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
         );
       }
 
-      c.set('auth', buildPreviewAuthContext(verified, config.AUTH_MODE));
+      c.set('previewAssetBase', previewAssetBase(previewOriginUrl.origin, projectId, signed?.assetLease ?? credential));
+      c.set('auth', buildPreviewAuthContext({ wid: workspaceId, pid: projectId }, config.AUTH_MODE));
       previewHostRequests.add(c.req.raw);
     } else if (isReadOnlyFontAsset) {
       // Baked container fonts & Google Font CSS proxy carry no tenant secrets; never read session cookies.
@@ -2606,6 +2613,40 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   // -------------------------------------------------------------------------
 
   app.use('/api/projects/*', authWithWelcome);
+  if (previewHostIsolationEnabled && previewOriginUrl) {
+    app.use('/api/projects/:id/*', async (c, next) => {
+      if (previewHostRequests.has(c.req.raw) || (c.req.method !== 'GET' && c.req.method !== 'HEAD')) {
+        return next();
+      }
+
+      // HTML/SVG and historical blobs remain readable for the editor. If a
+      // browser navigates to raw file content, it gets an inert, opaque document.
+      c.header('Content-Security-Policy', "sandbox; script-src 'none'; form-action 'none'");
+      c.header('X-Content-Type-Options', 'nosniff');
+      const source = new URL(c.req.url);
+      const isPreviewDocument = /^\/api\/projects\/[^/]+\/preview(?:\/?|\/comp\/.*)$/.test(source.pathname);
+      if (!isPreviewDocument || c.req.header('sec-fetch-mode') !== 'navigate') return next();
+
+      // A preview iframe on a sibling host must never mint a token by framing
+      // the main host with the user's same-site session cookie.
+      const site = c.req.header('sec-fetch-site');
+      if (site !== 'same-origin' && site !== 'none') {
+        return c.json({ error: 'Open this preview from Studio.' }, 403);
+      }
+      const auth = getAuthContext(c);
+      if (!hasScope(auth, 'projects:read')) return c.json({ error: 'Project read access required.' }, 403);
+      const projectId = c.req.param('id');
+      await workspace.getProject(auth, projectId, { allowTrashed: true });
+      const signed = signPreviewToken({
+        workspaceId: auth.workspaceId, projectId, ttlSec: config.PREVIEW_TOKEN_TTL_SEC,
+      }, previewTokenSecret);
+      const target = new URL(source.pathname + source.search, previewOriginUrl.origin);
+      target.searchParams.set(PREVIEW_TOKEN_QUERY_PARAM, signed.token);
+      c.header('Cache-Control', 'no-store');
+      c.header('Referrer-Policy', 'no-referrer');
+      return c.redirect(target.href, 302);
+    });
+  }
   app.use('/api/render/*', authWithWelcome);
   app.use('/api/media-jobs/*', authWithWelcome);
   app.use('/api/fonts/*', fontsAuthMiddleware);
@@ -2628,9 +2669,25 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     const projectId = c.req.param('id') ?? '';
     await workspace.getProject(auth, projectId, { allowTrashed: true });
 
+    const body = await c.req.text();
+    let requested: unknown;
+    if (body) {
+      try {
+        requested = JSON.parse(body)?.assetLease;
+      } catch {
+        return c.json({ error: 'Invalid preview token request.' }, 400);
+      }
+    }
+    let assetLease: string | undefined;
+    if (requested === true || isAssetLease(requested)) {
+      assetLease = await renewAssetLease(authCache, auth.workspaceId, projectId, requested, config.PREVIEW_TOKEN_TTL_SEC);
+    } else if (requested !== undefined) {
+      return c.json({ error: 'Invalid preview asset lease.' }, 400);
+    }
     const signed = signPreviewToken(
       {
         workspaceId: auth.workspaceId,
+        assetLease,
         projectId,
         ttlSec: config.PREVIEW_TOKEN_TTL_SEC,
       },
@@ -2645,6 +2702,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
       {
         token: signed.token,
         expiresAt: signed.expiresAt,
+        ...(assetLease && { assetLease }),
         previewOrigin,
         previewUrl,
       },
@@ -2718,7 +2776,10 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     try {
       const rawHtml = await readFile(path.join(studioBuildDir, 'index.html'), 'utf8');
       const renderedHtml = injectRuntimeConfigIntoHtml(rawHtml, browserObservabilityConfig);
-      const bytes = Buffer.from(renderedHtml, 'utf8');
+      const studioHtml = previewHostIsolationEnabled && previewOriginUrl
+        ? renderedHtml.replace('</head>', `<meta name="openmotion-preview-origin" content="${previewOriginUrl.origin}"></head>`)
+        : renderedHtml;
+      const bytes = Buffer.from(studioHtml, 'utf8');
       return new Response(headOnly ? null : bytes, {
         status: 200,
         headers: {

@@ -13,11 +13,17 @@ export const PREVIEW_BRIDGE_VERSION = 1 as const;
 
 export type PreviewBridgeMessageType =
   | "preview-ready"
+  | "preview-build-busy"
   | "select-element"
   | "selection-geometry"
   | "edit-element"
   | "timeline-state"
   | "playback-control"
+  | "layer-tree"
+  | "layer-select"
+  | "inline-text"
+  | "inline-text-finished"
+  | "canvas-drag"
   | "pick-mode"
   | "runtime-error"
   | "preview-replaced"
