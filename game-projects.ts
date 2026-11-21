@@ -800,8 +800,8 @@ export class GameProjects {
     });
     const closeRooms=attachGameRooms(server,path.dirname(this.root));
     try {
-      const executablePath=await browserExecutable();
       const puppeteer=await browserAutomation(this.runtimeRoot);
+      const executablePath=await browserExecutable();
       profile=await mkdtemp(path.join(tmpdir(),'openmotion-game-chrome-'));
       await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
       const address=server.address();if(!address||typeof address==='string')throw new GameError('Local game server failed to listen');
