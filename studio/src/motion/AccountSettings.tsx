@@ -35,6 +35,18 @@ export interface CloudAccountSummary extends AccountSummary {
   };
 }
 
+export interface ConnectedApplicationRecord {
+  clientId: string;
+  clientName: string;
+  redirectHost: string;
+  redirectUris: string[];
+  workspaceId: string;
+  scopes: string[];
+  firstAuthorizedAt: string;
+  lastUsedAt: string | null;
+  activeTokenCount: number;
+}
+
 export interface PersonalAccessTokenRecord {
   id: string;
   name: string;
@@ -217,6 +229,10 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
   const [refreshing, setRefreshing] = useState(false);
   const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string | null>(null);
 
+  // Connected OAuth applications ("已连接的应用") state
+  const [connections, setConnections] = useState<ConnectedApplicationRecord[] | null>(null);
+  const [revokingClientId, setRevokingClientId] = useState<string | null>(null);
+
   // Personal Access Token management state
   const [tokens, setTokens] = useState<PersonalAccessTokenRecord[] | null>(null);
   const [tokensError, setTokensError] = useState(false);
@@ -241,9 +257,22 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
     }
   }, [signedIn, subscription]);
 
+  const loadConnections = useCallback(async () => {
+    if (!signedIn || subscription) return;
+    try {
+      const response = await gatewayRequest<{ connections?: ConnectedApplicationRecord[] }>('connections');
+      setConnections(Array.isArray(response.connections) ? response.connections : []);
+    } catch {
+      setConnections([]);
+    }
+  }, [signedIn, subscription]);
+
   useEffect(() => {
-    if (signedIn && !subscription) void loadTokens();
-  }, [signedIn, subscription, loadTokens]);
+    if (signedIn && !subscription) {
+      void loadTokens();
+      void loadConnections();
+    }
+  }, [signedIn, subscription, loadTokens, loadConnections]);
 
   function subscriptionLink(source: string, element: 'manage_subscription' | 'view_plans') {
     const consoleUrl = state.account!.consoleUrl;
@@ -340,6 +369,19 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
       toast.showToast(error instanceof Error ? error.message : t('Could not create token'), 'error');
     } finally {
       setCreatingToken(false);
+    }
+  }
+
+  async function revokeConnection(clientId: string) {
+    setRevokingClientId(clientId);
+    try {
+      await gatewayRequest(`connections/${encodeURIComponent(clientId)}`, 'DELETE');
+      await loadConnections();
+      toast.showToast(t('Connection revoked'), 'info');
+    } catch (error) {
+      toast.showToast(error instanceof Error ? error.message : t('Could not revoke connection'), 'error');
+    } finally {
+      setRevokingClientId(null);
     }
   }
 
@@ -483,6 +525,50 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
                     </div>
                   );
                 })}
+              </div>
+            </section>
+          )}
+
+          {!subscription && signedIn && (
+            <section id="account-connections" className="om-settings-section" aria-label={t('Connected applications')}>
+              <div className="om-settings-row">
+                <div>
+                  <h2 className="om-subtitle">{t('Connected applications')}</h2>
+                  <p className="om-muted">{t('External MCP agents (such as Codex or Claude Code) authorized to connect to your OpenDesign Workbench. Revoking an app immediately invalidates all of its access and refresh tokens.')}</p>
+                </div>
+                <Tooltip label={t('Refresh connections')} wrap>
+                  <IconButton
+                    variant="ghost"
+                    className="motion-icon-button"
+                    aria-label={t('Refresh connections')}
+                    onClick={() => void loadConnections()}
+                    icon={<RemixIcon name="refresh-line" size={17} />}
+                  />
+                </Tooltip>
+              </div>
+              <div className="om-card om-card-stack">
+                {!connections || connections.length === 0 ? (
+                  <p className="om-muted">{t('No connected applications yet.')}</p>
+                ) : (
+                  connections.map(conn => (
+                    <div className="om-preference-row" key={conn.clientId}>
+                      <div>
+                        <strong>{conn.clientName}</strong>
+                        <p className="om-muted">
+                          {conn.redirectHost} · {t('Authorized')}: {formatDate(conn.firstAuthorizedAt)} · {t('Last used')}: {formatDate(conn.lastUsedAt)}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        className="om-button h-auto"
+                        disabled={revokingClientId === conn.clientId}
+                        onClick={() => void revokeConnection(conn.clientId)}
+                      >
+                        {t(revokingClientId === conn.clientId ? 'Revoking…' : 'Revoke')}
+                      </Button>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
           )}

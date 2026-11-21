@@ -16,6 +16,7 @@ import {
   projectVersions,
 } from '../db/schema/project-files.ts';
 import {
+  projectGrants,
   projects,
   sessionMessages,
   sessions,
@@ -331,6 +332,7 @@ export class WorkspaceService {
   async getProject(ctx: AuthContext, projectId: string, options: { allowTrashed?: boolean } = {}): Promise<ProjectSummaryDetail> {
     const row = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
       allowTrashed: options.allowTrashed ?? true,
+      auth: ctx,
     });
     return toProjectSummaryDetail(row);
   }
@@ -500,6 +502,7 @@ export class WorkspaceService {
         .values(
           asInsert(projects, {
             workspaceId: ctx.workspaceId,
+            ownerUserId: ctx.userId,
             sessionId,
             artifactId,
             title,
@@ -521,6 +524,30 @@ export class WorkspaceService {
           }),
         )
         .returning({ id: projects.id });
+
+      // Spec: when an OAuth agent creates a new project, automatically grant that connection access.
+      if (ctx.authMethod === 'oauth_bearer' && ctx.clientId) {
+        await tx
+          .insert(projectGrants)
+          .values(
+            asInsert(projectGrants, {
+              projectId: createdProject.id,
+              userId: ctx.userId,
+              workspaceId: ctx.workspaceId,
+              clientId: ctx.clientId,
+              grantedAt: now,
+              revokedAt: null,
+            }),
+          )
+          .onConflictDoUpdate({
+            target: [projectGrants.projectId, projectGrants.userId, projectGrants.clientId],
+            set: asUpdate(projectGrants, {
+              workspaceId: ctx.workspaceId,
+              grantedAt: now,
+              revokedAt: null,
+            }),
+          });
+      }
 
       // Apply +2 refcount per workspace blob (+1 live project_files +1 v1 project_version_files).
       const deltas: BlobRefDelta[] = prepared
@@ -709,6 +736,7 @@ export class WorkspaceService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
       const now = new Date();
       const [row] = await tx
@@ -774,6 +802,7 @@ export class WorkspaceService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
 
       if (input.expectedTitle !== undefined && project.title !== input.expectedTitle) {
@@ -882,6 +911,7 @@ export class WorkspaceService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
+        auth: ctx,
       });
 
       const activeProjects = await tx
@@ -1004,6 +1034,7 @@ export class WorkspaceService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
+        auth: ctx,
       });
 
       const now = new Date();
@@ -1105,6 +1136,7 @@ export class WorkspaceService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
+        auth: ctx,
       });
 
       if (!project.trashed) {
@@ -1247,7 +1279,7 @@ export class WorkspaceService {
     projectId: string,
     payload: Record<string, unknown>,
   ): Promise<{ ok: true; projectId: string; previewDisplay: Record<string, unknown> }> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false, auth: ctx });
     const merged = {
       ...(project.previewDisplay ?? {}),
       ...payload,
@@ -1270,6 +1302,7 @@ export class WorkspaceService {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
+        auth: ctx,
       });
       const existing = Array.isArray(project.reviews) ? project.reviews : [];
       const next = [
@@ -1532,7 +1565,7 @@ export class WorkspaceService {
   }
 
   async listProjectConversation(ctx: AuthContext, projectId: string): Promise<{ projectId: string; messages: SessionMessage[] }> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const rows = await this.db
       .select()
       .from(sessionMessages)

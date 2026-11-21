@@ -44,6 +44,7 @@ import {
   uploadStagingKey,
   workspaceBlobKey,
 } from '../infra/storage.ts';
+import { loadProjectOrThrow } from './project-files-service.ts';
 
 export const MAX_FONT_LICENSE_BYTES = 131_072; // 128 KiB per Spike 2 §3.2.5
 export const DEFAULT_UPLOAD_TICKET_TTL_SEC = 900;
@@ -408,17 +409,10 @@ export class AssetLibraryService {
     let targetProjectId: string | null = null;
     if (input.targetProjectId !== undefined) {
       targetProjectId = requireUuid(input.targetProjectId, 'targetProjectId');
-      const projectRows = await this.db
-        .select({ id: projects.id, trashed: projects.trashed })
-        .from(projects)
-        .where(and(eq(projects.id, targetProjectId), eq(projects.workspaceId, ctx.workspaceId)))
-        .limit(1);
-      if (projectRows.length === 0) {
-        throw new CloudError('PROJECT_NOT_FOUND', 'Target project was not found in this workspace', { status: 404 });
-      }
-      if (projectRows[0].trashed) {
-        throw new CloudError('PROJECT_TRASHED', 'Restore the project before uploading assets', { status: 400 });
-      }
+      await loadProjectOrThrow(this.db, ctx.workspaceId, targetProjectId, {
+        allowTrashed: false,
+        auth: ctx,
+      });
     }
 
     let targetAssetId: string | null = null;
@@ -1404,17 +1398,10 @@ export class AssetLibraryService {
       }
 
       if (input.targetProjectId) {
-        const existingProject = await tx
-          .select({ id: projects.id, trashed: projects.trashed })
-          .from(projects)
-          .where(and(eq(projects.id, input.targetProjectId), eq(projects.workspaceId, ctx.workspaceId)))
-          .limit(1);
-        if (existingProject.length === 0) {
-          throw new CloudError('PROJECT_NOT_FOUND', 'Target project not found', { status: 404 });
-        }
-        if (existingProject[0].trashed) {
-          throw new CloudError('PROJECT_TRASHED', 'Target project is in trash', { status: 400 });
-        }
+        await loadProjectOrThrow(tx, ctx.workspaceId, input.targetProjectId, {
+          allowTrashed: false,
+          auth: ctx,
+        });
       }
 
       const priorReceipt = await tx

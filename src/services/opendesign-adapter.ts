@@ -55,7 +55,10 @@ export interface ModelCatalogCache {
 export interface OpenDesignGatewayOptions {
   apiUrl: string;
   linkUrl: string;
-  s2sApiKey: string;
+  /** AMR service-to-service internal token sent via `x-internal-token` (NEVER as Authorization: Bearer). */
+  internalToken?: string;
+  /** Legacy alias for `internalToken`; still sent via `x-internal-token`. */
+  s2sApiKey?: string;
   asrUrl?: string;
   billingSyncEnabled?: boolean;
   maxRefImageBytes?: number;
@@ -154,7 +157,7 @@ export class OpenDesignModelGateway implements PlatformModelGateway {
 
   private readonly apiUrl: string;
   private readonly linkUrl: string;
-  private readonly s2sApiKey: string;
+  private readonly internalToken: string;
   private readonly asrUrl?: string;
   private readonly billingSyncEnabled: boolean;
   private readonly maxRefImageBytes: number;
@@ -168,7 +171,7 @@ export class OpenDesignModelGateway implements PlatformModelGateway {
   constructor(options: OpenDesignGatewayOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, '');
     this.linkUrl = options.linkUrl.replace(/\/$/, '');
-    this.s2sApiKey = options.s2sApiKey;
+    this.internalToken = options.internalToken ?? options.s2sApiKey ?? '';
     this.asrUrl = options.asrUrl?.replace(/\/$/, '');
     this.billingSyncEnabled = options.billingSyncEnabled ?? false;
     this.maxRefImageBytes = options.maxRefImageBytes ?? DEFAULT_MAX_REF_IMAGE_BYTES;
@@ -186,17 +189,37 @@ export class OpenDesignModelGateway implements PlatformModelGateway {
     this.cache = options.cache;
   }
 
+  /**
+   * Builds AMR upstream-trust headers (`x-internal-token` + `x-workspace-*` 4-tuple).
+   * CRITICAL: NEVER attach `Authorization: Bearer` — AMR's `createAuthenticateRequest`
+   * prioritizes Bearer and routes it into the control-key branch instead of internal trust.
+   */
   private buildHeaders(
     ctx: GatewayCallContext,
     extra: Record<string, string> = {},
   ): Record<string, string> {
-    return {
-      Authorization: `Bearer ${this.s2sApiKey}`,
+    const headers: Record<string, string> = {
+      'x-internal-token': this.internalToken,
       Accept: 'application/json',
-      ...(ctx.externalWorkspaceId
-        ? { [this.workspaceHeaderName]: ctx.externalWorkspaceId }
-        : {}),
-      ...(ctx.externalUserId ? { [this.userHeaderName]: ctx.externalUserId } : {}),
+    };
+    if (ctx.externalWorkspaceId) {
+      headers['x-workspace-team-id'] = ctx.externalWorkspaceId;
+      headers[this.workspaceHeaderName] = ctx.externalWorkspaceId;
+    }
+    if (ctx.amrWorkspaceMemberId) {
+      headers['x-workspace-member-id'] = ctx.amrWorkspaceMemberId;
+    }
+    if (ctx.amrWorkspaceRole) {
+      headers['x-workspace-role'] = ctx.amrWorkspaceRole;
+    }
+    if (ctx.amrWorkspaceLifecycleState) {
+      headers['x-workspace-lifecycle-state'] = ctx.amrWorkspaceLifecycleState;
+    }
+    if (ctx.externalUserId) {
+      headers[this.userHeaderName] = ctx.externalUserId;
+    }
+    return {
+      ...headers,
       ...extra,
     };
   }
@@ -751,9 +774,11 @@ export class OpenDesignModelGateway implements PlatformModelGateway {
     }
 
     const signal = ctx.signal ?? new AbortController().signal;
-    const path = ctx.externalWorkspaceId
-      ? `/api/v1/workspaces/${encodeURIComponent(ctx.externalWorkspaceId)}/billing/snapshot`
-      : '/api/v1/billing/summary';
+    const path = ctx.appUserId
+      ? `/api/internal/billing/summary/${encodeURIComponent(ctx.appUserId)}`
+      : ctx.externalWorkspaceId
+        ? `/api/v1/workspaces/${encodeURIComponent(ctx.externalWorkspaceId)}/billing/snapshot`
+        : '/api/v1/billing/summary';
     try {
       const body = await this.requestJson(`${this.apiUrl}${path}`, {
         method: 'GET',

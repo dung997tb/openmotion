@@ -3,11 +3,13 @@ import {
   hasMinRole,
   hasScope,
   type AuthContext,
+  type AuthEntry,
   type PatScope,
   type WorkspaceRole,
 } from '../contracts/auth.ts';
 import { CloudError, isCloudError } from '../contracts/errors.ts';
 import type { AppConfig } from '../infra/config.ts';
+import type { AmrIdentityClient } from './amr-identity.ts';
 import { createDevTenantProvisioner, verifyDevPat } from './dev-auth.ts';
 import {
   buildOAuth21Config,
@@ -41,6 +43,7 @@ export interface AuthMiddlewareDeps {
   cache?: AuthKeyValueCache;
   oidc?: OidcService;
   oauth21?: OAuth21Config;
+  amrIdentity?: AmrIdentityClient;
   /**
    * When true, even in AUTH_MODE=dev, `/mcp` requires an explicit Bearer token (`DEV_PAT` or DB PAT/OAuth).
    * Defaults to false so local Compose DX works smoothly when no Authorization header AND no Cookie are sent.
@@ -86,6 +89,7 @@ async function resolveBearerAuth(
     return verifyOAuthAccessToken(deps.store, token, {
       authMode: deps.config.AUTH_MODE,
       expectedResource: oauthCfg.resourceUrl,
+      cache: deps.cache,
     });
   }
 
@@ -102,6 +106,18 @@ async function resolveBearerAuth(
   }
 
   return null;
+}
+
+async function finalizeAuthContext(
+  deps: AuthMiddlewareDeps,
+  auth: AuthContext,
+  entry: AuthEntry,
+): Promise<AuthContext> {
+  if (deps.config.AUTH_MODE === 'oidc' && deps.amrIdentity) {
+    const verified = await deps.amrIdentity.verifyAndEnrichAuthContext(deps.store, auth);
+    return { ...verified, entry };
+  }
+  return { ...auth, entry };
 }
 
 /**
@@ -121,19 +137,26 @@ export function createAuthMiddleware(deps: AuthMiddlewareDeps): MiddlewareHandle
     if (authHeader !== undefined) {
       const bearer = extractBearerToken(c.req.raw);
       if (!bearer) {
-        return c.json({ code: 'UNAUTHORIZED', error: 'Invalid Authorization header format' }, 401);
+        return c.json(
+          { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Invalid Authorization header format' },
+          401,
+        );
       }
       try {
-        const auth = await resolveBearerAuth(deps, oauthCfg, bearer, requestedWorkspaceId, provisionDev);
-        if (!auth) {
-          return c.json({ code: 'UNAUTHORIZED', error: 'Invalid or expired bearer token' }, 401);
+        const rawAuth = await resolveBearerAuth(deps, oauthCfg, bearer, requestedWorkspaceId, provisionDev);
+        if (!rawAuth) {
+          return c.json(
+            { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Invalid or expired bearer token' },
+            401,
+          );
         }
+        const auth = await finalizeAuthContext(deps, rawAuth, 'api');
         c.set('auth', auth);
         await next();
         return;
       } catch (error) {
         if (isCloudError(error)) {
-          return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 404 | 409 | 500 | 501);
+          return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 404 | 409 | 500 | 501 | 503);
         }
         throw error;
       }
@@ -150,7 +173,10 @@ export function createAuthMiddleware(deps: AuthMiddlewareDeps): MiddlewareHandle
           cache: deps.cache,
         });
         if (!resolved) {
-          return c.json({ code: 'UNAUTHORIZED', error: 'Session expired or revoked' }, 401);
+          return c.json(
+            { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Session expired or revoked' },
+            401,
+          );
         }
         if (isMutatingMethod(c.req.method) && !verifyCsrfOrigin(c.req.raw, deps.config.APP_PUBLIC_ORIGIN)) {
           return c.json(
@@ -158,14 +184,15 @@ export function createAuthMiddleware(deps: AuthMiddlewareDeps): MiddlewareHandle
             403,
           );
         }
-        c.set('auth', resolved.auth);
+        const auth = await finalizeAuthContext(deps, resolved.auth, 'web');
+        c.set('auth', auth);
         c.set('csrfTokenHash', resolved.csrfTokenHash);
         c.set('sessionTokenHash', resolved.tokenHash);
         await next();
         return;
       } catch (error) {
         if (isCloudError(error)) {
-          return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 404 | 409 | 500 | 501);
+          return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 404 | 409 | 500 | 501 | 503);
         }
         throw error;
       }
@@ -173,14 +200,17 @@ export function createAuthMiddleware(deps: AuthMiddlewareDeps): MiddlewareHandle
 
     // Branch C: Local `AUTH_MODE=dev` auto-provisioned single tenant.
     if (deps.config.AUTH_MODE === 'dev') {
-      const auth = await provisionDev();
+      const auth = { ...(await provisionDev()), entry: 'web' as const };
       c.set('auth', auth);
       await next();
       return;
     }
 
     // Branch D: Unauthenticated in OIDC mode.
-    return c.json({ code: 'UNAUTHORIZED', error: 'Authentication required' }, 401);
+    return c.json(
+      { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Authentication required' },
+      401,
+    );
   };
 }
 
@@ -203,26 +233,36 @@ export function createMcpBearerAuthMiddleware(deps: AuthMiddlewareDeps): Middlew
       const bearer = extractBearerToken(c.req.raw);
       if (!bearer) {
         c.header('WWW-Authenticate', buildWwwAuthenticateHeader(oauthCfg.resourceMetadataUrl, 'invalid_token'));
-        return c.json({ code: 'UNAUTHORIZED', error: 'Bearer token required for /mcp' }, 401);
+        return c.json(
+          { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Bearer token required for /mcp' },
+          401,
+        );
       }
       try {
-        const auth = await resolveBearerAuth(
+        const rawAuth = await resolveBearerAuth(
           deps,
           oauthCfg,
           bearer,
           c.req.header('x-openmotion-workspace-id') ?? null,
           provisionDev,
         );
-        if (!auth) {
+        if (!rawAuth) {
           c.header('WWW-Authenticate', buildWwwAuthenticateHeader(oauthCfg.resourceMetadataUrl, 'invalid_token'));
-          return c.json({ code: 'UNAUTHORIZED', error: 'Invalid or expired bearer token' }, 401);
+          return c.json(
+            { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Invalid or expired bearer token' },
+            401,
+          );
         }
+        const auth = await finalizeAuthContext(deps, rawAuth, 'mcp');
         c.set('auth', auth);
         await next();
         return;
       } catch (error) {
         if (isCloudError(error)) {
-          return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 404 | 409 | 500 | 501);
+          if (error.status === 401) {
+            c.header('WWW-Authenticate', buildWwwAuthenticateHeader(oauthCfg.resourceMetadataUrl, 'invalid_token'));
+          }
+          return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 404 | 409 | 500 | 501 | 503);
         }
         throw error;
       }
@@ -234,6 +274,7 @@ export function createMcpBearerAuthMiddleware(deps: AuthMiddlewareDeps): Middlew
       return c.json(
         {
           code: 'UNAUTHORIZED',
+          errorCode: 'auth_required',
           error: 'Browser session cookies are not accepted on /mcp. Provide an Authorization: Bearer token.',
         },
         401,
@@ -242,14 +283,17 @@ export function createMcpBearerAuthMiddleware(deps: AuthMiddlewareDeps): Middlew
 
     // In AUTH_MODE=dev without cookie and without requireBearerOnDevMcp, allow local DX bypass.
     if (deps.config.AUTH_MODE === 'dev' && !deps.requireBearerOnDevMcp) {
-      const auth = await provisionDev();
+      const auth = { ...(await provisionDev()), entry: 'mcp' as const };
       c.set('auth', auth);
       await next();
       return;
     }
 
     c.header('WWW-Authenticate', buildWwwAuthenticateHeader(oauthCfg.resourceMetadataUrl));
-    return c.json({ code: 'UNAUTHORIZED', error: 'Bearer authentication required for /mcp' }, 401);
+    return c.json(
+      { code: 'UNAUTHORIZED', errorCode: 'auth_required', error: 'Bearer authentication required for /mcp' },
+      401,
+    );
   };
 }
 

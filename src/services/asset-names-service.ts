@@ -111,7 +111,7 @@ export class AssetNamesService {
       fallbackLanguage?: string;
     } = {},
   ): Promise<ProjectAssetNamesResult> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
     const allFiles = options.paths
       ? [...options.paths]
@@ -190,7 +190,7 @@ export class AssetNamesService {
       writeToken?: string | null;
     },
   ): Promise<ProjectAssetNamesResult & { revision: string; versionId: string | null }> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false, auth: ctx });
 
     let validatedLanguage: string | undefined;
     if (input.namingLanguage !== undefined) {
@@ -315,7 +315,7 @@ export class AssetNamesService {
   ): Promise<void> {
     if (deletedPaths.length === 0) return;
     const deletedSet = new Set(deletedPaths.map((p) => normalizeSafeProjectPath(p)));
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
     const previous = readStoredAllocations(project.assetNameAllocations);
     let allocationsChanged = false;

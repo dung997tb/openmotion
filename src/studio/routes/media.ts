@@ -402,7 +402,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
   const handleCompositionThumbnail = async (c: Context<{ Variables: StudioVariables }>) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id') ?? '';
-    const project = await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: true });
+    const project = await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: true, auth: auth });
 
     const rawComp = extractWildcardPath(c.req.url, '/thumbnail/');
     const compPath = rawComp ? normalizeSafeProjectPath(rawComp) : 'index.html';

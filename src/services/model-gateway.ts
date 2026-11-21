@@ -1,4 +1,5 @@
 import type { GatewayStatus, Modality, Model } from '../../shared/gateway.ts';
+import type { AuthContext } from '../contracts/auth.ts';
 import type { WorkspaceDefaultModels } from '../db/schema/auth.ts';
 import type { AppConfig } from '../infra/config.ts';
 import { MockModelGateway, type MockModelGatewayOptions } from './mock-model-adapter.ts';
@@ -8,8 +9,37 @@ export interface GatewayCallContext {
   readonly workspaceId: string;
   readonly externalWorkspaceId?: string | null;
   readonly externalUserId?: string | null;
+  readonly appUserId?: string | null;
+  readonly amrWorkspaceMemberId?: string | null;
+  readonly amrWorkspaceRole?: 'owner' | 'admin' | 'member' | null;
+  readonly amrWorkspaceLifecycleState?: string | null;
   readonly signal?: AbortSignal;
   readonly idempotencyKey?: string;
+}
+
+export function gatewayCallContextFromAuth(
+  auth: Pick<
+    AuthContext,
+    | 'workspaceId'
+    | 'externalWorkspaceId'
+    | 'authUserId'
+    | 'appUserId'
+    | 'amrWorkspaceMemberId'
+    | 'amrWorkspaceRole'
+    | 'amrWorkspaceLifecycleState'
+  >,
+  extra: Pick<GatewayCallContext, 'signal' | 'idempotencyKey'> = {},
+): GatewayCallContext {
+  return {
+    workspaceId: auth.workspaceId,
+    externalWorkspaceId: auth.externalWorkspaceId,
+    externalUserId: auth.authUserId ?? null,
+    appUserId: auth.appUserId ?? null,
+    amrWorkspaceMemberId: auth.amrWorkspaceMemberId ?? null,
+    amrWorkspaceRole: auth.amrWorkspaceRole ?? null,
+    amrWorkspaceLifecycleState: auth.amrWorkspaceLifecycleState ?? null,
+    ...extra,
+  };
 }
 
 export interface GatewayUploadedInput {
@@ -195,23 +225,26 @@ export function createPlatformModelGateway(
     | 'OPENDESIGN_S2S_API_KEY'
     | 'OPENDESIGN_ASR_URL'
     | 'OPENDESIGN_BILLING_SYNC_ENABLED'
-  >,
+  > &
+    Partial<Pick<AppConfig, 'OPENDESIGN_INTERNAL_API_TOKEN'>>,
   options: CreateGatewayOptions = {},
 ): PlatformModelGateway {
   if (config.MODEL_GATEWAY_MODE === 'mock') {
     return new MockModelGateway(options.mock);
   }
-  if (!config.OPENDESIGN_S2S_API_KEY) {
+  const internalToken = config.OPENDESIGN_INTERNAL_API_TOKEN ?? config.OPENDESIGN_S2S_API_KEY;
+  if (!internalToken) {
     throw new GatewayError(
       'unauthorized',
-      'MODEL_GATEWAY_MODE=opendesign requires OPENDESIGN_S2S_API_KEY',
+      'MODEL_GATEWAY_MODE=opendesign requires OPENDESIGN_INTERNAL_API_TOKEN (or OPENDESIGN_S2S_API_KEY)',
       { status: 500 },
     );
   }
   return new OpenDesignModelGateway({
     apiUrl: config.OPENDESIGN_API_URL,
     linkUrl: config.OPENDESIGN_LINK_URL,
-    s2sApiKey: config.OPENDESIGN_S2S_API_KEY,
+    internalToken,
+    s2sApiKey: internalToken,
     asrUrl: config.OPENDESIGN_ASR_URL,
     billingSyncEnabled: config.OPENDESIGN_BILLING_SYNC_ENABLED,
     ...options.opendesign,

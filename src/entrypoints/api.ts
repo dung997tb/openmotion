@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import { serve, type ServerType } from '@hono/node-server';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { Redis } from 'ioredis';
@@ -40,8 +40,10 @@ import {
   templateLibraryPreview,
 } from '../../shared/workspace-url.ts';
 import {
+  AmrIdentityClient,
   InMemoryAuthCache,
   OidcService,
+  amrIdentityClientFromAppConfig,
   buildOAuth21Config,
   createAuthMiddleware,
   createAuthRoutes,
@@ -71,6 +73,7 @@ import type { StoragePort } from '../contracts/storage.ts';
 import { createDbHandle, type Database, type DbHandle } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { jobs } from '../db/schema/jobs.ts';
+import { projectGrants, projects } from '../db/schema/projects.ts';
 import { getConfig, type AppConfig } from '../infra/config.ts';
 import { createLogger, type Logger } from '../infra/logger.ts';
 import { QueueService } from '../infra/queues.ts';
@@ -111,6 +114,7 @@ import { ProjectArchiveService } from '../services/project-archive-service.ts';
 import { createOrCloneProject } from '../services/project-creation.ts';
 import {
   ProjectFilesService,
+  loadProjectOrThrow,
   type HotTextCachePort,
   type ProjectFileOp,
 } from '../services/project-files-service.ts';
@@ -250,6 +254,7 @@ export interface CreateApiAppDeps {
   readonly authStore?: AuthStore;
   readonly authCache?: AuthKeyValueCache;
   readonly oidc?: OidcService;
+  readonly amrIdentity?: AmrIdentityClient;
   readonly gateway?: PlatformModelGateway;
   readonly mcpSessionStore?: McpSessionStore;
   readonly welcomeBootstrap?: WelcomeBootstrapService;
@@ -549,6 +554,9 @@ function createCloudMediaJobsPort(deps: {
         ? validateStableRequestId(input.requestId)
         : randomUUID();
     const projectId = typeof input.projectId === 'string' && isUuid(input.projectId) ? input.projectId : null;
+    if (projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, projectId, { allowTrashed: false, auth });
+    }
     const assetName =
       typeof input.name === 'string' && input.name.trim()
         ? input.name.trim().slice(0, 200)
@@ -636,7 +644,13 @@ function createCloudMediaJobsPort(deps: {
         : {}),
       references: resolvedRefs,
       ...(auth.externalWorkspaceId ? { externalWorkspaceId: auth.externalWorkspaceId } : {}),
-      externalUserId: auth.userId,
+      externalUserId: auth.authUserId ?? auth.userId,
+      ...(auth.appUserId ? { appUserId: auth.appUserId } : {}),
+      ...(auth.amrWorkspaceMemberId ? { amrWorkspaceMemberId: auth.amrWorkspaceMemberId } : {}),
+      ...(auth.amrWorkspaceRole ? { amrWorkspaceRole: auth.amrWorkspaceRole } : {}),
+      ...(auth.amrWorkspaceLifecycleState
+        ? { amrWorkspaceLifecycleState: auth.amrWorkspaceLifecycleState }
+        : {}),
     };
 
     const [inserted] = await deps.db
@@ -692,12 +706,96 @@ function createCloudMediaJobsPort(deps: {
   ): Promise<Record<string, unknown>> => {
     const limit = Math.min(Math.max(1, query.limit ?? 50), 100);
     const offset = Math.max(0, query.offset ?? 0);
+    const rawProjectId = typeof query.projectId === 'string' ? query.projectId.trim() : '';
+
+    if (auth.authMethod === 'oauth_bearer') {
+      if (rawProjectId) {
+        if (!isUuid(rawProjectId)) {
+          return { jobs: [], total: 0, offset, limit };
+        }
+        await loadProjectOrThrow(deps.db, auth.workspaceId, rawProjectId, { allowTrashed: true, auth });
+        const rows = await deps.db
+          .select()
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.workspaceId, auth.workspaceId),
+              eq(jobs.kind, 'media_generate'),
+              eq(jobs.projectId, rawProjectId),
+            ),
+          )
+          .orderBy(desc(jobs.createdAt))
+          .limit(limit)
+          .offset(offset);
+        return {
+          jobs: rows.map(serializeJob),
+          total: rows.length,
+          offset,
+          limit,
+        };
+      }
+
+      if (!auth.clientId) {
+        return { jobs: [], total: 0, offset, limit };
+      }
+
+      const grantedRows = await deps.db
+        .select({ projectId: projectGrants.projectId })
+        .from(projectGrants)
+        .where(
+          and(
+            eq(projectGrants.workspaceId, auth.workspaceId),
+            eq(projectGrants.userId, auth.userId),
+            eq(projectGrants.clientId, auth.clientId),
+            isNull(projectGrants.revokedAt),
+          ),
+        );
+
+      const candidateProjectIds = [...new Set(grantedRows.map((row) => row.projectId))];
+      if (candidateProjectIds.length === 0) {
+        return { jobs: [], total: 0, offset, limit };
+      }
+
+      const accessibleProjects = await deps.db
+        .select({ id: projects.id, ownerUserId: projects.ownerUserId })
+        .from(projects)
+        .where(and(eq(projects.workspaceId, auth.workspaceId), inArray(projects.id, candidateProjectIds)));
+
+      const grantedProjectIds = accessibleProjects
+        .filter((project) => !project.ownerUserId || project.ownerUserId === auth.userId)
+        .map((project) => project.id);
+      if (grantedProjectIds.length === 0) {
+        return { jobs: [], total: 0, offset, limit };
+      }
+
+      const rows = await deps.db
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.workspaceId, auth.workspaceId),
+            eq(jobs.kind, 'media_generate'),
+            inArray(jobs.projectId, grantedProjectIds),
+          ),
+        )
+        .orderBy(desc(jobs.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+      return {
+        jobs: rows.map(serializeJob),
+        total: rows.length,
+        offset,
+        limit,
+      };
+    }
+
     const predicate =
-      query.projectId && isUuid(query.projectId)
+      rawProjectId && isUuid(rawProjectId)
         ? and(
             eq(jobs.workspaceId, auth.workspaceId),
             eq(jobs.kind, 'media_generate'),
-            eq(jobs.projectId, query.projectId),
+            eq(jobs.projectId, rawProjectId),
           )
         : and(eq(jobs.workspaceId, auth.workspaceId), eq(jobs.kind, 'media_generate'));
 
@@ -729,6 +827,9 @@ function createCloudMediaJobsPort(deps: {
     if (!row) {
       throw new CloudError('NOT_FOUND', `Media job '${jobId}' not found`, { status: 404, applied: false });
     }
+    if (row.projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, row.projectId, { allowTrashed: true, auth });
+    }
     return { job: serializeJob(row) };
   };
 
@@ -743,6 +844,9 @@ function createCloudMediaJobsPort(deps: {
       .limit(1);
     if (!existing) {
       throw new CloudError('NOT_FOUND', `Media job '${jobId}' not found`, { status: 404, applied: false });
+    }
+    if (existing.projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, existing.projectId, { allowTrashed: true, auth });
     }
     if (['completed', 'failed', 'cancelled'].includes(existing.state)) {
       return { job: serializeJob(existing) };
@@ -785,6 +889,9 @@ function createCloudMediaJobsPort(deps: {
       .limit(1);
     if (!existing) {
       throw new CloudError('NOT_FOUND', `Media job '${jobId}' not found`, { status: 404, applied: false });
+    }
+    if (existing.projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, existing.projectId, { allowTrashed: true, auth });
     }
     if (!existing.remoteId || existing.remoteTerminal || existing.state !== 'failed') {
       throw new CloudError(
@@ -833,6 +940,9 @@ function createCloudMediaJobsPort(deps: {
       .limit(1);
     if (!existing) {
       throw new CloudError('NOT_FOUND', `Media job '${jobId}' not found`, { status: 404, applied: false });
+    }
+    if (existing.projectId && auth.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(deps.db, auth.workspaceId, existing.projectId, { allowTrashed: true, auth });
     }
     if (!existing.savePending) {
       throw new CloudError('INVALID_ARGUMENT', 'Media job does not have a pending save to retry.', {
@@ -1853,12 +1963,17 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     mcpDispatcher,
   };
 
+  const amrIdentity =
+    deps.amrIdentity ??
+    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache) : undefined);
+
   const authDeps: AuthMiddlewareDeps = {
     config,
     store: authStore,
     cache: authCache,
     oidc,
     oauth21,
+    amrIdentity,
     requireBearerOnDevMcp: deps.requireBearerOnDevMcp,
   };
   const authMiddleware = createAuthMiddleware(authDeps);
@@ -1932,11 +2047,52 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   const app = new Hono<AuthEnv>();
 
   app.onError((error, c) => {
+    const auth = c.get('auth') as AuthContext | undefined;
     if (isCloudError(error)) {
       return c.json(error.toJSON(), error.status as ContentfulStatusCode);
     }
-    logger.error('Unhandled API error', { error, method: c.req.method, path: c.req.path });
+    logger.error('Unhandled API error', {
+      error,
+      method: c.req.method,
+      path: c.req.path,
+      ...(auth ? { userId: auth.userId, workspaceId: auth.workspaceId, authMethod: auth.authMethod } : {}),
+      ...(auth?.clientId ? { clientId: auth.clientId } : {}),
+    });
     return c.json({ code: 'INTERNAL_ERROR', error: 'Internal server error' }, 500);
+  });
+
+  // Structured audit/access log for API, Auth, OAuth & MCP traffic (spec §验收 2).
+  app.use('*', async (c, next) => {
+    const path = c.req.path;
+    const isAuditedRoute =
+      path.startsWith('/motion-api/') ||
+      path.startsWith('/api/') ||
+      path === '/mcp' ||
+      path.startsWith('/mcp/') ||
+      path.startsWith('/auth/') ||
+      path.startsWith('/oauth/');
+    if (!isAuditedRoute || path.startsWith('/api/health')) {
+      await next();
+      return;
+    }
+    const startedAt = Date.now();
+    await next();
+    const auth = c.get('auth') as AuthContext | undefined;
+    logger.info('HTTP request completed', {
+      method: c.req.method,
+      path,
+      status: c.res.status,
+      durationMs: Date.now() - startedAt,
+      ...(auth
+        ? {
+            userId: auth.userId,
+            workspaceId: auth.workspaceId,
+            authMethod: auth.authMethod,
+            ...(auth.entry ? { entry: auth.entry } : {}),
+            ...(auth.clientId ? { clientId: auth.clientId } : {}),
+          }
+        : {}),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2045,7 +2201,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
         role: 'viewer',
         scopes: ['projects:read'],
         authMode: config.AUTH_MODE,
-        authMethod: 'oauth_bearer',
+        authMethod: 'preview_token',
         displayName: 'Preview Font Reader',
       });
       previewHostRequests.add(c.req.raw);
@@ -2421,7 +2577,20 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   app.use('/motion-api/models/*', authWithWelcome);
   app.use('/motion-api/account/*', authWithWelcome);
 
-  app.route('/', createProjectsRouter({ workspace, files, history, assetNames, workRounds, archives, catalog, exports: exportsService }));
+  app.route(
+    '/',
+    createProjectsRouter({
+      workspace,
+      files,
+      history,
+      assetNames,
+      workRounds,
+      archives,
+      catalog,
+      exports: exportsService,
+      authStore,
+    }),
+  );
   app.route('/', createSessionsRouter({ workspace, catalog, exports: exportsService }));
   app.route('/', createArchivesRouter({ archives }));
   app.route('/motion-api/assets', createAssetRoutes({ assetService: assets }));
@@ -2841,6 +3010,29 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
       server.close((error) => (error ? reject(error) : resolve()));
     });
   });
+
+  // Periodic cleanup of anonymous DCR OAuth clients that never exchanged a token (spec §6.6).
+  if (config.AUTH_MODE === 'oidc' && config.MCP_OAUTH_MODE === 'proxy') {
+    const DCR_CLEANUP_INTERVAL_MS = 60 * 60_000;
+    const DCR_UNUSED_MAX_AGE_MS = 24 * 60 * 60_000;
+    const runCleanup = async () => {
+      try {
+        const deleted = await authStore.cleanupUnusedOAuthClients(new Date(Date.now() - DCR_UNUSED_MAX_AGE_MS));
+        if (deleted > 0) {
+          logger.info('Swept unused anonymous DCR OAuth clients', { deleted });
+        }
+      } catch (error) {
+        logger.warn('Unused DCR OAuth client sweep failed', { error });
+      }
+    };
+    const cleanupTimer = setInterval(() => {
+      void runCleanup();
+    }, DCR_CLEANUP_INTERVAL_MS);
+    cleanupTimer.unref();
+    shutdown.register('oauth-dcr-cleanup', () => {
+      clearInterval(cleanupTimer);
+    });
+  }
 
   if (options.installSignals !== false) {
     shutdown.installSignalHandlers(options.onShutdownComplete);

@@ -22,6 +22,7 @@ import { projects } from '../db/schema/projects.ts';
 import type { QueueService } from '../infra/queues.ts';
 import { cancelChannel, jobChannel, projectChannel, type RedisEventBus } from '../infra/redis.ts';
 import { assertTenantScopedKey } from '../infra/storage.ts';
+import { assertAgentProjectAccess, loadProjectOrThrow } from './project-files-service.ts';
 
 export type ExportFormat = 'mp4' | 'mov' | 'webm' | 'gif';
 const EXPORT_FORMATS: ReadonlySet<string> = new Set(['mp4', 'mov', 'webm', 'gif']);
@@ -295,6 +296,7 @@ export class ExportService {
           throw new CloudError('PROJECT_NOT_FOUND', 'Project not found in this workspace', { status: 404 });
         }
         const project = lockedProjects[0];
+        await assertAgentProjectAccess(tx, ctx, project);
         if (project.trashed || project.trashedAt !== null) {
           throw new CloudError('PROJECT_TRASHED', 'Restore this project from trash before exporting', {
             status: 400,
@@ -663,6 +665,12 @@ export class ExportService {
     if (rows.length === 0) {
       throw new CloudError('EXPORT_NOT_FOUND', 'Export job not found', { status: 404 });
     }
+    if (rows[0].projectId && ctx.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(this.db, ctx.workspaceId, rows[0].projectId, {
+        allowTrashed: true,
+        auth: ctx,
+      });
+    }
     return toExportJobRecord(rows[0]);
   }
 
@@ -674,6 +682,12 @@ export class ExportService {
   ): Promise<ExportJobRecord[]> {
     if (!isUuid(projectId)) {
       throw new CloudError('PROJECT_NOT_FOUND', 'Project not found', { status: 404 });
+    }
+    if (ctx.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
+        allowTrashed: true,
+        auth: ctx,
+      });
     }
     const limit = Math.max(1, Math.min(100, options.limit ?? 50));
     const rows = await this.db
@@ -723,6 +737,12 @@ export class ExportService {
         throw new CloudError('EXPORT_NOT_FOUND', 'Export job not found', { status: 404 });
       }
       const current = existing[0];
+      if (current.projectId && ctx.authMethod === 'oauth_bearer') {
+        await loadProjectOrThrow(tx, ctx.workspaceId, current.projectId, {
+          allowTrashed: true,
+          auth: ctx,
+        });
+      }
       if (TERMINAL_JOB_STATES.has(current.state)) {
         return { row: current, shouldPublishCancel: false, wasQueued: false };
       }
@@ -850,6 +870,12 @@ export class ExportService {
   ): Promise<ExportFileMetadata> {
     if (!isUuid(projectId)) {
       throw new CloudError('PROJECT_NOT_FOUND', 'Project not found', { status: 404 });
+    }
+    if (ctx.authMethod === 'oauth_bearer') {
+      await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
+        allowTrashed: true,
+        auth: ctx,
+      });
     }
     const rows = await this.db
       .select()

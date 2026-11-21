@@ -1,5 +1,7 @@
 import { projectArtifact } from '../../shared/session.ts';
 import { Hono, type Context } from 'hono';
+import { formatRedirectHostLabel } from '../auth/oauth21.ts';
+import type { AuthStore } from '../auth/store.ts';
 import type { AuthContext, PatScope, WorkspaceRole } from '../contracts/auth.ts';
 import { CloudError, isCloudError } from '../contracts/errors.ts';
 import type { ProjectType } from '../db/schema/projects.ts';
@@ -34,6 +36,7 @@ export interface ProjectsRouterDeps {
   readonly archives?: ProjectArchiveService;
   readonly catalog?: Pick<CatalogPort, 'cloneTemplateToProject'>;
   readonly exports?: Pick<ExportService, 'listProjectExports'>;
+  readonly authStore?: AuthStore;
   readonly resolveAuth?: (c: Context<{ Variables: ProductRouteVariables }>) => AuthContext | Promise<AuthContext>;
 }
 
@@ -491,6 +494,116 @@ export function createProjectsRouter(deps: ProjectsRouterDeps): Hono<{ Variables
     const auth = await requireAuth(c, deps, WRITE_REQ);
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     return c.json(await deps.workspace.recordReview(auth, c.req.param('id'), body), 201);
+  });
+
+  // -------------------------------------------------------------------------
+  // Project-Level Agent Grants ("交给 Codex" / Revoke Project Access)
+  // -------------------------------------------------------------------------
+
+  app.get('/motion-api/projects/:id/grants', async (c) => {
+    const auth = await requireAuth(c, deps, READ_REQ);
+    const projectId = c.req.param('id');
+    await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+    if (!deps.authStore) {
+      return c.json({ projectId, grants: [], availableConnections: [] });
+    }
+    const [grants, connections] = await Promise.all([
+      deps.authStore.listProjectGrants(projectId, auth.userId),
+      deps.authStore.listConnectedApps(auth.userId),
+    ]);
+    const clientMap = new Map(connections.map((item) => [item.clientId, item]));
+    return c.json({
+      projectId,
+      grants: grants
+        .filter((g) => !g.revokedAt)
+        .map((g) => {
+          const conn = clientMap.get(g.clientId);
+          return {
+            id: g.id,
+            clientId: g.clientId,
+            clientName: conn?.clientName ?? g.clientId,
+            redirectHost: conn?.redirectUris[0] ? formatRedirectHostLabel(conn.redirectUris[0]) : 'Unknown',
+            grantedAt: g.grantedAt.toISOString(),
+          };
+        }),
+      availableConnections: connections.map((item) => ({
+        clientId: item.clientId,
+        clientName: item.clientName,
+        redirectHost: item.redirectUris[0] ? formatRedirectHostLabel(item.redirectUris[0]) : 'Unknown',
+        firstAuthorizedAt: item.firstAuthorizedAt.toISOString(),
+        lastUsedAt: item.lastUsedAt ? item.lastUsedAt.toISOString() : null,
+      })),
+    });
+  });
+
+  app.post('/motion-api/projects/:id/grants', async (c) => {
+    const auth = await requireAuth(c, deps, WRITE_REQ);
+    if (auth.authMethod !== 'session_cookie' && auth.authMethod !== 'dev_bypass') {
+      throw new CloudError(
+        'FORBIDDEN',
+        'Project agent grants can only be managed from an interactive browser session.',
+        { status: 403, applied: false },
+      );
+    }
+    if (!deps.authStore) {
+      throw new CloudError('SERVICE_UNAVAILABLE', 'Auth store is not configured.', { status: 503 });
+    }
+    const projectId = c.req.param('id');
+    const project = await deps.workspace.getProject(auth, projectId, { allowTrashed: false });
+    const body = (await c.req.json().catch(() => ({}))) as { clientId?: unknown };
+    const clientId = typeof body.clientId === 'string' ? body.clientId.trim() : '';
+    if (!clientId) {
+      throw new CloudError('INVALID_ARGUMENT', 'clientId is required', { status: 400, applied: false });
+    }
+    const client = await deps.authStore.findOAuthClient(clientId);
+    if (!client) {
+      throw new CloudError('NOT_FOUND', 'Connected OAuth application not found.', { status: 404, applied: false });
+    }
+    const grant = await deps.authStore.grantProjectAccess({
+      projectId: project.id,
+      userId: auth.userId,
+      workspaceId: auth.workspaceId,
+      clientId: client.clientId,
+    });
+    return c.json(
+      {
+        ok: true,
+        grant: {
+          id: grant.id,
+          projectId: grant.projectId,
+          clientId: grant.clientId,
+          clientName: client.clientName,
+          grantedAt: grant.grantedAt.toISOString(),
+        },
+      },
+      201,
+    );
+  });
+
+  app.delete('/motion-api/projects/:id/grants/:clientId', async (c) => {
+    const auth = await requireAuth(c, deps, WRITE_REQ);
+    if (auth.authMethod !== 'session_cookie' && auth.authMethod !== 'dev_bypass') {
+      throw new CloudError(
+        'FORBIDDEN',
+        'Project agent grants can only be revoked from an interactive browser session.',
+        { status: 403, applied: false },
+      );
+    }
+    if (!deps.authStore) {
+      throw new CloudError('SERVICE_UNAVAILABLE', 'Auth store is not configured.', { status: 503 });
+    }
+    const projectId = c.req.param('id');
+    await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+    const clientId = c.req.param('clientId').trim();
+    if (!clientId) {
+      throw new CloudError('INVALID_ARGUMENT', 'clientId is required', { status: 400, applied: false });
+    }
+    const revoked = await deps.authStore.revokeProjectAccess({
+      projectId,
+      userId: auth.userId,
+      clientId,
+    });
+    return c.json({ ok: true, projectId, clientId, revoked }, 200);
   });
 
   return app;

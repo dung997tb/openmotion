@@ -63,7 +63,7 @@ export class WorkRoundsService {
 
   /** Start a new authoring work round bound to a project's current version & revision. */
   async create(ctx: AuthContext, input: CreateWorkRoundInput): Promise<WorkRoundRecord> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, input.projectId, { allowTrashed: false });
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, input.projectId, { allowTrashed: false, auth: ctx });
     const versionId = input.versionId ?? project.currentVersionId;
     if (!versionId) {
       throw new CloudError('INVALID_ARGUMENT', 'Project does not have a baseline version yet.', {
@@ -124,7 +124,7 @@ export class WorkRoundsService {
 
   /** List work rounds for a project newest first. */
   async list(ctx: AuthContext, projectId: string, limit = 50): Promise<WorkRoundRecord[]> {
-    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const clamped = Math.max(1, Math.min(200, Math.floor(limit)));
     const rows = await this.db
       .select()
@@ -137,7 +137,7 @@ export class WorkRoundsService {
 
   /** Find the latest saved/generated work round for telemetry or Studio export attribution. */
   async latestGenerated(ctx: AuthContext, projectId: string): Promise<WorkRoundRecord | null> {
-    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true });
+    await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const rows = await this.db
       .select()
       .from(workRounds)

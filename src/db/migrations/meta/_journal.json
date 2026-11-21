@@ -8,6 +8,13 @@
       "when": 1795168497490,
       "tag": "0000_yellow_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795254897490,
+      "tag": "0001_cloud_auth_amr_alignment",
+      "breakpoints": true
     }
   ]
 }

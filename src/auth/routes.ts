@@ -7,6 +7,7 @@ import {
   buildOAuth21Config,
   buildProtectedResourceMetadata,
   exchangeOAuthToken,
+  formatRedirectHostLabel,
   issueAuthorizationCode,
   registerOAuthClient,
   renderOAuthConsentHtml,
@@ -98,14 +99,29 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
 
   app.get('/auth/login', async (c) => {
     const returnTo = assertSafeReturnTo(c.req.query('returnTo'));
+    const switchAccount = c.req.query('switch') === '1';
+    const prompt = c.req.query('prompt') ?? (switchAccount ? 'login' : null);
+
+    if (switchAccount) {
+      const cookies = parseCookies(c.req.header('cookie'));
+      const rawSession = cookies[SESSION_COOKIE_NAME];
+      if (rawSession) {
+        await revokeBrowserSession(deps.store, { rawToken: rawSession }, deps.cache);
+      }
+    }
+
     if (deps.config.AUTH_MODE === 'dev') {
       return c.redirect(returnTo, 302);
     }
     if (!deps.oidc) {
       return c.json({ code: 'SERVICE_UNAVAILABLE', error: 'OIDC service is not configured' }, 503);
     }
-    const { authorizationUrl, txCookieValue } = await deps.oidc.startLogin(returnTo);
-    c.header(
+    const { authorizationUrl, txCookieValue } = await deps.oidc.startLogin(returnTo, { prompt });
+    const headers = new Headers();
+    if (switchAccount) {
+      headers.append('Set-Cookie', clearCookie(SESSION_COOKIE_NAME, secureCookie, '/'));
+    }
+    headers.append(
       'Set-Cookie',
       serializeCookie(OIDC_TX_COOKIE_NAME, txCookieValue, {
         httpOnly: true,
@@ -115,7 +131,8 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
         maxAgeSec: 600,
       }),
     );
-    return c.redirect(authorizationUrl, 302);
+    headers.set('Location', authorizationUrl);
+    return new Response(null, { status: 302, headers });
   });
 
   app.get('/auth/callback', async (c) => {
@@ -139,6 +156,7 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
         txCookieValue,
         iss,
         error: oauthError,
+        amrIdentity: deps.amrIdentity,
       });
 
       const session = await createBrowserSession(deps.store, {
@@ -164,7 +182,7 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
     } catch (error) {
       if (isCloudError(error)) {
         c.header('Set-Cookie', clearCookie(OIDC_TX_COOKIE_NAME, secureCookie, '/auth'));
-        return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 500 | 502);
+        return c.json(error.toJSON(), error.status as 400 | 401 | 403 | 500 | 502 | 503);
       }
       throw error;
     }
@@ -217,9 +235,46 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
   // OAuth 2.1 Proxy Endpoints (DCR, PKCE Authorize, Token, Revoke)
   // -------------------------------------------------------------------------
 
+  // Per-IP sliding window counter for DCR anti-abuse.
+  const localDcrHits = new Map<string, { count: number; resetAt: number }>();
+
+  const checkDcrRateLimit = async (rawIp: string): Promise<boolean> => {
+    const ip = rawIp.trim() || 'unknown';
+    const limit = oauthCfg.dcrRateLimitPerMin;
+    if (deps.cache) {
+      const bucket = Math.floor(Date.now() / 60_000);
+      const key = `om:oauth:dcr:rl:${sha256Hex(ip)}:${bucket}`;
+      const currentRaw = await deps.cache.get(key);
+      const current = currentRaw ? Number.parseInt(currentRaw, 10) || 0 : 0;
+      if (current >= limit) return false;
+      await deps.cache.set(key, String(current + 1), 65);
+      return true;
+    }
+    const now = Date.now();
+    const entry = localDcrHits.get(ip);
+    if (!entry || now >= entry.resetAt) {
+      localDcrHits.set(ip, { count: 1, resetAt: now + 60_000 });
+      return true;
+    }
+    if (entry.count >= limit) return false;
+    entry.count += 1;
+    return true;
+  };
+
   app.post('/oauth/register', async (c) => {
     if (oauthCfg.mode !== 'proxy') {
       return c.json({ error: 'unsupported_operation', error_description: 'DCR is delegated to external IdP' }, 404);
+    }
+    const clientIp =
+      (deps.config.TRUST_PROXY_HOPS > 0 ? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() : undefined) ||
+      c.req.header('x-real-ip')?.trim() ||
+      'local';
+    if (!(await checkDcrRateLimit(clientIp))) {
+      c.header('Retry-After', '60');
+      return c.json(
+        { error: 'too_many_requests', error_description: 'Dynamic client registration rate limit exceeded' },
+        429,
+      );
     }
     let body: Record<string, unknown>;
     try {
@@ -228,7 +283,9 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
       return c.json({ error: 'invalid_client_metadata', error_description: 'Invalid JSON body' }, 400);
     }
     try {
-      const registered = await registerOAuthClient(deps.store, body);
+      const registered = await registerOAuthClient(deps.store, body, {
+        allowedHttpsHosts: oauthCfg.allowedHttpsHosts,
+      });
       return c.json(registered, 201);
     } catch (error) {
       if (isCloudError(error)) {
@@ -268,17 +325,36 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
     let userId: string | null = null;
     let workspaceId: string | null = null;
     let workspaceName = 'Workspace';
+    let userEmail: string | null = null;
+    let userDisplayName: string | null = null;
+    let userAvatarUrl: string | null = null;
 
     if (rawSession) {
-      const resolved = await resolveBrowserSession(deps.store, rawSession, {
-        authMode: deps.config.AUTH_MODE,
-        cache: deps.cache,
-      });
-      if (resolved) {
-        userId = resolved.auth.userId;
-        workspaceId = resolved.auth.workspaceId;
-        const ws = await deps.store.findWorkspaceById(workspaceId);
-        if (ws) workspaceName = ws.name;
+      try {
+        const resolved = await resolveBrowserSession(deps.store, rawSession, {
+          authMode: deps.config.AUTH_MODE,
+          cache: deps.cache,
+        });
+        if (resolved) {
+          const auth =
+            deps.config.AUTH_MODE === 'oidc' && deps.amrIdentity
+              ? await deps.amrIdentity.verifyAndEnrichAuthContext(deps.store, resolved.auth)
+              : resolved.auth;
+          userId = auth.userId;
+          workspaceId = auth.workspaceId;
+          userEmail = auth.email ?? null;
+          userDisplayName = auth.displayName ?? null;
+          userAvatarUrl = auth.avatarUrl ?? null;
+          const ws = await deps.store.findWorkspaceById(workspaceId);
+          if (ws) workspaceName = ws.name;
+        }
+      } catch (error) {
+        if (isCloudError(error) && error.status === 503) {
+          return c.json(error.toJSON(), 503);
+        }
+        // Inactive / revoked account -> force re-login.
+        userId = null;
+        workspaceId = null;
       }
     } else if (deps.config.AUTH_MODE === 'dev') {
       const dev = await deps.store.ensureDevTenant({
@@ -288,12 +364,17 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
       userId = dev.user.id;
       workspaceId = dev.workspace.id;
       workspaceName = dev.workspace.name;
+      userEmail = dev.user.email;
+      userDisplayName = dev.user.displayName;
+      userAvatarUrl = dev.user.avatarUrl;
     }
 
+    const currentPath = new URL(c.req.url).pathname + new URL(c.req.url).search;
     if (!userId || !workspaceId) {
-      const currentPath = new URL(c.req.url).pathname + new URL(c.req.url).search;
       return c.redirect(`/auth/login?returnTo=${encodeURIComponent(currentPath)}`, 302);
     }
+
+    const userWorkspaces = await deps.store.listUserWorkspaces(userId);
 
     // Bind consent submission to a single-use CSRF token stored in cache.
     const consentToken = randomBase64Url(24);
@@ -307,7 +388,14 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
 
     const html = renderOAuthConsentHtml({
       clientName: validated.client.clientName,
+      redirectUri: validated.redirectUri,
       workspaceName,
+      workspaceId,
+      workspaces: userWorkspaces.map((w) => ({ id: w.id, name: w.name, role: w.role })),
+      userEmail,
+      userDisplayName,
+      userAvatarUrl,
+      switchAccountUrl: `/auth/login?switch=1&returnTo=${encodeURIComponent(currentPath)}`,
       scopes: validated.scopes,
       formAction: '/oauth/authorize',
       hiddenFields: {
@@ -352,14 +440,29 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
       if (!verifyCsrfOrigin(c.req.raw, deps.config.APP_PUBLIC_ORIGIN)) {
         return c.json({ error: 'access_denied', error_description: 'CSRF Origin check failed' }, 403);
       }
+      const requestedWs =
+        fields.selected_workspace_id && isUuid(fields.selected_workspace_id)
+          ? fields.selected_workspace_id
+          : null;
       const resolved = await resolveBrowserSession(deps.store, rawSession, {
         authMode: deps.config.AUTH_MODE,
+        requestedWorkspaceId: requestedWs,
         cache: deps.cache,
       });
       if (!resolved) {
         return c.json({ error: 'access_denied', error_description: 'Session expired' }, 401);
       }
-      auth = resolved.auth;
+      try {
+        auth =
+          deps.config.AUTH_MODE === 'oidc' && deps.amrIdentity
+            ? await deps.amrIdentity.verifyAndEnrichAuthContext(deps.store, resolved.auth)
+            : resolved.auth;
+      } catch (error) {
+        if (isCloudError(error)) {
+          return c.json(error.toJSON(), error.status as 401 | 403 | 404 | 503);
+        }
+        throw error;
+      }
     } else if (deps.config.AUTH_MODE === 'dev') {
       const dev = await deps.store.ensureDevTenant({
         workspaceId: deps.config.DEV_WORKSPACE_ID,
@@ -420,10 +523,13 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
       const denyUrl = new URL(validated.redirectUri);
       denyUrl.searchParams.set('error', 'access_denied');
       if (validated.state) denyUrl.searchParams.set('state', validated.state);
+      if (oauthCfg.issuer) denyUrl.searchParams.set('iss', oauthCfg.issuer);
       return c.redirect(denyUrl.toString(), 302);
     }
 
-    const { redirectUrl } = await issueAuthorizationCode(deps.store, auth, validated);
+    const { redirectUrl } = await issueAuthorizationCode(deps.store, auth, validated, {
+      issuer: oauthCfg.issuer,
+    });
     return c.redirect(redirectUrl, 302);
   });
 
@@ -550,6 +656,44 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
       return c.json({ code: 'NOT_FOUND', error: 'Token not found or already revoked' }, 404);
     }
     return c.json({ ok: true, id: tokenId });
+  });
+
+  // -------------------------------------------------------------------------
+  // Connected OAuth Applications ("已连接的应用") Management
+  // -------------------------------------------------------------------------
+
+  app.get('/motion-api/connections', authMiddleware, async (c) => {
+    const auth = getAuthContext(c);
+    const apps = await deps.store.listConnectedApps(auth.userId);
+    return c.json({
+      connections: apps.map((item) => ({
+        clientId: item.clientId,
+        clientName: item.clientName,
+        redirectHost: item.redirectUris[0] ? formatRedirectHostLabel(item.redirectUris[0]) : 'Unknown',
+        redirectUris: item.redirectUris,
+        workspaceId: item.workspaceId,
+        scopes: item.scopes,
+        firstAuthorizedAt: item.firstAuthorizedAt.toISOString(),
+        lastUsedAt: item.lastUsedAt ? item.lastUsedAt.toISOString() : null,
+        activeTokenCount: item.activeTokenCount,
+      })),
+    });
+  });
+
+  app.delete('/motion-api/connections/:clientId', authMiddleware, async (c) => {
+    const auth = getAuthContext(c);
+    if (auth.authMethod !== 'session_cookie' && auth.authMethod !== 'dev_bypass') {
+      return c.json(
+        { code: 'FORBIDDEN', error: 'Connected applications can only be revoked from an interactive browser session.' },
+        403,
+      );
+    }
+    const clientId = c.req.param('clientId').trim();
+    if (!clientId) {
+      return c.json({ code: 'INVALID_ARGUMENT', error: 'Invalid clientId' }, 400);
+    }
+    const revokedTokens = await deps.store.revokeOAuthClientForUser(auth.userId, clientId);
+    return c.json({ ok: true, clientId, revokedTokens }, 200);
   });
 
   return app;

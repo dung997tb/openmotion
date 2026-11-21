@@ -1,4 +1,5 @@
 export * from './store.ts';
+export * from './amr-identity.ts';
 export * from './session.ts';
 export * from './pat.ts';
 export * from './dev-auth.ts';

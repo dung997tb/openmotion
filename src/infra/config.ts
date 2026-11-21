@@ -83,12 +83,16 @@ const rawConfigSchema = z.object({
   MCP_OAUTH_MODE: z.enum(['proxy', 'delegated']).default('proxy'),
   MCP_OAUTH_ISSUER: optionalUrl,
   MCP_MAX_BODY_BYTES: z.coerce.number().int().min(1024 * 1024).max(64 * 1024 * 1024).default(10_485_760),
+  OAUTH_DCR_ALLOWED_HTTPS_HOSTS: optionalNonEmptyString,
+  OAUTH_DCR_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).max(1000).default(10),
 
-  // Unified OpenDesign Model Gateway
+  // Unified OpenDesign Model Gateway & AMR Identity
   MODEL_GATEWAY_MODE: z.enum(['opendesign', 'mock']).default('opendesign'),
   OPENDESIGN_API_URL: z.string().url().default('https://amr-api.open-design.ai'),
   OPENDESIGN_LINK_URL: z.string().url().default('https://amr-link.open-design.ai'),
+  OPENDESIGN_INTERNAL_API_TOKEN: optionalNonEmptyString,
   OPENDESIGN_S2S_API_KEY: optionalNonEmptyString,
+  AMR_IDENTITY_CACHE_TTL_SEC: z.coerce.number().int().min(1).max(60).default(60),
   OPENDESIGN_ASR_URL: optionalUrl,
   OPENDESIGN_BILLING_SYNC_ENABLED: booleanEnv.default(false),
   ALLOW_DOH_FAKEIP_FALLBACK: booleanEnv.default(false),
@@ -139,14 +143,15 @@ export function parseConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
-  // OpenDesign S2S key requirement when live gateway mode is active on api or media worker.
+  // OpenDesign internal token requirement when live gateway mode is active on api or media worker.
   if (
     (config.WORKER_ROLE === 'api' || config.WORKER_ROLE === 'media') &&
     config.MODEL_GATEWAY_MODE === 'opendesign' &&
+    !config.OPENDESIGN_INTERNAL_API_TOKEN &&
     !config.OPENDESIGN_S2S_API_KEY
   ) {
     throw new Error(
-      'INVALID_CONFIG: MODEL_GATEWAY_MODE=opendesign requires OPENDESIGN_S2S_API_KEY (or set MODEL_GATEWAY_MODE=mock for local dev/tests).',
+      'INVALID_CONFIG: MODEL_GATEWAY_MODE=opendesign requires OPENDESIGN_INTERNAL_API_TOKEN (or OPENDESIGN_S2S_API_KEY; set MODEL_GATEWAY_MODE=mock for local dev/tests).',
     );
   }
 

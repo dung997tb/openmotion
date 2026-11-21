@@ -199,14 +199,16 @@ export function buildAllowedHostnames(publicOrigin: string, extraHosts: readonly
 function toSdkAuthInfo(auth: AuthContext): AuthInfo {
   return {
     token: auth.tokenId ?? auth.authMethod,
-    clientId: auth.userId,
+    clientId: auth.clientId ?? auth.userId,
     scopes: [...auth.scopes],
     extra: {
       workspaceId: auth.workspaceId,
       userId: auth.userId,
+      clientId: auth.clientId ?? null,
       role: auth.role,
       authMode: auth.authMode,
       authMethod: auth.authMethod,
+      entry: auth.entry ?? 'mcp',
     },
   };
 }

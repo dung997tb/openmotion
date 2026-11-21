@@ -30,6 +30,7 @@ import {
   WELCOME_SHARED_ASSETS,
   WELCOME_TEMPLATE_ID,
 } from '../../src/services/catalog-service.ts';
+import { loadProjectOrThrow } from '../../src/services/project-files-service.ts';
 import {
   WelcomeBootstrapService,
   ensureWelcomeProject,
@@ -216,6 +217,7 @@ interface TableStore {
   catalog_template_files: RowRecord[];
   sessions: RowRecord[];
   projects: RowRecord[];
+  project_grants: RowRecord[];
   project_files: RowRecord[];
   project_versions: RowRecord[];
   project_version_files: RowRecord[];
@@ -382,6 +384,7 @@ class MockPgHarness {
     catalog_template_files: [],
     sessions: [],
     projects: [],
+    project_grants: [],
     project_files: [],
     project_versions: [],
     project_version_files: [],
@@ -449,12 +452,12 @@ class MockPgHarness {
         // SELECT
         if (lower.startsWith('select ')) {
           const selectMatch = normalizedSql.match(
-            /^select\s+(.+?)\s+from\s+"([^"]+)"(?:\s+where\s+(.+?))?(?:\s+order\s+by\s+(.+?))?(?:\s+for\s+update)?$/i,
+            /^select\s+(.+?)\s+from\s+"([^"]+)"(?:\s+where\s+(.+?))?(?:\s+order\s+by\s+(.+?))?(?:\s+limit\s+(\$\d+|\d+))?(?:\s+for\s+update)?$/i,
           );
           if (!selectMatch) {
             throw new Error(`MockPg unsupported SELECT: ${normalizedSql}`);
           }
-          const [, colsRaw, tableNameRaw, whereRaw, orderByRaw] = selectMatch;
+          const [, colsRaw, tableNameRaw, whereRaw, orderByRaw, limitRaw] = selectMatch;
           const isForUpdate = /\s+for\s+update$/i.test(normalizedSql);
           const tableName = tableNameRaw as TableName;
 
@@ -503,7 +506,14 @@ class MockPgHarness {
             });
           }
 
-          const mapped = rows.map((row) =>
+          const limitedRows = limitRaw
+            ? rows.slice(
+                0,
+                limitRaw.startsWith('$') ? Number(values[Number(limitRaw.slice(1)) - 1]) : Number(limitRaw),
+              )
+            : rows;
+
+          const mapped = limitedRows.map((row) =>
             rowMode === 'array'
               ? selectedCols.map((col) => row[col] ?? null)
               : Object.fromEntries(selectedCols.map((col) => [col, row[col] ?? null])),
@@ -1260,6 +1270,63 @@ describe('CatalogService Zero-Copy Cloning & Tenant Isolation', () => {
           sessionId: cloned.sessionId,
         }),
       { code: 'SESSION_NOT_FOUND' },
+    );
+
+    // OAuth agent template clone sets owner_user_id and auto-grants project_grants so the agent can immediately read/write it
+    const agentClientId = 'codex-agent-client';
+    const oauthAgentCtx = makeAuthContext({
+      workspaceId: WID_A,
+      userId: USER_A,
+      authMode: 'oidc',
+      authMethod: 'oauth_bearer',
+      clientId: agentClientId,
+    });
+    const agentClone = await catalog.cloneTemplateToProject(oauthAgentCtx, {
+      templateId: WELCOME_TEMPLATE_ID,
+      title: 'Agent Cloned Template',
+      requestId: 'req_agent_clone_1',
+    });
+    const agentProjectRow = pg.tables.projects.find((p) => p.id === agentClone.projectId);
+    assert.ok(agentProjectRow);
+    assert.equal(agentProjectRow.owner_user_id, USER_A);
+    assert.equal(
+      pg.tables.project_grants.filter(
+        (g) =>
+          g.project_id === agentClone.projectId &&
+          g.user_id === USER_A &&
+          g.client_id === agentClientId &&
+          g.revoked_at === null,
+      ).length,
+      1,
+    );
+
+    const loadedByCreator = await loadProjectOrThrow(pg.db, WID_A, agentClone.projectId, {
+      auth: oauthAgentCtx,
+    });
+    assert.equal(loadedByCreator.id, agentClone.projectId);
+
+    const otherClientCtx = makeAuthContext({
+      workspaceId: WID_A,
+      userId: USER_A,
+      authMode: 'oidc',
+      authMethod: 'oauth_bearer',
+      clientId: 'other-agent-client',
+    });
+    await assert.rejects(
+      () => loadProjectOrThrow(pg.db, WID_A, agentClone.projectId, { auth: otherClientCtx }),
+      { code: 'PROJECT_GRANT_REQUIRED' },
+    );
+
+    const otherUserAgentCtx = makeAuthContext({
+      workspaceId: WID_A,
+      userId: USER_B,
+      authMode: 'oidc',
+      authMethod: 'oauth_bearer',
+      clientId: agentClientId,
+    });
+    await assert.rejects(
+      () => loadProjectOrThrow(pg.db, WID_A, agentClone.projectId, { auth: otherUserAgentCtx }),
+      { code: 'PROJECT_NOT_FOUND' },
     );
   });
 });

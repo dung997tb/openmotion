@@ -23,6 +23,7 @@ import { buildContentDisposition, getMimeType, sha256Hex } from '../studio/etag.
 import { lintProjectInMemory } from '../studio/engine/lint-project.ts';
 import { InMemoryVirtualProject, type VirtualFileRecord } from '../studio/virtual-project-store.ts';
 import {
+  assertAgentProjectAccess,
   assertValidUuid,
   canonicalInputHash,
   isBinaryBuffer,
@@ -299,14 +300,30 @@ export class ProjectArchiveService {
     const skippedProjectIds: string[] = [];
 
     if (input.all) {
-      targets = workspaceProjects;
+      if (ctx.authMethod === 'oauth_bearer') {
+        targets = [];
+        for (const project of workspaceProjects) {
+          try {
+            await assertAgentProjectAccess(this.db, ctx, project);
+            targets.push(project);
+          } catch {
+            // Omit ungranted projects when exporting all accessible projects.
+          }
+        }
+      } else {
+        targets = workspaceProjects;
+      }
     } else if (input.projectIds && input.projectIds.length > 0) {
       const byId = new Map(workspaceProjects.map((p) => [p.id, p]));
       targets = [];
       for (const pid of input.projectIds) {
         const match = byId.get(pid);
-        if (match) targets.push(match);
-        else skippedProjectIds.push(pid);
+        if (match) {
+          await assertAgentProjectAccess(this.db, ctx, match);
+          targets.push(match);
+        } else {
+          skippedProjectIds.push(pid);
+        }
       }
     } else {
       throw new CloudError('INVALID_ARGUMENT', 'Specify either projectIds or all=true to export.', {
@@ -647,7 +664,7 @@ export class ProjectArchiveService {
     projectId: string,
     input: { requestId?: string; title?: string; selectActive?: boolean } = {},
   ) {
-    const source = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false });
+    const source = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: false, auth: ctx });
     const sourceFiles = await this.files.listFiles(ctx, source.id, { allowTrashed: false });
 
     const copyTitle = input.title?.trim()

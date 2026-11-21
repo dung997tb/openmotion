@@ -305,6 +305,10 @@ describe('OpenDesignModelGateway Direct S2S HTTP Contract (Zero vela-cli / Zero 
       workspaceId: randomUUID(),
       externalWorkspaceId: 'vela-ws-88',
       externalUserId: 'vela-user-55',
+      appUserId: 'app-user-55',
+      amrWorkspaceMemberId: 'mem-88',
+      amrWorkspaceRole: 'owner' as const,
+      amrWorkspaceLifecycleState: 'active',
       idempotencyKey: 'idem-job-1',
     };
 
@@ -313,7 +317,12 @@ describe('OpenDesignModelGateway Direct S2S HTTP Contract (Zero vela-cli / Zero 
     assert.ok(models.some((m) => m.id === 'opendesign:wan-2.7'));
     assert.ok(models.some((m) => m.id === 'opendesign:flux-pro' && m.supportsImageReference === true));
     assert.ok(models.some((m) => m.id === 'opendesign:elevenlabs-music-v2'));
-    assert.equal(calls[0].headers.authorization, 'Bearer test-s2s-service-key');
+    assert.equal(calls[0].headers.authorization, undefined);
+    assert.equal(calls[0].headers['x-internal-token'], 'test-s2s-service-key');
+    assert.equal(calls[0].headers['x-workspace-team-id'], 'vela-ws-88');
+    assert.equal(calls[0].headers['x-workspace-member-id'], 'mem-88');
+    assert.equal(calls[0].headers['x-workspace-role'], 'owner');
+    assert.equal(calls[0].headers['x-workspace-lifecycle-state'], 'active');
     assert.equal(calls[0].headers['x-vela-workspace-id'], 'vela-ws-88');
 
     // 2. 3-step reference upload

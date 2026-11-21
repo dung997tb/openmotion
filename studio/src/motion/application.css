@@ -553,3 +553,7 @@
 .om-account-capabilities svg { color: var(--motion-accent); }
 .om-account-offer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--motion-space-6); margin: 0; font-size: var(--motion-text-sm); }
 .om-account-offer svg, .om-account-offer strong { color: var(--motion-accent); }
+.om-project-grants { display: flex; flex-direction: column; gap: var(--motion-space-16); }
+.om-auth-recovery-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--motion-space-12); padding: 10px var(--motion-space-16); border-bottom: 1px solid var(--motion-border-subtle); font-size: var(--motion-text-sm); background: var(--motion-danger-soft); }
+.om-auth-recovery-banner[data-kind="auth_unavailable"] { background: var(--motion-warning-soft); }
+.om-auth-recovery-banner[data-kind="pending_draft"] { background: var(--motion-accent-soft); }

@@ -47,6 +47,7 @@ import type { AppConfig } from '../infra/config.ts';
 import type { QueueService } from '../infra/queues.ts';
 import { projectChannel, type RedisEventBus } from '../infra/redis.ts';
 import { uploadLicenseStagingKey, uploadStagingKey } from '../infra/storage.ts';
+import { loadProjectOrThrow } from '../services/project-files-service.ts';
 
 // ---------------------------------------------------------------------------
 // Hardened SSRF Pre-Validation (Public HTTPS URLs Only)
@@ -181,7 +182,7 @@ export interface LibraryAssetZeroCopyResult {
 }
 
 export interface ImportAssetsStore {
-  assertActiveProject(workspaceId: string, projectId: string): Promise<{ id: string }>;
+  assertActiveProject(workspaceId: string, projectId: string, auth?: AuthContext): Promise<{ id: string }>;
   findReceipt(
     workspaceId: string,
     scope: string,
@@ -332,24 +333,11 @@ export function resolveProjectAssetTargetPath(
 
 export function createPgImportAssetsStore(db: Database): ImportAssetsStore {
   return {
-    async assertActiveProject(workspaceId, projectId) {
-      const [project] = await db
-        .select({ id: projects.id, trashed: projects.trashed })
-        .from(projects)
-        .where(and(eq(projects.workspaceId, workspaceId), eq(projects.id, projectId)))
-        .limit(1);
-      if (!project) {
-        throw new CloudError('PROJECT_NOT_FOUND', `Project ${projectId} not found`, {
-          status: 404,
-          applied: false,
-        });
-      }
-      if (project.trashed) {
-        throw new CloudError('PROJECT_TRASHED', 'Cannot import assets into a trashed project', {
-          status: 400,
-          applied: false,
-        });
-      }
+    async assertActiveProject(workspaceId, projectId, auth) {
+      const project = await loadProjectOrThrow(db, workspaceId, projectId, {
+        allowTrashed: false,
+        auth,
+      });
       return { id: project.id };
     },
 
@@ -830,7 +818,7 @@ export class CloudImportAssetsService {
       });
     }
 
-    await this.deps.store.assertActiveProject(auth.workspaceId, input.projectId);
+    await this.deps.store.assertActiveProject(auth.workspaceId, input.projectId, auth);
 
     const scope = 'phase1:import_assets:prepare';
     const inputHash = hashPayload({ projectId: input.projectId, files: input.files });
@@ -1024,7 +1012,7 @@ export class CloudImportAssetsService {
       });
     }
 
-    await this.deps.store.assertActiveProject(auth.workspaceId, input.projectId);
+    await this.deps.store.assertActiveProject(auth.workspaceId, input.projectId, auth);
 
     const scope = 'phase1:import_assets';
     const inputHash = hashPayload({ projectId: input.projectId, items: input.items });

@@ -6,6 +6,13 @@ import { isWorkspaceSettingsPage, preservePresentation } from '../../../shared/w
 import { diagnosticFetch } from './diagnosticRequests';
 import { initializeWorkspaceHistory, WORKSPACE_LOCATION_CHANGED, workspaceHistoryIndex, workspaceHistorySession, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { readWorkspacePage } from './workspacePageRouting';
+import {
+  classifyAuthHttpError,
+  clearAuthPendingDraft,
+  notifyAuthRecovery,
+  readAuthPendingDraft,
+  saveAuthPendingDraft,
+} from './authRecoveryStore';
 
 export type SavedProject = { id: string; title: string; titleKey?: 'OpenMotion Sample Video' | null; templateId?: string; createdAt?: number; openedAt?: number; trashedAt?: number };
 type Job = { id: string; state: 'pending' | 'running' | 'completed' | 'failed'; error?: string };
@@ -25,9 +32,16 @@ export async function motionApi<T>(path: string, init?: RequestInit, projectId?:
   }
   if (!response.ok) {
     const message = typeof data.error === 'string' ? data.error : 'Workspace connection failed';
-    const error = new Error(message) as Error & { status?: number; code?: string };
+    const error = new Error(message) as Error & { status?: number; code?: string; errorCode?: string };
     error.status = response.status;
     if (typeof data.code === 'string') error.code = data.code;
+    if (typeof data.errorCode === 'string') error.errorCode = data.errorCode;
+    const authRecovery = classifyAuthHttpError(response.status, data, message);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const isMutating = method !== 'GET' && method !== 'HEAD';
+    if (authRecovery && (authRecovery.kind === 'auth_unavailable' || isMutating)) {
+      notifyAuthRecovery(authRecovery);
+    }
     throw error;
   }
   return data as T;
@@ -159,9 +173,23 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
         method: 'POST', ...jsonBody({ expectedRevision: current.revision, expectedProjectId: current.projectId, ...options }),
       });
       if (options?.instruction) { try { localStorage.removeItem('motion.home.draft.v1'); } catch {} }
+      clearAuthPendingDraft();
       navigate(sessionRoute && next.sessionId ? sessionHref(next.sessionId, next.projectId, revealArtifact) : projectHref(next.projectId));
       return true;
-    } catch (err) { setError((err as Error).message); return false; }
+    } catch (err) {
+      const apiErr = err as Error & { status?: number; errorCode?: string; code?: string };
+      if (apiErr.status === 401 && (apiErr.errorCode === 'auth_required' || apiErr.code === 'UNAUTHORIZED')) {
+        const draft = saveAuthPendingDraft({
+          action: options?.templateId ? 'use_template' : 'create_project',
+          templateId: options?.templateId,
+          instruction: options?.instruction,
+          projectId: options?.projectId ?? projectId,
+        });
+        notifyAuthRecovery({ kind: 'auth_required', status: 401, message: apiErr.message, draft });
+      }
+      setError((err as Error).message);
+      return false;
+    }
     finally { acting.current = false; setBusy(false); }
   }, [waitForSaves, projectId, request, navigate]);
   const open = useCallback((kind: 'templates' | 'projects', id: string) => transition(`/${kind}/${encodeURIComponent(id)}/open`), [transition]);
@@ -174,18 +202,34 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
     let createdId: string | undefined;
     const options = { mode, ...(instruction?.trim() ? { instruction: instruction.trim() } : {}), ...(templateId ? { templateId } : {}) };
     const key = JSON.stringify(options);
-    if (pendingSession.current?.key !== key) pendingSession.current = { key, id: crypto.randomUUID() };
+    const preserved = readAuthPendingDraft();
+    const preservedId =
+      preserved && preserved.templateId === templateId && preserved.instruction === (instruction?.trim() || undefined)
+        ? preserved.idempotencyKey
+        : undefined;
+    if (pendingSession.current?.key !== key) pendingSession.current = { key, id: preservedId ?? crypto.randomUUID() };
     try {
       await waitForSaves();
       const created = await motionApi<{ sessionId: string; session: CreativeSession }>('/sessions', { method: 'POST', ...jsonBody({ ...options, id: pendingSession.current.id }) });
       createdId = created.sessionId;
       try { localStorage.removeItem('motion.home.draft.v1'); } catch {}
+      clearAuthPendingDraft();
       const existing = created.session?.artifacts.find(item => item.id === created.session.activeArtifactId) ?? created.session?.artifacts[0];
       if (existing) { navigate(sessionHref(createdId, existing.projectId, true)); return true; }
       const current = await request<WorkspaceStatus>(workspaceStatusPath);
       const next = await request<WorkspaceStatus>(`/sessions/${createdId}/artifacts`, { method: 'POST', ...jsonBody({ expectedRevision: current.revision, expectedProjectId: current.projectId }) });
       navigate(sessionHref(createdId, next.projectId, true)); return true;
     } catch (err) {
+      const apiErr = err as Error & { status?: number; errorCode?: string; code?: string };
+      if (apiErr.status === 401 && (apiErr.errorCode === 'auth_required' || apiErr.code === 'UNAUTHORIZED')) {
+        const draft = saveAuthPendingDraft({
+          action: templateId ? 'use_template' : 'start_session',
+          idempotencyKey: pendingSession.current?.id,
+          templateId,
+          instruction: instruction?.trim() || undefined,
+        });
+        notifyAuthRecovery({ kind: 'auth_required', status: 401, message: apiErr.message, draft });
+      }
       if (createdId) {
         try { sessionStorage.setItem(`opendesign.session-error:${createdId}`, (err as Error).message); } catch {}
         navigate(sessionHref(createdId)); return true;

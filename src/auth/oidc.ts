@@ -9,6 +9,7 @@ import { isUuid } from '../../shared/project-validation.ts';
 import type { AuthContext, PatScope } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { AppConfig } from '../infra/config.ts';
+import type { AmrIdentityClient } from './amr-identity.ts';
 import {
   assertSafeReturnTo,
   intersectScopesWithRole,
@@ -232,7 +233,10 @@ export class OidcService {
     throw new Error('Unsupported id_token signing algorithm');
   }
 
-  async startLogin(returnTo?: string | null): Promise<{
+  async startLogin(
+    returnTo?: string | null,
+    options: { prompt?: string | null } = {},
+  ): Promise<{
     authorizationUrl: string;
     state: string;
     txCookieValue: string;
@@ -261,6 +265,9 @@ export class OidcService {
     authUrl.searchParams.set('nonce', nonce);
     authUrl.searchParams.set('code_challenge', codeChallenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
+    if (options.prompt && ['login', 'select_account', 'consent'].includes(options.prompt)) {
+      authUrl.searchParams.set('prompt', options.prompt);
+    }
 
     return {
       authorizationUrl: authUrl.toString(),
@@ -277,6 +284,7 @@ export class OidcService {
       txCookieValue?: string | null;
       iss?: string | null;
       error?: string | null;
+      amrIdentity?: AmrIdentityClient;
     },
   ): Promise<{ membership: MembershipResolution; returnTo: string }> {
     if (input.error) {
@@ -376,13 +384,23 @@ export class OidcService {
       ? readStringClaim(payload, this.cfg.claimWorkspace)
       : null;
 
-    const membership = await store.upsertOidcUserAndWorkspace({
-      oidcSub: sub,
-      email,
-      displayName,
-      avatarUrl,
-      externalWorkspaceId,
-    });
+    const membership = input.amrIdentity
+      ? (
+          await input.amrIdentity.resolveAndProjectLogin(store, {
+            authUserId: sub,
+            email,
+            displayName,
+            avatarUrl,
+            requestedExternalWorkspaceId: externalWorkspaceId,
+          })
+        ).membership
+      : await store.upsertOidcUserAndWorkspace({
+          oidcSub: sub,
+          email,
+          displayName,
+          avatarUrl,
+          externalWorkspaceId,
+        });
 
     return { membership, returnTo: tx.returnTo };
   }
