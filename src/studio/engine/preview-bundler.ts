@@ -441,7 +441,7 @@ function injectBodyScript(html: string, scriptBody: string, deferred = true): st
  * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
  * same-origin previews keep their existing DOM/runtime fast path.
  */
-export function createPreviewBridgeScript(projectId: string): string {
+export function createPreviewBridgeScript(projectId: string, compositionPath = 'index.html'): string {
   const encodedProjectId = JSON.stringify(projectId).replace(/</g, '\\u003c');
   return `(function(){
   var SOURCE='openmotion-preview-bridge', PARENT='openmotion-studio', VERSION=1;
@@ -449,7 +449,7 @@ export function createPreviewBridgeScript(projectId: string): string {
   var token=new URL(location.href).searchParams.get('pt');
   if(!token || window.parent===window) return;
   var parentWindow=window.parent;
-  var pickMode=false;
+  var pickMode=false, picked=null;
   var parentOrigin='*';
   try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
   function post(type,payload,requestId){
@@ -470,8 +470,13 @@ export function createPreviewBridgeScript(projectId: string): string {
     if(!element || element.nodeType!==1) return null;
     var rect=element.getBoundingClientRect();
     var text=(element.innerText||element.textContent||'').replace(/\\s+/g,' ').trim().slice(0,240);
-    return {elementId:element.id||null,selector:element.id?'#'+CSS.escape(element.id):null,
-      tagName:element.tagName.toLowerCase(),text:text||null,
+    var hfId=element.getAttribute('data-hf-id');
+    var scope=element.matches('[data-composition-src],[data-hf-scene]')?element.parentElement:element;
+    var owner=scope&&scope.closest('[data-composition-file],[data-composition-src]');
+    var sourceFile=(owner&&(owner.getAttribute('data-composition-file')||owner.getAttribute('data-composition-src'))) || ${JSON.stringify(compositionPath).replace(/</g, '\\u003c')};
+    return {elementId:element.id||null,hfId:hfId,sourceFile:sourceFile,
+      selector:element.id?'#'+CSS.escape(element.id):hfId?'[data-hf-id="'+CSS.escape(hfId)+'"]':null,
+      tagName:element.tagName.toLowerCase(),text:text||null,textContent:element.textContent,
       geometry:{x:rect.left,y:rect.top,width:rect.width,height:rect.height},
       viewport:{width:innerWidth,height:innerHeight}};
   }
@@ -504,9 +509,18 @@ export function createPreviewBridgeScript(projectId: string): string {
         respond(requestId,target?describe(target):null); if(target) post('selection-geometry',{selection:describe(target)}); return;
       }
       if(message.type==='edit-element'){
-        // Editing is acknowledged here so the host can persist through Project API.
-        // The bridge never writes project files or trusts arbitrary HTML from a parent.
-        window.dispatchEvent(new CustomEvent('openmotion:edit-element',{detail:message}));
+        if(!message.operation){
+          window.dispatchEvent(new CustomEvent('openmotion:edit-element',{detail:message}));
+          respond(requestId,{accepted:true}); return;
+        }
+        if(!picked || !picked.isConnected || describe(picked).selector!==message.selector)
+          throw new Error('Preview selection changed');
+        var op=message.operation;
+        if(!op || typeof op.value!=='string' || typeof op.property!=='string') throw new Error('Invalid edit');
+        if(op.type==='inline-style') picked.style.setProperty(op.property,op.value);
+        else if(op.type==='text-content') picked.textContent=op.value;
+        else if(op.type==='attribute') picked.setAttribute('data-'+op.property,op.value);
+        else throw new Error('Unsupported edit');
         respond(requestId,{accepted:true}); return;
       }
       respond(requestId,{accepted:false},'Unsupported preview message');
@@ -516,7 +530,7 @@ export function createPreviewBridgeScript(projectId: string): string {
     if(!pickMode) return;
     var target=event.target;
     var detail=describe(target);
-    if(detail) post('select-element',{selection:detail});
+    if(detail && detail.selector){ picked=target; pickMode=false; post('select-element',{selection:detail}); }
   },true);
   window.addEventListener('error',function(event){ post('runtime-error',{message:String(event.message||'Preview runtime error'),filename:event.filename||null,line:event.lineno||null}); });
   window.addEventListener('unhandledrejection',function(event){ post('runtime-error',{message:String(event.reason&&event.reason.message||event.reason||'Unhandled preview rejection')}); });
@@ -612,7 +626,7 @@ function applyStudioPreviewAugmentations(
 
   // 2. Cookie-less cross-origin preview bridge. It is a no-op for local
   // previews because the script exits when the project token is absent.
-  out = injectBodyScript(out, createPreviewBridgeScript(project.projectId), false);
+  out = injectBodyScript(out, createPreviewBridgeScript(project.projectId, activeCompositionPath), false);
 
   // 3. GSAP base URL meta + project signature meta + CDN fallback
   out = injectTagsAtHeadStart(

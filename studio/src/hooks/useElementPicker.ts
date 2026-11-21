@@ -108,6 +108,7 @@ export function useElementPicker(
     setPickedElement(null);
   }, []);
 
+  const bridgeSelection = useRef<{ iframe: HTMLIFrameElement; token: string; sourceFile: string; hfId?: string } | null>(null);
   const windowsThatWerePrimary = useRef(new WeakSet<MessageEventSource>());
 
   // Listen for picker messages from the iframe
@@ -132,7 +133,7 @@ export function useElementPicker(
           tagName: typeof selection.tagName === "string" ? selection.tagName : "div",
           selector: typeof selection.selector === "string" ? selection.selector : "",
           label: typeof selection.text === "string" && selection.text ? selection.text.slice(0, 48) : "Element",
-          textContent: typeof selection.text === "string" ? selection.text : null,
+          textContent: typeof selection.textContent === "string" ? selection.textContent : typeof selection.text === "string" ? selection.text : null,
           boundingBox: {
             x: typeof geometry.x === "number" ? geometry.x : 0,
             y: typeof geometry.y === "number" ? geometry.y : 0,
@@ -140,12 +141,17 @@ export function useElementPicker(
             height: typeof geometry.height === "number" ? geometry.height : 0,
           },
         };
+        bridgeSelection.current = {
+          iframe: activeIframe, token: data.token,
+          sourceFile: typeof selection.sourceFile === "string" ? selection.sourceFile : compositionPathOfPreviewUrl(activeIframe.src),
+          hfId: typeof selection.hfId === "string" ? selection.hfId : undefined,
+        };
         setPickedElement(toPickedElement(picked, activeIframe));
         setIsPickMode(false);
         return;
       }
 
-      if (data?.source !== "hf-preview") return;
+      if (data?.source !== "hf-preview" || !createPreviewAdapter({ iframe: activeIframe }).sameOrigin) return;
       if (!acceptStudioRuntimeMessage(data)) return;
       if (e.source === iframeRef.current?.contentWindow)
         windowsThatWerePrimary.current.add(e.source);
@@ -200,88 +206,54 @@ export function useElementPicker(
     [],
   );
 
-  const setStyle = useCallback(
-    (prop: string, value: string) => {
-      const activeIframe = getActiveIframe();
-      if (!pickedElement?.selector || !activeIframe) return;
-      try {
-        const doc = activeIframe.contentDocument;
-        const el = doc?.querySelector(pickedElement.selector) as HTMLElement | null;
-        if (el) {
-          el.style.setProperty(prop, value);
-          setPickedElement((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  computedStyles: { ...prev.computedStyles, [prop]: value },
-                }
-              : null,
-          );
-          syncToSource(pickedElement, el, activeIframe, {
-            type: "inline-style",
-            property: prop,
-            value,
-          });
+  const editPicked = useCallback((op: PatchOperation & { value: string }) => {
+    const iframe = getActiveIframe();
+    if (!iframe || !pickedElement?.selector) return;
+    const adapter = createPreviewAdapter({ iframe });
+    if (!adapter.sameOrigin) {
+      const selected = bridgeSelection.current;
+      if (!selected || selected.iframe !== iframe || selected.token !== adapter.token) return;
+      const opts = optionsRef.current;
+      if (opts?.workspaceFiles && opts.onSyncFiles) {
+        const pending = pendingWritesRef.current;
+        const path = selected.sourceFile;
+        const before = withPendingWrites(opts.workspaceFiles, pending)[path];
+        const target = { id: pickedElement.id ?? undefined, hfId: selected.hfId };
+        if (typeof before !== "string" || !findTagByTarget(before, target)) return;
+        const after = applyPatchByTarget(before, target, op);
+        if (after !== before) {
+          recordPendingWrite(pending, path, opts.workspaceFiles[path], after);
+          opts.onSyncFiles({ [path]: after });
         }
-      } catch {
-        /* cross-origin */
       }
-    },
-    [pickedElement, getActiveIframe, syncToSource],
-  );
+      adapter.send("edit-element", { selector: pickedElement.selector, operation: op });
+    } else {
+      let el: HTMLElement | null | undefined;
+      try {
+        el = iframe.contentDocument?.querySelector<HTMLElement>(pickedElement.selector);
+      } catch {
+        return;
+      }
+      if (!el) return;
+      if (op.type === "inline-style") el.style.setProperty(op.property, op.value);
+      else if (op.type === "attribute") el.setAttribute(`data-${op.property}`, op.value);
+      else el.textContent = op.value;
+      syncToSource(pickedElement, el, iframe, op);
+    }
+    setPickedElement(prev => {
+      if (!prev) return prev;
+      if (op.type === "inline-style") return { ...prev, computedStyles: { ...prev.computedStyles, [op.property]: op.value } };
+      if (op.type === "attribute") return { ...prev, dataAttributes: { ...prev.dataAttributes, [op.property]: op.value } };
+      return { ...prev, textContent: op.value };
+    });
+  }, [getActiveIframe, pickedElement, syncToSource]);
 
-  const setDataAttr = useCallback(
-    (attr: string, value: string) => {
-      const activeIframe = getActiveIframe();
-      if (!pickedElement?.selector || !activeIframe) return;
-      try {
-        const doc = activeIframe.contentDocument;
-        const el = doc?.querySelector(pickedElement.selector);
-        if (el) {
-          el.setAttribute(`data-${attr}`, value);
-          setPickedElement((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  dataAttributes: { ...prev.dataAttributes, [attr]: value },
-                }
-              : null,
-          );
-          syncToSource(pickedElement, el as HTMLElement, activeIframe, {
-            type: "attribute",
-            property: attr,
-            value,
-          });
-        }
-      } catch {
-        /* cross-origin */
-      }
-    },
-    [pickedElement, getActiveIframe, syncToSource],
-  );
-
-  const setTextContent = useCallback(
-    (text: string) => {
-      const activeIframe = getActiveIframe();
-      if (!pickedElement?.selector || !activeIframe) return;
-      try {
-        const doc = activeIframe.contentDocument;
-        const el = doc?.querySelector(pickedElement.selector);
-        if (el) {
-          el.textContent = text;
-          setPickedElement((prev) => (prev ? { ...prev, textContent: text } : null));
-          syncToSource(pickedElement, el as HTMLElement, activeIframe, {
-            type: "text-content",
-            property: "textContent",
-            value: text,
-          });
-        }
-      } catch {
-        /* cross-origin */
-      }
-    },
-    [pickedElement, getActiveIframe, syncToSource],
-  );
+  const setStyle = useCallback((property: string, value: string) =>
+    editPicked({ type: "inline-style", property, value }), [editPicked]);
+  const setDataAttr = useCallback((property: string, value: string) =>
+    editPicked({ type: "attribute", property, value }), [editPicked]);
+  const setTextContent = useCallback((value: string) =>
+    editPicked({ type: "text-content", property: "textContent", value }), [editPicked]);
 
   // Ref-like object that always points to the active iframe (override or primary)
   const activeIframeRef = useRef<HTMLIFrameElement | null>(null);
