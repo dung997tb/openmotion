@@ -374,7 +374,7 @@ export class Phase1Service {
     return { projectId: args.projectId, review: record, changed: false };
   }
   async dispatch(name: string, args: any, host?: HostContext): Promise<any> {
-    if (name.startsWith('motion_game_')) return dispatchGameTool(name, args, this.store.directory);
+    if (name.startsWith('motion_game_')) return dispatchGameTool(name, args, this.store.directory, this.runtimeRoot);
     if (name === 'motion_design_catalog' || name === 'motion_design_project' || name === 'motion_design_edit' || name === 'motion_design_comments') {
       return dispatchDesignTool(name, args, this.store.directory, this.context.origin());
     }
