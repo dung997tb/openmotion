@@ -64,7 +64,7 @@ export function ModelCollection({ story, gateway, onNavigate, onModel }: {
       {loading ? <Skeleton className="om-story-action-skeleton" /> : gateway.failed ? <Button type="button" variant="secondary" className="om-button" onClick={gateway.retry}>{t('Retry loading models')}</Button> :
         <Button type="button" variant="secondary" className="om-button" onClick={featured ? () => onModel(featured.id) : openModelSettings}>{t(featured ? 'Model details' : 'Manage providers')}<RemixIcon name="arrow-right-line" size={16} /></Button>}
     </header>
-    <ModelStoryGallery story={story} models={models} loading={loading} onNavigate={onNavigate} brandedFallback />
+    <ModelStoryGallery story={story} models={models} loading={loading} onNavigate={onNavigate} brandedFallback showLabels={false} />
   </section>;
 }
 

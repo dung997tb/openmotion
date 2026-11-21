@@ -688,8 +688,12 @@ it('shows mixed media in one Explore feed and opens templates and editing preset
   await click('Preview template Product Promo');
   expect(page()).toMatchObject({ explore: true, templates: false, template: 'product-promo' });
   await traverse(-1);
-  const preset = [...container.querySelectorAll<HTMLButtonElement>('.om-scene-tile')].find(button => button.textContent?.includes('Scored shortlist before shorts'));
-  await act(async () => preset!.click());
+  const feed = explore.querySelector('.om-feed-group')!;
+  expect(feed.querySelector('.om-feed-card-label, .om-feed-card-detail')).toBeNull();
+  const preset = [...feed.querySelectorAll<HTMLButtonElement>('.om-scene-tile')].find(button => button.textContent?.includes('Scored shortlist before shorts'))!;
+  expect(preset.querySelector('.om-feed-skill-badge')?.textContent).toBe('Skill');
+  expect(preset.querySelector('.om-feed-prompt-action.om-nav-item')?.textContent).toBe('Use Skill');
+  await act(async () => preset.click());
   expect(page()).toMatchObject({ specialty: { id: 'shorts' }, skill: 'openmotion-shortlist-shorts' });
 });
 
@@ -1215,7 +1219,9 @@ it('recovers community templates and opens the library from the community headin
   for (const id of ['explore-seedance', 'explore-gpt-image']) {
     const heading = container.querySelector(`#${id}`)!;
     expect(heading.previousElementSibling).toBeNull();
+    expect(heading.closest('section')!.querySelector('.om-feed-card-label')).toBeNull();
   }
+  expect(sections[5].querySelector('.om-studio-collection-cards .om-feed-card-label')).toBeNull();
   const picks = container.querySelector('[aria-labelledby="explore-community"]')!;
   expect([...picks.querySelectorAll('[data-template-id]')].map(node => node.getAttribute('data-template-id'))).toEqual(['second']);
   const communityActions = [...container.querySelectorAll<HTMLButtonElement>('.om-explore-feed > header button')];
@@ -1648,7 +1654,7 @@ it.each([
 it('keeps unlisted model briefs usable and links an Explore workflow to the Claude handbook example', async () => {
   await mount(); await click('Explore');
   const fallback = container.querySelector<HTMLButtonElement>('[aria-labelledby="explore-seedance"] .om-story-card')!;
-  expect(fallback.textContent).toContain('Choose a model');
+  expect(fallback.querySelector('.om-feed-card-label')).toBeNull();
   await act(async () => fallback.click());
   expect(page().studio).toMatchObject({ model: null, studio: { id: 'cinema' }, scene: { id: 'text-to-video' } });
   expect(container.querySelector<HTMLInputElement>('[aria-label="Asset draft"]')?.value).toContain('floating city');

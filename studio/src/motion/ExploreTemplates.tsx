@@ -103,16 +103,16 @@ export function useExploreTemplateShelf(filter: ExploreTemplateFilter, locale: s
   return { ...shelf, loading: requiresCatalog && !curated.catalog && !curated.failed, error: requiresCatalog && curated.failed, retry: curated.retry };
 }
 
-export function ExplorePromptLabel() {
+export function ExploreActionLabel({ label }: { label: 'Use this prompt' | 'Use Skill' }) {
   const { t } = useI18n();
-  return <>{t('Use this prompt')}<RemixIcon name="arrow-right-line" size={15} /></>;
+  return <>{t(label)}<RemixIcon name="arrow-right-line" size={15} /></>;
 }
 
 export function TemplatePromptAction({ item, onTry }: { item: GalleryTemplate; onTry: (prompt: string) => void }) {
   const prompt = [item.description?.trim(), item.styleDescription?.trim()].filter(Boolean).join('\n\n');
   if (!prompt) return null;
   return <Button variant="plain" className="om-nav-item om-feed-prompt-action" onClick={() => onTry(prompt)}>
-    <ExplorePromptLabel />
+    <ExploreActionLabel label="Use this prompt" />
   </Button>;
 }
 

@@ -100,10 +100,11 @@
 .om-feed-template-copy { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: var(--motion-space-4); padding-top: var(--motion-space-8); }
 .om-feed-template-copy strong { line-height: var(--motion-leading-body); font-size: var(--motion-text-heading); font-weight: var(--motion-weight-semibold); }
 .om-feed-template-copy p, .om-feed-card-meta, .om-feed-card-description, .om-featured-caption small { color: var(--motion-muted); font-size: var(--motion-text-sm); line-height: var(--motion-leading-body); }
-.om-feed-card-description, .om-feed-card-detail > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.om-feed-card-description { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .om-community-picks .om-feed-template-copy > strong,
 .om-feed-group .om-feed-template-copy:has(> .om-feed-prompt-action) strong,
-.om-highlights .om-story-card > .om-feed-card-description {
+.om-explore-sections .om-story-card > .om-feed-card-description,
+:is(.om-community-picks, .om-feed-group) .om-feed-card-description {
   display: block;
   min-width: 0;
   max-width: 100%;
@@ -113,15 +114,9 @@
 }
 .om-feed-template-copy .om-nav-item { gap: var(--motion-space-6); margin-inline-start: calc(var(--motion-space-8) * -1); }
 .om-feed-card-title { display: flex; min-width: 0; max-width: 100%; align-items: center; flex-wrap: wrap; gap: var(--motion-space-8); }
+.om-feed-group .om-feed-card-title { flex-wrap: nowrap; }
 .om-feed-card-meta { display: grid; min-width: 0; gap: var(--motion-space-4); }
 .om-feed-duration { color: var(--motion-dim); font-size: inherit; white-space: nowrap; }
-.om-feed-card-detail { display: flex; align-items: baseline; gap: var(--motion-space-6); text-align: start; color: var(--motion-muted); font-size: var(--motion-text-sm); line-height: var(--motion-leading-body); }
-.om-feed-card-detail svg { flex: none; align-self: flex-start; margin-top: var(--motion-space-2); }
-@container discovery (min-width: 471px) {
-  .om-feed-group .om-feed-template-copy > :is(.om-feed-card-description, .om-feed-card-meta) { min-height: 2lh; }
-  .om-feed-group .om-feed-card-meta { display: block; width: 100%; }
-  .om-feed-group .om-feed-card-meta > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
 .om-feed-status, .om-discovery-empty { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--motion-space-12); }
 .om-feed-loading { width: 100%; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: var(--motion-space-16); }
 .om-feed-loading > * { aspect-ratio: 16/9; }

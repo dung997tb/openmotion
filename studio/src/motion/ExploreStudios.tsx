@@ -19,7 +19,7 @@ import { AssetHoverVideo } from './AssetHoverVideo';
 import { useTemplatePlayback } from './useTemplatePlayback';
 import { editingPresets, motionSkills, skillCategories, type SkillCategory, type MotionSkill } from './skillCatalog';
 import { useWorkspaceChrome } from './WorkspaceChromeContext';
-import { ExplorePromptLabel, ExploreTemplateCard, TemplatePromptAction, useExploreTemplates, useExploreTemplateShelf, type ExploreTemplateFilter } from './ExploreTemplates';
+import { ExploreActionLabel, ExploreTemplateCard, TemplatePromptAction, useExploreTemplates, useExploreTemplateShelf, type ExploreTemplateFilter } from './ExploreTemplates';
 import { ClaudeStories, ExploreHighlights, ModelCollection } from './ExploreStories';
 import { gptImageStory, seedanceStory } from './exploreModelStories';
 import { ExploreSpotlight, featuredSceneIds } from './ExploreSpotlight';
@@ -83,8 +83,8 @@ type ExploreProps = {
   filters: ExploreFilters;
 };
 
-function FeedCard({ title, detail, promptAction, badge, studioLabel, description, poster, posterPosition, credit, icon, onClick, sceneId, children, playbackId, onPriority }: {
-  title: string; detail?: string; promptAction?: boolean; badge?: string; studioLabel?: string; description: string; poster?: string; posterPosition?: string; credit?: string; icon: string; onClick: () => void; sceneId?: string;
+function FeedCard({ title, action, badge, studioLabel, description, poster, posterPosition, credit, onClick, sceneId, children, playbackId, onPriority }: {
+  title: string; action?: 'Use this prompt' | 'Use Skill'; badge?: string; studioLabel?: string; description: string; poster?: string; posterPosition?: string; credit?: string; onClick: () => void; sceneId?: string;
   children?: ReactNode; playbackId?: string; onPriority?: (id: string | null) => void;
 }) {
   const summary = <span className="om-feed-card-description">{description}</span>;
@@ -101,8 +101,7 @@ function FeedCard({ title, detail, promptAction, badge, studioLabel, description
         {badge && <span className="om-feed-skill-badge">{badge}</span>}
       </span>
       {studioLabel ? <span className="om-feed-card-meta"><span className="om-feed-card-label">{studioLabel}</span>{summary}</span> : summary}
-      {promptAction ? <span className="om-nav-item om-feed-prompt-action"><ExplorePromptLabel /></span> :
-        detail && <span className="om-feed-card-detail"><RemixIcon name={icon} size={14} /><span>{detail}</span></span>}
+      {action && <span className="om-nav-item om-feed-prompt-action"><ExploreActionLabel label={action} /></span>}
     </span>
   </Button>;
 }
@@ -114,8 +113,8 @@ function SceneFeedCard({ target, example, section, onNavigate, playing, onPriori
   const { t } = useI18n();
   const { scene, studio } = target;
   const id = example.clip ? [section, scene.id, example.title].join('/') : undefined;
-  return <FeedCard sceneId={scene.id} icon={scene.icon} promptAction title={t(example.title)}
-    studioLabel={section === 'cinema' ? undefined : t(studio.title) + ' · ' + t(scene.label)}
+  return <FeedCard sceneId={scene.id} action="Use this prompt" title={t(example.title)}
+    studioLabel={['cinema', 'design', 'feed'].includes(section) ? undefined : t(studio.title) + ' · ' + t(scene.label)}
     description={t(scene.hint)} poster={example.poster} posterPosition={example.posterPosition} credit={example.credit}
     playbackId={id} onPriority={onPriority} onClick={() => {
       const { area, collection } = cardArea(section);
@@ -135,15 +134,14 @@ const threeDCardDescriptions: Partial<Record<string, string>> = {
   'openmotion-surreal-3d-poster': 'Reveal a product among drifting clay shapes with oversized type behind it.',
 };
 
-function SkillFeedCard({ skill, section, icon, onSkill, playing, onPriority, community }: FeedPlayback & {
-  skill: MotionSkill; section: string; icon: string; onSkill: ExploreProps['onSkill']; community?: string;
+function SkillFeedCard({ skill, section, onSkill, playing, onPriority, community }: FeedPlayback & {
+  skill: MotionSkill; section: string; onSkill: ExploreProps['onSkill']; community?: string;
 }) {
   const { t } = useI18n();
   const id = section + '/' + skill.id;
   const onSkillsShelf = section === 'skills';
-  const showOutput = !onSkillsShelf && !['shorts', 'marketing', 'explainer', '3d', 'motion'].includes(section);
   const description = section === '3d' ? threeDCardDescriptions[skill.id] ?? skill.tagline : skill.tagline;
-  return <FeedCard title={t(skill.title)} badge={onSkillsShelf ? undefined : "Skill"} detail={showOutput ? t(skill.output) : undefined} description={t(description)} icon={icon}
+  return <FeedCard title={t(skill.title)} badge={onSkillsShelf ? undefined : 'Skill'} action={section === 'feed' ? 'Use Skill' : undefined} description={t(description)}
     playbackId={id} onPriority={onPriority} onClick={() => {
       const { area, collection } = cardArea(section);
       track(area, 'open_skill', { skill: skill.id, collection, community });
@@ -203,7 +201,7 @@ function StudioCollection({ studio, medium, onChooseStudio, onSkill, onNavigate,
     const techniques = studio.surface === 'techniques' ? studio.techniques : community?.source === 'templates' ? community.skills : [];
     cards = techniques.slice(0, templatePreviewLimit).flatMap(id => {
       const skill = motionSkills.find(item => item.id === id);
-      return skill ? [<SkillFeedCard key={id} section={studio.id} skill={skill} icon={studio.icon} onSkill={onSkill} {...playback} />] : [];
+      return skill ? [<SkillFeedCard key={id} section={studio.id} skill={skill} onSkill={onSkill} {...playback} />] : [];
     });
   }
   if (!cards.length) return null;
@@ -311,7 +309,7 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
     return <SceneFeedCard key={scene.id} section="feed" target={sceneDestination(scene)} example={sceneExamples[scene.id][0]}
       onNavigate={onNavigate} playing={playing} onPriority={setPriority} community={community?.id} />;
   });
-  const skillCards = showMotion ? (community ? skills : skills.slice(0, 3)).map(skill => <SkillFeedCard key={skill.id} section="feed" skill={skill} icon={specialty?.icon ?? 'puzzle-line'}
+  const skillCards = showMotion ? (community ? skills : skills.slice(0, 3)).map(skill => <SkillFeedCard key={skill.id} section="feed" skill={skill}
     onSkill={onSkill} playing={playing} onPriority={setPriority} community={community?.id} />) : [];
   const tryVideoPrompt = (prompt: string) => onNavigate(templateVideoDestination, prompt);
   const templateCard = (item: GalleryTemplate) => <ExploreTemplateCard key={item.id} item={item} active={playing.has('community/' + item.id)} onPriority={setPriority}
@@ -423,7 +421,7 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
         }}
         extraAction={<SkillSubmissionLink explore />}>
         <div className="om-explore-preview-grid">{shelfSkills.map(skill => <SkillFeedCard key={skill.id} skill={skill} section="skills"
-          icon="puzzle-line" onSkill={onSkill} playing={playing} onPriority={setPriority} />)}</div>
+          onSkill={onSkill} playing={playing} onPriority={setPriority} />)}</div>
       </ExploreShelf>
     </>}
     {!community && discoveryStudios.filter(studio => !home || studio.id !== 'design').map(studioSection)}
