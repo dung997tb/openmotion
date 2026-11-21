@@ -11,7 +11,7 @@ import { motionSkills, motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
 import type { ScenarioId } from '../../../shared/scenarios';
-import speakerStudio from './scene-art/speaker-studio.webp';
+import aiInfluencerMarketing from './scene-art/ai-influencer-marketing.webp';
 import './scenarioNavigation.css';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
@@ -53,7 +53,7 @@ const slides: FeaturedSlide[] = [{
   subtitle: 'Roles',
   icon: 'user-3-line',
   hint: 'Script, persona visuals, a link-in-bio page, a voiced video and posts for every platform.',
-  poster: speakerStudio,
+  poster: aiInfluencerMarketing,
   scenario: 'ai-influencer',
 }];
 

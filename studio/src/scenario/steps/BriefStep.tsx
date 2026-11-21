@@ -19,7 +19,7 @@ import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import type { BriefPreset } from './briefPresets';
 import { BriefPromptComposer } from './BriefPromptComposer';
-import { StepCapabilityBar } from './StepCapabilityBar';
+import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
 import {
   buildStepAgentPrompt,
   computeDiscountSummary,
@@ -96,6 +96,7 @@ export function BriefStep({
   nav,
   renderExportMenu,
   renderIterations,
+  renderCapabilityBar,
 }: StepProps) {
   const { t, locale } = useI18n();
   const { info: integration } = useIntegrationInfo();
@@ -111,6 +112,7 @@ export function BriefStep({
   );
   const [editorMode, setEditorMode] = useState<'guided' | 'form'>('guided');
   const [promptsExpanded, setPromptsExpanded] = useState(false);
+  const [geminiExpanded, setGeminiExpanded] = useState(false);
   const dirtyFieldsRef = useRef<Set<string>>(new Set());
   const activeFieldRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,11 +125,15 @@ export function BriefStep({
     [isAiInfluencer, state.iterations, state.activeIterationId],
   );
   const [scriptText, setScriptText] = useState(activeScriptFromRun);
+  const [scriptExpanded, setScriptExpanded] = useState(() => Boolean(activeScriptFromRun.trim()));
   const scriptDirtyRef = useRef(false);
 
   useEffect(() => {
     if (!scriptDirtyRef.current) {
       setScriptText(activeScriptFromRun);
+      if (activeScriptFromRun.trim()) {
+        setScriptExpanded(true);
+      }
     }
   }, [activeScriptFromRun]);
 
@@ -136,6 +142,9 @@ export function BriefStep({
   useEffect(() => {
     dirtyFieldsRef.current.clear();
     setValues(initialBriefValues(scenario.briefFields, run?.brief, locale));
+    setPromptsExpanded(false);
+    setGeminiExpanded(false);
+    setScriptExpanded(Boolean(activeScriptFromRun.trim()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenario.id, runId]);
 
@@ -303,7 +312,7 @@ export function BriefStep({
       if (updatedCount > 0) {
         toast.showToast(t('Updated prompts for {count} steps', { count: updatedCount }), 'info', 'feedback');
       } else {
-        toast.showToast(t('All downstream steps already have custom prompts.'), 'info', 'feedback');
+        toast.showToast(t('All later steps already have custom prompts.'), 'info', 'feedback');
       }
     } catch (error) {
       if (!isScenarioConflictError(error)) {
@@ -317,6 +326,7 @@ export function BriefStep({
   // AI influencer script actions
   const [generatingScript, setGeneratingScript] = useState(false);
   const handleGenerateScriptOutline = async () => {
+    setScriptExpanded(true);
     setGeneratingScript(true);
     try {
       const lang = typeof values.language === 'string' && values.language ? values.language : locale;
@@ -639,20 +649,23 @@ export function BriefStep({
       )}
 
       {isAiInfluencer && (
-        <section className="om-step-card" aria-label={t('Episode script')}>
-          <div className="om-step-section-head">
-            <div className="om-brief-composer-lead">
-              <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
-                <RemixIcon name="voiceprint-line" size={16} />
+        <section className="om-step-disclosure" data-script-disclosure="true" aria-label={t('Episode script')}>
+          <div className="om-step-disclosure-row">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="om-step-disclosure-trigger"
+              aria-expanded={scriptExpanded}
+              icon={<RemixIcon name={scriptExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+              onClick={() => setScriptExpanded(prev => !prev)}
+            >
+              <span>
+                {t('Episode script')} · {scriptExpanded ? t('Hide script') : t('Write or generate script')}
               </span>
-              <div>
-                <h3 className="om-step-section-title">{t('Episode script')}</h3>
-                <p className="om-step-muted">{t('Used automatically as the speech prompt in the voiceover step.')}</p>
-              </div>
-            </div>
-            <div className="om-step-toolbar-group">
+            </Button>
+            {!scriptExpanded && (
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 icon={<RemixIcon name="sparkling-line" size={14} />}
                 loading={generatingScript}
@@ -660,140 +673,207 @@ export function BriefStep({
               >
                 {t('Generate script outline')}
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<RemixIcon name="clipboard-line" size={14} />}
-                onClick={() => void handleCopyScriptHandoff()}
-              >
-                {t('Ask Agent to write script')}
-              </Button>
+            )}
+          </div>
+          {scriptExpanded && (
+            <div className="om-step-disclosure-body om-step-disclosure-panel">
+              <div className="om-step-section-head">
+                <div className="om-brief-composer-lead">
+                  <span className="om-brief-composer-icon" data-tone="audio" aria-hidden="true">
+                    <RemixIcon name="voiceprint-line" size={16} />
+                  </span>
+                  <div>
+                    <h3 className="om-step-section-title">{t('Episode script')}</h3>
+                    <p className="om-step-muted">{t('Used automatically as the speech prompt in the voiceover step.')}</p>
+                  </div>
+                </div>
+                <div className="om-step-toolbar-group">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<RemixIcon name="sparkling-line" size={14} />}
+                    loading={generatingScript}
+                    onClick={() => void handleGenerateScriptOutline()}
+                  >
+                    {t('Generate script outline')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<RemixIcon name="clipboard-line" size={14} />}
+                    onClick={() => void handleCopyScriptHandoff()}
+                  >
+                    {t('Ask Agent to write script')}
+                  </Button>
+                </div>
+              </div>
+              <FieldTextarea
+                className="om-step-textarea"
+                rows={6}
+                aria-label={t('Episode script')}
+                placeholder={t('Generate an outline or write your spoken script here.')}
+                value={scriptText}
+                onChange={e => {
+                  scriptDirtyRef.current = true;
+                  setScriptText(e.target.value);
+                }}
+              />
+              <div className="om-step-actions-end">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<RemixIcon name="save-line" size={14} />}
+                  loading={savingScript}
+                  disabled={!scriptText.trim()}
+                  onClick={() => void handleSaveScript()}
+                >
+                  {t('Save script version')}
+                </Button>
+              </div>
             </div>
-          </div>
-          <FieldTextarea
-            className="om-step-textarea"
-            rows={6}
-            aria-label={t('Episode script')}
-            placeholder={t('Generate an outline or write your spoken script here.')}
-            value={scriptText}
-            onChange={e => {
-              scriptDirtyRef.current = true;
-              setScriptText(e.target.value);
-            }}
-          />
-          <div className="om-step-actions-end">
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<RemixIcon name="save-line" size={14} />}
-              loading={savingScript}
-              disabled={!scriptText.trim()}
-              onClick={() => void handleSaveScript()}
-            >
-              {t('Save script version')}
-            </Button>
-          </div>
+          )}
         </section>
       )}
 
-      <StepCapabilityBar
-        scenario={scenario}
-        step={step}
-        state={state}
-        run={run}
-        active={active}
-        api={api}
-        pool={pool}
-        toast={toast}
-        nav={nav}
-        stepPrompt={briefStepPrompt}
-        allowQuickMedia
-      />
+      {(() => {
+        const capabilityNode = (
+          <StepCapabilityBar
+            scenario={scenario}
+            step={step}
+            state={state}
+            run={run}
+            active={active}
+            api={api}
+            pool={pool}
+            toast={toast}
+            nav={nav}
+            stepPrompt={briefStepPrompt}
+            allowQuickMedia
+            compact
+          />
+        );
+        return renderCapabilityBar ? renderCapabilityBar(capabilityNode) : capabilityNode;
+      })()}
 
       {isGemini && geminiHub && (
-        <>
-          <section className="om-step-card" aria-label={t('Gemini 4 availability')}>
-            <div className="om-step-section-head">
-              <div className="om-brief-composer-lead">
-                <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
-                  <RemixIcon name="sparkling-line" size={16} />
-                </span>
-                <div>
-                  <h3 className="om-step-section-title">{t('Gemini 4 availability')}</h3>
-                  <p className="om-step-muted">{t(geminiHub.summary)}</p>
-                </div>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<RemixIcon name="plug-line" size={14} />}
-                onClick={() => nav.openProviders('gemini')}
-              >
-                {t('Connect Gemini')}
-              </Button>
-            </div>
+        <section className="om-step-disclosure" data-gemini-disclosure="true" aria-label={t('Gemini 4 availability')}>
+          <div className="om-step-disclosure-row">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="om-step-disclosure-trigger"
+              aria-expanded={geminiExpanded}
+              icon={<RemixIcon name={geminiExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+              onClick={() => setGeminiExpanded(prev => !prev)}
+            >
+              <span>
+                {t('Gemini 4 & Neon inspiration')} · {geminiExpanded ? t('Hide details') : t('View details')}
+              </span>
+            </Button>
             {geminiCatalogFailed ? (
-              <div className="om-step-inline-error">
-                <span>{t('Could not check model availability.')}</span>
-                <Button variant="ghost" size="sm" onClick={retryGeminiCatalog}>{t('Retry')}</Button>
+              <span className="om-step-badge" data-gemini-status="error">
+                {t('Could not check model availability.')}
+              </span>
+            ) : geminiCatalog ? (
+              <span
+                className="om-step-badge"
+                data-status={geminiServedModels.length > 0 ? 'done' : undefined}
+                data-gemini-status="true"
+              >
+                {geminiServedModels.length > 0
+                  ? t('{count} Gemini 4 models ready', { count: geminiServedModels.length })
+                  : geminiProvider?.available
+                    ? t('Gemini connected')
+                    : t('Not configured')}
+              </span>
+            ) : null}
+          </div>
+          {geminiExpanded && (
+            <div className="om-step-disclosure-body">
+              <div className="om-step-disclosure-panel">
+                <div className="om-step-section-head">
+                  <div className="om-brief-composer-lead">
+                    <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                      <RemixIcon name="sparkling-line" size={16} />
+                    </span>
+                    <div>
+                      <h3 className="om-step-section-title">{t('Gemini 4 availability')}</h3>
+                      <p className="om-step-muted">{t(geminiHub.summary)}</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<RemixIcon name="plug-line" size={14} />}
+                    onClick={() => nav.openProviders('gemini')}
+                  >
+                    {t('Connect Gemini')}
+                  </Button>
+                </div>
+                {geminiCatalogFailed ? (
+                  <div className="om-step-inline-error">
+                    <span>{t('Could not check model availability.')}</span>
+                    <Button variant="ghost" size="sm" onClick={retryGeminiCatalog}>{t('Retry')}</Button>
+                  </div>
+                ) : !geminiCatalog ? (
+                  <Skeleton className="om-step-availability-skeleton" />
+                ) : geminiServedModels.length > 0 ? (
+                  <div className="om-step-status-row">
+                    <RemixIcon name="checkbox-circle-fill" size={16} />
+                    <span>{t('{count} Gemini 4 models ready', { count: geminiServedModels.length })}</span>
+                  </div>
+                ) : (
+                  <p className="om-step-muted">
+                    {geminiProvider?.available
+                      ? t('Gemini provider is connected. {model} appears here once your key has access.', { model: geminiHub.modelName })
+                      : t('{model} is not configured yet. Connect Gemini or send the brief to your Agent.', { model: geminiHub.modelName })}
+                  </p>
+                )}
               </div>
-            ) : !geminiCatalog ? (
-              <Skeleton className="om-step-availability-skeleton" />
-            ) : geminiServedModels.length > 0 ? (
-              <div className="om-step-status-row">
-                <RemixIcon name="checkbox-circle-fill" size={16} />
-                <span>{t('{count} Gemini 4 models ready', { count: geminiServedModels.length })}</span>
-              </div>
-            ) : (
-              <p className="om-step-muted">
-                {geminiProvider?.available
-                  ? t('Gemini provider is connected. {model} appears here once your key has access.', { model: geminiHub.modelName })
-                  : t('{model} is not configured yet. Connect Gemini or hand off the brief to your Agent.', { model: geminiHub.modelName })}
-              </p>
-            )}
-          </section>
 
-          <section className="om-step-section" aria-label={t('Gemini 4 Neon inspiration')}>
-            <div className="om-step-section-head">
-              <div className="om-brief-composer-lead">
-                <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
-                  <RemixIcon name="movie-line" size={16} />
-                </span>
-                <div>
-                  <h3 className="om-step-section-title">{t('Gemini 4 Neon inspiration')}</h3>
-                  <p className="om-step-muted">{t('Explore community code animations in the Gemini 4 hub.')}</p>
+              <div className="om-step-section" aria-label={t('Gemini 4 Neon inspiration')}>
+                <div className="om-step-section-head">
+                  <div className="om-brief-composer-lead">
+                    <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                      <RemixIcon name="movie-line" size={16} />
+                    </span>
+                    <div>
+                      <h3 className="om-step-section-title">{t('Gemini 4 Neon inspiration')}</h3>
+                      <p className="om-step-muted">{t('Explore community code animations in the Gemini 4 hub.')}</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<RemixIcon name="external-link-line" size={14} />}
+                    onClick={() => nav.openModelHub('gemini-4')}
+                  >
+                    {t('Open Gemini 4 hub')}
+                  </Button>
+                </div>
+                <div className="om-step-inspiration-rail">
+                  {geminiInspiration.map(video => (
+                    <Button
+                      key={video.id}
+                      variant="plain"
+                      type="button"
+                      className="om-step-inspiration-card"
+                      onClick={() => nav.openModelHub('gemini-4')}
+                    >
+                      <span className="om-step-inspiration-thumb">
+                        <InspirationPoster src={video.poster} title={video.title} />
+                      </span>
+                      <span className="om-step-inspiration-copy">
+                        <strong>{video.title}</strong>
+                        <small>{video.authorName} · {video.variant}</small>
+                      </span>
+                    </Button>
+                  ))}
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<RemixIcon name="external-link-line" size={14} />}
-                onClick={() => nav.openModelHub('gemini-4')}
-              >
-                {t('Open Gemini 4 hub')}
-              </Button>
             </div>
-            <div className="om-step-inspiration-rail">
-              {geminiInspiration.map(video => (
-                <Button
-                  key={video.id}
-                  variant="plain"
-                  type="button"
-                  className="om-step-inspiration-card"
-                  onClick={() => nav.openModelHub('gemini-4')}
-                >
-                  <span className="om-step-inspiration-thumb">
-                    <InspirationPoster src={video.poster} title={video.title} />
-                  </span>
-                  <span className="om-step-inspiration-copy">
-                    <strong>{video.title}</strong>
-                    <small>{video.authorName} · {video.variant}</small>
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </section>
-        </>
+          )}
+        </section>
       )}
 
       {downstreamSteps.length > 0 && (
@@ -878,6 +958,7 @@ export function BriefStep({
                   onClick={() => {
                     setScriptText(scriptOut.text);
                     scriptDirtyRef.current = false;
+                    setScriptExpanded(true);
                   }}
                 >
                   {t('Load script')}
@@ -885,7 +966,9 @@ export function BriefStep({
               </div>
             );
           }
-          return <span className="om-step-muted">{t('Version')}</span>;
+          return (
+            <StepMediaOutputs iteration={iteration} pool={pool} fallback={t('Version')} />
+          );
         },
       })}
     </div>

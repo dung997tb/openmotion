@@ -14,18 +14,21 @@ import { RemixIcon } from '../../icons/RemixIcons';
 import { AssetAudioPreview } from '../../motion/AssetAudioPreview';
 import { AssetPicker } from '../../motion/AssetBrowser';
 import { uploadLibraryAsset } from '../../motion/assetClient';
-import { needsImage, sceneDestination, studioScenes, supportsScene } from '../../motion/creativeStudios';
+import { needsImage, sceneDestination, studioScenes } from '../../motion/creativeStudios';
+import { providerDisplayName } from '../../motion/imageMenuModels';
 import { useMediaCatalog } from '../../motion/useMediaCatalog';
 import { ScenarioApiError } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
 import { MotionPanel } from './MotionPanel';
-import { StepCapabilityBar } from './StepCapabilityBar';
+import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
 import {
   extractErrorMessage,
+  isProviderLimitOrAuthError,
   isScenarioConflictError,
   jobStateLabel,
-  poolKindIcon,
+  pickDefaultScenarioModelId,
+  selectScenarioModels,
   triggerUrlDownload,
 } from './stepUtils';
 
@@ -140,6 +143,8 @@ export function MediaStep(props: StepProps) {
     nav,
     renderExportMenu,
     renderIterations,
+    renderOutputPanel,
+    renderCapabilityBar,
   } = props;
 
   const { t } = useI18n();
@@ -183,8 +188,11 @@ export function MediaStep(props: StepProps) {
   const [prompt, setPrompt] = useState(seededPrompt);
   const promptDirtyRef = useRef(false);
 
+  const userSelectedModelRef = useRef(false);
+
   useEffect(() => {
     promptDirtyRef.current = false;
+    userSelectedModelRef.current = false;
     setPrompt(seededPrompt);
   }, [step.id, activeSceneId]);
 
@@ -196,32 +204,19 @@ export function MediaStep(props: StepProps) {
 
   // Catalog & compatible models
   const { catalog, failed: catalogFailed, retry: retryCatalog } = useMediaCatalog(active);
-  const availableModels = useMemo(() => {
-    if (!catalog) return [];
-    const availableProviders = new Set(
-      catalog.status.providers.filter(p => p.available).map(p => p.id),
-    );
-    return catalog.models.filter(model => {
-      if (model.modality !== modality) return false;
-      if (currentScene && !supportsScene(model, currentScene)) return false;
-      return availableProviders.has(model.provider);
-    });
-  }, [catalog, modality, currentScene]);
+  const availableModels = useMemo(
+    () => selectScenarioModels(catalog, modality, currentScene),
+    [catalog, modality, currentScene],
+  );
 
-  const defaultModelId = useMemo(() => {
-    if (!availableModels.length) return '';
-    const draftModel = typeof state.draft.model === 'string' ? state.draft.model : '';
-    if (draftModel && availableModels.some(m => m.id === draftModel)) return draftModel;
-    const routeModel = catalog?.status.routes[modality];
-    if (routeModel && availableModels.some(m => m.id === routeModel)) return routeModel;
-    const capModel = catalog?.status.capabilities.find(c => c.modality === modality)?.selectedModelId;
-    if (capModel && availableModels.some(m => m.id === capModel)) return capModel;
-    return availableModels[0].id;
-  }, [availableModels, state.draft.model, catalog?.status, modality]);
+  const defaultModelId = useMemo(
+    () => pickDefaultScenarioModelId(availableModels, catalog, modality, state.draft.model),
+    [availableModels, catalog, modality, state.draft.model],
+  );
 
   const [selectedModelId, setSelectedModelId] = useState(defaultModelId);
   useEffect(() => {
-    if (!availableModels.some(m => m.id === selectedModelId)) {
+    if (!userSelectedModelRef.current || !availableModels.some(m => m.id === selectedModelId)) {
       setSelectedModelId(defaultModelId);
     }
   }, [availableModels, selectedModelId, defaultModelId]);
@@ -285,7 +280,7 @@ export function MediaStep(props: StepProps) {
           prompt: nextPrompt,
           promptEdited: true,
           scene: activeSceneId,
-          ...(selectedModel ? { model: selectedModel.id } : {}),
+          ...(userSelectedModelRef.current && selectedModel ? { model: selectedModel.id } : {}),
         },
       });
     } catch {
@@ -458,6 +453,50 @@ export function MediaStep(props: StepProps) {
     }
     toast.showToast(t('Download started'), 'info', 'feedback');
   };
+
+  const failedModelId = activeIteration?.job?.model;
+  const failedModelAvailable = Boolean(failedModelId && availableModels.some(m => m.id === failedModelId));
+  const retryModelId = selectedModel && (!failedModelAvailable || selectedModel.id !== failedModelId)
+    ? selectedModel.id
+    : (failedModelId || selectedModel?.id);
+  const switchedModel = Boolean(retryModelId && failedModelId && retryModelId !== failedModelId);
+  const showLimitHint = activeIteration?.job?.state === 'failed' && isProviderLimitOrAuthError(activeIteration.job.error);
+  const activeJobModelLabel = useMemo(() => {
+    const modelId = activeIteration?.job?.model;
+    if (!modelId) return '';
+    return (
+      catalog?.models.find(m => m.id === modelId)?.label ??
+      availableModels.find(m => m.id === modelId)?.label ??
+      modelId
+    );
+  }, [activeIteration?.job?.model, availableModels, catalog?.models]);
+
+  const isJobActive = Boolean(
+    activeIteration?.job &&
+      (activeIteration.job.state === 'queued' || activeIteration.job.state === 'running'),
+  );
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!isJobActive || !activeIteration) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - activeIteration.createdAt) / 1000)));
+    };
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [activeIteration, isJobActive]);
+
+  const formattedElapsed = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
+  const activeJobPhaseTitle = activeIteration?.job?.state === 'queued'
+    ? t('Waiting in queue…')
+    : modality === 'image'
+      ? t('Creating image…')
+      : modality === 'video'
+        ? t('Creating video…')
+        : t('Creating audio…');
 
   const acceptMime = modality === 'image' ? 'image/*' : modality === 'video' ? 'video/*' : 'audio/*';
 
@@ -694,9 +733,12 @@ export function MediaStep(props: StepProps) {
                   options={availableModels.map(m => ({
                     value: m.id,
                     label: m.label,
-                    description: m.provider,
+                    description: providerDisplayName(m.provider, catalog?.status.providers ?? []),
                   }))}
-                  onCommit={setSelectedModelId}
+                  onCommit={next => {
+                    userSelectedModelRef.current = true;
+                    setSelectedModelId(next);
+                  }}
                 />
               </div>
 
@@ -758,6 +800,14 @@ export function MediaStep(props: StepProps) {
                 >
                   {t('Choose from workspace')}
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<RemixIcon name="plug-line" size={14} />}
+                  onClick={() => nav.openProviders()}
+                >
+                  {t('Model providers')}
+                </Button>
               </div>
               <Button
                 variant="primary"
@@ -773,7 +823,14 @@ export function MediaStep(props: StepProps) {
         )}
       </section>
 
-      {activeIteration && (
+      {activeIteration && (() => {
+        const outputStatus: 'running' | 'failed' | 'ready' =
+          activeIteration.job && (activeIteration.job.state === 'queued' || activeIteration.job.state === 'running')
+            ? 'running'
+            : activeIteration.job && (activeIteration.job.state === 'failed' || activeIteration.job.state === 'cancelled')
+              ? 'failed'
+              : 'ready';
+        const outputSection = (
         <section className="om-step-card" aria-label={t('Active result')}>
           <div className="om-step-section-head">
             <h3 className="om-step-section-title">
@@ -785,11 +842,26 @@ export function MediaStep(props: StepProps) {
           </div>
 
           {activeIteration.job && (activeIteration.job.state === 'queued' || activeIteration.job.state === 'running') ? (
-            <div className="om-step-job-progress">
-              <Skeleton className="om-step-media-skeleton" />
+            <div className="om-step-job-progress" role="status" aria-live="polite">
+              <div className="om-step-job-stage" data-modality={modality} data-state={activeIteration.job.state}>
+                <div className="om-step-job-stage-icon" aria-hidden="true">
+                  <RemixIcon name="loader-4-line" size={22} className="om-scenario-spin" />
+                </div>
+                <div className="om-step-job-stage-body">
+                  <strong className="om-step-job-stage-title">{activeJobPhaseTitle}</strong>
+                  <div className="om-step-job-stage-meta">
+                    <span>{activeJobModelLabel}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{formattedElapsed}</span>
+                  </div>
+                  {activeIteration.prompt && (
+                    <p className="om-step-job-stage-prompt">{activeIteration.prompt}</p>
+                  )}
+                </div>
+              </div>
               <div className="om-step-job-bar">
                 <span className="om-step-muted">
-                  {t('Generating with {model}…', { model: activeIteration.job.model })}
+                  {t('Generating with {model}…', { model: activeJobModelLabel })}
                 </span>
                 <Button
                   variant="ghost"
@@ -803,31 +875,73 @@ export function MediaStep(props: StepProps) {
               </div>
             </div>
           ) : activeIteration.job && (activeIteration.job.state === 'failed' || activeIteration.job.state === 'cancelled') ? (
-            <div className="om-step-inline-error">
-              <span>
-                {activeIteration.job.error
-                  ? activeIteration.job.error
-                  : activeIteration.job.state === 'cancelled'
-                    ? t('Generation was cancelled.')
-                    : t('Generation failed.')}
-              </span>
-              {!noProvider && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  loading={generating}
-                  onClick={() => void handleGenerate({
-                    prompt: activeIteration.prompt ?? prompt,
-                    model: activeIteration.job?.model,
-                    inputs: activeIteration.inputs,
-                    parameters: (activeIteration.settings?.parameters as Record<string, unknown> | undefined) ?? undefined,
-                    scene: (activeIteration.settings?.scene as string | undefined) ?? activeSceneId,
-                    mode: (activeIteration.settings?.mode as 'text-to-image' | 'text-to-video' | 'text-to-audio' | 'text-to-speech' | undefined) ?? undefined,
-                  })}
-                >
-                  {activeIteration.job.state === 'cancelled' ? t('Run again') : t('Retry')}
-                </Button>
-              )}
+            <div className="om-step-inline-error" role="alert">
+              <div className="om-step-inline-error-copy">
+                <div className="om-step-inline-error-head">
+                  <RemixIcon name="error-warning-line" size={15} aria-hidden="true" />
+                  <strong>
+                    {activeIteration.job.state === 'cancelled'
+                      ? t('Generation was cancelled.')
+                      : showLimitHint
+                        ? t('{model} reached its usage limit or needs access.', { model: activeJobModelLabel })
+                        : t('Generation failed.')}
+                  </strong>
+                </div>
+                {showLimitHint && (
+                  <span className="om-step-inline-error-hint">
+                    {t('Your current model provider hit a limit or needs access. Switch models above or connect another provider to continue.')}
+                  </span>
+                )}
+                {activeIteration.job.error && (
+                  <div className="om-step-inline-error-detail">{activeIteration.job.error}</div>
+                )}
+              </div>
+              <div className="om-step-inline-error-actions">
+                {!noProvider && (
+                  <Button
+                    variant={switchedModel ? 'primary' : 'secondary'}
+                    size="sm"
+                    loading={generating}
+                    onClick={() => void handleGenerate({
+                      prompt: activeIteration.prompt ?? prompt,
+                      model: retryModelId,
+                      inputs: activeIteration.inputs,
+                      parameters: switchedModel
+                        ? undefined
+                        : ((activeIteration.settings?.parameters as Record<string, unknown> | undefined) ?? undefined),
+                      scene: (activeIteration.settings?.scene as string | undefined) ?? activeSceneId,
+                      mode: (activeIteration.settings?.mode as 'text-to-image' | 'text-to-video' | 'text-to-audio' | 'text-to-speech' | undefined) ?? undefined,
+                    })}
+                  >
+                    {activeIteration.job.state === 'cancelled'
+                      ? t('Run again')
+                      : switchedModel && selectedModel
+                        ? t('Retry with {model}', { model: selectedModel.label })
+                        : t('Retry')}
+                  </Button>
+                )}
+                {activeIteration.job.state === 'failed' && (
+                  <>
+                    <Button
+                      variant={showLimitHint && !switchedModel ? 'secondary' : 'ghost'}
+                      size="sm"
+                      icon={<RemixIcon name="plug-line" size={14} />}
+                      onClick={() => nav.openProviders()}
+                    >
+                      {t('Set up a provider')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<RemixIcon name="upload-2-line" size={14} />}
+                      loading={uploading}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {uploadLabel}
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
           ) : activePoolOutputs.length > 0 ? (
             <div className="om-step-media-grid" data-modality={modality}>
@@ -893,7 +1007,11 @@ export function MediaStep(props: StepProps) {
             <p className="om-step-muted">{t('No media outputs attached to this version yet.')}</p>
           )}
         </section>
-      )}
+        );
+        return renderOutputPanel
+          ? renderOutputPanel(outputSection, { status: outputStatus, version: activeIteration.number })
+          : outputSection;
+      })()}
     </>
   );
 
@@ -933,54 +1051,30 @@ export function MediaStep(props: StepProps) {
         generateWorkbench
       )}
 
-      <StepCapabilityBar
-        scenario={scenario}
-        step={step}
-        state={state}
-        run={run}
-        active={active}
-        api={api}
-        pool={pool}
-        toast={toast}
-        nav={nav}
-        stepPrompt={prompt}
-        allowQuickMedia={false}
-      />
+      {(() => {
+        const capabilityNode = (
+          <StepCapabilityBar
+            scenario={scenario}
+            step={step}
+            state={state}
+            run={run}
+            active={active}
+            api={api}
+            pool={pool}
+            toast={toast}
+            nav={nav}
+            stepPrompt={prompt}
+            allowQuickMedia={false}
+            compact
+          />
+        );
+        return renderCapabilityBar ? renderCapabilityBar(capabilityNode) : capabilityNode;
+      })()}
 
       {renderIterations({
-        renderOutput: (iteration: StepIteration) => {
-          if (iteration.job && (iteration.job.state === 'queued' || iteration.job.state === 'running')) {
-            return <Skeleton className="om-step-iter-skeleton" />;
-          }
-          if (iteration.job && (iteration.job.state === 'failed' || iteration.job.state === 'cancelled')) {
-            return <span className="om-step-iter-error">{iteration.job.error ?? t(jobStateLabel(iteration.job.state))}</span>;
-          }
-          const items = iteration.outputs
-            .filter((out): out is { type: 'pool'; poolItemId: string } => out.type === 'pool')
-            .map(out => pool.byId.get(out.poolItemId))
-            .filter((item): item is PoolItem => Boolean(item));
-          if (!items.length) return <span className="om-step-muted">{t('No outputs')}</span>;
-          return (
-            <div className="om-step-iter-thumbs">
-              {items.slice(0, 4).map(item => (
-                item.ref.type === 'asset' && item.kind === 'image' ? (
-                  <img
-                    key={item.id}
-                    className="om-step-iter-thumb"
-                    src={assetMediaUrl(item.ref.assetId, item.ref.versionId)}
-                    alt={item.label}
-                    loading="lazy"
-                  />
-                ) : (
-                  <span key={item.id} className="om-step-iter-pill">
-                    <RemixIcon name={poolKindIcon(item.kind)} size={13} />
-                    <span>{item.label}</span>
-                  </span>
-                )
-              ))}
-            </div>
-          );
-        },
+        renderOutput: (iteration: StepIteration) => (
+          <StepMediaOutputs iteration={iteration} pool={pool} fallback={t('No outputs')} />
+        ),
       })}
 
       {pickerOpen && (

@@ -32,7 +32,7 @@ import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { ScenarioApiError } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
-import { StepCapabilityBar } from './StepCapabilityBar';
+import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
 import { copyText, extractErrorMessage, isScenarioConflictError } from './stepUtils';
 
 function targetToValue(target: HtmlImageTarget): string {
@@ -138,6 +138,7 @@ export function WebPageStep({
   nav,
   renderExportMenu,
   renderIterations,
+  renderCapabilityBar,
 }: StepProps) {
   const { t, locale } = useI18n();
   const { info: integration } = useIntegrationInfo();
@@ -153,6 +154,7 @@ export function WebPageStep({
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState(false);
   const [showAllTemplates, setShowAllTemplates] = useState(false);
+  const [linkProjectExpanded, setLinkProjectExpanded] = useState(false);
   const [existingProjects, setExistingProjects] = useState<DesignProject[]>([]);
   const [selectedExistingId, setSelectedExistingId] = useState('');
   const [creatingMode, setCreatingMode] = useState<string | null>(null);
@@ -645,7 +647,7 @@ export function WebPageStep({
             <BindingSlot
               slot="embedImages"
               label={t('Images to embed')}
-              hint={t('Optional. Attach images from your shared assets to place automatically.')}
+              hint={t('Optional. Attach images from Assets to place automatically.')}
               kinds={['image']}
               stepId={step.id}
               boundIds={boundEmbedIds}
@@ -677,20 +679,26 @@ export function WebPageStep({
           </div>
         </section>
 
-        <StepCapabilityBar
-          scenario={scenario}
-          step={step}
-          state={state}
-          run={run}
-          active={active}
-          api={api}
-          pool={pool}
-          toast={toast}
-          nav={nav}
-          stepPrompt={pagePrompt}
-          allowQuickMedia
-          defaultModality="image"
-        />
+        {(() => {
+          const capabilityNode = (
+            <StepCapabilityBar
+              scenario={scenario}
+              step={step}
+              state={state}
+              run={run}
+              active={active}
+              api={api}
+              pool={pool}
+              toast={toast}
+              nav={nav}
+              stepPrompt={pagePrompt}
+              allowQuickMedia
+              defaultModality="image"
+              compact
+            />
+          );
+          return renderCapabilityBar ? renderCapabilityBar(capabilityNode) : capabilityNode;
+        })()}
 
         {(templatesLoading || templatesError || visibleTemplates.length > 0) && (
           <section className="om-step-section" aria-label={t('Start from a Design template')}>
@@ -757,37 +765,59 @@ export function WebPageStep({
         )}
 
         {existingProjects.length > 0 && (
-          <section className="om-step-section" aria-label={t('Link an existing Design project')}>
-            <div className="om-step-section-head">
-              <div className="om-brief-composer-lead">
-                <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
-                  <RemixIcon name="link" size={16} />
-                </span>
-                <div>
-                  <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
-                  <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+          <section className="om-step-disclosure" aria-label={t('Link an existing Design project')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="om-step-disclosure-trigger"
+              aria-expanded={linkProjectExpanded}
+              icon={<RemixIcon name={linkProjectExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+              onClick={() => setLinkProjectExpanded(prev => !prev)}
+            >
+              <span>
+                {t('Or reuse an existing Design page')} · {t('{count} available', { count: existingProjects.length })}
+              </span>
+            </Button>
+            {linkProjectExpanded && (
+              <div className="om-step-disclosure-body om-step-disclosure-panel">
+                <div className="om-step-section-head">
+                  <div className="om-brief-composer-lead">
+                    <span className="om-brief-composer-icon" data-tone="web-page" aria-hidden="true">
+                      <RemixIcon name="link" size={16} />
+                    </span>
+                    <div>
+                      <h3 className="om-step-section-title">{t('Link an existing Design project')}</h3>
+                      <p className="om-step-muted">{t('Reuse a Design Studio HTML project already in this workspace.')}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="om-step-link-row">
+                  <Select
+                    label={t('Design project')}
+                    value={selectedExistingId}
+                    options={existingProjects.map(p => ({ value: p.id, label: p.title }))}
+                    onCommit={setSelectedExistingId}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={creatingMode === 'link'}
+                    disabled={!selectedExistingId || creatingMode !== null}
+                    onClick={() => void handleLinkExisting()}
+                  >
+                    {t('Link project')}
+                  </Button>
                 </div>
               </div>
-            </div>
-            <div className="om-step-link-row">
-              <Select
-                label={t('Design project')}
-                value={selectedExistingId}
-                options={existingProjects.map(p => ({ value: p.id, label: p.title }))}
-                onCommit={setSelectedExistingId}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                loading={creatingMode === 'link'}
-                disabled={!selectedExistingId || creatingMode !== null}
-                onClick={() => void handleLinkExisting()}
-              >
-                {t('Link project')}
-              </Button>
-            </div>
+            )}
           </section>
         )}
+
+        {state.iterations.length > 0 && renderIterations({
+          renderOutput: (iteration: StepIteration) => (
+            <StepMediaOutputs iteration={iteration} pool={pool} fallback={t('Page version')} />
+          ),
+        })}
       </div>
     );
   }
@@ -878,7 +908,7 @@ export function WebPageStep({
             </span>
             <div>
               <h3 className="om-step-section-title">{t('Embed images into this page')}</h3>
-              <p className="om-step-muted">{t('Place your shared images directly into the page layout.')}</p>
+              <p className="om-step-muted">{t('Place images from Assets directly into the page layout.')}</p>
             </div>
           </div>
           {boundImages.length > 0 && (
@@ -939,26 +969,32 @@ export function WebPageStep({
         )}
       </section>
 
-      <StepCapabilityBar
-        scenario={scenario}
-        step={step}
-        state={state}
-        run={run}
-        active={active}
-        api={api}
-        pool={pool}
-        toast={toast}
-        nav={nav}
-        stepPrompt={pagePrompt}
-        allowQuickMedia
-        defaultModality="image"
-        onAfterSync={() => loadLinkedProject(designProjectId)}
-      />
+      {(() => {
+        const capabilityNode = (
+          <StepCapabilityBar
+            scenario={scenario}
+            step={step}
+            state={state}
+            run={run}
+            active={active}
+            api={api}
+            pool={pool}
+            toast={toast}
+            nav={nav}
+            stepPrompt={pagePrompt}
+            allowQuickMedia
+            defaultModality="image"
+            compact
+            onAfterSync={() => loadLinkedProject(designProjectId)}
+          />
+        );
+        return renderCapabilityBar ? renderCapabilityBar(capabilityNode) : capabilityNode;
+      })()}
 
       {renderIterations({
         renderOutput: (iteration: StepIteration) => {
           if (!iteration.design) {
-            return <span className="om-step-muted">{t('Page version')}</span>;
+            return <StepMediaOutputs iteration={iteration} pool={pool} fallback={t('Page version')} />;
           }
           const entry = project?.entry ?? 'index.html';
           const versionUrl = iteration.design.versionId

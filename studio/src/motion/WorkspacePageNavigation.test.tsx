@@ -681,6 +681,8 @@ it('shows mixed media in one Explore feed and opens templates and editing preset
   expect(sections[0].classList.contains('om-explore-features')).toBe(true);
   expect(sections[0].querySelector('.om-featured-caption strong')?.textContent).toBe('Product Promo');
   expect(sections[1].getAttribute('aria-labelledby')).toBe('explore-workflows');
+  expect(sections[1].querySelector('#explore-workflows')?.textContent).toBe('Workflows');
+  expect(sections[1].querySelector('header button')?.textContent).toBe('All workflows');
   expect(sections[2].getAttribute('aria-labelledby')).toBe('explore-highlights');
   const scenes = [...explore.querySelectorAll<HTMLElement>('.om-feed-group [data-scene]')];
   expect(scenes.map(card => card.dataset.scene)).toEqual(expect.arrayContaining(['image-edit', 'image-to-video', 'music', 'speech']));
@@ -888,7 +890,9 @@ it.each([
   if (slide === 'ai-influencer') {
     expect(carousel.querySelector('.om-feature-slide:not([inert]) [data-slide-action="destination"]')).toBeNull();
   }
-  await act(async () => carousel.querySelector<HTMLButtonElement>('.om-feature-slide:not([inert]) [data-slide-action="workflow"]')!.click());
+  const primaryCta = carousel.querySelector<HTMLButtonElement>('.om-feature-slide:not([inert]) [data-slide-action="workflow"]')!;
+  expect(primaryCta.textContent).toBe('Start workflow');
+  await act(async () => primaryCta.click());
   const params = new URL(location.href).searchParams;
   expect(params.get('page')).toBe('scenario');
   expect(params.get('scenario')).toBe(scenarioId);

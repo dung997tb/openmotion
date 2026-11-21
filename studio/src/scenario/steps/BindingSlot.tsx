@@ -162,7 +162,7 @@ export function BindingSlot({
     if (!id) return;
     const item = pool.byId.get(id);
     if (!item) {
-      toast.showToast(t('That asset is no longer in shared assets.'), 'error', 'feedback');
+      toast.showToast(t('That asset is no longer in Assets.'), 'error', 'feedback');
       return;
     }
     if (!kinds.includes(item.kind)) {
@@ -232,26 +232,36 @@ export function BindingSlot({
 
       {resolvedItems.length > 0 ? (
         <div className="om-step-chip-list">
-          {resolvedItems.map(({ id, item }) => (
-            <span key={id} className="om-step-bound-chip" data-pool-item-id={id}>
-              <SlotThumb item={item!} />
-              <span className="om-step-bound-chip-label">{item!.label}</span>
-              <IconButton
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                aria-label={t('Remove {label}', { label: item!.label })}
-                icon={<RemixIcon name="close-line" size={12} />}
-                onClick={() => handleRemove(id)}
-              />
-            </span>
-          ))}
+          {resolvedItems.map(({ id, item }) => {
+            const isVisual =
+              item!.ref.type === 'asset' && (item!.kind === 'image' || item!.kind === 'video');
+            return (
+              <span
+                key={id}
+                className={isVisual ? 'om-step-bound-thumb-card' : 'om-step-bound-chip'}
+                data-pool-item-id={id}
+                title={item!.label}
+              >
+                <SlotThumb item={item!} />
+                {!isVisual && <span className="om-step-bound-chip-label">{item!.label}</span>}
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  className={isVisual ? 'om-step-bound-thumb-remove' : undefined}
+                  disabled={busy}
+                  aria-label={t('Remove {label}', { label: item!.label })}
+                  icon={<RemixIcon name="close-line" size={12} />}
+                  onClick={() => handleRemove(id)}
+                />
+              </span>
+            );
+          })}
         </div>
       ) : (
         <p className="om-step-slot-empty">
           {required
-            ? t('Drag assets here or choose from shared assets.')
-            : t('Optional. Drag assets here or choose from shared assets.')}
+            ? t('Drag assets here or choose from Assets.')
+            : t('Optional. Drag assets here or choose from Assets.')}
         </p>
       )}
     </div>

@@ -32,7 +32,26 @@ export type ScenarioBriefField = {
   options?: readonly { id: string; label: string }[];
 };
 
+export type ScenarioWorkspaceMode = 'manual' | 'agent';
+
+export type ScenarioSkillRef = {
+  id: string;
+  label: string;
+  /** 'library' skills are loaded via openmotion_get_skill(skillId); 'workflow' guides via resources/read on resourceUri. */
+  source: 'library' | 'workflow';
+  resourceUri?: string;
+  role: string;
+};
+
 export type PageRecipeId = 'landing' | 'sale' | 'link-in-bio' | 'code-animation';
+
+export type ScenarioStepExecutionMode = 'input' | 'model' | 'direct' | 'agent' | 'hybrid';
+
+export type ScenarioWorkflowEdge = {
+  id: string;
+  from: string;
+  to: string;
+};
 
 export type ScenarioStepDefinition = {
   id: string;
@@ -42,6 +61,11 @@ export type ScenarioStepDefinition = {
   icon: string;
   accepts: readonly PoolKind[];
   produces: readonly PoolKind[];
+  /** Explicit upstream step IDs for the visual workflow graph. Empty array marks a start node. */
+  dependsOn?: readonly string[];
+  /** Primary execution path for this node: user input, direct media model, direct Studio action, external Agent, or hybrid. */
+  executionMode?: ScenarioStepExecutionMode;
+  skills?: readonly ScenarioSkillRef[];
   /** image | video: generator scenes; the first one is the default. */
   scenes?: readonly StudioScene['id'][];
   /** image | video | audio: English template with {field} placeholders seeded from the brief. */
@@ -156,6 +180,23 @@ export const scenarioDefinitions = [
         icon: 'file-text-line',
         accepts: [],
         produces: ['text'],
+        dependsOn: [],
+        executionMode: 'input',
+        skills: [
+          {
+            id: 'openmotion-director',
+            label: 'Director Brief',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/director/start',
+            role: 'Creative direction and narrative structure',
+          },
+          {
+            id: 'openmotion-shot-breakdown',
+            label: 'Shot Breakdown',
+            source: 'library',
+            role: 'Scene-by-scene shot plan and pacing',
+          },
+        ],
       },
       {
         id: 'storyboard',
@@ -165,6 +206,17 @@ export const scenarioDefinitions = [
         icon: 'image-line',
         accepts: ['image'],
         produces: ['image'],
+        dependsOn: ['brief'],
+        executionMode: 'model',
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Media Generation',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'Storyboard frames and visual references',
+          },
+        ],
         scenes: ['text-to-image', 'shot-image'],
         promptTemplate: 'Storyboard frame for {concept}: {visualStyle}, {aspect} composition',
       },
@@ -176,6 +228,23 @@ export const scenarioDefinitions = [
         icon: 'movie-line',
         accepts: ['image', 'audio'],
         produces: ['video', 'motion'],
+        dependsOn: ['storyboard', 'soundtrack'],
+        executionMode: 'hybrid',
+        skills: [
+          {
+            id: 'openmotion-storyboard-to-motion',
+            label: 'Storyboard to Motion',
+            source: 'library',
+            role: 'Turn storyboard frames into animated film',
+          },
+          {
+            id: 'openmotion-production',
+            label: 'Motion Production',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/production/start',
+            role: 'Editable composition, preview and export',
+          },
+        ],
         scenes: ['image-to-video', 'text-to-video'],
         promptTemplate: 'Motion film sequence for {concept}: {visualStyle}, {aspect}, {durationSeconds}s',
         motion: {
@@ -192,6 +261,17 @@ export const scenarioDefinitions = [
         icon: 'music-2-line',
         accepts: ['text'],
         produces: ['audio'],
+        dependsOn: ['brief'],
+        executionMode: 'model',
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Audio & Music',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'Soundtrack music and voiceover generation',
+          },
+        ],
         audioModes: ['music', 'speech'],
         promptTemplate: '{tone} soundtrack for {concept}, {durationSeconds}s',
         optional: true,
@@ -204,6 +284,16 @@ export const scenarioDefinitions = [
         icon: 'chat-1-line',
         accepts: ['image', 'video', 'page'],
         produces: ['text'],
+        dependsOn: ['motion-film'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Launch Copy',
+            source: 'library',
+            role: 'Platform-ready launch hooks and captions',
+          },
+        ],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu'],
       },
     ],
@@ -232,6 +322,17 @@ export const scenarioDefinitions = [
         icon: 'file-text-line',
         accepts: [],
         produces: ['text'],
+        dependsOn: [],
+        executionMode: 'input',
+        skills: [
+          {
+            id: 'openmotion-director',
+            label: 'Creative Direction',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/director/start',
+            role: 'Visual concept, rhythm and art direction',
+          },
+        ],
       },
       {
         id: 'code-animation',
@@ -241,6 +342,23 @@ export const scenarioDefinitions = [
         icon: 'code-s-slash-line',
         accepts: ['image'],
         produces: ['page'],
+        dependsOn: ['brief'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-design',
+            label: 'Interactive HTML & Canvas',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/design/start',
+            role: 'Self-contained HTML/CSS/Canvas animation',
+          },
+          {
+            id: 'openmotion-aurora-gradient',
+            label: 'Aurora Gradient',
+            source: 'library',
+            role: 'Luminous neon glow and shader-style gradients',
+          },
+        ],
         page: {
           recipe: 'code-animation',
           designScenario: 'live-artifact',
@@ -256,6 +374,17 @@ export const scenarioDefinitions = [
         icon: 'image-line',
         accepts: ['image'],
         produces: ['image'],
+        dependsOn: ['brief'],
+        executionMode: 'model',
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Key Stills',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'High-impact posters and visual frames',
+          },
+        ],
         scenes: ['text-to-image'],
         promptTemplate: 'Neon key still for {concept}, {codeStyle} visual direction, high contrast studio composition',
       },
@@ -267,6 +396,29 @@ export const scenarioDefinitions = [
         icon: 'clapperboard-line',
         accepts: ['image', 'audio'],
         produces: ['video', 'motion'],
+        dependsOn: ['stills'],
+        executionMode: 'hybrid',
+        skills: [
+          {
+            id: 'openmotion-bubble-field',
+            label: 'Bubble Field',
+            source: 'library',
+            role: 'Procedural floating light and particle motion',
+          },
+          {
+            id: 'openmotion-neon-outline-type',
+            label: 'Neon Outline Type',
+            source: 'library',
+            role: 'Kinetic glowing headline typography',
+          },
+          {
+            id: 'openmotion-production',
+            label: 'Motion Production',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/production/start',
+            role: 'Editable timeline assembly and MP4 export',
+          },
+        ],
         scenes: ['image-to-video', 'text-to-video'],
         promptTemplate: 'Fluid motion sequence for {concept} in {codeStyle} style, {durationSeconds}s',
         motion: {
@@ -283,6 +435,16 @@ export const scenarioDefinitions = [
         icon: 'chat-1-line',
         accepts: ['image', 'video', 'page'],
         produces: ['text'],
+        dependsOn: ['code-animation', 'film'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Social Copy',
+            source: 'library',
+            role: 'Launch captions tailored per channel',
+          },
+        ],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu', 'linkedin'],
       },
     ],
@@ -313,6 +475,17 @@ export const scenarioDefinitions = [
         icon: 'file-text-line',
         accepts: [],
         produces: ['text'],
+        dependsOn: [],
+        executionMode: 'input',
+        skills: [
+          {
+            id: 'openmotion-design',
+            label: 'Design Brief',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/design/start',
+            role: 'Page hierarchy, sections and UX structure',
+          },
+        ],
       },
       {
         id: 'landing-page',
@@ -322,6 +495,16 @@ export const scenarioDefinitions = [
         icon: 'layout-line',
         accepts: ['image'],
         produces: ['page'],
+        dependsOn: ['brief'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-design-styles',
+            label: 'Design Styles',
+            source: 'library',
+            role: 'Cohesive visual tokens, typography and layout',
+          },
+        ],
         page: {
           recipe: 'landing',
           designScenario: 'prototype',
@@ -337,6 +520,17 @@ export const scenarioDefinitions = [
         icon: 'image-line',
         accepts: ['image'],
         produces: ['image'],
+        dependsOn: ['brief'],
+        executionMode: 'model',
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Hero & Product Visuals',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'Generate and edit hero photography',
+          },
+        ],
         scenes: ['text-to-image', 'image-edit', 'remove-background', 'relight'],
         promptTemplate: 'Hero image for {productName}: {valueProps}, {visualStyle}',
       },
@@ -348,6 +542,17 @@ export const scenarioDefinitions = [
         icon: 'file-image-line',
         accepts: ['image', 'page'],
         produces: ['page'],
+        dependsOn: ['landing-page', 'page-images'],
+        executionMode: 'direct',
+        skills: [
+          {
+            id: 'openmotion-design',
+            label: 'Asset Embedding',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/design/start',
+            role: 'Embed pinned images into responsive HTML',
+          },
+        ],
         page: {
           recipe: 'landing',
           designScenario: 'prototype',
@@ -364,6 +569,22 @@ export const scenarioDefinitions = [
         icon: 'clapperboard-line',
         accepts: ['image', 'audio'],
         produces: ['video', 'motion'],
+        dependsOn: ['page-images'],
+        executionMode: 'hybrid',
+        skills: [
+          {
+            id: 'openmotion-website-launch',
+            label: 'Website Launch Film',
+            source: 'library',
+            role: 'Product and landing-page launch animation',
+          },
+          {
+            id: 'openmotion-storyboard-to-motion',
+            label: 'Storyboard to Motion',
+            source: 'library',
+            role: 'Animate hero visuals into a promo clip',
+          },
+        ],
         scenes: ['image-to-video', 'text-to-video'],
         promptTemplate: 'Launch promo video for {productName}: {valueProps}, {visualStyle}',
         motion: {
@@ -380,6 +601,16 @@ export const scenarioDefinitions = [
         icon: 'chat-1-line',
         accepts: ['image', 'video', 'page'],
         produces: ['text'],
+        dependsOn: ['embed-images', 'promo-video'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Launch Copy',
+            source: 'library',
+            role: 'Channel-ready launch posts and hooks',
+          },
+        ],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu', 'linkedin'],
       },
     ],
@@ -413,6 +644,16 @@ export const scenarioDefinitions = [
         icon: 'file-text-line',
         accepts: [],
         produces: ['text'],
+        dependsOn: [],
+        executionMode: 'input',
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Campaign Script',
+            source: 'library',
+            role: 'Offer positioning, hooks and conversion copy',
+          },
+        ],
       },
       {
         id: 'product-images',
@@ -422,6 +663,23 @@ export const scenarioDefinitions = [
         icon: 'image-line',
         accepts: ['image'],
         produces: ['image'],
+        dependsOn: ['brief'],
+        executionMode: 'model',
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Studio Product Media',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'Product photography, relighting and cutouts',
+          },
+          {
+            id: 'openmotion-flat-lay-product',
+            label: 'Flat-Lay Product',
+            source: 'library',
+            role: 'Commercial product framing and composition',
+          },
+        ],
         scenes: ['text-to-image', 'image-edit', 'remove-background', 'relight'],
         promptTemplate: 'Commercial product photo of {productName}: {productDescription}, bold Black Friday campaign lighting',
       },
@@ -433,6 +691,17 @@ export const scenarioDefinitions = [
         icon: 'layout-line',
         accepts: ['image'],
         produces: ['page'],
+        dependsOn: ['product-images'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-design',
+            label: 'Sale Detail Page',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/design/start',
+            role: 'Responsive sale page with embedded product photos',
+          },
+        ],
         page: {
           recipe: 'sale',
           designScenario: 'prototype',
@@ -448,6 +717,28 @@ export const scenarioDefinitions = [
         icon: 'clapperboard-line',
         accepts: ['image', 'audio'],
         produces: ['video', 'motion'],
+        dependsOn: ['product-images'],
+        executionMode: 'hybrid',
+        skills: [
+          {
+            id: 'openmotion-sale-countdown',
+            label: 'Sale Countdown',
+            source: 'library',
+            role: 'Urgency countdown intro and offer beats',
+          },
+          {
+            id: 'openmotion-sale-promo',
+            label: 'Sale Promo',
+            source: 'library',
+            role: 'High-impact discount showcase motion',
+          },
+          {
+            id: 'openmotion-sale-carousel',
+            label: 'Sale Carousel',
+            source: 'library',
+            role: 'Multi-angle product card reveal',
+          },
+        ],
         scenes: ['image-to-video', 'video-multi-shot'],
         promptTemplate: '30s Black Friday sales film for {productName}: {salePrice}, code {promoCode}, {saleWindow}',
         motion: {
@@ -464,6 +755,16 @@ export const scenarioDefinitions = [
         icon: 'chat-1-line',
         accepts: ['image', 'video', 'page'],
         produces: ['text'],
+        dependsOn: ['detail-page', 'sales-film'],
+        executionMode: 'agent',
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Promo Posts',
+            source: 'library',
+            role: 'Pricing, promo code and countdown posts',
+          },
+        ],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu'],
       },
     ],
@@ -495,6 +796,14 @@ export const scenarioDefinitions = [
         icon: 'file-text-line',
         accepts: [],
         produces: ['text'],
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Episode Script',
+            source: 'library',
+            role: 'Hook, talking points and closing CTA script',
+          },
+        ],
       },
       {
         id: 'persona',
@@ -504,6 +813,15 @@ export const scenarioDefinitions = [
         icon: 'user-3-line',
         accepts: ['image'],
         produces: ['image'],
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Character Visuals',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'Consistent persona portraits from references',
+          },
+        ],
         scenes: ['character', 'text-to-image'],
         promptTemplate: 'Consistent portrait of {personaName}, {niche} creator talking about {topic}, natural studio lighting',
       },
@@ -515,6 +833,15 @@ export const scenarioDefinitions = [
         icon: 'global-line',
         accepts: ['image'],
         produces: ['page'],
+        skills: [
+          {
+            id: 'openmotion-design',
+            label: 'Link-in-Bio Page',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/design/start',
+            role: 'Creator profile page with persona gallery',
+          },
+        ],
         page: {
           recipe: 'link-in-bio',
           designScenario: 'prototype',
@@ -530,6 +857,15 @@ export const scenarioDefinitions = [
         icon: 'voiceprint-line',
         accepts: ['text'],
         produces: ['audio'],
+        skills: [
+          {
+            id: 'openmotion-media',
+            label: 'Voiceover & Music',
+            source: 'workflow',
+            resourceUri: 'openmotion://workflow/media/start',
+            role: 'Spoken narration and background track',
+          },
+        ],
         audioModes: ['speech', 'music'],
         promptTemplate: '{voiceStyle} voiceover for {personaName} covering {topic}',
       },
@@ -541,6 +877,26 @@ export const scenarioDefinitions = [
         icon: 'movie-line',
         accepts: ['image', 'audio'],
         produces: ['video', 'motion'],
+        skills: [
+          {
+            id: 'openmotion-talking-head-recreation',
+            label: 'Talking Head Film',
+            source: 'library',
+            role: 'Presenter video pacing and motion graphics',
+          },
+          {
+            id: 'openmotion-presenter-story',
+            label: 'Presenter Story',
+            source: 'library',
+            role: 'Creator narrative framing and overlays',
+          },
+          {
+            id: 'openmotion-caption-styling',
+            label: 'Caption Styling',
+            source: 'library',
+            role: 'Dynamic synced creator subtitles',
+          },
+        ],
         scenes: ['image-to-video', 'video-native-audio'],
         promptTemplate: 'Talking-head creator clip of {personaName} explaining {topic}, natural gestures and framing',
         motion: {
@@ -557,6 +913,14 @@ export const scenarioDefinitions = [
         icon: 'chat-1-line',
         accepts: ['image', 'video', 'page'],
         produces: ['text'],
+        skills: [
+          {
+            id: 'openmotion-ad-script',
+            label: 'Social Distribution',
+            source: 'library',
+            role: 'Multi-platform episode hooks and links',
+          },
+        ],
         platforms: ['x', 'instagram', 'tiktok', 'douyin', 'xiaohongshu', 'linkedin'],
       },
     ],
@@ -572,14 +936,15 @@ export const findScenarioStep = (scenario: ScenarioDefinition, stepId: unknown):
 export const scenariosByCategory = (category: ScenarioCategory): ScenarioDefinition[] =>
   scenarioDefinitions.filter(scenario => scenario.category === category);
 
+function formatBriefValue(raw: string | string[] | undefined): string {
+  if (Array.isArray(raw)) {
+    return raw.map(item => String(item).trim()).filter(Boolean).join(', ');
+  }
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
 export function fillScenarioTemplate(template: string, brief: Record<string, string | string[]>): string {
-  const replaced = template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key: string) => {
-    const raw = brief[key];
-    if (Array.isArray(raw)) {
-      return raw.map(item => String(item).trim()).filter(Boolean).join(', ');
-    }
-    return typeof raw === 'string' ? raw.trim() : '';
-  });
+  const replaced = template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key: string) => formatBriefValue(brief[key]));
   return replaced
     .replace(/\bcode\s*(?=[,;.]|$)/gi, '')
     .replace(/:\s*,/g, ': ')
@@ -654,23 +1019,23 @@ export function scenarioAgentPrompt(
     (step, index) => `${index + 1}. ${step.title} (${step.id}, ${step.type}): ${step.hint} ${stepToolGuide(step)}`,
   );
   const lines = [
-    `Run the OpenMotion "${scenario.title}" (${scenario.id}) end-to-end scenario workflow.`,
+    `Run the OpenMotion "${scenario.title}" (${scenario.id}) end-to-end workflow.`,
     `Goal: ${scenario.description}`,
     options?.locale ? `Reply and write visible copy in: ${options.locale}` : null,
     options?.integration?.previewUrl ? `Studio URL: ${options.integration.previewUrl}` : null,
     options?.integration?.dataDirectory ? `Workspace: ${options.integration.dataDirectory}` : null,
     '',
     'Run tracking:',
-    `- Use openmotion_assets_use with action=scenario (command=create, command=get, command=update_brief, command=sync) to track this run and share every asset in the run pool.`,
+    `- Use openmotion_assets_use with action=scenario (command=create, command=list, command=get, command=update_brief, command=sync) to track this workflow run and save every output into this run's Assets.`,
     '',
     'Ordered steps:',
     ...stepLines,
     '',
     'Tool composition across the workflow:',
-    '- Media discovery & generation: call openmotion_media_use (action=inspect, action=models), then openmotion_assets_use (action=generate, action=status) or scenario command=generate/sync.',
-    '- HTML web pages: call openmotion_design_project (action=create/get/open), then openmotion_design_edit (action=write and action=import_asset) to author HTML and embed pinned workspace assets.',
-    '- Editable Motion films: call openmotion_create_project, import selected pool versions via openmotion_assets_use (action=import_to_project), and deliver via openmotion_open_preview.',
-    '- Export from Shared assets or header: call openmotion_assets_use with action=scenario, command=export (optionally passing poolItemIds or stepIds) to build a downloadable ZIP package of selected assets or all deliverables.',
+    '- Media discovery & direct generation: call openmotion_media_use (action=inspect, action=models), then generate directly into this workflow run with openmotion_assets_use (action=scenario, command=generate) and poll command=sync; or use openmotion_assets_use (action=generate/status) and save edited/selected asset versions back via action=scenario command=add_pool with recordIteration=true.',
+    '- HTML web pages: call openmotion_design_project (action=create/get/open), then openmotion_design_edit (action=write and action=import_asset) to author HTML and embed pinned workspace assets; link or refresh in the workflow run via command=link_design.',
+    '- Editable Motion films: call openmotion_create_project, import selected asset versions via openmotion_assets_use (action=import_to_project), preview via openmotion_open_preview, and link to the step via command=link_motion.',
+    '- Export from Assets or header: call openmotion_assets_use with action=scenario, command=export (optionally passing poolItemIds or stepIds) to build a downloadable ZIP package of selected assets or all deliverables.',
     '',
     'Delivery & safety requirements:',
     '- Pass an explicit stable requestId on every mutating call and current expectedRevision on run and design edits.',
@@ -703,29 +1068,29 @@ function stepWriteBackLines(
     '',
     'Step write-back instructions:',
     trimmedPrompt ? `- Current step prompt: ${trimmedPrompt}` : '',
-    `- Generate images, videos, or audio directly into this step and Shared assets: openmotion_assets_use (action=scenario, command=generate, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", modality, model, prompt), then poll command=sync until completed.`,
-    `- Write an existing or workspace asset back into this step and Shared assets: openmotion_assets_use (action=scenario, command=add_pool, runId=${run.id}, expectedRevision=${run.revision}, items=[{ ref: { type: "asset", assetId, versionId }, stepId: "${focusStep.id}", source: "agent", label }]), plus command=add_iteration with outputs: [{ type: "pool", poolItemId }] when recording a new version in this step.`,
+    `- Direct multimodal generation into this step and Assets: openmotion_assets_use (action=scenario, command=generate, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", modality, model, prompt), then poll command=sync until completed.`,
+    `- Save Agent-created or refined workspace assets into this workflow version's Assets and step history atomically: openmotion_assets_use (action=scenario, command=add_pool, runId=${run.id}, expectedRevision=${run.revision}, requestId="<stable-id>", recordIteration=true, items=[{ ref: { type: "asset", assetId, versionId }, stepId: "${focusStep.id}", source: "agent", label }]).`,
   ].filter(Boolean);
 
   if (focusStep.type === 'web-page') {
     lines.push(
-      `- Author or update the HTML page via openmotion_design_project + openmotion_design_edit (action=write / action=import_asset), then link it back with openmotion_assets_use (action=scenario, command=link_design, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", designProjectId=<id>).`,
+      `- Author or update the HTML page via openmotion_design_project + openmotion_design_edit (action=write / action=import_asset), then link it back to this step and Assets with openmotion_assets_use (action=scenario, command=link_design, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", designProjectId=<id>).`,
     );
   } else if (focusStep.type === 'brief') {
     lines.push(
-      `- Save brief fields or scripts via openmotion_assets_use (action=scenario, command=update_brief / command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}"), plus command=add_pool for any accompanying visuals or videos.`,
+      `- Save brief fields or scripts via openmotion_assets_use (action=scenario, command=update_brief / command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>"), plus command=add_pool (recordIteration=true) for any accompanying visuals, audio, or video.`,
     );
   } else if (focusStep.type === 'social-pack') {
     lines.push(
-      `- Save platform posts via openmotion_assets_use (action=scenario, command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", iteration={ source: "agent", outputs: [{ type: "social", posts }] }), plus command=add_pool for any accompanying visuals or videos.`,
+      `- Save platform posts via openmotion_assets_use (action=scenario, command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", iteration={ source: "agent", outputs: [{ type: "social", posts }] }), plus command=add_pool (recordIteration=true) for any accompanying visuals or video.`,
     );
   } else if (focusStep.type === 'video') {
     lines.push(
-      `- For an editable Motion project: openmotion_create_project + openmotion_assets_use (action=import_to_project) + openmotion_assets_use (action=scenario, command=link_motion, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", projectId=<id>).`,
+      `- For an editable Motion project: openmotion_create_project + openmotion_assets_use (action=import_to_project) + openmotion_assets_use (action=scenario, command=link_motion, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", projectId=<id>).`,
     );
   }
   lines.push(
-    `- Package all deliverables or specific Shared assets into a ZIP via openmotion_assets_use (action=scenario, command=export, runId=${run.id}, requestId, poolItemIds=[...]).`,
+    `- Package all deliverables or specific Assets into a ZIP via openmotion_assets_use (action=scenario, command=export, runId=${run.id}, requestId="<stable-id>", poolItemIds=[...]).`,
   );
   return lines;
 }
@@ -739,7 +1104,7 @@ export function scenarioRunAgentPrompt(
   const focusStep = options?.stepId ? findScenarioStep(scenario, options.stepId) : undefined;
   const briefEntries = Object.entries(run.brief)
     .map(([key, value]) => {
-      const formatted = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value ?? '').trim();
+      const formatted = formatBriefValue(value);
       return formatted ? `- ${key}: ${formatted}` : null;
     })
     .filter((entry): entry is string => entry !== null);
@@ -779,10 +1144,112 @@ export function scenarioRunAgentPrompt(
     'Linked projects:',
     ...(linkLines.length ? linkLines : ['- (none yet)']),
     '',
-    'Shared asset pool:',
+    'Workflow assets:',
     ...(poolLines.length ? poolLines : ['- (empty)']),
     '',
     `Read the latest state first with openmotion_assets_use action=scenario command=get runId=${run.id}.`,
+  ];
+  return lines.filter((line): line is string => line !== null).join('\n');
+}
+
+/** Deduplicate Skills across a scenario's steps while preserving first-seen order. */
+export function scenarioSkills(scenario: ScenarioDefinition): ScenarioSkillRef[] {
+  const seen = new Set<string>();
+  const skills: ScenarioSkillRef[] = [];
+  for (const step of scenario.steps) {
+    for (const skill of step.skills ?? []) {
+      if (seen.has(skill.id)) continue;
+      seen.add(skill.id);
+      skills.push(skill);
+    }
+  }
+  return skills;
+}
+
+function collectLinkedProjectSummary(scenario: ScenarioDefinition, run?: ScenarioRunSummaryForPrompt | null): string {
+  if (!run) return '';
+  const linked: string[] = [];
+  for (const step of scenario.steps) {
+    const links = run.steps[step.id]?.links;
+    if (links?.designProjectId) linked.push(`${step.id}:design=${links.designProjectId}`);
+    if (links?.motionProjectId) {
+      linked.push(`${step.id}:motion=${links.motionProjectId}${links.motionSessionId ? `(session=${links.motionSessionId})` : ''}`);
+    }
+  }
+  return linked.join('; ');
+}
+
+function formatConciseAssetsSummary(run?: ScenarioRunSummaryForPrompt | null): string {
+  if (!run?.pool.length) return 'none';
+  return [...run.pool]
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+    .slice(0, 20)
+    .map(item => `${formatPoolRef(item.ref)} "${item.label}"${item.pinned ? ' (pinned)' : ''}`)
+    .join('; ');
+}
+
+/** Compact workflow handoff combining high-signal metadata, step Skills pipeline, and executable MCP instructions. */
+export function scenarioConcisePrompt(
+  scenario: ScenarioDefinition,
+  run?: ScenarioRunSummaryForPrompt | null,
+  options?: { customPrompt?: string; locale?: string | null; integration?: ScenarioPromptIntegration | null },
+): string {
+  const customTask = options?.customPrompt?.trim() ?? '';
+  const briefIdea = formatBriefValue(run?.brief?.idea);
+  const mainTask = (customTask || briefIdea || scenario.description).replace(/\s*\r?\n+\s*/g, ' ').trim();
+  const ideaShownAsMain = !customTask && Boolean(briefIdea);
+
+  const effectiveLocale = (options?.locale ?? run?.locale)?.trim() || '';
+  const workspace = options?.integration?.dataDirectory?.trim() || '';
+  const studioUrl = options?.integration?.previewUrl?.trim() || '';
+  const linkedSummary = collectLinkedProjectSummary(scenario, run);
+
+  const paramParts: string[] = [];
+  if (run) {
+    for (const [key, value] of Object.entries(run.brief)) {
+      const formatted = formatBriefValue(value).replace(/\s+/g, ' ');
+      if (!formatted) continue;
+      if (key === 'idea' && (ideaShownAsMain || formatted === mainTask)) continue;
+      paramParts.push(`${key}=${formatted}`);
+    }
+  }
+
+  const pipelineLines = scenario.steps.map((step, idx) => {
+    const refs = (step.skills ?? [])
+      .map(skill => (skill.source === 'library' ? `library:${skill.id}` : `resource:${skill.resourceUri ?? skill.id}`))
+      .join(', ');
+    return `${idx + 1}. ${step.id} (${step.title}) -> ${refs || 'none'}`;
+  });
+
+  const firstInstruction = run
+    ? `1. Read current state first: openmotion_assets_use(action="scenario", scenario={ command: "get", runId: ${JSON.stringify(run.id)} })`
+    : `1. Read current state first: openmotion_assets_use(action="scenario", scenario={ command: "create", scenarioId: ${JSON.stringify(scenario.id)}, requestId: "<stable-id>" })`;
+
+  const lines: (string | null)[] = [
+    `Run OpenMotion Workflow: "${scenario.title}" (${scenario.id}).`,
+    '',
+    '[Metadata]',
+    `workflow: ${scenario.id}`,
+    run ? `runId: ${run.id}` : 'runId: (create via openmotion_assets_use action=scenario command=create)',
+    run ? `expectedRevision: ${run.revision}` : null,
+    workspace ? `workspace: ${workspace}` : null,
+    studioUrl ? `studioUrl: ${studioUrl}` : null,
+    effectiveLocale ? `locale: ${effectiveLocale}` : null,
+    linkedSummary ? `linkedProjects: ${linkedSummary}` : null,
+    `assets: ${formatConciseAssetsSummary(run)}`,
+    '',
+    '[Task & Parameters]',
+    `task: ${mainTask}`,
+    paramParts.length ? `params: ${paramParts.join(' | ')}` : null,
+    '',
+    '[Skills Pipeline]',
+    ...pipelineLines,
+    '',
+    '[Instructions]',
+    firstInstruction,
+    '2. Load the workflow\'s Skills before authoring: call openmotion_get_skill(skillId) for every library:* Skill and resources/read for every resource:* guide.',
+    `3. Execute steps end to end with OpenMotion MCP tools (${scenarioRecipeTools.join(', ')}).`,
+    '4. Write every output back to this run\'s Assets (command="generate" + command="sync", command="add_pool" with recordIteration=true, command="link_design", command="link_motion", command="add_iteration", optional command="export") using current expectedRevision and a stable requestId.',
   ];
   return lines.filter((line): line is string => line !== null).join('\n');
 }

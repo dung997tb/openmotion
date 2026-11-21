@@ -16,7 +16,7 @@ import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
 import { SocialPlatformGlyph } from './SocialPlatformGlyph';
-import { StepCapabilityBar } from './StepCapabilityBar';
+import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
 import {
   briefStringValue,
   buildStepAgentPrompt,
@@ -89,6 +89,7 @@ export function SocialPackStep({
   nav,
   renderExportMenu,
   renderIterations,
+  renderCapabilityBar,
 }: StepProps) {
   const { t, locale } = useI18n();
   const { info: integration } = useIntegrationInfo();
@@ -337,7 +338,7 @@ export function SocialPackStep({
             </span>
             <div>
               <h3 className="om-step-section-title">{t('Compose social posts')}</h3>
-              <p className="om-step-muted">{t('Pick your channels, attach shared assets, and generate ready-to-post copy.')}</p>
+              <p className="om-step-muted">{t('Pick your channels, attach images or video from Assets, and generate ready-to-post copy.')}</p>
             </div>
           </div>
         </div>
@@ -434,20 +435,26 @@ export function SocialPackStep({
         </div>
       </section>
 
-      <StepCapabilityBar
-        scenario={scenario}
-        step={step}
-        state={state}
-        run={run}
-        active={active}
-        api={api}
-        pool={pool}
-        toast={toast}
-        nav={nav}
-        stepPrompt={socialStepPrompt}
-        allowQuickMedia
-        defaultModality="image"
-      />
+      {(() => {
+        const capabilityNode = (
+          <StepCapabilityBar
+            scenario={scenario}
+            step={step}
+            state={state}
+            run={run}
+            active={active}
+            api={api}
+            pool={pool}
+            toast={toast}
+            nav={nav}
+            stepPrompt={socialStepPrompt}
+            allowQuickMedia
+            defaultModality="image"
+            compact
+          />
+        );
+        return renderCapabilityBar ? renderCapabilityBar(capabilityNode) : capabilityNode;
+      })()}
 
       {posts.length > 0 && (
         <div className="om-step-social-list">
@@ -662,23 +669,7 @@ export function SocialPackStep({
         renderOutput: (iteration: StepIteration) => {
           const iterPosts = extractPostsFromIteration(iteration);
           if (!iterPosts.length) {
-            const mediaItems = iteration.outputs
-              .filter((out): out is { type: 'pool'; poolItemId: string } => out.type === 'pool')
-              .map(out => pool.byId.get(out.poolItemId))
-              .filter((item): item is PoolItem => Boolean(item));
-            if (mediaItems.length) {
-              return (
-                <div className="om-step-iter-thumbs">
-                  {mediaItems.slice(0, 4).map(item => (
-                    <span key={item.id} className="om-step-iter-pill">
-                      <RemixIcon name={poolKindIcon(item.kind)} size={13} />
-                      <span>{item.label}</span>
-                    </span>
-                  ))}
-                </div>
-              );
-            }
-            return <span className="om-step-muted">{t('No posts')}</span>;
+            return <StepMediaOutputs iteration={iteration} pool={pool} fallback={t('No posts')} />;
           }
           const labels = iterPosts.map(p => t(socialPlatforms.find(s => s.id === p.platform)?.label ?? p.platform));
           return (

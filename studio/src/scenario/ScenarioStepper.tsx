@@ -14,17 +14,14 @@ export type ScenarioStepperProps = {
   onSelectStep(stepId: string): void;
 };
 
-function statusGlyph(status: ScenarioStepState['status']): { icon: string; label: string } {
-  switch (status) {
-    case 'done':
-      return { icon: 'checkbox-circle-fill', label: 'Done' };
-    case 'in-progress':
-      return { icon: 'checkbox-blank-circle-fill', label: 'In progress' };
-    case 'skipped':
-      return { icon: 'subtract-line', label: 'Skipped' };
-    default:
-      return { icon: 'circle-line', label: 'To do' };
+function statusGlyph(status: ScenarioStepState['status']): { icon: string; label: string } | null {
+  if (status === 'in-progress') {
+    return { icon: 'checkbox-blank-circle-fill', label: 'In progress' };
   }
+  if (status === 'skipped') {
+    return { icon: 'subtract-line', label: 'Skipped' };
+  }
+  return null;
 }
 
 export function ScenarioStepper({
@@ -96,7 +93,7 @@ export function ScenarioStepper({
                       <RemixIcon name={step.icon} size={14} />
                     </span>
                     <span className="om-scenario-step-tab-title">{t(step.title)}</span>
-                    {(status === 'in-progress' || status === 'skipped') && (
+                    {glyph && (
                       <span
                         className="om-scenario-step-status-glyph"
                         data-status={status}

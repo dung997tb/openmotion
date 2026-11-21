@@ -19,7 +19,7 @@ export function ScenarioHighlights({
     <section className="om-scenario-highlights" aria-labelledby="explore-workflows">
       <header className="om-discovery-heading">
         <div>
-          <h2 id="explore-workflows">{t('Guided workflows')}</h2>
+          <h2 id="explore-workflows">{t('Workflows')}</h2>
           <p className="om-muted">
             {t('Pick a goal and go from idea to finished visuals, pages, videos, and posts.')}
           </p>
@@ -38,7 +38,7 @@ export function ScenarioHighlights({
         </Button>
       </header>
       <HorizontalRail
-        label="Guided workflows"
+        label="Workflows"
         className="om-scenario-highlights-rail"
         viewportClassName="om-scenario-highlights-viewport"
       >

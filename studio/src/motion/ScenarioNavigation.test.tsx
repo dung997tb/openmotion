@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { scenarioCategories, scenarioDefinitions, type ScenarioId } from '../../../shared/scenarios';
 import { I18nProvider } from '../i18n/I18n';
 import { CreativeNavigation, type CreativeNavigationProps } from './CreativeNavigation';
+import { selectMegaMenuRecentRuns } from './ScenarioMegaMenu';
 
 vi.mock('./tracking', () => ({ trackMotion: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -135,6 +136,7 @@ it('places Workflows with a New badge directly after Explore, opens a 3-column m
   // Reopen and click All workflows footer button.
   await act(async () => trigger.click());
   const allBtn = document.querySelector<HTMLButtonElement>('.om-scenario-mega-all')!;
+  expect(allBtn.textContent).toContain('All workflows');
   await act(async () => allBtn.click());
   expect(props.onOpenScenarioHub).toHaveBeenCalledOnce();
 });
@@ -193,4 +195,32 @@ it('moves Workflows into the More Studio overflow panel on narrow widths and kee
   expect(overflowWorkflows).not.toBeNull();
   await act(async () => overflowWorkflows.click());
   expect(props.onOpenScenarioHub).toHaveBeenCalledOnce();
+});
+
+it('deduplicates recent runs per sub-workflow and caps the mega-menu recent strip to 3 items with overflow count', () => {
+  const mk = (id: string, scenarioId: ScenarioId, title: string, updatedAt: number, archivedAt: number | null = null) => ({
+    id,
+    scenarioId,
+    title,
+    createdAt: updatedAt - 1000,
+    updatedAt,
+    archivedAt,
+    revision: 1,
+    activeStepId: 'brief',
+    poolCount: 0,
+    doneSteps: 0,
+    pendingJobs: 0,
+  });
+
+  const { visible, hiddenCount } = selectMegaMenuRecentRuns([
+    mk('r1', 'black-friday', 'Black Friday Latest', 5000),
+    mk('r2', 'black-friday', 'Black Friday Older Duplicate', 4500),
+    mk('r3', 'motion-full-chain', 'Motion Film Draft', 4000),
+    mk('r4', 'design-full-chain', 'Landing Page Draft', 3500),
+    mk('r5', 'ai-influencer', 'Creator Episode', 3000),
+    mk('r6', 'gemini-4-neon', 'Archived Neon', 2500, 2600),
+  ]);
+
+  expect(visible.map(r => r.id)).toEqual(['r1', 'r3', 'r4']);
+  expect(hiddenCount).toBe(2);
 });

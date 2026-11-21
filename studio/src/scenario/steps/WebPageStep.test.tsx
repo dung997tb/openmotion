@@ -254,7 +254,9 @@ describe('WebPageStep', () => {
     });
 
     vi.spyOn(designClient, 'listTemplates').mockResolvedValue({ items: [], nextCursor: null });
-    vi.spyOn(designClient, 'listProjects').mockResolvedValue({ projects: [] });
+    vi.spyOn(designClient, 'listProjects').mockResolvedValue({
+      projects: [makeDesignProject(rev1)],
+    });
     const getProjectSpy = vi.spyOn(designClient, 'getProject').mockResolvedValue({ project: makeDesignProject(rev1) });
     const readFileSpy = vi.spyOn(designClient, 'readFile').mockResolvedValue({
       path: 'index.html',
@@ -300,7 +302,16 @@ describe('WebPageStep', () => {
       expect(copied).toContain('11111111-1111-4111-8111-111111111111');
       expect(copied).toContain('stepId="landing-page"');
       expect(copied).toContain('command=add_pool');
+      expect(copied).toContain('recordIteration=true');
       expect(copied).toContain('command=link_design');
+
+      // Secondary link-existing-project card starts collapsed behind disclosure.
+      expect(draftMounted.container.textContent).not.toContain('Link an existing Design project');
+      const linkDisclosure = Array.from(draftMounted.container.querySelectorAll('button')).find(b =>
+        b.textContent?.includes('Or reuse an existing Design page'),
+      )!;
+      await act(async () => { linkDisclosure.click(); });
+      expect(draftMounted.container.textContent).toContain('Link an existing Design project');
     } finally {
       await draftMounted.unmount();
     }
@@ -316,7 +327,11 @@ describe('WebPageStep', () => {
       const initialReadCalls = readFileSpy.mock.calls.length;
 
       const assistBar = linkedMounted.container.querySelector('[data-step-assist="landing-page"]')!;
-      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate image / video'))!;
+      const mcpGuideBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('MCP guide'))!;
+      await act(async () => { mcpGuideBtn.click(); });
+      expect(linkedSetup.mocks.nav.openMcp).toHaveBeenCalledTimes(1);
+
+      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate media'))!;
       await act(async () => { quickToggle.click(); });
 
       const quickGen = linkedMounted.container.querySelector('[data-quick-gen="landing-page"]')!;

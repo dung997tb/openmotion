@@ -315,7 +315,13 @@
     "AI Influencer": "AI 博主",
     "Featured": "精选",
     "Recreate this template": "复刻模版",
-    "Templates could not be loaded.": "模板加载失败。"
+    "Templates could not be loaded.": "模板加载失败。",
+    "About": "关于",
+    "Privacy Policy": "隐私政策",
+    "Terms of Service": "服务条款",
+    "Refund Policy": "退款政策",
+    "Social channels": "社交与媒体渠道",
+    "Legal and policy links": "条款与政策链接"
   },
   "ja": {
     "Open Motion Editor": "Motion エディターを開く",
@@ -633,7 +639,13 @@
     "AI Influencer": "AI インフルエンサー",
     "Featured": "注目",
     "Recreate this template": "このテンプレートを再現",
-    "Templates could not be loaded.": "テンプレートを読み込めませんでした。"
+    "Templates could not be loaded.": "テンプレートを読み込めませんでした。",
+    "About": "概要",
+    "Privacy Policy": "プライバシーポリシー",
+    "Terms of Service": "利用規約",
+    "Refund Policy": "返金ポリシー",
+    "Social channels": "公式SNS・チャンネル",
+    "Legal and policy links": "規約・ポリシー"
   },
   "ko": {
     "Open Motion Editor": "Motion 편집기 열기",
@@ -951,7 +963,13 @@
     "AI Influencer": "AI 인플루언서",
     "Featured": "추천",
     "Recreate this template": "이 템플릿 다시 만들기",
-    "Templates could not be loaded.": "템플릿을 불러올 수 없습니다."
+    "Templates could not be loaded.": "템플릿을 불러올 수 없습니다.",
+    "About": "소개",
+    "Privacy Policy": "개인정보 처리방침",
+    "Terms of Service": "이용약관",
+    "Refund Policy": "환불 정책",
+    "Social channels": "소셜 채널",
+    "Legal and policy links": "약관 및 정책"
   },
   "de": {
     "Open Motion Editor": "Motion-Editor öffnen",
@@ -1269,7 +1287,13 @@
     "AI Influencer": "KI-Influencer",
     "Featured": "Empfohlen",
     "Recreate this template": "Diese Vorlage nachbauen",
-    "Templates could not be loaded.": "Vorlagen konnten nicht geladen werden."
+    "Templates could not be loaded.": "Vorlagen konnten nicht geladen werden.",
+    "About": "Über",
+    "Privacy Policy": "Datenschutz",
+    "Terms of Service": "Nutzungsbedingungen",
+    "Refund Policy": "Rückerstattungsrichtlinie",
+    "Social channels": "Soziale Kanäle",
+    "Legal and policy links": "Rechtliches & Richtlinien"
   },
   "fr": {
     "Open Motion Editor": "Ouvrir l’éditeur Motion",
@@ -1587,7 +1611,13 @@
     "AI Influencer": "Influenceur IA",
     "Featured": "À la une",
     "Recreate this template": "Recréer ce modèle",
-    "Templates could not be loaded.": "Impossible de charger les modèles."
+    "Templates could not be loaded.": "Impossible de charger les modèles.",
+    "About": "À propos",
+    "Privacy Policy": "Politique de confidentialité",
+    "Terms of Service": "Conditions d’utilisation",
+    "Refund Policy": "Politique de remboursement",
+    "Social channels": "Réseaux sociaux",
+    "Legal and policy links": "Mentions légales et politiques"
   },
   "ru": {
     "Open Motion Editor": "Открыть редактор Motion",
@@ -1905,7 +1935,13 @@
     "AI Influencer": "ИИ-блогер",
     "Featured": "Избранное",
     "Recreate this template": "Воссоздать этот шаблон",
-    "Templates could not be loaded.": "Не удалось загрузить шаблоны."
+    "Templates could not be loaded.": "Не удалось загрузить шаблоны.",
+    "About": "О проекте",
+    "Privacy Policy": "Политика конфиденциальности",
+    "Terms of Service": "Условия использования",
+    "Refund Policy": "Политика возврата",
+    "Social channels": "Социальные сети",
+    "Legal and policy links": "Правовая информация и политики"
   },
   "es": {
     "Open Motion Editor": "Abrir el editor de Motion",
@@ -2223,7 +2259,13 @@
     "AI Influencer": "Influencer IA",
     "Featured": "Destacados",
     "Recreate this template": "Recrear esta plantilla",
-    "Templates could not be loaded.": "No se pudieron cargar las plantillas."
+    "Templates could not be loaded.": "No se pudieron cargar las plantillas.",
+    "About": "Acerca de",
+    "Privacy Policy": "Política de privacidad",
+    "Terms of Service": "Términos de servicio",
+    "Refund Policy": "Política de reembolso",
+    "Social channels": "Canales sociales",
+    "Legal and policy links": "Enlaces legales y políticas"
   },
   "pt-BR": {
     "Open Motion Editor": "Abrir o editor do Motion",
@@ -2541,7 +2583,13 @@
     "AI Influencer": "Influenciador IA",
     "Featured": "Destaques",
     "Recreate this template": "Recriar este modelo",
-    "Templates could not be loaded.": "Não foi possível carregar os modelos."
+    "Templates could not be loaded.": "Não foi possível carregar os modelos.",
+    "About": "Sobre",
+    "Privacy Policy": "Política de privacidade",
+    "Terms of Service": "Termos de serviço",
+    "Refund Policy": "Política de reembolso",
+    "Social channels": "Canais sociais",
+    "Legal and policy links": "Links legais e políticas"
   },
   "it": {
     "Open Motion Editor": "Apri l’editor di Motion",
@@ -2859,7 +2907,13 @@
     "AI Influencer": "Influencer IA",
     "Featured": "In evidenza",
     "Recreate this template": "Ricrea questo modello",
-    "Templates could not be loaded.": "Impossibile caricare i modelli."
+    "Templates could not be loaded.": "Impossibile caricare i modelli.",
+    "About": "Informazioni",
+    "Privacy Policy": "Informativa sulla privacy",
+    "Terms of Service": "Termini di servizio",
+    "Refund Policy": "Politica di rimborso",
+    "Social channels": "Canali social",
+    "Legal and policy links": "Link legali e normative"
   },
   "tr": {
     "Open Motion Editor": "Motion düzenleyicisini aç",
@@ -3177,6 +3231,12 @@
     "AI Influencer": "Yapay Zeka Fenomeni",
     "Featured": "Öne çıkanlar",
     "Recreate this template": "Bu şablonu yeniden oluştur",
-    "Templates could not be loaded.": "Şablonlar yüklenemedi."
+    "Templates could not be loaded.": "Şablonlar yüklenemedi.",
+    "About": "Hakkında",
+    "Privacy Policy": "Gizlilik Politikası",
+    "Terms of Service": "Hizmet Şartları",
+    "Refund Policy": "İade Politikası",
+    "Social channels": "Sosyal kanallar",
+    "Legal and policy links": "Yasal ve politika bağlantıları"
   }
 }

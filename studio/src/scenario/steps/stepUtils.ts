@@ -1,3 +1,4 @@
+import type { Modality, Model, ProviderState } from '../../../../shared/gateway';
 import {
   scenarioAgentPrompt,
   scenarioRunAgentPrompt,
@@ -6,6 +7,9 @@ import {
   type ScenarioPromptIntegration,
 } from '../../../../shared/scenarios';
 import type { ScenarioRun, ScenarioStepState, StepIteration } from '../../../../shared/scenario-runs';
+import { supportsScene, type StudioScene } from '../../motion/creativeStudios';
+import type { loadGateway } from '../../motion/gatewayClient';
+import { providerRank } from '../../motion/imageMenuModels';
 import { ScenarioApiError } from '../scenarioClient';
 
 export const POOL_DRAG_MIME = 'application/x-om-pool-item';
@@ -139,4 +143,71 @@ export function briefStringValue(brief: Record<string, string | string[]>, key: 
   const val = brief[key];
   if (Array.isArray(val)) return val.filter(Boolean).join(', ');
   return typeof val === 'string' ? val : '';
+}
+
+/** Account plans without media entitlement remain signed-in in providers[], so filter them from runnable media models. */
+export function isScenarioProviderReady(provider: ProviderState): boolean {
+  return Boolean(provider.available && !(provider.id === 'account' && provider.mediaEntitlement === 'not-included'));
+}
+
+/** Prefer OpenDesign Cloud/account, then configured API providers, leaving local Codex CLI as fallback. */
+export function scenarioProviderRank(providerId: string): number {
+  if (providerId === 'opendesign') return 0;
+  if (providerId === 'account') return 1;
+  if (providerId === 'codex') return 1000;
+  return 2 + providerRank(providerId);
+}
+
+export function selectScenarioModels(
+  catalog: Awaited<ReturnType<typeof loadGateway>> | undefined,
+  modality: Modality,
+  scene?: StudioScene,
+): Model[] {
+  if (!catalog) return [];
+  const readyProviders = new Set(
+    catalog.status.providers.filter(isScenarioProviderReady).map(p => p.id),
+  );
+  return catalog.models
+    .filter(model => {
+      if (model.modality !== modality) return false;
+      if (scene && !supportsScene(model, scene)) return false;
+      return readyProviders.has(model.provider);
+    })
+    .sort((a, b) => scenarioProviderRank(a.provider) - scenarioProviderRank(b.provider));
+}
+
+export function pickDefaultScenarioModelId(
+  availableModels: Model[],
+  catalog: Awaited<ReturnType<typeof loadGateway>> | undefined,
+  modality: Modality,
+  draftModel?: unknown,
+): string {
+  if (!availableModels.length) return '';
+  const hasNonCodex = availableModels.some(m => m.provider !== 'codex');
+  const isPreferredChoice = (modelId: string | undefined): modelId is string => {
+    if (!modelId) return false;
+    const found = availableModels.find(m => m.id === modelId);
+    if (!found) return false;
+    return !hasNonCodex || found.provider !== 'codex';
+  };
+  if (typeof draftModel === 'string' && isPreferredChoice(draftModel)) {
+    return draftModel;
+  }
+  const routeModel = catalog?.status.routes[modality];
+  if (isPreferredChoice(routeModel)) {
+    return routeModel;
+  }
+  const preferredPool = hasNonCodex
+    ? availableModels.filter(m => m.provider !== 'codex')
+    : availableModels;
+  return preferredPool.find(m => m.mode?.startsWith('text-to-'))?.id ?? preferredPool[0].id;
+}
+
+export function isProviderLimitOrAuthError(message?: string): boolean {
+  return Boolean(
+    message &&
+      /usage limit|purchase more credits|rate limit|quota|insufficient.*credit|401\s*unauthorized|authentication_error|auth_required|forbidden|403/i.test(
+        message,
+      ),
+  );
 }

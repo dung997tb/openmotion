@@ -17,6 +17,7 @@ export type IterationHistoryProps = {
   onRetry(iteration: StepIteration): Promise<void>;
   onCancel(iterationId: string): Promise<void>;
   busy?: ReadonlySet<string>;
+  embedded?: boolean;
 };
 
 const SOURCE_LABELS: Record<StepIteration['source'], string> = {
@@ -38,16 +39,20 @@ export function IterationHistory({
   onRetry,
   onCancel,
   busy,
+  embedded = false,
 }: IterationHistoryProps) {
   const { t, formatDate } = useI18n();
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
 
   const ordered = useMemo(
     () => [...state.iterations].sort((a, b) => b.number - a.number),
     [state.iterations],
   );
+
+  const expanded = embedded ? true : (manualExpanded ?? ordered.length >= 2);
 
   const compareIterations = useMemo(() => {
     const byId = new Map(state.iterations.map(it => [it.id, it]));
@@ -79,34 +84,37 @@ export function IterationHistory({
   };
 
   if (ordered.length === 0) {
-    return (
-      <section className="om-scenario-history om-scenario-history--empty" aria-label={t('Version history')}>
-        <header className="om-scenario-history-header">
-          <h3 className="om-scenario-history-title">
-            <RemixIcon name="history-line" size={15} />
-            <span>{t('Version history')}</span>
-          </h3>
-        </header>
-        <p className="om-muted om-scenario-history-empty-copy">
-          {t('No saved versions yet. Generate, upload, or save in {step} to compare versions side by side.', {
-            step: t(step.title),
-          })}
-        </p>
-      </section>
-    );
+    return null;
   }
 
   return (
-    <section className="om-scenario-history" aria-label={t('Version history')}>
+    <section
+      className="om-scenario-history"
+      data-embedded={embedded ? 'true' : undefined}
+      aria-label={t('Version history')}
+    >
       <header className="om-scenario-history-header">
-        <div className="om-scenario-history-title-group">
-          <h3 className="om-scenario-history-title">
-            <RemixIcon name="history-line" size={15} />
-            <span>{t('Version history')}</span>
-          </h3>
-          <span className="om-badge">{ordered.length}</span>
-        </div>
-        {compareIds.length > 0 && (
+        {embedded ? (
+          <div className="om-scenario-history-heading">
+            <RemixIcon name="history-line" size={14} />
+            <span className="om-scenario-history-title">{t('Version history')}</span>
+            <span className="om-badge">{ordered.length}</span>
+          </div>
+        ) : (
+          <Button
+            variant="plain"
+            type="button"
+            className="om-scenario-history-toggle"
+            aria-expanded={expanded}
+            onClick={() => setManualExpanded(!expanded)}
+          >
+            <RemixIcon name={expanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={15} />
+            <RemixIcon name="history-line" size={14} />
+            <span className="om-scenario-history-title">{t('Version history')}</span>
+            <span className="om-badge">{ordered.length}</span>
+          </Button>
+        )}
+        {expanded && compareIds.length > 0 && (
           <div className="om-scenario-history-compare-status">
             <span className="om-muted">
               {compareIds.length === 1
@@ -120,7 +128,7 @@ export function IterationHistory({
         )}
       </header>
 
-      {compareIterations.length === 2 && (
+      {expanded && compareIterations.length === 2 && (
         <div className="om-scenario-compare-panel" role="region" aria-label={t('Compare versions')}>
           <div className="om-scenario-compare-header">
             <strong>
@@ -173,7 +181,8 @@ export function IterationHistory({
         </div>
       )}
 
-      <div className="om-scenario-history-strip">
+      {expanded && (
+        <div className="om-scenario-history-strip">
         {ordered.map(iteration => {
           const isActive = state.activeIterationId === iteration.id;
           const isComparing = compareIds.includes(iteration.id);
@@ -357,7 +366,8 @@ export function IterationHistory({
             </article>
           );
         })}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

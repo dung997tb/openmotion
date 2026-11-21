@@ -248,6 +248,8 @@ export const scenarioToolArguments = {
     poolItemId: uuid,
     iteration: iterationInputSchema,
     iterationId: uuid,
+    recordIteration: { type: 'boolean' },
+    note: { type: 'string', maxLength: 2000 },
     modality: { enum: ['image', 'video', 'audio'] },
     model: { type: 'string', minLength: 1, maxLength: 300 },
     mode: { enum: ['text-to-image', 'text-to-video', 'text-to-audio', 'text-to-speech', 'starter', 'template', 'blank'] },
@@ -277,7 +279,7 @@ export const scenarioToolArguments = {
   })),
 };
 
-export const scenarioToolDescription = ' action=scenario takes a scenario command to orchestrate end-to-end scenario workflows (catalog, list, get, create, update_run, update_brief, update_step, add_pool, update_pool, remove_pool, add_iteration, generate, sync, cancel, promote, create_page, embed_image, link_design, create_motion, link_motion, export). Runs store pinned asset, Design Studio and Motion project references rather than copying bytes; pass stable requestId and expectedRevision on mutations, poll generate jobs with sync without resubmitting paid work, and call export (optionally passing poolItemIds or stepIds) to build a downloadable ZIP package of selected shared assets or all deliverables.';
+export const scenarioToolDescription = ' action=scenario takes a scenario command to orchestrate end-to-end scenario workflows (catalog, list, get, create, update_run, update_brief, update_step, add_pool, update_pool, remove_pool, add_iteration, generate, sync, cancel, promote, create_page, embed_image, link_design, create_motion, link_motion, export). Runs store pinned workspace Assets, Design Studio and Motion project references rather than copying bytes; pass stable requestId and expectedRevision on mutations, poll generate jobs with sync without resubmitting paid work, call add_pool with recordIteration=true (and stepId on items) to save Agent-refined assets into both Assets and step version history atomically, and call export (optionally passing poolItemIds or stepIds) to build a downloadable ZIP package of selected assets or all deliverables.';
 
 export function parseScenarioError(message: string): { code: string; message: string } {
   const match = /^([A-Z][A-Z0-9_]{1,63}):\s*([\s\S]*)$/.exec(message.trim());

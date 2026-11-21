@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import {
+  findScenario,
   scenarioCategories,
   scenariosByCategory,
   type ScenarioId,
@@ -13,6 +14,29 @@ import { scenarioClient } from '../scenario/scenarioClient';
 import { ExploreCoverImage } from './ExploreCoverImage';
 import './scenarioNavigation.css';
 
+const MAX_MEGA_RECENT = 3;
+const MEGA_RECENT_FETCH_LIMIT = 15;
+
+export function selectMegaMenuRecentRuns(
+  runs: readonly ScenarioRunSummary[],
+  maxItems = MAX_MEGA_RECENT,
+): { visible: ScenarioRunSummary[]; hiddenCount: number } {
+  const seenScenarios = new Set<ScenarioId>();
+  const visible: ScenarioRunSummary[] = [];
+  for (const run of runs) {
+    if (run.archivedAt !== null) continue;
+    if (seenScenarios.has(run.scenarioId)) continue;
+    seenScenarios.add(run.scenarioId);
+    visible.push(run);
+    if (visible.length >= maxItems) break;
+  }
+  const activeCount = runs.filter(run => run.archivedAt === null).length;
+  return {
+    visible,
+    hiddenCount: Math.max(0, activeCount - visible.length),
+  };
+}
+
 export function ScenarioMegaMenu({
   activeScenarioId,
   onSelect,
@@ -24,14 +48,19 @@ export function ScenarioMegaMenu({
 }) {
   const { t } = useI18n();
   const [recentRuns, setRecentRuns] = useState<ScenarioRunSummary[]>([]);
+  const [hiddenRecentCount, setHiddenRecentCount] = useState(0);
+  const [hasMoreRecent, setHasMoreRecent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     scenarioClient
-      .list({ limit: 3 })
+      .list({ limit: MEGA_RECENT_FETCH_LIMIT })
       .then(result => {
         if (!cancelled && Array.isArray(result?.runs)) {
-          setRecentRuns(result.runs.slice(0, 3));
+          const { visible, hiddenCount } = selectMegaMenuRecentRuns(result.runs, MAX_MEGA_RECENT);
+          setRecentRuns(visible);
+          setHiddenRecentCount(hiddenCount);
+          setHasMoreRecent(result.nextOffset !== null && result.nextOffset !== undefined);
         }
       })
       .catch(() => {
@@ -93,18 +122,35 @@ export function ScenarioMegaMenu({
         {recentRuns.length > 0 && (
           <div className="om-scenario-mega-recent" aria-label={t('Recent')}>
             <span className="om-scenario-mega-recent-label">{t('Recent')}</span>
-            {recentRuns.map(run => (
-              <Button
-                key={run.id}
-                variant="plain"
-                className="om-nav-item om-scenario-mega-run"
-                title={run.title}
-                onClick={() => onSelect(run.scenarioId, run.id)}
-              >
-                <RemixIcon name="time-line" size={13} aria-hidden="true" />
-                <span className="om-scenario-mega-run-title">{run.title}</span>
-              </Button>
-            ))}
+            <div className="om-scenario-mega-recent-list">
+              {recentRuns.map(run => {
+                const def = findScenario(run.scenarioId);
+                return (
+                  <Button
+                    key={run.id}
+                    variant="plain"
+                    className="om-nav-item om-scenario-mega-run"
+                    title={def ? `${t(def.title)} · ${run.title}` : run.title}
+                    onClick={() => onSelect(run.scenarioId, run.id)}
+                  >
+                    <RemixIcon name={def?.icon ?? 'time-line'} size={13} aria-hidden="true" />
+                    <span className="om-scenario-mega-run-title">{run.title}</span>
+                  </Button>
+                );
+              })}
+              {(hiddenRecentCount > 0 || hasMoreRecent) && (
+                <Button
+                  variant="plain"
+                  className="om-nav-item om-scenario-mega-more"
+                  title={t('Manage run history')}
+                  onClick={onOpenHub}
+                >
+                  {hiddenRecentCount > 0
+                    ? t('+{count} more', { count: hiddenRecentCount })
+                    : t('More')}
+                </Button>
+              )}
+            </div>
           </div>
         )}
         <Button

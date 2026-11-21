@@ -10,21 +10,27 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from 'open-design-ui/button';
+import { IconButton } from 'open-design-ui/icon-button';
 import {
+  scenarioConcisePrompt,
   findScenarioStep,
   scenarioAgentPrompt,
+  scenarioCategories,
   scenarioRunAgentPrompt,
   type PoolKind,
   type ScenarioStepDefinition,
+  type ScenarioWorkspaceMode,
 } from '../../../shared/scenarios';
 import type {
   PoolItem,
   PoolRef,
   ScenarioBundleReceipt,
+  ScenarioRun,
   ScenarioRunSummary,
   ScenarioStepState,
   StepIteration,
 } from '../../../shared/scenario-runs';
+import { Popover } from '../components/ui/Popover';
 import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
 import { StudioToastViewport } from '../components/StudioToastViewport';
@@ -32,16 +38,20 @@ import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useIntegrationInfo } from '../motion/useIntegrationInfo';
+import { ScenarioAgentModeView } from './ScenarioAgentModeView';
 import { AssetPoolPanel, type PoolPickRequest } from './AssetPoolPanel';
 import { IterationHistory } from './IterationHistory';
 import { bundleDownloadUrl, scenarioClient } from './scenarioClient';
+import { scenarioCover } from './scenarioCovers';
 import { ScenarioHeader } from './ScenarioHeader';
+import { ScenarioRunHistoryDialog } from './ScenarioRunHistoryDialog';
+import { ScenarioStage } from './ScenarioStage';
 import { ScenarioStepper } from './ScenarioStepper';
-import type { ScenarioWorkspaceProps, StepProps } from './stepContract';
+import type { ScenarioWorkspaceProps, StepOutputPanelMeta, StepProps } from './stepContract';
 import { resolveStepPrompt, StepExportMenu } from './StepExportMenu';
 import { StepRouter } from './steps/StepRouter';
 import { isScenarioConflictError } from './steps/stepUtils';
-import { emptyStepState, useScenarioRun } from './useScenarioRun';
+import { countStepPendingJobs, emptyStepState, useScenarioRun } from './useScenarioRun';
 import './scenario.css';
 
 export type { ScenarioWorkspaceProps };
@@ -49,10 +59,15 @@ export type { ScenarioWorkspaceProps };
 const HIGHLIGHT_DURATION_MS = 1500;
 const POOL_WIDTH_STORAGE_KEY = 'opendesign.scenario.poolWidth';
 const POOL_COLLAPSED_STORAGE_KEY = 'opendesign.scenario.poolCollapsed';
+const WORKBENCH_WIDTH_STORAGE_KEY = 'opendesign.scenario.workbenchWidth';
 const DEFAULT_POOL_WIDTH = 320;
 const MIN_POOL_WIDTH = 240;
 const MAX_POOL_WIDTH = 520;
 const POOL_KEYBOARD_STEP = 20;
+const DEFAULT_WORKBENCH_WIDTH = 620;
+const MIN_WORKBENCH_WIDTH = 380;
+const MAX_WORKBENCH_WIDTH = 860;
+const WORKBENCH_KEYBOARD_STEP = 24;
 
 function maxPoolWidthFor(containerWidth: number): number {
   if (!Number.isFinite(containerWidth) || containerWidth <= 0) {
@@ -76,6 +91,32 @@ function readStoredPoolWidth(): number {
       : DEFAULT_POOL_WIDTH;
   } catch {
     return DEFAULT_POOL_WIDTH;
+  }
+}
+
+function maxWorkbenchWidthFor(containerWidth: number, reservedPoolWidth: number): number {
+  if (!Number.isFinite(containerWidth) || containerWidth <= 0) {
+    return MAX_WORKBENCH_WIDTH;
+  }
+  const available = containerWidth - reservedPoolWidth - 280;
+  return Math.max(MIN_WORKBENCH_WIDTH, Math.min(MAX_WORKBENCH_WIDTH, Math.floor(available)));
+}
+
+function clampWorkbenchWidth(width: number, maxWidth: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_WORKBENCH_WIDTH;
+  return Math.max(MIN_WORKBENCH_WIDTH, Math.min(maxWidth, Math.round(width)));
+}
+
+function readStoredWorkbenchWidth(): number {
+  try {
+    const raw = localStorage.getItem(WORKBENCH_WIDTH_STORAGE_KEY);
+    if (!raw) return DEFAULT_WORKBENCH_WIDTH;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed)
+      ? clampWorkbenchWidth(parsed, MAX_WORKBENCH_WIDTH)
+      : DEFAULT_WORKBENCH_WIDTH;
+  } catch {
+    return DEFAULT_WORKBENCH_WIDTH;
   }
 }
 
@@ -124,10 +165,52 @@ function StepExportMenuPortal({
   return <>{children}</>;
 }
 
+type StepOutputToolbarState = {
+  mounted: boolean;
+  status?: 'running' | 'failed' | 'ready';
+  version?: number;
+};
+
+function StepCardPopoverPortal({
+  host,
+  status,
+  version,
+  onMetaChange,
+  children,
+}: {
+  host: HTMLElement | null;
+  status?: 'running' | 'failed' | 'ready';
+  version?: number;
+  onMetaChange: (next: StepOutputToolbarState) => void;
+  children: ReactNode;
+}) {
+  useLayoutEffect(() => {
+    onMetaChange({ mounted: true, status, version });
+    return () => onMetaChange({ mounted: false });
+  }, [onMetaChange, status, version]);
+
+  if (host) {
+    return createPortal(children, host);
+  }
+  return null;
+}
+
+function StepIterationsBridge({
+  renderOutput,
+  renderOutputRef,
+}: {
+  renderOutput: (iteration: StepIteration) => ReactNode;
+  renderOutputRef: { current: ((iteration: StepIteration) => ReactNode) | null };
+}) {
+  renderOutputRef.current = renderOutput;
+  return null;
+}
+
 export function ScenarioWorkspace({
   scenarioId,
   runId,
   stepId,
+  mode: routedMode,
   active,
   onRoute,
   onExplore,
@@ -146,11 +229,19 @@ export function ScenarioWorkspace({
   const toast = useToast();
   const { info: integration } = useIntegrationInfo();
 
+  const [activeMode, setActiveMode] = useState<ScenarioWorkspaceMode>(routedMode ?? 'manual');
   const [poolOpen, setPoolOpen] = useState(false);
+
+  useEffect(() => {
+    setActiveMode(routedMode ?? 'manual');
+  }, [routedMode]);
   const [exportingBundle, setExportingBundle] = useState(false);
   const [poolWidth, setPoolWidth] = useState<number>(readStoredPoolWidth);
   const [poolCollapsed, setPoolCollapsed] = useState<boolean>(readStoredPoolCollapsed);
   const [resizingPool, setResizingPool] = useState(false);
+  const [workbenchWidth, setWorkbenchWidth] = useState<number>(readStoredWorkbenchWidth);
+  const [resizingWorkbench, setResizingWorkbench] = useState(false);
+  const [cardCoverFailed, setCardCoverFailed] = useState(false);
   const [containerWidth, setContainerWidth] = useState<number>(() =>
     typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0
       ? window.innerWidth
@@ -158,19 +249,35 @@ export function ScenarioWorkspace({
   );
   const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [scenarioRuns, setScenarioRuns] = useState<ScenarioRunSummary[]>([]);
+  const [hasMoreScenarioRuns, setHasMoreScenarioRuns] = useState(false);
   const [runsLoading, setRunsLoading] = useState(false);
+  const [runHistoryOpen, setRunHistoryOpen] = useState(false);
   const [pickState, setPickState] = useState<{
     request: PoolPickRequest;
     resolve: (ids: string[] | null) => void;
   } | null>(null);
   const [exportMenuHost, setExportMenuHost] = useState<HTMLDivElement | null>(null);
   const [stepOwnsExportMenu, setStepOwnsExportMenu] = useState(false);
+  const [outputHost, setOutputHost] = useState<HTMLDivElement | null>(null);
+  const [outputPopoverOpen, setOutputPopoverOpen] = useState(false);
+  const [outputMeta, setOutputMeta] = useState<StepOutputToolbarState>({ mounted: false });
+  const [historyPopoverOpen, setHistoryPopoverOpen] = useState(false);
+  const [capabilityHost, setCapabilityHost] = useState<HTMLDivElement | null>(null);
+  const [capabilityPopoverOpen, setCapabilityPopoverOpen] = useState(false);
+  const [capabilityMounted, setCapabilityMounted] = useState(false);
 
+  const iterationsRenderOutputRef = useRef<((iteration: StepIteration) => ReactNode) | null>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const poolDragRef = useRef<{ x: number; width: number } | null>(null);
   const latestDragWidthRef = useRef<number>(poolWidth);
+  const workbenchDragRef = useRef<{ x: number; width: number } | null>(null);
+  const latestWorkbenchDragWidthRef = useRef<number>(workbenchWidth);
   const highlightTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pickResolveRef = useRef<((ids: string[] | null) => void) | null>(null);
+
+  useEffect(() => {
+    setCardCoverFailed(false);
+  }, [scenarioId]);
 
   useEffect(() => {
     const node = workspaceRef.current;
@@ -200,6 +307,16 @@ export function ScenarioWorkspace({
     [maxPoolWidth, poolWidth],
   );
 
+  const reservedPoolWidth = !poolCollapsed && containerWidth >= 1100 ? effectivePoolWidth + 12 : 0;
+  const maxWorkbenchWidth = useMemo(
+    () => maxWorkbenchWidthFor(containerWidth, reservedPoolWidth),
+    [containerWidth, reservedPoolWidth],
+  );
+  const effectiveWorkbenchWidth = useMemo(
+    () => clampWorkbenchWidth(workbenchWidth, maxWorkbenchWidth),
+    [maxWorkbenchWidth, workbenchWidth],
+  );
+
   const persistPoolWidth = useCallback((width: number) => {
     try {
       localStorage.setItem(POOL_WIDTH_STORAGE_KEY, String(width));
@@ -217,6 +334,31 @@ export function ScenarioWorkspace({
     },
     [maxPoolWidth, persistPoolWidth],
   );
+
+  const persistWorkbenchWidth = useCallback((width: number) => {
+    try {
+      localStorage.setItem(WORKBENCH_WIDTH_STORAGE_KEY, String(width));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
+  const commitWorkbenchWidth = useCallback(
+    (nextWidth: number) => {
+      const clamped = clampWorkbenchWidth(nextWidth, maxWorkbenchWidth);
+      setWorkbenchWidth(clamped);
+      latestWorkbenchDragWidthRef.current = clamped;
+      persistWorkbenchWidth(clamped);
+    },
+    [maxWorkbenchWidth, persistWorkbenchWidth],
+  );
+
+  const finishWorkbenchResize = useCallback(() => {
+    if (!workbenchDragRef.current) return;
+    workbenchDragRef.current = null;
+    setResizingWorkbench(false);
+    persistWorkbenchWidth(latestWorkbenchDragWidthRef.current);
+  }, [persistWorkbenchWidth]);
 
   const updatePoolCollapsed = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
     setPoolCollapsed(prev => {
@@ -321,6 +463,11 @@ export function ScenarioWorkspace({
     }
   }, [activeStep.id]);
 
+  // Close per-workflow run history modal when switching to another workflow.
+  useEffect(() => {
+    setRunHistoryOpen(false);
+  }, [scenarioId]);
+
   const poolItems = useMemo(() => run?.pool ?? [], [run?.pool]);
   const poolById = useMemo(
     () => new Map(poolItems.map(item => [item.id, item])),
@@ -334,11 +481,44 @@ export function ScenarioWorkspace({
     [onRoute, run?.id, runId],
   );
 
+  const handleModeChange = useCallback(
+    (next: ScenarioWorkspaceMode) => {
+      setActiveMode(next);
+      onRoute(
+        {
+          run: run?.id ?? runId,
+          step: next === 'manual' ? activeStep.id : null,
+          mode: next,
+        },
+        false,
+      );
+    },
+    [activeStep.id, onRoute, run?.id, runId],
+  );
+
+  const handleOpenStepInManual = useCallback(
+    (targetStepId: string) => {
+      setActiveMode('manual');
+      onRoute(
+        {
+          run: run?.id ?? runId,
+          step: targetStepId,
+          mode: 'manual',
+        },
+        false,
+      );
+    },
+    [onRoute, run?.id, runId],
+  );
+
   const loadScenarioRuns = useCallback(() => {
     setRunsLoading(true);
     void scenarioClient
       .list({ scenarioId, limit: 20 })
-      .then(res => setScenarioRuns(res.runs ?? []))
+      .then(res => {
+        setScenarioRuns(res.runs ?? []);
+        setHasMoreScenarioRuns(res.nextOffset !== null && res.nextOffset !== undefined);
+      })
       .catch(() => {})
       .finally(() => setRunsLoading(false));
   }, [scenarioId]);
@@ -413,20 +593,38 @@ export function ScenarioWorkspace({
     [t, toast],
   );
 
-  const handleCopyAgentHandoff = useCallback(async () => {
-    let ensuredRun = run;
-    if (!ensuredRun) {
+  const handleCopyAgentPrompt = useCallback(
+    async (customPrompt?: string) => {
+      let ensuredRun: ScenarioRun | null = null;
       try {
         ensuredRun = await ensureRun();
       } catch {
-        ensuredRun = null;
+        ensuredRun = run;
       }
-    }
-    const prompt = ensuredRun
-      ? scenarioRunAgentPrompt(scenario, ensuredRun, { locale, integration })
-      : scenarioAgentPrompt(scenario, { locale, integration });
-    await copyToClipboard(prompt, t('Copied. Paste into your Agent.'));
-  }, [copyToClipboard, ensureRun, integration, locale, run, scenario, t]);
+      const promptRun =
+        ensuredRun && customPrompt !== undefined
+          ? {
+              ...ensuredRun,
+              brief: {
+                ...ensuredRun.brief,
+                idea: customPrompt,
+              },
+            }
+          : ensuredRun;
+      const prompt = scenarioConcisePrompt(scenario, promptRun, {
+        customPrompt,
+        locale,
+        integration,
+      });
+      await copyToClipboard(prompt, t('Copied. Paste into your Agent.'));
+    },
+    [copyToClipboard, ensureRun, integration, locale, run, scenario, t],
+  );
+
+  const handleCopyAgentHandoff = useCallback(
+    () => handleCopyAgentPrompt(),
+    [handleCopyAgentPrompt],
+  );
 
   const handleExportBundle = useCallback(
     async (options?: {
@@ -646,7 +844,7 @@ export function ScenarioWorkspace({
       );
       const downloadUrl = bundleDownloadUrl(res.bundle.bundleId);
       toast.showToast(
-        t('Step package ready'),
+        t('Step export ready'),
         'info',
         'feedback',
         {
@@ -665,7 +863,7 @@ export function ScenarioWorkspace({
     } catch (err) {
       if (!isScenarioConflictError(err)) {
         toast.showToast(
-          err instanceof Error ? err.message : t('Could not build step package'),
+          err instanceof Error ? err.message : t('Could not build step export'),
           'error',
           'feedback',
         );
@@ -854,30 +1052,52 @@ export function ScenarioWorkspace({
     ],
   );
 
+  const updateOutputMeta = useCallback((next: StepOutputToolbarState) => {
+    setOutputMeta(prev =>
+      prev.mounted === next.mounted && prev.status === next.status && prev.version === next.version
+        ? prev
+        : next,
+    );
+  }, []);
+
+  const updateCapabilityMeta = useCallback((next: StepOutputToolbarState) => {
+    setCapabilityMounted(prev => (prev === next.mounted ? prev : next.mounted));
+  }, []);
+
   const renderIterations = useCallback(
     ({ renderOutput }: { renderOutput(iteration: StepIteration): ReactNode }) => (
-      <IterationHistory
-        step={activeStep}
-        state={activeStepState}
+      <StepIterationsBridge
         renderOutput={renderOutput}
-        onPromote={handlePromoteIteration}
-        onUseSettings={handleUseIterationSettings}
-        onSaveNote={handleSaveIterationNote}
-        onRetry={handleRetryIteration}
-        onCancel={handleCancelIteration}
-        busy={busy}
+        renderOutputRef={iterationsRenderOutputRef}
       />
     ),
-    [
-      activeStep,
-      activeStepState,
-      busy,
-      handleCancelIteration,
-      handlePromoteIteration,
-      handleRetryIteration,
-      handleSaveIterationNote,
-      handleUseIterationSettings,
-    ],
+    [],
+  );
+
+  const renderOutputPanel = useCallback(
+    (content: ReactNode, meta?: StepOutputPanelMeta) => (
+      <StepCardPopoverPortal
+        host={outputHost}
+        status={meta?.status}
+        version={meta?.version}
+        onMetaChange={updateOutputMeta}
+      >
+        {content}
+      </StepCardPopoverPortal>
+    ),
+    [outputHost, updateOutputMeta],
+  );
+
+  const renderCapabilityBar = useCallback(
+    (content: ReactNode) => (
+      <StepCardPopoverPortal
+        host={capabilityHost}
+        onMetaChange={updateCapabilityMeta}
+      >
+        {content}
+      </StepCardPopoverPortal>
+    ),
+    [capabilityHost, updateCapabilityMeta],
   );
 
   const stepApi = useMemo(
@@ -932,11 +1152,43 @@ export function ScenarioWorkspace({
     nav: stepNav,
     renderExportMenu,
     renderIterations,
+    renderOutputPanel,
+    renderCapabilityBar,
   };
+
+  useEffect(() => {
+    setOutputPopoverOpen(false);
+    setHistoryPopoverOpen(false);
+    setCapabilityPopoverOpen(false);
+  }, [activeStep.id]);
+
+  const stepPendingJobs = useMemo(
+    () => countStepPendingJobs(activeStepState),
+    [activeStepState],
+  );
+  const stepVersionsCount = activeStepState.iterations.length;
 
   const prevStep = activeStepIndex > 0 ? scenario.steps[activeStepIndex - 1] : null;
   const nextStep =
     activeStepIndex < scenario.steps.length - 1 ? scenario.steps[activeStepIndex + 1] : null;
+  const category = useMemo(
+    () => scenarioCategories.find(item => item.id === scenario.category) ?? null,
+    [scenario.category],
+  );
+
+  const handleOpenAssets = useCallback(() => {
+    const isNarrow =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 1099px)').matches;
+    if (isNarrow) {
+      setPoolOpen(prev => !prev);
+    } else if (poolCollapsed) {
+      updatePoolCollapsed(false);
+    } else {
+      togglePoolCollapsed();
+    }
+  }, [poolCollapsed, togglePoolCollapsed, updatePoolCollapsed]);
 
   const statusOptions = useMemo(
     () => [
@@ -948,14 +1200,46 @@ export function ScenarioWorkspace({
     [t],
   );
 
+  const loadingStateNode = (
+    <div className="om-scenario-loading" role="status" aria-label={t('Loading workflow…')}>
+      <Skeleton className="om-scenario-skeleton-title" />
+      <Skeleton className="om-scenario-skeleton-card" />
+      <Skeleton className="om-scenario-skeleton-card" />
+    </div>
+  );
+
+  const errorStateNode = error ? (
+    <div className="om-scenario-error-panel" role="alert">
+      <RemixIcon name="error-warning-line" size={28} />
+      <h2 className="om-subtitle">{t('Could not load workflow')}</h2>
+      <p className="om-muted">{error}</p>
+      <div className="om-scenario-error-actions">
+        <Button variant="primary" size="sm" onClick={reload}>
+          {t('Retry')}
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => void handleNewRun()}>
+          {t('New draft')}
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
+  const cardCoverSrc = scenarioCover(scenario.id);
+
   return (
     <section
       ref={workspaceRef}
       className="om-scenario-workspace"
-      style={{ '--om-scenario-pool-width': `${effectivePoolWidth}px` } as CSSProperties}
+      style={
+        {
+          '--om-scenario-pool-width': `${effectivePoolWidth}px`,
+          '--om-scenario-workbench-width': `${effectiveWorkbenchWidth}px`,
+        } as CSSProperties
+      }
       data-scenario-workspace={scenario.id}
       data-run-id={run?.id ?? runId ?? ''}
       data-step-id={activeStep.id}
+      data-scenario-mode={activeMode}
       data-active={active ? 'true' : 'false'}
       aria-label={t(scenario.title)}
     >
@@ -963,15 +1247,19 @@ export function ScenarioWorkspace({
         scenario={scenario}
         run={run}
         runs={scenarioRuns}
+        hasMoreRuns={hasMoreScenarioRuns}
         runsLoading={runsLoading}
         onLoadRuns={loadScenarioRuns}
         onSelectRun={handleSelectRun}
+        onOpenRunHistory={() => setRunHistoryOpen(true)}
         onNewRun={() => void handleNewRun()}
         onRenameRun={handleRenameRun}
         onArchiveRun={handleArchiveRun}
         onExplore={onExplore}
         onOpenHub={onOpenHub}
         breadcrumb={breadcrumb}
+        mode={activeMode}
+        onModeChange={handleModeChange}
         poolOpen={poolOpen}
         poolCollapsed={poolCollapsed}
         poolCount={poolItems.length}
@@ -983,129 +1271,429 @@ export function ScenarioWorkspace({
         busy={busy}
       />
 
-      <ScenarioStepper
-        scenario={scenario}
-        run={run}
-        activeStepId={activeStep.id}
-        onSelectStep={selectStep}
-      />
-
       <div
         className="om-scenario-body"
-        data-pool-collapsed={poolCollapsed ? 'true' : 'false'}
+        data-mode={activeMode}
+        data-pool-collapsed={activeMode === 'agent' ? 'true' : poolCollapsed ? 'true' : 'false'}
+        data-resizing-pool={activeMode === 'manual' && (resizingPool || resizingWorkbench) ? 'true' : undefined}
       >
-        <main className="om-scenario-workbench">
-          {loading ? (
-            <div className="om-scenario-loading" role="status" aria-label={t('Loading workflow…')}>
-              <Skeleton className="om-scenario-skeleton-title" />
-              <Skeleton className="om-scenario-skeleton-card" />
-              <Skeleton className="om-scenario-skeleton-card" />
-            </div>
-          ) : error ? (
-            <div className="om-scenario-error-panel" role="alert">
-              <RemixIcon name="error-warning-line" size={28} />
-              <h2 className="om-subtitle">{t('Could not load workflow')}</h2>
-              <p className="om-muted">{error}</p>
-              <div className="om-scenario-error-actions">
-                <Button variant="primary" size="sm" onClick={reload}>
-                  {t('Retry')}
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => void handleNewRun()}>
-                  {t('New draft')}
-                </Button>
-              </div>
-            </div>
+        {activeMode === 'agent' ? (
+          loading ? (
+            <div className="om-agent-mode-state">{loadingStateNode}</div>
+          ) : errorStateNode ? (
+            <div className="om-agent-mode-state">{errorStateNode}</div>
           ) : (
-            <div className="om-scenario-step-frame" data-step-frame={activeStep.id}>
-              <header className="om-scenario-step-header">
-                <div className="om-scenario-step-heading">
-                  <div className="om-scenario-step-title-line">
+            <ScenarioAgentModeView
+              scenario={scenario}
+              run={run}
+              activeStep={activeStep}
+              api={stepApi}
+              integration={integration}
+              toast={stepToast}
+              poolItems={poolItems}
+              highlightedIds={highlightedIds}
+              onRefresh={handleRefresh}
+              onAddPoolItems={handleAddPoolItems}
+              onUpdatePoolItem={handleUpdatePoolItem}
+              onRemovePoolItem={handleRemovePoolItem}
+              onOpenDesignProject={onOpenDesignProject}
+              onOpenMotionProject={onOpenMotionProject}
+              onExportBundle={handleExportBundle}
+              exportingBundle={exportingBundle}
+              onCopySummaryJson={handleCopySummaryJson}
+              onCopyAgentPrompt={handleCopyAgentPrompt}
+              onOpenMcp={onOpenMcp}
+              onOpenStep={handleOpenStepInManual}
+              onSwitchToManual={() => handleModeChange('manual')}
+            />
+          )
+        ) : (
+          <>
+        <ScenarioStage
+          scenario={scenario}
+          run={run}
+          activeStep={activeStep}
+          active={active}
+          poolItems={poolItems}
+          onSelectStep={selectStep}
+          onOpenAssets={handleOpenAssets}
+          onUseInStep={handleUseInCurrentStep}
+          onOpenDesignProject={onOpenDesignProject}
+          onOpenMotionProject={onOpenMotionProject}
+        />
+
+        <div
+          className="om-scenario-workbench-resizer"
+          role="separator"
+          tabIndex={0}
+          aria-label={t('Resize step panel')}
+          aria-orientation="vertical"
+          aria-valuemin={MIN_WORKBENCH_WIDTH}
+          aria-valuemax={maxWorkbenchWidth}
+          aria-valuenow={effectiveWorkbenchWidth}
+          data-dragging={resizingWorkbench ? 'true' : undefined}
+          onDoubleClick={() => commitWorkbenchWidth(DEFAULT_WORKBENCH_WIDTH)}
+          onKeyDown={event => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              commitWorkbenchWidth(effectiveWorkbenchWidth + WORKBENCH_KEYBOARD_STEP);
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              commitWorkbenchWidth(effectiveWorkbenchWidth - WORKBENCH_KEYBOARD_STEP);
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              commitWorkbenchWidth(maxWorkbenchWidth);
+            } else if (event.key === 'End') {
+              event.preventDefault();
+              commitWorkbenchWidth(MIN_WORKBENCH_WIDTH);
+            }
+          }}
+          onPointerDown={event => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            workbenchDragRef.current = { x: event.clientX, width: effectiveWorkbenchWidth };
+            latestWorkbenchDragWidthRef.current = effectiveWorkbenchWidth;
+            setResizingWorkbench(true);
+            try {
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+            } catch {
+              // Ignore if synthetic pointer events do not register an active pointer id.
+            }
+          }}
+          onPointerMove={event => {
+            const drag = workbenchDragRef.current;
+            if (!drag) return;
+            const next = clampWorkbenchWidth(drag.width + (drag.x - event.clientX), maxWorkbenchWidth);
+            latestWorkbenchDragWidthRef.current = next;
+            setWorkbenchWidth(next);
+          }}
+          onPointerUp={finishWorkbenchResize}
+          onPointerCancel={finishWorkbenchResize}
+          onLostPointerCapture={finishWorkbenchResize}
+        />
+
+        <main className="om-scenario-workbench" data-step-type={activeStep.type}>
+          <div className="om-scenario-card-top">
+            <header className="om-scenario-card-identity">
+              <span
+                className="om-scenario-workflow-badge"
+                data-category={scenario.category}
+                data-has-cover={cardCoverSrc && !cardCoverFailed ? 'true' : undefined}
+                aria-hidden="true"
+              >
+                {cardCoverSrc && !cardCoverFailed ? (
+                  <img
+                    src={cardCoverSrc}
+                    alt=""
+                    draggable={false}
+                    onError={() => setCardCoverFailed(true)}
+                  />
+                ) : (
+                  <RemixIcon name={scenario.icon} size={19} />
+                )}
+              </span>
+              <div className="om-scenario-card-identity-copy">
+                <div className="om-scenario-card-identity-row">
+                  <h1 className="om-scenario-card-workflow-title">{t(scenario.title)}</h1>
+                  {category && (
                     <span
-                      className="om-scenario-step-badge-icon"
-                      data-step-type={activeStep.type}
-                      aria-hidden="true"
+                      className="om-badge om-scenario-header-category"
+                      data-category={scenario.category}
                     >
-                      <RemixIcon name={activeStep.icon} size={20} />
+                      <RemixIcon name={category.icon} size={11} />
+                      <span>{t(category.label)}</span>
                     </span>
-                    <h2 className="om-scenario-step-title">{t(activeStep.title)}</h2>
-                    <span
-                      className="om-scenario-step-counter"
-                      data-step-type={activeStep.type}
-                    >
+                  )}
+                </div>
+                <p className="om-scenario-card-workflow-subtitle">{t(scenario.subtitle)}</p>
+              </div>
+
+              {!loading && !error && (
+                <div className="om-scenario-card-tools" role="toolbar" aria-label={t(activeStep.title)}>
+                  <Popover
+                    keepMounted
+                    align="end"
+                    open={outputPopoverOpen}
+                    onOpenChange={setOutputPopoverOpen}
+                    aria-label={t('Active result')}
+                    tooltip={
+                      outputMeta.version
+                        ? t('Output · v{number}', { number: outputMeta.version })
+                        : t('Active result')
+                    }
+                    className="om-scenario-card-popover om-scenario-output-popover"
+                    trigger={
+                      <IconButton
+                        variant={outputPopoverOpen ? 'secondary' : 'ghost'}
+                        size="sm"
+                        type="button"
+                        hidden={!outputMeta.mounted}
+                        className="om-scenario-card-tool-btn"
+                        data-card-tool="output"
+                        data-tool-status={outputMeta.status}
+                        aria-label={
+                          outputMeta.version
+                            ? t('Output · v{number}', { number: outputMeta.version })
+                            : t('Active result')
+                        }
+                        aria-pressed={outputPopoverOpen}
+                        icon={
+                          <RemixIcon
+                            name={
+                              outputMeta.status === 'running'
+                                ? 'loader-4-line'
+                                : outputMeta.status === 'failed'
+                                  ? 'error-warning-line'
+                                  : 'sparkling-line'
+                            }
+                            size={15}
+                            className={outputMeta.status === 'running' ? 'om-scenario-spin' : undefined}
+                          />
+                        }
+                      />
+                    }
+                  >
+                    <div ref={setOutputHost} className="om-scenario-card-popover-body" />
+                  </Popover>
+
+                  <Popover
+                    align="end"
+                    open={historyPopoverOpen}
+                    onOpenChange={setHistoryPopoverOpen}
+                    aria-label={t('Version history')}
+                    tooltip={
+                      stepVersionsCount > 0
+                        ? `${t('Version history')} (${stepVersionsCount})`
+                        : t('Version history')
+                    }
+                    className="om-scenario-card-popover om-scenario-history-popover"
+                    trigger={
+                      stepVersionsCount > 0 ? (
+                        <Button
+                          variant={historyPopoverOpen ? 'secondary' : 'ghost'}
+                          size="sm"
+                          type="button"
+                          className="om-scenario-card-tool-btn om-scenario-card-tool-btn--count"
+                          data-card-tool="history"
+                          aria-label={t('Version history')}
+                          aria-pressed={historyPopoverOpen}
+                          icon={<RemixIcon name="history-line" size={14} />}
+                        >
+                          <span className="om-scenario-card-tool-count">
+                            {stepVersionsCount > 99 ? '99+' : stepVersionsCount}
+                          </span>
+                        </Button>
+                      ) : (
+                        <IconButton
+                          variant={historyPopoverOpen ? 'secondary' : 'ghost'}
+                          size="sm"
+                          type="button"
+                          className="om-scenario-card-tool-btn"
+                          data-card-tool="history"
+                          aria-label={t('Version history')}
+                          aria-pressed={historyPopoverOpen}
+                          icon={<RemixIcon name="history-line" size={15} />}
+                        />
+                      )
+                    }
+                  >
+                    <div className="om-scenario-card-popover-body">
+                      {stepVersionsCount > 0 ? (
+                        <IterationHistory
+                          embedded
+                          step={activeStep}
+                          state={activeStepState}
+                          renderOutput={iteration =>
+                            iterationsRenderOutputRef.current?.(iteration) ?? null
+                          }
+                          onPromote={handlePromoteIteration}
+                          onUseSettings={handleUseIterationSettings}
+                          onSaveNote={handleSaveIterationNote}
+                          onRetry={handleRetryIteration}
+                          onCancel={handleCancelIteration}
+                          busy={busy}
+                        />
+                      ) : (
+                        <div className="om-scenario-card-popover-empty">
+                          <RemixIcon name="history-line" size={18} />
+                          <strong>{t('Version history')}</strong>
+                          <p className="om-muted">{t('No outputs')}</p>
+                        </div>
+                      )}
+                    </div>
+                  </Popover>
+
+                  <Popover
+                    keepMounted
+                    align="end"
+                    open={capabilityPopoverOpen}
+                    onOpenChange={setCapabilityPopoverOpen}
+                    aria-label={t('Agent tools')}
+                    tooltip={t('Agent tools')}
+                    className="om-scenario-card-popover om-scenario-capability-popover"
+                    trigger={
+                      <IconButton
+                        variant={capabilityPopoverOpen ? 'secondary' : 'ghost'}
+                        size="sm"
+                        type="button"
+                        hidden={!capabilityMounted}
+                        className="om-scenario-card-tool-btn"
+                        data-card-tool="agent"
+                        data-tool-status={stepPendingJobs > 0 ? 'running' : undefined}
+                        aria-label={t('Agent tools')}
+                        aria-pressed={capabilityPopoverOpen}
+                        icon={<RemixIcon name="robot-line" size={15} />}
+                      />
+                    }
+                  >
+                    <div ref={setCapabilityHost} className="om-scenario-card-popover-body" />
+                  </Popover>
+                </div>
+              )}
+            </header>
+
+            <ScenarioStepper
+              scenario={scenario}
+              run={run}
+              activeStepId={activeStep.id}
+              onSelectStep={selectStep}
+            />
+          </div>
+
+          <div className="om-scenario-step-scroll">
+            {loading ? (
+              loadingStateNode
+            ) : errorStateNode ? (
+              errorStateNode
+            ) : (
+              <div key={activeStep.id} className="om-scenario-step-frame" data-step-frame={activeStep.id}>
+                <header className="om-scenario-step-header">
+                  <div className="om-scenario-step-header-row">
+                    <div className="om-scenario-step-title-line">
+                      <span
+                        className="om-scenario-step-badge-icon"
+                        data-step-type={activeStep.type}
+                        aria-hidden="true"
+                      >
+                        <RemixIcon name={activeStep.icon} size={15} />
+                      </span>
+                      <h2 className="om-scenario-step-title">{t(activeStep.title)}</h2>
+                      {activeStep.optional && (
+                        <span className="om-badge">{t('Optional')}</span>
+                      )}
+                    </div>
+
+                    <div className="om-scenario-step-controls">
+                      <div className="om-scenario-status-select">
+                        <Select
+                          label={t('Step status')}
+                          value={activeStepState.status}
+                          options={statusOptions}
+                          disabled={busy.has(`status:${activeStep.id}`)}
+                          onCommit={value => void handleStatusChange(value)}
+                        />
+                      </div>
+                      <div
+                        ref={setExportMenuHost}
+                        className="om-scenario-step-export-slot"
+                      >
+                        {!stepOwnsExportMenu && (
+                          <StepExportMenu
+                            scenario={scenario}
+                            step={activeStep}
+                            state={activeStepState}
+                            run={run}
+                            busy={busy.has(`export-step:${activeStep.id}`)}
+                            onExportStepPackage={handleExportStepPackage}
+                            onCopyPrompt={handleCopyStepPrompt}
+                            onCopyStepAgentHandoff={handleCopyStepAgentHandoff}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="om-scenario-step-hint">{t(activeStep.hint)}</p>
+                </header>
+
+                <div className="om-scenario-step-content">
+                  <StepRouter {...stepProps} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {!loading && !error && (
+            <div className="om-scenario-card-footer">
+              <div className="om-scenario-card-meta">
+                <div className="om-scenario-card-meta-group">
+                  <span className="om-scenario-card-meta-item">
+                    <RemixIcon name="time-line" size={14} />
+                    <span>
                       {t('Step {current} / {total}', {
                         current: activeStepIndex + 1,
                         total: scenario.steps.length,
                       })}
                     </span>
-                    {activeStep.optional && (
-                      <span className="om-badge">{t('Optional')}</span>
-                    )}
-                  </div>
-                  <p className="om-scenario-step-hint">{t(activeStep.hint)}</p>
+                  </span>
+                  {category && (
+                    <>
+                      <span className="om-scenario-card-meta-dot" aria-hidden="true">·</span>
+                      <span className="om-scenario-card-meta-item">
+                        <RemixIcon name={category.icon} size={14} />
+                        <span>{t(category.label)}</span>
+                      </span>
+                    </>
+                  )}
                 </div>
-
-                <div className="om-scenario-step-controls">
-                  <div className="om-scenario-status-select">
-                    <Select
-                      label={t('Step status')}
-                      value={activeStepState.status}
-                      options={statusOptions}
-                      disabled={busy.has(`status:${activeStep.id}`)}
-                      onCommit={value => void handleStatusChange(value)}
-                    />
-                  </div>
-                  <div
-                    ref={setExportMenuHost}
-                    className="om-scenario-step-export-slot"
-                  >
-                    {!stepOwnsExportMenu && (
-                      <StepExportMenu
-                        scenario={scenario}
-                        step={activeStep}
-                        state={activeStepState}
-                        run={run}
-                        busy={busy.has(`export-step:${activeStep.id}`)}
-                        onExportStepPackage={handleExportStepPackage}
-                        onCopyPrompt={handleCopyStepPrompt}
-                        onCopyStepAgentHandoff={handleCopyStepAgentHandoff}
-                      />
-                    )}
-                  </div>
-                </div>
-              </header>
-
-              <div className="om-scenario-step-content">
-                <StepRouter {...stepProps} />
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-scenario-card-meta-item om-scenario-card-meta-btn"
+                  onClick={handleOpenAssets}
+                >
+                  <RemixIcon name="stack-line" size={14} />
+                  <span>{t('Assets ({count})', { count: poolItems.length })}</span>
+                </Button>
               </div>
 
               <footer className="om-scenario-step-footer">
-                <div>
-                  {prevStep && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      type="button"
-                      icon={<RemixIcon name="arrow-left-line" size={14} />}
-                      onClick={() => selectStep(prevStep.id)}
-                    >
-                      {t('Previous: {step}', { step: t(prevStep.title) })}
-                    </Button>
-                  )}
-                </div>
-                <div>
-                  {nextStep && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      type="button"
-                      icon={<RemixIcon name={nextStep.icon} size={14} />}
-                      onClick={() => selectStep(nextStep.id)}
-                    >
-                      <span>{t('Next: {step}', { step: t(nextStep.title) })}</span>
-                      <RemixIcon name="arrow-right-line" size={14} />
-                    </Button>
-                  )}
-                </div>
+                {prevStep && (
+                  <IconButton
+                    variant="secondary"
+                    size="lg"
+                    type="button"
+                    className="om-scenario-prev-cta"
+                    aria-label={t('Previous: {step}', { step: t(prevStep.title) })}
+                    title={t('Previous: {step}', { step: t(prevStep.title) })}
+                    icon={<RemixIcon name="arrow-left-line" size={16} />}
+                    onClick={() => selectStep(prevStep.id)}
+                  />
+                )}
+                {nextStep ? (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    type="button"
+                    className="om-scenario-primary-cta"
+                    icon={<RemixIcon name={nextStep.icon} size={15} />}
+                    onClick={() => selectStep(nextStep.id)}
+                  >
+                    <span>{t('Next: {step}', { step: t(nextStep.title) })}</span>
+                    <RemixIcon name="arrow-right-line" size={15} />
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    type="button"
+                    className="om-scenario-primary-cta"
+                    loading={exportingBundle}
+                    icon={<RemixIcon name="download-2-line" size={15} />}
+                    onClick={() => void handleExportBundle()}
+                  >
+                    {t('Export all')}
+                  </Button>
+                )}
               </footer>
             </div>
           )}
@@ -1115,7 +1703,7 @@ export function ScenarioWorkspace({
           className="om-scenario-pool-resizer"
           role="separator"
           tabIndex={0}
-          aria-label={t('Resize shared assets panel')}
+          aria-label={t('Resize assets panel')}
           aria-orientation="vertical"
           aria-valuemin={MIN_POOL_WIDTH}
           aria-valuemax={maxPoolWidth}
@@ -1187,7 +1775,32 @@ export function ScenarioWorkspace({
           onCopySummaryJson={handleCopySummaryJson}
           toast={stepToast}
         />
+          </>
+        )}
       </div>
+
+      <ScenarioRunHistoryDialog
+        scenario={scenario}
+        open={runHistoryOpen}
+        onOpenChange={setRunHistoryOpen}
+        activeRunId={run?.id ?? runId ?? null}
+        onSelectRun={handleSelectRun}
+        onNewRun={handleNewRun}
+        onHistoryMutated={loadScenarioRuns}
+        onActiveRunChanged={(action, _updatedRunId, nextFallbackId) => {
+          if (action === 'renamed') {
+            void refresh();
+          } else if (action === 'archived') {
+            setRunHistoryOpen(false);
+            if (nextFallbackId) {
+              onRoute({ run: nextFallbackId, step: null }, false);
+            } else {
+              onOpenHub();
+            }
+          }
+        }}
+        toast={stepToast}
+      />
 
       <StudioToastViewport {...toast} />
     </section>

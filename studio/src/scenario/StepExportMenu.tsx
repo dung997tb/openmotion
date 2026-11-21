@@ -47,7 +47,7 @@ export function StepExportMenu({
       aria-label={t('Export {step}', { step: t(step.title) })}
       trigger={
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
           type="button"
           loading={busy}

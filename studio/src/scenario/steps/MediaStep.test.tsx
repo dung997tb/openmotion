@@ -362,4 +362,307 @@ describe('MediaStep', () => {
       await mounted.unmount();
     }
   });
+
+  it('prefers configured cloud/API providers over codex, excludes unentitled account models, and exposes Model providers', async () => {
+    const codexModel: Model = {
+      id: 'codex:image-generation',
+      provider: 'codex',
+      modelId: 'image-generation',
+      label: 'Codex Image',
+      modality: 'image',
+      source: 'builtin',
+      mode: 'text-to-image',
+      supportsImageReference: true,
+    };
+    const accountModel: Model = {
+      id: 'account:seedream-5.5',
+      provider: 'account',
+      modelId: 'seedream-5.5',
+      label: 'Seedream 5.5',
+      modality: 'image',
+      source: 'live',
+      mode: 'text-to-image',
+    };
+
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [
+            { id: 'codex', label: 'Codex', available: true, enabled: true, configured: true, credentialSource: 'local-agent', verification: 'unverified', reason: 'ready' },
+            { id: 'account', label: 'OpenDesign', available: true, enabled: true, configured: true, credentialSource: 'account', verification: 'unverified', mediaEntitlement: 'not-included' },
+            { id: 'fal', label: 'fal.ai', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' },
+          ],
+          agents: [],
+          routes: {},
+          capabilities: [{ modality: 'image', available: true, modelIds: [codexModel.id, imageModel.id], selectedModelId: codexModel.id }],
+        },
+        models: [codexModel, accountModel, imageModel],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    const run = makeBaseRun('motion-full-chain', {
+      steps: {
+        storyboard: { draft: { prompt: 'Hero storyboard frame' } },
+      },
+    });
+    const { props, mocks } = createStepProps('motion-full-chain', 'storyboard', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+
+    try {
+      const modelTrigger = mounted.container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Model"]')!;
+      expect(modelTrigger.textContent).toContain('Flux Schnell');
+
+      await act(async () => { modelTrigger.click(); });
+      const optionTexts = [...document.querySelectorAll<HTMLElement>('[role="option"]')].map(el => el.textContent ?? '');
+      expect(optionTexts.some(text => text.includes('Seedream 5.5'))).toBe(false);
+      expect(optionTexts.some(text => text.includes('Codex Image'))).toBe(true);
+      await act(async () => { modelTrigger.click(); });
+
+      const providersBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Model providers'))!;
+      await act(async () => { providersBtn.click(); });
+      expect(mocks.nav.openProviders).toHaveBeenCalledTimes(1);
+
+      const generateBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Generate')!;
+      await act(async () => { generateBtn.click(); });
+      expect(mocks.mutate).toHaveBeenCalledWith(
+        'generate:storyboard',
+        'generate',
+        expect.objectContaining({
+          stepId: 'storyboard',
+          modality: 'image',
+          model: imageModel.id,
+        }),
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('upgrades from fallback Codex Image when another provider becomes available after prompt edit', async () => {
+    const codexModel: Model = {
+      id: 'codex:image-generation',
+      provider: 'codex',
+      modelId: 'image-generation',
+      label: 'Codex Image',
+      modality: 'image',
+      source: 'builtin',
+      mode: 'text-to-image',
+      supportsImageReference: true,
+    };
+
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [
+            { id: 'codex', label: 'Codex', available: true, enabled: true, configured: true, credentialSource: 'local-agent', verification: 'unverified', reason: 'ready' },
+          ],
+          agents: [],
+          routes: {},
+          capabilities: [{ modality: 'image', available: true, modelIds: [codexModel.id], selectedModelId: codexModel.id }],
+        },
+        models: [codexModel],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    const run = makeBaseRun('motion-full-chain', {
+      steps: {
+        storyboard: { draft: { prompt: 'Initial storyboard frame' } },
+      },
+    });
+    const { props, mocks } = createStepProps('motion-full-chain', 'storyboard', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+
+    try {
+      const promptEl = mounted.container.querySelector<HTMLTextAreaElement>('#media-prompt-storyboard')!;
+      await act(async () => {
+        setFieldValue(promptEl, 'Updated storyboard prompt');
+        promptEl.focus();
+        promptEl.blur();
+      });
+
+      expect(mocks.mutate).toHaveBeenCalledWith(
+        'draft:storyboard',
+        'update_step',
+        expect.objectContaining({
+          stepId: 'storyboard',
+          draft: expect.not.objectContaining({ model: codexModel.id }),
+        }),
+      );
+
+      mockUseMediaCatalog.mockReturnValue({
+        catalog: {
+          status: {
+            providers: [
+              { id: 'codex', label: 'Codex', available: true, enabled: true, configured: true, credentialSource: 'local-agent', verification: 'unverified', reason: 'ready' },
+              { id: 'fal', label: 'fal.ai', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' },
+            ],
+            agents: [],
+            routes: {},
+            capabilities: [{ modality: 'image', available: true, modelIds: [codexModel.id, imageModel.id], selectedModelId: imageModel.id }],
+          },
+          models: [codexModel, imageModel],
+        },
+        failed: false,
+        retry: vi.fn(),
+      });
+      await mounted.rerender(<MediaStep {...props} />);
+
+      const generateBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Generate')!;
+      await act(async () => { generateBtn.click(); });
+      expect(mocks.mutate).toHaveBeenCalledWith(
+        'generate:storyboard',
+        'generate',
+        expect.objectContaining({
+          stepId: 'storyboard',
+          model: imageModel.id,
+        }),
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('shows provider recovery on quota failures and retries with a newly selected model', async () => {
+    const codexModel: Model = {
+      id: 'codex:image-generation',
+      provider: 'codex',
+      modelId: 'image-generation',
+      label: 'Codex Image',
+      modality: 'image',
+      source: 'builtin',
+      mode: 'text-to-image',
+      supportsImageReference: true,
+    };
+
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [
+            { id: 'codex', label: 'Codex', available: true, enabled: true, configured: true, credentialSource: 'local-agent', verification: 'unverified', reason: 'ready' },
+            { id: 'fal', label: 'fal.ai', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' },
+          ],
+          agents: [],
+          routes: { image: codexModel.id },
+          capabilities: [{ modality: 'image', available: true, modelIds: [codexModel.id, imageModel.id], selectedModelId: codexModel.id }],
+        },
+        models: [codexModel, imageModel],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    const failedIter: StepIteration = {
+      id: '77777777-7777-4777-8777-777777777773',
+      number: 1,
+      createdAt: 1700000000000,
+      source: 'generated',
+      prompt: 'Storyboard frame for hello: sssss, composition',
+      settings: { scene: 'text-to-image', parameters: { aspect_ratio: '1:1' } },
+      inputs: [],
+      outputs: [],
+      job: {
+        jobId: 'job-codex-limit',
+        state: 'failed',
+        modality: 'image',
+        model: codexModel.id,
+        error: "Codex image generation exited (1)\nYou've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 23rd, 2026 8:07 PM.",
+      },
+    };
+    const run = makeBaseRun('motion-full-chain', {
+      steps: {
+        storyboard: {
+          iterations: [failedIter],
+          activeIterationId: failedIter.id,
+          draft: { prompt: 'Storyboard frame for hello: sssss, composition' },
+        },
+      },
+    });
+
+    const { props, mocks } = createStepProps('motion-full-chain', 'storyboard', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+
+    try {
+      const errorBox = mounted.container.querySelector('.om-step-inline-error')!;
+      expect(errorBox.textContent).toContain('Your current model provider hit a limit or needs access');
+
+      const setupBtn = Array.from(errorBox.querySelectorAll('button')).find(b => b.textContent?.includes('Set up a provider'))!;
+      await act(async () => { setupBtn.click(); });
+      expect(mocks.nav.openProviders).toHaveBeenCalledTimes(1);
+
+      const modelTrigger = mounted.container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Model"]')!;
+      await act(async () => { modelTrigger.click(); });
+      const fluxOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent?.includes('Flux Schnell'))!;
+      await act(async () => { fluxOption.click(); });
+
+      const retryBtn = Array.from(errorBox.querySelectorAll('button')).find(b => b.textContent?.includes('Retry with Flux Schnell'))!;
+      expect(retryBtn).toBeTruthy();
+      await act(async () => { retryBtn.click(); });
+
+      const retryCall = mocks.mutate.mock.calls.find(call => call[0] === 'generate:storyboard');
+      expect(retryCall?.[1]).toBe('generate');
+      expect(retryCall?.[2]).toMatchObject({
+        stepId: 'storyboard',
+        modality: 'image',
+        model: imageModel.id,
+        prompt: 'Storyboard frame for hello: sssss, composition',
+        scene: 'text-to-image',
+        parameters: { image_size: 'landscape_4_3', num_images: 1 },
+      });
+      expect((retryCall?.[2] as { parameters?: Record<string, unknown> })?.parameters).not.toHaveProperty('aspect_ratio');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('renders a rich live generation stage with friendly model label, phase title, prompt preview and Cancel', async () => {
+    const runningIter: StepIteration = {
+      id: '77777777-7777-4777-8777-777777777774',
+      number: 2,
+      createdAt: Date.now() - 4000,
+      source: 'generated',
+      prompt: 'Studio product photo of Holiday Tote with crisp rim lighting',
+      settings: { scene: 'text-to-image' },
+      inputs: [],
+      outputs: [],
+      job: {
+        jobId: 'job-running-1',
+        state: 'running',
+        modality: 'image',
+        model: imageModel.id,
+      },
+    };
+    const run = makeBaseRun('black-friday', {
+      steps: {
+        'product-images': {
+          iterations: [runningIter],
+          activeIterationId: runningIter.id,
+          draft: { prompt: runningIter.prompt },
+        },
+      },
+    });
+    const { props, mocks } = createStepProps('black-friday', 'product-images', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+
+    try {
+      const stage = mounted.container.querySelector('.om-step-job-stage')!;
+      expect(stage).toBeTruthy();
+      expect(stage.textContent).toContain('Creating image…');
+      expect(stage.textContent).toContain('Flux Schnell');
+      expect(stage.textContent).toContain('Studio product photo of Holiday Tote');
+      expect(mounted.container.textContent).not.toContain('fal:flux-schnell');
+
+      const cancelBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Cancel'))!;
+      await act(async () => { cancelBtn.click(); });
+      expect(mocks.mutate).toHaveBeenCalledWith('cancel:product-images:77777777-7777-4777-8777-777777777774', 'cancel', {
+        stepId: 'product-images',
+        iterationId: runningIter.id,
+      });
+    } finally {
+      await mounted.unmount();
+    }
+  });
 });

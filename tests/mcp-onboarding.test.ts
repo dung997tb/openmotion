@@ -86,6 +86,9 @@ test('connection guidance exposes the maintained media workflow without asking f
   assert.doesNotMatch(guide, /不公开生成/);
   assert.match(guide, /Keep credentials in Settings/);
   assert.match(guide, /openmotion_assets_use generate/);
+  for (const scenarioToken of ['action=scenario', 'add_pool', 'recordIteration=true', 'link_design', 'link_motion']) {
+    assert.ok(guide.includes(scenarioToken), scenarioToken);
+  }
 });
 
 test('media example preserves setup and task continuation across supported languages', async () => {
@@ -226,17 +229,37 @@ test('video feature handbook scenarios cover camera control, multi-shot and nati
   }
 });
 
-test('scenario workflows capability, Black Friday recipe and design asset embedding stay aligned and localized', () => {
+test('Workflows capability, Black Friday recipe and design asset embedding stay aligned and localized', () => {
   const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
   const capability = mcpCapabilities.find(item => item.id === 'scenario-workflows')!;
   const blackFriday = mcpScenarios.find(item => item.id === 'scenario-black-friday')!;
+  const writeback = mcpScenarios.find(item => item.id === 'scenario-agent-writeback')!;
   const embedAssets = mcpScenarios.find(item => item.id === 'design-embed-assets')!;
+  const writebackFaq = mcpFaq.find(([question]) => question === 'How does my Agent run a workflow and save results to Assets?')!;
 
   assert.ok(capability);
+  assert.equal(capability.title, 'Run a workflow end to end');
   assert.deepEqual([...capability.tools], ['openmotion_assets_use', 'openmotion_design_edit', 'openmotion_design_project']);
+  assert.match(capability.prompt, /openmotion_get_skill/);
+  assert.match(capability.prompt, /openmotion:\/\/workflow\/\*/);
+  for (const tool of capability.tools) assert.ok(capability.prompt.includes(tool), tool);
+  assert.equal(blackFriday.title, 'Run the Black Friday campaign workflow');
   assert.equal(blackFriday.prompt, scenarioAgentPrompt(findScenario('black-friday')!));
   assert.deepEqual([...blackFriday.tools], [...scenarioRecipeTools]);
   for (const tool of scenarioRecipeTools) assert.ok(blackFriday.prompt.includes(tool), tool);
+  assert.ok(writeback);
+  assert.equal(writeback.title, 'Run a workflow and save back to Assets');
+  assert.deepEqual([...writeback.tools], [...scenarioRecipeTools]);
+  assert.match(writeback.prompt, /recordIteration=true/);
+  assert.match(writeback.prompt, /openmotion_get_skill/);
+  for (const tool of scenarioRecipeTools) assert.ok(writeback.prompt.includes(tool), tool);
+  assert.ok(writebackFaq);
+  assert.match(writebackFaq[1], /Copy for Agent/);
+  assert.match(writebackFaq[1], /Copy MCP prompt/);
+  assert.match(writebackFaq[1], /openmotion_get_skill/);
+  assert.match(writebackFaq[1], /action=scenario/);
+  assert.match(writebackFaq[1], /recordIteration=true/);
+  assert.match(writebackFaq[1], /Sync/);
   assert.deepEqual([...embedAssets.tools], ['openmotion_assets_use', 'openmotion_design_edit']);
   assert.ok(embedAssets.prompt.includes('openmotion_assets_use'));
   assert.ok(embedAssets.prompt.includes('openmotion_design_edit'));
@@ -246,6 +269,8 @@ test('scenario workflows capability, Black Friday recipe and design asset embedd
     for (const key of [
       capability.title, capability.description, capability.prompt,
       blackFriday.title, blackFriday.description,
+      writeback.title, writeback.description, writeback.prompt,
+      writebackFaq[0], writebackFaq[1],
       embedAssets.title, embedAssets.description, embedAssets.prompt,
     ]) {
       assert.ok(values[key]?.trim(), `${locale}: missing ${key}`);

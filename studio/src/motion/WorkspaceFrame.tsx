@@ -473,10 +473,12 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
           scenarioId={page.scenario}
           runId={page.scenarioRun}
           stepId={page.scenarioStep}
+          mode={page.scenarioMode}
           active={!connectionsOpen}
           onRoute={(patch, replace) => navigatePage({
             ...(patch.run !== undefined ? { scenarioRun: patch.run } : {}),
             ...(patch.step !== undefined ? { scenarioStep: patch.step } : {}),
+            ...(patch.mode !== undefined ? { scenarioMode: patch.mode } : {}),
           }, Boolean(replace))}
           onExplore={returnToExplore}
           onOpenHub={() => openScenarioHub()}

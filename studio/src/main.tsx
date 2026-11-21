@@ -1,4 +1,4 @@
-import { lazy, StrictMode, Suspense } from "react";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { IconContext } from "@phosphor-icons/react";
 import { MotionApp } from "./motion/MotionApp";
@@ -20,10 +20,14 @@ import "./motion/application.css";
 import { MotionStudioHost } from "./motion/MotionStudioHost";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
+import { bindVitePreloadErrorReload, lazyWithChunkReload } from './utils/chunkReload';
 
 const ComponentInspector = new URLSearchParams(location.search).get('debug') === 'ui'
-  ? lazy(() => import('./components/ComponentInspector'))
+  ? lazyWithChunkReload(() => import('./components/ComponentInspector'))
   : null;
+
+const unbindPreloadErrorReload = bindVitePreloadErrorReload();
+import.meta.hot?.dispose(unbindPreloadErrorReload);
 
 const unbindHostTheme = bindEmbeddedStudioTheme();
 import.meta.hot?.dispose(unbindHostTheme);

@@ -248,22 +248,54 @@ it('round-trips scenario hub, scenario workspace, run/step overlay patches and s
 
   // Overlay step/run patch retains parent scenario.
   const nextStep = new URL(workspacePageHref(workspace.href, { scenarioStep: 'social' }), origin);
-  expect(readWorkspacePage(nextStep.search)).toMatchObject({ scenario: 'black-friday', scenarioRun: runId, scenarioStep: 'social' });
+  expect(readWorkspacePage(nextStep.search)).toMatchObject({ scenario: 'black-friday', scenarioRun: runId, scenarioStep: 'social', scenarioMode: null });
 
-  // Leaving scenario clears scenario, run, step and category.
-  const returned = new URL(workspacePageHref(nextStep.href, { explore: true }), origin);
+  // Mode round-trips for 'agent', omits 'mode' for 'manual'/null, and clears when leaving.
+  const agentMode = new URL(workspacePageHref(nextStep.href, { scenarioMode: 'agent' }), origin);
+  expect(agentMode.search).toBe(`?page=scenario&scenario=black-friday&run=${runId}&step=social&mode=agent&community=product-films`);
+  expect(readWorkspacePage(agentMode.search)).toMatchObject({
+    scenario: 'black-friday',
+    scenarioRun: runId,
+    scenarioStep: 'social',
+    scenarioMode: 'agent',
+  });
+  const directAgent = new URL(workspacePageHref(origin, { scenario: 'black-friday', scenarioMode: 'agent' }), origin);
+  expect(directAgent.search).toBe('?page=scenario&scenario=black-friday&mode=agent&community=product-films');
+  expect(readWorkspacePage(directAgent.search).scenarioMode).toBe('agent');
+
+  const manualOverlay = new URL(workspacePageHref(agentMode.href, { scenarioMode: 'manual' }), origin);
+  expect(manualOverlay.searchParams.has('mode')).toBe(false);
+  expect(readWorkspacePage(manualOverlay.search)).toMatchObject({
+    scenario: 'black-friday',
+    scenarioRun: runId,
+    scenarioStep: 'social',
+    scenarioMode: null,
+  });
+  expect(readWorkspacePage('?page=scenario&scenario=black-friday&mode=manual').scenarioMode).toBe('manual');
+  expect(readWorkspacePage('?page=scenario&scenario=black-friday&mode=unknown').scenarioMode).toBeNull();
+  expect(readWorkspacePage('?page=explore&mode=agent').scenarioMode).toBeNull();
+
+  // Switching scenarios clears mode unless explicitly set.
+  const switched = new URL(workspacePageHref(agentMode.href, { scenario: 'ai-influencer' }), origin);
+  expect(switched.searchParams.has('mode')).toBe(false);
+  expect(readWorkspacePage(switched.search)).toMatchObject({ scenario: 'ai-influencer', scenarioMode: null });
+
+  // Leaving scenario clears scenario, run, step, mode and category.
+  const returned = new URL(workspacePageHref(agentMode.href, { explore: true }), origin);
   expect(returned.href).toBe(origin);
   expect(returned.searchParams.has('scenario')).toBe(false);
   expect(returned.searchParams.has('run')).toBe(false);
   expect(returned.searchParams.has('step')).toBe(false);
+  expect(returned.searchParams.has('mode')).toBe(false);
   expect(returned.searchParams.has('category')).toBe(false);
 
   // Unknown scenario falls back to scenarioHub; invalid run UUID and unknown step are ignored.
-  expect(readWorkspacePage('?page=scenario&scenario=does-not-exist')).toMatchObject({
+  expect(readWorkspacePage('?page=scenario&scenario=does-not-exist&mode=agent')).toMatchObject({
     scenarioHub: true,
     scenario: null,
     scenarioRun: null,
     scenarioStep: null,
+    scenarioMode: null,
   });
   expect(readWorkspacePage('?page=scenario&scenario=black-friday&run=not-a-uuid&step=unknown-step')).toMatchObject({
     scenarioHub: false,

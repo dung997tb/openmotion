@@ -99,6 +99,8 @@ export function MotionPanel({
   const [creating, setCreating] = useState(false);
   const [linking, setLinking] = useState(false);
   const [openingProject, setOpeningProject] = useState(false);
+  const [stagesExpanded, setStagesExpanded] = useState(false);
+  const [linkExpanded, setLinkExpanded] = useState(false);
 
   // Pool asset items eligible for import into Motion project
   const importablePoolItems = useMemo(
@@ -399,32 +401,46 @@ export function MotionPanel({
           </div>
 
           {blackFridayStages.length > 0 && (
-            <div className="om-step-bf-stages">
-              {blackFridayStages.map(stage => (
-                <div key={stage.id} className="om-step-bf-stage">
-                  <div className="om-step-bf-stage-head">
-                    <strong>{t(stage.title)}</strong>
-                    <span className="om-step-muted">{t(stage.description)}</span>
-                  </div>
-                  <div className="om-step-motion-shelf">
-                    {stage.items.slice(0, 3).map(item => {
-                      const isSelected = selectedTemplate?.id === item.id;
-                      return (
-                        <div key={item.id} className="om-step-motion-card-wrap" data-selected={isSelected ? 'true' : undefined}>
-                          <TemplateGalleryCard
-                            template={item}
-                            active={active && priorityId === item.id}
-                            onPriority={setPriorityId}
-                            showAvatar={false}
-                            brandedFallback
-                            onSelect={tpl => setSelectedTemplate(prev => (prev?.id === tpl.id ? null : tpl))}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+            <div className="om-step-disclosure">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="om-step-disclosure-trigger"
+                aria-expanded={stagesExpanded}
+                icon={<RemixIcon name={stagesExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+                onClick={() => setStagesExpanded(prev => !prev)}
+              >
+                <span>{t('Stage reference templates')}</span>
+              </Button>
+              {stagesExpanded && (
+                <div className="om-step-disclosure-body om-step-bf-stages">
+                  {blackFridayStages.map(stage => (
+                    <div key={stage.id} className="om-step-bf-stage">
+                      <div className="om-step-bf-stage-head">
+                        <strong>{t(stage.title)}</strong>
+                        <span className="om-step-muted">{t(stage.description)}</span>
+                      </div>
+                      <div className="om-step-motion-shelf">
+                        {stage.items.slice(0, 3).map(item => {
+                          const isSelected = selectedTemplate?.id === item.id;
+                          return (
+                            <div key={item.id} className="om-step-motion-card-wrap" data-selected={isSelected ? 'true' : undefined}>
+                              <TemplateGalleryCard
+                                template={item}
+                                active={active && priorityId === item.id}
+                                onPriority={setPriorityId}
+                                showAvatar={false}
+                                brandedFallback
+                                onSelect={tpl => setSelectedTemplate(prev => (prev?.id === tpl.id ? null : tpl))}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </section>
@@ -481,7 +497,7 @@ export function MotionPanel({
 
         <div className="om-step-field">
           <span className="om-step-field-label">
-            {t('Include shared assets ({count})', { count: selectedPoolIds.length })}
+            {t('Include assets ({count})', { count: selectedPoolIds.length })}
           </span>
           {importablePoolItems.length > 0 ? (
             <div className="om-step-checklist">
@@ -519,35 +535,51 @@ export function MotionPanel({
       </section>
 
       {workspaceProjects.length > 0 && (
-        <section className="om-step-section" aria-label={t('Link another project')}>
-          <div className="om-step-section-head">
-            <div className="om-brief-composer-lead">
-              <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
-                <RemixIcon name="link" size={16} />
-              </span>
-              <div>
-                <h3 className="om-step-section-title">{t('Link another project')}</h3>
-                <p className="om-step-muted">{t('Connect an existing Motion project from this workspace.')}</p>
+        <section className="om-step-disclosure" aria-label={t('Link another project')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="om-step-disclosure-trigger"
+            aria-expanded={linkExpanded}
+            icon={<RemixIcon name={linkExpanded ? 'arrow-down-s-line' : 'arrow-right-s-line'} size={14} />}
+            onClick={() => setLinkExpanded(prev => !prev)}
+          >
+            <span>
+              {t('Or link an existing Motion project')} · {t('{count} available', { count: workspaceProjects.length })}
+            </span>
+          </Button>
+          {linkExpanded && (
+            <div className="om-step-disclosure-body om-step-disclosure-panel">
+              <div className="om-step-section-head">
+                <div className="om-brief-composer-lead">
+                  <span className="om-brief-composer-icon" data-tone="video" aria-hidden="true">
+                    <RemixIcon name="link" size={16} />
+                  </span>
+                  <div>
+                    <h3 className="om-step-section-title">{t('Link another project')}</h3>
+                    <p className="om-step-muted">{t('Connect an existing Motion project from this workspace.')}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="om-step-link-row">
+                <Select
+                  label={t('Workspace Motion project')}
+                  value={linkProjectId}
+                  options={workspaceProjects.map(p => ({ value: p.id, label: p.title }))}
+                  onCommit={setLinkProjectId}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={linking}
+                  disabled={!linkProjectId}
+                  onClick={() => void handleLinkMotion()}
+                >
+                  {t('Link project')}
+                </Button>
               </div>
             </div>
-          </div>
-          <div className="om-step-link-row">
-            <Select
-              label={t('Workspace Motion project')}
-              value={linkProjectId}
-              options={workspaceProjects.map(p => ({ value: p.id, label: p.title }))}
-              onCommit={setLinkProjectId}
-            />
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={linking}
-              disabled={!linkProjectId}
-              onClick={() => void handleLinkMotion()}
-            >
-              {t('Link project')}
-            </Button>
-          </div>
+          )}
         </section>
       )}
     </div>

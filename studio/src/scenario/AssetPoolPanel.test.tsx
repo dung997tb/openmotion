@@ -125,7 +125,14 @@ describe('AssetPoolPanel', () => {
       IMG_ITEM_1.id,
     ]);
 
-    // Kind chip counts reflect the pool.
+    // Kind chip counts reflect only non-zero asset kinds in the panel (plus All).
+    const kindLabels = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-kind-chips button')).map(
+      btn => btn.textContent ?? '',
+    );
+    expect(kindLabels.some(txt => txt.includes('Video'))).toBe(false);
+    expect(kindLabels.some(txt => txt.includes('Audio'))).toBe(false);
+    expect(kindLabels.some(txt => txt.includes('Pages'))).toBe(false);
+    expect(kindLabels.some(txt => txt.includes('Motion'))).toBe(false);
     const imagesChip = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-kind-chips button')).find(
       btn => btn.textContent?.includes('Images'),
     )!;
@@ -180,6 +187,10 @@ describe('AssetPoolPanel', () => {
       );
     });
 
+    // Empty Assets panel hides zero-count filter chips and Step filter.
+    expect(container.querySelector('.om-scenario-pool-filters')).toBeNull();
+    expect(container.querySelector('.om-scenario-pool-title')?.textContent).toBe('Assets');
+
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(['png-bytes'], 'product.png', { type: 'image/png' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
@@ -204,7 +215,7 @@ describe('AssetPoolPanel', () => {
       },
     ]);
     expect(props.toast.showToast).toHaveBeenCalledWith(
-      'Added 1 file(s) to shared assets',
+      'Added 1 file(s) to assets',
       'info',
       'feedback',
     );
@@ -387,9 +398,9 @@ describe('AssetPoolPanel', () => {
       );
     });
 
-    // Header actions: Sync assets and Collapse shared assets.
+    // Header actions: Sync assets and Collapse assets.
     const syncBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Sync assets"]')!;
-    const collapseBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse shared assets"]')!;
+    const collapseBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse assets"]')!;
     await act(async () => {
       syncBtn.click();
       collapseBtn.click();
@@ -398,9 +409,7 @@ describe('AssetPoolPanel', () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
 
     // Enter export selection mode, select all visible items, and click Export (3).
-    const selectToggleBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-bar button')).find(
-      btn => btn.textContent?.trim() === 'Select',
-    )!;
+    const selectToggleBtn = container.querySelector<HTMLButtonElement>('.om-scenario-pool-header-actions button[aria-label="Select"]')!;
     await act(async () => { selectToggleBtn.click(); });
 
     const selBar = container.querySelector<HTMLElement>('.om-scenario-pool-selection-bar')!;
@@ -427,9 +436,7 @@ describe('AssetPoolPanel', () => {
     });
 
     // Open Export popover and trigger Copy summary (JSON).
-    const exportMenuTrigger = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-primary button')).find(
-      btn => btn.textContent?.trim() === 'Export',
-    )!;
+    const exportMenuTrigger = container.querySelector<HTMLButtonElement>('.om-scenario-pool-header-actions button[aria-label="Export"]')!;
     await act(async () => {
       exportMenuTrigger.click();
       await Promise.resolve();
@@ -534,8 +541,7 @@ describe('AssetPoolPanel', () => {
     });
 
     // Export popover options -> Export all (ZIP)
-    const exportMenuTrigger = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-primary button'))
-      .find(b => b.textContent?.trim() === 'Export')!;
+    const exportMenuTrigger = container.querySelector<HTMLButtonElement>('.om-scenario-pool-header-actions button[aria-label="Export"]')!;
     await act(async () => {
       exportMenuTrigger.click();
       await Promise.resolve();
@@ -582,8 +588,7 @@ describe('AssetPoolPanel', () => {
     ]);
 
     // Open Import -> Import Design pages… -> Select all (2) -> Import (2)
-    const importTrigger = Array.from(container.querySelectorAll<HTMLButtonElement>('.om-scenario-pool-actions-primary button'))
-      .find(b => b.textContent?.trim() === 'Import')!;
+    const importTrigger = container.querySelector<HTMLButtonElement>('.om-scenario-pool-header-actions button[aria-label="Import"]')!;
     await act(async () => {
       importTrigger.click();
       await Promise.resolve();

@@ -1,8 +1,8 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { assetMediaUrl } from '../../../../shared/asset-library';
-import type { PoolItem, ScenarioRun, ScenarioStepState } from '../../../../shared/scenario-runs';
+import type { PoolItem, ScenarioRun, ScenarioStepState, StepIteration } from '../../../../shared/scenario-runs';
 import type { ScenarioDefinition, ScenarioStepDefinition } from '../../../../shared/scenarios';
 import { Select } from '../../components/ui';
 import { FilterChip } from '../../components/ui/FilterChip';
@@ -10,6 +10,7 @@ import { FieldTextarea } from '../../components/ui/FormField';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useI18n } from '../../i18n/I18n';
 import { RemixIcon } from '../../icons/RemixIcons';
+import { providerDisplayName } from '../../motion/imageMenuModels';
 import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { useMediaCatalog } from '../../motion/useMediaCatalog';
 import { ScenarioApiError } from '../scenarioClient';
@@ -21,7 +22,60 @@ import {
   copyText,
   extractErrorMessage,
   isScenarioConflictError,
+  jobStateLabel,
+  pickDefaultScenarioModelId,
+  poolKindIcon,
+  selectScenarioModels,
 } from './stepUtils';
+
+export function StepMediaOutputs({
+  iteration,
+  pool,
+  fallback,
+}: {
+  iteration: StepIteration;
+  pool: StepProps['pool'];
+  fallback?: string;
+}) {
+  const { t } = useI18n();
+  if (iteration.job && (iteration.job.state === 'queued' || iteration.job.state === 'running')) {
+    return <Skeleton className="om-step-iter-skeleton" />;
+  }
+  if (iteration.job && (iteration.job.state === 'failed' || iteration.job.state === 'cancelled')) {
+    return (
+      <span className="om-step-iter-error">
+        {iteration.job.error ?? t(jobStateLabel(iteration.job.state))}
+      </span>
+    );
+  }
+  const items = iteration.outputs
+    .filter((out): out is { type: 'pool'; poolItemId: string } => out.type === 'pool')
+    .map(out => pool.byId.get(out.poolItemId))
+    .filter((item): item is PoolItem => Boolean(item));
+  if (!items.length) {
+    return fallback ? <span className="om-step-muted">{fallback}</span> : null;
+  }
+  return (
+    <div className="om-step-iter-thumbs">
+      {items.slice(0, 4).map(item =>
+        item.ref.type === 'asset' && item.kind === 'image' ? (
+          <img
+            key={item.id}
+            className="om-step-iter-thumb"
+            src={assetMediaUrl(item.ref.assetId, item.ref.versionId)}
+            alt={item.label}
+            loading="lazy"
+          />
+        ) : (
+          <span key={item.id} className="om-step-iter-pill">
+            <RemixIcon name={poolKindIcon(item.kind)} size={13} />
+            <span>{item.label}</span>
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
 
 export type StepCapabilityBarProps = {
   scenario: ScenarioDefinition;
@@ -35,7 +89,8 @@ export type StepCapabilityBarProps = {
   nav: StepProps['nav'];
   stepPrompt?: string;
   allowQuickMedia?: boolean;
-  defaultModality?: 'image' | 'video';
+  defaultModality?: 'image' | 'video' | 'audio';
+  compact?: boolean;
   onAfterSync?: () => Promise<void> | void;
 };
 
@@ -52,13 +107,14 @@ export function StepCapabilityBar({
   stepPrompt,
   allowQuickMedia = false,
   defaultModality = 'image',
+  compact = false,
   onAfterSync,
 }: StepCapabilityBarProps) {
   const { t, locale } = useI18n();
   const { info: integration } = useIntegrationInfo();
 
   const [quickOpen, setQuickOpen] = useState(false);
-  const [modality, setModality] = useState<'image' | 'video'>(defaultModality);
+  const [modality, setModality] = useState<'image' | 'video' | 'audio'>(defaultModality);
   const [refIds, setRefIds] = useState<string[]>([]);
   const [promptTouched, setPromptTouched] = useState(false);
   const [providerUnavailable, setProviderUnavailable] = useState(false);
@@ -83,13 +139,20 @@ export function StepCapabilityBar({
 
   const [quickPrompt, setQuickPrompt] = useState(fallbackPrompt);
 
+  const userSelectedModelRef = useRef(false);
+
   useEffect(() => {
     setQuickOpen(false);
     setModality(defaultModality);
     setRefIds([]);
     setPromptTouched(false);
     setProviderUnavailable(false);
+    userSelectedModelRef.current = false;
   }, [step.id, defaultModality]);
+
+  useEffect(() => {
+    userSelectedModelRef.current = false;
+  }, [step.id, modality]);
 
   useEffect(() => {
     if (!promptTouched) {
@@ -101,28 +164,19 @@ export function StepCapabilityBar({
     allowQuickMedia && active && quickOpen,
   );
 
-  const availableModels = useMemo(() => {
-    if (!catalog) return [];
-    const availableProviders = new Set(
-      catalog.status.providers.filter(p => p.available).map(p => p.id),
-    );
-    return catalog.models.filter(
-      model => model.modality === modality && availableProviders.has(model.provider),
-    );
-  }, [catalog, modality]);
+  const availableModels = useMemo(
+    () => selectScenarioModels(catalog, modality),
+    [catalog, modality],
+  );
 
-  const defaultModelId = useMemo(() => {
-    if (!availableModels.length) return '';
-    const routeModel = catalog?.status.routes[modality];
-    if (routeModel && availableModels.some(m => m.id === routeModel)) return routeModel;
-    const capModel = catalog?.status.capabilities.find(c => c.modality === modality)?.selectedModelId;
-    if (capModel && availableModels.some(m => m.id === capModel)) return capModel;
-    return availableModels[0].id;
-  }, [availableModels, catalog?.status, modality]);
+  const defaultModelId = useMemo(
+    () => pickDefaultScenarioModelId(availableModels, catalog, modality),
+    [availableModels, catalog, modality],
+  );
 
   const [selectedModelId, setSelectedModelId] = useState(defaultModelId);
   useEffect(() => {
-    if (!availableModels.some(m => m.id === selectedModelId)) {
+    if (!userSelectedModelRef.current || !availableModels.some(m => m.id === selectedModelId)) {
       setSelectedModelId(defaultModelId);
     }
   }, [availableModels, selectedModelId, defaultModelId]);
@@ -220,16 +274,20 @@ export function StepCapabilityBar({
     const trimmed = quickPrompt.trim();
     if (!selectedModel || !trimmed) return;
     setGenerating(true);
+    const targetMode = modality === 'audio'
+      ? (selectedModel.mode === 'text-to-speech' ? 'text-to-speech' : 'text-to-audio')
+      : undefined;
     try {
       await api.mutate(`quick-gen:${step.id}:${modality}`, 'generate', {
         stepId: step.id,
         modality,
         model: selectedModel.id,
+        ...(targetMode ? { mode: targetMode } : {}),
         prompt: trimmed,
-        ...(activeRefIds.length ? { referencePoolItemIds: activeRefIds } : {}),
+        ...(modality !== 'audio' && activeRefIds.length ? { referencePoolItemIds: activeRefIds } : {}),
       });
       toast.showToast(
-        t('Generation started. New assets will appear in Shared assets.'),
+        t('Generation started. New outputs will appear in Assets.'),
         'info',
         'feedback',
       );
@@ -247,7 +305,7 @@ export function StepCapabilityBar({
 
   return (
     <section
-      className="om-step-assist-bar"
+      className={compact ? 'om-step-assist-bar om-step-assist-bar--compact' : 'om-step-assist-bar'}
       data-step-assist={step.id}
       aria-label={allowQuickMedia ? t('Models and Agent tools') : t('Agent tools')}
     >
@@ -260,11 +318,13 @@ export function StepCapabilityBar({
             <h3 className="om-step-section-title">
               {allowQuickMedia ? t('Create with models or an Agent') : t('Work with your Agent via MCP')}
             </h3>
-            <p className="om-step-muted">
-              {allowQuickMedia
-                ? t('Generate images or video right here, or copy an MCP prompt so your Agent writes assets back into this step.')
-                : t('Copy a step-scoped MCP prompt so your Agent writes assets back into this step and Shared assets.')}
-            </p>
+            {!compact && (
+              <p className="om-step-muted">
+                {allowQuickMedia
+                  ? t('Generate images, video, or audio directly into Assets, or copy an MCP prompt so your Agent refines and saves back here.')
+                  : t('Copy an MCP prompt for this step so your Agent writes assets back here and to Assets.')}
+              </p>
+            )}
           </div>
           {pendingJobs > 0 && (
             <span className="om-step-badge om-step-badge--accent">
@@ -284,7 +344,7 @@ export function StepCapabilityBar({
               icon={<RemixIcon name="sparkling-line" size={14} />}
               onClick={handleToggleQuick}
             >
-              {t('Generate image / video')}
+              {t('Generate media')}
             </Button>
           )}
           <Button
@@ -296,6 +356,15 @@ export function StepCapabilityBar({
             onClick={() => void handleCopyMcp()}
           >
             {t('Copy MCP prompt')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            icon={<RemixIcon name="plug-line" size={14} />}
+            onClick={() => nav.openMcp()}
+          >
+            {t('MCP guide')}
           </Button>
           <Button
             variant="ghost"
@@ -336,6 +405,17 @@ export function StepCapabilityBar({
               </span>
               <span>{t('Video')}</span>
             </FilterChip>
+            <FilterChip
+              active={modality === 'audio'}
+              className="om-step-icon-chip"
+              data-tone="audio"
+              onClick={() => setModality('audio')}
+            >
+              <span className="om-step-chip-icon" data-tone="audio" aria-hidden="true">
+                <RemixIcon name="music-2-line" size={13} />
+              </span>
+              <span>{t('Audio')}</span>
+            </FilterChip>
           </div>
 
           <div className="om-step-field">
@@ -350,7 +430,9 @@ export function StepCapabilityBar({
               placeholder={
                 modality === 'image'
                   ? t('Describe the image to generate')
-                  : t('Describe the video clip to generate')
+                  : modality === 'video'
+                    ? t('Describe the video clip to generate')
+                    : t('Describe the music or voiceover to generate')
               }
               onChange={e => {
                 setPromptTouched(true);
@@ -359,42 +441,44 @@ export function StepCapabilityBar({
             />
           </div>
 
-          <div className="om-step-chip-list">
-            {refItems.map(item => (
-              <span key={item.id} className="om-step-bound-chip">
-                {item.ref.type === 'asset' ? (
-                  <img
-                    className="om-step-slot-thumb"
-                    src={assetMediaUrl(item.ref.assetId, item.ref.versionId)}
-                    alt=""
-                    loading="lazy"
+          {modality !== 'audio' && (
+            <div className="om-step-chip-list">
+              {refItems.map(item => (
+                <span key={item.id} className="om-step-bound-chip">
+                  {item.ref.type === 'asset' ? (
+                    <img
+                      className="om-step-slot-thumb"
+                      src={assetMediaUrl(item.ref.assetId, item.ref.versionId)}
+                      alt=""
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="om-step-slot-icon" data-pool-kind={item.kind} aria-hidden="true">
+                      <RemixIcon name="image-line" size={14} />
+                    </span>
+                  )}
+                  <span className="om-step-bound-chip-label">{item.label}</span>
+                  <IconButton
+                    size="sm"
+                    variant="ghost"
+                    type="button"
+                    aria-label={t('Remove {label}', { label: item.label })}
+                    icon={<RemixIcon name="close-line" size={12} />}
+                    onClick={() => setRefIds(prev => prev.filter(id => id !== item.id))}
                   />
-                ) : (
-                  <span className="om-step-slot-icon" data-pool-kind={item.kind} aria-hidden="true">
-                    <RemixIcon name="image-line" size={14} />
-                  </span>
-                )}
-                <span className="om-step-bound-chip-label">{item.label}</span>
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  type="button"
-                  aria-label={t('Remove {label}', { label: item.label })}
-                  icon={<RemixIcon name="close-line" size={12} />}
-                  onClick={() => setRefIds(prev => prev.filter(id => id !== item.id))}
-                />
-              </span>
-            ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              icon={<RemixIcon name="image-line" size={14} />}
-              onClick={() => void handlePickReference()}
-            >
-              {refItems.length > 0 ? t('Change reference image') : t('Attach reference image')}
-            </Button>
-          </div>
+                </span>
+              ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                icon={<RemixIcon name="image-line" size={14} />}
+                onClick={() => void handlePickReference()}
+              >
+                {refItems.length > 0 ? t('Change reference image') : t('Attach reference image')}
+              </Button>
+            </div>
+          )}
 
           {catalogFailed ? (
             <div className="om-step-inline-error">
@@ -413,7 +497,11 @@ export function StepCapabilityBar({
                 </span>
                 <div>
                   <strong>
-                    {modality === 'image' ? t('No image model is configured.') : t('No video model is configured.')}
+                    {modality === 'image'
+                      ? t('No image model is configured.')
+                      : modality === 'video'
+                        ? t('No video model is configured.')
+                        : t('No audio model is configured.')}
                   </strong>
                   <p className="om-step-muted">
                     {t('Connect a model provider to generate directly, or copy the MCP prompt so your Agent writes assets back here.')}
@@ -450,11 +538,23 @@ export function StepCapabilityBar({
                   options={availableModels.map(m => ({
                     value: m.id,
                     label: m.label,
-                    description: m.provider,
+                    description: providerDisplayName(m.provider, catalog?.status.providers ?? []),
                   }))}
-                  onCommit={setSelectedModelId}
+                  onCommit={next => {
+                    userSelectedModelRef.current = true;
+                    setSelectedModelId(next);
+                  }}
                 />
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                icon={<RemixIcon name="plug-line" size={14} />}
+                onClick={() => nav.openProviders()}
+              >
+                {t('Model providers')}
+              </Button>
               <Button
                 variant="primary"
                 size="sm"

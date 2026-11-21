@@ -11,6 +11,7 @@ import type {
   ScenarioDefinition,
   ScenarioId,
   ScenarioStepDefinition,
+  ScenarioWorkspaceMode,
 } from '../../../shared/scenarios';
 import type { useToast } from '../hooks/useToast';
 import type { StudioDestination } from '../motion/creativeStudios';
@@ -20,6 +21,11 @@ export type ScenarioRunApi = {
   mutate<T = { run: ScenarioRun }>(intent: string, command: ScenarioCommand, args: Record<string, unknown>): Promise<T>;
   refresh(): Promise<void>;
   busy: ReadonlySet<string>;
+};
+
+export type StepOutputPanelMeta = {
+  status?: 'running' | 'failed' | 'ready';
+  version?: number;
 };
 
 export type StepProps = {
@@ -49,14 +55,20 @@ export type StepProps = {
   };
   renderExportMenu(extraItems?: ReactNode): ReactNode;
   renderIterations(opts: { renderOutput(iteration: StepIteration): ReactNode }): ReactNode;
+  renderOutputPanel?(content: ReactNode, meta?: StepOutputPanelMeta): ReactNode;
+  renderCapabilityBar?(content: ReactNode): ReactNode;
 };
 
 export type ScenarioWorkspaceProps = {
   scenarioId: ScenarioId;
   runId: string | null;
   stepId: string | null;
+  mode?: ScenarioWorkspaceMode | null;
   active: boolean;
-  onRoute(patch: { run?: string | null; step?: string | null }, replace?: boolean): void;
+  onRoute(
+    patch: { run?: string | null; step?: string | null; mode?: ScenarioWorkspaceMode | null },
+    replace?: boolean,
+  ): void;
   onExplore(): void;
   onOpenHub(): void;
   breadcrumb?: ReactNode;

@@ -308,7 +308,7 @@ it.each([
   expect(faq.textContent).toContain('OpenMotion');
 });
 
-it.each(['en', 'zh-CN'] as const)('copies the Black Friday scenario workflow handoff with workspace context in %s', async locale => {
+it.each(['en', 'zh-CN'] as const)('copies the Black Friday campaign workflow handoff with workspace context in %s', async locale => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount(locale);

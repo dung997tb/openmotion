@@ -155,15 +155,17 @@ describe('SocialPackStep', () => {
         status: {
           providers: [{ id: 'fal', label: 'fal', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' }],
           agents: [],
-          routes: { image: 'fal:flux', video: 'fal:wan' },
+          routes: { image: 'fal:flux', video: 'fal:wan', audio: 'fal:music' },
           capabilities: [
             { modality: 'image', available: true, modelIds: ['fal:flux'], selectedModelId: 'fal:flux' },
             { modality: 'video', available: true, modelIds: ['fal:wan'], selectedModelId: 'fal:wan' },
+            { modality: 'audio', available: true, modelIds: ['fal:music'], selectedModelId: 'fal:music' },
           ],
         },
         models: [
           { id: 'fal:flux', provider: 'fal', modelId: 'flux', label: 'Flux', modality: 'image', source: 'builtin' },
           { id: 'fal:wan', provider: 'fal', modelId: 'wan', label: 'Wan', modality: 'video', source: 'builtin' },
+          { id: 'fal:music', provider: 'fal', modelId: 'music', label: 'MusicGen', modality: 'audio', source: 'builtin', mode: 'text-to-audio' },
         ] as never,
       },
       failed: false,
@@ -223,7 +225,11 @@ describe('SocialPackStep', () => {
     const mounted = await mountStep(<SocialPackStep {...setup.props} />);
     try {
       const assistBar = mounted.container.querySelector('[data-step-assist="social"]')!;
-      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate image / video'))!;
+      const mcpGuideBtn = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('MCP guide'))!;
+      await act(async () => { mcpGuideBtn.click(); });
+      expect(setup.mocks.nav.openMcp).toHaveBeenCalledTimes(1);
+
+      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate media'))!;
       await act(async () => { quickToggle.click(); });
 
       const quickGen = mounted.container.querySelector('[data-quick-gen="social"]')!;
@@ -247,6 +253,26 @@ describe('SocialPackStep', () => {
           modality: 'video',
           model: 'fal:wan',
           prompt: 'Short X social video loop',
+        },
+      );
+
+      // Switch to Audio modality and submit audio quick generation.
+      const audioChip = Array.from(quickGen.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Audio')!;
+      await act(async () => { audioChip.click(); });
+      await act(async () => { setFieldValue(promptInput, 'Upbeat 15s launch jingle'); });
+      await act(async () => {
+        generateBtn.click();
+        await Promise.resolve();
+      });
+      expect(setup.mocks.mutate).toHaveBeenCalledWith(
+        'quick-gen:social:audio',
+        'generate',
+        {
+          stepId: 'social',
+          modality: 'audio',
+          model: 'fal:music',
+          mode: 'text-to-audio',
+          prompt: 'Upbeat 15s launch jingle',
         },
       );
 

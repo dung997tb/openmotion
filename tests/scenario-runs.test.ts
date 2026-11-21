@@ -395,6 +395,50 @@ test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, gene
     );
     assert.equal(importedAssetIndex.length, 1, 'Pool asset was imported into Motion project');
 
+    // 10b. Agent write-back via add_pool with recordIteration=true adds to Assets and step history atomically (idempotent on retry)
+    const writeBackRes = await callScenario(api, {
+      command: 'add_pool',
+      runId: currentRun.id,
+      expectedRevision: currentRun.revision,
+      requestId: 'req-agent-writeback-1',
+      recordIteration: true,
+      note: 'Agent refined keyshot',
+      items: [{
+        ref: { type: 'asset', assetId: extraAsset.id, versionId: extraAsset.currentVersionId },
+        label: 'Agent Refined Hero',
+        stepId: 'product-images',
+        source: 'agent',
+      }],
+    });
+    assert.equal(writeBackRes.status, 200, JSON.stringify(writeBackRes.body));
+    currentRun = writeBackRes.body.run;
+    const writtenPoolId = writeBackRes.body.poolItemIds[0];
+    assert.ok(currentRun.pool.some((item: any) => item.id === writtenPoolId && item.source === 'agent'));
+    const productIters = currentRun.steps['product-images'].iterations;
+    const latestProductIter = productIters[productIters.length - 1];
+    assert.equal(latestProductIter.source, 'agent');
+    assert.equal(latestProductIter.note, 'Agent refined keyshot');
+    assert.deepEqual(latestProductIter.outputs, [{ type: 'pool', poolItemId: writtenPoolId }]);
+    assert.equal(currentRun.steps['product-images'].activeIterationId, latestProductIter.id);
+
+    const retryWriteBack = await callScenario(api, {
+      command: 'add_pool',
+      runId: currentRun.id,
+      expectedRevision: currentRun.revision - 1,
+      requestId: 'req-agent-writeback-1',
+      recordIteration: true,
+      note: 'Agent refined keyshot',
+      items: [{
+        ref: { type: 'asset', assetId: extraAsset.id, versionId: extraAsset.currentVersionId },
+        label: 'Agent Refined Hero',
+        stepId: 'product-images',
+        source: 'agent',
+      }],
+    });
+    assert.equal(retryWriteBack.status, 200);
+    assert.equal(retryWriteBack.body.run.revision, currentRun.revision, 'Idempotent replay reuses revision');
+    assert.equal(retryWriteBack.body.run.steps['product-images'].iterations.length, productIters.length);
+
     // 11. Persistence: fresh ScenarioRuns instance reads run, no .tmp files remain, corrupt file skipped by list
     const runsDir = path.join(store.directory, 'scenarios', 'runs');
     const dirEntries = await readdir(runsDir);
@@ -408,6 +452,54 @@ test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, gene
     const listed = await freshService.list();
     assert.equal(listed.runs.length, 1, 'Corrupt run file is skipped without failing list');
     assert.equal(listed.runs[0].id, currentRun.id);
+
+    // 11b. sync gracefully marks orphaned/missing jobs as failed instead of throwing and stalling polling
+    const orphanHostBase = {
+      resolveAsset: async () => null,
+      createDesign: async () => { throw new Error('unused'); },
+      importDesignAsset: async () => { throw new Error('unused'); },
+      writeDesignFile: async () => { throw new Error('unused'); },
+      readDesignFile: async () => { throw new Error('unused'); },
+      getDesignProject: async () => { throw new Error('unused'); },
+      createMotion: async () => { throw new Error('unused'); },
+      importToMotion: async () => { throw new Error('unused'); },
+    };
+    const orphanGenRes = await freshService.generate(
+      {
+        runId: currentRun.id,
+        expectedRevision: loaded.run.revision,
+        requestId: 'req-orphan-gen',
+        stepId: 'product-images',
+        modality: 'image',
+        model: 'codex:image-generation',
+        prompt: 'Orphaned job test',
+      },
+      {
+        ...orphanHostBase,
+        assets: async () => ({
+          job: {
+            id: 'job-missing-after-restart',
+            state: 'running',
+            modality: 'image',
+            model: 'codex:image-generation',
+          },
+        }),
+      } as any,
+    );
+    const syncedOrphan = await freshService.sync(
+      { runId: currentRun.id },
+      {
+        ...orphanHostBase,
+        assets: async () => {
+          throw new Error('ASSET_JOB_NOT_FOUND');
+        },
+      } as any,
+    );
+    const healed = syncedOrphan.run.steps['product-images'].iterations.find(
+      iter => iter.id === orphanGenRes.iteration.id,
+    );
+    assert.equal(healed?.job?.state, 'failed');
+    assert.match(healed?.job?.error ?? '', /interrupted or expired/i);
 
     // 12. Schema validation through phase1/call
     const badCommand = await callScenario(api, { command: 'unknown_cmd' });

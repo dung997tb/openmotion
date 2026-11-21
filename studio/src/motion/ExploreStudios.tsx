@@ -9,10 +9,14 @@ import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { exploreCommunities, findMediaStudio, findTechniqueStudio, type CreativeStudio, type ExploreCommunity, type MediaStudio } from '../../../shared/studio-catalog';
 import type { GalleryTemplate, TemplatePage } from '../../../shared/catalog';
 import type { ExploreFilters, TemplateCollection } from './workspacePageRouting';
-import { useI18n } from '../i18n/I18n';
+import { languages, useI18n, type Locale } from '../i18n/I18n';
+import { Select } from '../components/ui/Select';
 import { CoverPlaceholder } from '../components/ui/CoverPlaceholder';
 import { ExploreCoverImage } from './ExploreCoverImage';
 import { RemixIcon } from '../icons/RemixIcons';
+import { discord, feishu } from './CommunityLink';
+import { GITHUB_REPOSITORY } from './githubRepository';
+import { clickOption, trackStudioClick } from './editorTracking';
 import { creativeStudios, mediaLabels, motionStudio, sceneDestination, scenesForStudio, studioDestination, studioScenes, type StudioDestination, type StudioScene } from './creativeStudios';
 import { sceneExamples, type SceneExample } from './sceneShowcase';
 import { AssetHoverVideo } from './AssetHoverVideo';
@@ -208,13 +212,54 @@ function StudioCollection({ studio, medium, onChooseStudio, onSkill, onNavigate,
   </section>;
 }
 
+const OPEN_DESIGN_SITE = 'https://open-design.ai';
+const footerSocialLinks = [
+  { label: 'X / Twitter', href: 'https://x.com/OpenDesignHQ' },
+  { label: 'YouTube', href: 'https://www.youtube.com/@Open-Design-ai' },
+  { label: 'GitHub', href: GITHUB_REPOSITORY },
+  { label: discord.platform, href: discord.href },
+] as const;
+const footerLegalLinks = [
+  { label: 'About', href: `${OPEN_DESIGN_SITE}/about` },
+  { label: 'Documentation', href: `${GITHUB_REPOSITORY}/tree/main/docs` },
+  { label: 'Privacy Policy', href: `${OPEN_DESIGN_SITE}/privacy` },
+  { label: 'Terms of Service', href: `${OPEN_DESIGN_SITE}/terms` },
+  { label: 'Refund Policy', href: `${OPEN_DESIGN_SITE}/refund` },
+  { label: 'Report an issue', href: `${GITHUB_REPOSITORY}/issues/new/choose` },
+] as const;
+
 function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandKit, onMcp, onSkill, onStartScenario, onOpenScenarioHub }: Pick<ExploreProps, 'active' | 'onModel' | 'onNavigate' | 'onChooseStudio' | 'onBrandKit' | 'onMcp' | 'onSkill' | 'onStartScenario' | 'onOpenScenarioHub'>) {
-  const { t } = useI18n(), { openAssets, openModelSettings, openLibrary, openSkills } = useWorkspaceChrome();
+  const { t, locale, setLocale } = useI18n(), { openAssets, openModelSettings, openLibrary, openSkills } = useWorkspaceChrome();
   const [skillCategory, setSkillCategory] = useState<SkillCategory | null>(null);
   const [modelsFor, setModelsFor] = useState<StudioScene['modality'] | null>(null);
   const gateway = useMediaCatalog(active && modelsFor !== null);
+  const mediaStudios = creativeStudios.filter((studio): studio is MediaStudio => studio.surface === 'media');
+  const primaryMediaStudios = mediaStudios.filter(studio => studio.primaryModality !== 'audio');
+  const audioStudio = mediaStudios.find(studio => studio.primaryModality === 'audio');
+  const renderMediaColumn = (studio: MediaStudio) => {
+    const kind = studio.primaryModality;
+    return <div key={kind}><h3>{t(mediaLabels[kind])}</h3>
+      {scenesForStudio(studio).map(scene => <Button variant="plain" className="om-nav-item" key={scene.id} onClick={() => {
+        const target = sceneDestination(scene);
+        track('capability_index', 'select_scene', destinationTarget(target));
+        onNavigate(target);
+      }}>{t(scene.label)}</Button>)}
+      <Button variant="plain" className="om-nav-item" aria-expanded={modelsFor === kind} aria-controls={modelsFor === kind ? 'om-explore-models' : undefined}
+        aria-label={t(mediaLabels[kind]) + ' · ' + t('Models')} onClick={() => { track('capability_index', 'models_toggle', { medium: kind, expanded: modelsFor !== kind }); setModelsFor(modelsFor === kind ? null : kind); }}>
+        {t('Models')}<RemixIcon name="arrow-down-s-line" size={14} />
+      </Button>
+      {modelsFor === kind && <div className="om-index-models" id="om-explore-models">
+        <MediaModelChoices {...gateway} kind={kind} onModel={model => { track('capability_index', 'select_model', { medium: kind, model }); onModel(model); }}
+          onNavigate={target => { track('capability_index', 'select_model', { medium: kind, ...destinationTarget(target) }); onNavigate(target); }}
+          openProviders={() => { track('capability_index', 'open_providers', { medium: kind }); openModelSettings(); }} />
+      </div>}
+    </div>;
+  };
   return <footer className="om-capability-index" aria-label={t('Capability index')}><div className="om-capability-inner">
-    <h2 lang="en">Open Design</h2>
+    <div className="om-capability-brand">
+      <h2 lang="en">Open Design</h2>
+      <p className="om-capability-definition" lang="en">The open source AI-NATIVE creative SUITE</p>
+    </div>
     <div className="om-capability-body">
     <div className="om-capability-columns">
       {onStartScenario && <div>
@@ -228,32 +273,17 @@ function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandK
           onOpenScenarioHub();
         }}>{t('All workflows')}</Button>}
       </div>}
-      {creativeStudios.filter((studio): studio is MediaStudio => studio.surface === 'media').map(studio => {
-        const kind = studio.primaryModality;
-        return <div key={kind}><h3>{t(mediaLabels[kind])}</h3>
-        {scenesForStudio(studio).map(scene => <Button variant="plain" className="om-nav-item" key={scene.id} onClick={() => {
-          const target = sceneDestination(scene);
-          track('capability_index', 'select_scene', destinationTarget(target));
-          onNavigate(target);
-        }}>{t(scene.label)}</Button>)}
-        <Button variant="plain" className="om-nav-item" aria-expanded={modelsFor === kind} aria-controls={modelsFor === kind ? 'om-explore-models' : undefined}
-          aria-label={t(mediaLabels[kind]) + ' · ' + t('Models')} onClick={() => { track('capability_index', 'models_toggle', { medium: kind, expanded: modelsFor !== kind }); setModelsFor(modelsFor === kind ? null : kind); }}>
-          {t('Models')}<RemixIcon name="arrow-down-s-line" size={14} />
-        </Button>
-        {modelsFor === kind && <div className="om-index-models" id="om-explore-models">
-          <MediaModelChoices {...gateway} kind={kind} onModel={model => { track('capability_index', 'select_model', { medium: kind, model }); onModel(model); }}
-            onNavigate={target => { track('capability_index', 'select_model', { medium: kind, ...destinationTarget(target) }); onNavigate(target); }}
-            openProviders={() => { track('capability_index', 'open_providers', { medium: kind }); openModelSettings(); }} />
-        </div>}
-      </div>;
-      })}
+      {primaryMediaStudios.map(renderMediaColumn)}
       <div><h3>{t('Studios')}</h3>{creativeStudios.map(studio => <Button variant="plain" className="om-nav-item" key={studio.id} onClick={() => { track('capability_index', 'open_studio', { studio: studio.id }); onChooseStudio(studio); }}>{t(studio.title)}</Button>)}</div>
-      <div><h3>{t('Workspace')}</h3>
-        <Button variant="plain" className="om-nav-item" onClick={event => { track('capability_index', 'template_library'); openLibrary(event.currentTarget); }}>{t('Template library')}</Button>
-        <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_brand_kit'); onBrandKit(); }}>{t('Brand Kit')}</Button>
-        <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_assets'); openAssets(); }}>{t('Workspace assets')}</Button>
-        <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_providers'); openModelSettings(); }}>{t('Model providers')}</Button>
-        <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_mcp'); onMcp(); }}>{t('MCP · Connect Agent')}</Button>
+      <div className="om-capability-column-stack">
+        {audioStudio && renderMediaColumn(audioStudio)}
+        <div><h3>{t('Workspace')}</h3>
+          <Button variant="plain" className="om-nav-item" onClick={event => { track('capability_index', 'template_library'); openLibrary(event.currentTarget); }}>{t('Template library')}</Button>
+          <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_brand_kit'); onBrandKit(); }}>{t('Brand Kit')}</Button>
+          <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_assets'); openAssets(); }}>{t('Workspace assets')}</Button>
+          <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_providers'); openModelSettings(); }}>{t('Model providers')}</Button>
+          <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_mcp'); onMcp(); }}>{t('MCP · Connect Agent')}</Button>
+        </div>
       </div>
     </div>
     <div className="om-index-skills">
@@ -274,7 +304,55 @@ function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandK
         </Button>)}</div>}
     </div>
     </div>
-  </div></footer>;
+  </div>
+  <div className="om-capability-meta">
+    <p className="om-capability-meta-copy" lang="en">
+      <a href={OPEN_DESIGN_SITE} target="_blank" rel="noopener noreferrer">open-design.ai</a>
+      <span aria-hidden="true"> · </span>
+      <span>OpenDesign &amp; OpenMotion</span>
+    </p>
+    <nav className="om-capability-social" aria-label={t('Social channels')}>
+      {footerSocialLinks.map(link => (
+        <a key={link.label} href={link.href} target="_blank" rel="noopener noreferrer" lang="en">{link.label}</a>
+      ))}
+      {locale === 'zh-CN' && (
+        <a href={feishu.href} target="_blank" rel="noopener noreferrer">{t('Feishu group')}</a>
+      )}
+    </nav>
+  </div>
+  <div className="om-capability-legal">
+    <div className="om-capability-legal-inner">
+      <p className="om-capability-copyright" lang="en">
+        <span>© 2026 Powerformer, Inc.</span>
+        <span aria-hidden="true"> · </span>
+        <a href={`${GITHUB_REPOSITORY}/blob/main/LICENSE`} target="_blank" rel="noopener noreferrer">Apache-2.0</a>
+      </p>
+      <div className="om-capability-legal-actions">
+        <div className="om-capability-locale">
+          <Select
+            label={t('Language')}
+            value={locale}
+            className="om-capability-locale-trigger"
+            onCommit={value => {
+              if (value !== locale) trackStudioClick('settings', 'language_change', undefined, undefined, clickOption(value));
+              setLocale(value as Locale);
+            }}
+            options={languages.map(item => ({
+              value: item.locale,
+              label: item.label,
+              icon: <RemixIcon name="global-line" size={14} />,
+            }))}
+          />
+        </div>
+        <nav className="om-capability-legal-links" aria-label={t('Legal and policy links')}>
+          {footerLegalLinks.map(link => (
+            <a key={link.label} href={link.href} target="_blank" rel="noopener noreferrer">{t(link.label)}</a>
+          ))}
+        </nav>
+      </div>
+    </div>
+  </div>
+  </footer>;
 }
 
 function ExploreCollection({ community, root, firstPages, ...props }: ExploreProps & { firstPages: Map<string, TemplatePage>; community?: ExploreCommunity; root: RefObject<HTMLElement | null> }) {

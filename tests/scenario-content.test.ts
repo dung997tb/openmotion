@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync, statSync } from 'node:fs';
 import test from 'node:test';
 import {
   applyImageToHtml,
@@ -11,6 +12,8 @@ import {
   socialPostsMarkdown,
 } from '../shared/scenario-content.ts';
 import {
+  scenarioConcisePrompt,
+  scenarioSkills,
   fillScenarioTemplate,
   findScenario,
   scenarioAgentPrompt,
@@ -19,7 +22,10 @@ import {
   scenarioRunAgentPrompt,
   socialPlatforms,
   type PageRecipeId,
+  type ScenarioSkillRef,
+  type ScenarioWorkspaceMode,
 } from '../shared/scenarios.ts';
+import { workflowResources } from '../shared/workflow.ts';
 
 test('scenarioStarterPage escapes untrusted brief content, includes slots and valid structure for every recipe', () => {
   const recipes: PageRecipeId[] = ['landing', 'sale', 'link-in-bio', 'code-animation'];
@@ -240,4 +246,130 @@ test('fillScenarioTemplate handles missing fields gracefully and prompt builders
     pool: [],
   }, { origin: 'http://127.0.0.1:4173' });
   assert.ok(readme.includes('# Holiday Tote') && readme.includes('manifest.json'));
+});
+
+test('every scenario step defines valid real Skills and scenarioSkills deduplicates in first-seen order', () => {
+  const validWorkflowUris = new Set(workflowResources().map(resource => resource.uri));
+  const modeCheck: ScenarioWorkspaceMode = 'agent';
+  assert.equal(modeCheck, 'agent');
+
+  for (const scenario of scenarioDefinitions) {
+    const firstSeenIds: string[] = [];
+    for (const step of scenario.steps) {
+      assert.ok(step.skills && step.skills.length >= 1, `${scenario.id}/${step.id} defines at least one Skill`);
+      for (const skill of step.skills as readonly ScenarioSkillRef[]) {
+        assert.ok(skill.id.trim().length > 0, `${scenario.id}/${step.id} skill id`);
+        assert.ok(skill.label.trim().length > 0, `${scenario.id}/${step.id} skill label`);
+        assert.ok(skill.role.trim().length > 0, `${scenario.id}/${step.id} skill role`);
+        if (skill.source === 'library') {
+          const dirUrl = new URL(`../library/skills/${skill.id}`, import.meta.url);
+          assert.ok(existsSync(dirUrl) && statSync(dirUrl).isDirectory(), `library skill directory exists: ${skill.id}`);
+          assert.ok(existsSync(new URL(`../library/skills/${skill.id}/SKILL.md`, import.meta.url)), `SKILL.md exists: ${skill.id}`);
+        } else {
+          assert.equal(skill.source, 'workflow');
+          assert.ok(skill.resourceUri && validWorkflowUris.has(skill.resourceUri), `valid workflow resourceUri: ${skill.resourceUri}`);
+        }
+        if (!firstSeenIds.includes(skill.id)) {
+          firstSeenIds.push(skill.id);
+        }
+      }
+    }
+
+    const deduped = scenarioSkills(scenario);
+    assert.deepEqual(deduped.map(skill => skill.id), firstSeenIds, `${scenario.id} preserves first-seen order`);
+    assert.equal(new Set(deduped.map(skill => skill.id)).size, deduped.length, `${scenario.id} deduplicates skills`);
+  }
+
+  // Verify specific cross-step deduplication cases (e.g. openmotion-ad-script in black-friday appears in brief then social)
+  const bfSkills = scenarioSkills(findScenario('black-friday')!);
+  assert.equal(bfSkills[0].id, 'openmotion-ad-script');
+  assert.equal(bfSkills[0].label, 'Campaign Script');
+  assert.equal(bfSkills.filter(skill => skill.id === 'openmotion-ad-script').length, 1);
+});
+
+test('scenarioConcisePrompt stays under 35 lines with metadata, assets, skills pipeline and MCP instructions', () => {
+  const bf = findScenario('black-friday')!;
+  const runSummary = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 'Holiday Tote',
+    revision: 3,
+    brief: {
+      idea: 'Limited-run canvas tote campaign',
+      productName: 'Holiday Tote',
+      salePrice: '$79',
+      promoCode: 'BF40',
+    },
+    activeStepId: 'detail-page',
+    steps: {
+      brief: { stepId: 'brief', status: 'done', activeIterationId: null, links: {} },
+      'detail-page': {
+        stepId: 'detail-page',
+        status: 'in-progress',
+        activeIterationId: null,
+        links: { designProjectId: '22222222-2222-4222-8222-222222222222' },
+      },
+    },
+    pool: [
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        kind: 'image' as const,
+        label: 'Secondary angle',
+        stepId: 'product-images',
+        pinned: false,
+        ref: { type: 'asset' as const, assetId: '66666666-6666-4666-8666-666666666666', versionId: '77777777-7777-4777-8777-777777777777' },
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        kind: 'image' as const,
+        label: 'Hero shot',
+        stepId: 'product-images',
+        pinned: true,
+        ref: { type: 'asset' as const, assetId: '44444444-4444-4444-8444-444444444444', versionId: '55555555-5555-4555-8555-555555555555' },
+      },
+    ],
+  };
+
+  const concise = scenarioConcisePrompt(bf, runSummary, {
+    customPrompt: 'Create a high-contrast Black Friday tote campaign across page, video and social.',
+    locale: 'en',
+    integration: { previewUrl: 'http://127.0.0.1:4173', dataDirectory: '/fixture/data' },
+  });
+  const lines = concise.split('\n');
+  assert.ok(lines.length < 35, `Expected < 35 lines, got ${lines.length}`);
+  assert.ok(concise.includes('workflow: black-friday'));
+  assert.ok(concise.includes('runId: 11111111-1111-4111-8111-111111111111'));
+  assert.ok(concise.includes('expectedRevision: 3'));
+  assert.ok(concise.includes('workspace: /fixture/data'));
+  assert.ok(concise.includes('studioUrl: http://127.0.0.1:4173'));
+  assert.ok(concise.includes('locale: en'));
+  assert.ok(concise.includes('linkedProjects: detail-page:design=22222222-2222-4222-8222-222222222222'));
+  assert.ok(concise.includes('assets:'));
+  // Pinned item must appear before unpinned item
+  const heroIdx = concise.indexOf('asset:44444444-4444-4444-8444-444444444444@55555555-5555-4555-8555-555555555555 "Hero shot" (pinned)');
+  const secondaryIdx = concise.indexOf('asset:66666666-6666-4666-8666-666666666666@77777777-7777-4777-8777-777777777777 "Secondary angle"');
+  assert.ok(heroIdx > 0 && secondaryIdx > heroIdx, 'Pinned pool item comes first');
+  assert.ok(concise.includes('openmotion_get_skill'));
+  for (const tool of scenarioRecipeTools) {
+    assert.ok(concise.includes(tool), `concise prompt includes ${tool}`);
+  }
+  assert.ok(concise.includes('library:openmotion-sale-countdown'));
+  assert.ok(concise.includes('resource:openmotion://workflow/design/start'));
+  assert.ok(concise.includes('Create a high-contrast Black Friday tote campaign across page, video and social.'));
+  assert.ok(concise.includes('params: idea=Limited-run canvas tote campaign | productName=Holiday Tote | salePrice=$79 | promoCode=BF40'));
+
+  // Without customPrompt, brief.idea becomes the main task and is excluded from params
+  const briefMain = scenarioConcisePrompt(bf, runSummary);
+  assert.ok(briefMain.includes('task: Limited-run canvas tote campaign'));
+  assert.ok(briefMain.includes('params: productName=Holiday Tote | salePrice=$79 | promoCode=BF40'));
+  assert.ok(!briefMain.includes('params: idea='));
+
+  // Without run, all scenarios stay compact under 35 lines and use command=create
+  for (const scenario of scenarioDefinitions) {
+    const freshPrompt = scenarioConcisePrompt(scenario, null, {
+      integration: { previewUrl: 'http://127.0.0.1:4173', dataDirectory: '/fixture/data' },
+    });
+    assert.ok(freshPrompt.split('\n').length < 35, `${scenario.id} fresh concise prompt < 35 lines`);
+    assert.ok(freshPrompt.includes('command=create') && freshPrompt.includes('assets: none'));
+    assert.ok(freshPrompt.includes('command: "create"'));
+  }
 });

@@ -1,6 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from 'open-design-ui/button';
-import { scenarioCategories, type ScenarioDefinition } from '../../../shared/scenarios';
+import {
+  scenarioCategories,
+  scenarioSkills,
+  type ScenarioDefinition,
+} from '../../../shared/scenarios';
 import { CoverPlaceholder } from '../components/ui/CoverPlaceholder';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
@@ -24,6 +28,7 @@ export function ScenarioCard({ scenario, variant, onStart, meta }: ScenarioCardP
   }, [coverSrc]);
 
   const category = scenarioCategories.find(item => item.id === scenario.category);
+  const skillCount = scenarioSkills(scenario).length;
   const showSteps = variant !== 'compact';
   const showCta = variant === 'card' || variant === 'tile';
 
@@ -68,7 +73,10 @@ export function ScenarioCard({ scenario, variant, onStart, meta }: ScenarioCardP
               </span>
             )}
             <span className="om-scenario-card-step-count">
-              {t('{count} steps', { count: scenario.steps.length })}
+              {t('{count} steps · {skills} skills', {
+                count: scenario.steps.length,
+                skills: skillCount,
+              })}
             </span>
           </div>
 

@@ -438,7 +438,7 @@ export class ScenarioRuns {
       return existing;
     }
     if (run.pool.length >= SCENARIO_LIMITS.poolItems) {
-      throw new ScenarioError('LIMIT_EXCEEDED', `Shared asset pool limit (${SCENARIO_LIMITS.poolItems}) reached. Start a new run.`);
+      throw new ScenarioError('LIMIT_EXCEEDED', `Workflow assets limit (${SCENARIO_LIMITS.poolItems}) reached. Start a new run.`);
     }
     const created: PoolItem = {
       id: randomUUID(),
@@ -799,12 +799,17 @@ export class ScenarioRuns {
       expectedRevision: number;
       requestId: string;
       items: { ref: PoolRef; label?: string; tags?: string[]; stepId?: string | null; source: PoolItem['source'] }[];
+      recordIteration?: boolean;
+      note?: string;
     },
     host: ScenarioHost,
   ): Promise<{ run: ScenarioRun; poolItemIds: string[] }> {
     if (!Array.isArray(input.items) || !input.items.length || input.items.length > 50) {
       throw new ScenarioError('INVALID_ARGUMENT', 'items must contain 1–50 pool entries');
     }
+
+    const recordIteration = Boolean(input.recordIteration);
+    const trimmedNote = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 2000) : undefined;
 
     type ResolvedPoolInput = {
       kind: PoolKind;
@@ -820,7 +825,12 @@ export class ScenarioRuns {
       `add-pool:${input.runId}`,
       input.requestId,
       input.expectedRevision,
-      { expectedRevision: input.expectedRevision, items: input.items },
+      {
+        expectedRevision: input.expectedRevision,
+        items: input.items,
+        ...(recordIteration ? { recordIteration: true } : {}),
+        ...(trimmedNote ? { note: trimmedNote } : {}),
+      },
       async (snapshot, scenario): Promise<ResolvedPoolInput[]> => {
         const resolvedList: ResolvedPoolInput[] = [];
         for (const entry of input.items) {
@@ -905,9 +915,36 @@ export class ScenarioRuns {
       },
       (run, _scenario, resolvedList) => {
         const poolItemIds: string[] = [];
+        const byStep = new Map<string, { source: StepIteration['source']; poolItemIds: string[] }>();
         for (const item of resolvedList) {
           const stored = this.upsertPoolItem(run, item);
           poolItemIds.push(stored.id);
+          if (recordIteration && item.stepId) {
+            let group = byStep.get(item.stepId);
+            if (!group) {
+              const iterSource: StepIteration['source'] = item.source === 'step-output' ? 'local' : item.source;
+              group = { source: iterSource, poolItemIds: [] };
+              byStep.set(item.stepId, group);
+            }
+            group.poolItemIds.push(stored.id);
+          }
+        }
+        if (recordIteration) {
+          for (const [stepId, group] of byStep) {
+            const step = run.steps[stepId];
+            if (!step) continue;
+            const created = this.pushIteration(step, {
+              source: group.source,
+              inputs: [],
+              outputs: group.poolItemIds.map(poolItemId => ({ type: 'pool', poolItemId })),
+              ...(trimmedNote ? { note: trimmedNote } : {}),
+              requestId: input.requestId,
+            });
+            step.activeIterationId = created.id;
+            if (step.status === 'todo') {
+              step.status = 'in-progress';
+            }
+          }
         }
         return { run, poolItemIds };
       },
@@ -1168,8 +1205,24 @@ export class ScenarioRuns {
     };
     const updates: SyncUpdate[] = [];
     for (const item of pending) {
-      const statusResult = await host.assets({ action: 'status', jobId: item.jobId });
-      const job = statusResult.job;
+      let statusResult: any;
+      try {
+        statusResult = await host.assets({ action: 'status', jobId: item.jobId });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not_found|not found|unknown job/i.test(message)) {
+          updates.push({
+            stepId: item.stepId,
+            iterationId: item.iterationId,
+            state: 'failed',
+            error: 'This generation job was interrupted or expired. Click Retry to generate again.',
+            resolvedAssets: [],
+          });
+        }
+        continue;
+      }
+      const job = statusResult?.job;
+      if (!job || typeof job.state !== 'string') continue;
       const resolvedAssets: SyncUpdate['resolvedAssets'] = [];
       if (job.state === 'completed' && Array.isArray(job.libraryAssets)) {
         for (const ref of job.libraryAssets as { assetId: string; versionId: string }[]) {

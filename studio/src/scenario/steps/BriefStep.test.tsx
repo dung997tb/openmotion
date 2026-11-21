@@ -181,6 +181,8 @@ describe('BriefStep', () => {
     const mounted = await mountStep(<BriefStep {...props} />);
 
     try {
+      // Episode script starts collapsed behind a borderless disclosure on a fresh draft
+      expect(mounted.container.querySelector('textarea[aria-label="Episode script"]')).toBeNull();
       const genBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Generate script outline'))!;
       await act(async () => { genBtn.click(); });
 
@@ -196,10 +198,13 @@ describe('BriefStep', () => {
         }),
       );
 
+      // Generating an outline auto-expands Episode script so the user can refine and save
       const scriptArea = mounted.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Episode script"]')!;
+      expect(scriptArea).toBeTruthy();
       await act(async () => { setFieldValue(scriptArea, 'Edited spoken script'); });
 
       const saveScriptBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Save script version'))!;
+      expect(saveScriptBtn.className).not.toContain('primary');
       await act(async () => { saveScriptBtn.click(); });
 
       expect(mocks.mutate).toHaveBeenCalledWith(
@@ -218,11 +223,19 @@ describe('BriefStep', () => {
     }
   });
 
-  it('renders Gemini 4 Neon inspiration rail and availability card with provider CTA', async () => {
+  it('folds Gemini 4 availability and Neon inspiration rail behind a disclosure with compact status chip', async () => {
     const { props, mocks } = createStepProps('gemini-4-neon', 'brief');
     const mounted = await mountStep(<BriefStep {...props} />);
 
     try {
+      // Secondary availability card and 8-card inspiration rail start collapsed on Brief
+      expect(mounted.container.querySelectorAll('.om-step-inspiration-card').length).toBe(0);
+      expect(mounted.container.querySelector('[data-gemini-status]')?.textContent).toContain('Not configured');
+
+      const toggleBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('View details'))!;
+      expect(toggleBtn).toBeTruthy();
+      await act(async () => { toggleBtn.click(); });
+
       const cards = mounted.container.querySelectorAll('.om-step-inspiration-card');
       expect(cards.length).toBe(8);
       await act(async () => { (cards[0] as HTMLButtonElement).click(); });
@@ -338,7 +351,7 @@ describe('BriefStep', () => {
     const savedMounted = await mountStep(<BriefStep {...savedSetup.props} />);
     try {
       const assistBar = savedMounted.container.querySelector('[data-step-assist="brief"]')!;
-      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate image / video'))!;
+      const quickToggle = Array.from(assistBar.querySelectorAll('button')).find(b => b.textContent?.includes('Generate media'))!;
       await act(async () => { quickToggle.click(); });
 
       const quickGen = savedMounted.container.querySelector('[data-quick-gen="brief"]')!;

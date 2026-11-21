@@ -46,6 +46,7 @@ export type AssetPoolPanelProps = {
   highlightedIds: ReadonlySet<string>;
   open: boolean;
   onOpenChange(open: boolean): void;
+  presentation?: 'sidebar' | 'inline';
   collapsed?: boolean;
   onToggleCollapsed?(): void;
   onRefresh?(): Promise<void> | void;
@@ -137,6 +138,7 @@ export function AssetPoolPanel({
   highlightedIds,
   open,
   onOpenChange,
+  presentation = 'sidebar',
   collapsed = false,
   onToggleCollapsed,
   onRefresh,
@@ -365,7 +367,7 @@ export function AssetPoolPanel({
       if (toAdd.length > 0) {
         await addItemsBatched(toAdd);
         toast.showToast(
-          t('Added {count} file(s) to shared assets', { count: toAdd.length }),
+          t('Added {count} file(s) to assets', { count: toAdd.length }),
           'info',
           'feedback',
         );
@@ -417,7 +419,7 @@ export function AssetPoolPanel({
       setAssetPickerOpen(false);
       toast.showToast(
         picked.length === 1
-          ? t('Added to shared assets')
+          ? t('Added to assets')
           : t('Imported {count} asset(s)', { count: picked.length }),
         'info',
         'feedback',
@@ -740,7 +742,7 @@ export function AssetPoolPanel({
         multiple
         accept="image/*,video/*,audio/*"
         className="om-scenario-hidden-file-input"
-        aria-label={t('Upload files to shared assets')}
+        aria-label={t('Upload files to assets')}
         onChange={event => void handleFileUpload(event)}
       />
 
@@ -749,62 +751,29 @@ export function AssetPoolPanel({
           <span className="om-scenario-pool-header-icon" aria-hidden="true">
             <RemixIcon name="stack-line" size={14} />
           </span>
-          <h2 className="om-scenario-pool-title">{t('Shared assets')}</h2>
+          <h2 className="om-scenario-pool-title">{t('Assets')}</h2>
           <span className="om-badge">{items.length}</span>
         </div>
         <div className="om-scenario-pool-header-actions">
-          {onRefresh && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              type="button"
-              aria-label={t('Sync assets')}
-              title={t('Sync assets')}
-              onClick={() => void onRefresh()}
-              icon={<RemixIcon name="refresh-line" size={14} />}
-            />
-          )}
-
-          {layoutMode === 'docked' && onToggleCollapsed && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              type="button"
-              aria-label={t('Collapse shared assets')}
-              title={t('Collapse shared assets')}
-              onClick={onToggleCollapsed}
-              icon={<RemixIcon name="side-bar-line" size={15} />}
-            />
-          )}
-
-          {layoutMode !== 'docked' && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              type="button"
-              aria-label={t('Close shared assets')}
-              onClick={() => onOpenChange(false)}
-              icon={<RemixIcon name="close-line" size={16} />}
-            />
-          )}
-        </div>
-      </header>
-
-      <div className="om-scenario-pool-actions-bar">
-        <div className="om-scenario-pool-actions-primary">
           <Menu
-            align="start"
-            aria-label={t('Import shared assets')}
+            align="end"
+            aria-label={t('Import assets')}
             trigger={
-              <Button
-                variant="secondary"
+              <IconButton
+                variant="ghost"
                 size="sm"
                 type="button"
-                loading={uploading || importingProjects}
-                icon={<RemixIcon name="upload-2-line" size={14} />}
-              >
-                {t('Import')}
-              </Button>
+                aria-label={t('Import')}
+                title={t('Import')}
+                disabled={uploading || importingProjects}
+                icon={
+                  uploading || importingProjects ? (
+                    <RemixIcon name="loader-4-line" size={14} className="om-scenario-spin" />
+                  ) : (
+                    <RemixIcon name="upload-2-line" size={14} />
+                  )
+                }
+              />
             }
           >
             <MenuItem
@@ -835,21 +804,27 @@ export function AssetPoolPanel({
 
           {onExportBundle && (
             <Popover
-              align="start"
+              align="end"
               open={exportPopoverOpen}
               onOpenChange={setExportPopoverOpen}
               aria-label={t('Export options')}
               className="om-scenario-export-popover"
               trigger={
-                <Button
-                  variant="secondary"
+                <IconButton
+                  variant="ghost"
                   size="sm"
                   type="button"
-                  loading={exportingBundle}
-                  icon={<RemixIcon name="download-2-line" size={14} />}
-                >
-                  {t('Export')}
-                </Button>
+                  aria-label={t('Export')}
+                  title={t('Export')}
+                  disabled={exportingBundle}
+                  icon={
+                    exportingBundle ? (
+                      <RemixIcon name="loader-4-line" size={14} className="om-scenario-spin" />
+                    ) : (
+                      <RemixIcon name="download-2-line" size={14} />
+                    )
+                  }
+                />
               }
             >
               <div className="om-scenario-popover-body">
@@ -980,33 +955,68 @@ export function AssetPoolPanel({
               </div>
             </Popover>
           )}
-        </div>
 
-        {!pickRequest && items.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            aria-pressed={selectionMode}
-            icon={<RemixIcon name={selectionMode ? 'check-line' : 'checkbox-blank-line'} size={14} />}
-            onClick={() => {
-              if (selectionMode) {
-                setSelectionMode(false);
-                setSelectedExportIds([]);
-              } else {
-                setSelectionMode(true);
-              }
-            }}
-          >
-            {t(selectionMode ? 'Done' : 'Select')}
-          </Button>
-        )}
-      </div>
+          {!pickRequest && items.length > 0 && (
+            <IconButton
+              variant={selectionMode ? 'secondary' : 'ghost'}
+              size="sm"
+              type="button"
+              aria-label={t(selectionMode ? 'Done' : 'Select')}
+              title={t(selectionMode ? 'Done' : 'Select')}
+              aria-pressed={selectionMode}
+              icon={<RemixIcon name={selectionMode ? 'check-line' : 'checkbox-blank-line'} size={14} />}
+              onClick={() => {
+                if (selectionMode) {
+                  setSelectionMode(false);
+                  setSelectedExportIds([]);
+                } else {
+                  setSelectionMode(true);
+                }
+              }}
+            />
+          )}
+
+          {onRefresh && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label={t('Sync assets')}
+              title={t('Sync assets')}
+              onClick={() => void onRefresh()}
+              icon={<RemixIcon name="refresh-line" size={14} />}
+            />
+          )}
+
+          {presentation !== 'inline' && layoutMode === 'docked' && onToggleCollapsed && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label={t('Collapse assets')}
+              title={t('Collapse assets')}
+              onClick={onToggleCollapsed}
+              icon={<RemixIcon name="side-bar-line" size={15} />}
+            />
+          )}
+
+          {presentation !== 'inline' && layoutMode !== 'docked' && (
+            <IconButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label={t('Close assets')}
+              onClick={() => onOpenChange(false)}
+              icon={<RemixIcon name="close-line" size={16} />}
+            />
+          )}
+        </div>
+      </header>
 
       {fileDragActive && (
         <div className="om-scenario-pool-drop-hint" role="status">
           <RemixIcon name="upload-2-line" size={16} />
-          <span>{t('Drop files to upload to shared assets')}</span>
+          <span>{t('Drop files to upload to assets')}</span>
         </div>
       )}
 
@@ -1075,171 +1085,181 @@ export function AssetPoolPanel({
         </div>
       )}
 
-      <div className="om-scenario-pool-filters">
-        <div className="om-scenario-kind-chips" role="group" aria-label={t('Filter by asset kind')}>
-          {KIND_FILTERS.map(filter => {
-            const disallowedInPick =
-              pickRequest !== null &&
-              filter.id !== 'all' &&
-              !pickRequest.kinds.includes(filter.id);
-            if (disallowedInPick) return null;
-            return (
-              <FilterChip
-                key={filter.id}
-                active={kindFilter === filter.id}
-                className="om-scenario-kind-chip"
-                data-pool-kind={filter.id}
-                onClick={() => setKindFilter(filter.id)}
-              >
-                <span className="om-scenario-kind-chip-icon" aria-hidden="true">
-                  <RemixIcon name={filter.icon} size={12} />
-                </span>
-                <span>{t(filter.label)}</span>
-                <span className="om-scenario-chip-count">{kindCounts[filter.id]}</span>
-              </FilterChip>
-            );
-          })}
-        </div>
+      {(items.length > 0 || pickRequest !== null || hasActiveFilters) && (
+        <div className="om-scenario-pool-filters">
+          <div className="om-scenario-kind-chips" role="group" aria-label={t('Filter by asset kind')}>
+            {KIND_FILTERS.map(filter => {
+              const disallowedInPick =
+                pickRequest !== null &&
+                filter.id !== 'all' &&
+                !pickRequest.kinds.includes(filter.id);
+              if (disallowedInPick) return null;
+              const visibleKind =
+                filter.id === 'all' ||
+                kindCounts[filter.id] > 0 ||
+                kindFilter === filter.id ||
+                (pickRequest !== null && pickRequest.kinds.includes(filter.id));
+              if (!visibleKind) return null;
+              return (
+                <FilterChip
+                  key={filter.id}
+                  active={kindFilter === filter.id}
+                  className="om-scenario-kind-chip"
+                  data-pool-kind={filter.id}
+                  onClick={() => setKindFilter(filter.id)}
+                >
+                  <span className="om-scenario-kind-chip-icon" aria-hidden="true">
+                    <RemixIcon name={filter.icon} size={12} />
+                  </span>
+                  <span>{t(filter.label)}</span>
+                  <span className="om-scenario-chip-count">{kindCounts[filter.id]}</span>
+                </FilterChip>
+              );
+            })}
+          </div>
 
-        <div className="om-scenario-step-filter-row">
-          <Popover
-            align="end"
-            aria-label={t('Filter by step')}
-            className="om-scenario-step-popover"
-            trigger={
+          {(items.length > 1 || stepFilters.length > 0) && (
+            <div className="om-scenario-step-filter-row">
+              <Popover
+                align="end"
+                aria-label={t('Filter by step')}
+                className="om-scenario-step-popover"
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    icon={<RemixIcon name="filter-3-line" size={14} />}
+                  >
+                    <span>{t('Step filter')}</span>
+                    {stepFilters.length > 0 && (
+                      <span className="om-badge" data-active="true">
+                        {stepFilters.length}
+                      </span>
+                    )}
+                  </Button>
+                }
+              >
+                <div className="om-scenario-popover-body">
+                  <div className="om-scenario-popover-header">
+                    <strong>{t('Filter by source step')}</strong>
+                    <span className="om-muted">
+                      {t('{count} matching', { count: visibleItems.length })}
+                    </span>
+                  </div>
+                  <div className="om-scenario-popover-list">
+                    {scenario.steps.map(step => {
+                      const checked = stepFilters.includes(step.id);
+                      const count = stepCounts.get(step.id) ?? 0;
+                      return (
+                        <div key={step.id} className="om-scenario-popover-option">
+                          <Checkbox
+                            aria-label={t(step.title)}
+                            checked={checked}
+                            onCheckedChange={next => setStepFilter(step.id, Boolean(next))}
+                          />
+                          <span
+                            className="om-scenario-popover-option-label"
+                            onClick={() => setStepFilter(step.id, !checked)}
+                          >
+                            {t(step.title)}
+                          </span>
+                          <span className="om-scenario-chip-count">{count}</span>
+                        </div>
+                      );
+                    })}
+                    <div className="om-scenario-popover-option">
+                      <Checkbox
+                        aria-label={t('Added manually')}
+                        checked={stepFilters.includes(MANUAL_STEP_KEY)}
+                        onCheckedChange={next => setStepFilter(MANUAL_STEP_KEY, Boolean(next))}
+                      />
+                      <span
+                        className="om-scenario-popover-option-label"
+                        onClick={() => setStepFilter(MANUAL_STEP_KEY, !stepFilters.includes(MANUAL_STEP_KEY))}
+                      >
+                        {t('Added manually')}
+                      </span>
+                      <span className="om-scenario-chip-count">
+                        {stepCounts.get(MANUAL_STEP_KEY) ?? 0}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="om-scenario-popover-footer">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      disabled={stepFilters.length === 0}
+                      onClick={() => setStepFilters([])}
+                    >
+                      {t('Clear current')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      disabled={!hasActiveFilters}
+                      onClick={clearAllFilters}
+                    >
+                      {t('Clear all')}
+                    </Button>
+                  </div>
+                </div>
+              </Popover>
+            </div>
+          )}
+
+          {hasActiveFilters && (
+            <div className="om-scenario-active-filters" aria-label={t('Active filters')}>
+              {kindFilter !== 'all' && (
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-badge om-scenario-filter-chip"
+                  onClick={() => setKindFilter('all')}
+                >
+                  <span>{t(KIND_BADGE_LABELS[kindFilter])}</span>
+                  <RemixIcon name="close-line" size={12} />
+                </Button>
+              )}
+              {stepFilters.map(key => {
+                const label =
+                  key === MANUAL_STEP_KEY
+                    ? t('Added manually')
+                    : t(stepTitleMap.get(key) ?? key);
+                return (
+                  <Button
+                    key={key}
+                    variant="plain"
+                    type="button"
+                    className="om-badge om-scenario-filter-chip"
+                    onClick={() => toggleStepFilter(key)}
+                  >
+                    <span>{label}</span>
+                    <RemixIcon name="close-line" size={12} />
+                  </Button>
+                );
+              })}
               <Button
                 variant="ghost"
                 size="sm"
                 type="button"
-                icon={<RemixIcon name="filter-3-line" size={14} />}
+                onClick={clearAllFilters}
               >
-                <span>{t('Step filter')}</span>
-                {stepFilters.length > 0 && (
-                  <span className="om-badge" data-active="true">
-                    {stepFilters.length}
-                  </span>
-                )}
+                {t('Clear all')}
               </Button>
-            }
-          >
-            <div className="om-scenario-popover-body">
-              <div className="om-scenario-popover-header">
-                <strong>{t('Filter by source step')}</strong>
-                <span className="om-muted">
-                  {t('{count} matching', { count: visibleItems.length })}
-                </span>
-              </div>
-              <div className="om-scenario-popover-list">
-                {scenario.steps.map(step => {
-                  const checked = stepFilters.includes(step.id);
-                  const count = stepCounts.get(step.id) ?? 0;
-                  return (
-                    <div key={step.id} className="om-scenario-popover-option">
-                      <Checkbox
-                        aria-label={t(step.title)}
-                        checked={checked}
-                        onCheckedChange={next => setStepFilter(step.id, Boolean(next))}
-                      />
-                      <span
-                        className="om-scenario-popover-option-label"
-                        onClick={() => setStepFilter(step.id, !checked)}
-                      >
-                        {t(step.title)}
-                      </span>
-                      <span className="om-scenario-chip-count">{count}</span>
-                    </div>
-                  );
-                })}
-                <div className="om-scenario-popover-option">
-                  <Checkbox
-                    aria-label={t('Added manually')}
-                    checked={stepFilters.includes(MANUAL_STEP_KEY)}
-                    onCheckedChange={next => setStepFilter(MANUAL_STEP_KEY, Boolean(next))}
-                  />
-                  <span
-                    className="om-scenario-popover-option-label"
-                    onClick={() => setStepFilter(MANUAL_STEP_KEY, !stepFilters.includes(MANUAL_STEP_KEY))}
-                  >
-                    {t('Added manually')}
-                  </span>
-                  <span className="om-scenario-chip-count">
-                    {stepCounts.get(MANUAL_STEP_KEY) ?? 0}
-                  </span>
-                </div>
-              </div>
-              <div className="om-scenario-popover-footer">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  disabled={stepFilters.length === 0}
-                  onClick={() => setStepFilters([])}
-                >
-                  {t('Clear current')}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  disabled={!hasActiveFilters}
-                  onClick={clearAllFilters}
-                >
-                  {t('Clear all')}
-                </Button>
-              </div>
             </div>
-          </Popover>
+          )}
         </div>
-
-        {hasActiveFilters && (
-          <div className="om-scenario-active-filters" aria-label={t('Active filters')}>
-            {kindFilter !== 'all' && (
-              <Button
-                variant="plain"
-                type="button"
-                className="om-badge om-scenario-filter-chip"
-                onClick={() => setKindFilter('all')}
-              >
-                <span>{t(KIND_BADGE_LABELS[kindFilter])}</span>
-                <RemixIcon name="close-line" size={12} />
-              </Button>
-            )}
-            {stepFilters.map(key => {
-              const label =
-                key === MANUAL_STEP_KEY
-                  ? t('Added manually')
-                  : t(stepTitleMap.get(key) ?? key);
-              return (
-                <Button
-                  key={key}
-                  variant="plain"
-                  type="button"
-                  className="om-badge om-scenario-filter-chip"
-                  onClick={() => toggleStepFilter(key)}
-                >
-                  <span>{label}</span>
-                  <RemixIcon name="close-line" size={12} />
-                </Button>
-              );
-            })}
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={clearAllFilters}
-            >
-              {t('Clear all')}
-            </Button>
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="om-scenario-pool-scroll">
         {items.length === 0 ? (
           <div className="om-scenario-pool-empty">
             <PanelEmptyState
               icon="stack-line"
-              message={t('No shared assets yet')}
+              message={t('No assets yet')}
               description={t('Upload files, pick from your workspace, or generate in any step — everything you create appears here.')}
             />
             <div className="om-scenario-pool-empty-actions">
@@ -1291,7 +1311,7 @@ export function AssetPoolPanel({
                 pickRequest.max > 1 &&
                 !isSelectedForPick &&
                 draftPickIds.length >= pickRequest.max;
-              const canUse = currentStep.accepts.includes(item.kind);
+              const canUse = presentation !== 'inline' && currentStep.accepts.includes(item.kind);
               const stepTitle = item.stepId ? stepTitleMap.get(item.stepId) : null;
               const sourceBadge = stepTitle
                 ? t('From {step}', { step: t(stepTitle) })
@@ -1416,13 +1436,15 @@ export function AssetPoolPanel({
                             />
                           }
                         >
-                          <MenuItem
-                            icon={<RemixIcon name="check-line" size={14} />}
-                            disabled={!canUse}
-                            onClick={() => void onUseInCurrentStep(item)}
-                          >
-                            {t('Use in current step')}
-                          </MenuItem>
+                          {presentation !== 'inline' && (
+                            <MenuItem
+                              icon={<RemixIcon name="check-line" size={14} />}
+                              disabled={!canUse}
+                              onClick={() => void onUseInCurrentStep(item)}
+                            >
+                              {t('Use in current step')}
+                            </MenuItem>
+                          )}
                           <MenuItem
                             icon={<RemixIcon name="eye-line" size={14} />}
                             onClick={() => setPreviewItem(item)}
@@ -1505,7 +1527,7 @@ export function AssetPoolPanel({
         <AssetPicker
           multiple
           title="Import from workspace"
-          confirmLabel="Import to shared assets"
+          confirmLabel="Import to assets"
           busy={assetPickerBusy}
           onClose={() => setAssetPickerOpen(false)}
           onPickMany={picked => void handleWorkspaceAssetsImport(picked)}
@@ -1767,7 +1789,10 @@ export function AssetPoolPanel({
       <PoolItemPreviewDialog
         item={previewItem}
         run={run}
-        canUseInCurrentStep={Boolean(previewItem && currentStep.accepts.includes(previewItem.kind))}
+        canUseInCurrentStep={
+          presentation !== 'inline' &&
+          Boolean(previewItem && currentStep.accepts.includes(previewItem.kind))
+        }
         canDownloadMotion={Boolean(onExportBundle)}
         onClose={() => setPreviewItem(null)}
         onUseInCurrentStep={item => void onUseInCurrentStep(item)}
@@ -1777,6 +1802,21 @@ export function AssetPoolPanel({
       />
     </>
   );
+
+  if (presentation === 'inline') {
+    return (
+      <>
+        <section
+          id="om-scenario-pool"
+          aria-label={t('Assets')}
+          className="om-scenario-pool om-scenario-pool--inline"
+        >
+          {panelBody}
+        </section>
+        {dialogs}
+      </>
+    );
+  }
 
   if (layoutMode === 'sheet') {
     return (
@@ -1802,16 +1842,18 @@ export function AssetPoolPanel({
   if (layoutMode === 'drawer') {
     return (
       <>
-        {open && (
-          <div
-            className="om-scenario-drawer-scrim"
-            aria-hidden="true"
-            onClick={() => onOpenChange(false)}
-          />
-        )}
+        <div
+          className="om-scenario-drawer-scrim"
+          data-open={open ? 'true' : 'false'}
+          hidden={!open}
+          aria-hidden="true"
+          onClick={() => onOpenChange(false)}
+        />
         <aside
           id="om-scenario-pool"
-          aria-label={t('Shared assets')}
+          aria-label={t('Assets')}
+          aria-hidden={!open || undefined}
+          inert={!open}
           className="om-scenario-pool om-scenario-pool--drawer"
           data-open={open ? 'true' : 'false'}
           hidden={!open}
@@ -1827,8 +1869,11 @@ export function AssetPoolPanel({
     <>
       <aside
         id="om-scenario-pool"
-        aria-label={t('Shared assets')}
+        aria-label={t('Assets')}
+        aria-hidden={Boolean(collapsed) || undefined}
+        inert={Boolean(collapsed)}
         className="om-scenario-pool om-scenario-pool--docked"
+        data-collapsed={collapsed ? 'true' : 'false'}
         hidden={Boolean(collapsed)}
       >
         {panelBody}
