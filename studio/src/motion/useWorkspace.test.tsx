@@ -185,7 +185,7 @@ it('an existing project page polls its own project without following another cli
   await mount(async () => {}, first, first);
   expect(workspace.status?.projectId).toBe(first);
   expect(replace).not.toHaveBeenCalled();
-  expect(fetcher.mock.calls.some(([url]) => url === `/motion-api/project/status?projectId=${first}`)).toBe(true);
+  expect(fetcher.mock.calls.some(([url]) => url === `/motion-api/project/status?view=summary&projectId=${first}`)).toBe(true);
 });
 it('an empty conversation opens its own first artifact even when another project is globally active', async () => {
   history.replaceState(null, '', '/?session=conversation');

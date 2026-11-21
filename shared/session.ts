@@ -7,6 +7,10 @@ export type ArtifactKind = keyof typeof artifactViewers;
 export type CreationMode = typeof creationModes[number]['id'];
 export type ArtifactIdentity = { id: string; title: string; templateId?: string };
 export type MotionArtifact = ArtifactIdentity & { kind: 'motion-project'; projectId: string };
+export function projectArtifact(project: { id: string; artifactId: string; title: string; templateId?: string | null }): MotionArtifact {
+  return { id: project.artifactId, kind: 'motion-project', projectId: project.id, title: project.title,
+    ...(project.templateId ? { templateId: project.templateId } : {}) };
+}
 // Extend this discriminated union when an additional viewer/resource type is implemented.
 export type SessionArtifact = MotionArtifact;
 export type CreativeSession = { id: string; title: string; mode: CreationMode; artifacts: SessionArtifact[]; activeArtifactId?: string; createdAt?: number; openedAt?: number; templateId?: string };

@@ -2,7 +2,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MotionApp, resolveWorkspaceProject } from './MotionApp';
+import { MotionApp } from './MotionApp';
+import { resolveWorkspaceProject } from './resolveWorkspaceRoute';
+import { setCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { I18nProvider, translate } from '../i18n/I18n';
 import { trackMotion } from './tracking';
 
@@ -81,6 +83,32 @@ it('resolves a bookmark without switching another page globally', async () => {
   expect(fetcher.mock.calls[1][1]).toEqual({ method: 'POST', signal: expect.any(AbortSignal) });
 });
 
+it('mounts a cloud bookmark while the independent sidebar catalog is still pending', async () => {
+  const session = '22222222-2222-2222-2222-222222222222';
+  const artifact = { id: '33333333-3333-3333-3333-333333333333', projectId: id, title: 'Film', kind: 'motion-project' };
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes('/preview/open')) return Response.json({ projectId: id, sessionId: session, artifact });
+    return new Promise<Response>(() => {});
+  });
+  vi.stubGlobal('fetch', fetcher);
+  setCachedCloudDisklessMode(true);
+  history.replaceState(null, '', '/?project=' + id);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<I18nProvider><MotionApp /></I18nProvider>));
+    expect(container.querySelector('[data-viewer-project]')?.getAttribute('data-viewer-project')).toBe(id);
+    expect(new URLSearchParams(location.search).get('session')).toBe(session);
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('/preview/open'))).toHaveLength(1);
+    expect(fetcher.mock.calls.some(([url]) => url.includes('/sessions/'))).toBe(false);
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    history.replaceState(null, '', '/');
+    setCachedCloudDisklessMode(null);
+  }
+});
 it('records an explicit editor visit as Studio after its active project resolves', async () => {
   const artifact = { id: 'project', kind: 'motion-project', projectId: 'project', title: 'Existing project' };
   const catalog = { activeId: 'project', projects: [{ id: 'project', title: 'Existing project' }], sessions: [{ id: 'project', artifacts: [artifact] }] };

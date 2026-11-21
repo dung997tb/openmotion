@@ -1403,8 +1403,8 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
 // ---------------------------------------------------------------------------
 
 describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, WorkspaceStatus, /phase1/call, /generations, /tracking/preferences)', () => {
-  it('supports Studio project/session/template navigation, /motion-api/preview/open, /motion-api/phase1/call, /generations, and /tracking/preferences', async () => {
-    const { app, pgClient, storage } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+  it('supports Studio project/session/template navigation, /motion-api/preview/open, /motion-api/phase1/call, /generations, and /tracking/preferences', async (t) => {
+    const { app, pgClient, storage, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
 
     // Seed one catalog template so POST /motion-api/templates/:id/open can clone with expectedRevision/expectedProjectId.
     const tplHtml = Buffer.from('<div data-composition-id="main">Template</div>', 'utf8');
@@ -1442,6 +1442,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal(createProjRes.status, 201);
     const createdProj = (await createProjRes.json()) as {
       projectId: string;
+      artifactId: string;
       projectTitle: string;
       revision: string;
       sessionId: string;
@@ -1461,6 +1462,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     const previewOpen = (await previewOpenRes.json()) as {
       ok: boolean;
       activeId: string;
+      artifact: { id: string; kind: string; projectId: string; title: string };
       projectId: string;
       projectTitle: string;
       revision: string;
@@ -1474,6 +1476,9 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal(previewOpen.revision, createdProj.revision);
     assert.equal(previewOpen.sessionId, createdProj.sessionId);
     assert.equal(previewOpen.exportJob, null);
+    assert.notEqual(createdProj.artifactId, createdProj.projectId);
+    assert.deepEqual(previewOpen.artifact, { id: createdProj.artifactId, kind: 'motion-project',
+      projectId: createdProj.projectId, title: 'Studio Parity Film' });
 
     // 3. GET /motion-api/project/status & POST /motion-api/projects/:id/open top-level WorkspaceStatus
     const statusRes = await app.request(`/motion-api/project/status?projectId=${createdProj.projectId}`);
@@ -1490,6 +1495,17 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal(statusBody.revision, createdProj.revision);
     assert.equal(statusBody.sessionId, createdProj.sessionId);
     assert.equal(statusBody.exportJob, null);
+
+    const load = t.mock.method(services.files, 'loadVirtualProject');
+    const list = t.mock.method(services.workspace, 'getCatalog');
+    const summary = await app.request(`/motion-api/project/status?view=summary&projectId=${createdProj.projectId}`);
+    assert.equal(summary.status, 200);
+    assert.deepEqual(await summary.json(), {
+      projectId: statusBody.projectId, projectTitle: statusBody.projectTitle,
+      sessionId: statusBody.sessionId, revision: statusBody.revision, exportJob: null,
+    });
+    assert.equal(load.mock.callCount(), 0);
+    assert.equal(list.mock.callCount(), 0);
 
     const openProjRes = await app.request(`/motion-api/projects/${createdProj.projectId}/open`, { method: 'POST' });
     assert.equal(openProjRes.status, 200);

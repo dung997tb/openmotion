@@ -35,6 +35,7 @@ import {
 } from '../../shared/project-validation.ts';
 import {
   availableSession,
+  projectArtifact,
   creationMode,
   type CreativeSession,
   type SessionDetail,
@@ -292,13 +293,7 @@ export class WorkspaceService {
 
     const creativeSessions: CreativeSession[] = [];
     for (const sess of sessionRows) {
-      const artifacts = (projectsBySession.get(sess.id) ?? []).map((proj) => ({
-        id: proj.artifactId,
-        title: proj.title,
-        kind: 'motion-project' as const,
-        projectId: proj.id,
-        ...(proj.templateId ? { templateId: proj.templateId } : {}),
-      }));
+      const artifacts = (projectsBySession.get(sess.id) ?? []).map(projectArtifact);
       const fullSession: CreativeSession = {
         id: sess.id,
         title: sess.title,
@@ -1368,13 +1363,7 @@ export class WorkspaceService {
 
     const activeArtifacts = projRows
       .filter((p) => !p.trashed)
-      .map((proj) => ({
-        id: proj.artifactId,
-        title: proj.title,
-        kind: 'motion-project' as const,
-        projectId: proj.id,
-        ...(proj.templateId ? { templateId: proj.templateId } : {}),
-      }));
+      .map(projectArtifact);
 
     return {
       id: sess.id,

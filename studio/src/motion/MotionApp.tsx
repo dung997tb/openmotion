@@ -2,9 +2,9 @@ import { Button } from 'open-design-ui/button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { WorkspaceFrame, WorkspaceMenuButton, useWorkspaceChrome } from './WorkspaceFrame';
-import { motionApi, type ProjectCatalog } from './useWorkspace';
-import { requestedProject, validWorkspaceProject } from './workspaceRouting';
-import type { SessionDetail, SessionArtifact } from '../../../shared/session';
+import { requestedProject } from './workspaceRouting';
+import { resolveWorkspaceRoute } from './resolveWorkspaceRoute';
+import type { SessionArtifact } from '../../../shared/session';
 import { ArtifactViewer } from './ArtifactViewer';
 import { EditorLoading, readEditorLoadingLayout, type EditorLoadingLayout } from './EditorLoading';
 import { RecoveryScreen } from '../components/RecoveryScreen';
@@ -13,14 +13,6 @@ import { WORKSPACE_LOCATION_CHANGED, writeWorkspaceHistory } from '../utils/work
 import { isWorkspaceSettingsPage } from '../../../shared/workspace-url';
 
 const noPendingSaves = async () => {};
-
-export async function resolveWorkspaceProject(id: string, signal: AbortSignal) {
-  if (!validWorkspaceProject(id)) throw new Error('项目链接无效');
-  const catalog = await motionApi<ProjectCatalog>('/projects', { signal });
-  if (!catalog.projects.some(project => project.id === id)) throw new Error('项目不存在，请从左侧列表选择一个项目。');
-  signal.throwIfAborted();
-  await motionApi('/preview/open', { method: 'POST', signal }, id);
-}
 
 /** Resolve the native service before mounting any editor that could read or save files. */
 export function MotionApp() {
@@ -61,25 +53,16 @@ export function MotionApp() {
     const controller = new AbortController();
     setError('');
     async function resolve() {
-      const catalog = await motionApi<ProjectCatalog>('/projects', { signal: controller.signal });
-      controller.signal.throwIfAborted();
-      const targetProject = projectId ?? (sessionId ? null : catalog.activeId);
-      // The first-run placeholder has no native source yet. Browsing must not create it.
-      // Existing projects can prepare behind the modal without changing the active project.
-      if (libraryOnly && targetProject === 'project') return;
-      const id = sessionId ?? catalog.sessions?.find(item => item.artifacts.some(artifact => artifact.projectId === targetProject))?.id;
-      if (!id || !validWorkspaceProject(id)) throw new Error('会话不存在');
-      const session = await motionApi<SessionDetail>(`/sessions/${id}`, { signal: controller.signal });
-      controller.signal.throwIfAborted();
-      if (!session.artifacts.length && projectId === null) { setReady({ sessionId: id }); return; }
-      const artifact = session.artifacts.find(item => item.projectId === targetProject) ?? (targetProject === null ? session.artifacts.find(item => item.id === session.activeArtifactId) ?? session.artifacts[0] : undefined);
-      if (!artifact) throw new Error('该产物不属于此会话');
-      await resolveWorkspaceProject(artifact.projectId, controller.signal);
-      if (controller.signal.aborted) return;
-      const url = new URL(location.href); url.searchParams.set('session', id); url.searchParams.set('project', artifact.projectId);
-      if (!url.hash.startsWith(`#project/${artifact.projectId}`)) url.hash = `project/${artifact.projectId}`;
-      writeWorkspaceHistory(url, true);
-      setReady({ sessionId: id, artifact });
+      const resolved = await resolveWorkspaceRoute(projectId, sessionId, libraryOnly, controller.signal);
+      if (!resolved || controller.signal.aborted) return;
+      if (resolved.artifact) {
+        const url = new URL(location.href);
+        url.searchParams.set('session', resolved.sessionId);
+        url.searchParams.set('project', resolved.artifact.projectId);
+        if (!url.hash.startsWith(`#project/${resolved.artifact.projectId}`)) url.hash = `project/${resolved.artifact.projectId}`;
+        writeWorkspaceHistory(url, true);
+      }
+      setReady(resolved);
     }
     void resolve().catch(err => { if (!controller.signal.aborted) setError((err as Error).message); });
     return () => controller.abort();
