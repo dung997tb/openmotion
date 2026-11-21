@@ -321,7 +321,8 @@
     "Terms of Service": "服务条款",
     "Refund Policy": "退款政策",
     "Social channels": "社交与媒体渠道",
-    "Legal and policy links": "条款与政策链接"
+    "Legal and policy links": "条款与政策链接",
+    "Image creation": "图片创作"
   },
   "ja": {
     "Open Motion Editor": "Motion エディターを開く",
@@ -645,7 +646,8 @@
     "Terms of Service": "利用規約",
     "Refund Policy": "返金ポリシー",
     "Social channels": "公式SNS・チャンネル",
-    "Legal and policy links": "規約・ポリシー"
+    "Legal and policy links": "規約・ポリシー",
+    "Image creation": "画像の作成"
   },
   "ko": {
     "Open Motion Editor": "Motion 편집기 열기",
@@ -969,7 +971,8 @@
     "Terms of Service": "이용약관",
     "Refund Policy": "환불 정책",
     "Social channels": "소셜 채널",
-    "Legal and policy links": "약관 및 정책"
+    "Legal and policy links": "약관 및 정책",
+    "Image creation": "이미지 생성"
   },
   "de": {
     "Open Motion Editor": "Motion-Editor öffnen",
@@ -1293,7 +1296,8 @@
     "Terms of Service": "Nutzungsbedingungen",
     "Refund Policy": "Rückerstattungsrichtlinie",
     "Social channels": "Soziale Kanäle",
-    "Legal and policy links": "Rechtliches & Richtlinien"
+    "Legal and policy links": "Rechtliches & Richtlinien",
+    "Image creation": "Bilderstellung"
   },
   "fr": {
     "Open Motion Editor": "Ouvrir l’éditeur Motion",
@@ -1617,7 +1621,8 @@
     "Terms of Service": "Conditions d’utilisation",
     "Refund Policy": "Politique de remboursement",
     "Social channels": "Réseaux sociaux",
-    "Legal and policy links": "Mentions légales et politiques"
+    "Legal and policy links": "Mentions légales et politiques",
+    "Image creation": "Création d’images"
   },
   "ru": {
     "Open Motion Editor": "Открыть редактор Motion",
@@ -1941,7 +1946,8 @@
     "Terms of Service": "Условия использования",
     "Refund Policy": "Политика возврата",
     "Social channels": "Социальные сети",
-    "Legal and policy links": "Правовая информация и политики"
+    "Legal and policy links": "Правовая информация и политики",
+    "Image creation": "Создание изображений"
   },
   "es": {
     "Open Motion Editor": "Abrir el editor de Motion",
@@ -2265,7 +2271,8 @@
     "Terms of Service": "Términos de servicio",
     "Refund Policy": "Política de reembolso",
     "Social channels": "Canales sociales",
-    "Legal and policy links": "Enlaces legales y políticas"
+    "Legal and policy links": "Enlaces legales y políticas",
+    "Image creation": "Creación de imágenes"
   },
   "pt-BR": {
     "Open Motion Editor": "Abrir o editor do Motion",
@@ -2589,7 +2596,8 @@
     "Terms of Service": "Termos de serviço",
     "Refund Policy": "Política de reembolso",
     "Social channels": "Canais sociais",
-    "Legal and policy links": "Links legais e políticas"
+    "Legal and policy links": "Links legais e políticas",
+    "Image creation": "Criação de imagens"
   },
   "it": {
     "Open Motion Editor": "Apri l’editor di Motion",
@@ -2913,7 +2921,8 @@
     "Terms of Service": "Termini di servizio",
     "Refund Policy": "Politica di rimborso",
     "Social channels": "Canali social",
-    "Legal and policy links": "Link legali e normative"
+    "Legal and policy links": "Link legali e normative",
+    "Image creation": "Creazione di immagini"
   },
   "tr": {
     "Open Motion Editor": "Motion düzenleyicisini aç",
@@ -3237,6 +3246,7 @@
     "Terms of Service": "Hizmet Şartları",
     "Refund Policy": "İade Politikası",
     "Social channels": "Sosyal kanallar",
-    "Legal and policy links": "Yasal ve politika bağlantıları"
+    "Legal and policy links": "Yasal ve politika bağlantıları",
+    "Image creation": "Görsel oluşturma"
   }
 }
