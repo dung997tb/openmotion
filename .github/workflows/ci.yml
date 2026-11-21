@@ -4,6 +4,7 @@ name: Motion standalone checks
 # Studio UI, cloud backend (PostgreSQL + Redis + S3 CAS), MCP Streamable HTTP,
 # and multi-target container definitions.
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
@@ -113,6 +114,8 @@ jobs:
         run: node .github/scripts/ci-scope.mjs
       - name: Test release controls without publication credentials
         run: node --test tests/release-workflows.test.mjs tests/release-scan.test.mjs tests/registry-download.test.mjs tests/stable-release.test.mjs tests/release-notes.test.mjs tests/publish-template-catalog.test.mjs tests/template-registry-consumer.test.mjs
+      - name: Exercise cloud test promotion against a local remote
+        run: bash tests/cloud-test-promotion.sh
       - name: Install locked Motion dependencies
         if: steps.scope.outputs.full == 'true'
         run: npm ci --no-audit --no-fund
