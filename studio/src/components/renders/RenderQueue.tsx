@@ -29,7 +29,12 @@ import {
 } from "./renderSettings";
 import { GpuEncodingToggle } from "./GpuEncodingToggle";
 import { BrowserExportToggle } from "./BrowserExportToggle";
-import { isBrowserWebCodecsSupported } from "../../render/browserExportPreflight";
+import {
+  ISOLATED_PREVIEW_EXPORT_REASON,
+  isBrowserWebCodecsSupported,
+  isIsolatedPreviewIframe,
+} from "../../render/browserExportPreflight";
+import { useLivePreviewIframe } from "../../player/store/previewIframeStore";
 import { GifLoopInput, isInvalidGifLoop } from "./GifLoopInput";
 import { trackStudioEvent } from "../../utils/studioTelemetry";
 import { clickMethod, trackStudioClick } from "../../motion/editorTracking";
@@ -61,6 +66,8 @@ export interface RenderQueueProps {
   onStartRender: StartRenderHandler;
   isRendering: boolean;
   emptyComposition?: boolean;
+  /** False when the user selected a composition other than the one open in preview. */
+  canBrowserExport?: boolean;
   /** History fetch failure (null when the last load succeeded). */
   loadError?: string | null;
   /** Retry a failed history load. */
@@ -196,6 +203,7 @@ function FormatExportButton({
   isRendering,
   separateExport = false,
   emptyComposition = false,
+  canBrowserExport = true,
   compositionDimensions,
   lastRenderDurationMs,
   ffmpeg,
@@ -206,6 +214,7 @@ function FormatExportButton({
   isRendering: boolean;
   separateExport?: boolean;
   emptyComposition?: boolean;
+  canBrowserExport?: boolean;
   compositionDimensions?: CompositionDimensions | null;
   lastRenderDurationMs?: number;
   ffmpeg: FfmpegStatus | null;
@@ -216,6 +225,7 @@ function FormatExportButton({
   const persisted = getPersistedRenderSettings();
   const mvp = useMvpEditor();
   const projectId = useStudioShellContextOptional()?.projectId;
+  const previewIframe = useLivePreviewIframe();
   const [format, setFormat] = useState<"mp4" | "webm" | "mov" | "gif">(persisted.format);
   const [quality, setQuality] = useState<"draft" | "standard" | "high">(persisted.quality);
   const [resolution, setResolution] = useState<RenderScale>("auto");
@@ -225,8 +235,17 @@ function FormatExportButton({
   const [gpu, setGpu] = useState(persisted.gpu);
   const [browserExport, setBrowserExport] = useState(getBrowserExportEnabled);
   const webCodecsSupported = isBrowserWebCodecsSupported();
+  const previewIsolated = isIsolatedPreviewIframe(previewIframe);
+  const browserExportSupported = webCodecsSupported && !previewIsolated && canBrowserExport;
+  const browserExportUnsupportedReason = !webCodecsSupported
+    ? "WebCodecs VideoEncoder is unavailable in this browser."
+    : previewIsolated
+      ? ISOLATED_PREVIEW_EXPORT_REASON
+      : !canBrowserExport
+        ? "Browser export only applies to the currently open composition."
+        : undefined;
   const usingBrowserExport =
-    browserExport && webCodecsSupported && (format === "mp4" || format === "webm");
+    browserExport && browserExportSupported && (format === "mp4" || format === "webm");
   const [gifLoop, setGifLoop] = useState("0");
   const loopCount = mvp ? 0 : Number(gifLoop);
   const invalidGifLoop = !mvp && isInvalidGifLoop(format, gifLoop);
@@ -338,7 +357,8 @@ function FormatExportButton({
         format={format}
         checked={browserExport}
         disabled={isRendering}
-        supported={webCodecsSupported}
+        supported={browserExportSupported}
+        unsupportedReason={browserExportUnsupportedReason}
         onToggle={(next) => {
           setBrowserExport(next);
           setBrowserExportEnabled(next);
@@ -393,6 +413,7 @@ export const RenderQueue = memo(function RenderQueue({
   onStartRender,
   isRendering,
   emptyComposition = false,
+  canBrowserExport = true,
   loadError,
   onRetryLoad,
   actionError,
@@ -426,6 +447,7 @@ export const RenderQueue = memo(function RenderQueue({
       <div className={`px-3 pb-3 border-b border-border shrink-0 ${mvp ? "pt-1" : "pt-3"}`}>
         <FormatExportButton
           emptyComposition={emptyComposition}
+          canBrowserExport={canBrowserExport}
           onStartRender={onStartRender}
           isRendering={isRendering}
           separateExport={!isRendering && jobs.some(job => job.status === "unknown" && job.workerActive === false)}

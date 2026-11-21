@@ -16,7 +16,11 @@ import { useRenderProgress } from "./useRenderProgress";
 import { beginStudioIo } from "../../telemetry/ioRecovery";
 import { usePlayerStore } from "../../player/store/playerStore";
 import { usePreviewIframeStore } from "../../player/store/previewIframeStore";
-import { evaluateBrowserExportEligibility } from "../../render/browserExportPreflight";
+import {
+  evaluateBrowserExportEligibility,
+  isBrowserWebCodecsSupported,
+  isIsolatedPreviewIframe,
+} from "../../render/browserExportPreflight";
 import { runBrowserExport } from "../../render/browserExport";
 import { getBrowserExportEnabled } from "./renderSettings";
 import { durationBucket, exportRejection, exportSettings, openTemplateFields, projectScaleFields, projectFields,
@@ -252,7 +256,8 @@ export function useRenderQueue(
       }
       const exportId = generateId();
       const player = usePlayerStore.getState();
-      const openComposition = !opts.composition || opts.composition === activeCompPathRef.current;
+      const openComposition =
+        !opts.composition || opts.composition === (activeCompPathRef.current || "index.html");
       const timeline = openComposition && player.timelineReady;
       const tracked = { ...exportSettings(opts.origin, opts),
         video_duration_bucket: durationBucket(timeline ? player.duration : undefined), ...openTemplateFields() };
@@ -272,11 +277,18 @@ export function useRenderQueue(
         }
       };
       const requestedFormat = opts.format ?? "mp4";
+      const previewIframe = usePreviewIframeStore.getState().iframe;
+      // Browser export captures the mounted preview iframe and player store, so it
+      // can only render the currently open composition; other compositions always
+      // fall back to the server render pipeline.
       const useBrowserEngine =
-        opts.engine === "browser" ||
-        (opts.engine === undefined &&
-          getBrowserExportEnabled() &&
-          (requestedFormat === "mp4" || requestedFormat === "webm"));
+        openComposition &&
+        (opts.engine === "browser" ||
+          (opts.engine === undefined &&
+            getBrowserExportEnabled() &&
+            isBrowserWebCodecsSupported() &&
+            !isIsolatedPreviewIframe(previewIframe) &&
+            (requestedFormat === "mp4" || requestedFormat === "webm")));
 
       // The server would answer this with a 503 anyway. Refusing here keeps
       // the reason and the fix in the message, and keeps a control that
@@ -359,7 +371,7 @@ export function useRenderQueue(
       };
 
       if (useBrowserEngine) {
-        const iframe = usePreviewIframeStore.getState().iframe;
+        const iframe = previewIframe;
         const eligibility = evaluateBrowserExportEligibility({
           format,
           elements: player.elements,

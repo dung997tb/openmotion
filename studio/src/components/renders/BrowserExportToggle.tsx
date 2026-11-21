@@ -6,12 +6,14 @@ export function BrowserExportToggle({
   checked,
   disabled,
   supported,
+  unsupportedReason = "WebCodecs VideoEncoder is unavailable in this browser.",
   onToggle,
 }: {
   format: "mp4" | "webm" | "mov" | "gif";
   checked: boolean;
   disabled: boolean;
   supported: boolean;
+  unsupportedReason?: string;
   onToggle: (next: boolean) => void;
 }) {
   const { t } = useI18n();
@@ -23,7 +25,7 @@ export function BrowserExportToggle({
         <span className="text-step-10 text-text-3 block">{t("Browser export (Beta)")}</span>
         {!supported && (
           <span className="text-step-10 text-text-5 block">
-            {t("WebCodecs VideoEncoder is unavailable in this browser.")}
+            {t(unsupportedReason)}
           </span>
         )}
       </div>

@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KeyframeCacheEntry } from "../player/store/keyframeSlice";
 import type { TimelineElement } from "../player/store/timelineElement";
 import {
+  ISOLATED_PREVIEW_EXPORT_REASON,
   evaluateBrowserExportEligibility,
+  isIsolatedPreviewIframe,
   resolveOriginalPreviewMediaUrl,
 } from "./browserExportPreflight";
 import { capturePreviewLayoutSnapshot, interpolateElementTransform } from "./layoutSnapshot";
@@ -85,6 +87,40 @@ describe("browserExportPreflight", () => {
     });
     expect(result.eligible).toBe(true);
     expect(result.warnings).toHaveLength(2);
+  });
+
+  it("rejects browser export when the preview iframe is cross-origin isolated or opaquely sandboxed", () => {
+    const isolatedIframe = document.createElement("iframe");
+    isolatedIframe.setAttribute(
+      "src",
+      "https://preview.example.com/api/projects/proj-1/preview?variables=%7B%22title%22%3A%22A%22%7D",
+    );
+    Object.defineProperty(isolatedIframe, "contentDocument", { get: () => null });
+
+    expect(isIsolatedPreviewIframe(isolatedIframe, "https://studio.example.com")).toBe(true);
+    const isolatedResult = evaluateBrowserExportEligibility({
+      format: "mp4",
+      elements: [makeElement({ tag: "p", text: { value: "Hello" } })],
+      duration: 2,
+      webCodecsSupported: true,
+      iframe: isolatedIframe,
+      origin: "https://studio.example.com",
+    });
+    expect(isolatedResult.eligible).toBe(false);
+    expect(isolatedResult.reasons).toContain(ISOLATED_PREVIEW_EXPORT_REASON);
+
+    const opaqueSandbox = document.createElement("iframe");
+    opaqueSandbox.setAttribute("src", "/api/projects/proj-1/preview");
+    opaqueSandbox.setAttribute("sandbox", "allow-scripts");
+    expect(isIsolatedPreviewIframe(opaqueSandbox, "https://studio.example.com")).toBe(true);
+
+    const sameOriginSandbox = document.createElement("iframe");
+    sameOriginSandbox.setAttribute(
+      "src",
+      "https://studio.example.com/api/projects/proj-1/preview?variables=%7B%22title%22%3A%22A%22%7D",
+    );
+    sameOriginSandbox.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    expect(isIsolatedPreviewIframe(sameOriginSandbox, "https://studio.example.com")).toBe(false);
   });
 });
 
@@ -210,6 +246,84 @@ describe("audioMixer", () => {
     expect(rampCalls).toEqual([
       [0.5, 1.5],
       [0, 4],
+    ]);
+  });
+
+  it("converts timeline play duration to source-buffer duration for faster (2x) and slower (0.5x) clips", async () => {
+    const scheduled: Array<{ when: number; offset: number; sourceDur: number; rate: number }> = [];
+    const fakeBuffer = { duration: 10, numberOfChannels: 2, sampleRate: 48000 } as AudioBuffer;
+
+    class MockOfflineAudioContext {
+      destination = {};
+      decodeAudioData = vi.fn(async () => fakeBuffer);
+      createBufferSource = () => {
+        const node = {
+          buffer: null as AudioBuffer | null,
+          playbackRate: { value: 1 },
+          connect: vi.fn(),
+          start: (when: number, offset: number, dur: number) =>
+            scheduled.push({ when, offset, sourceDur: dur, rate: node.playbackRate.value }),
+        };
+        return node;
+      };
+      createGain = () => ({
+        gain: {
+          setValueAtTime: vi.fn(),
+          linearRampToValueAtTime: vi.fn(),
+        },
+        connect: vi.fn(),
+      });
+      startRendering = vi.fn(async () => fakeBuffer);
+    }
+
+    vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })),
+    );
+
+    const mixed = await mixTimelineAudio({
+      projectId: "proj-1",
+      duration: 12,
+      elements: [
+        // 4s timeline clip at 2x speed consumes 8s of source buffer.
+        makeElement({
+          id: "fast",
+          tag: "audio",
+          src: "assets/fast.mp3",
+          start: 0,
+          duration: 4,
+          playbackStart: 0,
+          playbackRate: 2,
+        }),
+        // 4s timeline clip at 0.5x speed consumes 2s of source buffer (no bleed beyond clip end).
+        makeElement({
+          id: "slow",
+          tag: "audio",
+          src: "assets/slow.mp3",
+          start: 5,
+          duration: 4,
+          playbackStart: 1,
+          playbackRate: 0.5,
+        }),
+        // Clamped by remaining source span: 10 - 7 = 3s source -> 1.5s timeline at 2x -> 3s source.
+        makeElement({
+          id: "clamped",
+          tag: "audio",
+          src: "assets/clamped.mp3",
+          start: 9,
+          duration: 4,
+          playbackStart: 7,
+          playbackRate: 2,
+        }),
+      ],
+    });
+
+    expect(mixed?.trackCount).toBe(3);
+    expect(scheduled).toEqual([
+      { when: 0, offset: 0, sourceDur: 8, rate: 2 },
+      { when: 5, offset: 1, sourceDur: 2, rate: 0.5 },
+      { when: 9, offset: 7, sourceDur: 3, rate: 2 },
     ]);
   });
 });
@@ -542,10 +656,11 @@ describe("browserExport orchestration", () => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-isolated-mp4");
 
     const visibleSeek = vi.fn();
+    const visibleUrl = "/api/projects/proj-1/preview?variables=%7B%22title%22%3A%22Custom%22%7D";
     const visibleIframe = document.createElement("iframe");
-    visibleIframe.setAttribute("src", "http://127.0.0.1:4123/api/projects/proj-1/preview");
+    visibleIframe.setAttribute("src", visibleUrl);
     Object.defineProperty(visibleIframe, "src", {
-      get: () => "http://127.0.0.1:4123/api/projects/proj-1/preview",
+      get: () => visibleUrl,
     });
     const visibleDoc = document.implementation.createHTMLDocument("visible");
     visibleDoc.body.innerHTML = `<div data-composition-id="root"><div data-hf-id="card-1">Card</div></div>`;
@@ -559,7 +674,7 @@ describe("browserExport orchestration", () => {
     const isolatedDoc = document.implementation.createHTMLDocument("isolated");
     isolatedDoc.body.innerHTML = `<div data-composition-id="root"><div data-hf-id="card-1">Card</div></div>`;
     Object.defineProperty(isolatedDoc, "URL", {
-      get: () => "http://127.0.0.1:4123/api/projects/proj-1/preview",
+      get: () => visibleUrl,
     });
     Object.defineProperty(isolatedDoc, "readyState", {
       get: () => "complete",
@@ -568,6 +683,7 @@ describe("browserExport orchestration", () => {
 
     const origCreateElement = document.createElement.bind(document);
     let createdExportFrame: HTMLIFrameElement | null = null;
+    const assignedExportSrcs: string[] = [];
     vi.spyOn(document, "createElement").mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
       const el = origCreateElement(tagName, options);
       if (tagName.toLowerCase() === "iframe") {
@@ -575,6 +691,7 @@ describe("browserExport orchestration", () => {
         Object.defineProperty(el, "src", {
           get: () => el.getAttribute("src") ?? "",
           set: (val: string) => {
+            assignedExportSrcs.push(val);
             el.setAttribute("src", val);
             queueMicrotask(() => el.dispatchEvent(new Event("load")));
           },
@@ -611,6 +728,7 @@ describe("browserExport orchestration", () => {
 
     expect(result.frameCount).toBe(3);
     expect(createdExportFrame).not.toBeNull();
+    expect(assignedExportSrcs[0]).toBe(visibleUrl);
     expect(isolatedPause).toHaveBeenCalledTimes(1);
     expect(isolatedSeek).toHaveBeenCalled();
     expect(visibleSeek).not.toHaveBeenCalled();
@@ -795,21 +913,36 @@ describe("cloud preview adaptation", () => {
     );
   });
 
-  it("falls back to same-origin preview route when the visible preview iframe is cross-origin", () => {
+  it("preserves same-origin preview URLs with variables and refuses cross-origin isolated preview fallback", async () => {
     const sameOriginIframe = document.createElement("iframe");
-    sameOriginIframe.setAttribute("src", "https://studio.example.com/api/projects/proj-1/preview");
+    sameOriginIframe.setAttribute(
+      "src",
+      "https://studio.example.com/api/projects/proj-1/preview?variables=%7B%22headline%22%3A%22Live%22%7D",
+    );
     expect(
       resolveIsolatablePreviewUrl(sameOriginIframe, "proj-1", "https://studio.example.com"),
-    ).toBe("https://studio.example.com/api/projects/proj-1/preview");
+    ).toBe("https://studio.example.com/api/projects/proj-1/preview?variables=%7B%22headline%22%3A%22Live%22%7D");
+
+    const relativeSubCompIframe = document.createElement("iframe");
+    relativeSubCompIframe.setAttribute(
+      "src",
+      "/api/projects/proj-1/preview/comp/parts/intro.html?variables=%7B%22theme%22%3A%22dark%22%7D",
+    );
+    expect(
+      resolveIsolatablePreviewUrl(relativeSubCompIframe, "proj-1", "https://studio.example.com"),
+    ).toBe("/api/projects/proj-1/preview/comp/parts/intro.html?variables=%7B%22theme%22%3A%22dark%22%7D");
 
     const crossOriginNullDoc = document.createElement("iframe");
-    crossOriginNullDoc.setAttribute("src", "https://preview.example.com/api/projects/proj-1/preview");
+    crossOriginNullDoc.setAttribute(
+      "src",
+      "https://preview.example.com/api/projects/proj-1/preview?variables=%7B%22headline%22%3A%22Live%22%7D",
+    );
     Object.defineProperty(crossOriginNullDoc, "contentDocument", {
       get: () => null,
     });
     expect(
       resolveIsolatablePreviewUrl(crossOriginNullDoc, "proj-1", "https://studio.example.com"),
-    ).toBe("/api/projects/proj-1/preview?original=1");
+    ).toBeNull();
 
     const crossOriginThrowing = document.createElement("iframe");
     crossOriginThrowing.setAttribute("src", "https://preview.example.com/api/projects/proj-1/preview");
@@ -820,7 +953,187 @@ describe("cloud preview adaptation", () => {
     });
     expect(
       resolveIsolatablePreviewUrl(crossOriginThrowing, "proj-1", "https://studio.example.com"),
-    ).toBe("/api/projects/proj-1/preview?original=1");
+    ).toBeNull();
+
+    const { runBrowserExport: runIsolatedCheck } = await import("./browserExport");
+    await expect(
+      runIsolatedCheck({
+        projectId: "proj-1",
+        format: "mp4",
+        quality: "standard",
+        fps: 10,
+        compositionDimensions: { width: 1280, height: 720 },
+        duration: 0.2,
+        elements: [makeElement({ id: "t1", tag: "p", text: { value: "Hello" } })],
+        keyframeCache: new Map(),
+        iframe: crossOriginThrowing,
+      }),
+    ).rejects.toThrow(ISOLATED_PREVIEW_EXPORT_REASON);
+  });
+
+  it("auto-selects snapdom-live for zero-start fading HTML titles and applies live opacity only once", async () => {
+    const capturedOpacities: string[] = [];
+    const snapdomCalls = vi.fn(async (el: Element) => {
+      capturedOpacities.push((el as HTMLElement).style.opacity);
+      return {
+        toCanvas: async () => ({ width: 400, height: 120 }),
+      };
+    });
+    vi.doMock("@zumer/snapdom", () => ({ snapdom: snapdomCalls }));
+    vi.doMock("mediabunny", () => ({
+      ALL_FORMATS: [],
+      Mp4OutputFormat: class {
+        getSupportedVideoCodecs = () => ["avc"];
+        getSupportedAudioCodecs = () => ["aac"];
+      },
+      WebMOutputFormat: class {
+        getSupportedVideoCodecs = () => ["vp9"];
+        getSupportedAudioCodecs = () => ["opus"];
+      },
+      BufferTarget: class {
+        buffer = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]).buffer;
+      },
+      Output: class {
+        state = "started";
+        addVideoTrack = vi.fn();
+        addAudioTrack = vi.fn();
+        start = vi.fn(async () => {});
+        getMimeType = vi.fn(async () => "video/mp4");
+        finalize = vi.fn(async () => {});
+        cancel = vi.fn(async () => {});
+      },
+      CanvasSource: class {
+        add = vi.fn(async () => {});
+        close = vi.fn();
+      },
+      AudioBufferSource: class {
+        add = vi.fn(async () => {});
+        close = vi.fn();
+      },
+      Input: class {
+        getPrimaryVideoTrack = vi.fn(async () => null);
+        dispose = vi.fn();
+      },
+      UrlSource: class {},
+      CanvasSink: class {},
+      getFirstEncodableVideoCodec: vi.fn(async () => "avc"),
+      getFirstEncodableAudioCodec: vi.fn(async () => "aac"),
+    }));
+
+    const drawAlphas: number[] = [];
+    const mockCtx = {
+      fillStyle: "",
+      font: "",
+      textAlign: "left",
+      textBaseline: "top",
+      globalAlpha: 1,
+      fillRect: vi.fn(),
+      fillText: vi.fn(),
+      drawImage: vi.fn(() => {
+        drawAlphas.push(mockCtx.globalAlpha);
+      }),
+      save: vi.fn(),
+      restore: vi.fn(() => {
+        mockCtx.globalAlpha = 1;
+      }),
+      translate: vi.fn(),
+      rotate: vi.fn(),
+      scale: vi.fn(),
+      beginPath: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      fill: vi.fn(),
+    };
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        width: number;
+        height: number;
+        constructor(w: number, h: number) {
+          this.width = w;
+          this.height = h;
+        }
+        getContext = () => mockCtx;
+      },
+    );
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-zero-start-fade");
+
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument!;
+    doc.body.innerHTML = `
+      <div data-composition-id="root">
+        <p data-hf-id="fade-title" style="opacity: 0; background-color: rgb(255, 0, 0);">Fade In</p>
+      </div>
+    `;
+    const root = doc.querySelector("[data-composition-id]")!;
+    const title = doc.querySelector('[data-hf-id="fade-title"]') as HTMLElement;
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 1280, height: 720, right: 1280, bottom: 720, x: 0, y: 0, toJSON: () => ({}),
+    });
+    vi.spyOn(title, "getBoundingClientRect").mockReturnValue({
+      left: 100, top: 100, width: 400, height: 120, right: 500, bottom: 220, x: 100, y: 100, toJSON: () => ({}),
+    });
+    const seekTimes: number[] = [];
+    Object.defineProperty(iframe, "contentWindow", {
+      get: () => ({
+        __playerReady: true,
+        __player: {
+          seek: (t: number) => {
+            seekTimes.push(Number(t.toFixed(2)));
+            // t=0 -> 0, t=0.1 -> 0.5, t=0.2 -> 0.5, t=0.3 -> 1
+            title.style.opacity = t <= 0 ? "0" : t < 0.25 ? "0.5" : "1";
+          },
+        },
+      }),
+    });
+
+    const keyframeCache = new Map<string, KeyframeCacheEntry>([
+      [
+        "t-fade",
+        {
+          format: "gsap",
+          keyframes: [
+            { percentage: 0, properties: { opacity: 0, x: 0 } },
+            { percentage: 50, properties: { opacity: 0.5, x: 40 } },
+            { percentage: 100, properties: { opacity: 1, x: 80 } },
+          ],
+        },
+      ],
+    ]);
+
+    const { runBrowserExport: runZeroStartFade } = await import("./browserExport");
+    const result = await runZeroStartFade({
+      projectId: "proj-1",
+      format: "mp4",
+      quality: "standard",
+      fps: 10,
+      compositionDimensions: { width: 1280, height: 720 },
+      duration: 0.4,
+      elements: [
+        makeElement({
+          id: "t-fade",
+          hfId: "fade-title",
+          tag: "p",
+          start: 0,
+          duration: 0.4,
+        }),
+      ],
+      keyframeCache,
+      iframe,
+      isolateIframe: false,
+    });
+
+    expect(result.stats?.htmlMode).toBe("snapdom-live");
+    expect(seekTimes).toEqual([0, 0.1, 0.2, 0.3]);
+    // Frame 0 (opacity 0) is skipped; frames 1-3 are captured at their live seeked opacity.
+    expect(capturedOpacities).toEqual(["0.5", "0.5", "1"]);
+    expect(result.stats?.snapdomCaptures).toBe(3);
+    // snapdom already bakes computed opacity into its rasterized canvas, so ctx.globalAlpha
+    // must remain 1 (no double attenuation to 0.25) and no duplicate keyframe translate.
+    expect(drawAlphas).toEqual([1, 1, 1]);
+    expect(mockCtx.translate).not.toHaveBeenCalled();
+    iframe.remove();
   });
 
   it("auto-selects snapdom-live for delayed HTML elements (start > 0) even without explicit mode", async () => {

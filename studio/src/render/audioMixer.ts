@@ -95,7 +95,10 @@ export async function mixTimelineAudio(options: {
 
     const maxSourceSpan = Math.max(0, buffer.duration - mediaOffset);
     const playDuration = Math.min(clipDuration, maxSourceSpan / rate);
-    if (playDuration <= 0) continue;
+    // AudioBufferSourceNode.start's third parameter is source-buffer duration,
+    // independent of playbackRate; convert timeline seconds to source seconds.
+    const sourceDuration = Math.min(maxSourceSpan, playDuration * rate);
+    if (playDuration <= 0 || sourceDuration <= 0) continue;
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -121,7 +124,7 @@ export async function mixTimelineAudio(options: {
 
     source.connect(gainNode);
     gainNode.connect(ctx.destination);
-    source.start(clipStart, mediaOffset, playDuration);
+    source.start(clipStart, mediaOffset, sourceDuration);
     scheduledCount += 1;
   }
 

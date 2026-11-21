@@ -68,6 +68,7 @@ export const RenderQueuePanel = memo(function RenderQueuePanel() {
           compositionDimensions={current ? compositionDimensions : null}
           isRendering={renderQueue.isRendering}
           emptyComposition={current && renderQueue.emptyComposition}
+          canBrowserExport={current}
         />
       </div>
     </div>

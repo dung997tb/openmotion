@@ -2,15 +2,19 @@ import { CANVAS_DIMENSIONS, type CanvasResolution } from "@hyperframes/parsers";
 import type { KeyframeCacheEntry } from "../player/store/keyframeSlice";
 import type { TimelineElement } from "../player/store/timelineElement";
 import { mediaUrlSourceOptions } from "../player/lib/mediaFetch";
-import { buildProjectApiPath } from "../utils/projectRouting";
 import { fetchMediaCredentials, mixTimelineAudio } from "./audioMixer";
-import { resolveOriginalPreviewMediaUrl } from "./browserExportPreflight";
+import {
+  ISOLATED_PREVIEW_EXPORT_REASON,
+  isIsolatedPreviewIframe,
+  resolveOriginalPreviewMediaUrl,
+} from "./browserExportPreflight";
 import {
   captureLiveElementBox,
   capturePreviewLayoutSnapshot,
   findDomElement,
   interpolateElementTransform,
   type ElementLayoutBox,
+  type InterpolatedTransform,
 } from "./layoutSnapshot";
 
 export type BrowserHtmlCaptureMode = "canvas2d" | "snapdom-cached" | "snapdom-live";
@@ -239,7 +243,7 @@ function resolveIframeSourceUrl(iframe: HTMLIFrameElement | null | undefined): s
   if (!iframe) return null;
   const rawSrc = iframe.getAttribute("src")?.trim() || iframe.src?.trim() || "";
   if (rawSrc && rawSrc !== "about:blank" && rawSrc !== "about:srcdoc") {
-    return iframe.src || rawSrc;
+    return rawSrc;
   }
   try {
     const docUrl = iframe.contentDocument?.URL?.trim() || "";
@@ -253,9 +257,10 @@ function resolveIframeSourceUrl(iframe: HTMLIFrameElement | null | undefined): s
 }
 
 function isSameOriginUrl(rawUrl: string, origin?: string): boolean {
-  if (!rawUrl || !origin) return !/^https?:/i.test(rawUrl);
+  if (!rawUrl) return false;
+  if (!origin || !/^https?:/i.test(origin)) return !/^https?:/i.test(rawUrl);
   try {
-    return new URL(rawUrl, origin).origin === origin;
+    return new URL(rawUrl, origin).origin === new URL(origin).origin;
   } catch {
     return false;
   }
@@ -263,25 +268,25 @@ function isSameOriginUrl(rawUrl: string, origin?: string): boolean {
 
 export function resolveIsolatablePreviewUrl(
   iframe: HTMLIFrameElement | null | undefined,
-  projectId: string,
-  origin?: string,
+  _projectId?: string,
+  origin: string | undefined = globalThis.location?.origin,
 ): string | null {
+  // Never downgrade a cookie-less isolated preview iframe (e.g. PREVIEW_PUBLIC_ORIGIN)
+  // back onto the authenticated app origin; keep untrusted project scripts isolated.
+  if (!iframe || isIsolatedPreviewIframe(iframe, origin)) {
+    return null;
+  }
   const candidate = resolveIframeSourceUrl(iframe);
   if (candidate && isSameOriginUrl(candidate, origin)) {
     return candidate;
   }
-  // When cloud preview runs under an isolated PREVIEW_PUBLIC_ORIGIN subdomain,
-  // fall back to the main origin's preview route so isolated capture stays same-origin.
-  if (iframe) {
-    try {
-      const doc = iframe.contentDocument;
-      if (doc !== null) {
-        return candidate ?? (doc.URL && doc.URL !== "about:blank" ? doc.URL : null);
-      }
-      return buildProjectApiPath(projectId, "/preview?original=1");
-    } catch {
-      return buildProjectApiPath(projectId, "/preview?original=1");
+  try {
+    const doc = iframe.contentDocument;
+    if (doc && doc.URL && doc.URL !== "about:blank" && doc.URL !== "about:srcdoc") {
+      return isSameOriginUrl(doc.URL, origin) ? doc.URL : null;
     }
+  } catch {
+    return null;
   }
   return null;
 }
@@ -459,25 +464,58 @@ function findDirectCanvasOnlyTarget(domEl: Element): HTMLCanvasElement | null {
 }
 
 function isSnapdomHtmlLayer(el: TimelineElement): boolean {
-  return !["video", "audio"].includes(el.tag) && !["video", "audio"].includes(el.kind ?? "");
+  if (["video", "audio"].includes(el.tag) || ["video", "audio"].includes(el.kind ?? "")) {
+    return false;
+  }
+  if ((el.tag === "img" || el.kind === "image") && Boolean(el.src)) {
+    return false;
+  }
+  return true;
 }
 
 function shouldUseLiveHtmlCapture(
   visible: ReadonlyArray<{ el: TimelineElement }>,
   previewDoc: Document | null,
+  keyframeCache: ReadonlyMap<string, KeyframeCacheEntry>,
 ): boolean {
   return visible.some(({ el }) => {
     if (
       el.compositionSrc ||
       el.tag === "hf-composition" ||
       el.tag === "canvas" ||
-      el.tag === "svg" ||
-      (isSnapdomHtmlLayer(el) && el.start > 0 && !el.src)
+      el.tag === "svg"
     ) {
       return true;
     }
+    if (isSnapdomHtmlLayer(el) && !el.src) {
+      if (el.start > 0 || (keyframeCache.get(el.id)?.keyframes.length ?? 0) > 0) {
+        return true;
+      }
+    }
     const domEl = previewDoc ? findDomElement(previewDoc, el) : null;
-    return Boolean(domEl?.querySelector("canvas, svg, [data-composition-id]"));
+    if (!domEl) return false;
+    if (domEl.querySelector("canvas, svg, [data-composition-id]")) {
+      return true;
+    }
+    if (isSnapdomHtmlLayer(el) && !el.src) {
+      const view = previewDoc?.defaultView;
+      if (view) {
+        const style = view.getComputedStyle(domEl);
+        const parsedOpacity = parseFloat(style.opacity);
+        const hasCssAnimation = Boolean(style.animationName && style.animationName !== "none");
+        const initiallyHidden =
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          (Number.isFinite(parsedOpacity) && parsedOpacity <= 0);
+        if (hasCssAnimation || initiallyHidden) {
+          return true;
+        }
+      }
+      if (typeof domEl.getAnimations === "function" && domEl.getAnimations().length > 0) {
+        return true;
+      }
+    }
+    return false;
   });
 }
 
@@ -513,6 +551,9 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
   throwIfAborted(signal);
 
   const origin = globalThis.location?.origin;
+  if (isIsolatedPreviewIframe(iframe, origin)) {
+    throw new Error(ISOLATED_PREVIEW_EXPORT_REASON);
+  }
   const inputsToDispose: Array<{ dispose: () => void }> = [];
   const bitmapsToClose: Array<() => void> = [];
 
@@ -533,7 +574,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     previewDoc = null;
   }
   const hasHtmlElements = visible.some(({ el }) => isSnapdomHtmlLayer(el));
-  const initialRequiresLiveSeek = shouldUseLiveHtmlCapture(visible, previewDoc);
+  const initialRequiresLiveSeek = shouldUseLiveHtmlCapture(visible, previewDoc, keyframeCache);
   const initialResolvedMode: BrowserHtmlCaptureMode =
     htmlCaptureMode ?? (initialRequiresLiveSeek ? "snapdom-live" : "snapdom-cached");
 
@@ -553,7 +594,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     const needsIsolatedSameOriginFrame =
       isolateIframe &&
       hasHtmlElements &&
-      (initialResolvedMode === "snapdom-live" || (!previewDoc && Boolean(iframe)));
+      initialResolvedMode === "snapdom-live";
     if (needsIsolatedSameOriginFrame) {
       const sourceUrl = resolveIsolatablePreviewUrl(iframe, projectId, origin);
       if (sourceUrl) {
@@ -584,7 +625,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     ({ width, height } = resolveBrowserExportDimensions(resolution, effectiveCompDimensions));
     const bitrate = resolveBrowserExportBitrate(quality, width, height, fps);
 
-    const requiresLiveSeek = shouldUseLiveHtmlCapture(visible, previewDoc);
+    const requiresLiveSeek = shouldUseLiveHtmlCapture(visible, previewDoc, keyframeCache);
     const resolvedHtmlMode: BrowserHtmlCaptureMode =
       htmlCaptureMode ?? (requiresLiveSeek ? "snapdom-live" : "snapdom-cached");
     const snapdomFn =
@@ -722,11 +763,28 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
         const usesSnapdomCapture = Boolean(
           snapdomFn && previewDoc && isSnapdomHtmlLayer(el) && domEl && !domEl.querySelector("video") && !directCanvas,
         );
+        const isLiveMeasured = activeHtmlMode === "snapdom-live" && liveMeasured !== null;
         const clipPct = el.duration > 0 ? ((t - el.start) / el.duration) * 100 : 0;
-        // snapdom already bakes domEl's own computed CSS opacity into its rasterized image,
-        // whereas directCanvas and fallback draws need ctx.globalAlpha.
-        const baseOpacity = usesSnapdomCapture && !keyframeCache.has(el.id) ? 1 : box.opacity;
-        const transform = interpolateElementTransform(keyframeCache.get(el.id), clipPct, baseOpacity);
+        let transform: InterpolatedTransform;
+        if (isLiveMeasured) {
+          // In snapdom-live mode, the seeked DOM is the authoritative visual state:
+          // liveMeasured.box already reflects seeked geometry and opacity, and snapdom
+          // bakes domEl's computed CSS opacity into its rasterized image. Re-applying
+          // keyframe opacity or transforms would double-attenuate or double-offset layers.
+          transform = {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: usesSnapdomCapture ? 1 : box.opacity,
+          };
+        } else {
+          // snapdom already bakes domEl's own computed CSS opacity into its rasterized image,
+          // whereas directCanvas and fallback draws need ctx.globalAlpha.
+          const baseOpacity = usesSnapdomCapture && !keyframeCache.has(el.id) ? 1 : box.opacity;
+          transform = interpolateElementTransform(keyframeCache.get(el.id), clipPct, baseOpacity);
+        }
         if (transform.opacity <= 0) continue;
 
         ctx.save();
@@ -798,6 +856,9 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
               }
             }
           if (!renderedBySnapdom && (el.text || !["div", "section"].includes(el.tag) || box.backgroundColor)) {
+            if (isLiveMeasured && usesSnapdomCapture) {
+              ctx.globalAlpha = box.opacity;
+            }
             drawTextLayer(ctx, el, box);
           }
         }

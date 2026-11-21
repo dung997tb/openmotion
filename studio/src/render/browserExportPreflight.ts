@@ -50,12 +50,76 @@ export interface BrowserExportPreflightInput {
   duration: number;
   webCodecsSupported?: boolean;
   iframe?: HTMLIFrameElement | null;
+  origin?: string;
 }
 
 export interface BrowserExportPreflightResult {
   eligible: boolean;
   reasons: string[];
   warnings: string[];
+}
+
+export const ISOLATED_PREVIEW_EXPORT_REASON =
+  "Browser export is unavailable while preview isolation is active.";
+
+function readIframeCandidateUrl(iframe: HTMLIFrameElement): string | null {
+  const rawSrc = iframe.getAttribute("src")?.trim() || iframe.src?.trim() || "";
+  if (rawSrc && rawSrc !== "about:blank" && rawSrc !== "about:srcdoc") {
+    return rawSrc;
+  }
+  try {
+    const docUrl = iframe.contentDocument?.URL?.trim() || "";
+    if (docUrl && docUrl !== "about:blank" && docUrl !== "about:srcdoc") {
+      return docUrl;
+    }
+  } catch {
+    /* cross-origin access throws; handled by caller */
+  }
+  return null;
+}
+
+/**
+ * Returns true when the preview iframe is isolated onto a distinct origin (e.g.
+ * cloud `PREVIEW_PUBLIC_ORIGIN`) or an opaque sandbox without `allow-same-origin`.
+ * Browser export must refuse such previews rather than reloading untrusted
+ * project scripts onto the authenticated app origin.
+ */
+export function isIsolatedPreviewIframe(
+  iframe: HTMLIFrameElement | null | undefined,
+  origin: string | undefined = globalThis.location?.origin,
+): boolean {
+  if (!iframe) return false;
+  let doc: Document | null = null;
+  try {
+    doc = iframe.contentDocument ?? null;
+  } catch {
+    return true;
+  }
+
+  const sandbox = iframe.getAttribute("sandbox");
+  if (sandbox !== null) {
+    const tokens = new Set(sandbox.trim().toLowerCase().split(/\s+/).filter(Boolean));
+    if (!tokens.has("allow-same-origin")) {
+      return true;
+    }
+  }
+
+  const candidate = readIframeCandidateUrl(iframe);
+  if (candidate && /^https?:/i.test(candidate)) {
+    if (origin && /^https?:/i.test(origin)) {
+      try {
+        if (new URL(candidate).origin !== new URL(origin).origin) {
+          return true;
+        }
+      } catch {
+        return true;
+      }
+    } else if (doc === null) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function isBrowserWebCodecsSupported(): boolean {
@@ -75,6 +139,7 @@ export function evaluateBrowserExportEligibility({
   duration,
   webCodecsSupported = isBrowserWebCodecsSupported(),
   iframe,
+  origin,
 }: BrowserExportPreflightInput): BrowserExportPreflightResult {
   const reasons: string[] = [];
   const warnings: string[] = [];
@@ -84,6 +149,9 @@ export function evaluateBrowserExportEligibility({
   }
   if (!webCodecsSupported) {
     reasons.push("WebCodecs VideoEncoder is unavailable in this browser.");
+  }
+  if (isIsolatedPreviewIframe(iframe, origin)) {
+    reasons.push(ISOLATED_PREVIEW_EXPORT_REASON);
   }
   const visible = elements.filter((el) => !el.hidden);
   if (visible.length === 0 || !Number.isFinite(duration) || duration <= 0) {
