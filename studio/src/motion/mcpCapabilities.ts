@@ -88,7 +88,7 @@ export const mcpScenarios = [animeOpeningScenario, {
   description: 'Open Creators in Explore, choose a catalogue credit or source account, then open a work. Copy its template instruction to use it with your Agent.',
   tools: ['openmotion_get_template'],
   prompt: 'Use openmotion_get_template with the template ID in my brief. Inspect its editable source or recreation guide and keep its credit when adapting it.',
-}, ...creativeStudios.filter(studio => studio.surface === 'techniques' && studio.id !== '3d').map(studio => ({
+}, ...creativeStudios.filter(studio => studio.surface === 'techniques' && studio.id !== '3d' && studio.id !== 'game').map(studio => ({
   id: studio.id, icon: studio.icon, title: studio.title, description: studio.briefHint,
   tools: ['openmotion_get_skill', 'openmotion_create_project', 'openmotion_edit_project'],
   prompt: 'Read the selected Skill with openmotion_get_skill. Confirm the source footage or brief, then use openmotion_create_project and openmotion_edit_project to produce an editable result. If an input is missing, ask for it before editing.',
