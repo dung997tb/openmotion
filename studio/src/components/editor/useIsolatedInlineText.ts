@@ -3,7 +3,7 @@ import { useDomEditActionsContext } from "../../contexts/DomEditContext";
 import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/previewAdapter";
 import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
 import { useLivePreviewIframe } from "../../player/store/previewIframeStore";
-import { useStudioShellContextOptional } from "../../contexts/StudioContext";
+import { useStudioShellContext } from "../../contexts/StudioContext";
 import { inlineTextBatches, isInlineTextTarget, type InlineTextTarget } from "./isolatedInlineTextPatch";
 import { beginStudioManualEditGesture, endStudioManualEditGesture, countStudioManualEditSave } from "./manualEditsDom";
 
@@ -22,7 +22,7 @@ export function useIsolatedInlineText(
   preview: RefObject<HTMLIFrameElement | null>, projectId: string | null, enabled: boolean,
 ) {
   const { commitDomEditPatchBatches } = useDomEditActionsContext();
-  const showToast = useStudioShellContextOptional()?.showToast;
+  const { showToast } = useStudioShellContext();
   const liveFrame = useLivePreviewIframe();
   const active = useRef<TextSession | null>(null);
   const [editing, setEditing] = useState(false);
@@ -59,7 +59,7 @@ export function useIsolatedInlineText(
         close(session, result.durable);
       }).catch(error => {
         if (active.current !== session) return;
-        showToast?.(error instanceof Error ? error.message : "Could not save text", "error");
+        showToast(error instanceof Error ? error.message : "Could not save text", "error");
         close(session, false);
       });
     }

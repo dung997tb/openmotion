@@ -1,3 +1,4 @@
+import { stampHfIdsInPlace } from "@hyperframes/parsers/hf-ids";
 import { isHtmlElement } from "@hyperframes/core/runtime/dom-realm";
 import { applyAuthoredTiming } from "@hyperframes/core/studio-preview-mark";
 import { syncPreservedPreviewTiming } from "../utils/previewAuthoredTiming";
@@ -431,12 +432,18 @@ export function patchTimelineChangesInSource(
     const target = buildPatchTarget(element);
     if (!target) throw new Error(`Timeline element ${element.id} is missing a patchable target`);
     // Resolve first: a member already at its target values patches to the same string, a missing one must throw.
-    if (!findTagByTarget(current, target)) {
-      throw new Error(
-        `Unable to patch timeline element ${element.id} in ${targetPath} (${missedLookups(element, target)})`,
-      );
+    let basis = current;
+    if (!findTagByTarget(basis, target)) {
+      // Legacy documents may only have the preview's deterministic hf-id until their first edit.
+      if (target.hfId) basis = stampHfIdsInPlace(current);
+      if (basis === current || !findTagByTarget(basis, target)) {
+        throw new Error(
+          `Unable to patch timeline element ${element.id} in ${targetPath} (${missedLookups(element, target)})`,
+        );
+      }
     }
-    current = buildPatches(current, target);
+    const patched = buildPatches(basis, target);
+    if (patched !== basis) current = patched;
   }
   return current;
 }

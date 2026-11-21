@@ -540,7 +540,9 @@ export function createStudioFileMutationsRoutes(
       if (entry.expectedVersion !== undefined && entry.expectedVersion !== beforeVersion) {
         return c.json({ ok: false, outcome: 'conflict', error: `File changed before cut: ${safePath}` }, 409);
       }
-      const cutRes = applyAtomicCutsToHtml(before, targets, takenIds);
+      // A legacy anonymous clip gets its deterministic hf-id during preview bundling.
+      const basis = targets.some(cut => cut.target.hfId && !cut.target.id) ? stampHfIdsInPlace(before) : before;
+      const cutRes = applyAtomicCutsToHtml(basis, targets, takenIds);
       if (cutRes.splitCount !== targets.length) {
         return c.json({ ok: false, outcome: 'conflict', error: `Split target changed: ${safePath}` }, 409);
       }

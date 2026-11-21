@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { ensureHfIds } from '@hyperframes/parsers/hf-ids';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -830,6 +831,24 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('splits a legacy anonymous clip using its preview-stamped hf-id', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const html = '<html><body><img data-start="0" data-duration="4"></body></html>';
+    const hfId = ensureHfIds(html).match(/<img[^>]*data-hf-id="([^"]+)"/)?.[1];
+    assert.ok(hfId);
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: 'index.html', content: html }] });
+    const response = await env.studioApp.request(`/api/projects/${projectId}/file-mutations/split-batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [{ path: 'index.html', expectedVersion: fileContentVersion(html),
+        targets: [{ target: { hfId }, splitTime: 2, elementStart: 0, elementDuration: 4 }] }] }),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json() as { files: Array<{ splitCount: number; before: string }> };
+    assert.equal(result.files[0]!.before, html);
+    assert.equal(result.files[0]!.splitCount, 1);
+  });
+
   it('applies Studio split targets atomically at the requested file version and returns stored history bytes', async () => {
     const env = createStudioTestEnv();
     const { projectId } = await env.workspace.createProject(env.auth);
