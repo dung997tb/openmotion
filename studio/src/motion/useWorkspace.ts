@@ -12,6 +12,8 @@ type Job = { id: string; state: 'pending' | 'running' | 'completed' | 'failed'; 
 export type WorkspaceStatus = { revision: string; projectId: string; projectTitle: string; exportJob: Job | null; sessionId?: string;
   historyRestoreError?: { requestId: string; message: string } | null };
 export type ProjectCatalog = { activeId: string; projects: SavedProject[]; sessions?: CreativeSession[]; activeSessionId?: string };
+const workspaceStatusPath = '/project/status?view=summary';
+
 export async function motionApi<T>(path: string, init?: RequestInit, projectId?: string): Promise<T> {
   const response = await diagnosticFetch('/motion-api' + path
     + (projectId ? (path.includes('?') ? '&' : '?') + 'projectId=' + encodeURIComponent(projectId) : ''), init);
@@ -122,7 +124,7 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
     async function poll() {
       try {
         const [data, catalog] = await Promise.all([
-          request<WorkspaceStatus>('/project/status', { signal: controller.signal }),
+          request<WorkspaceStatus>(workspaceStatusPath, { signal: controller.signal }),
           motionApi<ProjectCatalog>('/projects', { signal: controller.signal }).then(catalog => {
             if (!controller.signal.aborted) updateCatalog(catalog);
             return catalog;
@@ -151,7 +153,7 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
     try {
       await waitForSaves();
       if (!path) { navigate('/'); return true; }
-      const current = await request<WorkspaceStatus>('/project/status');
+      const current = await request<WorkspaceStatus>(workspaceStatusPath);
       if (projectId && current.projectId !== projectId) throw new Error('当前项目已切换，请刷新后重试。');
       const next = await request<WorkspaceStatus>(path, {
         method: 'POST', ...jsonBody({ expectedRevision: current.revision, expectedProjectId: current.projectId, ...options }),
@@ -180,7 +182,7 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
       try { localStorage.removeItem('motion.home.draft.v1'); } catch {}
       const existing = created.session?.artifacts.find(item => item.id === created.session.activeArtifactId) ?? created.session?.artifacts[0];
       if (existing) { navigate(sessionHref(createdId, existing.projectId, true)); return true; }
-      const current = await request<WorkspaceStatus>('/project/status');
+      const current = await request<WorkspaceStatus>(workspaceStatusPath);
       const next = await request<WorkspaceStatus>(`/sessions/${createdId}/artifacts`, { method: 'POST', ...jsonBody({ expectedRevision: current.revision, expectedProjectId: current.projectId }) });
       navigate(sessionHref(createdId, next.projectId, true)); return true;
     } catch (err) {

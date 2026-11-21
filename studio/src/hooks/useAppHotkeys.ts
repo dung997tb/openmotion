@@ -232,7 +232,7 @@ export function useAppHotkeys({
   // ── Keydown dispatch ──
 
   const handleAppKeyDown = useCallback((event: KeyboardEvent) => {
-    if (document.querySelector('[data-editor-initializing="true"]')) return;
+    if (document.querySelector('[data-editor-initializing="true"], [data-studio-timeline][aria-busy="true"]')) return;
     const cb = cbRef.current;
     const key = event.key.toLowerCase();
     if (document.fullscreenElement?.matches('[data-studio-fullscreen-target]')) {

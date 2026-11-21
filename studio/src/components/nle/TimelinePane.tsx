@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n/I18n";
 import type { ReactNode } from "react";
-import { Timeline } from "../../player";
+import { Timeline, usePlayerStore } from "../../player";
 import type { TimelineElement, TimelineTimeRange } from "../../player";
 import type { TimelineProps } from "../../player/components/TimelineTypes";
 import type { BlockedTimelineEditIntent } from "../../player/components/timelineEditing";
@@ -85,9 +85,12 @@ export function TimelinePane({
     compositionStack,
     handleNavigateComposition,
     updateCompositionStack,
-    timelineDisabled,
+    timelineDisabled: compositionLoading,
     timelineSessionEpoch,
   } = useNLEContext();
+
+  const timelineReady = usePlayerStore(state => state.timelineProjectId === projectId && state.timelineReady);
+  const timelineDisabled = compositionLoading || !timelineReady;
 
   // Move/resize/split come from the timeline edit context, not props.
   const { onMoveElement, onMoveElements, onResizeElement, onResizeElements, onSplitElement } =
@@ -98,9 +101,11 @@ export function TimelinePane({
       className="relative flex h-full flex-col"
       data-studio-timeline="true"
       aria-disabled={timelineDisabled || undefined}
+      aria-busy={!timelineReady || undefined}
     >
       <div
         className="flex flex-col flex-1 min-h-0 overflow-hidden"
+        inert={timelineDisabled}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest("[data-clip]")) return;
           if (timelineDisabled) return;
@@ -145,7 +150,7 @@ export function TimelinePane({
           <AudioMeterStrip />
         </div>
       </div>
-      {timelineFooter && <div ref={sizing.footer} className="shrink-0">{timelineFooter}</div>}
+      {timelineFooter && <div ref={sizing.footer} className="shrink-0" inert={timelineDisabled}>{timelineFooter}</div>}
       {timelineOverlay && (
         <div className="pointer-events-none absolute inset-0 z-20">{timelineOverlay}</div>
       )}

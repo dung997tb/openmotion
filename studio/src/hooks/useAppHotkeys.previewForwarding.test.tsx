@@ -101,6 +101,21 @@ describe("preview iframe hotkey forwarding", () => {
     expect(domDelete).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks editing shortcuts from the visible canvas until its timeline is ready", () => {
+    const inner = mountWithPreview();
+    const pane = document.createElement("div");
+    pane.dataset.studioTimeline = "true";
+    pane.setAttribute("aria-busy", "true");
+    document.body.append(pane);
+    const pressDelete = () => inner.document.body.dispatchEvent(new inner.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    pressDelete();
+    expect(domDelete).not.toHaveBeenCalled();
+    pane.removeAttribute("aria-busy");
+    pressDelete();
+    expect(domDelete).toHaveBeenCalledTimes(1);
+    pane.remove();
+  });
+
   function mountWithPreview(): Window & typeof globalThis {
     root = mountReactHarness(<Harness />);
     const iframe = document.createElement("iframe");

@@ -1,3 +1,4 @@
+import { projectArtifact } from '../../shared/session.ts';
 import { Hono, type Context } from 'hono';
 import type { AuthContext, PatScope, WorkspaceRole } from '../contracts/auth.ts';
 import { CloudError, isCloudError } from '../contracts/errors.ts';
@@ -153,6 +154,7 @@ export function createProjectsRouter(deps: ProjectsRouterDeps): Hono<{ Variables
       projectTitle: project.title,
       revision: project.revision,
       sessionId: project.sessionId,
+      artifact: projectArtifact(project),
       exportJob,
     });
   });
@@ -160,8 +162,10 @@ export function createProjectsRouter(deps: ProjectsRouterDeps): Hono<{ Variables
   // GET /motion-api/project & /motion-api/project/status — Active project status summary.
   const handleActiveProject = async (c: Context<{ Variables: ProductRouteVariables }>) => {
     const auth = await requireAuth(c, deps, READ_REQ);
-    const catalog = await deps.workspace.getCatalog(auth);
-    const requestedId = c.req.query('projectId') || catalog.activeId;
+    const summaryOnly = c.req.query('view') === 'summary';
+    const scopedId = c.req.query('projectId');
+    const catalog = summaryOnly && scopedId ? undefined : await deps.workspace.getCatalog(auth);
+    const requestedId = scopedId || catalog?.activeId;
     if (!requestedId) {
       return c.json({
         activeId: '',
@@ -170,25 +174,29 @@ export function createProjectsRouter(deps: ProjectsRouterDeps): Hono<{ Variables
         revision: '',
         exportJob: null,
         project: null,
-        projects: catalog.projects,
+        projects: catalog?.projects ?? [],
       });
     }
     const project = await deps.workspace.getProject(auth, requestedId, { allowTrashed: true });
+    const status = {
+      projectId: project.id,
+      projectTitle: project.title,
+      sessionId: project.sessionId,
+      revision: project.revision,
+      exportJob: await resolveActiveExportJob(deps.exports, auth, project.id),
+    };
+    // The workspace polls this projection and uses its revision to guard project switches.
+    if (summaryOnly) return c.json(status);
+
     const virtual = await deps.files.loadVirtualProject(auth, requestedId);
     const assetNameInfo = await deps.assetNames.readAssetNames(auth, requestedId, {
       paths: virtual.listFiles().map((f) => f.path),
     });
     const info = infoInMemory(virtual);
-    const exportJob = await resolveActiveExportJob(deps.exports, auth, project.id);
-
     return c.json({
-      activeId: catalog.activeId,
-      projectId: project.id,
-      projectTitle: project.title,
-      sessionId: project.sessionId,
-      exportJob,
+      ...status,
+      activeId: catalog?.activeId,
       project,
-      revision: project.revision,
       versionId: project.currentVersionId,
       versionNumber: project.currentVersionNumber,
       historySeq: project.currentHistorySeq,

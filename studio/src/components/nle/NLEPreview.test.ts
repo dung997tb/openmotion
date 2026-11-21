@@ -5,13 +5,14 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTimelinePlayer } from "../../player/hooks/useTimelinePlayer";
 import { NLEPreview, getPreviewPlayerKey } from "./NLEPreview";
-import { StudioHostContext } from "../../motion/StudioHost";
+import { LivePreviewReadyContext, StudioHostContext } from "../../motion/StudioHost";
 import { resolvePreviewStageSize } from "./previewStage";
 import { readPreviewComplexity } from "../../player/hooks/usePreviewFirstFrameTelemetry";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const playerMounts: string[] = [];
+const onLivePreviewReady = vi.fn();
 let livePlayerProps: { onReadyToShowChange?: (ready: boolean) => void } = {};
 
 const measured = vi.hoisted(() => ({ size: null as { width: number; height: number } | null }));
@@ -107,22 +108,23 @@ function renderPreview(
   const render = (directUrl?: string, projectId = "timeline-edit-playground", presentationMode = false) =>
     act(() => {
       root.render(
-        React.createElement(StudioHostContext.Provider, { value: { mvpEditor: mvp } }, React.createElement(NLEPreview, {
-          projectId,
-          directUrl,
-          iframeRef,
-          onIframeLoad: () => {},
-          previewSlots,
-          onShadowIframeLoad: () => {},
-          onShadowReadyChange: () => {},
-          onShadowError: () => {},
-          setShadowIframeNode: () => {},
-          resetPreviewSlots: () => {},
-          fillBox,
-          presentationMode,
-          zoomControlsTarget,
-          compositionSizeHint,
-        })),
+        React.createElement(LivePreviewReadyContext.Provider, { value: onLivePreviewReady },
+          React.createElement(StudioHostContext.Provider, { value: { mvpEditor: mvp } }, React.createElement(NLEPreview, {
+            projectId,
+            directUrl,
+            iframeRef,
+            onIframeLoad: () => {},
+            previewSlots,
+            onShadowIframeLoad: () => {},
+            onShadowReadyChange: () => {},
+            onShadowError: () => {},
+            setShadowIframeNode: () => {},
+            resetPreviewSlots: () => {},
+            fillBox,
+            presentationMode,
+            zoomControlsTarget,
+            compositionSizeHint,
+          }))),
       );
     });
   render();
@@ -545,9 +547,12 @@ describe("NLEPreview", () => {
     );
     expect(poster()?.style.zIndex).toBe("2");
 
+    onLivePreviewReady.mockClear();
     act(() => livePlayerProps.onReadyToShowChange?.(false));
+    expect(onLivePreviewReady).not.toHaveBeenCalled();
     expect(poster()?.hidden).toBe(false);
     act(() => livePlayerProps.onReadyToShowChange?.(true));
+    expect(onLivePreviewReady).toHaveBeenCalledWith("timeline-edit-playground");
     expect(poster()?.hidden).toBe(true);
     act(() => poster()?.dispatchEvent(new Event("load")));
     expect(poster()).toBeNull();

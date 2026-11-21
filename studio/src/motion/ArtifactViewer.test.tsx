@@ -1,103 +1,116 @@
 // @vitest-environment happy-dom
-import React, { act } from 'react';
+import React, { act, useContext } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArtifactViewer } from './ArtifactViewer';
 import { I18nProvider } from '../i18n/I18n';
 import { usePlayerStore } from '../player/store/playerStore';
+import { LivePreviewReadyContext } from './StudioHost';
+import { useDockLayoutStore } from '../components/dock/dockLayoutStore';
 import { readEditorLoadingLayout } from './EditorLoading';
 import type { SessionArtifact } from '../../../shared/session';
 
-const state = vi.hoisted(() => ({ error: false, hiddenError: false, loaded: true, value: 'first', saves: 0 }));
-vi.mock('../App', () => ({ StudioApp: ({ resolvedProjectId }: { resolvedProjectId: string }) => <div>
-  <header className="motion-studio-header"><input aria-label="Edit" defaultValue={resolvedProjectId} onChange={() => state.saves++} /></header>
-  <div className="hf-dock"><div className="dv-groupview"><div data-preview-pan-surface /><div data-studio-timeline /></div></div>
-  {state.error && <div hidden={state.hiddenError}><div role="alert">Preview failed</div></div>}
-</div> }));
-vi.mock('./WorkspaceFrame', () => ({ useOptionalWorkspaceChrome: () => ({ workspace: { status: state.loaded ? { projectId: state.value } : null, error: '' } }) }));
+let liveReady: ((projectId: string) => void) | null, saves: number;
+vi.mock('../App', () => ({ StudioApp: ({ resolvedProjectId }: { resolvedProjectId: string }) => {
+  liveReady = useContext(LivePreviewReadyContext);
+  return <div>
+    <header className="motion-studio-header"><input aria-label="Edit" defaultValue={resolvedProjectId} onChange={() => saves++} /></header>
+    <div className="hf-dock"><div className="dv-groupview"><div data-preview-pan-surface /><div data-studio-timeline /></div></div>
+  </div>;
+} }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, container: HTMLDivElement;
-let frames: Map<number, FrameRequestCallback>, nextFrame: number;
+const opening = () => container.querySelector('.motion-project-editor')?.hasAttribute('inert');
 beforeEach(() => {
-  state.error = false; state.hiddenError = false; state.loaded = true; state.value = 'first'; state.saves = 0;
+  saves = 0; liveReady = null;
   usePlayerStore.getState().reset();
-  frames = new Map(); nextFrame = 0;
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; });
-  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+  useDockLayoutStore.setState(useDockLayoutStore.getInitialState());
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const artifact = (projectId: string): SessionArtifact => ({ id: projectId, projectId, kind: 'motion-project', title: projectId });
 async function render(projectId = 'first') {
   await act(async () => root.render(<I18nProvider><ArtifactViewer key={projectId} artifact={artifact(projectId)} /></I18nProvider>));
 }
-async function settle() {
-  for (let index = 0; index < 4; index++) await act(async () => {
-    const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(index * 16));
-  });
-}
-function boot(projectId: string) {
-  act(() => { usePlayerStore.getState().beginTimelineSession(projectId); usePlayerStore.getState().setTimelineReady(true); usePlayerStore.getState().markPreviewBooted(); });
+function ready(projectId = 'first') {
+  act(() => liveReady!(projectId));
 }
 
-it('waits for the current project and stable layout, then stays visible during normal state changes', async () => {
-  boot('other'); await render(); await settle();
-  expect(container.querySelector('.motion-project-editor')?.hasAttribute('inert')).toBe(true);
-  expect(container.querySelectorAll('.motion-loading')).toHaveLength(1);
-  boot('first'); await settle();
-  expect(container.querySelector('[data-editor-initializing="false"]')).not.toBeNull();
-  expect(container.querySelector('.motion-project-editor')?.hasAttribute('inert')).toBe(false);
-  expect(container.querySelector('.motion-loading')).toBeNull();
+it('presents the current live frame without waiting for sidebar status, timeline readiness or layout polling', async () => {
+  await render();
+  const measure = vi.spyOn(container.querySelector('.dv-groupview')!, 'getBoundingClientRect');
+  expect(opening()).toBe(true);
+  ready('other');
+  expect(opening()).toBe(true);
+  ready();
+  expect(usePlayerStore.getState().timelineReady).toBe(false);
+  expect(measure).not.toHaveBeenCalled();
+  expect(opening()).toBe(false);
   const input = container.querySelector('input')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Changed');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  expect(state.saves).toBe(1);
+  expect(saves).toBe(1);
   act(() => usePlayerStore.getState().reset());
-  await settle();
   expect(container.querySelector('input')).toBe(input);
   expect(container.querySelector('.motion-loading')).toBeNull();
 });
 
-it('keeps a prepared viewer hidden until its scoped workspace status is available', async () => {
-  state.loaded = false; boot('first'); await render(); await settle();
-  expect(container.querySelector('[data-editor-initializing="true"]')).not.toBeNull();
-  state.loaded = true; await render(); await settle();
-  expect(container.querySelector('[data-editor-initializing="false"]')).not.toBeNull();
+it('ignores a previous visit to the same project, even when its boot work is done', async () => {
+  await render(); const oldReady = liveReady!; ready();
+  await render('second'); await render();
+  act(() => {
+    oldReady('first');
+    const store = usePlayerStore.getState();
+    store.beginTimelineSession('first'); store.setTimelineReady(true); store.markPreviewBooted();
+  });
+  expect(opening()).toBe(true);
+  ready();
+  expect(opening()).toBe(false);
 });
 
-it('shows errors immediately and cancels pending presentation when switching projects', async () => {
-  boot('first'); await render();
-  expect(frames.size).toBe(1);
-  state.value = 'second'; await render('second');
-  expect(frames.size).toBe(0);
-  expect(container.querySelector('input')?.defaultValue).toBe('second');
-  expect(container.querySelector('.motion-loading')).not.toBeNull();
-  state.error = true; await render('second');
-  vi.spyOn(container.querySelector('[role="alert"]')!, 'getClientRects').mockReturnValue([{} as DOMRect] as unknown as DOMRectList);
-  await act(async () => container.querySelector('[role="alert"]')!.append('!'));
-  expect(container.querySelector('[data-editor-initializing="false"]')).not.toBeNull();
-  expect(container.querySelector('[role="alert"]')?.textContent).toBe('Preview failed!');
-  expect(container.querySelector('.motion-loading')).toBeNull();
+function addNotice(attributes: Record<string, string>, hidden = false) {
+  const message = document.createElement('div');
+  Object.entries(attributes).forEach(([key, value]) => message.setAttribute(key, value));
+  message.textContent = 'Preview status'; message.hidden = hidden;
+  vi.spyOn(message, 'getClientRects').mockReturnValue([{} as DOMRect] as unknown as DOMRectList);
+  container.querySelector('.hf-dock')!.append(message);
+  return message;
+}
+
+it('presents an actionable error as soon as it becomes visible', async () => {
+  await render();
+  let message!: Element;
+  await act(async () => {
+    addNotice({role: 'alert'}); // A sidebar warning is independent of the canvas.
+    message = addNotice({'data-testid': 'composition-preview-error'}, true);
+  });
+  expect(opening()).toBe(true);
+  await act(async () => message.removeAttribute('hidden'));
+  expect(opening()).toBe(false);
 });
 
-it('does not reveal for a partial preview or a hidden error, and bounds slow initialization', async () => {
+it('hands a slow open to the mounted player loader, keeping a bare dock covered', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  state.error = true; state.hiddenError = true;
-  act(() => { usePlayerStore.getState().beginTimelineSession('first'); usePlayerStore.getState().markPreviewBooted(); });
-  await render(); await settle();
-  expect(container.querySelector('[data-editor-initializing="true"]')).not.toBeNull();
+  await render();
   await act(async () => vi.advanceTimersByTime(5000));
-  await settle();
-  expect(container.querySelector('[data-editor-initializing="false"]')).not.toBeNull();
+  expect(opening()).toBe(true);
+  await act(async () => { addNotice({'data-testid': 'composition-loading-overlay'}); });
+  expect(opening()).toBe(false);
 });
 
-it('captures only settled geometry for the transition placeholder', async () => {
+it('opens a restored workspace where the user closed the preview panel', async () => {
+  await render();
+  act(() => useDockLayoutStore.setState({ controller: {} as NonNullable<ReturnType<typeof useDockLayoutStore.getState>['controller']>, visiblePanels: new Set(['timeline']) }));
+  expect(opening()).toBe(false);
+});
+
+it('captures only presented geometry for the transition placeholder', async () => {
   await render();
   expect(readEditorLoadingLayout(container)).toBeNull();
-  boot('first'); await settle();
+  ready();
   const box = (x: number, width: number, height: number) => ({ x, y: 0, left: x, right: x + width, top: 0, bottom: height, width, height, toJSON() {} });
   vi.spyOn(container, 'getBoundingClientRect').mockReturnValue(box(200, 1000, 800));
   vi.spyOn(container.querySelector('.motion-studio-header')!, 'getBoundingClientRect').mockReturnValue(box(200, 1000, 40));
