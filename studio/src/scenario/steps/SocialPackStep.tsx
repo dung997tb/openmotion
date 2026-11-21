@@ -180,7 +180,6 @@ export function SocialPackStep({
       });
       setPosts(generated);
       setLastVariant(nextVariant);
-      setDirty(false);
       await api.mutate(`social-draft:${step.id}:v${nextVariant}`, 'add_iteration', {
         stepId: step.id,
         iteration: {
@@ -189,8 +188,10 @@ export function SocialPackStep({
           settings: { tone, variant: nextVariant, platforms: selectedPlatforms, link: link.trim() },
         },
       });
+      setDirty(false);
       toast.showToast(nextVariant > 0 ? t('Drafts regenerated') : t('Social posts drafted'), 'info', 'feedback');
     } catch (error) {
+      setDirty(true);
       if (!isScenarioConflictError(error)) {
         toast.showToast(extractErrorMessage(error, t('Could not draft social posts.')), 'error', 'feedback');
       }

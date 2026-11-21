@@ -336,9 +336,9 @@ describe('BriefStep', () => {
       expect(clipboardSpy).toHaveBeenCalledTimes(1);
       const copied = clipboardSpy.mock.calls[0][0] as string;
       expect(copied).toContain('11111111-1111-4111-8111-111111111111');
-      expect(copied).toContain('stepId="brief"');
-      expect(copied).toContain('command=add_pool');
-      expect(copied).toContain('command=update_brief');
+      expect(copied).toContain('stepId: "brief"');
+      expect(copied).toContain('command: "add_pool"');
+      expect(copied).toContain('command: "update_brief" | "add_iteration"');
     } finally {
       await draftMounted.unmount();
     }
@@ -390,5 +390,26 @@ describe('BriefStep', () => {
     } finally {
       await savedMounted.unmount();
     }
+  });
+
+  it('flushes pending brief edits on unmount before the debounce timer fires', async () => {
+    vi.useFakeTimers();
+    const run = makeBaseRun('black-friday', {
+      brief: { productName: 'Old Tote' },
+    });
+    const { props, mocks } = createStepProps('black-friday', 'brief', { run });
+    const mounted = await mountStep(<BriefStep {...props} />);
+    try {
+      const allFieldsBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('All fields'))!;
+      await act(async () => { allFieldsBtn.click(); });
+      const productInput = mounted.container.querySelector<HTMLInputElement>('#brief-black-friday-productName')!;
+      await act(async () => { setFieldValue(productInput, 'Holiday Weekender Tote'); });
+      expect(mocks.mutate).not.toHaveBeenCalled();
+    } finally {
+      await mounted.unmount();
+    }
+    expect(mocks.mutate).toHaveBeenCalledWith('brief-autosave', 'update_brief', {
+      brief: { productName: 'Holiday Weekender Tote' },
+    });
   });
 });

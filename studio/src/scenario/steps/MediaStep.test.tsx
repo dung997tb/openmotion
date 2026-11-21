@@ -665,4 +665,30 @@ describe('MediaStep', () => {
       await mounted.unmount();
     }
   });
+
+  it('does not persist promptEdited on a plain focus/blur without edits', async () => {
+    const run = makeBaseRun('black-friday', {
+      steps: {
+        'product-images': {
+          draft: { prompt: 'Seeded product prompt', promptEdited: false },
+        },
+      },
+    });
+    const { props, mocks } = createStepProps('black-friday', 'product-images', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+    try {
+      const textarea = mounted.container.querySelector<HTMLTextAreaElement>('#media-prompt-product-images')!;
+      await act(async () => {
+        textarea.focus();
+        textarea.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+      });
+      expect(mocks.mutate).not.toHaveBeenCalledWith(
+        'draft:product-images',
+        'update_step',
+        expect.anything(),
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
 });

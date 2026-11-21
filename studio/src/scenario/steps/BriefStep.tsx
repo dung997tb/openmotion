@@ -169,10 +169,6 @@ export function BriefStep({
     });
   }, [run?.brief, run?.revision, scenario.briefFields]);
 
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, []);
-
   const flushBriefSave = useCallback(async (patchOverride?: Record<string, string | string[]>) => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -213,6 +209,19 @@ export function BriefStep({
     }
   }, [api, scenario.briefFields]);
 
+  const flushBriefSaveRef = useRef(flushBriefSave);
+  flushBriefSaveRef.current = flushBriefSave;
+
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (dirtyFieldsRef.current.size > 0) {
+      void flushBriefSaveRef.current();
+    }
+  }, []);
+
   const scheduleAutosave = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
@@ -222,7 +231,9 @@ export function BriefStep({
 
   const updateField = (fieldId: string, value: string | string[]) => {
     dirtyFieldsRef.current.add(fieldId);
-    setValues(prev => ({ ...prev, [fieldId]: value }));
+    const next = { ...latestValuesRef.current, [fieldId]: value };
+    latestValuesRef.current = next;
+    setValues(next);
     scheduleAutosave();
   };
 
@@ -231,6 +242,7 @@ export function BriefStep({
     for (const field of scenario.briefFields) {
       dirtyFieldsRef.current.add(field.id);
     }
+    latestValuesRef.current = merged;
     setValues(merged);
     scheduleAutosave();
     toast.showToast(t('Example applied'), 'info', 'feedback');
@@ -480,7 +492,10 @@ export function BriefStep({
             placeholder={field.placeholder ? t(field.placeholder) : undefined}
             required={field.required}
             onFocus={() => { activeFieldRef.current = field.id; }}
-            onBlur={() => { activeFieldRef.current = null; }}
+            onBlur={() => {
+              activeFieldRef.current = null;
+              if (dirtyFieldsRef.current.size > 0) void flushBriefSave();
+            }}
             onChange={e => updateField(field.id, e.target.value)}
           />
         )}
@@ -495,7 +510,10 @@ export function BriefStep({
             placeholder={field.placeholder ? t(field.placeholder) : undefined}
             required={field.required}
             onFocus={() => { activeFieldRef.current = field.id; }}
-            onBlur={() => { activeFieldRef.current = null; }}
+            onBlur={() => {
+              activeFieldRef.current = null;
+              if (dirtyFieldsRef.current.size > 0) void flushBriefSave();
+            }}
             onChange={e => updateField(field.id, e.target.value)}
           />
         )}
@@ -591,7 +609,12 @@ export function BriefStep({
           savingRevision={savingRevision}
           autosaving={api.busy.has('brief-autosave')}
           onUpdateField={updateField}
-          onFocusField={fieldId => { activeFieldRef.current = fieldId; }}
+          onFocusField={fieldId => {
+            activeFieldRef.current = fieldId;
+            if (fieldId === null && dirtyFieldsRef.current.size > 0) {
+              void flushBriefSave();
+            }
+          }}
           onApplyPreset={handleApplyPreset}
           onClearAll={handleClearAll}
           onSaveRevision={() => void handleSaveRevision()}

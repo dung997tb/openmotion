@@ -967,15 +967,27 @@ function formatBriefValue(raw: string | string[] | undefined): string {
 }
 
 export function fillScenarioTemplate(template: string, brief: Record<string, string | string[]>): string {
-  const replaced = template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key: string) => formatBriefValue(brief[key]));
-  return replaced
-    .replace(/\bcode\s*(?=[,;.]|$)/gi, '')
-    .replace(/:\s*,/g, ': ')
-    .replace(/,\s*,+/g, ', ')
-    .replace(/\s+,/g, ',')
-    .replace(/([:,])\s*$/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  const EMPTY = '\u0000';
+  // Clean optional template-only prefixes and empty-placeholder separators before
+  // substituting user brief values so user prose (e.g. "Learn to code." or trailing punctuation) is never altered.
+  let prepared = template.replace(/\bcode\s+\{([a-zA-Z0-9_]+)\}/gi, (match, key: string) =>
+    formatBriefValue(brief[key]) ? match : EMPTY,
+  );
+  prepared = prepared.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) =>
+    formatBriefValue(brief[key]) ? match : EMPTY,
+  );
+  let prev = '';
+  while (prev !== prepared) {
+    prev = prepared;
+    prepared = prepared
+      .replace(/,\s*\u0000(?=\s*(?:[,;.]|$))/g, '')
+      .replace(/:\s*\u0000\s*,\s*/g, ': ')
+      .replace(/:\s*\u0000(?=\s*$)/g, '')
+      .replace(/\u0000\s*,\s*/g, '')
+      .replace(/\s*\u0000\s*/g, ' ');
+  }
+  prepared = prepared.replace(/\s{2,}/g, ' ').trim();
+  return prepared.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key: string) => formatBriefValue(brief[key])).trim();
 }
 
 /** Tools the scenario recipe composes. The handbook test asserts that the prompt contains each one. */
@@ -1091,29 +1103,29 @@ function stepWriteBackLines(
     '',
     'Step write-back instructions:',
     trimmedPrompt ? `- Current step prompt: ${trimmedPrompt}` : '',
-    `- Direct multimodal generation into this step and Assets: openmotion_assets_use (action=scenario, command=generate, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", modality, model, prompt), then poll command=sync until completed.`,
-    `- Save Agent-created or refined workspace assets into this workflow version's Assets and step history atomically: openmotion_assets_use (action=scenario, command=add_pool, runId=${run.id}, expectedRevision=${run.revision}, requestId="<stable-id>", recordIteration=true, items=[{ ref: { type: "asset", assetId, versionId }, stepId: "${focusStep.id}", source: "agent", label }]).`,
+    `- Direct multimodal generation into this step and Assets: openmotion_assets_use(action="scenario", scenario={ command: "generate", runId: "${run.id}", expectedRevision: ${run.revision}, stepId: "${focusStep.id}", requestId: "<stable-id>", modality, model, prompt }), then poll openmotion_assets_use(action="scenario", scenario={ command: "sync", runId: "${run.id}" }) until completed.`,
+    `- Save Agent-created or refined workspace assets into this workflow version's Assets and step history atomically: openmotion_assets_use(action="scenario", scenario={ command: "add_pool", runId: "${run.id}", expectedRevision: ${run.revision}, requestId: "<stable-id>", recordIteration: true, items: [{ ref: { type: "asset", assetId, versionId }, stepId: "${focusStep.id}", source: "agent", label }] }).`,
   ].filter(Boolean);
 
   if (focusStep.type === 'web-page') {
     lines.push(
-      `- Author or update the HTML page via openmotion_design_project + openmotion_design_edit (action=write / action=import_asset), then link it back to this step and Assets with openmotion_assets_use (action=scenario, command=link_design, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", designProjectId=<id>).`,
+      `- Author or update the HTML page via openmotion_design_project + openmotion_design_edit (action=write / action=import_asset), then link it back to this step and Assets with openmotion_assets_use(action="scenario", scenario={ command: "link_design", runId: "${run.id}", expectedRevision: ${run.revision}, stepId: "${focusStep.id}", requestId: "<stable-id>", designProjectId: "<id>" }).`,
     );
   } else if (focusStep.type === 'brief') {
     lines.push(
-      `- Save brief fields or scripts via openmotion_assets_use (action=scenario, command=update_brief / command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>"), plus command=add_pool (recordIteration=true) for any accompanying visuals, audio, or video.`,
+      `- Save brief fields or scripts via openmotion_assets_use(action="scenario", scenario={ command: "update_brief" | "add_iteration", runId: "${run.id}", expectedRevision: ${run.revision}, stepId: "${focusStep.id}", requestId: "<stable-id>" }), plus command="add_pool" (recordIteration=true) for any accompanying visuals, audio, or video.`,
     );
   } else if (focusStep.type === 'social-pack') {
     lines.push(
-      `- Save platform posts via openmotion_assets_use (action=scenario, command=add_iteration, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", iteration={ source: "agent", outputs: [{ type: "social", posts }] }), plus command=add_pool (recordIteration=true) for any accompanying visuals or video.`,
+      `- Save platform posts via openmotion_assets_use(action="scenario", scenario={ command: "add_iteration", runId: "${run.id}", expectedRevision: ${run.revision}, stepId: "${focusStep.id}", requestId: "<stable-id>", iteration: { source: "agent", outputs: [{ type: "social", posts }] } }), plus command="add_pool" (recordIteration=true) for any accompanying visuals or video.`,
     );
   } else if (focusStep.type === 'video') {
     lines.push(
-      `- For an editable Motion project: openmotion_create_project + openmotion_assets_use (action=import_to_project) + openmotion_assets_use (action=scenario, command=link_motion, runId=${run.id}, expectedRevision=${run.revision}, stepId="${focusStep.id}", requestId="<stable-id>", projectId=<id>).`,
+      `- For an editable Motion project: openmotion_create_project + openmotion_assets_use(action="import_to_project") + openmotion_assets_use(action="scenario", scenario={ command: "link_motion", runId: "${run.id}", expectedRevision: ${run.revision}, stepId: "${focusStep.id}", requestId: "<stable-id>", projectId: "<id>" }).`,
     );
   }
   lines.push(
-    `- Package all deliverables or specific Assets into a ZIP via openmotion_assets_use (action=scenario, command=export, runId=${run.id}, requestId="<stable-id>", poolItemIds=[...]).`,
+    `- Package all deliverables or specific Assets into a ZIP via openmotion_assets_use(action="scenario", scenario={ command: "export", runId: "${run.id}", requestId: "<stable-id>", poolItemIds: [...] }).`,
   );
   return lines;
 }

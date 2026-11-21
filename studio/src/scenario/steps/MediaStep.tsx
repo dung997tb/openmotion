@@ -272,7 +272,8 @@ export function MediaStep(props: StepProps) {
   const noProvider = (catalog !== undefined && availableModels.length === 0) || providerUnavailable;
 
   const persistDraftPrompt = async (nextPrompt: string) => {
-    if (!run) return;
+    if (!run || !promptDirtyRef.current) return;
+    promptDirtyRef.current = false;
     try {
       await api.mutate(`draft:${step.id}`, 'update_step', {
         stepId: step.id,

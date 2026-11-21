@@ -9,6 +9,7 @@ import { execute, pluginRoot } from '../hyperframes.ts';
 import { verificationBinaries } from '../scripts/verify-export.ts';
 import type { Service } from '../server.ts';
 import { draftSocialPosts } from '../shared/scenario-content.ts';
+import { SCENARIO_LIMITS } from '../shared/scenario-runs.ts';
 import { findScenario } from '../shared/scenarios.ts';
 import { studioScenes } from '../shared/studio-catalog.ts';
 import { fixture } from './fixtures.ts';
@@ -509,6 +510,90 @@ test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, gene
     const missingRunId = await callScenario(api, { command: 'get' });
     assert.equal(missingRunId.status, 400);
     assert.equal(missingRunId.body.validation_rule, 'missing');
+
+    // 13. generate adopts already-submitted paid job when revision bumps concurrently
+    let assetsCallCount = 0;
+    const { run: concurrentBase } = await freshService.get(currentRun.id);
+    const adoptedRes = await freshService.generate(
+      {
+        runId: currentRun.id,
+        expectedRevision: concurrentBase.revision,
+        requestId: 'req-generate-adopt-conflict',
+        stepId: 'product-images',
+        modality: 'image',
+        model: 'codex:image-generation',
+        prompt: 'Concurrent adoption test',
+      },
+      {
+        ...orphanHostBase,
+        assets: async () => {
+          assetsCallCount += 1;
+          // Simulate a concurrent revision bump (e.g., background sync or brief edit) while provider call is in flight
+          await freshService.updateBrief({
+            runId: currentRun.id,
+            expectedRevision: concurrentBase.revision,
+            requestId: 'req-concurrent-brief-bump',
+            brief: { productName: 'Holiday Tote Pro' },
+          });
+          return {
+            job: {
+              id: 'job-adopted-after-concurrent-bump',
+              state: 'running',
+              modality: 'image',
+              model: 'codex:image-generation',
+            },
+          };
+        },
+      } as any,
+    );
+    assert.equal(assetsCallCount, 1);
+    assert.equal(adoptedRes.iteration.job?.jobId, 'job-adopted-after-concurrent-bump');
+    assert.equal(adoptedRes.run.brief.productName, 'Holiday Tote Pro');
+    assert.ok(
+      adoptedRes.run.steps['product-images'].iterations.some(iter => iter.job?.jobId === 'job-adopted-after-concurrent-bump'),
+      'Submitted paid job must be adopted into the latest run instead of orphaned',
+    );
+
+    // 14. generate rejects at iteration limit before invoking paid host.assets
+    const { run: limitRun } = await freshService.create({
+      scenarioId: 'black-friday',
+      requestId: 'req-limit-run',
+      title: 'Limit Check Run',
+    });
+    let limitRev = limitRun.revision;
+    for (let i = 0; i < SCENARIO_LIMITS.iterationsPerStep; i += 1) {
+      const added = await freshService.addIteration({
+        runId: limitRun.id,
+        expectedRevision: limitRev,
+        requestId: `req-limit-iter-${i}`,
+        stepId: 'product-images',
+        iteration: { source: 'manual', outputs: [], note: `v${i}` },
+      });
+      limitRev = added.run.revision;
+    }
+    let paidCalledAtLimit = 0;
+    await assert.rejects(
+      () => freshService.generate(
+        {
+          runId: limitRun.id,
+          expectedRevision: limitRev,
+          requestId: 'req-generate-over-limit',
+          stepId: 'product-images',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'Should fail before provider call',
+        },
+        {
+          ...orphanHostBase,
+          assets: async () => {
+            paidCalledAtLimit += 1;
+            return { job: { id: 'should-not-happen', state: 'running', modality: 'image', model: 'codex:image-generation' } };
+          },
+        } as any,
+      ),
+      /LIMIT_EXCEEDED/,
+    );
+    assert.equal(paidCalledAtLimit, 0, 'host.assets must not be called when step is already at iteration limit');
 
     await gateway.close();
   }, false));

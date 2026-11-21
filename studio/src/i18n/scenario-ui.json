@@ -931,7 +931,8 @@
     "MCP instructions": "MCP 指令",
     "Design via MCP": "通过 MCP 设计",
     "Write via MCP": "通过 MCP 撰写",
-    "Write script via MCP": "通过 MCP 写脚本"
+    "Write script via MCP": "通过 MCP 写脚本",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "初始页面已创建，但有 {count} 张已关联的图片未能自动嵌入。"
   },
   "ja": {
     "$129": "¥19,800",
@@ -1865,7 +1866,8 @@
     "MCP instructions": "MCP 指示",
     "Design via MCP": "MCP でデザイン",
     "Write via MCP": "MCP で執筆",
-    "Write script via MCP": "MCP で台本を作成"
+    "Write script via MCP": "MCP で台本を作成",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "スターターページを作成しましたが、添付画像 {count} 件を埋め込めませんでした。"
   },
   "ko": {
     "$129": "₩169,000",
@@ -2799,7 +2801,8 @@
     "MCP instructions": "MCP 지침",
     "Design via MCP": "MCP로 디자인",
     "Write via MCP": "MCP로 작성",
-    "Write script via MCP": "MCP로 스크립트 작성"
+    "Write script via MCP": "MCP로 스크립트 작성",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "스타터 페이지가 생성되었지만 첨부된 이미지 {count}개를 삽입하지 못했습니다."
   },
   "de": {
     "$129": "129 €",
@@ -3733,7 +3736,8 @@
     "MCP instructions": "MCP-Anweisungen",
     "Design via MCP": "Per MCP gestalten",
     "Write via MCP": "Per MCP schreiben",
-    "Write script via MCP": "Skript per MCP schreiben"
+    "Write script via MCP": "Skript per MCP schreiben",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Startseite wurde erstellt, aber {count} angehängte Bild(er) konnten nicht eingebettet werden."
   },
   "fr": {
     "$129": "129 €",
@@ -4667,7 +4671,8 @@
     "MCP instructions": "Instructions MCP",
     "Design via MCP": "Concevoir via MCP",
     "Write via MCP": "Rédiger via MCP",
-    "Write script via MCP": "Rédiger le script via MCP"
+    "Write script via MCP": "Rédiger le script via MCP",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "La page de démarrage a été créée, mais {count} image(s) jointe(s) n’ont pas pu être intégrées."
   },
   "ru": {
     "$129": "129 $",
@@ -5601,7 +5606,8 @@
     "MCP instructions": "Инструкции MCP",
     "Design via MCP": "Дизайн через MCP",
     "Write via MCP": "Написать через MCP",
-    "Write script via MCP": "Написать сценарий через MCP"
+    "Write script via MCP": "Написать сценарий через MCP",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Стартовая страница создана, но не удалось встроить прикреплённые изображения: {count}."
   },
   "es": {
     "$129": "$129",
@@ -6535,7 +6541,8 @@
     "MCP instructions": "Instrucciones MCP",
     "Design via MCP": "Diseñar vía MCP",
     "Write via MCP": "Redactar vía MCP",
-    "Write script via MCP": "Escribir guion vía MCP"
+    "Write script via MCP": "Escribir guion vía MCP",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Se creó la página inicial, pero no se pudieron incrustar {count} imagen(es) adjunta(s)."
   },
   "pt-BR": {
     "$129": "R$ 599",
@@ -7469,7 +7476,8 @@
     "MCP instructions": "Instruções MCP",
     "Design via MCP": "Criar design via MCP",
     "Write via MCP": "Escrever via MCP",
-    "Write script via MCP": "Escrever roteiro via MCP"
+    "Write script via MCP": "Escrever roteiro via MCP",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Página inicial criada, mas não foi possível incorporar {count} imagem(ns) anexada(s)."
   },
   "it": {
     "$129": "129 €",
@@ -8403,7 +8411,8 @@
     "MCP instructions": "Istruzioni MCP",
     "Design via MCP": "Progetta via MCP",
     "Write via MCP": "Scrivi via MCP",
-    "Write script via MCP": "Scrivi copione via MCP"
+    "Write script via MCP": "Scrivi copione via MCP",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Pagina iniziale creata, ma non è stato possibile incorporare {count} immagine/i allegata/e."
   },
   "tr": {
     "$129": "129 $",
@@ -9337,6 +9346,7 @@
     "MCP instructions": "MCP talimatları",
     "Design via MCP": "MCP ile tasarla",
     "Write via MCP": "MCP ile yaz",
-    "Write script via MCP": "MCP ile senaryo yaz"
+    "Write script via MCP": "MCP ile senaryo yaz",
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Başlangıç sayfası oluşturuldu, ancak ekli {count} görsel gömülemedi."
   }
 }

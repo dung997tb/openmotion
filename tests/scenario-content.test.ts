@@ -116,6 +116,19 @@ test('applyImageToHtml handles slot, img-index and append targets idempotently w
   assert.ok(appended.includes('src="./assets/gal.png"'));
   const appendedAgain = applyImageToHtml(appended, { kind: 'append' }, './assets/gal.png', 'Gallery');
   assert.equal(appendedAgain.match(/gal\.png/g)?.length, 1);
+
+  // Dollar replacement patterns ($1, $&, $') and data-src/data-alt attributes must be handled safely
+  const lazyHtml = '<html><body><img data-src="./lazy.png" data-alt="Lazy alt" src="./real.png" alt="Real alt" /></body></html>';
+  const dollarPatched = applyImageToHtml(
+    lazyHtml,
+    { kind: 'img', index: 0 },
+    './assets/hero.png',
+    "Save $1 off & $' deals",
+  );
+  assert.ok(dollarPatched.includes('data-src="./lazy.png"'), 'data-src must remain untouched');
+  assert.ok(dollarPatched.includes('data-alt="Lazy alt"'), 'data-alt must remain untouched');
+  assert.ok(dollarPatched.includes('src="./assets/hero.png"'), 'real src must be updated');
+  assert.ok(dollarPatched.includes('alt="Save $1 off &amp; $&#39; deals"'), 'alt must preserve literal $1 and $\'');
 });
 
 test('draftSocialPosts enforces platform character, hashtag and title limits, rotates variants and localizes zh-CN', () => {
@@ -161,6 +174,31 @@ test('fillScenarioTemplate handles missing fields gracefully and prompt builders
   const filledPartial = fillScenarioTemplate('Hero image for {productName}: {valueProps}, {visualStyle}', { productName: 'Nova' });
   assert.equal(filledPartial, 'Hero image for Nova');
   assert.ok(!filledPartial.includes('{'));
+
+  // Preserves literal words like "code" and trailing punctuation in user values while cleaning empty `code {promoCode}`
+  const preservedUserProse = fillScenarioTemplate('Storyboard frame for {concept}: {visualStyle}, {aspect} composition', {
+    concept: 'Learn to code.',
+    visualStyle: 'Minimal',
+    aspect: '16:9',
+  });
+  assert.equal(preservedUserProse, 'Storyboard frame for Learn to code.: Minimal, 16:9 composition');
+
+  const preservedTrailingColon = fillScenarioTemplate('Hero image for {productName}: {valueProps}, {visualStyle}', {
+    productName: 'ACME:',
+  });
+  assert.equal(preservedTrailingColon, 'Hero image for ACME:');
+
+  const cleanedEmptyPromoCode = fillScenarioTemplate(
+    '30s Black Friday sales film for {productName}: {salePrice}, code {promoCode}, {saleWindow}',
+    { productName: 'Holiday Tote', salePrice: '$79', promoCode: '', saleWindow: 'Nov 27' },
+  );
+  assert.equal(cleanedEmptyPromoCode, '30s Black Friday sales film for Holiday Tote: $79, Nov 27');
+
+  const keptPromoCode = fillScenarioTemplate(
+    '30s Black Friday sales film for {productName}: {salePrice}, code {promoCode}, {saleWindow}',
+    { productName: 'Holiday Tote', salePrice: '$79', promoCode: 'BF40', saleWindow: 'Nov 27' },
+  );
+  assert.equal(keptPromoCode, '30s Black Friday sales film for Holiday Tote: $79, code BF40, Nov 27');
 
   const filledList = fillScenarioTemplate('Hero image for {productName}: {valueProps}, {visualStyle}', {
     productName: 'Nova',
@@ -209,31 +247,31 @@ test('fillScenarioTemplate handles missing fields gracefully and prompt builders
   assert.ok(runPrompt.includes('22222222-2222-4222-8222-222222222222'));
   assert.ok(runPrompt.includes('Step write-back instructions:'));
   assert.ok(runPrompt.includes('Current step prompt: Create a bold Black Friday landing page for Holiday Tote'));
-  assert.ok(runPrompt.includes('runId=11111111-1111-4111-8111-111111111111, expectedRevision=3, stepId="detail-page"'));
-  assert.ok(runPrompt.includes('command=add_pool'));
-  assert.ok(runPrompt.includes('command=link_design'));
+  assert.ok(runPrompt.includes('openmotion_assets_use(action="scenario", scenario={ command: "generate", runId: "11111111-1111-4111-8111-111111111111", expectedRevision: 3, stepId: "detail-page"'));
+  assert.ok(runPrompt.includes('command: "add_pool"'));
+  assert.ok(runPrompt.includes('command: "link_design"'));
 
   const briefStepPrompt = scenarioRunAgentPrompt(bf, runSummary, {
     stepId: 'brief',
     stepPrompt: 'Refine Holiday Tote offer brief',
   });
   assert.ok(briefStepPrompt.includes('Step write-back instructions:'));
-  assert.ok(briefStepPrompt.includes('command=update_brief / command=add_iteration'));
-  assert.ok(briefStepPrompt.includes('stepId="brief"'));
+  assert.ok(briefStepPrompt.includes('command: "update_brief" | "add_iteration"'));
+  assert.ok(briefStepPrompt.includes('stepId: "brief"'));
 
   const videoStepPrompt = scenarioRunAgentPrompt(bf, runSummary, {
     stepId: 'sales-film',
     stepPrompt: '30s Holiday Tote reveal video',
   });
-  assert.ok(videoStepPrompt.includes('command=link_motion'));
-  assert.ok(videoStepPrompt.includes('stepId="sales-film"'));
+  assert.ok(videoStepPrompt.includes('command: "link_motion"'));
+  assert.ok(videoStepPrompt.includes('stepId: "sales-film"'));
 
   const socialStepPrompt = scenarioRunAgentPrompt(bf, runSummary, {
     stepId: 'social',
     stepPrompt: 'Draft Black Friday social launch posts',
   });
   assert.ok(socialStepPrompt.includes('outputs: [{ type: "social", posts }]'));
-  assert.ok(socialStepPrompt.includes('stepId="social"'));
+  assert.ok(socialStepPrompt.includes('stepId: "social"'));
 
   assert.ok(briefMarkdown(bf, { productName: 'Tote' }).includes('## Product name'));
   const readme = runReadme(bf, {

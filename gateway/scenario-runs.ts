@@ -455,13 +455,23 @@ export class ScenarioRuns {
     return created;
   }
 
+  private assertPoolCapacity(run: ScenarioRun, additional = 1): void {
+    if (run.pool.length + additional > SCENARIO_LIMITS.poolItems) {
+      throw new ScenarioError('LIMIT_EXCEEDED', `Workflow assets limit (${SCENARIO_LIMITS.poolItems}) reached. Start a new run.`);
+    }
+  }
+
+  private assertIterationCapacity(stepState: ScenarioStepState): void {
+    if (stepState.iterations.length >= SCENARIO_LIMITS.iterationsPerStep) {
+      throw new ScenarioError('LIMIT_EXCEEDED', `Iteration limit (${SCENARIO_LIMITS.iterationsPerStep}) reached for step ${stepState.stepId}. Start a new run.`);
+    }
+  }
+
   private pushIteration(
     stepState: ScenarioStepState,
     iter: Omit<StepIteration, 'id' | 'number' | 'createdAt'> & { id?: string },
   ): StepIteration {
-    if (stepState.iterations.length >= SCENARIO_LIMITS.iterationsPerStep) {
-      throw new ScenarioError('LIMIT_EXCEEDED', `Iteration limit (${SCENARIO_LIMITS.iterationsPerStep}) reached for step ${stepState.stepId}. Start a new run.`);
-    }
+    this.assertIterationCapacity(stepState);
     const number = (stepState.iterations.at(-1)?.number ?? 0) + 1;
     const created: StepIteration = {
       id: iter.id ?? randomUUID(),
@@ -518,6 +528,7 @@ export class ScenarioRuns {
     inputForHash: unknown,
     prepareAndExecute: (run: ScenarioRun, scenario: ScenarioDefinition) => Promise<S>,
     commit: (run: ScenarioRun, scenario: ScenarioDefinition, sideEffectResult: S) => T | Promise<T>,
+    options?: { adoptOnConflict?: boolean },
   ): Promise<T> {
     const id = validateUuid(runId, 'runId');
     const rid = validateRequestId(requestId);
@@ -540,7 +551,9 @@ export class ScenarioRuns {
       const concurrentReceipt = await this.readReceipt<T>(scope, rid, inputHash);
       if (concurrentReceipt) return concurrentReceipt;
       const latest = await this.readRunRaw(id);
-      this.assertRevision(latest, expectedRevision);
+      if (!options?.adoptOnConflict) {
+        this.assertRevision(latest, expectedRevision);
+      }
       const scenario = this.requireScenario(latest.scenarioId);
       const result = await commit(latest, scenario, sideEffectResult);
       latest.revision += 1;
@@ -1113,6 +1126,8 @@ export class ScenarioRuns {
       async (snapshot, scenario) => {
         const stepDef = this.requireStep(scenario, input.stepId);
         const stepState = snapshot.steps[stepDef.id];
+        this.assertIterationCapacity(stepState);
+        this.assertPoolCapacity(snapshot, 1);
         const refIds = input.referencePoolItemIds ?? [];
         const references: { assetId: string; versionId: string }[] = [];
         for (const id of refIds) {
@@ -1175,6 +1190,7 @@ export class ScenarioRuns {
         if (step.status === 'todo') step.status = 'in-progress';
         return { run, job, iteration };
       },
+      { adoptOnConflict: true },
     );
   }
 

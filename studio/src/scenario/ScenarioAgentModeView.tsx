@@ -230,13 +230,6 @@ export function ScenarioAgentModeView({
     });
   }, [run?.brief, run?.revision, scenario.briefFields]);
 
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    [],
-  );
-
   const flushBrief = useCallback(async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -274,6 +267,22 @@ export function ScenarioAgentModeView({
       // Conflicts are toasted by useScenarioRun; keep dirty fields intact so edits remain recoverable.
     }
   }, [api, scenario.briefFields]);
+
+  const flushBriefRef = useRef(flushBrief);
+  flushBriefRef.current = flushBrief;
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (dirtyFieldsRef.current.size > 0) {
+        void flushBriefRef.current();
+      }
+    },
+    [],
+  );
 
   const scheduleAutosave = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);

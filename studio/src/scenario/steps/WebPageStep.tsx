@@ -302,6 +302,7 @@ export function WebPageStep({
         { stepId: step.id, mode: 'starter' },
       );
       let currentProject = res.project;
+      let failedEmbeds = 0;
       // If the user already attached images from the shared pool in this step, embed them automatically!
       if (pageConfig?.mode === 'both' && boundImages.length > 0) {
         const htmlRes = await designClient.readFile(currentProject.id, currentProject.entry).catch(() => null);
@@ -311,23 +312,37 @@ export function WebPageStep({
           const target: EmbedImageTarget = slots[i]
             ? { kind: 'slot', slot: slots[i].slot }
             : { kind: 'append' };
-          const embedRes = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
-            `auto-embed:${step.id}:${item.id}:${i}`,
-            'embed_image',
-            {
-              stepId: step.id,
-              designProjectId: currentProject.id,
-              expectedDesignRevision: currentProject.revision,
-              poolItemId: item.id,
-              target,
-              alt: item.label,
-            },
-          ).catch(() => null);
-          if (embedRes?.project) currentProject = embedRes.project;
+          try {
+            const embedRes = await api.mutate<{ run: ScenarioRun; project: DesignProjectDetail }>(
+              `auto-embed:${step.id}:${item.id}:${i}`,
+              'embed_image',
+              {
+                stepId: step.id,
+                designProjectId: currentProject.id,
+                expectedDesignRevision: currentProject.revision,
+                poolItemId: item.id,
+                target,
+                alt: item.label,
+              },
+            );
+            if (embedRes?.project) currentProject = embedRes.project;
+          } catch {
+            failedEmbeds += 1;
+            const refreshed = await designClient.getProject(currentProject.id).catch(() => null);
+            if (refreshed?.project) currentProject = refreshed.project;
+          }
         }
       }
       setProject(currentProject);
-      toast.showToast(t('Starter page created'), 'info', 'feedback');
+      if (failedEmbeds > 0) {
+        toast.showToast(
+          t('Starter page created, but {count} attached image(s) could not be embedded.', { count: failedEmbeds }),
+          'error',
+          'feedback',
+        );
+      } else {
+        toast.showToast(t('Starter page created'), 'info', 'feedback');
+      }
     } catch (error) {
       if (!isScenarioConflictError(error)) {
         toast.showToast(extractErrorMessage(error, t('Could not create starter page.')), 'error', 'feedback');

@@ -186,8 +186,8 @@ describe('SocialPackStep', () => {
       expect(clipboardSpy).toHaveBeenCalledTimes(1);
       const copied = clipboardSpy.mock.calls[0][0] as string;
       expect(copied).toContain('11111111-1111-4111-8111-111111111111');
-      expect(copied).toContain('stepId="social"');
-      expect(copied).toContain('command=add_pool');
+      expect(copied).toContain('stepId: "social"');
+      expect(copied).toContain('command: "add_pool"');
       expect(copied).toContain('outputs: [{ type: "social", posts }]');
     } finally {
       await draftMounted.unmount();
@@ -295,6 +295,27 @@ describe('SocialPackStep', () => {
       });
       expect(updated.mocks.refresh).toHaveBeenCalledTimes(1);
       expect(updated.mocks.showToast).toHaveBeenCalledWith('Synced latest assets', 'info', 'feedback');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('keeps Save edits enabled when add_iteration fails during drafting', async () => {
+    const run = makeBaseRun('black-friday', {
+      brief: { productName: 'Holiday Tote', salePrice: '$79' },
+    });
+    const { props, mocks } = createStepProps('black-friday', 'social', { run });
+    mocks.mutate.mockRejectedValueOnce(new Error('Network error'));
+    const mounted = await mountStep(<SocialPackStep {...props} />);
+    try {
+      const draftBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Generate posts'))!;
+      await act(async () => {
+        draftBtn.click();
+        await Promise.resolve();
+      });
+      const saveBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Save edits'))!;
+      expect(saveBtn).toBeTruthy();
+      expect(saveBtn.disabled).toBe(false);
     } finally {
       await mounted.unmount();
     }

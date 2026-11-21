@@ -537,17 +537,17 @@ ${propCards}
 }
 
 function readAttr(tag: string, attr: string): string | null {
-  const re = new RegExp(`\\b${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i');
+  const re = new RegExp(`(?<![\\w:-])${escapeRegex(attr)}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i');
   const match = re.exec(tag);
   return match ? (match[1] ?? match[2] ?? '') : null;
 }
 
 function setAttr(tag: string, attr: string, escapedValue: string): string {
-  const re = new RegExp(`(\\b${attr}\\s*=\\s*)(?:"[^"]*"|'[^']*')`, 'i');
+  const re = new RegExp(`((?<![\\w:-])${escapeRegex(attr)}\\s*=\\s*)(?:"[^"]*"|'[^']*')`, 'i');
   if (re.test(tag)) {
-    return tag.replace(re, `$1"${escapedValue}"`);
+    return tag.replace(re, (_match, prefix: string) => `${prefix}"${escapedValue}"`);
   }
-  return tag.replace(/\s*(\/?>)$/, ` ${attr}="${escapedValue}"$1`);
+  return tag.replace(/\s*(\/?>)$/, (_match, closing: string) => ` ${attr}="${escapedValue}"${closing}`);
 }
 
 function escapeRegex(value: string): string {

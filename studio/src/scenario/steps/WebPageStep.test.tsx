@@ -300,10 +300,10 @@ describe('WebPageStep', () => {
       expect(clipboardSpy).toHaveBeenCalledTimes(1);
       const copied = clipboardSpy.mock.calls[0][0] as string;
       expect(copied).toContain('11111111-1111-4111-8111-111111111111');
-      expect(copied).toContain('stepId="landing-page"');
-      expect(copied).toContain('command=add_pool');
-      expect(copied).toContain('recordIteration=true');
-      expect(copied).toContain('command=link_design');
+      expect(copied).toContain('stepId: "landing-page"');
+      expect(copied).toContain('command: "add_pool"');
+      expect(copied).toContain('recordIteration: true');
+      expect(copied).toContain('command: "link_design"');
 
       // Secondary link-existing-project card starts collapsed behind disclosure.
       expect(draftMounted.container.textContent).not.toContain('Link an existing Design project');
@@ -378,6 +378,79 @@ describe('WebPageStep', () => {
       expect(linkedSetup.mocks.showToast).toHaveBeenCalledWith('Synced latest assets', 'info', 'feedback');
     } finally {
       await linkedMounted.unmount();
+    }
+  });
+
+  it('refreshes revision and surfaces an error toast when auto-embed fails during starter creation', async () => {
+    const projectId = '22222222-2222-4222-8222-222222222222';
+    const createdProject = {
+      id: projectId,
+      title: 'Black Friday Detail Page',
+      revision: 'rev-1',
+      entry: 'index.html',
+      files: [{ path: 'index.html', bytes: 120 }],
+    };
+    const refreshedProject = { ...createdProject, revision: 'rev-2' };
+    const getProjectSpy = vi.spyOn(designClient, 'getProject').mockResolvedValue({ project: refreshedProject } as any);
+    vi.spyOn(designClient, 'readFile').mockResolvedValue({
+      path: 'index.html',
+      content: '<html><body><section data-om-slot="hero"></section><section data-om-slot="gallery"></section></body></html>',
+    } as any);
+
+    const img1 = {
+      id: 'aaaa1111-1111-4111-8111-111111111111',
+      kind: 'image' as const,
+      label: 'Hero 1',
+      source: 'generated' as const,
+      stepId: 'product-images',
+      createdAt: 1700000000000,
+      tags: [],
+      pinned: true,
+      ref: { type: 'asset' as const, assetId: 'asset-1', versionId: 'ver-1' },
+    };
+    const img2 = {
+      id: 'aaaa2222-2222-4222-8222-222222222222',
+      kind: 'image' as const,
+      label: 'Hero 2',
+      source: 'generated' as const,
+      stepId: 'product-images',
+      createdAt: 1700000001000,
+      tags: [],
+      pinned: true,
+      ref: { type: 'asset' as const, assetId: 'asset-2', versionId: 'ver-2' },
+    };
+    const run = makeBaseRun('black-friday', {
+      pool: [img1, img2],
+      steps: {
+        'detail-page': {
+          bindings: { embedImages: [img1.id, img2.id] },
+        },
+      },
+    });
+    const { props, mocks } = createStepProps('black-friday', 'detail-page', { run });
+    mocks.mutate.mockImplementation(async (_key: string, command: string) => {
+      if (command === 'create_page') return { run, project: createdProject };
+      if (command === 'embed_image') throw new Error('DESIGN_CONFLICT');
+      return { run };
+    });
+
+    const mounted = await mountStep(<WebPageStep {...props} />);
+    try {
+      const createBtn = Array.from(mounted.container.querySelectorAll('button')).find(b => b.textContent?.includes('Create page'))!;
+      await act(async () => {
+        createBtn.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(getProjectSpy).toHaveBeenCalledWith(projectId);
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        'Starter page created, but 2 attached image(s) could not be embedded.',
+        'error',
+        'feedback',
+      );
+    } finally {
+      await mounted.unmount();
     }
   });
 });
