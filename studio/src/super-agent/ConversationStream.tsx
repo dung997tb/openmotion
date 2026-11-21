@@ -1,6 +1,7 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import type { Model } from '../../../shared/gateway';
 import type { LocalAgent } from '../../../shared/local-agents';
 import type {
@@ -21,6 +22,7 @@ import { uploadLibraryAsset } from '../motion/assetClient';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
+import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
@@ -33,6 +35,7 @@ import {
   formatModePromptPrefix,
   getModeComposerPlaceholder,
   ModeComposerControls,
+  ModeComposerTopBar,
   type ModeComposerOptions,
 } from './ModeComposerControls';
 import { SimpleMarkdown } from './SimpleMarkdown';
@@ -46,7 +49,7 @@ const PRIMARY_STARTERS: {
   { id: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
   { id: 'media', tone: 'audio', icon: 'music-2-line', title: 'Cinema & audio' },
-  { id: 'deck', tone: 'agent', icon: 'slideshow-line', title: 'Create slides' },
+  { id: 'game', tone: 'agent', icon: 'sparkling-line', title: 'Build a game' },
 ];
 
 const EXTRA_STARTERS: {
@@ -55,11 +58,12 @@ const EXTRA_STARTERS: {
   icon: string;
   title: string;
 }[] = [
+  { id: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
   { id: 'website', tone: 'image', icon: 'layout-line', title: 'Build a website' },
-  { id: 'game', tone: 'agent', icon: 'sparkling-line', title: 'Build a game' },
 ];
 
 export type AgentSelection = {
+  runtimeId?: string;
   engine: SuperAgentEngine;
   model: string;
   reasoning: string;
@@ -77,6 +81,8 @@ export function ConversationStream({
   attachments,
   agents,
   agentsLoaded = true,
+  runtimes,
+  localDirectAvailable = true,
   selection,
   permissionMode,
   onRetryLoad,
@@ -94,6 +100,7 @@ export function ConversationStream({
   onPreviewAttachment,
   onCopyText,
   onOpenAgentSettings,
+  onOpenRuntimeSettings,
   onOpenModelSettings,
   onOpenMcp,
   onError,
@@ -109,6 +116,8 @@ export function ConversationStream({
   attachments: SuperAgentResourceAttachment[];
   agents: LocalAgent[];
   agentsLoaded?: boolean;
+  runtimes?: AgentRuntimeInfo[];
+  localDirectAvailable?: boolean;
   selection: AgentSelection;
   permissionMode: SuperAgentPermissionMode;
   onRetryLoad: () => void;
@@ -126,6 +135,7 @@ export function ConversationStream({
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onCopyText: (text: string) => void;
   onOpenAgentSettings: () => void;
+  onOpenRuntimeSettings?: () => void;
   onOpenModelSettings?: () => void;
   onOpenMcp: () => void;
   onError: (message: string) => void;
@@ -173,21 +183,39 @@ export function ConversationStream({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
+  const activeRuntime = useMemo(() => {
+    if (!runtimes?.length) return undefined;
+    return runtimes.find(rt => rt.id === selection.runtimeId)
+      ?? runtimes.find(rt => rt.status === 'online')
+      ?? runtimes[0];
+  }, [runtimes, selection.runtimeId]);
+
+  const effectiveAgents = activeRuntime ? activeRuntime.agents : agents;
+  const runtimeOnline = !activeRuntime || (activeRuntime.status !== 'offline' && activeRuntime.status !== 'disabled');
+
   const runnableEngines = useMemo(
-    () => agents.filter(item => item.installed && item.auth !== 'signed-out'),
-    [agents],
+    () => (runtimeOnline ? effectiveAgents.filter(item => item.installed && item.auth !== 'signed-out') : []),
+    [effectiveAgents, runtimeOnline],
   );
-  const activeAgent = agents.find(item => item.id === selection.engine);
+  const activeAgent = effectiveAgents.find(item => item.id === selection.engine) ?? effectiveAgents[0];
   const selectedModelMeta = activeAgent?.models.find(m => m.id === selection.model);
   const reasoningEfforts = selectedModelMeta?.reasoning ?? [];
   const busy = chat?.state === 'running' || chat?.state === 'waiting';
   const canSubmit = Boolean(text.trim()) && !sending && !busy && !loading && runnableEngines.length > 0;
 
   const engineChoices = useMemo(() => {
-    const installed = agents.filter(item => item.installed || item.id === selection.engine);
+    if (activeRuntime?.kind === 'remote-service') {
+      return effectiveAgents.map(agent => ({
+        id: agent.id as SuperAgentEngine,
+        label: agent.label,
+        agent: agent as LocalAgent | undefined,
+        ready: Boolean(runtimeOnline && agent.installed && agent.auth !== 'signed-out'),
+      }));
+    }
+    const installed = effectiveAgents.filter(item => item.installed || item.id === selection.engine);
     const list = installed.length > 0
       ? installed
-      : agents.filter(item => item.id === 'codex' || item.id === 'claude');
+      : effectiveAgents.filter(item => item.id === 'codex' || item.id === 'claude');
     if (list.length === 0) {
       return [
         { id: 'codex', label: 'Codex', agent: undefined as LocalAgent | undefined, ready: false },
@@ -198,25 +226,28 @@ export function ConversationStream({
       id: agent.id as SuperAgentEngine,
       label: agent.label,
       agent: agent as LocalAgent | undefined,
-      ready: Boolean(agent.installed && agent.auth !== 'signed-out'),
+      ready: Boolean(runtimeOnline && agent.installed && agent.auth !== 'signed-out'),
     }));
-  }, [agents, selection.engine]);
+  }, [activeRuntime?.kind, effectiveAgents, runtimeOnline, selection.engine]);
 
   const browsingChoice = engineChoices.find(item => item.id === browsingEngine) ?? engineChoices[0];
 
   useEffect(() => {
     if (!modelMenuOpen) return;
+    if (activeRuntime?.kind === 'remote-service') return;
+    if (activeRuntime?.kind === 'local-bridge' && activeRuntime.status !== 'online') return;
     const target = browsingChoice?.agent;
-    if (!target?.installed || target.checkedAt || target.models.length > 0 || inspectedEnginesRef.current.has(browsingChoice.id)) {
+    const inspectKey = `${activeRuntime?.id ?? 'local'}:${browsingChoice?.id ?? ''}`;
+    if (!target?.installed || target.checkedAt || target.models.length > 0 || inspectedEnginesRef.current.has(inspectKey)) {
       return;
     }
-    inspectedEnginesRef.current.add(browsingChoice.id);
+    inspectedEnginesRef.current.add(inspectKey);
     setInspectingEngine(browsingChoice.id);
     let cancelled = false;
-    void gatewayRequest(`settings/agents/${target.id}/inspect`, 'POST', {})
-      .then(() => {
-        if (!cancelled) notifyAgentsChanged();
-      })
+    const req = activeRuntime?.kind === 'local-bridge'
+      ? inspectBridgeAgent(activeRuntime.id, target.id).then(() => { if (!cancelled) notifyRuntimesChanged(); })
+      : gatewayRequest(`settings/agents/${target.id}/inspect`, 'POST', {}).then(() => { if (!cancelled) notifyAgentsChanged(); });
+    void req
       .catch(() => { /* keep fallback default option */ })
       .finally(() => {
         if (!cancelled) setInspectingEngine(current => (current === browsingChoice.id ? null : current));
@@ -224,7 +255,7 @@ export function ConversationStream({
     return () => {
       cancelled = true;
     };
-  }, [modelMenuOpen, browsingChoice?.id, browsingChoice?.agent]);
+  }, [modelMenuOpen, activeRuntime?.id, activeRuntime?.kind, activeRuntime?.status, browsingChoice?.id, browsingChoice?.agent]);
 
   const activeProviderRef = { id: activeAgent?.icon ?? selection.engine, custom: false };
   const triggerPrimaryLabel = selectedModelMeta?.label
@@ -700,11 +731,48 @@ export function ConversationStream({
         {agentsLoaded && !runnableEngines.length && (
           <div className="om-sa-agent-banner">
             <RemixIcon name="plug-line" size={15} />
-            <span>{t('Install and sign in to Codex or Claude Code to run Super Agent.')}</span>
-            <Button variant="ghost" className="om-button h-auto" onClick={onOpenAgentSettings}>
-              {t('Configure Local Agent')}
+            <span>
+              {t(
+                !localDirectAvailable || (activeRuntime && activeRuntime.kind !== 'local-direct')
+                  ? 'Connect a local machine via the Bridge script or add a Custom Agent Service to run Super Agent.'
+                  : 'Install and sign in to Codex or Claude Code to run Super Agent.',
+              )}
+            </span>
+            <Button
+              variant="ghost"
+              className="om-button h-auto"
+              onClick={
+                !localDirectAvailable || (activeRuntime && activeRuntime.kind !== 'local-direct')
+                  ? (onOpenRuntimeSettings ?? onOpenAgentSettings)
+                  : onOpenAgentSettings
+              }
+            >
+              {t(
+                !localDirectAvailable || (activeRuntime && activeRuntime.kind !== 'local-direct')
+                  ? 'Connect Agent Runtime'
+                  : 'Configure Local Agent',
+              )}
             </Button>
           </div>
+        )}
+
+        {activeMode && (
+          <ModeComposerTopBar
+            active={active}
+            modeId={activeMode.id}
+            options={modeOptions}
+            disabled={busy || sending}
+            onChange={updateModeOptions}
+            onCatalogModelsChange={handleCatalogModelsChange}
+            onOpenResourcePicker={category => {
+              setResourceCategory(category);
+              setResourceMenuOpen(true);
+            }}
+            onOpenModelSettings={() => {
+              if (onOpenModelSettings) onOpenModelSettings();
+              else onOpenAgentSettings();
+            }}
+          />
         )}
 
         <div className="om-sa-composer">
@@ -826,15 +894,6 @@ export function ConversationStream({
                   options={modeOptions}
                   disabled={busy || sending}
                   onChange={updateModeOptions}
-                  onCatalogModelsChange={handleCatalogModelsChange}
-                  onOpenResourcePicker={category => {
-                    setResourceCategory(category);
-                    setResourceMenuOpen(true);
-                  }}
-                  onOpenModelSettings={() => {
-                    if (onOpenModelSettings) onOpenModelSettings();
-                    else onOpenAgentSettings();
-                  }}
                 />
               )}
 
@@ -863,11 +922,57 @@ export function ConversationStream({
                     {triggerSecondaryLabel && (
                       <span className="om-sa-model-trigger-sub" data-engine={selection.engine}>{triggerSecondaryLabel}</span>
                     )}
+                    {activeRuntime && activeRuntime.kind !== 'local-direct' && (
+                      <span className="om-sa-runtime-chip">
+                        <RemixIcon name={activeRuntime.kind === 'local-bridge' ? 'link-line' : 'plug-line'} size={11} />
+                        <span>{activeRuntime.name}</span>
+                      </span>
+                    )}
                     <RemixIcon name="arrow-down-s-line" size={15} />
                   </Button>
                 }
               >
                 <div className="om-sa-model-menu">
+                  {runtimes && (runtimes.length > 1 || (activeRuntime && activeRuntime.kind !== 'local-direct')) && (
+                    <div className="om-sa-runtime-pills" role="group" aria-label={t('Execution runtime')}>
+                      {runtimes.map(rt => {
+                        const isRtActive = activeRuntime?.id === rt.id;
+                        const icon = rt.kind === 'local-bridge' ? 'link-line' : rt.kind === 'remote-service' ? 'plug-line' : 'computer-line';
+                        return (
+                          <Button
+                            key={rt.id}
+                            variant="plain"
+                            type="button"
+                            className="om-sa-runtime-pill"
+                            aria-pressed={isRtActive}
+                            data-active={isRtActive || undefined}
+                            disabled={rt.status === 'disabled'}
+                            onClick={() => {
+                              const nextEngine = rt.runnableAgentIds.includes(selection.engine)
+                                ? selection.engine
+                                : rt.runnableAgentIds[0] ?? rt.agents[0]?.id ?? selection.engine;
+                              setBrowsingEngine(nextEngine);
+                              onChangeSelection({
+                                runtimeId: rt.id,
+                                engine: nextEngine,
+                                model: 'default',
+                                reasoning: 'default',
+                              });
+                            }}
+                          >
+                            <RemixIcon name={icon} size={13} />
+                            <span>{t(rt.name)}</span>
+                            <span
+                              className="om-sa-runtime-pill-dot"
+                              data-online={rt.status === 'online' || undefined}
+                              aria-hidden="true"
+                            />
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div className="om-sa-model-agent-select-wrap">
                     <Select
                       label={t('Local Agent')}
@@ -886,13 +991,20 @@ export function ConversationStream({
                         ),
                         description: choice.ready
                           ? undefined
-                          : (!choice.agent?.installed ? t('Not installed') : t('Sign-in required')),
+                          : !runtimeOnline
+                            ? t('Runtime offline')
+                            : (!choice.agent?.installed ? t('Not installed') : t('Sign-in required')),
                       }))}
                       onCommit={nextId => {
                         const chosen = engineChoices.find(item => item.id === nextId);
                         setBrowsingEngine(nextId);
                         if (chosen?.ready && selection.engine !== nextId) {
-                          onChangeSelection({ engine: nextId, model: 'default', reasoning: 'default' });
+                          onChangeSelection({
+                            ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+                            engine: nextId,
+                            model: 'default',
+                            reasoning: 'default',
+                          });
                         }
                       }}
                     />
@@ -913,7 +1025,11 @@ export function ConversationStream({
                         {!choice.ready ? (
                           <div className="om-sa-model-unavailable">
                             <p className="om-muted">
-                              {!choice.agent?.installed ? t('Not installed') : t('Sign-in required')}
+                              {!runtimeOnline
+                                ? t('This runtime is currently offline.')
+                                : !choice.agent?.installed
+                                  ? t('Not installed')
+                                  : t('Sign-in required')}
                             </p>
                           </div>
                         ) : (
@@ -925,7 +1041,12 @@ export function ConversationStream({
                               aria-selected={isDefaultSelected}
                               data-active={isDefaultSelected || undefined}
                               className="om-sa-model-option"
-                              onClick={() => onChangeSelection({ engine: choice.id, model: 'default', reasoning: 'default' })}
+                              onClick={() => onChangeSelection({
+                                ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+                                engine: choice.id,
+                                model: 'default',
+                                reasoning: 'default',
+                              })}
                             >
                               <span className="om-sa-model-option-main">
                                 <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
@@ -948,7 +1069,12 @@ export function ConversationStream({
                                 aria-selected
                                 data-active
                                 className="om-sa-model-option"
-                                onClick={() => onChangeSelection({ engine: choice.id, model: selection.model, reasoning: selection.reasoning })}
+                                onClick={() => onChangeSelection({
+                                  ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+                                  engine: choice.id,
+                                  model: selection.model,
+                                  reasoning: selection.reasoning,
+                                })}
                               >
                                 <span className="om-sa-model-option-main">
                                   <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
@@ -982,7 +1108,12 @@ export function ConversationStream({
                                   aria-selected={isSelected}
                                   data-active={isSelected || undefined}
                                   className="om-sa-model-option"
-                                  onClick={() => onChangeSelection({ engine: choice.id, model: model.id, reasoning: 'default' })}
+                                  onClick={() => onChangeSelection({
+                                    ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+                                    engine: choice.id,
+                                    model: model.id,
+                                    reasoning: 'default',
+                                  })}
                                 >
                                   <span className="om-sa-model-option-main">
                                     <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
@@ -1034,6 +1165,19 @@ export function ConversationStream({
                   )}
 
                   <div className="om-sa-model-menu-foot">
+                    <Button
+                      variant="plain"
+                      type="button"
+                      className="om-sa-popover-link-row"
+                      onClick={() => {
+                        setModelMenuOpen(false);
+                        (onOpenRuntimeSettings ?? onOpenAgentSettings)();
+                      }}
+                    >
+                      <RemixIcon name="link-line" size={15} />
+                      <span>{t('Runtimes & Cloud Bridge')}</span>
+                      <RemixIcon name="arrow-right-up-line" size={14} />
+                    </Button>
                     <Button
                       variant="plain"
                       type="button"

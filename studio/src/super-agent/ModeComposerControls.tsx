@@ -4,8 +4,8 @@ import type { Modality, Model } from '../../../shared/gateway';
 import { Popover } from '../components/ui/Popover';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { ModelAvatar } from '../motion/settingsPrimitives';
 import { providerReady } from '../motion/imageMenuModels';
+import { ModelAvatar } from '../motion/settingsPrimitives';
 import { useMediaCatalog } from '../motion/useMediaCatalog';
 import type { SuperAgentCreationModeId, SuperAgentModeSpec } from './ModeResourceShowcase';
 import type { ResourceCategoryTab } from './ResourcePickerDialog';
@@ -17,7 +17,7 @@ export type ModeComposerOptions = {
   imageQuality: 'standard' | 'high';
   imageCount: 1 | 2 | 4;
 
-  // Cinema & Audio (also supports switching directly to Motion Code)
+  // Cinema & Audio (also supports switching directly to Motion graphics)
   mediaSubMode: 'video' | 'motion' | 'audio';
   videoModelId: string;
   videoAspect: '16:9' | '9:16' | '1:1' | '21:9';
@@ -142,7 +142,7 @@ export function getModeComposerPlaceholder(
       return t('Describe the soundtrack, voiceover, or sound effect you want to create…');
     }
     if (options.mediaSubMode === 'motion') {
-      return t('Describe the editable HyperFrames motion video you want to build with code…');
+      return t('Describe the editable Motion graphics film you want to build…');
     }
     return t('Describe the cinema video shot, camera motion, and lighting you want to generate…');
   }
@@ -178,7 +178,7 @@ export function formatModePromptPrefix(
       if (modelLabel) parts.push(`Video Model: ${modelLabel}`);
       parts.push(`Format: ${options.videoAspect} · ${options.videoDuration} · ${VIDEO_SPEED_LABELS[options.videoSpeed]}`);
     } else if (options.mediaSubMode === 'motion') {
-      parts.push('Mode: Motion Video (Editable HyperFrames Code)');
+      parts.push('Mode: Motion graphics (Editable HyperFrames Code)');
       parts.push(`Format: ${options.motionAspect} · ${options.motionDuration} · ${options.motionFps}`);
       parts.push(`Style: ${MOTION_STYLE_LABELS[options.motionStyle]}`);
     } else {
@@ -195,7 +195,7 @@ export function formatModePromptPrefix(
       if (modelLabel) parts.push(`Video Model: ${modelLabel}`);
       parts.push(`Format: ${options.videoAspect} · ${options.videoDuration} · ${VIDEO_SPEED_LABELS[options.videoSpeed]}`);
     } else {
-      parts.push('Mode: Motion Video (Editable HyperFrames Code)');
+      parts.push('Mode: Motion graphics (Editable HyperFrames Code)');
       parts.push(`Format: ${options.motionAspect} · ${options.motionDuration} · ${options.motionFps}`);
       parts.push(`Style: ${MOTION_STYLE_LABELS[options.motionStyle]}`);
     }
@@ -230,7 +230,12 @@ function modelShortDescription(model: Model, t: (text: string) => string): strin
   return model.provider;
 }
 
-export function ModeComposerControls({
+/**
+ * Floating pill bar placed cleanly ABOVE the composer box (Manus-style),
+ * keeping model / pipeline switches (`Seedance`, `Motion graphics`, `Audio`, `Import from…`)
+ * accessible without crowding the composer's bottom toolbar.
+ */
+export function ModeComposerTopBar({
   active = true,
   modeId,
   options,
@@ -252,7 +257,7 @@ export function ModeComposerControls({
   const { t } = useI18n();
   const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion');
   const { catalog } = useMediaCatalog(needsMediaCatalog);
-  const [openMenu, setOpenMenu] = useState<'pipeline' | 'model' | 'params' | 'import' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'video-model' | 'image-model' | 'audio-model' | 'import' | null>(null);
   const [urlDraft, setUrlDraft] = useState(options.webReferenceUrl);
 
   useEffect(() => {
@@ -273,83 +278,90 @@ export function ModeComposerControls({
     }
   }, [catalog?.models, onCatalogModelsChange]);
 
-  const activeModality: Modality | null = modeId === 'image'
-    ? 'image'
-    : modeId === 'media'
-      ? (options.mediaSubMode === 'audio' ? 'audio' : options.mediaSubMode === 'video' ? 'video' : null)
-      : modeId === 'motion' && options.motionEngine === 'video-model'
-        ? 'video'
-        : null;
-
-  const modalityModels = useMemo(() => {
-    if (!activeModality || !catalog?.models) return [];
-    const providers = catalog.status.providers ?? [];
-    const filtered = catalog.models.filter(item => item.modality === activeModality);
-    return filtered.sort((a, b) => {
-      const aReady = providerReady(providers, a.provider) ? 0 : 1;
-      const bReady = providerReady(providers, b.provider) ? 0 : 1;
-      if (aReady !== bReady) return aReady - bReady;
-      return a.label.localeCompare(b.label);
-    });
-  }, [activeModality, catalog]);
-
   const providers = catalog?.status.providers ?? [];
-  const defaultRouteId = activeModality ? catalog?.status.routes?.[activeModality] : undefined;
-  const defaultRouteModel = defaultRouteId ? modalityModels.find(item => item.id === defaultRouteId) : modalityModels[0];
 
-  const renderMediaModelSelector = (
-    selectedId: string,
-    onSelect: (id: string) => void,
-    modalityLabel: string,
-  ) => {
-    const selectedModel = selectedId !== 'auto' ? modalityModels.find(item => item.id === selectedId) : undefined;
-    const triggerLabel = selectedModel?.label ?? (defaultRouteModel ? defaultRouteModel.label : t('Auto model'));
-    const triggerProvider = selectedModel?.provider ?? defaultRouteModel?.provider ?? 'opendesign';
+  const getModelsFor = useMemo(() => {
+    const all = catalog?.models ?? [];
+    return (modality: Modality) =>
+      all
+        .filter(item => item.modality === modality)
+        .sort((a, b) => {
+          const aReady = providerReady(providers, a.provider) ? 0 : 1;
+          const bReady = providerReady(providers, b.provider) ? 0 : 1;
+          if (aReady !== bReady) return aReady - bReady;
+          return a.label.localeCompare(b.label);
+        });
+  }, [catalog?.models, providers]);
+
+  const renderFloatingModelPill = ({
+    menuKey,
+    modality,
+    selectedId,
+    isActiveEngine,
+    fallbackLabel,
+    title,
+    onSelect,
+  }: {
+    menuKey: 'video-model' | 'image-model' | 'audio-model';
+    modality: Modality;
+    selectedId: string;
+    isActiveEngine: boolean;
+    fallbackLabel: string;
+    title: string;
+    onSelect: (id: string) => void;
+  }) => {
+    const list = getModelsFor(modality);
+    const defaultRouteId = catalog?.status.routes?.[modality];
+    const defaultRouteModel = (defaultRouteId ? list.find(item => item.id === defaultRouteId) : undefined) ?? list[0];
+    const selectedModel = selectedId !== 'auto' ? list.find(item => item.id === selectedId) : undefined;
+    const displayModel = selectedModel ?? defaultRouteModel;
+    const label = displayModel?.label ?? fallbackLabel;
 
     return (
       <Popover
-        open={openMenu === 'model'}
-        onOpenChange={next => setOpenMenu(next ? 'model' : null)}
+        open={openMenu === menuKey}
+        onOpenChange={next => setOpenMenu(next ? menuKey : null)}
         side="top"
         align="start"
-        aria-label={modalityLabel}
-        className="om-agent-settings-popover om-sa-mode-popover om-sa-mode-model-popover"
+        aria-label={title}
+        className="om-sa-mode-popover om-sa-mode-model-popover"
         trigger={
           <Button
             variant="plain"
             type="button"
-            className="om-sa-mode-param-trigger"
-            data-active={selectedId !== 'auto' || openMenu === 'model' || undefined}
+            className="om-sa-composer-top-pill"
+            data-active={isActiveEngine || undefined}
+            aria-pressed={isActiveEngine}
             disabled={disabled}
           >
-            <span className="om-sa-mode-param-avatar" aria-hidden="true">
-              {selectedModel || defaultRouteModel ? (
+            {displayModel ? (
+              <span className="om-sa-mode-param-avatar" aria-hidden="true">
                 <ModelAvatar
-                  name={triggerLabel}
-                  modelId={selectedModel?.modelId ?? defaultRouteModel?.modelId ?? triggerLabel}
-                  provider={{ id: triggerProvider, custom: false }}
+                  name={displayModel.label}
+                  modelId={displayModel.modelId}
+                  provider={{ id: displayModel.provider, custom: false }}
                 />
-              ) : (
-                <RemixIcon name="sparkling-line" size={13} />
-              )}
-            </span>
-            <span className="om-sa-mode-param-label">{triggerLabel}</span>
+              </span>
+            ) : (
+              <RemixIcon name="add-line" size={13} />
+            )}
+            <span className="om-sa-composer-top-pill-label">{label}</span>
             <RemixIcon name="arrow-down-s-line" size={14} />
           </Button>
         }
       >
         <div className="om-sa-mode-menu">
           <div className="om-sa-mode-menu-head">
-            <span className="om-sa-popover-label">{modalityLabel}</span>
-            <span className="om-sa-mode-menu-count">{modalityModels.length}</span>
+            <span className="om-sa-popover-label">{title}</span>
+            <span className="om-sa-mode-menu-count">{list.length}</span>
           </div>
-          <div className="om-sa-mode-model-list" role="listbox" aria-label={modalityLabel}>
+          <div className="om-sa-mode-model-list" role="listbox" aria-label={title}>
             <Button
               variant="plain"
               type="button"
               role="option"
-              aria-selected={selectedId === 'auto'}
-              data-active={selectedId === 'auto' || undefined}
+              aria-selected={isActiveEngine && selectedId === 'auto'}
+              data-active={(isActiveEngine && selectedId === 'auto') || undefined}
               className="om-sa-mode-model-row"
               onClick={() => {
                 onSelect('auto');
@@ -363,11 +375,11 @@ export function ModeComposerControls({
                 <strong>{t('Auto (Recommended)')}</strong>
                 <span>{defaultRouteModel ? `${t('Uses')} ${defaultRouteModel.label}` : t('Pick best configured model automatically')}</span>
               </span>
-              {selectedId === 'auto' && <RemixIcon name="check-line" size={15} />}
+              {isActiveEngine && selectedId === 'auto' && <RemixIcon name="check-line" size={15} />}
             </Button>
 
-            {modalityModels.map(model => {
-              const isSelected = selectedId === model.id;
+            {list.map(model => {
+              const isSelected = isActiveEngine && selectedId === model.id;
               const ready = providerReady(providers, model.provider);
               return (
                 <Button
@@ -398,7 +410,7 @@ export function ModeComposerControls({
               );
             })}
 
-            {modalityModels.length === 0 && (
+            {list.length === 0 && (
               <div className="om-sa-model-unavailable">
                 <p className="om-muted">{t('No configured models yet. Connect a provider in Settings.')}</p>
               </div>
@@ -424,96 +436,216 @@ export function ModeComposerControls({
     );
   };
 
-  if (modeId === 'image') {
-    const aspectSummary = options.imageAspect === 'auto' ? t('Auto') : options.imageAspect;
-    const countSummary = options.imageCount > 1 ? ` · ${options.imageCount}×` : '';
-    const qualitySummary = options.imageQuality === 'high' ? ' · 2K' : '';
+  if (modeId === 'motion' || modeId === 'media') {
+    const isVideoActive = modeId === 'motion'
+      ? options.motionEngine === 'video-model'
+      : options.mediaSubMode === 'video';
+    const isMotionActive = modeId === 'motion'
+      ? options.motionEngine === 'motion'
+      : options.mediaSubMode === 'motion';
+    const isAudioActive = modeId === 'media' && options.mediaSubMode === 'audio';
 
     return (
-      <div className="om-sa-mode-controls" role="group" aria-label={t('Image options')}>
-        {renderMediaModelSelector(options.imageModelId, id => onChange({ imageModelId: id }), t('Image model'))}
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Video generation options')}>
+        {renderFloatingModelPill({
+          menuKey: 'video-model',
+          modality: 'video',
+          selectedId: options.videoModelId,
+          isActiveEngine: isVideoActive,
+          fallbackLabel: t('AI Video model'),
+          title: t('Video model'),
+          onSelect: id => {
+            if (modeId === 'motion') {
+              onChange({ motionEngine: 'video-model', videoModelId: id });
+            } else {
+              onChange({ mediaSubMode: 'video', videoModelId: id });
+            }
+          },
+        })}
 
+        <Button
+          variant="plain"
+          type="button"
+          className="om-sa-composer-top-pill"
+          data-active={isMotionActive || undefined}
+          aria-pressed={isMotionActive}
+          disabled={disabled}
+          onClick={() => {
+            setOpenMenu(null);
+            if (modeId === 'motion') onChange({ motionEngine: 'motion' });
+            else onChange({ mediaSubMode: 'motion' });
+          }}
+        >
+          <RemixIcon name={isMotionActive ? 'check-line' : 'add-line'} size={13} />
+          <span>{t('Motion graphics')}</span>
+        </Button>
+
+        {modeId === 'media' && renderFloatingModelPill({
+          menuKey: 'audio-model',
+          modality: 'audio',
+          selectedId: options.audioModelId,
+          isActiveEngine: isAudioActive,
+          fallbackLabel: t('Audio'),
+          title: t('Audio model'),
+          onSelect: id => onChange({ mediaSubMode: 'audio', audioModelId: id }),
+        })}
+      </div>
+    );
+  }
+
+  if (modeId === 'image') {
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Image model')}>
+        {renderFloatingModelPill({
+          menuKey: 'image-model',
+          modality: 'image',
+          selectedId: options.imageModelId,
+          isActiveEngine: true,
+          fallbackLabel: t('Image model'),
+          title: t('Image model'),
+          onSelect: id => onChange({ imageModelId: id }),
+        })}
+      </div>
+    );
+  }
+
+  if (modeId === 'website') {
+    const hasUrl = Boolean(options.webReferenceUrl.trim());
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Website references')}>
         <Popover
-          open={openMenu === 'params'}
-          onOpenChange={next => setOpenMenu(next ? 'params' : null)}
+          open={openMenu === 'import'}
+          onOpenChange={next => setOpenMenu(next ? 'import' : null)}
           side="top"
           align="start"
-          aria-label={t('Image parameters')}
-          className="om-agent-settings-popover om-sa-mode-popover"
+          aria-label={t('Import from URL or Brand Kit')}
+          className="om-sa-mode-popover"
           trigger={
             <Button
               variant="plain"
               type="button"
-              className="om-sa-mode-param-trigger"
-              data-active={openMenu === 'params' || undefined}
+              className="om-sa-composer-top-pill"
+              data-active={hasUrl || openMenu === 'import' || undefined}
               disabled={disabled}
             >
-              <RemixIcon name="layout-line" size={13} />
-              <span className="om-sa-mode-param-label">{`${aspectSummary}${qualitySummary}${countSummary}`}</span>
+              <RemixIcon name="global-line" size={13} />
+              <span className="om-sa-composer-top-pill-label">
+                {hasUrl ? options.webReferenceUrl.replace(/^https?:\/\//, '').slice(0, 26) : t('Import from…')}
+              </span>
               <RemixIcon name="arrow-down-s-line" size={14} />
             </Button>
           }
         >
           <div className="om-sa-mode-menu">
             <div className="om-sa-mode-field">
-              <span className="om-sa-popover-label">{t('Aspect ratio')}</span>
-              <div className="om-sa-popover-pills">
-                {(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2'] as const).map(ratio => (
+              <span className="om-sa-popover-label">{t('Reference website URL')}</span>
+              <div className="om-sa-mode-url-row">
+                <input
+                  type="url"
+                  className="om-sa-mode-url-input"
+                  value={urlDraft}
+                  placeholder="https://example.com"
+                  onChange={event => setUrlDraft(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      onChange({ webReferenceUrl: urlDraft.trim() });
+                      setOpenMenu(null);
+                    }
+                  }}
+                />
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  data-active
+                  onClick={() => {
+                    onChange({ webReferenceUrl: urlDraft.trim() });
+                    setOpenMenu(null);
+                  }}
+                >
+                  {t('Apply')}
+                </Button>
+                {hasUrl && (
                   <Button
-                    key={ratio}
                     variant="plain"
                     type="button"
                     className="om-sa-popover-pill"
-                    aria-pressed={options.imageAspect === ratio}
-                    data-active={options.imageAspect === ratio || undefined}
-                    onClick={() => onChange({ imageAspect: ratio })}
+                    onClick={() => {
+                      setUrlDraft('');
+                      onChange({ webReferenceUrl: '' });
+                      setOpenMenu(null);
+                    }}
                   >
-                    {ratio === 'auto' ? t('Auto') : ratio}
+                    {t('Clear')}
                   </Button>
-                ))}
+                )}
               </div>
             </div>
-            <div className="om-sa-mode-field">
-              <span className="om-sa-popover-label">{t('Quality')}</span>
-              <div className="om-sa-popover-pills">
-                {(['standard', 'high'] as const).map(q => (
-                  <Button
-                    key={q}
-                    variant="plain"
-                    type="button"
-                    className="om-sa-popover-pill"
-                    aria-pressed={options.imageQuality === q}
-                    data-active={options.imageQuality === q || undefined}
-                    onClick={() => onChange({ imageQuality: q })}
-                  >
-                    {q === 'high' ? t('High · 2K') : t('Standard')}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <div className="om-sa-mode-field">
-              <span className="om-sa-popover-label">{t('Variations')}</span>
-              <div className="om-sa-popover-pills">
-                {([1, 2, 4] as const).map(count => (
-                  <Button
-                    key={count}
-                    variant="plain"
-                    type="button"
-                    className="om-sa-popover-pill"
-                    aria-pressed={options.imageCount === count}
-                    data-active={options.imageCount === count || undefined}
-                    onClick={() => onChange({ imageCount: count })}
-                  >
-                    {`${count} ${count === 1 ? t('image') : t('images')}`}
-                  </Button>
-                ))}
-              </div>
+            <div className="om-sa-model-menu-foot">
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-popover-link-row"
+                onClick={() => {
+                  setOpenMenu(null);
+                  onOpenResourcePicker('brand-kit');
+                }}
+              >
+                <RemixIcon name="palette-line" size={15} />
+                <span>{t('Attach Brand Kit')}</span>
+                <RemixIcon name="arrow-right-up-line" size={14} />
+              </Button>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-popover-link-row"
+                onClick={() => {
+                  setOpenMenu(null);
+                  onOpenResourcePicker('design-template');
+                }}
+              >
+                <RemixIcon name="layout-line" size={15} />
+                <span>{t('Attach Design Template')}</span>
+                <RemixIcon name="arrow-right-up-line" size={14} />
+              </Button>
             </div>
           </div>
         </Popover>
       </div>
     );
   }
+
+  return null;
+}
+
+/**
+ * Compact single-pill parameter control inside the composer's bottom toolbar.
+ * Keeps the toolbar airy and strictly single-row alongside Mode pill and Agent selector.
+ */
+export function ModeComposerControls({
+  active = true,
+  modeId,
+  options,
+  disabled,
+  onChange,
+}: {
+  active?: boolean;
+  modeId: SuperAgentCreationModeId;
+  options: ModeComposerOptions;
+  disabled?: boolean;
+  onChange: (patch: Partial<ModeComposerOptions>) => void;
+}) {
+  const { t } = useI18n();
+  const [openMenu, setOpenMenu] = useState<'params' | null>(null);
+
+  useEffect(() => {
+    if (!active) setOpenMenu(null);
+  }, [active]);
+
+  useEffect(() => {
+    setOpenMenu(null);
+  }, [modeId]);
 
   const renderVideoParamsPopover = () => {
     const paramSummary = `${options.videoAspect} · ${options.videoDuration} · ${t(VIDEO_SPEED_LABELS[options.videoSpeed])}`;
@@ -524,7 +656,7 @@ export function ModeComposerControls({
         side="top"
         align="start"
         aria-label={t('Video parameters')}
-        className="om-agent-settings-popover om-sa-mode-popover"
+        className="om-sa-mode-popover"
         trigger={
           <Button
             variant="plain"
@@ -607,8 +739,8 @@ export function ModeComposerControls({
         onOpenChange={next => setOpenMenu(next ? 'params' : null)}
         side="top"
         align="start"
-        aria-label={t('Motion Video parameters')}
-        className="om-agent-settings-popover om-sa-mode-popover"
+        aria-label={t('Motion graphics parameters')}
+        className="om-sa-mode-popover"
         trigger={
           <Button
             variant="plain"
@@ -698,91 +830,109 @@ export function ModeComposerControls({
     );
   };
 
-  if (modeId === 'media') {
-    const subMode = options.mediaSubMode;
-    const subModeMeta = subMode === 'motion'
-      ? { icon: 'code-s-slash-line', label: t('Motion Code') }
-      : subMode === 'audio'
-        ? { icon: 'music-2-line', label: t('Audio') }
-        : { icon: 'clapperboard-line', label: t('AI Video') };
-    const audioSummary = `${t(AUDIO_TYPE_LABELS[options.audioType])} · ${options.audioDuration}`;
+  if (modeId === 'image') {
+    const aspectSummary = options.imageAspect === 'auto' ? t('Auto') : options.imageAspect;
+    const countSummary = options.imageCount > 1 ? ` · ${options.imageCount}×` : '';
+    const qualitySummary = options.imageQuality === 'high' ? ' · 2K' : '';
 
     return (
-      <div className="om-sa-mode-controls" role="group" aria-label={t('Cinema & Audio options')}>
+      <div className="om-sa-mode-controls" role="group" aria-label={t('Image options')}>
         <Popover
-          open={openMenu === 'pipeline'}
-          onOpenChange={next => setOpenMenu(next ? 'pipeline' : null)}
+          open={openMenu === 'params'}
+          onOpenChange={next => setOpenMenu(next ? 'params' : null)}
           side="top"
           align="start"
-          aria-label={t('Video or audio pipeline')}
-          className="om-agent-settings-popover om-sa-mode-popover"
+          aria-label={t('Image parameters')}
+          className="om-sa-mode-popover"
           trigger={
             <Button
               variant="plain"
               type="button"
               className="om-sa-mode-param-trigger"
-              data-active={openMenu === 'pipeline' || undefined}
+              data-active={openMenu === 'params' || undefined}
               disabled={disabled}
             >
-              <RemixIcon name={subModeMeta.icon} size={13} />
-              <span className="om-sa-mode-param-label">{subModeMeta.label}</span>
+              <RemixIcon name="layout-line" size={13} />
+              <span className="om-sa-mode-param-label">{`${aspectSummary}${qualitySummary}${countSummary}`}</span>
               <RemixIcon name="arrow-down-s-line" size={14} />
             </Button>
           }
         >
           <div className="om-sa-mode-menu">
-            <span className="om-sa-popover-label">{t('Generation pipeline')}</span>
-            <div className="om-sa-mode-model-list" role="listbox" aria-label={t('Generation pipeline')}>
-              {(
-                [
-                  { id: 'video', icon: 'clapperboard-line', title: t('AI Video (Models)'), desc: t('Generate cinema shots with Seedance, Veo, or configured video models') },
-                  { id: 'motion', icon: 'code-s-slash-line', title: t('Motion Video (Code)'), desc: t('Build editable HyperFrames HTML & GSAP timeline animations') },
-                  { id: 'audio', icon: 'music-2-line', title: t('Audio & Sound'), desc: t('Compose music, narration voiceovers, or sound effects') },
-                ] as const
-              ).map(entry => {
-                const isSelected = subMode === entry.id;
-                return (
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Aspect ratio')}</span>
+              <div className="om-sa-popover-pills">
+                {(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2'] as const).map(ratio => (
                   <Button
-                    key={entry.id}
+                    key={ratio}
                     variant="plain"
                     type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    data-active={isSelected || undefined}
-                    className="om-sa-mode-model-row"
-                    onClick={() => {
-                      onChange({ mediaSubMode: entry.id });
-                      setOpenMenu(null);
-                    }}
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.imageAspect === ratio}
+                    data-active={options.imageAspect === ratio || undefined}
+                    onClick={() => onChange({ imageAspect: ratio })}
                   >
-                    <span className="om-sa-mode-model-avatar" aria-hidden="true">
-                      <RemixIcon name={entry.icon} size={14} />
-                    </span>
-                    <span className="om-sa-mode-model-copy">
-                      <strong>{entry.title}</strong>
-                      <span>{entry.desc}</span>
-                    </span>
-                    {isSelected && <RemixIcon name="check-line" size={15} />}
+                    {ratio === 'auto' ? t('Auto') : ratio}
                   </Button>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Quality')}</span>
+              <div className="om-sa-popover-pills">
+                {(['standard', 'high'] as const).map(q => (
+                  <Button
+                    key={q}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.imageQuality === q}
+                    data-active={options.imageQuality === q || undefined}
+                    onClick={() => onChange({ imageQuality: q })}
+                  >
+                    {q === 'high' ? t('High · 2K') : t('Standard')}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Variations')}</span>
+              <div className="om-sa-popover-pills">
+                {([1, 2, 4] as const).map(count => (
+                  <Button
+                    key={count}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.imageCount === count}
+                    data-active={options.imageCount === count || undefined}
+                    onClick={() => onChange({ imageCount: count })}
+                  >
+                    {`${count} ${count === 1 ? t('image') : t('images')}`}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
         </Popover>
+      </div>
+    );
+  }
 
-        {subMode === 'video' && renderMediaModelSelector(options.videoModelId, id => onChange({ videoModelId: id }), t('Video model'))}
-        {subMode === 'audio' && renderMediaModelSelector(options.audioModelId, id => onChange({ audioModelId: id }), t('Audio model'))}
-
-        {subMode === 'video' && renderVideoParamsPopover()}
-        {subMode === 'motion' && renderMotionParamsPopover()}
-        {subMode === 'audio' && (
+  if (modeId === 'media') {
+    const audioSummary = `${t(AUDIO_TYPE_LABELS[options.audioType])} · ${options.audioDuration}`;
+    return (
+      <div className="om-sa-mode-controls" role="group" aria-label={t('Cinema & Audio options')}>
+        {options.mediaSubMode === 'video' && renderVideoParamsPopover()}
+        {options.mediaSubMode === 'motion' && renderMotionParamsPopover()}
+        {options.mediaSubMode === 'audio' && (
           <Popover
             open={openMenu === 'params'}
             onOpenChange={next => setOpenMenu(next ? 'params' : null)}
             side="top"
             align="start"
             aria-label={t('Audio parameters')}
-            className="om-agent-settings-popover om-sa-mode-popover"
+            className="om-sa-mode-popover"
             trigger={
               <Button
                 variant="plain"
@@ -842,77 +992,15 @@ export function ModeComposerControls({
   }
 
   if (modeId === 'motion') {
-    const isCodeMotion = options.motionEngine === 'motion';
     return (
-      <div className="om-sa-mode-controls" role="group" aria-label={t('Motion Video options')}>
-        <Popover
-          open={openMenu === 'pipeline'}
-          onOpenChange={next => setOpenMenu(next ? 'pipeline' : null)}
-          side="top"
-          align="start"
-          aria-label={t('Motion or AI video engine')}
-          className="om-agent-settings-popover om-sa-mode-popover"
-          trigger={
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-mode-param-trigger"
-              data-active={openMenu === 'pipeline' || !isCodeMotion || undefined}
-              disabled={disabled}
-            >
-              <RemixIcon name={isCodeMotion ? 'code-s-slash-line' : 'clapperboard-line'} size={13} />
-              <span className="om-sa-mode-param-label">{isCodeMotion ? t('Motion Code') : t('AI Video')}</span>
-              <RemixIcon name="arrow-down-s-line" size={14} />
-            </Button>
-          }
-        >
-          <div className="om-sa-mode-menu">
-            <span className="om-sa-popover-label">{t('Video generation engine')}</span>
-            <div className="om-sa-mode-model-list" role="listbox" aria-label={t('Video generation engine')}>
-              {(
-                [
-                  { id: 'motion', icon: 'code-s-slash-line', title: t('Motion Video (Code)'), desc: t('Editable HyperFrames HTML & GSAP timeline film') },
-                  { id: 'video-model', icon: 'clapperboard-line', title: t('AI Video (Seedance / Models)'), desc: t('Generate video clips directly with configured AI video models') },
-                ] as const
-              ).map(entry => {
-                const isSelected = options.motionEngine === entry.id;
-                return (
-                  <Button
-                    key={entry.id}
-                    variant="plain"
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    data-active={isSelected || undefined}
-                    className="om-sa-mode-model-row"
-                    onClick={() => {
-                      onChange({ motionEngine: entry.id });
-                      setOpenMenu(null);
-                    }}
-                  >
-                    <span className="om-sa-mode-model-avatar" aria-hidden="true">
-                      <RemixIcon name={entry.icon} size={14} />
-                    </span>
-                    <span className="om-sa-mode-model-copy">
-                      <strong>{entry.title}</strong>
-                      <span>{entry.desc}</span>
-                    </span>
-                    {isSelected && <RemixIcon name="check-line" size={15} />}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        </Popover>
-
-        {!isCodeMotion && renderMediaModelSelector(options.videoModelId, id => onChange({ videoModelId: id }), t('Video model'))}
-        {isCodeMotion ? renderMotionParamsPopover() : renderVideoParamsPopover()}
+      <div className="om-sa-mode-controls" role="group" aria-label={t('Motion graphics options')}>
+        {options.motionEngine === 'motion' ? renderMotionParamsPopover() : renderVideoParamsPopover()}
       </div>
     );
   }
 
   if (modeId === 'deck') {
-    const slidesLabel = options.deckSlides === 'auto' ? t('Auto length') : `${options.deckSlides} ${t('slides')}`;
+    const slidesLabel = options.deckSlides === 'auto' ? t('Auto') : options.deckSlides;
     return (
       <div className="om-sa-mode-controls" role="group" aria-label={t('Slides & Docs options')}>
         <Popover
@@ -921,7 +1009,7 @@ export function ModeComposerControls({
           side="top"
           align="start"
           aria-label={t('Deck format & length')}
-          className="om-agent-settings-popover om-sa-mode-popover"
+          className="om-sa-mode-popover"
           trigger={
             <Button
               variant="plain"
@@ -998,7 +1086,6 @@ export function ModeComposerControls({
   }
 
   if (modeId === 'website') {
-    const hasUrl = Boolean(options.webReferenceUrl.trim());
     return (
       <div className="om-sa-mode-controls" role="group" aria-label={t('Website & App options')}>
         <Popover
@@ -1007,7 +1094,7 @@ export function ModeComposerControls({
           side="top"
           align="start"
           aria-label={t('Target viewport')}
-          className="om-agent-settings-popover om-sa-mode-popover"
+          className="om-sa-mode-popover"
           trigger={
             <Button
               variant="plain"
@@ -1046,106 +1133,6 @@ export function ModeComposerControls({
             </div>
           </div>
         </Popover>
-
-        <Popover
-          open={openMenu === 'import'}
-          onOpenChange={next => setOpenMenu(next ? 'import' : null)}
-          side="top"
-          align="start"
-          aria-label={t('Import from URL or Brand Kit')}
-          className="om-agent-settings-popover om-sa-mode-popover"
-          trigger={
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-mode-param-trigger"
-              data-active={hasUrl || openMenu === 'import' || undefined}
-              disabled={disabled}
-            >
-              <RemixIcon name="global-line" size={13} />
-              <span className="om-sa-mode-param-label">
-                {hasUrl ? options.webReferenceUrl.replace(/^https?:\/\//, '').slice(0, 22) : t('Import from…')}
-              </span>
-              <RemixIcon name="arrow-down-s-line" size={14} />
-            </Button>
-          }
-        >
-          <div className="om-sa-mode-menu">
-            <div className="om-sa-mode-field">
-              <span className="om-sa-popover-label">{t('Reference website URL')}</span>
-              <div className="om-sa-mode-url-row">
-                <input
-                  type="url"
-                  className="om-sa-mode-url-input"
-                  value={urlDraft}
-                  placeholder="https://example.com"
-                  onChange={event => setUrlDraft(event.target.value)}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      onChange({ webReferenceUrl: urlDraft.trim() });
-                      setOpenMenu(null);
-                    }
-                  }}
-                />
-                <Button
-                  variant="plain"
-                  type="button"
-                  className="om-sa-popover-pill"
-                  data-active
-                  onClick={() => {
-                    onChange({ webReferenceUrl: urlDraft.trim() });
-                    setOpenMenu(null);
-                  }}
-                >
-                  {t('Apply')}
-                </Button>
-                {hasUrl && (
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-popover-pill"
-                    onClick={() => {
-                      setUrlDraft('');
-                      onChange({ webReferenceUrl: '' });
-                      setOpenMenu(null);
-                    }}
-                  >
-                    {t('Clear')}
-                  </Button>
-                )}
-              </div>
-            </div>
-            <div className="om-sa-model-menu-foot">
-              <Button
-                variant="plain"
-                type="button"
-                className="om-sa-popover-link-row"
-                onClick={() => {
-                  setOpenMenu(null);
-                  onOpenResourcePicker('brand-kit');
-                }}
-              >
-                <RemixIcon name="palette-line" size={15} />
-                <span>{t('Attach Brand Kit')}</span>
-                <RemixIcon name="arrow-right-up-line" size={14} />
-              </Button>
-              <Button
-                variant="plain"
-                type="button"
-                className="om-sa-popover-link-row"
-                onClick={() => {
-                  setOpenMenu(null);
-                  onOpenResourcePicker('design-template');
-                }}
-              >
-                <RemixIcon name="layout-line" size={15} />
-                <span>{t('Attach Design Template')}</span>
-                <RemixIcon name="arrow-right-up-line" size={14} />
-              </Button>
-            </div>
-          </div>
-        </Popover>
       </div>
     );
   }
@@ -1160,7 +1147,7 @@ export function ModeComposerControls({
         side="top"
         align="start"
         aria-label={t('Game engine & viewport')}
-        className="om-agent-settings-popover om-sa-mode-popover"
+        className="om-sa-mode-popover"
         trigger={
           <Button
             variant="plain"

@@ -496,8 +496,10 @@ export function ArtifactBrowserPane({
   const [addressEditing, setAddressEditing] = useState(false);
   const [newTabQuery, setNewTabQuery] = useState('');
   const [newTabFilter, setNewTabFilter] = useState<'all' | 'web-apps' | 'motion' | 'media' | 'brand-kit' | 'browser'>('all');
+  const [pendingWebUrl, setPendingWebUrl] = useState<string | null>(null);
   const webRef = useRef<WebBrowserHandle>(null);
   const addressInputRef = useRef<HTMLInputElement>(null);
+  const newTabInputRef = useRef<HTMLInputElement>(null);
 
   const openTabs = useMemo(() => {
     const byId = new Map(artifacts.map(item => [item.id, item]));
@@ -514,6 +516,7 @@ export function ArtifactBrowserPane({
   useEffect(() => {
     setWebState(null);
     setAddressEditing(false);
+    setPendingWebUrl(null);
     if (!activeArtifact) {
       setAddressDraft('');
       return;
@@ -525,6 +528,20 @@ export function ArtifactBrowserPane({
       else setViewport('desktop');
     }
   }, [activeArtifact?.id]);
+
+  useEffect(() => {
+    if (!pendingWebUrl) return;
+    const timer = setTimeout(() => setPendingWebUrl(null), 10_000);
+    return () => clearTimeout(timer);
+  }, [pendingWebUrl]);
+
+  const navigateWeb = (targetUrl: string) => {
+    setPendingWebUrl(targetUrl);
+    setAddressDraft(targetUrl);
+    onOpenWebUrl(targetUrl);
+  };
+
+  const webLoading = Boolean(pendingWebUrl) || Boolean(activeArtifact?.kind === 'web' && webState?.loading);
 
   useEffect(() => {
     if (activeArtifact?.kind === 'web' && webState?.url && !addressEditing) {
@@ -655,10 +672,16 @@ export function ArtifactBrowserPane({
           )}
           <Tooltip label={t('New tab')}>
             <IconButton
-              variant="ghost"
-              className="motion-icon-button om-sa-new-tab-btn"
+              variant="plain"
+              className="om-sa-new-tab-btn"
               aria-label={t('New tab')}
-              onClick={onNewTab}
+              disabled={showNewTab}
+              onClick={event => {
+                event.currentTarget.blur();
+                setPendingWebUrl(null);
+                onNewTab();
+                requestAnimationFrame(() => newTabInputRef.current?.focus());
+              }}
               icon={<RemixIcon name="add-line" size={15} />}
             />
           </Tooltip>
@@ -730,7 +753,7 @@ export function ArtifactBrowserPane({
               const normalized = normalizeBrowserAddress(trimmed);
               setAddressEditing(false);
               addressInputRef.current?.blur();
-              onOpenWebUrl(normalized ?? searchWebUrl(trimmed));
+              navigateWeb(normalized ?? searchWebUrl(trimmed));
             }}
           >
             <RemixIcon name={activeArtifact ? artifactTabIcon(activeArtifact.kind) : 'search-line'} size={14} />
@@ -766,7 +789,7 @@ export function ArtifactBrowserPane({
                     onClick={() => {
                       setAddressEditing(false);
                       addressInputRef.current?.blur();
-                      onOpenWebUrl(normalized);
+                      navigateWeb(normalized);
                     }}
                   >
                     <RemixIcon name="global-line" size={15} />
@@ -782,7 +805,7 @@ export function ArtifactBrowserPane({
                     onClick={() => {
                       setAddressEditing(false);
                       addressInputRef.current?.blur();
-                      onOpenWebUrl(searchWebUrl(trimmed));
+                      navigateWeb(searchWebUrl(trimmed));
                     }}
                   >
                     <RemixIcon name="search-line" size={15} />
@@ -948,10 +971,28 @@ export function ArtifactBrowserPane({
             </Tooltip>
           )}
         </div>
+        {webLoading && <div className="om-sa-viewer-progress" role="progressbar" aria-label={t('Loading…')} />}
       </div>
 
       <div className="om-sa-viewer-stage">
-        {showNewTab || !activeArtifact ? (
+        {pendingWebUrl && (showNewTab || !activeArtifact) ? (
+          <div className="om-sa-web-skeleton om-sa-web-skeleton-enter" role="status" aria-label={t('Loading…')}>
+            <div className="om-sa-web-skeleton-head">
+              <Skeleton style={{ width: 120, height: 18 }} />
+              <Skeleton style={{ width: '42%', height: 28, borderRadius: 999 }} />
+            </div>
+            <Skeleton style={{ width: '100%', height: 180, borderRadius: 12 }} />
+            <div className="om-sa-web-skeleton-grid">
+              <Skeleton style={{ width: '100%', height: 96, borderRadius: 10 }} />
+              <Skeleton style={{ width: '100%', height: 96, borderRadius: 10 }} />
+            </div>
+            <div className="om-sa-web-skeleton-lines">
+              <Skeleton style={{ width: '68%', height: 14 }} />
+              <Skeleton style={{ width: '88%', height: 14 }} />
+              <Skeleton style={{ width: '54%', height: 14 }} />
+            </div>
+          </div>
+        ) : showNewTab || !activeArtifact ? (
           <div className="om-sa-newtab">
             <div className="om-sa-newtab-hero">
               <form
@@ -962,11 +1003,12 @@ export function ArtifactBrowserPane({
                   if (!trimmed) return;
                   const normalized = normalizeBrowserAddress(trimmed);
                   setNewTabQuery('');
-                  onOpenWebUrl(normalized ?? searchWebUrl(trimmed));
+                  navigateWeb(normalized ?? searchWebUrl(trimmed));
                 }}
               >
                 <RemixIcon name="search-line" size={16} />
                 <input
+                  ref={newTabInputRef}
                   value={newTabQuery}
                   onChange={event => setNewTabQuery(event.target.value)}
                   placeholder={t('Search web, artifacts, or enter a URL')}
@@ -983,7 +1025,7 @@ export function ArtifactBrowserPane({
                     const trimmed = newTabQuery.trim();
                     const normalized = normalizeBrowserAddress(trimmed);
                     setNewTabQuery('');
-                    onOpenWebUrl(normalized ?? searchWebUrl(trimmed));
+                    navigateWeb(normalized ?? searchWebUrl(trimmed));
                   }}
                 >
                   <RemixIcon name={normalizeBrowserAddress(newTabQuery) ? 'global-line' : 'search-line'} size={15} />

@@ -223,12 +223,21 @@ function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
   if (category === 'relight') return relight;
   if (category === 'character') return char;
 
-  const seen = new Set<string>();
-  return [...gpt, ...t2i, ...edit, ...bg, ...relight, ...char, ...cinemaStills].filter(item => {
-    if (seen.has(item.title)) return false;
-    seen.add(item.title);
-    return true;
-  });
+  const seenTitles = new Set<string>();
+  const seenPosters = new Set<string>();
+  const primary: CuratedShowcaseCard[] = [];
+  const secondary: CuratedShowcaseCard[] = [];
+  for (const item of [...gpt, ...t2i, ...edit, ...bg, ...relight, ...char, ...cinemaStills]) {
+    if (seenTitles.has(item.title)) continue;
+    seenTitles.add(item.title);
+    if (item.poster && !seenPosters.has(item.poster)) {
+      seenPosters.add(item.poster);
+      primary.push(item);
+    } else {
+      secondary.push(item);
+    }
+  }
+  return [...primary, ...secondary];
 }
 
 function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedShowcaseCard[] {
@@ -250,7 +259,7 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
     posterPosition: item.example.posterPosition,
     prompt: item.example.prompt,
   }));
-  const videoScenes: CuratedShowcaseCard[] = (['video-camera-control', 'video-multi-shot', 'video-native-audio'] as const).flatMap(sceneKey =>
+  const videoScenes: CuratedShowcaseCard[] = (['video-camera-control', 'video-multi-shot'] as const).flatMap(sceneKey =>
     sceneExamples[sceneKey].map((ex, idx) => ({
       id: `${sceneKey}-${idx}`,
       title: ex.title,
@@ -278,12 +287,21 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
   ];
 
   const dedupe = (list: CuratedShowcaseCard[]) => {
-    const seen = new Set<string>();
-    return list.filter(item => {
-      if (seen.has(item.title)) return false;
-      seen.add(item.title);
-      return true;
-    });
+    const seenTitles = new Set<string>();
+    const seenPosters = new Set<string>();
+    const primary: CuratedShowcaseCard[] = [];
+    const secondary: CuratedShowcaseCard[] = [];
+    for (const item of list) {
+      if (seenTitles.has(item.title)) continue;
+      seenTitles.add(item.title);
+      if (item.poster && !seenPosters.has(item.poster)) {
+        seenPosters.add(item.poster);
+        primary.push(item);
+      } else {
+        secondary.push(item);
+      }
+    }
+    return [...primary, ...secondary];
   };
 
   if (category === 'all-media') return dedupe([...cinema, ...seedance, ...videoScenes, ...audio]);
@@ -487,7 +505,7 @@ export function ModeResourceShowcase({
         return [
           { id: 'all-media', label: 'All', count: buildCinemaCardsByCategory('all-media', isZh).length },
           { id: 'ai-video', label: 'AI Video & Seedance', count: buildCinemaCardsByCategory('ai-video', isZh).length },
-          { id: 'motion-video', label: 'Motion Video (Code)', count: hasFull ? motionCatalog.length : undefined },
+          { id: 'motion-video', label: 'Motion graphics', count: hasFull ? motionCatalog.length : undefined },
           { id: 'cinema', label: 'Cinema Studio', count: cinemaTemplates.length },
           { id: 'video-scenes', label: 'Camera & multi-shot', count: buildCinemaCardsByCategory('video-scenes', isZh).length },
           { id: 'audio', label: 'Music & Sound', count: sceneExamples.music.length + sceneExamples.speech.length },

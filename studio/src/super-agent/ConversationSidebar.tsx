@@ -213,7 +213,7 @@ export function ConversationSidebar({
           onClick={onCreate}
         >
           <RemixIcon name="edit-line" size={15} />
-          <span>{t('New conversation')}</span>
+          <span>{t('New task')}</span>
         </Button>
       </div>
 
@@ -225,8 +225,8 @@ export function ConversationSidebar({
           </section>
         )}
 
-        <section className="om-sa-chat-group" aria-label={t(pinned.length > 0 ? 'Recent' : 'Conversations')}>
-          <h2 className="om-sa-chat-group-title">{t(pinned.length > 0 ? 'Recent' : 'Conversations')}</h2>
+        <section className="om-sa-chat-group" aria-label={t('Tasks')}>
+          <h2 className="om-sa-chat-group-title">{t('Tasks')}</h2>
           {loading && !conversations.length ? (
             <div className="om-sa-chat-skeletons" aria-hidden="true">
               <Skeleton style={{ width: '88%', height: 32 }} />
