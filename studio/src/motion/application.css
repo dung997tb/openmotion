@@ -680,7 +680,6 @@
 .om-account-capabilities li { display: inline-flex; align-items: center; gap: var(--motion-space-6); padding: var(--motion-space-4) var(--motion-space-12); border: 1px solid var(--motion-border-subtle); border-radius: var(--motion-radius-full); font-size: var(--motion-text-sm); }
 .om-account-capabilities svg { color: var(--motion-accent); }
 .om-account-offer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--motion-space-6); margin: 0; font-size: var(--motion-text-sm); }
-.om-account-offer svg, .om-account-offer strong { color: var(--motion-accent); }
 .om-account-offer-callout { position: relative; min-width: 0; padding: var(--motion-space-8) var(--motion-space-12); }
 .om-account-offer-callout::before {
   content: "";
