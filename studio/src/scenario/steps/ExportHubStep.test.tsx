@@ -150,4 +150,24 @@ describe('ExportHubStep', () => {
       await mounted.unmount();
     }
   });
+
+  it('shows Brief as In progress and a single calm guidance note on a fresh draft instead of warning banners', async () => {
+    const { props, mocks } = createStepProps('motion-full-chain', 'export', {
+      run: null,
+    });
+    const mounted = await mountStep(<ExportHubStep {...props} />);
+    try {
+      const briefCard = mounted.container.querySelector('[data-overview-step="brief"]')!;
+      expect(briefCard.querySelector('[data-status="in-progress"]')?.textContent).toBe('In progress');
+      expect(mounted.container.textContent).not.toContain('has not been started yet');
+      expect(mounted.container.querySelectorAll('.om-step-readiness-row')).toHaveLength(1);
+      const goBtn = Array.from(mounted.container.querySelectorAll('.om-step-readiness-row button'))
+        .find(b => b.textContent?.includes('Go to Brief')) as HTMLButtonElement;
+      expect(goBtn).toBeTruthy();
+      await act(async () => { goBtn.click(); });
+      expect(mocks.nav.selectStep).toHaveBeenCalledWith('brief');
+    } finally {
+      await mounted.unmount();
+    }
+  });
 });

@@ -1110,22 +1110,31 @@
   font-variant-numeric: tabular-nums;
 }
 
-.om-step-warnings {
+.om-step-readiness-notes {
   display: flex;
   flex-direction: column;
   gap: var(--motion-space-6);
 }
 
-.om-step-warning-row {
+.om-step-readiness-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--motion-space-8);
   padding: var(--motion-space-8) var(--motion-space-10);
-  background: var(--motion-warning-soft);
-  border: 1px solid var(--motion-warning);
+  background: var(--motion-bg);
+  border: 1px solid var(--motion-border-subtle);
   border-radius: var(--motion-radius-md);
-  color: var(--motion-warning);
+  color: var(--motion-muted);
   font-size: var(--motion-text-sm);
+}
+
+.om-step-readiness-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  min-width: 0;
 }
 
 .om-step-last-package {

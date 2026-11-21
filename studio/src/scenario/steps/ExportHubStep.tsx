@@ -1,7 +1,7 @@
 import { Button } from 'open-design-ui/button';
 import { useMemo, useState } from 'react';
-import type { ScenarioBundleReceipt } from '../../../../shared/scenario-runs';
-import type { PoolKind } from '../../../../shared/scenarios';
+import type { ScenarioBundleReceipt, ScenarioStepState } from '../../../../shared/scenario-runs';
+import type { PoolKind, ScenarioStepDefinition } from '../../../../shared/scenarios';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { FilterChip } from '../../components/ui/FilterChip';
 import { useI18n } from '../../i18n/I18n';
@@ -22,6 +22,13 @@ import {
 } from './stepUtils';
 
 const POOL_KIND_ORDER: readonly PoolKind[] = ['image', 'video', 'audio', 'page', 'motion', 'text'];
+
+function effectiveStepStatus(
+  stepDef: ScenarioStepDefinition,
+  stepState: ScenarioStepState | undefined,
+): ScenarioStepState['status'] {
+  return stepState?.status ?? (stepDef.type === 'brief' ? 'in-progress' : 'todo');
+}
 
 export function ExportHubStep({
   scenario,
@@ -66,18 +73,20 @@ export function ExportHubStep({
     return { byKind, pinned, total: pool.items.length };
   }, [pool.items]);
 
-  // Readiness warnings
-  const warnings = useMemo(() => {
-    const list: string[] = [];
-    if (pool.items.length === 0) {
-      list.push(t('Shared asset pool is empty.'));
+  // Actionable, non-alarming readiness hints (unstarted steps are already shown in Step overview)
+  const readinessNotes = useMemo(() => {
+    const list: { key: string; text: string; stepId?: string; actionLabel?: string }[] = [];
+    if (pool.items.length === 0 && contentSteps.length > 0) {
+      const firstStep = contentSteps[0];
+      list.push({
+        key: 'empty-pool',
+        text: t('Add files, import workspace assets, or generate in any step. Everything you make lands here.'),
+        stepId: firstStep.id,
+        actionLabel: t('Go to {step}', { step: t(firstStep.title) }),
+      });
     }
     for (const stepDef of contentSteps) {
       const stepState = run?.steps[stepDef.id];
-      const status = stepState?.status ?? 'todo';
-      if (status === 'todo' && !stepDef.optional) {
-        list.push(t('{step} has not been started yet.', { step: t(stepDef.title) }));
-      }
       if (stepDef.type === 'web-page' && (stepDef.page?.mode === 'both' || stepDef.page?.mode === 'embed')) {
         const linkedId = stepState?.links.designProjectId
           ?? (stepDef.page.linkedStepId ? run?.steps[stepDef.page.linkedStepId]?.links.designProjectId : undefined);
@@ -85,7 +94,12 @@ export function ExportHubStep({
           stepState?.iterations.some(iter => iter.design && iter.inputs.length > 0),
         );
         if (linkedId && !hasEmbeddedImage) {
-          list.push(t('{step} has no embedded images.', { step: t(stepDef.title) }));
+          list.push({
+            key: `no-embed:${stepDef.id}`,
+            text: t('{step} has no embedded images.', { step: t(stepDef.title) }),
+            stepId: stepDef.id,
+            actionLabel: t('Open step'),
+          });
         }
       }
     }
@@ -188,7 +202,7 @@ export function ExportHubStep({
         return {
           id: stepDef.id,
           type: stepDef.type,
-          status: st?.status ?? 'todo',
+          status: effectiveStepStatus(stepDef, st),
           activeIterationId: st?.activeIterationId ?? null,
           iterationCount: st?.iterations.length ?? 0,
           links: st?.links ?? {},
@@ -232,7 +246,7 @@ export function ExportHubStep({
         <div className="om-step-overview-grid">
           {contentSteps.map(stepDef => {
             const st = run?.steps[stepDef.id];
-            const status = st?.status ?? 'todo';
+            const status = effectiveStepStatus(stepDef, st);
             const activeIter = st?.iterations.find(iter => iter.id === st.activeIterationId) ?? st?.iterations.at(-1);
             const outputCount = activeIter?.outputs.length ?? 0;
 
@@ -288,12 +302,23 @@ export function ExportHubStep({
             </div>
           ))}
         </div>
-        {warnings.length > 0 && (
-          <div className="om-step-warnings" role="region" aria-label={t('Readiness warnings')}>
-            {warnings.map((warning, idx) => (
-              <div key={idx} className="om-step-warning-row">
-                <RemixIcon name="alert-line" size={14} />
-                <span>{warning}</span>
+        {readinessNotes.length > 0 && (
+          <div className="om-step-readiness-notes" role="region" aria-label={t('Pool summary and readiness')}>
+            {readinessNotes.map(note => (
+              <div key={note.key} className="om-step-readiness-row">
+                <div className="om-step-readiness-copy">
+                  <RemixIcon name="information-line" size={14} />
+                  <span>{note.text}</span>
+                </div>
+                {note.stepId && note.actionLabel && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => nav.selectStep(note.stepId!)}
+                  >
+                    {note.actionLabel}
+                  </Button>
+                )}
               </div>
             ))}
           </div>
