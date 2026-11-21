@@ -1,3 +1,4 @@
+import { scanHtmlOpeningTags } from "@hyperframes/parsers";
 import type { DomEditPatchBatch } from "../../hooks/domEditCommitTypes";
 import { readTagAttribute, readTagSnippetByTarget, type PatchTarget } from "../../utils/sourcePatcher";
 import { readProjectFileContent } from "../../utils/studioFileHistory";
@@ -58,17 +59,12 @@ export async function inlineTextBatches(
   const owner = isolatedPatchTarget(binding);
   const ownerTarget: PatchTarget = binding.htmlRoot ? { selector: "html" } : { hfId: binding.hfId, id: binding.elementId };
   const source = await readFile(projectId, owner.sourceFile);
-  let raw: string | undefined;
-  if (binding.htmlRoot) {
-    raw = new DOMParser().parseFromString(source, "text/html").documentElement.getAttribute(binding.attribute) ?? undefined;
-  } else {
-    const tag = readTagSnippetByTarget(source, ownerTarget);
-    if (!tag) throw new Error("The bound variable's owner was not found.");
-    if (binding.attribute === "data-variable-values" && !readTagAttribute(tag, "data-composition-src") &&
-        !readTagAttribute(tag, "data-composition-template")) throw new Error("The variable instance has changed.");
-    raw = readTagAttribute(tag, binding.attribute);
-  }
-  const value = updatedBinding(raw, binding, text);
+  const root = binding.htmlRoot ? scanHtmlOpeningTags(source).find(tag => tag.name === "html") : undefined;
+  const tag = root ? source.slice(root.start, root.bodyEnd) : readTagSnippetByTarget(source, ownerTarget);
+  if (!tag) throw new Error("The bound variable's owner was not found.");
+  if (binding.attribute === "data-variable-values" && !readTagAttribute(tag, "data-composition-src") &&
+      !readTagAttribute(tag, "data-composition-template")) throw new Error("The variable instance has changed.");
+  const value = updatedBinding(readTagAttribute(tag, binding.attribute), binding, text);
   const patch: DomEditPatchBatch["patches"][number] = {
     target: ownerTarget, operations: [{ type: "attribute", property: binding.attribute, value }],
   };
