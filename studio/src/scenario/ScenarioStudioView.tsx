@@ -186,6 +186,12 @@ export function ScenarioStudioView({
     return () => clearInterval(id);
   }, [api, handedOffAt]);
 
+  /** Leave the studio only after the typed brief is saved, so nothing typed is lost. */
+  const leaveAfterSave = async (leave: () => void) => {
+    if (await flush()) { leave(); return; }
+    toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
+  };
+
   const missing = [{ id: 'idea', label: 'Core idea' }, ...inputFields].filter(field => !(values[field.id] ?? '').trim());
   const readyCount = deliverables.filter(step => deliverableState(run?.steps[step.id]) === 'ready').length;
 
@@ -240,6 +246,7 @@ export function ScenarioStudioView({
           rows={4}
           aria-label={t('Core idea')}
           value={values.idea ?? ''}
+          maxLength={scenario.briefFields.find(field => field.id === 'idea')?.maxLength}
           placeholder={t(scenario.briefFields.find(field => field.id === 'idea')?.placeholder ?? 'Describe what you want to create and the outcome you want.')}
           onChange={event => update({ idea: event.target.value })}
         />
@@ -288,10 +295,10 @@ export function ScenarioStudioView({
         <div className="om-studio-output-grid">
           {deliverables.map(step => (
             <DeliverableCard key={step.id} step={step} state={run?.steps[step.id]} run={run} poolById={poolById}
-              example={examples.get(step.id)} onOpen={() => onOpenStep(step.id)} />
+              example={examples.get(step.id)} onOpen={() => void leaveAfterSave(() => onOpenStep(step.id))} />
           ))}
         </div>
-        <Button variant="plain" size="sm" className="om-studio-workflow-link" icon={<RemixIcon name="route-line" size={14} />} onClick={onSwitchToManual}>
+        <Button variant="plain" size="sm" className="om-studio-workflow-link" icon={<RemixIcon name="route-line" size={14} />} onClick={() => void leaveAfterSave(onSwitchToManual)}>
           {t('Fine-tune each step')}
         </Button>
       </section>
