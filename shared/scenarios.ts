@@ -32,7 +32,7 @@ export type ScenarioBriefField = {
   options?: readonly { id: string; label: string }[];
 };
 
-export type ScenarioWorkspaceMode = 'manual' | 'agent';
+export type ScenarioWorkspaceMode = 'studio' | 'manual' | 'agent';
 
 export type ScenarioSkillRef = {
   id: string;
