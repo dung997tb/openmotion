@@ -27,7 +27,11 @@ export function readFileChangeField(payload: unknown, key: string): string | nul
 
 export function readStudioFileChangePath(payload: unknown): string | null {
   const path = readFileChangeField(payload, "path") ?? readFileChangeField(payload, "filePath");
-  return path === null ? null : normalizeStudioFileChangePath(path);
+  if (path !== null) return normalizeStudioFileChangePath(path);
+  // Cloud transactions can atomically change several files in one event.
+  const paths = asPayloadRecord(payload)?.paths;
+  if (!Array.isArray(paths) || !paths.length || !paths.every(p => typeof p === "string" && p)) return null;
+  return paths.length === 1 ? normalizeStudioFileChangePath(paths[0]) : ".";
 }
 
 export function readFileChangeAffectsPreview(payload: unknown): boolean {

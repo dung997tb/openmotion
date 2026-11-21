@@ -1007,9 +1007,16 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     // Verify HotTextCache warmed post-commit and event published with writeToken.
     const newSha = sha256Hex(updatedHtml);
     assert.equal(await h.hotTextCache.getText(newSha), updatedHtml);
-    const lastEvt = h.eventBus.published.at(-1);
-    assert.equal(lastEvt?.channel, `om:project:${h.authA.workspaceId}:${created.projectId}`);
-    assert.equal((lastEvt?.payload as { writeToken?: string }).writeToken, 'tok-abc-123');
+    const [fileEvent, historyEvent] = h.eventBus.published.slice(-2);
+    const channel = `om:project:${h.authA.workspaceId}:${created.projectId}`;
+    assert.equal(fileEvent?.channel, channel);
+    assert.equal((fileEvent?.payload as { writeToken?: string }).writeToken, 'tok-abc-123');
+    assert.equal(historyEvent?.channel, channel);
+    assert.deepEqual(historyEvent?.payload, {
+      type: 'history-changed', workspaceId: h.authA.workspaceId, projectId: created.projectId,
+      revision: committed.revision, versionId: committed.versionId, historySeq: committed.historySeq,
+      ts: (historyEvent?.payload as { ts: number }).ts,
+    });
   });
 
   it('throws VERSION_CONFLICT (409) on stale expectedRevision or expectedVersionId and rolls back tx', async () => {
@@ -1074,6 +1081,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     assert.equal(first.versionNumber, 2);
 
     // Retry with identical requestId + identical payload (even though revision moved!) -> replays cleanly.
+    const publishedBeforeReplay = h.eventBus.published.length;
     const replay = await h.files.commitChanges(h.authA, {
       projectId: created.projectId,
       ops: [{ op: 'upsert_text', path: 'notes.txt', content: 'hello world' }],
@@ -1081,6 +1089,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
       requestId: 'req-edit-001',
     });
     assert.equal(replay.replayed, true);
+    assert.equal(h.eventBus.published.length, publishedBeforeReplay);
     assert.equal(replay.versionId, first.versionId);
     assert.equal(replay.revision, first.revision);
 
