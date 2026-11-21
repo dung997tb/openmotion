@@ -18,14 +18,25 @@ export function bindPreviewLease(
   let pending = false;
   let assetLease: string | undefined;
   let renewAt = 0;
+  let expiresAt = 0;
+  let navigateOnGrant = false;
   let retryDelay = 1000;
 
-  function schedule(delay: number) {
+  // Active editors recover within a second. Suspended background viewers can spread over a longer window.
+  const recoveryDelay = () => Math.random() * (document.hidden ? 30_000 : 1000);
+
+  function schedule(delay: number, spreadIfSuspended = false) {
     renewAt = Date.now() + delay;
-    timer = setTimeout(() => void renew(), delay);
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      // Timers that were originally staggered can all run together after system sleep.
+      const now = Date.now();
+      if (spreadIfSuspended && now >= expiresAt && now - renewAt > 1000) schedule(recoveryDelay());
+      else void renew();
+    }, delay);
   }
 
-  async function renew(forceNavigation = false) {
+  async function renew() {
     if (pending || controller.signal.aborted) return;
     clearTimeout(timer);
     pending = true;
@@ -49,43 +60,58 @@ export function bindPreviewLease(
         throw new Error(`Preview authorization failed (HTTP ${response.status})`);
       }
       const grant = await response.json();
-      const ttl = Date.parse(grant.expiresAt) - Date.now();
+      const deadline = Date.parse(grant.expiresAt);
+      const ttl = deadline - Date.now();
       if (grant.previewOrigin !== origin || typeof grant.token !== "string" || !grant.token ||
           typeof grant.assetLease !== "string" || !grant.assetLease || !(ttl > 0)) {
         throw new Error("Invalid preview authorization");
       }
       if (controller.signal.aborted) return;
-      if (forceNavigation || assetLease !== grant.assetLease) {
+      if (navigateOnGrant || assetLease !== grant.assetLease) {
         const url = new URL(source.pathname, origin);
         url.search = source.search;
         url.searchParams.set("pt", grant.token);
         navigate(url);
       }
       assetLease = grant.assetLease;
+      expiresAt = deadline;
+      navigateOnGrant = false;
       retryDelay = 1000;
-      schedule(ttl - Math.min(30_000, ttl / 5));
+      // Keep at least one renewal window before expiry, and spread simultaneous viewers over another.
+      const windowMs = Math.min(30_000, ttl / 5);
+      schedule(ttl - windowMs * (1 + Math.random()), true);
     } catch (error) {
       if (controller.signal.aborted) return;
       if (!assetLease) failed(error instanceof Error ? error.message : "Preview authorization failed");
-      schedule(retryDelay);
+      schedule(retryDelay * (0.5 + Math.random() / 2));
       retryDelay = Math.min(30_000, retryDelay * 2);
     } finally {
       pending = false;
     }
   }
 
-  const wake = () => { if (!document.hidden && Date.now() >= renewAt) void renew(); };
-  const reconnect = () => { if (renewAt !== Infinity) void renew(); };
+  const wake = () => {
+    if (document.hidden || pending || renewAt === Infinity) return;
+    const now = Date.now();
+    if (now < renewAt && now < expiresAt) return;
+    // A reconnect may pull an expired lease out of a long backoff. Repeated
+    // online/visibility events must not postpone a recovery already due shortly.
+    if (renewAt > now && renewAt - now <= 1000) return;
+    schedule(recoveryDelay());
+  };
   document.addEventListener("visibilitychange", wake);
-  window.addEventListener("online", reconnect);
+  window.addEventListener("online", wake);
   void renew();
   return {
-    retry: () => renew(true),
+    retry() {
+      navigateOnGrant = true;
+      return renew();
+    },
     dispose() {
       controller.abort();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("online", reconnect);
+      window.removeEventListener("online", wake);
     },
   };
 }

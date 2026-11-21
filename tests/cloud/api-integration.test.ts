@@ -2167,6 +2167,15 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     const leaseDocument = await app.request(initial.previewUrl, { headers: previewHeaders });
     const leaseBase = (await leaseDocument.text()).match(/<base href="([^"]+)"/)?.[1];
     assert.ok(leaseBase?.includes(initial.assetLease));
+    const secondLease = await leaseRequest(projectA, true);
+    const otherDocument = await app.request(secondLease.previewUrl, {
+      headers: { ...previewHeaders, 'If-None-Match': leaseDocument.headers.get('etag')! },
+    });
+    assert.equal(otherDocument.status, 200);
+    const otherHtml = await otherDocument.text();
+    assert.ok(otherHtml.includes(secondLease.assetLease));
+    assert.ok(!otherHtml.includes(initial.assetLease));
+    assert.notEqual(otherDocument.headers.get('etag'), leaseDocument.headers.get('etag'));
     const leaseAssetUrl = new URL('index.html', leaseBase);
     assert.equal((await app.request(leaseAssetUrl.href, { headers: previewHeaders })).status, 200);
     const foreignLease = await leaseRequest(projectB, initial.assetLease);

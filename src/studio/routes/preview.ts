@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   extractWildcardPath,
   getAuthContext,
@@ -8,6 +8,7 @@ import {
 } from '../context.ts';
 import {
   buildSubCompositionHtmlInMemory,
+  createPreviewBuildBusyHtml,
   bundlePreviewInMemory,
   previewEtag,
 } from '../engine/preview-bundler.ts';
@@ -15,6 +16,7 @@ import {
   PRESIGNED_REDIRECT_HEADERS,
   formatVersionFromSha256,
 } from '../etag.ts';
+import { PreviewBuildBusy, PreviewDocumentCache } from '../engine/preview-document-cache.ts';
 import { assertTenantScopedKey } from '../../infra/storage.ts';
 import { normalizeSafeProjectPath } from '../../services/project-files-service.ts';
 
@@ -114,105 +116,78 @@ function documentSignature(revision: string, assetBase?: string): string {
 export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Variables: StudioVariables }> {
   const app = new Hono<{ Variables: StudioVariables }>();
 
-  // GET /api/projects/:id/preview — Bundled root composition HTML (pure in-memory, zero local FS).
-  app.get('/api/projects/:id/preview', async (c) => {
+  const cache = new PreviewDocumentCache();
+  const gsapBaseUrl = '/api/vendor/gsap/';
+
+  async function documentResponse(c: Context<{ Variables: StudioVariables }>, compPath?: string) {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
-    const projectId = c.req.param('id');
-    const virtual = await deps.files.loadVirtualProject(auth, projectId);
-    const capture = c.req.query('capture') === '1' || c.req.query('capture') === 'true';
+    const projectId = c.req.param('id')!;
+    const project = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+    const capture = ['1', 'true'].includes(c.req.query('capture') ?? '');
     const variables = parseVariablesQuery(c.req.query('variables'));
-    const baseHref = c.get('previewAssetBase') ?? `/api/projects/${encodeURIComponent(projectId)}/preview/`;
-
-    try {
-      const html = await bundlePreviewInMemory(virtual, {
-        runtimeUrl: '/api/runtime.js',
-        baseHref,
-        gsapBaseUrl: '/api/vendor/gsap/',
-        capture,
-        variables,
-        fontCssCache:
-          deps.hotTextCache?.getFontCss && deps.hotTextCache?.setFontCss
-            ? {
-                getFontCss: (hash) => deps.hotTextCache!.getFontCss!(hash),
-                setFontCss: (hash, css, ttl) => deps.hotTextCache!.setFontCss!(hash, css, ttl),
-              }
-            : undefined,
-        fetchImpl: deps.fetchImpl,
-        skipDeterministicFonts: deps.skipDeterministicFonts,
-      });
-
-      if (html === null) {
-        return c.json({ error: 'Entry composition index.html not found' }, 404);
-      }
-
-      const etag = previewEtag(documentSignature(virtual.revision, c.get('previewAssetBase')), {
-        gsapBaseUrl: '/api/vendor/gsap/',
-        rawVariables: c.req.query('variables'),
-        capture,
-      });
-      if (c.req.header('if-none-match')?.trim() === etag) {
-        c.header('ETag', etag);
-        return c.body(null, 304);
-      }
-
-      c.header('Content-Type', 'text/html; charset=utf-8');
-      c.header('ETag', etag);
-      c.header('Cache-Control', 'no-store');
-      return c.body(html, 200);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Preview bundling failed';
-      c.header('Content-Type', 'text/html; charset=utf-8');
-      c.header('Cache-Control', 'no-store');
-      return c.body(previewErrorHtml(msg), 500);
-    }
-  });
-
-  // GET /api/projects/:id/preview/comp/* — Standalone sub-composition preview HTML.
-  app.get('/api/projects/:id/preview/comp/*', async (c) => {
-    const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
-    const projectId = c.req.param('id');
-    const compPath = normalizeSafeProjectPath(extractWildcardPath(c.req.url, '/preview/comp/'));
-    const virtual = await deps.files.loadVirtualProject(auth, projectId);
-    const capture = c.req.query('capture') === '1' || c.req.query('capture') === 'true';
-    const variables = parseVariablesQuery(c.req.query('variables'));
-    const baseHref = c.get('previewAssetBase') ?? `/api/projects/${encodeURIComponent(projectId)}/preview/`;
-
-    const html = await buildSubCompositionHtmlInMemory(virtual, compPath, {
-      runtimeUrl: '/api/runtime.js',
-      baseHref,
-      gsapBaseUrl: '/api/vendor/gsap/',
-      capture,
-      variables,
-      fontCssCache:
-        deps.hotTextCache?.getFontCss && deps.hotTextCache?.setFontCss
-          ? {
-              getFontCss: (hash) => deps.hotTextCache!.getFontCss!(hash),
-              setFontCss: (hash, css, ttl) => deps.hotTextCache!.setFontCss!(hash, css, ttl),
-            }
-          : undefined,
-      fetchImpl: deps.fetchImpl,
-      skipDeterministicFonts: deps.skipDeterministicFonts,
+    const assetBase = c.get('previewAssetBase');
+    const origin = assetBase && new URL(assetBase).origin;
+    const localBase = `/api/projects/${encodeURIComponent(projectId)}/preview/`;
+    const variant = createHash('sha256').update(JSON.stringify([
+      auth.workspaceId, projectId, compPath, origin, capture, variables,
+    ])).digest('hex');
+    const tag = (revision: string) => previewEtag(documentSignature(revision, assetBase), {
+      gsapBaseUrl, rawVariables: variant, capture, compPath,
     });
-
-    if (html === null) {
-      return c.json({ error: 'Sub-composition not found', path: compPath }, 404);
-    }
-
-    const etag = previewEtag(documentSignature(virtual.revision, c.get('previewAssetBase')), {
-      compPath,
-      gsapBaseUrl: '/api/vendor/gsap/',
-      rawVariables: c.req.query('variables'),
-      capture,
-    });
-    if (c.req.header('if-none-match')?.trim() === etag) {
-      c.header('ETag', etag);
+    const validator = c.req.header('if-none-match');
+    const expectedTag = tag(project.revision);
+    c.header('Cache-Control', 'no-store');
+    if (validator === expectedTag && await deps.files.getFile(auth, projectId, compPath ?? 'index.html')) {
+      c.header('ETag', expectedTag);
       return c.body(null, 304);
     }
-    c.header('Content-Type', 'text/html; charset=utf-8');
-    c.header('ETag', etag);
-    c.header('Cache-Control', 'no-store');
-    return c.body(html, 200);
-  });
+
+    try {
+      const doc = await cache.get(variant + project.revision, project.revision, async () => {
+        const virtual = await deps.files.loadVirtualProject(auth, projectId);
+        // The content-derived base has the same path depth as the live base. Relative
+        // author base tags and root import maps resolve normally without a user grant.
+        const templateBase = origin
+          ? `${origin}${localBase}~assets/${variant}-${virtual.revision}/`
+          : localBase;
+        const options = {
+          runtimeUrl: '/api/runtime.js', baseHref: templateBase, gsapBaseUrl, capture, variables,
+          fontCssCache: deps.hotTextCache?.getFontCss && deps.hotTextCache.setFontCss ? {
+            getFontCss: deps.hotTextCache.getFontCss.bind(deps.hotTextCache),
+            setFontCss: deps.hotTextCache.setFontCss.bind(deps.hotTextCache),
+          } : undefined,
+          fetchImpl: deps.fetchImpl,
+          skipDeterministicFonts: deps.skipDeterministicFonts,
+        };
+        const html = compPath === undefined
+          ? await bundlePreviewInMemory(virtual, options)
+          : await buildSubCompositionHtmlInMemory(virtual, compPath, options);
+        return html === null ? null : { html, templateBase, revision: virtual.revision };
+      });
+      if (!doc) {
+        return c.json(compPath === undefined
+          ? { error: 'Entry composition index.html not found' }
+          : { error: 'Sub-composition not found', path: compPath }, 404);
+      }
+      c.header('ETag', tag(doc.revision));
+      c.header('Content-Type', 'text/html; charset=utf-8');
+      return c.body(assetBase ? doc.html.replaceAll(doc.templateBase, () => assetBase) : doc.html, 200);
+    } catch (error) {
+      if (error instanceof PreviewBuildBusy) {
+        const retryAfterSeconds = 1;
+        c.header('Retry-After', String(retryAfterSeconds));
+        if (assetBase) return c.html(createPreviewBuildBusyHtml(projectId, retryAfterSeconds), 503);
+        return c.json({ error: 'Preview builders are busy.' }, 503);
+      }
+      if (compPath !== undefined) throw error;
+      c.header('Content-Type', 'text/html; charset=utf-8');
+      return c.body(previewErrorHtml(error instanceof Error ? error.message : 'Preview bundling failed'), 500);
+    }
+  }
+
+  app.get('/api/projects/:id/preview', c => documentResponse(c));
+  app.get('/api/projects/:id/preview/comp/*', c => documentResponse(c,
+    normalizeSafeProjectPath(extractWildcardPath(c.req.url, '/preview/comp/'))));
 
   // GET & HEAD /api/projects/:id/preview/*
   // Note: Hono v4 dispatches HEAD requests through GET handlers; check `c.req.method === 'HEAD'`

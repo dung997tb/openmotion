@@ -14,9 +14,9 @@ interface Drag {
   startX: number;
   startY: number;
   frame: DOMRect;
-  moved: boolean;
   finishing: boolean;
   bounds?: Box;
+  offset?: { x: number; y: number };
 }
 
 interface DragResult {
@@ -79,6 +79,11 @@ export function IsolatedCanvasOverlay() {
     cancel();
   }, [projectId, select, writeBlockedReason, cancel]);
 
+  function showBounds(active: Drag) {
+    if (active.bounds) setBox({ ...active.bounds,
+      x: active.bounds.x + (active.offset?.x ?? 0), y: active.bounds.y + (active.offset?.y ?? 0) });
+  }
+
   function begin(event: PointerEvent<HTMLDivElement>) {
     const iframe = previewIframeRef.current;
     if (!iframe || drag.current || event.button !== 0 || !event.isPrimary) return;
@@ -93,7 +98,7 @@ export function IsolatedCanvasOverlay() {
       observedFrame.current = iframe;
       iframe.addEventListener("load", cancel);
     }
-    const active: Drag = { pointer: event.pointerId, gestureId: crypto.randomUUID(), adapter, frame, startX, startY, moved: false, finishing: false };
+    const active: Drag = { pointer: event.pointerId, gestureId: crypto.randomUUID(), adapter, frame, startX, startY, finishing: false };
     drag.current = lastPick.current = active;
     setBox(null);
     const overlay = event.currentTarget.getBoundingClientRect();
@@ -104,7 +109,7 @@ export function IsolatedCanvasOverlay() {
         const sx = frame.width / pick.viewport.width, sy = frame.height / pick.viewport.height;
         active.bounds = { x: frame.x - overlay.x + pick.geometry.x * sx, y: frame.y - overlay.y + pick.geometry.y * sy,
           width: pick.geometry.width * sx, height: pick.geometry.height * sy };
-        if (!active.moved) setBox(active.bounds);
+        showBounds(active);
       }).catch(() => { if (drag.current === active) setBox(null); });
   }
 
@@ -112,33 +117,44 @@ export function IsolatedCanvasOverlay() {
     const active = drag.current;
     if (!active || active.pointer !== event.pointerId || active.finishing) return;
     const dx = event.clientX - active.startX, dy = event.clientY - active.startY;
-    if (Math.hypot(dx, dy) >= 3) active.moved = true;
     const payload = { phase, dx: dx / active.frame.width, dy: dy / active.frame.height, gestureId: active.gestureId };
+    if (phase !== "cancel" && (active.offset || Math.hypot(dx, dy) >= 3)) {
+      active.offset = { x: dx, y: dy };
+      showBounds(active);
+    }
     if (phase === "move") {
-      if (active.moved) {
-        if (active.bounds) setBox({ ...active.bounds, x: active.bounds.x + dx, y: active.bounds.y + dy });
-        active.adapter.send("canvas-drag", payload);
-      }
+      if (active.offset) active.adapter.send("canvas-drag", payload);
       return;
     }
-    if (phase === "cancel" || !active.moved) {
+    if (phase === "cancel" || !active.offset) {
       if (phase === "cancel") { setBox(null); lastPick.current = null; }
       active.adapter.send("canvas-drag", { ...payload, phase: "cancel" });
       drag.current = null;
       return;
     }
     active.finishing = true;
+    let committed = false;
+    let changed = false;
     void active.adapter.request<DragResult | null>("canvas-drag", payload).then(async result => {
       if (drag.current !== active || previewIframeRef.current !== active.adapter.iframe) return;
       if (createPreviewAdapter({ iframe: active.adapter.iframe }).token !== active.adapter.token) return;
-      if (!validResult(result)) {
-        setBox(null);
-        return;
-      }
-      await commitDomEditPatchBatches([positionPatch(result)], { label: "Move layer", coalesceKey: active.gestureId });
-    }, () => showToast(t("Preview unavailable"), "error")).catch(() => {
+      if (!validResult(result)) return;
+      // The scoped frame holds the optimistic styles until this write settles.
+      // Pointer capture can now serve another source file.
+      drag.current = null;
+      const saved = await commitDomEditPatchBatches([positionPatch(result)], { label: "Move layer", coalesceKey: active.gestureId });
+      committed = saved.durable;
+      changed = saved.changed;
+    }, () => { if (drag.current === active) showToast(t("Preview unavailable"), "error"); }).catch(() => {
       // The shared save queue reports the error and reloads the authoritative preview.
-    }).finally(() => { if (drag.current === active) drag.current = null; });
+    }).finally(() => {
+      active.adapter.send("canvas-drag", { phase: committed ? "commit" : "cancel", changed, gestureId: active.gestureId });
+      if (drag.current === active) drag.current = null;
+      if (!committed && lastPick.current === active) {
+        lastPick.current = null;
+        setBox(null);
+      }
+    });
   }
 
   if (!select || writeBlockedReason) return null;
