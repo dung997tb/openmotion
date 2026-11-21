@@ -1,6 +1,7 @@
 name: Build and push container images
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       publish_latest:
@@ -10,7 +11,6 @@ on:
   push:
     branches:
       - main
-      - feat/cloud-container-p1
     paths:
       - .dockerignore
       - deploy/Dockerfile
@@ -222,6 +222,23 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.title=${{ matrix.title }}
+
+      - name: Record the test image digest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/cloud-container-p1'
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          TARGET: ${{ matrix.target }}
+        run: printf '%s\n' "$IMAGE_DIGEST" > "$RUNNER_TEMP/$TARGET"
+
+      - name: Upload the test image digest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/cloud-container-p1'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-digest-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ matrix.target }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
 
       - name: Summarize published image
         shell: bash
