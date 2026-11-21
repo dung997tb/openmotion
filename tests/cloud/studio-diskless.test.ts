@@ -5,6 +5,8 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { Hono } from 'hono';
+import type { StudioVariables } from '../../src/studio/context.ts';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { AuthContext } from '../../src/contracts/auth.ts';
 import type { RenderWorkerHealth } from '../../src/contracts/events.ts';
@@ -1230,6 +1232,66 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(retryRender.status, 200);
     const retryRenderJson = (await retryRender.json()) as { settings: { variables?: Record<string, unknown> } };
     assert.deepEqual(retryRenderJson.settings.variables, { theme: 'dark' });
+  });
+
+  it('shares preview builds, validates ETags before loading files, and isolates document variants and edits', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth, { title: 'Preview cache' });
+    const url = `/api/projects/${projectId}/preview`;
+    const loads = t.mock.method(env.files, 'loadVirtualProject');
+    const results = await Promise.all(Array.from({ length: 8 }, () => env.studioApp.request(url)));
+    assert.ok(results.every(response => response.status === 200));
+    assert.equal(loads.mock.callCount(), 1);
+    const etag = results[0]!.headers.get('etag')!;
+    assert.equal((await env.studioApp.request(url, { headers: { 'If-None-Match': etag } })).status, 304);
+    assert.equal(loads.mock.callCount(), 1);
+
+    for (const suffix of ['?capture=1', '?variables=%7B%22theme%22%3A%22red%22%7D', '/comp/index.html']) {
+      const variant = await env.studioApp.request(url + suffix, { headers: { 'If-None-Match': etag } });
+      assert.equal(variant.status, 200);
+      assert.notEqual(variant.headers.get('etag'), etag);
+    }
+    assert.equal(loads.mock.callCount(), 4);
+    await env.files.commitChanges(env.auth, {
+      projectId, ops: [{ op: 'upsert_text', path: 'index.html', content: '<html><body>fresh-revision</body></html>' }],
+    });
+    const updated = await env.studioApp.request(url, { headers: { 'If-None-Match': etag } });
+    assert.equal(updated.status, 200);
+    assert.match(await updated.text(), /fresh-revision/);
+    assert.notEqual(updated.headers.get('etag'), etag);
+    assert.equal(loads.mock.callCount(), 5);
+    const missingUrl = url + '/comp/missing.html';
+    assert.equal((await env.studioApp.request(missingUrl, { headers: { 'If-None-Match': etag } })).status, 404);
+    await env.files.commitChanges(env.auth, {
+      projectId, ops: [{ op: 'upsert_text', path: 'missing.html', content: '<html><body>created</body></html>' }],
+    });
+    assert.equal((await env.studioApp.request(missingUrl)).status, 200);
+
+  });
+
+  it('late-binds scoped roots and import maps while preserving authored base resolution', async () => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const path = `/api/projects/${projectId}/preview`;
+    const app = new Hono<{ Variables: StudioVariables }>();
+    let base = '';
+    app.use('*', async (c, next) => { c.set('previewAssetBase', base); await next(); });
+    app.route('/', env.studioApp);
+    for (const href of ['assets/styles/', '../other/', '.', 'https://external.example/static/']) {
+      await env.files.commitChanges(env.auth, { projectId, ops: [{
+        op: 'upsert_text', path: 'index.html',
+        content: `<html><head><base href="${href}"></head><body><img src="/poster.png"></body></html>`,
+      }] });
+      for (const lease of ['grant-a', 'grant-b']) {
+        base = `https://preview.example${path}/~assets/${lease}/`;
+        const response = await app.request(path);
+        assert.equal(response.status, 200);
+        const html = await response.text();
+        assert.equal(html.match(/<base href="([^"]+)"/)?.[1], new URL(href, base).href);
+        assert.ok(html.includes(base + 'poster.png'));
+        assert.ok(html.includes(JSON.stringify({ imports: { '/': base, [base]: base } })));
+      }
+    }
   });
 
   it('verifies #41 fixes: HTTP /preview + /preview/comp/* 200, real /api/runtime.js, worker-render resultJson interop, RBAC/scopes, HEAD thumbnails, PUT selection, GET open-in-desktop, and multi-file upload', async () => {
