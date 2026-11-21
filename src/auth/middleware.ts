@@ -29,6 +29,7 @@ import type { AuthKeyValueCache, AuthStore } from './store.ts';
 export type AuthEnv = {
   Variables: {
     auth: AuthContext;
+    previewAssetBase?: string;
     csrfTokenHash?: string;
     sessionTokenHash?: string;
   };

@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { AuthContext, AuthMode } from '../contracts/auth.ts';
 import type { AppConfig } from '../infra/config.ts';
+import { isAssetLease } from './preview-asset-lease.ts';
 import { isUuid } from '../../shared/project-validation.ts';
 
 export const PREVIEW_TOKEN_TYPE = 'om_preview' as const;
@@ -18,6 +19,7 @@ export interface PreviewTokenPayload {
   readonly typ: typeof PREVIEW_TOKEN_TYPE;
   readonly wid: string;
   readonly pid: string;
+  readonly assetLease?: string;
   readonly iat: number;
   readonly exp: number;
 }
@@ -25,6 +27,7 @@ export interface PreviewTokenPayload {
 export interface SignPreviewTokenInput {
   readonly workspaceId: string;
   readonly projectId: string;
+  readonly assetLease?: string;
   readonly ttlSec?: number;
   readonly nowMs?: number;
 }
@@ -106,6 +109,7 @@ export function signPreviewToken(input: SignPreviewTokenInput, secret: string): 
     typ: PREVIEW_TOKEN_TYPE,
     wid: input.workspaceId,
     pid: input.projectId,
+    ...(input.assetLease && { assetLease: input.assetLease }),
     iat: nowSec,
     exp,
   };
@@ -171,6 +175,7 @@ export function verifyPreviewToken(
   const payload = rawPayload as Partial<PreviewTokenPayload>;
 
   if (payload.typ !== PREVIEW_TOKEN_TYPE) return null;
+  if (payload.assetLease !== undefined && !isAssetLease(payload.assetLease)) return null;
   if (typeof payload.wid !== 'string' || !isUuid(payload.wid)) return null;
   if (typeof payload.pid !== 'string' || !isUuid(payload.pid)) return null;
   if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat)) return null;
@@ -190,9 +195,14 @@ export function verifyPreviewToken(
     typ: PREVIEW_TOKEN_TYPE,
     wid: payload.wid,
     pid: payload.pid,
+    ...(payload.assetLease && { assetLease: payload.assetLease }),
     iat: payload.iat,
     exp: payload.exp,
   };
+}
+
+export function previewAssetBase(origin: string, projectId: string, assetCredential: string): string {
+  return `${origin}/api/projects/${encodeURIComponent(projectId)}/preview/~assets/${encodeURIComponent(assetCredential)}/`;
 }
 
 /**
@@ -213,7 +223,7 @@ export function extractPreviewToken(request: Request): string | null {
 /**
  * Build a minimal read-only `AuthContext` bound strictly to the preview token's workspace and `projects:read` scope.
  */
-export function buildPreviewAuthContext(payload: PreviewTokenPayload, authMode: AuthMode): AuthContext {
+export function buildPreviewAuthContext(payload: Pick<PreviewTokenPayload, 'wid' | 'pid'>, authMode: AuthMode): AuthContext {
   return {
     workspaceId: payload.wid,
     userId: PREVIEW_VIEWER_USER_ID,

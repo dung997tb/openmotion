@@ -18,6 +18,7 @@ export type PreviewBridgeMessageType =
   | "edit-element"
   | "timeline-state"
   | "playback-control"
+  | "canvas-drag"
   | "pick-mode"
   | "runtime-error"
   | "preview-replaced"

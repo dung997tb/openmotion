@@ -3,6 +3,7 @@ import type { ImportedFontAsset } from "../components/editor/fontAssets";
 import type { PatchOperation, PatchTarget } from "../utils/sourcePatcher";
 
 export interface DomEditPatchBatch {
+  ifMatch?: string;
   sourceFile: string;
   patches: Array<{ target: PatchTarget; operations: PatchOperation[] }>;
 }

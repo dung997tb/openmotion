@@ -140,6 +140,8 @@ export function createStudioFileMutationsRoutes(
       batches?: Array<{
         sourceFile?: string;
         path?: string;
+        ifMatch?: string;
+        patches?: Array<{ target: SourceMutationTarget; operations: PatchOperation[] }>;
         edits?: Array<{ target: SourceMutationTarget; ops: PatchOperation[]; fontFaceCss?: string }>;
         target?: SourceMutationTarget;
         ops?: PatchOperation[];
@@ -167,36 +169,48 @@ export function createStudioFileMutationsRoutes(
     const fileResults: Array<{
       sourceFile: string;
       changed: boolean;
-      matched: boolean;
+      matched: boolean[];
       before: string;
       after: string;
     }> = [];
     const commitOps: ProjectFileOp[] = [];
     const preconditions: Array<{ path: string; ifMatch: string }> = [];
 
+    const seenFiles = new Set<string>();
     for (const batch of body.batches) {
       const sourceFile = normalizeSafeProjectPath(batch.sourceFile ?? batch.path ?? 'index.html', true);
+      if (seenFiles.has(sourceFile)) return c.json({ error: 'Duplicate batch file', durable: false }, 400);
+      seenFiles.add(sourceFile);
       const before = virtual.readText(sourceFile);
       if (before === null) {
         return c.json({ error: `Target file not found: ${sourceFile}`, durable: false }, 404);
       }
 
-      const edits = Array.isArray(batch.edits)
-        ? batch.edits
-        : batch.target && Array.isArray(batch.ops)
-          ? [{ target: batch.target, ops: batch.ops, fontFaceCss: batch.fontFaceCss }]
-          : [];
+      const currentVersion = formatVersionFromSha256(sha256Hex(before));
+      if (batch.ifMatch !== undefined && batch.ifMatch !== currentVersion) {
+        return c.json({ error: 'file conflict', code: 'VERSION_MISMATCH', durable: false }, 409);
+      }
+      if (batch.patches !== undefined && !Array.isArray(batch.patches)) {
+        return c.json({ error: 'Invalid patches', durable: false }, 400);
+      }
+      const edits = batch.patches?.map(patch => ({
+        target: patch?.target, ops: patch?.operations, fontFaceCss: undefined,
+      })) ?? batch.edits ?? (batch.target && batch.ops
+        ? [{ target: batch.target, ops: batch.ops, fontFaceCss: batch.fontFaceCss }]
+        : []);
+      if (!edits.length) return c.json({ error: 'No patches supplied', durable: false }, 400);
 
       let after = before;
-      let anyMatched = false;
+      const matched: boolean[] = [];
 
       for (const edit of edits) {
+        if (!edit?.target || !Array.isArray(edit.ops)) return c.json({ error: 'Invalid patch', durable: false }, 400);
         const unsafe = findUnsafeDomPatchValues(edit.ops);
         if (unsafe.length > 0) {
           return c.json({ error: 'Non-finite or unsafe DOM patch values', unsafe, durable: false }, 400);
         }
         const patched = patchElementInHtml(after, edit.target, edit.ops, takenIds);
-        if (patched.matched) anyMatched = true;
+        matched.push(patched.matched);
         if (patched.elementId) takenIds.add(patched.elementId);
         after = patched.html;
         if (edit.fontFaceCss !== undefined) {
@@ -208,18 +222,18 @@ export function createStudioFileMutationsRoutes(
       }
 
       const changed = after !== before;
-      fileResults.push({ sourceFile, changed, matched: anyMatched, before, after });
+      fileResults.push({ sourceFile, changed, matched, before, after });
       if (changed) {
         commitOps.push({ op: 'upsert_text', path: sourceFile, content: after, stampHfIds: true });
-        preconditions.push({ path: sourceFile, ifMatch: formatVersionFromSha256(sha256Hex(before)) });
+        preconditions.push({ path: sourceFile, ifMatch: currentVersion });
       }
     }
 
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
-    let durable = true;
+    const durable = fileResults.every(file => file.matched.every(Boolean));
     let revision = virtual.revision;
 
-    if (commitOps.length > 0) {
+    if (durable && commitOps.length > 0) {
       try {
         const committed = await deps.files.commitChanges(auth, {
           projectId,
@@ -232,7 +246,6 @@ export function createStudioFileMutationsRoutes(
         revision = committed.revision;
       } catch (error) {
         if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {
-          durable = false;
           return c.json({ error: 'file conflict', code: 'VERSION_MISMATCH', durable: false }, 409);
         }
         throw error;
@@ -244,7 +257,11 @@ export function createStudioFileMutationsRoutes(
       durable,
       revision,
       writeToken,
-      files: fileResults,
+      files: fileResults.map((file, i) => ({
+        ...file,
+        ...(!durable && { after: file.before, changed: false }),
+        matched: body.batches![i]!.patches ? file.matched : file.matched.some(Boolean),
+      })),
     });
   });
 

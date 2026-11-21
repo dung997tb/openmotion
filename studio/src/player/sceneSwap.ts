@@ -114,6 +114,7 @@ export function swapFreshly(
 export function sceneSwapFor(
   iframe: HTMLIFrameElement,
 ): ((url: string, isCurrent: () => boolean, cancel?: AbortSignal) => Promise<void>) | null {
+  if (iframe.contentDocument === null) return null;
   const win = iframe.contentWindow as SwapWindow | null;
   const swap = win?.__hfSwapScenes;
   if (typeof swap !== "function") return null;
