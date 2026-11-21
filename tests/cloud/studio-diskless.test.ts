@@ -1004,7 +1004,7 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target: { id: 'headline' },
-          ops: [{ type: 'text-content', property: 'textContent', value: 'After Patch' }],
+          operations: [{ type: 'text-content', property: 'textContent', value: 'After Patch' }],
         }),
       },
     );
