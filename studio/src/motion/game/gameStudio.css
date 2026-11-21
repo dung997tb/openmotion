@@ -3,7 +3,8 @@
    changes the scroll height, which keeps expanding and collapsing from moving the page. */
 .om-game-studio { position: relative; display: flex; flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; overflow: hidden; }
 .om-game-main { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; }
-.om-game-scroll { height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+/* Hovering an animated cover can make Chromium's scroll anchoring jump backward. */
+.om-game-scroll { height: 100%; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; }
 .om-game-page, .om-game-dock { width: min(100% - 2 * var(--motion-space-24), 1280px); margin-inline: auto; }
 .om-game-dock { width: auto; }
 .om-game-dock .om-game-composer { margin-inline: auto; }
@@ -125,9 +126,13 @@ button.om-game-chip:hover, .om-game-chip[aria-expanded="true"] { background: var
 .om-game-stage[data-orientation="portrait"] iframe { position: absolute; inset-block: var(--motion-space-16); inset-inline: 0; margin-inline: auto; width: auto; height: calc(100% - 2 * var(--motion-space-16)); max-width: calc(100% - 2 * var(--motion-space-16)); aspect-ratio: 9 / 16; border-radius: var(--motion-radius-xl); box-shadow: 0 0 0 1px var(--motion-border); }
 .om-game-code { width: 100%; height: 100%; border-radius: 0; place-self: stretch; }
 .om-game-waiting { display: grid; justify-items: center; gap: var(--motion-space-8); max-width: 360px; padding: var(--motion-space-24); text-align: center; color: var(--motion-text); }
-.om-game-waiting svg[data-remix-icon="loader-4-line"] { animation: om-game-spin 1s linear infinite; }
+.om-game-waiting svg[data-remix-icon="loader-4-line"],
+.om-game-status-line[data-tone="building"] svg[data-remix-icon="loader-4-line"] { animation: om-game-spin 1s linear infinite; }
 @keyframes om-game-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .om-game-waiting svg { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .om-game-waiting svg,
+  .om-game-status-line[data-tone="building"] svg[data-remix-icon="loader-4-line"] { animation: none !important; }
+}
 .om-game-dock-toggle { position: absolute; top: calc(-1 * var(--motion-space-16)); inset-inline-end: var(--motion-space-12); z-index: 1; border-radius: var(--motion-radius-full); background: var(--motion-panel) !important; border: 1px solid var(--motion-border-subtle); }
 
 @media (max-width: 960px) {
