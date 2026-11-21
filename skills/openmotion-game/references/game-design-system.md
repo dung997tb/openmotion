@@ -1,6 +1,4 @@
-> Ported from the Higgsfield Websites handbook (MIT); see ../LICENSE-HIGGSFIELD. Upstream measurements and dated experiments below describe that reference environment, not OpenMotion verification.
-
-> OpenMotion execution mapping: read [game-flow.md](game-flow.md). Media generation requires discovery, a stated cost and approval; unsupported 3D/rigging uses `templates/game-kits/characters/` or separately supplied local tooling. Legacy helper commands below require those optional tools; they are not bundled. Dated measurements and historical costs are upstream evidence only.
+> See [source and execution notes](../PROVENANCE.md).
 
 # GAME CREATION SYSTEM
 ### Plan → Build → Deliver — the compressed operating core
@@ -158,11 +156,6 @@ Perceptual quality — composition, animation feel, music — and real player de
 
 **Freeze points:** agency metrics — before mass content (§5.3); features — once content is complete.
 
-## Mandatory multiplayer entry acceptance
+## Multiplayer entry checks
 
-Every multiplayer game joins on load from `new URL(location.href).searchParams.get('room')`; generate a short random room id when missing. The local play entry redirects missing-room URLs to `?room=...` and preserves other query parameters on both API prefixes. The client must still handle a missing parameter for standalone/embedded use, including opaque sandbox origins where history replacement may fail. Never ask the player to type a room code or perform a Join room step.
-
-- [ ] Opening the game joins within five seconds, with no click or typing.
-- [ ] Lobby displays the room code, a Copy invite link button and one primary Start button; one player can start. Copy uses the current room in the invite URL. No room-code input or Join room button, on desktop or touch.
-- [ ] `openmotion_game_validate` passes: room-code text inputs or Join room/加入房间 buttons in index.html/client.js are blocking diagnostics. A missing room-query read is an advisory warning; static heuristics do not prove automatic joining.
-- [ ] `openmotion_game_playtest` reports the `autoJoin` assertion passed for every client before it clicks Start or executes scripts. Evidence is the room socket's joined message or `window.__omGame.getState()` with selfId and the corresponding player. Joining after five seconds or only after an input fails, even if later gameplay works. Report unavailable Chrome/loopback separately.
+Apply the [automatic-join acceptance checklist](../SKILL.md#mandatory-multiplayer-entry-acceptance).

@@ -1,6 +1,4 @@
-> Ported from the Higgsfield Websites handbook (MIT); see ../LICENSE-HIGGSFIELD. Upstream measurements and dated experiments below describe that reference environment, not OpenMotion verification.
-
-> OpenMotion execution mapping: read [game-flow.md](game-flow.md). Media generation requires discovery, a stated cost and approval; unsupported 3D/rigging uses `templates/game-kits/characters/` or separately supplied local tooling. Legacy helper commands below require those optional tools; they are not bundled. Dated measurements and historical costs are upstream evidence only.
+> See [source and execution notes](../PROVENANCE.md).
 
 # Meshy API — verified animated-character pipeline (FALLBACK ONLY)
 
@@ -148,14 +146,7 @@ Note: `rigged.glb` may carry a service clip named like
 `Armature|clip0|baselayer` (bind pose) — drop it from the merged file before
 delivery.
 
-**MANDATORY post-merge check — root-bone scale bug (verified):** library
-animations can bake a scale factor into the root bone's scale channel.
-Observed: `Hips` scale **1.176** baked into `idle` while walk/run were 1.0 —
-the character visibly grew 18% when idle played. Fix (automated in the merge
-script): for every clip, if the root bone's scale min/max ≠ 1.0 — set scale
-keys to 1.0 AND divide that clip's root translation keys by the same factor
-(otherwise the character hovers above ground). Verify with
-`scripts/glb_inspect.py` — it prints per-clip root-scale ranges.
+For inherited root-scale diagnostics and corrective steps, follow the [animation merge pitfall](game-3d-animation.md#step-5--meshy-clip-merge--root-scale-check-mandatory-for-meshy).
 
 Finish with the standard checks: `glb_inspect.py` (skins ≥ 1, all clips
 present, alphaMode OPAQUE) and zip before local asset copying (binary uploads are not exposed by game_write_files) (raw `.glb`

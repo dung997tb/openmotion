@@ -176,11 +176,19 @@ test('packaged server imports without local dependencies and captions use the se
   } finally { await rm(extracted, { recursive: true, force: true }); }
 });
 
-test('offline game kit, binary characters, inspector and licenses survive lightweight packaging', async () => {
+test('offline game kit, handbook, binary characters, inspector and licenses survive lightweight packaging', async () => {
   for (const profile of ['phase1', 'legacy']) {
-    const files = new Set(await distributionFiles(profile, file => file.startsWith('templates/game-kits/') || file === 'scripts/game-glb-inspect.mjs'));
+    const files = new Set(await distributionFiles(profile, file => file.startsWith('templates/game-kits/') || file.startsWith('skills/openmotion-game/') || file === 'scripts/game-glb-inspect.mjs'));
     const entries = await readdir(new URL('../templates/game-kits/', import.meta.url), {recursive:true,withFileTypes:true});
     assert(files.has('scripts/game-glb-inspect.mjs'));
+    assert(files.has('skills/openmotion-game/SKILL.md'));
+    assert(files.has('skills/openmotion-game/LICENSE-HIGGSFIELD'));
+    assert(files.has('skills/openmotion-game/PROVENANCE.md'));
+    for (const section of Object.keys(workflowRegistry.game.sections)) {
+      const document = await getWorkflow(section, 'game');
+      assert(files.has(document.documentId), 'Missing game handbook resource: ' + document.documentId);
+      for (const reference of document.references) assert(files.has(reference.documentId), 'Missing game handbook reference: ' + reference.documentId);
+    }
     for (const entry of entries) if(entry.isFile()) {
       const relative = path.relative(fileURLToPath(new URL('../', import.meta.url)), path.join(entry.parentPath, entry.name)).split(path.sep).join('/');
       assert(files.has(relative), 'Missing offline kit file: '+relative);

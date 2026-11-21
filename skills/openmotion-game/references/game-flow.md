@@ -1,4 +1,4 @@
-> Ported from the Higgsfield Websites handbook (MIT); see ../LICENSE-HIGGSFIELD. Upstream measurements and dated experiments below describe that reference environment, not OpenMotion verification.
+> See [source and execution notes](../PROVENANCE.md).
 
 ## OpenMotion execution contract
 
@@ -185,11 +185,6 @@ Recording uses isolated headless Chrome, 1280×720, three five-second moments se
 
 Composition creates a standard native project through `openmotion_create_project`, imports local clips and the game's cover (or a gameplay poster when absent), and writes editable HyperFrames HTML plus deterministic `trailer.json`. Prefer zh-CN title/description/controls. Three highlights make 19 seconds (two supported highlights make 15.5 seconds); include title, brief captions and Play now with controls. Export uses the existing frozen-project/export verification pipeline. Report projectId, status and videoUrl; silent captures do not establish audible quality, human fun, physical-device performance or successful export until ready. Failures retain partial media and project identity.
 
-## Mandatory multiplayer entry acceptance
+## Multiplayer entry checks
 
-Every multiplayer game joins on load from `new URL(location.href).searchParams.get('room')`; generate a short random room id when missing. The local play entry redirects missing-room URLs to `?room=...` and preserves other query parameters on both API prefixes. The client must still handle a missing parameter for standalone/embedded use, including opaque sandbox origins where history replacement may fail. Never ask the player to type a room code or perform a Join room step.
-
-- [ ] Opening the game joins within five seconds, with no click or typing.
-- [ ] Lobby displays the room code, a Copy invite link button and one primary Start button; one player can start. Copy uses the current room in the invite URL. No room-code input or Join room button, on desktop or touch.
-- [ ] `openmotion_game_validate` passes: room-code text inputs or Join room/加入房间 buttons in index.html/client.js are blocking diagnostics. A missing room-query read is an advisory warning; static heuristics do not prove automatic joining.
-- [ ] `openmotion_game_playtest` reports the `autoJoin` assertion passed for every client before it clicks Start or executes scripts. Evidence is the room socket's joined message or `window.__omGame.getState()` with selfId and the corresponding player. Joining after five seconds or only after an input fails, even if later gameplay works. Report unavailable Chrome/loopback separately.
+Apply the [automatic-join acceptance checklist](../SKILL.md#mandatory-multiplayer-entry-acceptance).

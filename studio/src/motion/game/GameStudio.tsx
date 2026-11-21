@@ -152,9 +152,10 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
     // Explore lists templates and community games only; games made here live in Assets → Games.
     const list = all.filter(game => game.source !== 'mine' && game.status === 'published'
       && (category === 'all' || (category === 'portrait' ? game.orientation === 'portrait' : game.genre === category))
-      && (!needle || [game.title, game.description, t(genreLabels[game.genre])].some(text => text.toLocaleLowerCase().includes(needle))));
+      // Search the shown (localized) title and description as well as the originals, e.g. 小王子 and Little Prince.
+      && (!needle || [game.title, game.description, game.i18n?.[locale]?.title, game.i18n?.[locale]?.description, t(genreLabels[game.genre])].some(text => text?.toLocaleLowerCase().includes(needle))));
     return sort === 'plays' ? [...list].sort((a, b) => b.plays - a.plays) : sort === 'newest' ? [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : interleavePortrait(list);
-  }, [all, category, query, sort, t]);
+  }, [all, category, query, sort, t, locale]);
   // The user's own games, newest first, live in the side list like projects in the Motion editor.
   const mine = useMemo(() => games.filter(game => game.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [games]);
   const browsing = category === 'all' && !query.trim();
@@ -330,7 +331,13 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
     // playUrl changes from the built-in copy to the served game once the catalogue loads; follow it so ./assets resolve.
   }, [game.id, game.playUrl, playable, reload]);
   useEffect(() => { if (playable && !offline && !game.external) gameApi.play(game.id).then(onChange).catch(() => {}); }, [game.id, playable]);
-  useEffect(() => { if (view === 'code' && playable && source === null) void gameSource(game).then(setSource).catch(() => setSource('')); }, [view, playable]);
+  // Re-read the source on every reload too, so the Code tab never stays on "Loading game…" after Reload.
+  useEffect(() => {
+    if (view !== 'code' || !playable || source !== null) return;
+    let live = true;
+    void gameSource(game).then(text => { if (live) setSource(text); }).catch(() => { if (live) setSource(''); });
+    return () => { live = false; };
+  }, [view, playable, source, reload]);
   useEffect(() => {
     if (!trailerBusy) return;
     const timer = setInterval(() => { void gameApi.trailer(game.id).then(next => onChange({ ...game, trailer: next })).catch(() => {}); }, 3000);

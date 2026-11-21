@@ -33,4 +33,4 @@ Every multiplayer game joins on load from `new URL(location.href).searchParams.g
 - [ ] `openmotion_game_validate` passes: room-code text inputs or Join room/加入房间 buttons in index.html/client.js are blocking diagnostics. A missing room-query read is an advisory warning; static heuristics do not prove automatic joining.
 - [ ] `openmotion_game_playtest` reports the `autoJoin` assertion passed for every client before it clicks Start or executes scripts. Evidence is the room socket's joined message or `window.__omGame.getState()` with selfId and the corresponding player. Joining after five seconds or only after an input fails, even if later gameplay works. Report unavailable Chrome/loopback separately.
 
-Provenance: Adapted from https://github.com/higgsfield-ai/skills (MIT). Original notice: LICENSE-HIGGSFIELD.
+See [provenance and execution boundaries](PROVENANCE.md); the original MIT notice is retained in [LICENSE-HIGGSFIELD](LICENSE-HIGGSFIELD).
