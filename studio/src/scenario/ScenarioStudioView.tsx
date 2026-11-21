@@ -33,6 +33,8 @@ export type ScenarioStudioViewProps = {
   onAddPoolItems(items: { ref: PoolRef; label?: string; tags?: string[]; stepId?: string | null; source: PoolItem['source'] }[]): Promise<string[]>;
   /** Resolves false when the brief could not be copied, so the hand-off note is not shown. */
   onRemovePoolItem(poolItemId: string): Promise<void>;
+  onOpenDesignProject(id: string): void;
+  onOpenMotionProject(id: string): Promise<boolean>;
   onCopyAgentPrompt(customPrompt?: string): Promise<boolean>;
   onExportBundle(options?: PoolExportOptions): Promise<ScenarioBundleReceipt | null>;
   exportingBundle: boolean;
@@ -116,7 +118,7 @@ function DeliverableTab({ step, state, cover, example, selected, onSelect }: {
 }
 
 export function ScenarioStudioView({
-  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
+  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onOpenDesignProject, onOpenMotionProject, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
 }: ScenarioStudioViewProps) {
   const { t, locale } = useI18n();
   const studio = scenarioStudio(scenario.id);
@@ -247,7 +249,13 @@ export function ScenarioStudioView({
     return productSync.current;
   };
   const syncProductPhotos = async (next: StudioProduct) => {
-    const poolItems = poolRef.current;
+    // Read the run the hook holds right now, which already includes the previous switch's writes.
+    let poolItems = poolRef.current;
+    try {
+      poolItems = (await api.ensureRun()).pool;
+    } catch {
+      // Fall back to the rendered Assets; the write below reports its own failure.
+    }
     const known = new Set(poolItems.flatMap(item => item.ref.type === 'asset' ? [item.ref.assetId + '/' + item.ref.versionId] : []));
     // Photos of a previously picked product leave this run; other reference images stay.
     const keep = new Set(next.images.map(image => image.assetId + '/' + image.versionId));
@@ -374,7 +382,7 @@ export function ScenarioStudioView({
             </Button>
           ))}
         </div>}
-        <Button variant="primary" className="om-studio-make" icon={<RemixIcon name="sparkling-line" size={16} />} disabled={making} onClick={() => void makeKit()}>
+        <Button variant="primary" className="om-studio-make" icon={<RemixIcon name="sparkling-line" size={16} />} disabled={making || toggling !== null} onClick={() => void makeKit()}>
           {t('Make the full kit')}
         </Button>
         {handedOffAt !== null && <div className="om-studio-handoff" role="status">
@@ -458,7 +466,13 @@ export function ScenarioStudioView({
             </div>
           );
         })()}
-        <PoolItemPreviewDialog item={previewItem} run={run} canUseInCurrentStep={false} onClose={() => setPreviewItem(null)} />
+        <PoolItemPreviewDialog item={previewItem} run={run} canUseInCurrentStep={false} onClose={() => setPreviewItem(null)}
+          onOpen={item => {
+            setPreviewItem(null);
+            if (item.ref.type === 'design') onOpenDesignProject(item.ref.projectId);
+            else if (item.ref.type === 'motion') void onOpenMotionProject(item.ref.projectId);
+            else if (item.ref.type === 'asset') window.open(`/?page=assets&asset=${encodeURIComponent(item.ref.assetId)}`, '_blank', 'noopener,noreferrer');
+          }} />
         <Button variant="plain" size="sm" className="om-studio-workflow-link" icon={<RemixIcon name="route-line" size={14} />} onClick={() => void leaveAfterSave(onSwitchToManual)}>
           {t('Fine-tune each step')}
         </Button>

@@ -1152,6 +1152,8 @@ export function ScenarioWorkspace({
               poolItems={poolItems}
               onAddPoolItems={handleAddPoolItems}
               onRemovePoolItem={handleRemovePoolItem}
+              onOpenDesignProject={onOpenDesignProject}
+              onOpenMotionProject={onOpenMotionProject}
               onCopyAgentPrompt={handleCopyAgentPrompt}
               onExportBundle={handleExportBundle}
               exportingBundle={exportingBundle}
