@@ -710,6 +710,18 @@ export class ProjectFilesService {
         };
         void this.eventBus.publish(projectChannel(ctx.workspaceId, input.projectId), event).catch(() => {});
       }
+      if (this.eventBus && !input.skipVersion && (eventPaths.length || input.forceVersion)) {
+        const historyEvent: ProjectEvent = {
+          type: 'history-changed',
+          workspaceId: ctx.workspaceId,
+          projectId: input.projectId,
+          revision: result.revision,
+          versionId: result.versionId ?? undefined,
+          historySeq: result.historySeq,
+          ts: Date.now(),
+        };
+        void this.eventBus.publish(projectChannel(ctx.workspaceId, input.projectId), historyEvent).catch(() => {});
+      }
     }
 
     return result;

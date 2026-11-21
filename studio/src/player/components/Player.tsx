@@ -234,7 +234,7 @@ export const Player = forwardRef<HTMLIFrameElement, PlayerProps>(
         const player = document.createElement("hyperframes-player") as HyperframesPlayerElement;
         const srcUrl = new URL(previewSource, window.location.origin);
         applyPreviewVariablesToUrl(srcUrl);
-        const src = srcUrl.pathname + srcUrl.search;
+        const src = srcUrl.origin === window.location.origin ? srcUrl.pathname + srcUrl.search : srcUrl.href;
         const retryPreview = () => {
           retryCountRef.current += 1;
           const retryUrl = new URL(src, window.location.origin);
@@ -244,7 +244,7 @@ export const Player = forwardRef<HTMLIFrameElement, PlayerProps>(
           loadStartedAtRef.current = performance.now();
           loadIdRef.current += 1;
           player.removeAttribute("no-load-timeout");
-          player.setAttribute("src", retryUrl.pathname + retryUrl.search);
+          player.setAttribute("src", retryUrl.origin === window.location.origin ? retryUrl.pathname + retryUrl.search : retryUrl.href);
         };
         retryPreviewRef.current = retryPreview;
         const stopLoadingBrand = brandPlayerLoading(player);

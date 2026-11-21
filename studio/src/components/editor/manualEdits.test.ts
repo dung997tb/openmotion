@@ -63,6 +63,9 @@ describe("studio manual edits", () => {
       ".hyperframes/studio-manual-edits.json",
     );
     expect(readStudioFileChangePath({ filePath: "/nested/file.html" })).toBe("nested/file.html");
+    expect(readStudioFileChangePath({ paths: ["/scenes/title.html"] })).toBe("scenes/title.html");
+    expect(readStudioFileChangePath({ paths: ["index.html", "scenes/title.html"] })).toBe(".");
+    expect(readStudioFileChangePath({ paths: [] })).toBeNull();
     // A still-wrapped delivery is a decoding bug upstream, never a path.
     expect(readStudioFileChangePath({ data: { path: "nested/file.html" } })).toBeNull();
   });

@@ -1,0 +1,31 @@
+export {
+  DEFAULT_TRACES_SAMPLE_RATE,
+  RUNTIME_CONFIG_GLOBAL_KEY,
+  RUNTIME_CONFIG_PLACEHOLDER,
+  buildBrowserObservabilityConfig,
+  injectRuntimeConfigIntoHtml,
+  normalizeSampleRate,
+  parseSentryDsn,
+  readBrowserObservabilityConfig,
+  serializeRuntimeConfigScript,
+  type BrowserObservabilityConfig,
+  type BrowserObservabilityInput,
+} from './config.ts';
+
+export {
+  isExtensionOnlyStackText,
+  isNoisyCompositionAssetError,
+  sanitizeHeaders,
+  sanitizeSentryBreadcrumb,
+  sanitizeSentryEvent,
+  sanitizeText,
+  sanitizeUrl,
+  shouldDropBrowserEvent,
+  type SanitizeOptions,
+  type SentryLikeBreadcrumb,
+  type SentryLikeEvent,
+  type SentryLikeEventHint,
+  type SentryLikeExceptionValue,
+  type SentryLikeSpan,
+  type SentryLikeStackFrame,
+} from './sanitize.ts';

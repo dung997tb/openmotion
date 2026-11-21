@@ -50,6 +50,8 @@ import {
   type ProjectFilesService,
 } from './project-files-service.ts';
 
+export const DEFAULT_SESSION_TITLE = 'New Session';
+
 const MAX_SESSION_MESSAGES = 200;
 
 export interface WorkspaceServiceDeps {
@@ -1436,7 +1438,7 @@ export class WorkspaceService {
 
     const requestedId = typeof input.id === 'string' && isUuid(input.id) ? input.id : undefined;
     const promptText = input.prompt ?? input.instruction;
-    const title = safeTitle(input.title, 'New Session');
+    const title = safeTitle(input.title, DEFAULT_SESSION_TITLE);
     const now = new Date();
     const sessionId = await this.db.transaction(async (tx) => {
       if (requestedId) {

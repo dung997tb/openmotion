@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useMountEffect } from "../../hooks/useMountEffect";
+import { recordPerformanceMetric } from "@openmotion/observability/browser";
 import {
   trackStudioTimelinePerformance,
   type StudioTimelinePerformanceSample,
@@ -114,6 +115,18 @@ export function useTimelinePerformanceTelemetry(context: TimelinePerformanceCont
           state.frameIntervals,
         );
         if (sample) {
+          recordPerformanceMetric(
+            "openmotion.timeline.scroll_frame_latency_p95_ms",
+            sample.scroll_frame_latency_p95_ms,
+            {
+              unit: "millisecond",
+              attributes: {
+                zoom_mode: sample.zoom_mode,
+                total_clip_count: sample.total_clip_count,
+                mounted_clip_count: sample.mounted_clip_count,
+              },
+            },
+          );
           trackStudioTimelinePerformance(sample);
           state.lastEmittedAt = emittedAt;
         }

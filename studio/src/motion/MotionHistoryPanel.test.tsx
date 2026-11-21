@@ -40,6 +40,23 @@ const button = (text: string) => [...container.querySelectorAll('button')].find(
 const click = async (text: string) => { await act(async () => button(text).click()); };
 const render = async () => { await act(async () => root.render(<I18nProvider initialLocale="zh-CN"><MotionHistoryPanel onRestored={onRestored} /></I18nProvider>)); };
 
+it('opens cloud history with ISO timestamps and selects the newest entry first', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+    currentSeq: 2,
+    entries: [...entries].reverse().map((entry, i) => ({
+      ...entry, seq: 2 - i, endedAt: new Date(entry.endedAt).toISOString(),
+      files: [{ path: 'index.html', status: 'added' }],
+    })),
+  })));
+  await render();
+  const rows = [...container.querySelectorAll('.motion-history-entry')];
+  expect(rows[0]?.textContent).toContain('second edit');
+  expect(rows[0]?.getAttribute('aria-pressed')).toBe('true');
+  expect(rows[0]?.querySelector('time')?.dateTime).toBe(new Date(1001).toISOString());
+  await click('first edit');
+  expect(rows[1]?.getAttribute('aria-pressed')).toBe('true');
+});
+
 it('keeps the current version only after native saves and a checkpoint finish', async () => {
   await render();
   await click('保留当前版本');

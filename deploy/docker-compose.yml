@@ -135,6 +135,7 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-openmotion}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      CATALOG_SYNC_FETCH_REMOTE: ${CATALOG_SYNC_FETCH_REMOTE:-true}
     read_only: true
     tmpfs:
       - /tmp:size=64m
@@ -212,6 +213,10 @@ services:
       OPENDESIGN_ASR_URL: ${OPENDESIGN_ASR_URL:-}
       OPENDESIGN_BILLING_SYNC_ENABLED: ${OPENDESIGN_BILLING_SYNC_ENABLED:-false}
       ALLOW_DOH_FAKEIP_FALLBACK: ${ALLOW_DOH_FAKEIP_FALLBACK:-false}
+      SENTRY_WEB_DSN: ${SENTRY_WEB_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     ports:
       # Loopback publication keeps the local AUTH_MODE=dev stack unreachable from the LAN.
       - "127.0.0.1:${OPENMOTION_PORT:-4173}:${PORT:-4173}"

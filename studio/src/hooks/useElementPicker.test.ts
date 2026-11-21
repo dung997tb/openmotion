@@ -176,6 +176,73 @@ describe("an edit to a picked element without an id", () => {
 });
 
 describe("a pick across a reload that swaps the preview frame", () => {
+  it("maps a scoped cross-origin bridge selection into the existing picker model", () => {
+    const iframe = mountPreview();
+    iframe.src = `${location.origin}/api/projects/project-1/preview?pt=token-1`;
+    const ref: { current: HTMLIFrameElement | null } = { current: iframe };
+    let api: ReturnType<typeof useElementPicker> | null = null;
+    function Harness() {
+      api = useElementPicker(ref);
+      return null;
+    }
+    root = createRoot(document.createElement("div"));
+    act(() => root?.render(React.createElement(Harness)));
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: iframe.contentWindow,
+          origin: location.origin,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "select-element",
+            projectId: "project-1",
+            token: "token-1",
+            selection: {
+              elementId: "title",
+              tagName: "h1",
+              selector: "h1",
+              text: "Title",
+              geometry: { x: 12, y: 20, width: 120, height: 30 },
+            },
+          },
+        }),
+      );
+    });
+    expect(api?.pickedElement).toMatchObject({
+      id: "title",
+      selector: "h1",
+      textContent: "Title",
+      boundingBox: { x: 12, y: 20, width: 120, height: 30 },
+    });
+  });
+
+  it("persists isolated picker edits to the owning source even when another scene uses the same ID", () => {
+    const saved = '<div id="title">Title</div>';
+    const { picker, synced } = mountPicker({ "index.html": saved, "scene.html": saved });
+    const frame = document.querySelector("iframe")!;
+    frame.src = "https://preview.example/api/projects/test/preview?pt=test-token";
+    act(() => window.dispatchEvent(new MessageEvent("message", {
+      origin: "https://preview.example",
+      source: frame.contentWindow,
+      data: {
+        source: "openmotion-preview-bridge", type: "select-element", version: 1,
+        projectId: "test", token: "test-token",
+        selection: { elementId: "title", selector: "#title", text: "Title", sourceFile: "scene.html" },
+      },
+    })));
+    act(() => picker().setTextContent("Updated"));
+    act(() => picker().setStyle("color", "red"));
+    expect(synced).toHaveLength(2);
+    expect(Object.keys(synced[1]!)).toEqual(["scene.html"]);
+    expect(synced[1]!["scene.html"]).toContain("Updated");
+    expect(synced[1]!["scene.html"]).toContain("color: red");
+
+    frame.src = "https://preview.example/api/projects/test/preview?pt=next-token";
+    act(() => picker().setTextContent("Stale target"));
+    expect(synced).toHaveLength(2);
+  });
+
   function mountSwapping() {
     const live = mountPreview();
     const ref: { current: HTMLIFrameElement | null } = { current: live };

@@ -18,6 +18,10 @@ import {
   readBrandCatalog,
 } from '../../gateway/brand-catalog.ts';
 import { publicDesignFiles, resolveDesignSystemFile } from '../../packages/design-system/index.js';
+import {
+  buildBrowserObservabilityConfig,
+  injectRuntimeConfigIntoHtml,
+} from '../../packages/observability/config.ts';
 import { compositionCanvasSource, type CanvasFit, type CanvasRatio } from '../../shared/composition-canvas.ts';
 import {
   agentGuide,
@@ -104,6 +108,7 @@ import { CatalogService } from '../services/catalog-service.ts';
 import { ExportService } from '../services/export-service.ts';
 import { createPlatformModelGateway, type PlatformModelGateway } from '../services/model-gateway.ts';
 import { ProjectArchiveService } from '../services/project-archive-service.ts';
+import { createOrCloneProject } from '../services/project-creation.ts';
 import {
   ProjectFilesService,
   loadProjectOrThrow,
@@ -343,7 +348,12 @@ export async function serveStaticAsset(
   pathname: string,
   runtimeRoot = DEFAULT_RUNTIME_ROOT,
   headOnly = false,
+  options: { allowSourcemaps?: boolean } = {},
 ): Promise<Response | null> {
+  if (options.allowSourcemaps === false && pathname.toLowerCase().endsWith('.map')) {
+    return null;
+  }
+
   // 1. Design system package assets (supports both `/design-system/*` and `/web/design-system/*`).
   const designFile = resolveDesignSystemFile(pathname);
   if (designFile) {
@@ -1115,77 +1125,48 @@ function createMcpDomainPorts(deps: {
           | 'reference_video';
         const requestId = String(args.requestId ?? '');
         const title = typeof args.title === 'string' ? args.title : undefined;
+        const templateId = typeof args.templateId === 'string' ? args.templateId : undefined;
         const requirements = typeof args.requirements === 'string' ? args.requirements : undefined;
         const namingLanguage = typeof args.namingLanguage === 'string' ? args.namingLanguage : undefined;
         const sessionId = typeof args.sessionId === 'string' && isUuid(args.sessionId) ? args.sessionId : undefined;
 
-        if (projectType === 'template') {
-          const templateId = typeof args.templateId === 'string' ? args.templateId : '';
-          if (!templateId) {
-            throw new CloudError('INVALID_ARGUMENT', 'templateId is required when projectType=template', {
-              status: 400,
-              applied: false,
-            });
-          }
-          const cloned = await deps.catalog.cloneTemplateToProject(auth, {
-            templateId,
+        const result = await createOrCloneProject(
+          { workspace: deps.workspace, catalog: deps.catalog },
+          auth,
+          {
             title,
-            sessionId,
+            templateId,
+            projectType,
             requirements,
             namingLanguage,
+            sessionId,
             requestId,
-          });
-          return {
-            projectId: cloned.projectId,
-            sessionId: cloned.sessionId,
-            title: cloned.title,
-            templateId: cloned.templateId,
-            revision: cloned.revision,
-            version: {
-              versionId: cloned.versionId,
-              versionNumber: cloned.versionNumber,
-            },
-            replayed: false,
-            ...buildProjectPreviewHandoff(deps.config.APP_PUBLIC_ORIGIN, {
-              id: cloned.projectId,
-              sessionId: cloned.sessionId,
-              revision: cloned.revision,
-              currentVersionId: cloned.versionId,
-            }),
-          };
-        }
-
-        const created = await deps.workspace.createProject(auth, {
-          title,
-          projectType,
-          requirements,
-          namingLanguage,
-          sessionId,
-          requestId,
-          sourceMeta:
-            args.referenceVideoId || args.referenceUrl
-              ? {
-                  ...(args.referenceVideoId ? { referenceVideoId: args.referenceVideoId } : {}),
-                  ...(args.referenceUrl ? { referenceUrl: args.referenceUrl } : {}),
-                }
-              : null,
-        });
+            sourceMeta:
+              args.referenceVideoId || args.referenceUrl
+                ? {
+                    ...(args.referenceVideoId ? { referenceVideoId: args.referenceVideoId } : {}),
+                    ...(args.referenceUrl ? { referenceUrl: args.referenceUrl } : {}),
+                  }
+                : null,
+          },
+        );
 
         return {
-          projectId: created.projectId,
-          sessionId: created.sessionId,
-          title: created.title,
-          revision: created.revision,
+          projectId: result.projectId,
+          sessionId: result.sessionId,
+          title: result.title,
+          ...(result.templateId ? { templateId: result.templateId } : {}),
+          revision: result.revision,
           version: {
-            versionId: created.versionId,
-            versionNumber: created.versionNumber,
+            versionId: result.versionId,
+            versionNumber: result.versionNumber,
           },
-          replayed: created.replayed,
+          replayed: result.replayed,
           ...buildProjectPreviewHandoff(deps.config.APP_PUBLIC_ORIGIN, {
-            id: created.projectId,
-            sessionId: created.sessionId,
-            revision: created.revision,
-            currentVersionId: created.versionId,
+            id: result.projectId,
+            sessionId: result.sessionId,
+            revision: result.revision,
+            currentVersionId: result.versionId,
           }),
         };
       },
@@ -2245,8 +2226,24 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   // 4. Static Design System, Studio Assets, MCP UI & Read-Only Vendor GSAP
   // -------------------------------------------------------------------------
 
+  const allowSourcemaps = config.NODE_ENV !== 'production';
+  const browserObservabilityConfig = buildBrowserObservabilityConfig({
+    dsn: config.SENTRY_WEB_DSN,
+    environment: config.SENTRY_ENVIRONMENT ?? config.NODE_ENV,
+    release: config.SENTRY_RELEASE ?? `openmotion@${VERSION}`,
+    tracesSampleRate: config.SENTRY_TRACES_SAMPLE_RATE,
+    previewOrigin: previewHostIsolationEnabled && previewOriginUrl ? previewOriginUrl.origin : null,
+    appVersion: VERSION,
+    deploymentMode: 'cloud-container',
+  });
+
   const handleStaticPath = async (c: Context) => {
-    const response = await serveStaticAsset(new URL(c.req.url).pathname, runtimeRoot, c.req.method === 'HEAD');
+    const response = await serveStaticAsset(
+      new URL(c.req.url).pathname,
+      runtimeRoot,
+      c.req.method === 'HEAD',
+      { allowSourcemaps },
+    );
     if (response) return response;
     return c.notFound();
   };
@@ -2494,11 +2491,12 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
       assetNames,
       workRounds,
       archives,
+      catalog,
       exports: exportsService,
       authStore,
     }),
   );
-  app.route('/', createSessionsRouter({ workspace, exports: exportsService }));
+  app.route('/', createSessionsRouter({ workspace, catalog, exports: exportsService }));
   app.route('/', createArchivesRouter({ archives }));
   app.route('/motion-api/assets', createAssetRoutes({ assetService: assets }));
   app.route('/motion-api', createExportRoutes({ exportService: exportsService }));
@@ -2702,6 +2700,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
 
     // Attempt exact static file under studio/build first (e.g. /assets/*, /manifest.json).
     if (pathname !== '/' && path.extname(pathname)) {
+      if (!allowSourcemaps && pathname.toLowerCase().endsWith('.map')) {
+        return c.notFound();
+      }
       const resolved = resolveSafeSubpath(studioBuildDir, pathname);
       if (resolved) {
         const asset = await readStaticResponse(resolved, {
@@ -2713,12 +2714,23 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
       return c.notFound();
     }
 
-    // SPA index.html fallback for client-side routes.
-    const indexResponse = await readStaticResponse(path.join(studioBuildDir, 'index.html'), {
-      cacheControl: 'no-cache',
-      headOnly,
-    });
-    if (indexResponse) return indexResponse;
+    // SPA index.html fallback for client-side routes, with runtime observability config injected when enabled.
+    try {
+      const rawHtml = await readFile(path.join(studioBuildDir, 'index.html'), 'utf8');
+      const renderedHtml = injectRuntimeConfigIntoHtml(rawHtml, browserObservabilityConfig);
+      const bytes = Buffer.from(renderedHtml, 'utf8');
+      return new Response(headOnly ? null : bytes, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': String(bytes.byteLength),
+          'Cache-Control': 'no-cache',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
 
     return new Response('OpenMotion Studio has not been built yet. Run npm run build:studio.', {
       status: 503,
@@ -2889,6 +2901,7 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
     s3PresignCacheWindowSec: config.S3_PRESIGN_CACHE_WINDOW_SEC,
     authMode: config.AUTH_MODE,
     modelGatewayMode: config.MODEL_GATEWAY_MODE,
+    sentryWebEnabled: Boolean(config.SENTRY_WEB_DSN),
     version: VERSION,
     designSystemFiles: publicDesignFiles.length,
   });

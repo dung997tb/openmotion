@@ -220,12 +220,17 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
         projectChannel(auth.workspaceId, projectId),
         (payload) => {
           if (closed || stream.aborted) return;
-          const evt = payload as { type?: string };
+          const evt = payload as { type?: string; path?: string; paths?: string[] };
           const eventName = evt?.type === 'history-changed' ? 'history-changed' : 'file-change';
+          // Tabs opened before a rolling update may only understand the single-path wire format.
+          const files = evt?.paths;
+          const data = !evt?.path && files?.length && (evt.type === 'file-change' || evt.type === 'files-changed')
+            ? { ...evt, path: files.length === 1 ? files[0] : '.' }
+            : payload;
           void stream
             .writeSSE({
               event: eventName,
-              data: JSON.stringify(payload),
+              data: JSON.stringify(data),
             })
             .catch(() => {});
         },

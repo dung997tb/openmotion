@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import sharp from 'sharp';
+import { extractStandaloneEntryFromIndex } from '@hyperframes/core/compiler';
 import {
   pluginRoot,
   runHyperframesIsolated,
@@ -387,29 +388,29 @@ export function buildThumbnailSnapshotArgs(params: {
   compositionId?: string | null;
 }): string[] {
   const safeTime = Number.isFinite(params.timeSec) && params.timeSec >= 0 ? params.timeSec : 0;
-  return [
-    'snapshot',
-    '.',
-    '--output',
-    params.framesDir,
-    '--at',
-    String(safeTime),
-    '--no-end',
-    ...(params.compositionId ? ['--composition', params.compositionId] : []),
-    '--json',
-  ];
+  const sample = params.compositionId
+    ? ['--composition', params.compositionId, '--frames', '1']
+    : ['--at', String(safeTime)];
+  return ['snapshot', '.', '--output', params.framesDir, ...sample, '--no-end', '--json'];
 }
 
-async function resolveNonRootCompositionId(projectDir: string, compositionPath: string): Promise<string | null> {
-  const normalized = compositionPath.replace(/^\/+/, '') || 'index.html';
+/** Render a subscene on its own clock inside the disposable snapshot directory. */
+async function prepareThumbnailEntry(projectDir: string, compositionPath: string): Promise<string | null> {
+  const normalized = projectPath(compositionPath);
   if (normalized === 'index.html') return null;
-  try {
-    const html = await readFile(path.join(projectDir, normalized), 'utf8');
-    const match = /\bdata-composition-id\s*=\s*["']([^"']+)["']/i.exec(html);
-    return match?.[1]?.trim() || null;
-  } catch {
+  const indexPath = path.join(projectDir, 'index.html');
+  const [index, scene] = await Promise.all([
+    readFile(indexPath, 'utf8'), readFile(path.join(projectDir, normalized), 'utf8'),
+  ]);
+  const shell = extractStandaloneEntryFromIndex(index, normalized, scene);
+  if (shell) {
+    await writeFile(indexPath, shell);
     return null;
   }
+  // Nested scenes may only have a mount inside another composition.
+  const id = /\bdata-composition-id\s*=\s*["']([^"']+)["']/i.exec(scene)?.[1]?.trim();
+  if (!id) throw new Error(`No composition found for thumbnail: ${normalized}`);
+  return id;
 }
 
 async function verifyContainerHeader(filePath: string, format: string): Promise<void> {
@@ -842,7 +843,7 @@ async function defaultRenderCompositionThumbnail(params: {
   // strictly inside the allowlisted env without leaking worker secrets.
   const framesDir = path.join(path.dirname(params.outputPngPath), 'frames');
   await mkdir(framesDir, { recursive: true, mode: 0o700 });
-  const compositionId = await resolveNonRootCompositionId(params.projectDir, params.compositionPath);
+  const compositionId = await prepareThumbnailEntry(params.projectDir, params.compositionPath);
   const args = buildThumbnailSnapshotArgs({
     framesDir,
     timeSec: params.timeSec,

@@ -109,7 +109,31 @@ export function compositionThumbnailRequest(
 }
 
 async function loadCompositionImage(url: string, signal: AbortSignal) {
-  const response = await studioApiFetch(url, { signal });
+  let response = await studioApiFetch(url, { signal });
+  if (response.status === 202) {
+    const cached = new URL(url, window.location.origin);
+    cached.searchParams.set("cached", "1");
+    // Only the first request enqueues work. Check for the image while this card is visible.
+    const deadline = Date.now() + 180_000;
+    let delay = 500;
+    do {
+      signal.throwIfAborted();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", abort);
+          resolve();
+        }, delay);
+        function abort() {
+          clearTimeout(timer);
+          reject(signal.reason);
+        }
+        signal.addEventListener("abort", abort, { once: true });
+      });
+      response = await studioApiFetch(cached.pathname + cached.search, { signal });
+      delay = Math.min(4000, delay * 2);
+    } while (response.status === 204 && Date.now() < deadline);
+    if (response.status === 204) throw new Error("Composition thumbnail is still pending");
+  }
   if (!response.ok) throw new Error(`Composition thumbnail failed (${response.status})`);
   const blob = await response.blob();
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");

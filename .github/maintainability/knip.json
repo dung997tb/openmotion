@@ -9,11 +9,12 @@
     "studio/src/main.tsx",
     "packages/open-design-ui/site/main.tsx",
     "web/{connect,template-gallery}.ts",
-    "tracking/{browser,core,events,node}.ts"
+    "tracking/{browser,core,events,node}.ts",
+    "packages/observability/{browser,config,index,sanitize,vite}.ts"
   ],
   "project": [
     "*.{ts,js,mjs}",
-    "{src,gateway,shared,web,studio/src,tracking,scripts}/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "{src,gateway,shared,web,studio/src,tracking,scripts,packages/observability}/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "!**/{dist,fixtures,node_modules}/**",
     "!**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}"
   ]
