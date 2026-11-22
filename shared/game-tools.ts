@@ -3,7 +3,7 @@ const reads = { readOnlyHint: true, openWorldHint: false };
 const writes = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const object = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object', properties, required, additionalProperties: false });
 const id = { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}$' };
-const brief = object({ prompt: { type:'string',minLength:1,maxLength:20000 }, multiplayer: { type:'boolean' }, genre:{ enum:[...gameGenres,null] }, style:{ enum:[...gameStyles,null] }, setting:{ enum:[...gameSettings,null] }, orientation:{ enum:['landscape','portrait'] } },['prompt','multiplayer']);
+const brief = object({ prompt: { type:'string',minLength:1,maxLength:20000 }, multiplayer: { type:'boolean' }, genre:{ enum:[...gameGenres,null] }, style:{ enum:[...gameStyles,null] }, setting:{ enum:[...gameSettings,null] }, orientation:{ enum:['landscape','portrait'] }, playableAd:{ type:'boolean', description:'Portrait single-player only: build a playable ad (instant play, hand tutorial, short levels, end card with a call to action).' } },['prompt','multiplayer']);
 const metadataText = {
   title: { type:'string', minLength:1, maxLength:200 },
   description: { type:'string', minLength:1, maxLength:20000 },

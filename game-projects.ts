@@ -75,7 +75,10 @@ function briefInput(raw: any): GameBrief {
     if (raw[key] != null && !(choices as readonly string[]).includes(raw[key])) throw new GameError(`Invalid ${key}`);
   }
   if (raw.orientation != null && raw.orientation !== 'landscape' && raw.orientation !== 'portrait') throw new GameError('Invalid orientation');
-  return { prompt: raw.prompt.trim(), multiplayer: raw.multiplayer, genre: raw.genre ?? null, style: raw.style ?? null, setting: raw.setting ?? null, orientation: raw.orientation ?? 'landscape' };
+  if (raw.playableAd != null && typeof raw.playableAd !== 'boolean') throw new GameError('Invalid playableAd');
+  // A playable ad is a single-player portrait build; the flag is ignored for landscape or multiplayer briefs.
+  const playableAd = raw.playableAd === true && raw.orientation === 'portrait' && !raw.multiplayer;
+  return { playableAd, prompt: raw.prompt.trim(), multiplayer: raw.multiplayer, genre: raw.genre ?? null, style: raw.style ?? null, setting: raw.setting ?? null, orientation: raw.orientation ?? 'landscape' };
 }
 function instruction(game: GameCard, brief: GameBrief, remix = false) {
   const summary = [brief.style && `${brief.style} style`, brief.multiplayer && 'with multiplayer', brief.genre, brief.setting && `${brief.setting} setting`].filter(Boolean).join(', ');
@@ -364,8 +367,10 @@ export class GameProjects {
   async create(raw: GameBrief): Promise<GameCreated> { return this.mutate(async () => {
     const brief = briefInput(raw), id = randomUUID(), dir = path.join(this.root, id), now = new Date().toISOString();
     // A portrait brief tells the Agent to build for a phone held upright; the card keeps the shape for the 9:16 stage.
-    const rawPrompt = brief.orientation === 'portrait' ? `${brief.prompt}\n\nLayout: portrait 9:16 phone game. Design every screen, HUD and control for a phone held upright (390×844); in a landscape window, centre the 9:16 play area and letterbox the sides.` : brief.prompt;
-    const game: StoredGame = { rawPrompt, orientation: brief.orientation, id, title: brief.prompt.slice(0,80), description: brief.prompt, genre: brief.genre ?? 'casual', style: brief.style, setting: brief.setting, multiplayer: brief.multiplayer, maxPlayers: brief.multiplayer ? 4 : 1, status: 'draft', cover: null, playUrl: `/api/games/${id}/play/index.html`, plays: 0, likes: 0, dislikes: 0, reaction: 0, favorite: false, source: 'mine', remixOf: null, controls: '', createdAt: now, updatedAt: now };
+    const layout = brief.orientation === 'portrait' ? `${brief.prompt}\n\nLayout: portrait 9:16 phone game. Design every screen, HUD and control for a phone held upright (390×844); in a landscape window, centre the 9:16 play area and letterbox the sides.` : brief.prompt;
+    // A playable-ad brief adds the ad recipe on top of the portrait layout; the card keeps the flag for the market tag.
+    const rawPrompt = brief.playableAd ? `${layout}\n\nFormat: playable ad. Follow the playable-ad recipe in the openmotion-game skill (references/game-playable-ad.md): interactive on the first frame with a hand tutorial, no title screen, 3–8 short levels, a fail or win end card with Play again and a call-to-action button, one self-contained HTML that loads nothing from the network.` : layout;
+    const game: StoredGame = { rawPrompt, orientation: brief.orientation, ...(brief.playableAd ? { playableAd: true } : {}), id, title: brief.prompt.slice(0,80), description: brief.prompt, genre: brief.genre ?? 'casual', style: brief.style, setting: brief.setting, multiplayer: brief.multiplayer, maxPlayers: brief.multiplayer ? 4 : 1, status: 'draft', cover: null, playUrl: `/api/games/${id}/play/index.html`, plays: 0, likes: 0, dislikes: 0, reaction: 0, favorite: false, source: 'mine', remixOf: null, controls: '', createdAt: now, updatedAt: now };
     return this.populate(dir, async () => {
     // Multiplayer briefs with no genre ("play with friends") or a shooter/3D brief get the co-op room kit; other multiplayer
     // genres keep the room-ready starter until a matching kit exists. arcade-2d is single-player only.
@@ -412,7 +417,7 @@ export class GameProjects {
     const stored = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
     if (stored.source !== 'mine') throw new GameError('Only workspace games can be handed to an Agent');
     const game = await this.get(id);
-    const brief: GameBrief = { prompt: stored.rawPrompt ?? stored.description, genre: stored.genre, style: stored.style, setting: stored.setting, multiplayer: stored.multiplayer, orientation: stored.orientation };
+    const brief: GameBrief = { prompt: stored.rawPrompt ?? stored.description, genre: stored.genre, style: stored.style, setting: stored.setting, multiplayer: stored.multiplayer, orientation: stored.orientation, playableAd: stored.playableAd };
     return { gameId: id, status: game.status, agentInstruction: instruction(game, brief, Boolean(stored.remixOf)) };
   }
   async interact(id: string, kind: 'play'|'reaction'|'favorite', value?: unknown) { return this.mutate(async () => {

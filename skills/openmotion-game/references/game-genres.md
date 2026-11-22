@@ -42,18 +42,6 @@ Each recipe lists the core loop, the must-haves and the acceptance checks.
 
 **Versus reaction / party.** 2–4 players compete in short rounds. Must have: the server decides signal timing and order (clients never send their own timestamps), a false-start penalty, 10–20 rounds in about a minute, a live scoreboard and a final ranking, big portrait buttons. Accept: two clients in one room see the same round; the earlier server-received tap wins; a false start is penalized.
 
-## 4. Playable ads (pull-the-pin, eat-and-grow, crowd runner, merge)
+## 4. Playable ads
 
-A playable ad is a 15–60 s mini game that sells itself in the first touch. Must have:
-- **Portrait first**: design at 9:16 (`ORIENTATION = 'portrait'` in arcade-2d); set metadata `orientation: "portrait"` when the tool supports it.
-- **Instant play**: interactive on the first frame. Show a hand or finger tutorial animation on the exact element to touch until the first input. No title screen.
-- **Satisfying physics or numbers**: many small bodies (coins, balls, crowd members) with cheap custom physics; big growing numbers, ×2/×5 gates, combo popups.
-- **Short levels**: 3–8 levels of 10–20 s each, with an obvious first win, a near-fail on level 2 or 3 and a twist (moving parts, a thief, a boss).
-- **End card**: after the last level or a fail, show a full-screen end card with the score, "Play again" and a clear call to action button (text from the brief, default "Play the full game").
-- **Performance**: cap the body count; keep 60 fps at 390×844 in software rendering by using 2D canvas or instanced meshes.
-
-**Pull the pin.** Pins are draggable or tappable bars that block chambers. Pulling a pin releases its contents under gravity. Wrong order spills into hazards. Accept: each level has exactly one correct order that the reference performs; idle never wins.
-
-**Eat and grow.** Swallow smaller things to grow; avoid bigger ones; size thresholds unlock bigger prey; a timer per area; upgrades between rounds. Accept: size visibly scales the camera; reference reaches the final size; idle fails the timer.
-
-**Crowd runner.** A crowd auto-runs forward, the player steers through +N / ×N gates, and the crowd fights an army or boss whose number must be lower. Accept: the gate math is correct; the reference beats the boss; idle loses at the first red gate or the boss.
+A brief with **Format: playable ad** (portrait, single player) follows the [playable-ad recipe](game-playable-ad.md) instead of this file's title-screen and session rules: first-frame play with a hand tutorial on the exact touch target, 3–8 short levels (obvious first win, near fail, twist), win and fail end cards with Play again and a CTA routed through `openStore()`, one tunables block, one self-contained `index.html`, and its own presets for pull-the-pin, eat-and-grow, crowd battle, runner, merge-style puzzles and twelve more genres. The quality floor of section 1 still applies, except that the first touch on the playfield replaces the start button and no best score is stored.

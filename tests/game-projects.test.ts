@@ -335,6 +335,20 @@ test('portrait briefs are stored and told to the Agent; invalid orientation is r
   await assert.rejects(service.create({...brief,orientation:'square'} as any),/Invalid orientation/);
 }));
 
+test('playable-ad briefs are portrait single-player only and carry the ad recipe to the Agent',()=>fixture(async(_,workspace)=>{
+  const {service}=await fakeKits(workspace);
+  const {game}=await service.create({...brief,orientation:'portrait',playableAd:true});
+  assert.equal(game.playableAd,true);
+  const stored=JSON.parse(await readFile(path.join(service.root,game.id,'game.json'),'utf8'));
+  assert.match(stored.rawPrompt,/portrait 9:16 phone game/);
+  assert.match(stored.rawPrompt,/Format: playable ad/);
+  // Landscape or multiplayer briefs ignore the flag rather than building a broken ad.
+  const wide=await service.create({...brief,orientation:'landscape',playableAd:true});assert.equal(wide.game.playableAd,undefined);
+  const party=await service.create({...brief,multiplayer:true,orientation:'portrait',playableAd:true});assert.equal(party.game.playableAd,undefined);
+  const plain=JSON.parse(await readFile(path.join(service.root,wide.game.id,'game.json'),'utf8'));assert.doesNotMatch(plain.rawPrompt,/playable ad/);
+  await assert.rejects(service.create({...brief,orientation:'portrait',playableAd:'yes'} as any),/Invalid playableAd/);
+}));
+
 test('single-player 3d selects arcade plus vendor without characters',()=>fixture(async(_,workspace)=>{
   const {service}=await fakeKits(workspace);const {game}=await service.create({...brief,style:'3d'});
   assert.equal((await service.read(game.id,'assets/marker.txt')).content,'arcade asset');
