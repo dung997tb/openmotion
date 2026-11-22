@@ -78,6 +78,7 @@ import { getConfig, type AppConfig } from '../infra/config.ts';
 import { createLogger, type Logger } from '../infra/logger.ts';
 import { QueueService } from '../infra/queues.ts';
 import {
+  workspaceCatalogChannel,
   HotTextCache,
   RateLimiter,
   RedisEventBus,
@@ -1886,6 +1887,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     historyCoalesceWindowMs: config.HISTORY_COALESCE_WINDOW_MS,
   });
   const workspace = new WorkspaceService({
+    onCatalogChange: workspaceId => {
+      void eventBus.publish(workspaceCatalogChannel(workspaceId), { type: 'catalog-changed' }).catch(() => {});
+    },
     db,
     storage,
     files,

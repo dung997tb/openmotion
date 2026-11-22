@@ -627,6 +627,27 @@ describe('Zero Local ProjectDir Disk Writes Guard', () => {
 });
 
 describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', () => {
+  it('versions large interactive scripts while retaining inline scripts in standalone bundles', async () => {
+    const script = '/*' + 'v'.repeat(40 * 1024) + '*/window.vendorReady = true;';
+    const sources = {
+      'index.html': '<html><head><script src="vendor.js"></script></head><body></body></html>',
+      'vendor.js': script,
+    };
+    const project = new InMemoryVirtualProject({
+      projectId: 'fixture', projectName: 'Fixture', revision: 'a'.repeat(64), textContents: sources,
+      files: Object.entries(sources).map(([path, content]) => ({
+        path, blobScope: 'workspace', sha256: sha256Hex(content), sizeBytes: Buffer.byteLength(content),
+        mimeType: path.endsWith('.js') ? 'text/javascript' : 'text/html', isText: true, updatedAt: new Date(),
+      })),
+    });
+    const options = { baseHref: 'https://preview.example/authorized/', skipDeterministicFonts: true };
+    const interactive = await bundlePreviewInMemory(project, { ...options, cacheProjectScripts: true });
+    assert.ok(interactive);
+    assert.ok(interactive.includes(options.baseHref + 'vendor.js?om-script=' + sha256Hex(script)));
+    assert.ok(!interactive.includes(script));
+    assert.ok((await bundlePreviewInMemory(project, options))?.includes(script));
+  });
+
   it('keeps deferred composition scripts with the scene that mounts their DOM', async () => {
     const sources = {
       'index.html': '<html><body><div data-composition-id="main"><div data-composition-id="later" data-composition-src="later.html" data-start="15" data-duration="3"></div></div><script>window.rootReady = true;</script></body></html>',
@@ -1075,6 +1096,15 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(result.files[0].before, before);
     assert.match(await current(), /left:\s*42px/);
     assert.equal((await drag(['title'], version)).status, 409);
+    const remove = (ifMatch: string) => env.studioApp.request(
+      `/api/projects/${projectId}/file-mutations/remove-elements/index.html`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': ifMatch },
+        body: JSON.stringify({ targets: [{ id: 'title' }] }),
+      });
+    assert.equal((await remove(version)).status, 409);
+    assert.match(await current(), /id="title"/);
+    assert.equal((await remove(fileContentVersion(await current()))).status, 200);
+    assert.doesNotMatch(await current(), /id="title"/);
   });
 
   it('executes DOM file-mutations and GSAP AST mutations + rollback purely in memory via PG', async () => {
@@ -1284,6 +1314,24 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(retryRender.status, 200);
     const retryRenderJson = (await retryRender.json()) as { settings: { variables?: Record<string, unknown> } };
     assert.deepEqual(retryRenderJson.settings.variables, { theme: 'dark' });
+  });
+
+  it('caches only matching script versions on the project asset route', async () => {
+    const env = createStudioTestEnv();
+    const content = 'window.ready = true;';
+    const { projectId } = await env.workspace.createProject(env.auth, {
+      title: 'Script cache', initialFiles: [{ path: 'vendor.js', content }],
+    });
+    const url = `/api/projects/${projectId}/preview/vendor.js`;
+    const read = (suffix: string) => env.studioApp.request(url + suffix);
+    const cached = await read('?om-script=' + sha256Hex(content));
+    assert.equal(cached.status, 200);
+    assert.equal(await cached.text(), content);
+    assert.equal(cached.headers.get('cache-control'), 'private, max-age=300, immutable');
+    assert.equal((await read('')).headers.get('cache-control'), 'no-cache');
+    const stale = await read('?om-script=' + sha256Hex('older'));
+    assert.equal(stale.status, 409);
+    assert.equal(stale.headers.get('cache-control'), 'no-store');
   });
 
   it('shares preview builds, validates ETags before loading files, and isolates document variants and edits', async t => {
@@ -1502,10 +1550,11 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(getDesktop.status, 200);
     assert.deepEqual(await getDesktop.json(), { available: false, handoff: false, installed: false });
 
-    // 6. Multi-file upload with ?dir=media saves all files, returns files[], and uses spec 'w320'.
+    // 6. Multi-file upload saves the originals and enqueues only eager media jobs.
     const form = new FormData();
     form.append('file', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'a.png', { type: 'image/png' }));
     form.append('file', new File([new Uint8Array([1, 2, 3, 4])], 'b.jpg', { type: 'image/jpeg' }));
+    form.append('file', new File([new Uint8Array([5, 6, 7])], 'c.mp4', { type: 'video/mp4' }));
     env.enqueued.length = 0;
     const uploadRes = await env.studioApp.request(`/api/projects/${created.projectId}/upload?dir=media`, {
       method: 'POST',
@@ -1513,11 +1562,16 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     });
     assert.equal(uploadRes.status, 201);
     const uploadJson = (await uploadRes.json()) as { files: string[]; path: string };
-    assert.deepEqual(uploadJson.files, ['media/a.png', 'media/b.jpg']);
+    assert.deepEqual(uploadJson.files, ['media/a.png', 'media/b.jpg', 'media/c.mp4']);
     assert.equal(uploadJson.path, 'media/a.png');
-    const thumbJobs = env.enqueued.filter((j) => j.name === 'image_thumbnail');
-    assert.equal(thumbJobs.length, 2);
-    assert.equal((thumbJobs[0].payload as { spec: string }).spec, 'w320');
+    assert.deepEqual(env.enqueued.map(job => job.name).sort(), [
+      'extract_waveform_peaks', 'generate_preview_proxy', 'media_probe', 'media_probe', 'media_probe',
+    ]);
+    env.enqueued.length = 0;
+    const thumbnail = await env.studioApp.request(`/api/projects/${created.projectId}/image-thumbnail/media/a.png`);
+    assert.equal(thumbnail.status, 202);
+    assert.deepEqual(env.enqueued.map(job => job.name), ['image_thumbnail']);
+    assert.equal((env.enqueued[0].payload as { spec: string }).spec, 'w320');
 
     // 7. RBAC & PAT scope enforcement: viewer with projects:read only is allowed reads and blocked (403) on writes!
     const viewerAuth: AuthContext = {
@@ -1971,12 +2025,14 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
 
     // Once proxy also finishes, hero.mp4 transitions cleanly to optimizationStatus === 'ready'
     (heroBlob.metadata as Record<string, unknown>).previewProxy = { status: 'ready' };
+    (silentBlob.metadata as Record<string, unknown>).previewProxy = { status: 'ready' };
     const projReadyRes = await env.studioApp.request(`/api/projects/${created.projectId}`);
     assert.equal(projReadyRes.status, 200);
     const projReadyBody = (await projReadyRes.json()) as {
       assetMetadata?: Record<string, { optimizationStatus?: 'optimizing' | 'ready' }>;
     };
     assert.equal(projReadyBody.assetMetadata?.['assets/hero.mp4']?.optimizationStatus, 'ready');
+    assert.equal(projReadyBody.assetMetadata?.['assets/silent.mp4']?.optimizationStatus, 'ready', 'a video without a requested sprite is ready once its proxy settles');
 
     // 6. GET /api/projects/:id/media/metadata skips media_probe for vector SVG files
     await env.files.commitChanges(env.auth, {

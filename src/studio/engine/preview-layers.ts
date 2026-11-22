@@ -32,6 +32,7 @@ export const PREVIEW_LAYERS = `
         layerElements.set(key, element);
         row = { key, depth: parent ? parent.depth + 1 : 0, childCount: 0, isCompHost: Boolean(file),
           label: (group || file || element.id || ownText || element.classList.item(0) || tag).slice(0, 100),
+          draggable: Boolean((stamped || element.id) && tag !== 'audio' && !element.closest('[data-timeline-locked]')),
           kind: layerMediaKinds[tag] || (group || file ? 'group' : ownText ? 'text' : 'shape'),
           z: Number.parseInt(getComputedStyle(element).zIndex, 10) || 0 };
         rows.push(row);
@@ -78,9 +79,30 @@ export const PREVIEW_LAYERS = `
 
   function reportLayerSelection(element, detail) {
     const key = layerHandles.get(element);
-    if (!layerElements.has(key)) return;
     picked = element;
-    post('select-element', { layerKey: key, subscription: layerSubscription, selection: detail });
+    post('select-element', { inspect: true, layerKey: layerElements.has(key) ? key : undefined, subscription: layerSubscription, selection: detail });
+  }
+
+  function previewLayerFamily(message) {
+    const atPoint = !message.key && Number.isFinite(message.x) && Number.isFinite(message.y) &&
+      message.x >= 0 && message.x <= 1 && message.y >= 0 && message.y <= 1;
+    const element = atPoint ? document.elementFromPoint(message.x * innerWidth,message.y * innerHeight)?.closest('[id],[data-hf-id]') :
+      message.subscription === layerSubscription && layerElements.get(message.key);
+    if (!element?.isConnected || !element.parentElement || element.matches('html,body,[data-composition-id]:not([data-composition-src])') ||
+        element.closest('[data-timeline-locked]')) return null;
+    if (atPoint) reportLayerSelection(element,describe(element));
+    const target = element.getBoundingClientRect();
+    const siblings = Array.from(element.parentElement.children).filter(el => !el.matches('audio,script,style,link,meta,template,noscript'));
+    if (siblings.length > ${MAX_LAYER_ROWS}) return null;
+    return siblings.map((el, domIndex) => {
+      const style = getComputedStyle(el), sourceFile = sourceFileForElement(el);
+      const box = el.getBoundingClientRect();
+      const overlaps = box.left < target.right && box.right > target.left && box.top < target.bottom && box.bottom > target.top;
+      return {element: layerHandles.get(el) || '@' + domIndex, domIndex, selected: el === element,
+        stepCandidate: overlaps && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0.01, zIndex: Number.parseInt(style.zIndex,10) || 0,
+        makeRelative: style.position === 'static', locked: !!el.closest('[data-timeline-locked]'),
+        sourceFile, sha256: sourceVersions[sourceFile], elementId: el.id || undefined, hfId: el.getAttribute('data-hf-id') || undefined};
+    });
   }
 
   function selectPreviewLayer(message) {

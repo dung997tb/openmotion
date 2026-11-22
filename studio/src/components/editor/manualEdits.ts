@@ -13,6 +13,7 @@ export {
   mergeFileChangePayloads,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
+  readFileTreeChanged,
   readFileChangeField,
   readStudioFileChangePath,
 } from "./manualEditsParsing";

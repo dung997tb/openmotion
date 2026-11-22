@@ -182,6 +182,7 @@ export async function postPatchElement(
   targetPath: string,
   body: unknown,
   showToast: ShowToast,
+  ifMatch?: string,
 ): Promise<PatchElementResponse> {
   const response = await studioApiFetch(
     buildProjectApiPath(
@@ -190,7 +191,7 @@ export async function postPatchElement(
     ),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+      headers: { "Content-Type": "application/json", ...studioWriteHeaders(), ...(ifMatch && { "If-Match": ifMatch }) },
       body: JSON.stringify(body),
     },
   );

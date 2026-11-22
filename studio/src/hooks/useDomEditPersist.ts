@@ -80,7 +80,7 @@ export function useDomEditPersist({
 
       const targetPath = selection.sourceFile || activeCompPath || "index.html";
       const completePersistence = <T>(result: T, changed: boolean): T => {
-        if (options?.skipRefresh && changed && !options.deferRender)
+        if (!selection.isolatedTarget && options?.skipRefresh && changed && !options.deferRender)
           reseekPreviewRuntime(previewIframeRef.current);
         return result;
       };
@@ -115,7 +115,7 @@ export function useDomEditPersist({
 
       // An imported font or prepareContent takes the server patch; the SDK serializes only the patched
       // DOM. The SDK re-reads in the file queue; this read is its fallback.
-      if (onTrySdkPersist && !font && !options?.prepareContent && !options?.validateContent) {
+      if (onTrySdkPersist && !selection.isolatedTarget && !font && !options?.prepareContent && !options?.validateContent) {
         const originalContent = await readTarget();
         if (originalContent === null) return;
         const cutover = await onTrySdkPersist(selection, operations, originalContent, targetPath, {
@@ -163,7 +163,8 @@ export function useDomEditPersist({
           if (changed) await writeProjectFile(targetPath, content, originalContent);
           patchData = { matched, changed, content, path: targetPath };
         } else {
-          patchData = await postPatchElement(pid, targetPath, patchBody, showToast);
+          patchData = await postPatchElement(pid, targetPath, patchBody, showToast,
+            selection.isolatedTarget && '"sha256:' + selection.isolatedTarget.sha256 + '"');
         }
         if (!patchData.changed) return { patchData, originalContent, patchedContent: null, finalContent: null };
 
@@ -225,7 +226,9 @@ export function useDomEditPersist({
       }
       forceReloadSdkSession?.();
 
-      if (options?.syncTimingInPlace) {
+      if (selection.isolatedTarget) {
+        reloadPreview();
+      } else if (options?.syncTimingInPlace) {
         // Reuse the same attribute-only diff and runtime rebind as soft undo.
         // Keep the iframe, media decoder, thumbnails and ruler alive during a slider drag.
         const strategy = applyUndoRestoreToPreview(

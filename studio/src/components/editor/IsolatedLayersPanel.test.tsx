@@ -7,6 +7,10 @@ import { PREVIEW_LAYERS } from "../../../../src/studio/engine/preview-layers";
 import { IsolatedLayersPanel } from "./IsolatedLayersPanel";
 import { PREVIEW_BRIDGE_SOURCE } from "../../player/lib/previewAdapter";
 
+vi.mock("../../contexts/DomEditContext", () => ({ useDomEditActionsContext: () => ({ commitDomEditPatchBatches: vi.fn() }) }));
+vi.mock("../../contexts/StudioContext", () => ({ useStudioShellContext: () => ({ projectId: "demo", showToast: vi.fn() }) }));
+vi.mock("../nle/useCanvasZOrderTimelineMirror", () => ({ useLayerReorderTimelineMirror: () => vi.fn() }));
+
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 afterEach(() => {

@@ -390,6 +390,10 @@ export function createStudioFileMutationsRoutes(
     const current = await deps.files.readTextFile(auth, projectId, filePath);
     if (!current) return c.json({ error: 'Target file not found', path: filePath }, 404);
 
+    const shownVersion = c.req.header('if-match');
+    if (shownVersion !== undefined && shownVersion !== current.version)
+      return c.json({ error: 'file conflict', code: 'VERSION_MISMATCH', durable: false }, 409);
+
     const nextHtml = removeElementsFromHtml(current.content, body.targets);
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     let version = current.version;

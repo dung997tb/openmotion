@@ -59,9 +59,7 @@ import {
 import { projects } from '../db/schema/projects.ts';
 import type { Logger } from '../infra/logger.ts';
 import {
-  buildImageThumbnailJobId,
   buildPreviewProxyJobId,
-  buildVideoSpriteJobId,
   buildWaveformPeaksJobId,
   type QueueService,
 } from '../infra/queues.ts';
@@ -238,82 +236,14 @@ async function enqueueDerivedMediaJobs(
     sha256: string;
     mimeType: string;
     sizeBytes: number;
-    probed?: ProbedMediaInfo | null;
+    probed: ProbedMediaInfo;
     projectId?: string;
-    skipThumbnail?: boolean;
   },
 ): Promise<void> {
   if (!deps.queues) return;
   const queues = deps.queues;
-  const mime = params.mimeType.trim().toLowerCase().split(';')[0] ?? '';
-  const modality =
-    params.probed?.modality ??
-    (mime.startsWith('video/')
-      ? 'video'
-      : mime.startsWith('audio/')
-        ? 'audio'
-        : mime.startsWith('image/')
-          ? 'image'
-          : undefined);
-
   const tasks: Array<{ name: MediaIngestJobName; run: () => Promise<unknown> }> = [];
-
-  if (modality === 'video') {
-    tasks.push({
-      name: 'generate_video_sprite',
-      run: () =>
-        queues.enqueueMediaIngest(
-          'generate_video_sprite',
-          {
-            workspaceId: params.workspaceId,
-            blobScope: params.blobScope,
-            sha256: params.sha256,
-            ...(params.projectId ? { projectId: params.projectId } : {}),
-            ...(params.probed?.durationSec !== undefined ? { durationSec: params.probed.durationSec } : {}),
-            ...(params.probed?.width !== undefined ? { width: params.probed.width } : {}),
-            ...(params.probed?.height !== undefined ? { height: params.probed.height } : {}),
-          },
-          { jobId: buildVideoSpriteJobId(params.workspaceId, params.sha256) },
-        ),
-    });
-
-    if (params.probed?.hasAudio !== false) {
-      tasks.push({
-        name: 'extract_waveform_peaks',
-        run: () =>
-          queues.enqueueMediaIngest(
-            'extract_waveform_peaks',
-            {
-              workspaceId: params.workspaceId,
-              blobScope: params.blobScope,
-              sha256: params.sha256,
-              ...(params.projectId ? { projectId: params.projectId } : {}),
-              samples: 2048,
-            },
-            { jobId: buildWaveformPeaksJobId(params.workspaceId, params.sha256) },
-          ),
-      });
-    }
-
-    if (!params.skipThumbnail) {
-      tasks.push({
-        name: 'image_thumbnail',
-        run: () =>
-          queues.enqueueMediaIngest(
-            'image_thumbnail',
-            {
-              workspaceId: params.workspaceId,
-              blobScope: params.blobScope,
-              sha256: params.sha256,
-              ...(params.projectId ? { projectId: params.projectId } : {}),
-              spec: 'w320',
-              width: 320,
-            },
-            { jobId: buildImageThumbnailJobId(params.workspaceId, params.sha256, 'w320') },
-          ),
-      });
-    }
-  } else if (modality === 'audio') {
+  if (params.probed.modality === 'audio' || (params.probed.modality === 'video' && params.probed.hasAudio !== false)) {
     tasks.push({
       name: 'extract_waveform_peaks',
       run: () =>
@@ -329,31 +259,14 @@ async function enqueueDerivedMediaJobs(
           { jobId: buildWaveformPeaksJobId(params.workspaceId, params.sha256) },
         ),
     });
-  } else if (modality === 'image' && mime !== 'image/svg+xml' && !params.skipThumbnail) {
-    tasks.push({
-      name: 'image_thumbnail',
-      run: () =>
-        queues.enqueueMediaIngest(
-          'image_thumbnail',
-          {
-            workspaceId: params.workspaceId,
-            blobScope: params.blobScope,
-            sha256: params.sha256,
-            ...(params.projectId ? { projectId: params.projectId } : {}),
-            spec: 'w320',
-            width: 320,
-          },
-          { jobId: buildImageThumbnailJobId(params.workspaceId, params.sha256, 'w320') },
-        ),
-    });
   }
 
   if (params.blobScope === 'workspace') {
     const proxyTarget = classifyPreviewProxyTarget({
       mimeType: params.mimeType,
       sizeBytes: params.sizeBytes,
-      width: params.probed?.width,
-      height: params.probed?.height,
+      width: params.probed.width,
+      height: params.probed.height,
     });
     if (proxyTarget) {
       tasks.push({
@@ -368,8 +281,8 @@ async function enqueueDerivedMediaJobs(
               ...(params.projectId ? { projectId: params.projectId } : {}),
               mimeType: params.mimeType,
               sizeBytes: params.sizeBytes,
-              ...(params.probed?.width !== undefined ? { width: params.probed.width } : {}),
-              ...(params.probed?.height !== undefined ? { height: params.probed.height } : {}),
+              ...(params.probed.width !== undefined ? { width: params.probed.width } : {}),
+              ...(params.probed.height !== undefined ? { height: params.probed.height } : {}),
             },
             { jobId: buildPreviewProxyJobId(params.workspaceId, params.sha256) },
           ),
@@ -1098,7 +1011,6 @@ async function promoteFileToLibraryOrProject(
   sizeBytes: number;
   mimeType: string;
   modality: AssetModality | 'font';
-  thumbnailKey?: string;
   projectPath?: string;
   licenseProjectPath?: string;
   projectRevision?: string;
@@ -1122,10 +1034,6 @@ async function promoteFileToLibraryOrProject(
 
   const runCmd = deps.runFfmpegCommand ?? defaultRunFfmpegCommand;
   const probe = deps.probeMedia ?? ((file: string) => probeMediaFile(file, runCmd));
-  const thumbFn =
-    deps.generateThumbnailBuffer ??
-    ((file: string, media: ProbedMediaInfo, opts: { width: number; height?: number; timestampSec?: number }) =>
-      defaultGenerateThumbnailBuffer(file, media, opts, runCmd));
   const applyDeltas = deps.applyBlobDeltas ?? applyWorkspaceBlobRefDeltas;
 
   // Support font uploads (`project_asset` + optional companion license) without running ffprobe/thumbnailing.
@@ -1176,19 +1084,6 @@ async function promoteFileToLibraryOrProject(
   if (params.licenseBuffer && params.licenseBuffer.byteLength > 0) {
     licenseSha256 = createHash('sha256').update(params.licenseBuffer).digest('hex');
     licenseBlobKey = workspaceBlobKey(params.workspaceId, licenseSha256);
-  }
-
-  // Generate thumbnail off-thread before PG tx (skipped for fonts and audio).
-  let uploadedThumbKey: string | undefined;
-  if (probed) {
-    const thumbBuffer = await thumbFn(params.filePath, probed, { width: 320 }).catch(() => null);
-    if (thumbBuffer && thumbBuffer.byteLength > 0) {
-      uploadedThumbKey = thumbnailKey(params.workspaceId, sha256, 'w320');
-      await deps.storage.putObject(uploadedThumbKey, thumbBuffer, 'image/jpeg', thumbBuffer.byteLength);
-      if (blobMetadata) {
-        blobMetadata = { ...blobMetadata, thumbnailReady: true };
-      }
-    }
   }
 
   // INVARIANT: Upload bytes to S3 CAS BEFORE opening PG transaction!
@@ -1650,7 +1545,6 @@ async function promoteFileToLibraryOrProject(
         modality,
         ...(createdAssetId ? { assetId: createdAssetId } : {}),
         ...(createdVersionId ? { versionId: createdVersionId } : {}),
-        ...(uploadedThumbKey ? { thumbnailKey: uploadedThumbKey } : {}),
         ...(committedProjectPath ? { projectPath: committedProjectPath } : {}),
         ...(committedLicensePath ? { licenseProjectPath: committedLicensePath } : {}),
         ...(committedProjectRevision ? { projectRevision: committedProjectRevision } : {}),
@@ -1753,7 +1647,7 @@ async function promoteFileToLibraryOrProject(
   }
   await Promise.allSettled(publications);
 
-  // Best-effort non-blocking derived media scheduling (sprite / waveform / thumbnail / preview proxy).
+  // Waveforms and preview proxies are warmed in the background.
   // Never fail upload_commit / url_fetch if background scheduling fails.
   if (probed && deps.queues) {
     await enqueueDerivedMediaJobs(deps, {
@@ -1764,7 +1658,6 @@ async function promoteFileToLibraryOrProject(
       sizeBytes,
       probed,
       projectId: params.targetProjectId,
-      skipThumbnail: Boolean(uploadedThumbKey),
     });
   }
 
@@ -1775,7 +1668,6 @@ async function promoteFileToLibraryOrProject(
     sizeBytes,
     mimeType,
     modality,
-    thumbnailKey: uploadedThumbKey,
     projectPath: committed.projectPath,
     licenseProjectPath: committed.licenseProjectPath,
     projectRevision: committed.projectRevision,

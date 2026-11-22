@@ -137,18 +137,10 @@ export function useFfmpegStatus(): {
   }, []);
 
   useEffect(() => {
-    let stopped = false, timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      await run();
-      // Poll briefly while waiting for worker-render to come online in cloud mode.
-      if (!stopped && cached?.mode === 'remote-worker' && !cached.ok) {
-        timer = setTimeout(tick, 5000);
-      }
-    };
-    void tick();
-    const refresh = () => { clearTimeout(timer); void tick(); };
+    void run();
+    const refresh = () => { void run(); };
     window.addEventListener('focus', refresh);
-    return () => { stopped = true; clearTimeout(timer); window.removeEventListener('focus', refresh); };
+    return () => window.removeEventListener('focus', refresh);
   }, [run]);
 
   const recheck = useCallback((_retry = true) => {

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useCloudDisklessMode } from "../../utils/cloudRuntime";
 import { buildProjectApiPath } from "../../utils/projectRouting";
 import {
   createThumbnailKey,
@@ -63,6 +64,7 @@ export function usePreviewPoster(
   activeKey: string,
   directUrl: string | undefined,
 ) {
+  const cloud = useCloudDisklessMode();
   const visit = useVisitNumber(activeKey);
   const [coverDoneFor, setCoverDoneFor] = useState<number | null>(null);
   const [posterSettledFor, setPosterSettledFor] = useState<number | null>(null);
@@ -83,7 +85,7 @@ export function usePreviewPoster(
     [visit, renderMissingPoster],
   );
   return {
-    mountPoster: !directUrl && (coverDoneFor !== visit || posterSettledFor !== visit),
+    mountPoster: !cloud && !directUrl && (coverDoneFor !== visit || posterSettledFor !== visit),
     hidePoster: coverDoneFor === visit,
     onLiveReadyToShowChange,
     onPreviewError: () => setCoverDoneFor(visit),

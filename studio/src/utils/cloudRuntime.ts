@@ -18,7 +18,9 @@ function notify(cloud: boolean): void {
 
 /** Synchronous result of shell detection or the legacy config probe. */
 export function getCachedCloudDisklessMode(): boolean {
-  return cachedCloudMode === true;
+  return cachedCloudMode ?? (typeof document !== "undefined" && Boolean(
+    isolatedPreviewOrigin() || document.head.querySelector('meta[name="openmotion-runtime"][content="cloud-diskless"]'),
+  ));
 }
 
 /** Explicitly mark cloud mode (used by tests or when a project response already confirmed cloud-diskless). */
@@ -31,8 +33,7 @@ export function setCachedCloudDisklessMode(value: boolean | null): void {
 /** Prefer the cloud shell declaration. Older and native shells use the config probe. */
 export function ensureCloudDisklessMode(): Promise<boolean> {
   if (cachedCloudMode !== null) return Promise.resolve(cachedCloudMode);
-  if (typeof document !== "undefined" && (isolatedPreviewOrigin() ||
-      document.head.querySelector('meta[name="openmotion-runtime"][content="cloud-diskless"]'))) {
+  if (getCachedCloudDisklessMode()) {
     setCachedCloudDisklessMode(true);
     return Promise.resolve(true);
   }

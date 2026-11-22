@@ -8,6 +8,7 @@ export type ProjectEvent =
       paths: string[];
       writeToken?: string;
       affectsPreview?: boolean;
+      fileTreeChanged?: boolean;
       affectedCompositions?: string[];
       ts: number;
     }

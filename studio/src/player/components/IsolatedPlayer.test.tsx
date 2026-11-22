@@ -35,10 +35,10 @@ function mountPlayer(showInitialLoading = true) {
   act(() => root.render(<IsolatedPlayer projectId="p" origin={origin} onLoad={ready} onPreviewError={error} showInitialLoading={showInitialLoading} />));
   const frame = host.querySelector("iframe")!;
   Object.defineProperty(frame, "contentWindow", { value: window });
-  const notify = (type: string, token = "grant-" + grant) => act(() => {
+  const notify = (type: string, token = "grant-" + grant, firstFrame?: string) => act(() => {
     window.dispatchEvent(new MessageEvent("message", { origin, source: frame.contentWindow,
       data: { source: PREVIEW_BRIDGE_SOURCE, version: PREVIEW_BRIDGE_VERSION, projectId: "p", token,
-        type, duration: 5, retryAfterMs: 1000 } }));
+        type, firstFrame, duration: 5, retryAfterMs: 1000 } }));
   });
   return { retry, ready, error, notify, host, unmount: () => act(() => root.unmount()) };
 }
@@ -104,5 +104,36 @@ it("keeps loading local through a timeout and manual retry, then uncovers the fi
     player.notify("timeline-state");
     advance(40);
     expect(loading()).toBeNull();
+  } finally { player.unmount(); }
+});
+
+it("publishes timeline metadata while waiting for a decodable visible frame", () => {
+  const player = mountPlayer();
+  const loading = () => player.host.querySelector('[data-testid="composition-loading-overlay"]');
+  try {
+    player.notify("timeline-state", undefined, "loading");
+    advance(70);
+    expect(player.ready).toHaveBeenCalledOnce();
+    expect(loading()).not.toBeNull();
+    player.notify("timeline-state", undefined, "ready");
+    advance(40);
+    expect(player.ready).toHaveBeenCalledOnce();
+    expect(loading()).toBeNull();
+  } finally { player.unmount(); }
+});
+
+it("offers retry on first-frame media failure or a stalled first frame, ignoring late messages for the old load", () => {
+  const player = mountPlayer();
+  try {
+    player.notify("timeline-state", undefined, "loading");
+    advance(90_001);
+    expect(player.error).toHaveBeenCalledOnce();
+    player.notify("timeline-state", undefined, "ready");
+    expect(player.host.textContent).toContain("Retry preview");
+    act(() => player.host.querySelector("button")!.click());
+    player.notify("timeline-state", "grant-1", "ready");
+    expect(player.host.querySelector('[data-testid="composition-loading-overlay"]')).not.toBeNull();
+    player.notify("timeline-state", undefined, "error");
+    expect(player.error).toHaveBeenCalledTimes(2);
   } finally { player.unmount(); }
 });

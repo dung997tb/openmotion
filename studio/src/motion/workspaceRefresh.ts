@@ -4,7 +4,7 @@ export const activeWorkspaceInterval = 1800;
 
 // The editor already owns the project SSE connection. Unscoped views and older
 // servers still reconcile through bounded reads.
-type ProjectActivity = (projectId: string, event: 'render-updated' | 'reconnected') => void;
+type ProjectActivity = (projectId: string, event: 'render-updated' | 'catalog-changed' | 'reconnected') => void;
 const activityListeners = new Set<ProjectActivity>();
 
 export const notifyProjectActivity: ProjectActivity = (projectId, event) => {

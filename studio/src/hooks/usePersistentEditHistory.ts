@@ -224,14 +224,16 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
   const [pageKeyScope] = useState(generateId);
   const claimKey = useCallback((key: string) => `${pageKeyScope}:${key}`, [pageKeyScope]);
 
+  const readSequence = useRef(0);
   const refresh = useCallback(async () => {
+    const sequence = ++readSequence.current;
     if (!projectId) return;
     const seen = own.changes();
     const response = await studioApiFetch(historyUrl(projectId)).catch(() => null);
     const next = response?.ok
       ? ((await response.json().catch(() => null)) as HistoryView | null)
       : EMPTY;
-    if (projectIdRef.current !== projectId) return;
+    if (sequence !== readSequence.current || projectIdRef.current !== projectId) return;
     if (!next) return console.error("The history's reply was unreadable.");
     observeStudioSavedAt(projectId, Math.max(0, ...next.entries.map(entry => timestamp(entry.endedAt))));
     setView(next);
@@ -363,10 +365,17 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
     [projectId, view, refresh, own],
   );
 
+  // A single cloud commit can deliver both a file event and a history event.
+  const historyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(historyTimer.current), [projectId]);
+  const refreshAfterEvent = useCallback(() => {
+    clearTimeout(historyTimer.current);
+    historyTimer.current = setTimeout(() => void refresh(), 75);
+  }, [refresh]);
   const noteOutsideChange = useCallback(() => {
     own.overtake();
-    void refresh();
-  }, [own, refresh]);
+    refreshAfterEvent();
+  }, [own, refreshAfterEvent]);
 
   const undo = useCallback((callbacks: ApplyCallbacks) => step("undo", callbacks), [step]);
   const redo = useCallback((callbacks: ApplyCallbacks) => step("redo", callbacks), [step]);
@@ -401,5 +410,6 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
         ? null : own.predict(direction),
     claims: own.claimCount,
     noteOutsideChange,
+    refreshAfterEvent,
   };
 }

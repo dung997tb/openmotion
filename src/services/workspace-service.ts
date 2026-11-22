@@ -60,6 +60,7 @@ export interface WorkspaceServiceDeps {
   readonly db: Database;
   readonly storage: StoragePort;
   readonly files: ProjectFilesService;
+  readonly onCatalogChange?: (workspaceId: string) => void;
   readonly hotTextCache?: HotTextCachePort;
 }
 
@@ -252,7 +253,10 @@ export class WorkspaceService {
   private readonly storage: StoragePort;
   private readonly hotTextCache?: HotTextCachePort;
 
+  private readonly onCatalogChange?: WorkspaceServiceDeps['onCatalogChange'];
+
   constructor(deps: WorkspaceServiceDeps) {
+    this.onCatalogChange = deps.onCatalogChange;
     this.db = deps.db;
     this.storage = deps.storage;
     this.hotTextCache = deps.hotTextCache;
@@ -728,6 +732,7 @@ export class WorkspaceService {
       }
     }
 
+    if (!result.replayed) this.onCatalogChange?.(ctx.workspaceId);
     return result;
   }
 
@@ -776,7 +781,7 @@ export class WorkspaceService {
       ? canonicalInputHash({ projectId, title: nextTitle, expectedTitle: input.expectedTitle ?? null })
       : null;
 
-    return this.db.transaction(async (tx) => {
+    const result: ProjectMutationResult = await this.db.transaction(async (tx) => {
       if (input.requestId && inputHash) {
         const receipts = await tx
           .select()
@@ -874,6 +879,8 @@ export class WorkspaceService {
 
       return mutation;
     });
+    if (!result.replayed) this.onCatalogChange?.(ctx.workspaceId);
+    return result;
   }
 
   /** Soft-trash a project (refuses trashing the last remaining active project in the workspace). */
@@ -885,7 +892,7 @@ export class WorkspaceService {
     const scope = 'project:trash';
     const inputHash = input.requestId ? canonicalInputHash({ projectId, action: 'trash' }) : null;
 
-    return this.db.transaction(async (tx) => {
+    const result: ProjectMutationResult = await this.db.transaction(async (tx) => {
       if (input.requestId && inputHash) {
         const receipts = await tx
           .select()
@@ -997,6 +1004,8 @@ export class WorkspaceService {
 
       return mutation;
     });
+    if (!result.replayed) this.onCatalogChange?.(ctx.workspaceId);
+    return result;
   }
 
   /** Restore a project from trash (`trashed = false, trashedAt = null`). */
@@ -1008,7 +1017,7 @@ export class WorkspaceService {
     const scope = 'project:restore-trash';
     const inputHash = input.requestId ? canonicalInputHash({ projectId, action: 'restore' }) : null;
 
-    return this.db.transaction(async (tx) => {
+    const result: ProjectMutationResult = await this.db.transaction(async (tx) => {
       if (input.requestId && inputHash) {
         const receipts = await tx
           .select()
@@ -1090,6 +1099,8 @@ export class WorkspaceService {
 
       return mutation;
     });
+    if (!result.replayed) this.onCatalogChange?.(ctx.workspaceId);
+    return result;
   }
 
   /**
@@ -1107,7 +1118,7 @@ export class WorkspaceService {
     const scope = 'project:delete';
     const inputHash = input.requestId ? canonicalInputHash({ projectId, action: 'delete' }) : null;
 
-    return this.db.transaction(async (tx) => {
+    const result: ProjectMutationResult & { decrementedBlobRefs: number } = await this.db.transaction(async (tx) => {
       if (input.requestId && inputHash) {
         const receipts = await tx
           .select()
@@ -1275,6 +1286,8 @@ export class WorkspaceService {
 
       return mutation;
     });
+    if (!result.replayed) this.onCatalogChange?.(ctx.workspaceId);
+    return result;
   }
 
   /** Record Studio preview display metadata on the project row. */
@@ -1483,6 +1496,7 @@ export class WorkspaceService {
       return sess.id;
     });
 
+    this.onCatalogChange?.(ctx.workspaceId);
     return this.getSession(ctx, sessionId);
   }
 
@@ -1503,6 +1517,7 @@ export class WorkspaceService {
         applied: false,
       });
     }
+    this.onCatalogChange?.(ctx.workspaceId);
     return this.getSession(ctx, sessionId);
   }
 

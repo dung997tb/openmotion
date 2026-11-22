@@ -1,3 +1,5 @@
+import { usePlayerStore } from "../../player/store/playerStore";
+import type { TimelineDropPlacement } from "../../player/components/timelineCallbacks";
 import { useCallback, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PlayerControls } from "../../player";
@@ -45,6 +47,7 @@ function deselectIfPointerOutsideFrame(
 }
 
 export interface PreviewPaneProps {
+  onAssetDrop?: (assetPath: string, placement: TimelineDropPlacement, duration?: number) => void;
   portrait?: boolean;
   /** Slot for overlays rendered on top of the preview (cursors, highlights, etc.) */
   previewOverlay?: ReactNode;
@@ -61,6 +64,7 @@ export function PreviewPane({
   previewOverlay,
   onSelectTimelineElement,
   onPreviewBlockDrop,
+  onAssetDrop,
 }: PreviewPaneProps) {
   const mvp = useMvpEditor();
   const { t } = useI18n(), toast = useToast();
@@ -93,7 +97,11 @@ export function PreviewPane({
     stageRefForDrop.current = ref.current;
   }, []);
 
+  const handleCanvasAssetDrop = useCallback((path: string, duration: number | undefined, position: { left: number; top: number }) => {
+    onAssetDrop?.(path, { start: usePlayerStore.getState().currentTime, track: 0, newTrack: "top", canvasPosition: position }, duration);
+  }, [onAssetDrop]);
   const {
+    captureDrag,
     isDragOver: previewDragOver,
     handleDragEnter: handlePreviewDragEnter,
     handleDragOver: handlePreviewDragOver,
@@ -104,6 +112,7 @@ export function PreviewPane({
     compositionSize: previewCompositionSize,
     stageRef: stageRefForDrop as React.RefObject<HTMLDivElement | null>,
     onBlockDrop: onPreviewBlockDrop,
+    onAssetDrop: onAssetDrop && !timelineDisabled ? handleCanvasAssetDrop : undefined,
   });
 
   // Preview-only fullscreen: fullscreen targets THIS pane's container, so the
@@ -172,6 +181,7 @@ export function PreviewPane({
         </PreviewOverlayProvider>}
         {empty && <PreviewEmptyState />}
         {!empty && !isFullscreen && <TimelineHoverPreview />}
+        {captureDrag && !isFullscreen && <div aria-hidden className="absolute inset-0 z-50" data-preview-drop-surface="" />}
         {isFullscreen && <button type="button" data-fullscreen-playback-surface="" className="absolute inset-0 border-0 bg-transparent" aria-label={t('Play or pause preview')} onClick={togglePlay} />}
       </div>
       {/* The MVP transport fills both side edges and the bottom inset. */}

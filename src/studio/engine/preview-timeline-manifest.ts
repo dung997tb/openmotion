@@ -26,9 +26,14 @@ export const PREVIEW_TIMELINE_MANIFEST = `
       const hfId = node.getAttribute('data-hf-id') || undefined;
       const sourceFile = sourceFileForElement(node);
       if ((!domId && !hfId) || !Object.hasOwn(sourceVersions, sourceFile)) return clip;
+      // A composition's nested media belongs to its own timeline.
+      const media = node.matches('audio,video,img,[data-composition-id],[data-composition-src],[data-composition-file]')
+        ? node : node.querySelector('audio,video,img');
+      const volume = Number.parseFloat(node.getAttribute('data-volume') ?? media?.getAttribute('data-volume'));
       return { ...clip, authored: { domId, hfId, sourceFile,
         hidden: node.hasAttribute('data-hidden'), timelineLocked: node.hasAttribute('data-timeline-locked'),
-        muted: node.hasAttribute('muted') } };
+        muted: node.hasAttribute('muted') || !!media?.hasAttribute('muted'),
+        hasAudioAttr: node.getAttribute('data-has-audio'), volume: Number.isFinite(volume) ? volume : undefined } };
     });
   }
 `;

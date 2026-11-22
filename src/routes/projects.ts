@@ -1,3 +1,4 @@
+import { etag } from 'hono/etag';
 import { projectArtifact } from '../../shared/session.ts';
 import { Hono, type Context } from 'hono';
 import { formatRedirectHostLabel } from '../auth/oauth21.ts';
@@ -91,8 +92,10 @@ export function createProjectsRouter(deps: ProjectsRouterDeps): Hono<{ Variables
   app.onError((err, c) => handleError(c, err));
 
   // GET /motion-api/projects — List workspace projects & sessions.
-  app.get('/motion-api/projects', async (c) => {
+  app.get('/motion-api/projects', etag(), async (c) => {
     const auth = await requireAuth(c, deps, READ_REQ);
+    c.header('Cache-Control', 'private, no-cache');
+    c.header('Vary', 'Cookie, Authorization');
     return c.json(await deps.workspace.getCatalog(auth));
   });
 

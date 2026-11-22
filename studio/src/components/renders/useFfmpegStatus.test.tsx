@@ -7,7 +7,7 @@ import { useFfmpegStatus } from './useFfmpegStatus';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
-it('reads remote-worker heartbeat from /api/environment/ffmpeg and polls until a worker comes online', async () => {
+it('reads remote-worker heartbeat from /api/environment/ffmpeg and rechecks on demand without idle polling', async () => {
   vi.useFakeTimers();
   let ready = false;
   let result: ReturnType<typeof useFfmpegStatus>;
@@ -29,8 +29,11 @@ it('reads remote-worker heartbeat from /api/environment/ffmpeg and polls until a
   expect(result!.status?.ok).toBe(false);
   expect(result!.status?.mode).toBe('remote-worker');
   expect(result!.status?.title).toContain('Render worker');
+  const initialReads = fetcher.mock.calls.length;
   ready = true;
-  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+  expect(fetcher).toHaveBeenCalledTimes(initialReads);
+  await act(async () => result!.recheck());
   expect(result!.status?.ok).toBe(true);
   expect(result!.status?.workers).toHaveLength(1);
   expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);

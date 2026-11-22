@@ -3,6 +3,7 @@ import {
   mergeFileChangePayloads,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
+  readFileTreeChanged,
   readFileChangeField,
   readStudioFileChangePath,
 } from "../components/editor/manualEdits";
@@ -142,6 +143,10 @@ export function sseFileChangeChannel(
   const eventSource = new EventSource(studioProjectUrl('/api/events'));
   eventSource.addEventListener("file-change", onDelivery);
   eventSource.addEventListener("history-changed", onHistoryChanged);
+  eventSource.addEventListener("catalog-changed", (event) => {
+    const projectId = readFileChangeField(decodeFileChange(event), "projectId");
+    if (projectId) notifyProjectActivity(projectId, "catalog-changed");
+  });
   eventSource.addEventListener("render-updated", (event) => {
     const projectId = readFileChangeField(decodeFileChange(event), "projectId");
     if (projectId) notifyProjectActivity(projectId, "render-updated");
@@ -297,7 +302,7 @@ export function useExternalFileChangeCoordinator({
       // mode to surface. The `absent`-triggered fallback in useSdkSession
       // covers the case where this call is missed entirely (server restart,
       // a watcher event the SSE never delivered).
-      void refreshFileTree?.();
+      if (readFileTreeChanged(owed)) void refreshFileTree?.();
     },
     [onAcceptedPersistedFileChange, reloadPreview, reloadSdkSession, refreshFileTree],
   );
@@ -490,15 +495,9 @@ export function useExternalFileChangeCoordinator({
       }
 
       const waiting = pendingPayloadRef.current?.payload;
-      const waitingChangeOutranksThis =
-        waiting != null &&
-        readFileChangeAffectsPreview(waiting) &&
-        !readFileChangeAffectsPreview(payload);
-      if (!waitingChangeOutranksThis) {
-        pendingPayloadRef.current = {
-          payload: waiting == null ? payload : mergeFileChangePayloads(waiting, payload),
-        };
-      }
+      pendingPayloadRef.current = {
+        payload: waiting == null ? payload : mergeFileChangePayloads(waiting, payload),
+      };
       void startDrainLoop();
     },
     [projectId, pendingTimelineEditPathRef, startDrainLoop, onAcceptedPersistedFileChange],

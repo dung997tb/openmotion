@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
 
 class TestImage {
@@ -56,6 +57,16 @@ describe("timeline image thumbnails", () => {
     expect(latest().src).toBe(source);
     latest().onload?.();
     expect((await result).value).toMatchObject({ url: source });
+  });
+  it("loads original cloud JPEGs directly without queueing a derivative", async () => {
+    setCachedCloudDisklessMode(true);
+    try {
+      const url = "/api/projects/p/preview/photo.jpg?revision=2";
+      const result = decodeImageThumbnail(url, new AbortController().signal);
+      expect(latest().src).toBe(url);
+      latest().onload?.();
+      expect((await result).value).toMatchObject({ url });
+    } finally { setCachedCloudDisklessMode(null); }
   });
   it("falls back for an older server and accounts for original dimensions", async () => {
     const result = decodeImageThumbnail(

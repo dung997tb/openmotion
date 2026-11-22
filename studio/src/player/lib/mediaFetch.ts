@@ -172,7 +172,7 @@ function typedResponse(response: Response, asked: number, request: WatchedReques
  * Options for a mediabunny `UrlSource`. Its default retries a same-origin network failure
  * forever and logs a bare `TypeError` each time; these retry twice and fail with a MediaFetchError.
  */
-export function mediaUrlSourceOptions(reader: MediaReader) {
+export function mediaUrlSourceOptions(reader: MediaReader, requireBoundedRanges = false) {
   // Per start byte: a resume asks for a new start, while asking for one again uses its budget up.
   const failuresByStart = new Map<number | null, number>();
   const inFlightReads = new AbortController();
@@ -181,7 +181,7 @@ export function mediaUrlSourceOptions(reader: MediaReader) {
   const noteEtag = (response: Response) =>
     void (etag ??= response.headers.get("ETag") ?? undefined);
   const fetchFn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const sent = ranges === "readable" ? boundedRange(init) : init;
+    const sent = requireBoundedRanges || ranges === "readable" ? boundedRange(init) : init;
     const asked = Number(rangeStart(sent, true) ?? 0);
     const request = watchedRequest(
       reader,
@@ -189,6 +189,16 @@ export function mediaUrlSourceOptions(reader: MediaReader) {
       { ended: (start) => failuresByStart.delete(start), atTarget: init?.signal },
     );
     const response = await typedFetch(reader, input, sent ?? {}, asked, request);
+    if (requireBoundedRanges && !rangesReadable(sent, response)) {
+      // A small complete object is safe. A large 200 (Range ignored), or a partial
+      // response whose total size is hidden by CORS, must not become a full download.
+      const size = response.headers.get("Content-Length");
+      if (response.status !== 200 || !size || !/^\d+$/.test(size) || Number(size) > THUMBNAIL_RANGE_BYTES) {
+        request.done();
+        void response.body?.cancel().catch(() => {});
+        throw new MediaFetchError(reader, response.status, "range-unavailable", asked);
+      }
+    }
     if (ranges !== "hidden") ranges = rangesReadable(sent, response) ? "readable" : "hidden";
     noteEtag(response);
     return typedResponse(response, asked, request);

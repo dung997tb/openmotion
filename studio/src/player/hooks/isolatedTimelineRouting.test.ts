@@ -24,7 +24,7 @@ it("keeps authored identity across runtime notifications and only accepts it fro
   expect(process).not.toHaveBeenCalled();
   expect(child.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "handshake", timelineOnly: true }), origin);
   const payload = { source: PREVIEW_BRIDGE_SOURCE, version: PREVIEW_BRIDGE_VERSION, type: "timeline-state", projectId: "p",
-    clips: [{ ...clip, authored: { sourceFile: "parts/scene.html", hfId: "source-voice", hidden: true, timelineLocked: true, muted: true } }],
+    clips: [{ ...clip, authored: { sourceFile: "parts/scene.html", hfId: "source-voice", hidden: true, timelineLocked: true, muted: true, volume: 0.42 } }],
     durationInFrames: 60 };
   send({ ...payload, token: "older" });
   expect(process).not.toHaveBeenCalled();
@@ -33,7 +33,7 @@ it("keeps authored identity across runtime notifications and only accepts it fro
   expect(isCurrentIsolatedManifest(iframe, clips)).toBe(true);
   expect(buildTimelineElementsFromClips(clips, null)[0]).toMatchObject({
     sourceFile: "parts/scene.html", hfId: "source-voice", selector: '[data-hf-id="source-voice"]',
-    timelineLocked: true, hidden: true, muted: true,
+    timelineLocked: true, hidden: true, muted: true, volume: 0.42,
   });
   iframe.src = origin + "/api/projects/p/preview?pt=replacement";
   expect(isCurrentIsolatedManifest(iframe, clips)).toBe(false);
@@ -50,4 +50,11 @@ it("patches an anonymous legacy clip using exactly the same hf-id as its preview
   expect(patched).toContain('data-duration="2"');
   expect(patched).toContain(`data-hf-id="${hfId}"`);
   expect(patchTimelineChangesInSource(source, "index.html", [{ element, buildPatches: current => current }])).toBe(source);
+});
+
+it("uses the same audible-video rule for the isolated gain dialog and same-origin timeline", () => {
+  const clip = { id: "footage", kind: "video" as const, tagName: "video", start: 0, duration: 2, track: 0,
+    authored: { domId: "footage", sourceFile: "index.html", hidden: false, muted: false, timelineLocked: false, volume: 1.35 } };
+  expect(buildTimelineElementsFromClips([clip], null)[0]).toMatchObject({ hasAudio: true, volume: 1.35 });
+  expect(buildTimelineElementsFromClips([{ ...clip, authored: { ...clip.authored, hasAudioAttr: "false" } }], null)[0]?.hasAudio).toBeUndefined();
 });

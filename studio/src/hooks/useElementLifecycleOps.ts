@@ -124,7 +124,10 @@ export function useElementLifecycleOps({
         const hfIds = sameFile
           .map((member) => member.hfId)
           .filter((hfId): hfId is string => Boolean(hfId));
-        if (onTrySdkDelete && hfIds.length === sameFile.length) {
+        const shownVersions = new Set(sameFile.flatMap(member => member.isolatedTarget ? [member.isolatedTarget.sha256] : []));
+        if (shownVersions.size > 1) throw new Error("Preview changed before the elements could be deleted");
+        const [shownVersion] = shownVersions;
+        if (!shownVersion && onTrySdkDelete && hfIds.length === sameFile.length) {
           const originalContent = await readProjectFileContent(pid, targetPath);
           assertSafeElementDeletion(originalContent, patchTargets);
           // SDK members commit separately; validate each before the first write.
@@ -169,7 +172,8 @@ export function useElementLifecycleOps({
               ),
               {
                 method: "POST",
-                headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+                headers: { "Content-Type": "application/json", ...studioWriteHeaders(),
+                  ...(shownVersion && { "If-Match": '"sha256:' + shownVersion + '"' }) },
                 body: JSON.stringify({ targets: patchTargets }),
               },
             );

@@ -1,3 +1,4 @@
+import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { openComposition } from "@hyperframes/sdk";
 import type { Composition } from "@hyperframes/sdk";
@@ -195,9 +196,7 @@ async function readProjectFileOptional(
   let res: Response;
   const fetchStarted = performance.now();
   try {
-    res = await studioApiFetch(
-      `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(path)}?optional=1`,
-    );
+    res = await studioApiFetch(optionalProjectSourceUrl(projectId, path));
   } catch {
     return networkReadFailure(fetchStarted);
   }

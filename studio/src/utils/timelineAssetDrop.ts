@@ -93,16 +93,15 @@ export function resolveTimelineAssetCompositionSize(source: string): {
 export function fitTimelineAssetGeometry(
   natural: { width: number; height: number } | null,
   comp: { width: number; height: number },
+  center?: { left: number; top: number },
 ): { left: number; top: number; width: number; height: number } {
-  if (!natural || natural.width <= 0 || natural.height <= 0) {
-    return { left: 0, top: 0, width: comp.width, height: comp.height };
-  }
-  const scale = Math.min(1, comp.width / natural.width, comp.height / natural.height);
-  const width = Math.round(natural.width * scale);
-  const height = Math.round(natural.height * scale);
+  const size = natural && natural.width > 0 && natural.height > 0 ? natural : comp;
+  const scale = Math.min(1, comp.width / size.width, comp.height / size.height);
+  const width = Math.round(size.width * scale);
+  const height = Math.round(size.height * scale);
   return {
-    left: Math.round((comp.width - width) / 2),
-    top: Math.round((comp.height - height) / 2),
+    left: Math.round((center?.left ?? comp.width / 2) - width / 2),
+    top: Math.round((center?.top ?? comp.height / 2) - height / 2),
     width,
     height,
   };
