@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bindPreviewLease } from "./previewLease";
+import { bindPreviewLease, preparePreviewLease } from "./previewLease";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 
 vi.mock("../../utils/studioApiFetch", () => ({ studioApiFetch: vi.fn() }));
@@ -35,6 +35,40 @@ describe("preview lease", () => {
     expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ assetLease: "A" });
     await vi.advanceTimersByTimeAsync(16_000);
     expect(navigate.mock.calls[1][0].searchParams.get("pt")).toBe("third");
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("uses the project open request once for the matching live player and renews normally", async () => {
+    fetch.mockResolvedValueOnce(grant("A", "initial")).mockResolvedValueOnce(grant("A", "renewed"));
+    const prepared = preparePreviewLease("p", origin, new AbortController().signal);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(prepared("other", origin)).toBeUndefined();
+    expect(prepared("p", "https://other.example.test")).toBeUndefined();
+    lease = bindPreviewLease(source, origin, navigate, failed, prepared);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(navigate.mock.calls[0][0].searchParams.get("pt")).toBe("initial");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(prepared("p", origin)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ assetLease: "A" });
+  });
+
+  it.each(["aborted", "expired", "offline", "early-denial"])("fetches a fresh grant when the initial request is %s", async (reason) => {
+    const controller = new AbortController();
+    if (reason === "offline") fetch.mockRejectedValueOnce(new Error("offline"));
+    else if (reason === "early-denial") fetch.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    else fetch.mockResolvedValueOnce(grant("A", "unused"));
+    fetch.mockResolvedValueOnce(grant("B", "fresh"));
+    const prepared = preparePreviewLease("p", origin, controller.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    if (reason === "aborted") controller.abort();
+    if (reason === "expired") {
+      vi.setSystemTime(Date.now() + 21_000);
+      fetch.mockReset().mockResolvedValueOnce(grant("B", "fresh"));
+    }
+    lease = bindPreviewLease(source, origin, navigate, failed, prepared);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(navigate.mock.calls[0][0].searchParams.get("pt")).toBe("fresh");
     expect(failed).not.toHaveBeenCalled();
   });
 

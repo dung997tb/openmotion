@@ -1,4 +1,5 @@
-import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { InitialPreviewLeaseContext } from "../../motion/StudioHost";
+import { forwardRef, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "open-design-ui/button";
 import { useI18n } from "../../i18n/I18n";
 import { applyPreviewVariablesToUrl } from "../../hooks/previewVariablesStore";
@@ -22,6 +23,8 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
     // Shadow promotion changes props and the forwarded ref without replacing the live document.
     const source = useRef(props.directUrl ?? (props.projectId && buildProjectApiPath(props.projectId, "/preview")));
     const initialPortrait = useRef(props.portrait);
+    const prepared = useContext(InitialPreviewLeaseContext);
+    const initialLease = useRef(props.showInitialLoading ? prepared : undefined);
     const passive = props.passive === true;
     const lease = useRef<ReturnType<typeof bindPreviewLease> | null>(null);
     const busyRetries = useRef(0);
@@ -125,7 +128,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         iframe.src = next.href;
         bridge = createPreviewAdapter({ iframe, expectedOrigin: props.origin });
         deadline = setTimeout(() => fail("The composition preview did not become ready."), 15_000);
-      }, fail);
+      }, fail, initialLease.current);
       return () => {
         clearTimeout(busyTimer);
         clearTimeout(deadline);

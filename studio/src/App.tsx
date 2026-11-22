@@ -338,7 +338,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     syncPreviewHotkeys: appHotkeys.syncPreviewHotkeys,
     reloadPreview,
     setRefreshKey,
-    openSourceForSelection: fileManager.openSourceForSelection,
+    openSourceForSelection: mvpEditor ? undefined : fileManager.openSourceForSelection,
     sdkSession: editFlowSdkSession,
     publishSdkSession: sdkHandle.publish,
     forceReloadSdkSession: sdkHandle.forceReload,

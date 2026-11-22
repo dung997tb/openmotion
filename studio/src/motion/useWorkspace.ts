@@ -3,7 +3,7 @@ import { useI18n } from '../i18n/I18n';
 import { confirmedRoute, projectHref, requestedProject, sessionHref, type OpenedPreview, type WorkspaceRoute } from './workspaceRouting';
 import { availableSession, type CreativeSession, type CreationMode } from '../../../shared/session';
 import { isWorkspaceSettingsPage, preservePresentation } from '../../../shared/workspace-url';
-import { activeWorkspaceInterval, watchWorkspaceRead } from './workspaceRefresh';
+import { activeWorkspaceInterval, subscribeProjectActivity, watchWorkspaceRead } from './workspaceRefresh';
 import { getStudioSaveSnapshot, subscribeStudioSaves } from '../utils/studioSaveState';
 import { diagnosticFetch } from './diagnosticRequests';
 import { initializeWorkspaceHistory, WORKSPACE_LOCATION_CHANGED, workspaceHistoryIndex, workspaceHistorySession, writeWorkspaceHistory } from '../utils/workspaceHistory';
@@ -146,6 +146,7 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
       setConnectionError(statusError || catalogError || '');
       if (statusError !== undefined && catalogError !== undefined) setCheckingConnection(false);
     };
+    const openedAt = Date.now();
     const refreshStatus = watchWorkspaceRead(controller.signal, async () => {
       const data = await request<WorkspaceStatus>(workspaceStatusPath, { signal: controller.signal });
       if (controller.signal.aborted) return Infinity;
@@ -154,10 +155,12 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
       }
       setStatus(data);
       const exporting = data.exportJob?.state === 'pending' || data.exportJob?.state === 'running';
-      return exporting ? activeWorkspaceInterval : 30_000;
+      // Save notifications and render events handle changes in the active editor.
+      // Keep a bounded reconciliation for missed events and non-editor views.
+      return exporting ? activeWorkspaceInterval : 120_000;
     }, error => { statusError = error; settled(); });
 
-    watchWorkspaceRead(controller.signal, async () => {
+    const refreshCatalog = watchWorkspaceRead(controller.signal, async () => {
       const catalog = await motionApi<ProjectCatalog>('/projects', { signal: controller.signal });
       if (controller.signal.aborted) return Infinity;
       updateCatalog(catalog);
@@ -170,19 +173,28 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
           navigate(sessionHref(sessionWithoutProject!, generated.projectId, true), true);
           return Infinity;
         }
+        // Poll quickly for the first result, then cap the cost of an empty draft.
+        return Date.now() - openedAt < 30_000 ? activeWorkspaceInterval : 15_000;
       }
-      return awaitingArtifact ? activeWorkspaceInterval : 60_000;
+      return 60_000;
     }, error => { catalogError = error; settled(); });
 
     // Local writes and server-backed history both update the project save store.
     let savedAt = getStudioSaveSnapshot(projectId ?? null).savedAt;
-    const unsubscribe = subscribeStudioSaves(() => {
+    const unsubscribeSaves = subscribeStudioSaves(() => {
       const next = getStudioSaveSnapshot(projectId ?? null).savedAt;
       if (next === savedAt) return;
       savedAt = next;
       refreshStatus(activeWorkspaceInterval);
     });
-    return () => { controller.abort(); unsubscribe(); };
+    const unsubscribeActivity = subscribeProjectActivity((id, event) => {
+      if (id !== projectId) return;
+      if (event === 'reconnected') {
+        refreshStatus(0);
+        refreshCatalog(0);
+      } else refreshStatus(activeWorkspaceInterval);
+    });
+    return () => { controller.abort(); unsubscribeSaves(); unsubscribeActivity(); };
   }, [projectId, sessionWithoutProject, updateCatalog, request, connectionCheck, navigate]);
 
   const transition = useCallback(async (path?: string, options?: { instruction?: string; mode?: string; templateId?: string; projectId?: string }, route: { session?: boolean; revealArtifact?: boolean; existing?: OpenTarget } = {}) => {

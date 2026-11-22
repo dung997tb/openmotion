@@ -5,12 +5,45 @@ export function isolatedPreviewOrigin(): string | undefined {
     document.querySelector<HTMLMetaElement>('meta[name="openmotion-preview-origin"]')?.content;
 }
 
+type Grant = { previewOrigin: string; token: string; expiresAt: string; assetLease: string };
+type GrantResponse = { status: number; grant: Grant | null };
+
+async function requestPreviewLease(project: string, assetLease: string | undefined, signal: AbortSignal): Promise<GrantResponse> {
+  const response = await studioApiFetch(`/api/projects/${project}/preview-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assetLease: assetLease ?? true }),
+    cache: "no-store",
+    signal,
+  });
+  return { status: response.status, grant: response.ok ? await response.json() : null };
+}
+
+/** Only the initial live player of this route can take the speculative response. */
+export function preparePreviewLease(projectId: string, origin: string, route: AbortSignal) {
+  const project = encodeURIComponent(projectId);
+  const signal = AbortSignal.any([route, AbortSignal.timeout(10_000)]);
+  let pending: Promise<GrantResponse | undefined> | undefined = requestPreviewLease(project, undefined, signal).catch(() => undefined);
+  signal.addEventListener("abort", () => { pending = undefined; }, { once: true });
+  return (requestedProject: string, requestedOrigin: string) => {
+    if (signal.aborted || requestedProject !== project || requestedOrigin !== origin) return;
+    const response = pending;
+    pending = undefined;
+    return response?.then(result => {
+      if (signal.aborted || !result?.grant || !(Date.parse(result.grant.expiresAt) > Date.now())) return;
+      return result;
+    });
+  };
+}
+export type PreparedPreviewLease = ReturnType<typeof preparePreviewLease>;
+
 /** The host renews the asset lease. An uninterrupted lease keeps the current document alive. */
 export function bindPreviewLease(
   source: URL,
   origin: string,
   navigate: (url: URL) => void,
   failed: (message: string) => void,
+  prepared?: PreparedPreviewLease,
 ) {
   const project = /^\/api\/projects\/([^/]+)\/preview(?:\/|$)/.exec(source.pathname)?.[1];
   const controller = new AbortController();
@@ -42,15 +75,13 @@ export function bindPreviewLease(
     pending = true;
     try {
       if (!project) throw new Error("Invalid project preview URL");
-      const response = await studioApiFetch(`/api/projects/${project}/preview-token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetLease: assetLease ?? true }),
-        cache: "no-store",
-        signal: controller.signal,
-      });
+      const initial = prepared?.(project, origin);
+      prepared = undefined;
+      const early = initial && await initial;
       if (controller.signal.aborted) return;
-      if (!response.ok) {
+      const response = early ?? await requestPreviewLease(project, assetLease, controller.signal);
+      if (controller.signal.aborted) return;
+      if (!response.grant) {
         if (response.status === 401 || response.status === 403 || response.status === 404) {
           assetLease = undefined;
           renewAt = Infinity;
@@ -59,7 +90,7 @@ export function bindPreviewLease(
         }
         throw new Error(`Preview authorization failed (HTTP ${response.status})`);
       }
-      const grant = await response.json();
+      const grant = response.grant;
       const deadline = Date.parse(grant.expiresAt);
       const ttl = deadline - Date.now();
       if (grant.previewOrigin !== origin || typeof grant.token !== "string" || !grant.token ||

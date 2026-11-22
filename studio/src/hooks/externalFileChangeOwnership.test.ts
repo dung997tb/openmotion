@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { subscribeProjectActivity } from "../motion/workspaceRefresh";
 import { sseFileChangeChannel } from "./useExternalFileChangeCoordinator";
 
 describe("external file-change subscription ownership", () => {
@@ -75,7 +76,7 @@ describe("external file-change subscription ownership", () => {
     }
   });
 
-  it("delivers history-changed events through the shared EventSource", () => {
+  it("delivers project history and render invalidations through the shared EventSource", () => {
     const listeners = new Map<string, (event: unknown) => void>();
     class FakeEventSource {
       addEventListener(type: string, listener: (event: unknown) => void) {
@@ -84,14 +85,19 @@ describe("external file-change subscription ownership", () => {
       close = vi.fn();
     }
     vi.stubGlobal("EventSource", FakeEventSource);
+    const onActivity = vi.fn();
+    const unsubscribe = subscribeProjectActivity(onActivity);
     try {
       const onHistoryChanged = vi.fn();
       const stop = sseFileChangeChannel(vi.fn(), vi.fn(), onHistoryChanged);
       const event = new MessageEvent("history-changed", { data: JSON.stringify({ projectId: "project-a" }) });
       listeners.get("history-changed")?.(event);
       expect(onHistoryChanged).toHaveBeenCalledWith(event);
+      listeners.get("render-updated")?.(new MessageEvent("render-updated", { data: JSON.stringify({ projectId: "project-a", state: "queued" }) }));
+      expect(onActivity).toHaveBeenCalledWith("project-a", "render-updated");
       stop();
     } finally {
+      unsubscribe();
       vi.unstubAllGlobals();
     }
   });

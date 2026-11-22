@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import { StudioHostContext } from "../motion/StudioHost";
 import { studioApiFetch } from '../utils/studioApiFetch';
 import { useCompositionContentLoader } from './useCompositionContentLoader';
 
@@ -29,4 +30,23 @@ it('keeps the last selected clip when the initial composition finishes loading l
   } finally {
     act(() => root.unmount());
   }
+});
+
+it('selects the Motion composition without fetching source for a panel the workspace does not offer', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(document.createElement('div'));
+  const setEditingFile = vi.fn(), setActiveCompPath = vi.fn();
+  let select!: (path: string) => void;
+  vi.mocked(studioApiFetch).mockClear();
+  function Editor() {
+    select = useCompositionContentLoader({ projectId: 'p', setEditingFile, setActiveCompPath, showToast: vi.fn() });
+    return null;
+  }
+  try {
+    await act(async () => root.render(<StudioHostContext.Provider value={{ mvpEditor: true }}><Editor /></StudioHostContext.Provider>));
+    await act(async () => { select('index.html'); select('compositions/intro.html'); });
+    expect(studioApiFetch).not.toHaveBeenCalled();
+    expect(setEditingFile).toHaveBeenLastCalledWith({ path: 'compositions/intro.html', content: null });
+    expect(setActiveCompPath).toHaveBeenLastCalledWith('compositions/intro.html');
+  } finally { act(() => root.unmount()); }
 });

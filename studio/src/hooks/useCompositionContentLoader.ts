@@ -1,3 +1,4 @@
+import { useMvpEditor } from "../motion/StudioHost";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback, useEffect, useRef } from "react";
 import { studioApiFetch } from "../utils/studioApiFetch";
@@ -20,6 +21,7 @@ export function useCompositionContentLoader({
   setActiveCompPath: (path: string | null) => void;
   showToast: (message: string, tone?: "error" | "info") => void;
 }) {
+  const mvp = useMvpEditor();
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), [projectId]);
 
@@ -27,10 +29,12 @@ export function useCompositionContentLoader({
     (comp: string) => {
       if (!projectId) return;
       pending.current?.abort();
-      const controller = new AbortController();
-      pending.current = controller;
       setActiveCompPath(comp.endsWith(".html") ? comp : null);
       setEditingFile({ path: comp, content: null });
+      // The Motion workspace has neither the source editor nor the slideshow panel.
+      if (mvp) return;
+      const controller = new AbortController();
+      pending.current = controller;
       studioApiFetch(buildProjectApiPath(projectId, `/files/${encodeURIComponent(comp)}`), { signal: controller.signal })
         .then(async (r) => {
           if (!r.ok) throw new Error(`Failed to load ${comp} (${r.status})`);
@@ -46,6 +50,6 @@ export function useCompositionContentLoader({
           showToast(err instanceof Error ? err.message : `Failed to load ${comp}`, "error");
         });
     },
-    [projectId, setEditingFile, setActiveCompPath, showToast],
+    [projectId, setEditingFile, setActiveCompPath, showToast, mvp],
   );
 }

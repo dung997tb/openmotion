@@ -1,3 +1,5 @@
+import { isolatedPreviewOrigin, preparePreviewLease, type PreparedPreviewLease } from "../player/lib/previewLease";
+import { InitialPreviewLeaseContext } from "./StudioHost";
 import { Button } from 'open-design-ui/button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
@@ -26,7 +28,7 @@ export function MotionApp() {
     return () => window.removeEventListener(WORKSPACE_LOCATION_CHANGED, sync);
   }, []);
   const [libraryOnly, setLibraryOnly] = useState(() => new URLSearchParams(location.search).get('templates') === '1' && projectId === null && !sessionId);
-  const [ready, setReady] = useState<WorkspaceRoute | null>(null);
+  const [ready, setReady] = useState<(WorkspaceRoute & { previewLease?: PreparedPreviewLease }) | null>(null);
   const [error, setError] = useState('');
   const [attempt, retry] = useState(0);
   const surface = useRef<HTMLDivElement>(null);
@@ -50,11 +52,14 @@ export function MotionApp() {
   }, [projectId, sessionId, ready, error, libraryOnly]);
   useEffect(() => {
     if (ready || settingsPage) return;
+    const controller = new AbortController();
+    let previewLease: PreparedPreviewLease | undefined;
     if (projectId && validWorkspaceProject(projectId) && (sessionId === null || validWorkspaceProject(sessionId))
       && new URLSearchParams(location.search).get('templates') !== '1') {
       preloadMotionProjectEditor();
+      const origin = isolatedPreviewOrigin();
+      if (origin) previewLease = preparePreviewLease(projectId, origin, controller.signal);
     }
-    const controller = new AbortController();
     setError('');
     async function resolve() {
       const resolved = await resolveWorkspaceRoute(projectId, sessionId, libraryOnly, controller.signal);
@@ -66,9 +71,13 @@ export function MotionApp() {
         if (!url.hash.startsWith(`#project/${resolved.artifact.projectId}`)) url.hash = `project/${resolved.artifact.projectId}`;
         writeWorkspaceHistory(url, true);
       }
-      setReady(resolved);
+      setReady({ ...resolved, previewLease });
     }
-    void resolve().catch(err => { if (!controller.signal.aborted) setError((err as Error).message); });
+    void resolve().catch(err => {
+      if (controller.signal.aborted) return;
+      controller.abort();
+      setError((err as Error).message);
+    });
     return () => controller.abort();
   }, [route, attempt, libraryOnly, settingsPage]);
   const closeLibrary = () => {
@@ -79,7 +88,11 @@ export function MotionApp() {
     blocked={!ready && !error && !libraryOnly && !settingsPage} onLibraryClose={libraryOnly ? closeLibrary : undefined}>
     <div ref={surface} className="motion-project-surface">
     {error ? <><div className="motion-home-navigation"><WorkspaceMenuButton /></div><RecoveryScreen title={t('Could not open project')} message={error}><Button variant="ghost" className="om-button h-auto" data-primary onClick={() => retry(value => value + 1)}>{t('Retry')}</Button><a className="om-button" href="/?page=editor">{t('Open active project')}</a></RecoveryScreen></>
-      : ready ? ready.artifact ? <ArtifactViewer key={ready.artifact.projectId} artifact={ready.artifact} loadingLayout={loadingLayout} /> : <div className="motion-route-state"><WorkspaceMenuButton />{t('Create a project with your Agent to start editing.')}</div>
+      : ready ? ready.artifact ? (
+        <InitialPreviewLeaseContext.Provider value={ready.previewLease}>
+          <ArtifactViewer key={ready.artifact.projectId} artifact={ready.artifact} loadingLayout={loadingLayout} />
+        </InitialPreviewLeaseContext.Provider>
+      ) : <div className="motion-route-state"><WorkspaceMenuButton />{t('Create a project with your Agent to start editing.')}</div>
       : libraryOnly ? <TemplateLibraryLanding /> : <EditorLoading layout={loadingLayout} />}
     </div>
   </WorkspaceFrame>;
