@@ -20,6 +20,7 @@ import { productBrief, readProducts, studioUsesProduct, type StudioProduct } fro
 import { StudioProductPicker } from './StudioProductPicker';
 
 const AUTOSAVE_DELAY_MS = 800;
+const hiddenStudioPresets = new Set(['bf-keyboard']);
 const INPUT_WIDTH_KEY = 'openmotion.studio.inputWidth.v1';
 const DEFAULT_INPUT_WIDTH = 400;
 const MIN_INPUT_WIDTH = 280;
@@ -181,7 +182,8 @@ export function ScenarioStudioView({
   const inputFields = useMemo(() => studioInputFields(scenario), [scenario]);
   const deliverables = useMemo(() => studioDeliverables(scenario), [scenario]);
   const examples = useMemo(() => new Map(buildShowcaseSlides(scenario).map(slide => [slide.stepId, slide.poster])), [scenario]);
-  const presets = useMemo(() => briefPresetsFor(scenario.id, locale), [scenario.id, locale]);
+  // Studios show one example per scenario for now; the keyboard example is not offered here.
+  const presets = useMemo(() => briefPresetsFor(scenario.id, locale).filter(preset => !hiddenStudioPresets.has(preset.id)), [scenario.id, locale]);
   const poolById = useMemo(() => new Map(poolItems.map(item => [item.id, item])), [poolItems]);
   const references = useMemo(() => poolItems.filter(item => item.stepId === null && !item.tags.includes('product') && (item.source === 'upload' || item.source === 'workspace')), [poolItems]);
   const briefFieldIds = useMemo(() => new Set(scenario.briefFields.map(field => field.id)), [scenario]);
@@ -430,6 +432,15 @@ export function ScenarioStudioView({
       <section className="om-studio-input" aria-label={t('Your brief')}>
         <h1>{t(studio.title)}</h1>
         <p className="om-studio-input-hint">{t(studio.inputHint)}</p>
+        {presets.length > 0 && <div className="om-studio-presets">
+          <span>{t('Try:')}</span>
+          {presets.map(preset => (
+            <Button key={preset.id} variant="plain" size="sm" className="om-studio-preset"
+              onClick={() => update(Object.fromEntries(Object.entries(preset.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string')))}>
+              {preset.label}
+            </Button>
+          ))}
+        </div>}
         {usesProduct && <StudioProductPicker selected={product} onSelect={next => void selectProduct(next)} toast={toast} />}
         <FieldTextarea
           className="om-studio-idea"
@@ -468,15 +479,6 @@ export function ScenarioStudioView({
             );
           })}
         </fieldset>
-        {presets.length > 0 && <div className="om-studio-presets">
-          <span>{t('Try:')}</span>
-          {presets.map(preset => (
-            <Button key={preset.id} variant="plain" size="sm" className="om-studio-preset"
-              onClick={() => update(Object.fromEntries(Object.entries(preset.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string')))}>
-              {preset.label}
-            </Button>
-          ))}
-        </div>}
         <Button variant="primary" className="om-studio-make" icon={<RemixIcon name="sparkling-line" size={16} />} disabled={making || toggling !== null} onClick={() => void makeKit()}>
           {t('Make the full kit')}
         </Button>
