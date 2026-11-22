@@ -481,7 +481,9 @@ export function ScenarioStudioView({
         </header>
         <div className="om-studio-output-grid" role="tablist" aria-label={t('Your kit')}>
           {deliverables.map(step => {
-            const first = stepOutputs(step, run?.steps[step.id], run, poolById).items[0];
+            const made = stepOutputs(step, run?.steps[step.id], run, poolById);
+            // Posts have no media of their own; their first attached image or video is the cover.
+            const first = made.items[0] ?? made.posts.flatMap(post => post.mediaPoolItemIds).map(id => poolById.get(id)).find((item): item is PoolItem => Boolean(item));
             return (
               <DeliverableTab key={step.id} step={step} state={run?.steps[step.id]} example={examples.get(step.id)}
                 cover={first ? { item: first, run } : null} selected={step.id === shownStep?.id} onSelect={() => setShownStepId(step.id)} />

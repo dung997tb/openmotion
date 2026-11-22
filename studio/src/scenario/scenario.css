@@ -5142,7 +5142,7 @@ div.om-studio-output:hover {
 
 .om-studio-resizer-grip {
   position: absolute;
-  top: 50%;
+  top: clamp(48px, 50%, 280px);
   left: 50%;
   width: 12px;
   height: 48px;
