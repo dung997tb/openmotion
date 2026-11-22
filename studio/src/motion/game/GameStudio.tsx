@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { gameGenres, gameSettings, gameStyles, type GameCard, type GameCreated, type GameGenre, type GameSetting, type GameStyle } from '../../../../shared/game-contract';
 import { StudioToastViewport } from '../../components/StudioToastViewport';
+import { WebPublishPopover } from '../../components/WebPublishPopover';
 import { useToast } from '../../hooks/useToast';
 import { useI18n } from '../../i18n/I18n';
+import { useVisibilityPolling } from '../../hooks/useVisibilityPolling';
 import { RemixIcon } from '../../icons/RemixIcons';
 import { WorkspaceBack } from '../WorkspaceBack';
 import { MotionIcon } from '../icons';
@@ -86,12 +88,7 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
   }).catch(() => { setGames(current => current.some(game => game.source === 'mine') ? current : bundledGames); setOffline(true); });
   useEffect(() => { void load(); }, []);
   // Poll every 4 s while the page is visible, so drafts an Agent starts from its chat show up and open on their own.
-  useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') void load(); };
-    const timer = setInterval(tick, 4000);
-    document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-  }, []);
+  useVisibilityPolling(() => load(), { intervalMs: 4000, immediate: false });
   useEffect(() => {
     const scroller = root.current;
     if (!scroller) return;
@@ -358,6 +355,10 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
     try { await navigator.clipboard.writeText(link); notify(isLocalOnly(link) ? t('Link copied. It only opens on this computer; publishing to the web is not available yet.') : t('Game link copied.'), 'info'); }
     catch { notify(t('Could not copy the link.'), 'error'); }
   };
+  const copyPublishedUrl = async (publishedUrl: string) => {
+    try { await navigator.clipboard.writeText(publishedUrl); notify(t('Game link copied.'), 'info'); }
+    catch { notify(t('Could not copy the link.'), 'error'); }
+  };
   const popout = () => { if (url) window.open(url.startsWith('blob:') ? url : new URL(url, location.href).href, '_blank', 'noopener'); };
   return <div className="om-game-project" role="dialog" aria-modal="true" aria-label={game.title}>
     <header className="om-game-project-top">
@@ -408,6 +409,15 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
           {trailerReady && <Button variant="plain" role="tab" className="om-nav-item" aria-selected={view === 'trailer'} onClick={() => setView('trailer')}><RemixIcon name="film-line" size={15} />{t('Trailer')}</Button>}
         </div> : <span />}
         <span className="om-game-preview-tools">
+          {playable && !game.external && !offline && (
+            <WebPublishPopover
+              targetKind="game"
+              targetId={game.id}
+              title={gameTitle(game)}
+              onNotify={notify}
+              onCopyUrl={copyPublishedUrl}
+            />
+          )}
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Reload game')} disabled={!playable} onClick={() => { setSource(null); setReload(value => value + 1); }} icon={<RemixIcon name="refresh-line" size={17} />} />
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Full screen')} disabled={!url} onClick={() => void (view === 'preview' ? frame.current : stage.current)?.requestFullscreen?.()} icon={<RemixIcon name="fullscreen-line" size={17} />} />
           <Button variant="ghost" className="om-button h-auto" disabled={!url} onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open in new window')}</Button>

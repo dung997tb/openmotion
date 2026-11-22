@@ -48,11 +48,24 @@ export default defineConfig({
           ) {
             return 'vendor-react';
           }
+          if (id.includes('/node_modules/react-router/') || id.includes('/node_modules/react-router-dom/')) {
+            return 'vendor-router';
+          }
           if (id.includes('/node_modules/@base-ui/')) {
             return 'vendor-base-ui';
           }
           if (id.includes('/node_modules/lucide-react/')) {
             return 'vendor-icons';
+          }
+          if (id.includes('/node_modules/mediabunny/')) {
+            return 'vendor-mediabunny';
+          }
+          if (
+            id.includes('/node_modules/@modelcontextprotocol/')
+            || id.includes('/node_modules/@mcp-b/')
+            || id.includes('/node_modules/zod/')
+          ) {
+            return 'vendor-mcp-web';
           }
           if (id.includes('/node_modules/@codemirror/') || id.includes('/node_modules/@lezer/')) {
             return 'vendor-codemirror';

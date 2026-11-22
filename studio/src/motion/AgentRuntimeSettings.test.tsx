@@ -117,7 +117,9 @@ it('manages Bridge connect scripts, connected local machines, and Custom Agent S
         serverUrl: 'https://cloud.openmotion.example',
         scriptUrl: 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/script',
         installScriptUrl: `https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.sh?token=${demoBridgeValue}`,
+        installPs1Url: `https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.ps1?token=${demoBridgeValue}`,
         curlCommand: `curl -fsSL 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.sh?token=${demoBridgeValue}' | bash`,
+        powershellCommand: `irm 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.ps1?token=${demoBridgeValue}' | iex`,
         nodeCommand: `node openmotion-agent-bridge.mjs --token ${demoBridgeValue}`,
         localCommand: `node --experimental-strip-types gateway/agent-bridge.ts --token ${demoBridgeValue}`,
       });
@@ -216,7 +218,9 @@ it('manages Bridge connect scripts, connected local machines, and Custom Agent S
 
   expect(document.body.textContent).toContain(`install.sh?token=${['om', 'brg', 'demo', 'fixture'].join('_')}`);
 
-  // Switch to Node.js tab
+  // Switch to Windows PowerShell & Node.js tabs
+  await act(async () => findButton('Windows PowerShell').click());
+  expect(document.body.textContent).toContain('install.ps1');
   await act(async () => findButton('Node.js').click());
   expect(document.body.textContent).toContain('node openmotion-agent-bridge.mjs');
 

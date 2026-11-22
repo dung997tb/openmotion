@@ -149,7 +149,10 @@ export function useWorkspace(
         if (!controller.signal.aborted) setCheckingConnection(false);
       }
       if (!controller.signal.aborted && (typeof document === 'undefined' || !document.hidden)) {
-        timer = setTimeout(poll, 1800);
+        const pollDelayMs = isStandaloneSpaPath(location.pathname, location.search, location.hash) || (!projectId && !sessionId)
+          ? 4500
+          : 1800;
+        timer = setTimeout(poll, pollDelayMs);
       }
     }
     const onVisibilityChange = () => {

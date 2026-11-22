@@ -50,6 +50,51 @@ exec node "$BRIDGE_DIR/openmotion-agent-bridge.mjs" --config "$BRIDGE_DIR/config
 `;
 }
 
+export function renderBridgeInstallPowerShellScript(options: { serverUrl: string; token: string }): string {
+  const token = String(options.token || '').trim();
+  if (!SAFE_TOKEN.test(token)) {
+    throw new Error('Invalid bridge token');
+  }
+  const parsed = new URL(options.serverUrl);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('Invalid server URL');
+  }
+  const serverUrl = parsed.origin;
+  if (/['"\r\n\0\\$`<>|;&()]/.test(serverUrl)) {
+    throw new Error('Server URL contains unsupported shell characters');
+  }
+  const scriptUrl = `${serverUrl}${AGENT_RUNTIMES_API}/bridge/script`;
+  const configJson = JSON.stringify({ serverUrl, token }, null, 2);
+
+  return `$ErrorActionPreference = 'Stop'
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Error 'Node.js (>= 20) is required to run OpenMotion Agent Bridge.'
+  exit 1
+}
+
+$nodeMajor = [int](& node -p 'process.versions.node.split(".")[0]')
+if ($nodeMajor -lt 20) {
+  Write-Error "Node.js >= 20 is required (found $(& node -v))."
+  exit 1
+}
+
+$bridgeDir = Join-Path $HOME '.openmotion-bridge'
+New-Item -ItemType Directory -Force -Path $bridgeDir | Out-Null
+
+$scriptPath = Join-Path $bridgeDir 'openmotion-agent-bridge.mjs'
+Invoke-WebRequest -UseBasicParsing -Uri '${scriptUrl}' -OutFile $scriptPath
+
+$configPath = Join-Path $bridgeDir 'config.json'
+@'
+${configJson}
+'@ | Set-Content -Path $configPath -Encoding UTF8
+
+Write-Host "OpenMotion Agent Bridge installed in $bridgeDir"
+& node $scriptPath --config $configPath @args
+`;
+}
+
 export function renderStandaloneBridgeScript(options: {
   defaultServerUrl?: string;
   version?: string;

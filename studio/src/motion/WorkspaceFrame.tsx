@@ -26,6 +26,10 @@ import { StudioConnectionToast } from '../components/StudioConnectionToast';
 import { ErrorNotice } from '../components/ui/ErrorNotice';
 import { isConnectionFailure } from '../components/ui/errorNoticeMessage';
 import { preservePresentation, workspacePresentation } from '../../../shared/workspace-url';
+import type { DesktopMenuAction } from '../../../shared/platform-host';
+import { exportDesktopDiagnosticBundle, getDesktopBridge, openExternalUrl } from '../utils/platformHost';
+import { discord, feishu } from './CommunityLink';
+import { GITHUB_REPOSITORY } from './githubRepository';
 import { trackMotion } from './tracking';
 import { ApplicationHeader, WorkspaceUtilityActions } from './ApplicationChrome';
 import { BlackFridayTopBanner } from './BlackFridayTopBanner';
@@ -434,6 +438,44 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     }
     openMcp(client, example);
   };
+  const desktopMenuHandlerRef = useRef<(action: DesktopMenuAction) => void>(() => {});
+  desktopMenuHandlerRef.current = action => {
+    if (action === 'open-settings') openSettings('general');
+    else if (action === 'open-about') openSettings('about');
+    else if (action === 'open-help') openSettings('help');
+    else if (action === 'open-agent-runtimes') openSettings('local');
+    else if (action === 'open-mcp-connect') openMcp();
+    else if (action === 'new-project') navigatePage({ explore: true, templates: false });
+    else if (action === 'check-updates') {
+      void getDesktopBridge()?.checkForUpdates();
+      openSettings('about');
+    } else if (action === 'export-logs') {
+      void exportDesktopDiagnosticBundle().then(result => {
+        if (result.ok) {
+          navigationToast.showToast(t('Diagnostic logs exported'), 'info', 'feedback');
+        } else if (!result.canceled) {
+          navigationToast.showToast(
+            result.error || t('Could not export diagnostics. Use the command line if Studio cannot connect.'),
+            'error',
+            'feedback',
+          );
+        }
+      });
+    } else if (action === 'report-issue') {
+      void openExternalUrl(`${GITHUB_REPOSITORY}/issues/new/choose`);
+    } else if (action === 'join-community-feishu') {
+      void openExternalUrl(feishu.href);
+    } else if (action === 'join-community-discord') {
+      void openExternalUrl(discord.href);
+    } else if (action === 'reload-app') {
+      window.location.reload();
+    }
+  };
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge || typeof bridge.subscribeMenuActions !== 'function') return;
+    return bridge.subscribeMenuActions(action => desktopMenuHandlerRef.current(action));
+  }, []);
   const showStudioBackToExplore = page.studio?.scene.modality === 'image' && fromExplore && !sourcePage.community && !sourcePage.medium;
   const openTemplateFromOverlay = (id: string) => {
     if (!switchingDisabled) void (sessionId ? workspace.createArtifact(sessionId, id) : workspace.startSession(undefined, id));

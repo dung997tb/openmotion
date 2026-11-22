@@ -12,6 +12,8 @@ import { Select } from '../components/ui/Select';
 import type { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { AgentAutomationCard } from './AgentAutomationCard';
+import { AgentMcpTokensCard } from './AgentMcpTokensCard';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
 import {
   createAgentService,
@@ -24,7 +26,7 @@ import {
   updateAgentService,
 } from './useAgentRuntimes';
 
-type ScriptTab = 'curl' | 'node' | 'local';
+type ScriptTab = 'curl' | 'powershell' | 'node' | 'local';
 
 export function AgentRuntimeSettings({
   directory,
@@ -240,9 +242,11 @@ export function AgentRuntimeSettings({
   const activeCommand = bundle
     ? scriptTab === 'curl'
       ? bundle.curlCommand
-      : scriptTab === 'node'
-        ? bundle.nodeCommand
-        : bundle.localCommand
+      : scriptTab === 'powershell'
+        ? bundle.powershellCommand || `irm '${bundle.installPs1Url || `${bundle.serverUrl}/motion-api/agent-runtimes/bridge/install.ps1?token=${bundle.token}`}' | iex`
+        : scriptTab === 'node'
+          ? bundle.nodeCommand
+          : bundle.localCommand
     : '';
 
   const formatRuntimeSummary = (runtime: AgentRuntimeInfo) => {
@@ -451,6 +455,7 @@ export function AgentRuntimeSettings({
               <div className="om-runtime-script-tabs" role="tablist" aria-label={t('Command format')}>
                 {([
                   ['curl', 'Quick command'],
+                  ['powershell', 'Windows PowerShell'],
                   ['node', 'Node.js'],
                   ['local', 'Local source'],
                 ] as const).map(([id, label]) => (
@@ -683,6 +688,9 @@ POST /v1/runs/:runId/tool-results -> { callId, ok, contentItems, structuredConte
 POST /v1/runs/:runId/cancel      -> { ok: true }`}</pre>
         </details>
       </section>
+
+      <AgentMcpTokensCard showToast={showToast} />
+      <AgentAutomationCard showToast={showToast} />
     </div>
   );
 }

@@ -60,7 +60,9 @@ export type BridgeSetupBundle = {
   serverUrl: string;
   scriptUrl: string;
   installScriptUrl: string;
+  installPs1Url?: string;
   curlCommand: string;
+  powershellCommand?: string;
   nodeCommand: string;
   localCommand: string;
 };
