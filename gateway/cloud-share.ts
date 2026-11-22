@@ -523,21 +523,22 @@ export class CloudShareService {
   }
 
   private toSnapshot(
-    bundle: ShareBundle,
+    bundle: ShareBundle | null,
     summary: Awaited<ReturnType<OpenDesignAccount['summary']>>,
     record: PersistedCloudShareRecord | null,
+    fallback?: { kind: CloudShareKind; projectId: string },
   ): CloudShareSnapshot {
     const status: CloudShareStatus = record?.status ?? 'none';
-    const freshness: CloudShareFreshness = status === 'none' || !record?.contentFingerprint
+    const freshness: CloudShareFreshness = status === 'none' || !record?.contentFingerprint || !bundle
       ? 'unknown'
       : record.contentFingerprint === bundle.contentFingerprint
         ? 'fresh'
         : 'outdated';
 
     return {
-      kind: bundle.kind,
-      projectId: bundle.projectId,
-      title: bundle.title,
+      kind: bundle?.kind ?? record?.kind ?? fallback!.kind,
+      projectId: bundle?.projectId ?? record?.projectId ?? fallback!.projectId,
+      title: bundle?.title ?? record?.projectId ?? fallback?.projectId ?? '',
       accountState: summary.state,
       ...(summary.user?.email ? { accountEmail: summary.user.email } : {}),
       ...(record?.workspaceName ? { workspaceName: record.workspaceName } : {}),
@@ -547,11 +548,11 @@ export class CloudShareService {
       ...(record?.version !== undefined ? { version: record.version } : {}),
       ...(record?.publishedAt !== undefined ? { publishedAt: record.publishedAt } : {}),
       freshness,
-      fileCount: bundle.fileCount,
-      totalBytes: bundle.totalBytes,
-      bundledAssetCount: bundle.bundledAssetCount,
-      ...(bundle.multiplayer !== undefined ? { multiplayer: bundle.multiplayer } : {}),
-      entryPath: bundle.entryPath,
+      fileCount: bundle?.fileCount ?? 0,
+      totalBytes: bundle?.totalBytes ?? 0,
+      bundledAssetCount: bundle?.bundledAssetCount ?? 0,
+      ...(bundle?.multiplayer !== undefined ? { multiplayer: bundle.multiplayer } : {}),
+      entryPath: bundle?.entryPath ?? record?.entryPath ?? 'index.html',
     };
   }
 
@@ -713,10 +714,11 @@ export class CloudShareService {
       );
 
       const cloudProjectId = cloudProjectIdForShare(kind, projectId);
+      const sameFileIdentity = Boolean(sameOwner && existing!.entryPath === bundle.entryPath);
       const slug = sameOwner ? existing!.slug : randomUUID();
-      const sourceFileId = sameOwner ? existing!.sourceFileId : randomUUID();
-      const sourceKey = sameOwner ? existing!.sourceKey : commentFileSourceKey(cloudProjectId, sourceFileId);
-      const resourceId = sameOwner && existing!.entryPath === bundle.entryPath
+      const sourceFileId = sameFileIdentity ? existing!.sourceFileId : randomUUID();
+      const sourceKey = sameFileIdentity ? existing!.sourceKey : commentFileSourceKey(cloudProjectId, sourceFileId);
+      const resourceId = sameFileIdentity
         ? existing!.resourceId
         : publicFileResourceIdFor(principal.workspaceId, principal.workspaceMemberId, cloudProjectId, bundle.entryPath);
 
@@ -874,7 +876,6 @@ export class CloudShareService {
     const projectId = assertValidProjectId(rawProjectId);
     return this.withLock(`${kind}:${projectId}`, async () => {
       const { summary, principal } = await this.requirePrincipal();
-      const bundle = await this.buildShareBundle(kind, projectId);
       const record = await this.readRecord(kind, projectId);
       if (!record || record.status === 'none') {
         throw new CloudShareError('No active cloud deployment exists for this project.', 404, 'CLOUD_SHARE_NOT_FOUND');
@@ -882,8 +883,9 @@ export class CloudShareService {
       if (record.workspaceId !== principal.workspaceId || record.ownerMemberId !== principal.workspaceMemberId) {
         throw new CloudShareError('This share belongs to a different OpenDesign account or workspace.', 403, 'CLOUD_SHARE_FORBIDDEN');
       }
+      const bundle = await this.buildShareBundle(kind, projectId).catch(() => null);
       if (record.status === 'stopped') {
-        return this.toSnapshot(bundle, summary, record);
+        return this.toSnapshot(bundle, summary, record, { kind, projectId });
       }
       try {
         const stopped = parseJsonObject(
@@ -903,7 +905,7 @@ export class CloudShareService {
           updatedAt: Date.now(),
         };
         await this.saveRecord(nextRecord);
-        return this.toSnapshot(bundle, summary, nextRecord);
+        return this.toSnapshot(bundle, summary, nextRecord, { kind, projectId });
       } catch (error) {
         return this.mapCliError(error, 'CLOUD_SHARE_STOP_FAILED', 'Could not disable the share link.');
       }

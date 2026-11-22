@@ -553,3 +553,132 @@ test('CloudShareService supports design-project bundling, relative URL rewriting
     );
   });
 });
+
+test('CloudShareService allocates a new share file identity on entry change and allows stop after project deletion', async () => {
+  await withTempWorkspace(async store => {
+    const design = designProjectsFor(store.directory);
+    const created = await design.create({
+      requestId: 'entry-switch-create-1',
+      scenario: 'prototype',
+      title: 'Entry Switch Demo',
+    });
+    const w1 = await design.write(created.id, {
+      requestId: 'entry-switch-write-1',
+      expectedRevision: created.revision,
+      files: [{ path: 'index.html', content: '<!doctype html><html><body>v1</body></html>' }],
+    });
+
+    const admittedFiles: Array<{ sourceFileId: string; sourceFilePath: string; entryPath: string; retired: boolean; resourceId: string; versionId: string }> = [];
+    let catalogRevision = 0;
+    let pushCount = 0;
+    let stoppedSlug = '';
+    const seenSourceKeys: string[] = [];
+
+    const account = new OpenDesignAccount(store.directory, {
+      workspacePrincipal: async () => ({
+        workspaceId: 'ws_personal_1',
+        workspaceName: 'Maker Personal',
+        workspaceMemberId: 'mem_personal_1',
+        workspaceType: 'personal',
+      }),
+      runInWorkspace: async (_workspaceId, args) => {
+        if (args[0] === 'team-projects' && args[1] === 'ensure-private') {
+          return JSON.stringify({
+            projectId: args[2],
+            workspaceId: 'ws_personal_1',
+            ownerMemberId: 'mem_personal_1',
+            resourceId: `root-${args[2]}`,
+          });
+        }
+        if (args[0] === 'team-projects' && args[1] === 'register-resource') {
+          return JSON.stringify({ ok: true });
+        }
+        if (args[0] === 'resource' && args[1] === 'push') {
+          pushCount += 1;
+          return JSON.stringify({ id: `ver_entry_${pushCount}` });
+        }
+        if (args[0] === 'team-projects' && args[1] === 'get') {
+          return JSON.stringify({
+            projectId: args[2],
+            workspaceId: 'ws_personal_1',
+            ownerMemberId: 'mem_personal_1',
+            resourceId: `root-${args[2]}`,
+            metadata: {
+              _commentFiles: {
+                schemaVersion: 1,
+                revision: catalogRevision,
+                files: admittedFiles,
+              },
+            },
+          });
+        }
+        if (args[0] === 'team-projects' && args[1] === 'upsert') {
+          const parsed = JSON.parse(flagValue(args, '--metadata-json')!) as { _commentFiles?: { resourceId: string; versionId: string; files: Array<{ sourceFileId: string; sourceFilePath: string; entryPath: string; retired: boolean }> } };
+          const mutation = parsed._commentFiles!;
+          catalogRevision += 1;
+          for (const fact of mutation.files) {
+            admittedFiles.push({
+              ...fact,
+              resourceId: mutation.resourceId,
+              versionId: mutation.versionId,
+            });
+          }
+          return JSON.stringify({ ok: true });
+        }
+        if (args[0] === 'share' && args[1] === 'publish') {
+          const slug = flagValue(args, '--slug')!;
+          const cloudProjectId = flagValue(args, '--project-id')!;
+          const entryPath = flagValue(args, '--entry-path')!;
+          const sourceKey = flagValue(args, '--source-key')!;
+          const versionId = flagValue(args, '--version-id')!;
+          seenSourceKeys.push(sourceKey);
+          return JSON.stringify({
+            status: 'published',
+            slug,
+            entryPath,
+            version: pushCount,
+            publishedAt: 1700000002000 + pushCount,
+            url: `https://open-design.app/artifact/${encodeURIComponent(cloudProjectId)}/${encodeURIComponent(slug)}`,
+            snapshot: { versionId },
+            receipt: { slug, versionId, entryPath, version: pushCount },
+          });
+        }
+        if (args[0] === 'share' && args[1] === 'stop') {
+          stoppedSlug = args[2];
+          return JSON.stringify({ status: 'stopped', slug: args[2] });
+        }
+        throw new Error(`Unexpected Vela args: ${args.join(' ')}`);
+      },
+    });
+    await seedSignedInAccount(account);
+
+    const cloud = new CloudShareService(store, account);
+    const first = await cloud.publish('design-project', created.id);
+    assert.equal(first.status, 'active');
+    assert.equal(first.entryPath, 'index.html');
+
+    // Change the design project's entry file; republishing must allocate a fresh file identity instead of 409 conflict.
+    const rev1 = (await design.get(created.id)).revision;
+    await design.write(created.id, {
+      requestId: 'entry-switch-write-2',
+      expectedRevision: rev1,
+      entry: 'alt.html',
+      files: [{ path: 'alt.html', content: '<!doctype html><html><body>v2 alt</body></html>' }],
+    });
+    const second = await cloud.publish('design-project', created.id);
+    assert.equal(second.status, 'active');
+    assert.equal(second.entryPath, 'alt.html');
+    assert.equal(second.slug, first.slug);
+    assert.equal(seenSourceKeys.length, 2);
+    assert.notEqual(seenSourceKeys[0], seenSourceKeys[1]);
+
+    // Delete the local design project; stop() must still revoke the active cloud link from the persisted share record.
+    await design.trash(created.id, 'entry-switch-trash-1');
+    await design.remove(created.id, 'entry-switch-delete-1');
+    const stopped = await cloud.stop('design-project', created.id);
+    assert.equal(stopped.status, 'stopped');
+    assert.equal(stopped.slug, first.slug);
+    assert.equal(stopped.freshness, 'unknown');
+    assert.equal(stoppedSlug, first.slug);
+  });
+});
