@@ -259,7 +259,12 @@ export function ScenarioStudioView({
     const known = new Set(poolItems.flatMap(item => item.ref.type === 'asset' ? [item.ref.assetId + '/' + item.ref.versionId] : []));
     // Photos of a previously picked product leave this run; other reference images stay.
     const keep = new Set(next.images.map(image => image.assetId + '/' + image.versionId));
-    const stale = poolItems.filter(item => item.tags.includes('product') && !(item.ref.type === 'asset' && keep.has(item.ref.assetId + '/' + item.ref.versionId)));
+    // Never remove a photo a step has used as its output.
+    const latestRun = await api.ensureRun().catch(() => run);
+    const usedAsOutput = new Set(Object.values(latestRun?.steps ?? {}).flatMap(state =>
+      state.iterations.flatMap(iteration => iteration.outputs.flatMap(output => output.type === 'pool' ? [output.poolItemId] : []))));
+    const stale = poolItems.filter(item => item.tags.includes('product') && item.stepId === null && !usedAsOutput.has(item.id)
+      && !(item.ref.type === 'asset' && keep.has(item.ref.assetId + '/' + item.ref.versionId)));
     const items = next.images
       .filter(image => !known.has(image.assetId + '/' + image.versionId))
       .map(image => ({ ref: { type: 'asset' as const, assetId: image.assetId, versionId: image.versionId }, label: `${next.name} · ${image.name}`, tags: ['product'], stepId: null, source: 'upload' as const }));
