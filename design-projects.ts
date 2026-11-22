@@ -20,9 +20,10 @@ import { browserExecutable } from './browser.ts';
 import { validateReviewAnnotation } from './shared/review-comments.ts';
 import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/preview-bridge.ts';
 import { designCatalog } from './shared/design-catalog.ts';
+import { designDeployFor } from './gateway/design-deploy.ts';
 import {
   designEditorHref, designExportFormats, designRoutes, designScenarios, findDesignScenario, isDesignScenario,
-  type DesignComment, type DesignCommentAnchor, type DesignEditorApp, type DesignExportFormat,
+  type DesignComment, type DesignCommentAnchor, type DesignDeployMode, type DesignEditorApp, type DesignExportFormat,
   type DesignFile, type DesignProject, type DesignProjectDetail, type DesignScenarioId, type DesignVersion,
 } from './shared/design-project.ts';
 
@@ -67,7 +68,15 @@ const MIME_BY_EXT: Record<string, string> = {
   wasm: 'application/wasm', pdf: 'application/pdf', mp3: 'audio/mpeg', wav: 'audio/wav', mp4: 'video/mp4', webm: 'video/webm',
 };
 
-export type DesignErrorCode = 'INVALID_ARGUMENT' | 'NOT_FOUND' | 'VERSION_CONFLICT' | 'COMMENT_CONFLICT' | 'UNSUPPORTED';
+export type DesignErrorCode =
+  | 'INVALID_ARGUMENT'
+  | 'NOT_FOUND'
+  | 'VERSION_CONFLICT'
+  | 'COMMENT_CONFLICT'
+  | 'UNSUPPORTED'
+  | 'AUTH_REQUIRED'
+  | 'DEPLOY_CONFLICT'
+  | 'DEPLOY_FAILED';
 
 export class DesignError extends Error {
   readonly code: DesignErrorCode;
@@ -75,8 +84,36 @@ export class DesignError extends Error {
   constructor(code: DesignErrorCode, message: string, status?: number) {
     super(`${code}: ${message}`);
     this.code = code;
-    this.status = status ?? (code === 'NOT_FOUND' ? 404 : code === 'VERSION_CONFLICT' || code === 'COMMENT_CONFLICT' ? 409 : code === 'UNSUPPORTED' ? 501 : 400);
+    this.status = status ?? (
+      code === 'NOT_FOUND' ? 404
+        : code === 'VERSION_CONFLICT' || code === 'COMMENT_CONFLICT' || code === 'DEPLOY_CONFLICT' ? 409
+          : code === 'AUTH_REQUIRED' ? 401
+            : code === 'UNSUPPORTED' ? 501
+              : code === 'DEPLOY_FAILED' ? 502
+                : 400
+    );
   }
+}
+
+function mapDeployError(error: unknown): never {
+  if (error instanceof DesignError) throw error;
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.startsWith('OPENDESIGN_SIGN_IN_REQUIRED')) {
+    throw new DesignError('AUTH_REQUIRED', raw.replace(/^OPENDESIGN_SIGN_IN_REQUIRED:\s*/, ''));
+  }
+  if (raw.startsWith('SHARE_STOPPED_RESUME_REQUIRED')) {
+    throw new DesignError('DEPLOY_CONFLICT', raw.replace(/^SHARE_STOPPED_RESUME_REQUIRED:\s*/, ''));
+  }
+  if (raw.startsWith('NOT_FOUND:')) {
+    throw new DesignError('NOT_FOUND', raw.replace(/^NOT_FOUND:\s*/, ''));
+  }
+  if (raw.startsWith('INVALID_ARGUMENT:')) {
+    throw new DesignError('INVALID_ARGUMENT', raw.replace(/^INVALID_ARGUMENT:\s*/, ''));
+  }
+  if (raw.startsWith('DEPLOY_FAILED:')) {
+    throw new DesignError('DEPLOY_FAILED', raw.replace(/^DEPLOY_FAILED:\s*/, ''));
+  }
+  throw new DesignError('DEPLOY_FAILED', raw || 'Web deployment failed');
 }
 
 type StoredProject = Omit<DesignProject, 'revision' | 'versionId' | 'versionLabel'>;
@@ -1849,6 +1886,41 @@ export async function designHttp(
       return true;
     }
 
+    const deployMatch = /^projects\/([^/]+)\/deploy$/.exec(sub);
+    if (deployMatch) {
+      const id = deployMatch[1];
+      const deployService = designDeployFor(dataDirectory);
+      try {
+        const project = await service.get(id, origin);
+        if (req.method === 'GET') {
+          const status = await deployService.status(project, {
+            filePath: url.searchParams.get('filePath') ?? undefined,
+            refresh: url.searchParams.get('refresh') === '1',
+          });
+          return sendJson(200, status);
+        }
+        if (req.method === 'POST') {
+          const body = await input(req, 32 * 1024).catch(() => ({}));
+          const result = await deployService.deploy(project, project.path, {
+            filePath: typeof body?.filePath === 'string' ? body.filePath : undefined,
+            workspaceId: typeof body?.workspaceId === 'string' ? body.workspaceId : undefined,
+            mode: body?.deployMode as DesignDeployMode | undefined,
+            name: typeof body?.name === 'string' ? body.name : undefined,
+          });
+          return sendJson(200, result);
+        }
+        if (req.method === 'DELETE') {
+          const body = await input(req, 16 * 1024).catch(() => ({}));
+          const filePath = url.searchParams.get('filePath')
+            ?? (typeof body?.filePath === 'string' ? body.filePath : undefined);
+          const result = await deployService.unpublish(project, { filePath });
+          return sendJson(200, result);
+        }
+      } catch (error) {
+        mapDeployError(error);
+      }
+    }
+
     return sendJson(404, { error: { code: 'NOT_FOUND', message: `Unknown design endpoint: ${url.pathname}` } });
   } catch (error) {
     return sendError(error);
@@ -1967,6 +2039,43 @@ export async function dispatchDesignTool(
         if (!args.sourcePath) throw new DesignError('INVALID_ARGUMENT', 'sourcePath is required');
         const projects = await service.importPath(args.sourcePath, { titleHint: args.title, origin });
         return { projects };
+      }
+      case 'deploy': {
+        if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
+        const project = await service.get(args.projectId, origin);
+        try {
+          return await designDeployFor(dataDirectory).deploy(project, project.path, {
+            filePath: args.filePath,
+            workspaceId: args.workspaceId,
+            mode: args.deployMode,
+            name: args.title,
+          });
+        } catch (error) {
+          mapDeployError(error);
+        }
+      }
+      case 'deploy_status': {
+        if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
+        const project = await service.get(args.projectId, origin);
+        try {
+          return await designDeployFor(dataDirectory).status(project, {
+            filePath: args.filePath,
+            refresh: args.refresh === true,
+          });
+        } catch (error) {
+          mapDeployError(error);
+        }
+      }
+      case 'unpublish': {
+        if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
+        const project = await service.get(args.projectId, origin);
+        try {
+          return await designDeployFor(dataDirectory).unpublish(project, {
+            filePath: args.filePath,
+          });
+        } catch (error) {
+          mapDeployError(error);
+        }
       }
       default: throw new DesignError('INVALID_ARGUMENT', `Unknown project action: ${args.action}`);
     }

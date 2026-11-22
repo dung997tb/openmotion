@@ -25,7 +25,7 @@ import {
   type SuperAgentResourceAttachment,
 } from '../../../shared/super-agent';
 import { Popover } from '../components/ui/Popover';
-import { CloudSharePopover } from '../components/CloudSharePopover';
+import { WebPublishPopover } from '../components/WebPublishPopover';
 import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Tooltip } from '../components/ui/Tooltip';
@@ -210,14 +210,24 @@ function useInspectableCodeFiles({
   return { files, selectedFile, setSelectedFile, fileContent, loadingCode, codeError };
 }
 
-function codeFileIcon(filePath: string): string {
+type CodeFileMeta = {
+  icon: string;
+  tone: 'html' | 'css' | 'js' | 'ts' | 'json' | 'doc' | 'asset' | 'plain';
+  lang: string;
+};
+
+function codeFileMeta(filePath: string): CodeFileMeta {
   const lower = filePath.toLowerCase();
-  if (/\.(?:html?|xml)$/.test(lower)) return 'code-s-slash-line';
-  if (/\.(?:css|scss|less)$/.test(lower)) return 'palette-line';
-  if (/\.(?:m?js|cjs|tsx?|jsx?|json|glsl|wgsl)$/.test(lower)) return 'braces-line';
-  if (/\.(?:md|txt)$/.test(lower)) return 'file-text-line';
-  if (/\.svg$/.test(lower)) return 'image-line';
-  return 'file-code-line';
+  if (/\.(?:html?|xml)$/.test(lower)) return { icon: 'code-s-slash-line', tone: 'html', lang: lower.endsWith('.xml') ? 'XML' : 'HTML' };
+  if (/\.(?:css|scss|less)$/.test(lower)) return { icon: 'palette-line', tone: 'css', lang: 'CSS' };
+  if (/\.(?:m?js|cjs|jsx)$/.test(lower)) return { icon: 'braces-line', tone: 'js', lang: 'JavaScript' };
+  if (/\.tsx?$/.test(lower)) return { icon: 'braces-line', tone: 'ts', lang: 'TypeScript' };
+  if (/\.json$/.test(lower)) return { icon: 'braces-line', tone: 'json', lang: 'JSON' };
+  if (/\.(?:glsl|wgsl)$/.test(lower)) return { icon: 'file-code-line', tone: 'ts', lang: 'Shader' };
+  if (/\.md$/.test(lower)) return { icon: 'markdown-line', tone: 'doc', lang: 'Markdown' };
+  if (/\.txt$/.test(lower)) return { icon: 'file-text-line', tone: 'plain', lang: 'Text' };
+  if (/\.svg$/.test(lower)) return { icon: 'file-image-line', tone: 'asset', lang: 'SVG' };
+  return { icon: 'file-code-line', tone: 'plain', lang: 'Code' };
 }
 
 const PRIORITY_CODE_FILES = ['index.html', 'client.js', 'logic.js', 'main.js', 'game.js', 'app.js', 'style.css', 'styles.css'];
@@ -302,10 +312,15 @@ function ProjectPreviewCodeView({
   const { t } = useI18n();
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   useEffect(() => {
     setFrameLoaded(false);
   }, [previewUrl, srcDoc]);
+
+  useEffect(() => {
+    setCopiedCode(false);
+  }, [selectedFile]);
 
   const grouped = useMemo(() => groupProjectFiles(files), [files]);
   const selectOptions = useMemo(() => {
@@ -319,12 +334,15 @@ function ProjectPreviewCodeView({
     }));
   }, [grouped]);
   const lineCount = useMemo(() => (fileContent ? fileContent.split('\n').length : 0), [fileContent]);
+  const activeMeta = useMemo(() => codeFileMeta(selectedFile), [selectedFile]);
 
   if (mode === 'code') {
     const handleCopyCode = async () => {
       if (!fileContent) return;
       try {
         await navigator.clipboard.writeText(fileContent);
+        setCopiedCode(true);
+        window.setTimeout(() => setCopiedCode(false), 1600);
         onNotify?.(t('Copied to clipboard'), 'info');
       } catch {
         onNotify?.(t('Could not copy to clipboard'), 'error');
@@ -335,22 +353,29 @@ function ProjectPreviewCodeView({
       <div className="om-sa-code-view" data-sidebar-open={sidebarOpen || undefined}>
         {sidebarOpen && (
           <aside className="om-sa-code-sidebar" role="tablist" aria-label={t('Project files')}>
-            {grouped.rootFiles.map(filePath => (
-              <Button
-                key={filePath}
-                variant="plain"
-                type="button"
-                role="tab"
-                aria-selected={selectedFile === filePath}
-                data-active={selectedFile === filePath || undefined}
-                title={filePath}
-                className="om-sa-code-file-row"
-                onClick={() => onSelectFile(filePath)}
-              >
-                <RemixIcon name={codeFileIcon(filePath)} size={13} />
-                <span>{filePath}</span>
-              </Button>
-            ))}
+            <div className="om-sa-code-sidebar-head">
+              <span>{t('Files')}</span>
+              <small>{files.length}</small>
+            </div>
+            {grouped.rootFiles.map(filePath => {
+              const meta = codeFileMeta(filePath);
+              return (
+                <Button
+                  key={filePath}
+                  variant="plain"
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedFile === filePath}
+                  data-active={selectedFile === filePath || undefined}
+                  title={filePath}
+                  className="om-sa-code-file-row"
+                  onClick={() => onSelectFile(filePath)}
+                >
+                  <RemixIcon name={meta.icon} size={13} className="om-sa-code-file-icon" data-tone={meta.tone} />
+                  <span>{filePath}</span>
+                </Button>
+              );
+            })}
             {grouped.folders.map(folder => {
               const containsActive = folder.files.includes(selectedFile);
               return (
@@ -361,13 +386,15 @@ function ProjectPreviewCodeView({
                 >
                   <summary className="om-sa-code-folder-head">
                     <RemixIcon name="arrow-right-s-line" size={12} className="om-sa-code-folder-chevron" />
-                    <RemixIcon name="folder-line" size={13} />
+                    <RemixIcon name="folder-line" size={13} className="om-sa-code-folder-icon om-sa-code-folder-icon-closed" />
+                    <RemixIcon name="folder-open-line" size={13} className="om-sa-code-folder-icon om-sa-code-folder-icon-open" />
                     <span className="om-sa-code-folder-name">{folder.name}</span>
                     <small className="om-sa-code-folder-count">{folder.files.length}</small>
                   </summary>
                   <div className="om-sa-code-folder-list">
                     {folder.files.map(filePath => {
                       const base = filePath.slice(folder.name.length + 1);
+                      const meta = codeFileMeta(filePath);
                       return (
                         <Button
                           key={filePath}
@@ -380,7 +407,7 @@ function ProjectPreviewCodeView({
                           className="om-sa-code-file-row om-sa-code-file-nested"
                           onClick={() => onSelectFile(filePath)}
                         >
-                          <RemixIcon name={codeFileIcon(filePath)} size={13} />
+                          <RemixIcon name={meta.icon} size={13} className="om-sa-code-file-icon" data-tone={meta.tone} />
                           <span>{base}</span>
                         </Button>
                       );
@@ -407,7 +434,7 @@ function ProjectPreviewCodeView({
               </Tooltip>
               {selectedFile && (
                 <span className="om-sa-code-active-path" title={selectedFile}>
-                  <RemixIcon name={codeFileIcon(selectedFile)} size={13} />
+                  <RemixIcon name={activeMeta.icon} size={13} className="om-sa-code-file-icon" data-tone={activeMeta.tone} />
                   <span>{selectedFile}</span>
                 </span>
               )}
@@ -423,17 +450,21 @@ function ProjectPreviewCodeView({
               )}
             </div>
             <div className="om-sa-code-header-right">
+              {selectedFile && !loadingCode && !codeError && (
+                <span className="om-sa-code-lang" data-tone={activeMeta.tone}>{activeMeta.lang}</span>
+              )}
               {lineCount > 0 && !loadingCode && !codeError && (
-                <span className="om-sa-code-meta">{lineCount}</span>
+                <span className="om-sa-code-meta">{t('{count} lines', { count: lineCount })}</span>
               )}
               <Tooltip label={t('Copy')}>
                 <IconButton
                   variant="ghost"
-                  className="motion-icon-button"
+                  className="motion-icon-button om-sa-code-copy-btn"
+                  data-copied={copiedCode || undefined}
                   aria-label={t('Copy')}
                   disabled={!fileContent || loadingCode}
                   onClick={() => void handleCopyCode()}
-                  icon={<RemixIcon name="file-copy-line" size={14} />}
+                  icon={<RemixIcon name={copiedCode ? 'check-line' : 'file-copy-line'} size={14} />}
                 />
               </Tooltip>
             </div>
@@ -2005,10 +2036,12 @@ export function ArtifactBrowserPane({
                 )}
 
                 {canCloudShare && activeArtifact?.projectId && (activeArtifact.kind === 'game-project' || activeArtifact.kind === 'design-project') && (
-                  <CloudSharePopover
+                  <WebPublishPopover
                     compact
-                    kind={activeArtifact.kind}
-                    projectId={activeArtifact.projectId}
+                    targetKind={activeArtifact.kind === 'game-project' ? 'game' : 'design'}
+                    targetId={activeArtifact.projectId}
+                    filePath={activeArtifact.entry}
+                    title={activeArtifact.title}
                     revisionKey={activeArtifact.revision ?? String(activeArtifact.updatedAt)}
                     onNotify={onNotify}
                   />

@@ -445,7 +445,9 @@ export class AgentRuntimeRegistry {
 
     const scriptUrl = `${serverUrl}${AGENT_RUNTIMES_API}/bridge/script`;
     const installScriptUrl = `${serverUrl}${AGENT_RUNTIMES_API}/bridge/install.sh?token=${rawToken}`;
+    const installPs1Url = `${serverUrl}${AGENT_RUNTIMES_API}/bridge/install.ps1?token=${rawToken}`;
     const curlCommand = `curl -fsSL ${shellSingleQuote(installScriptUrl)} | bash`;
+    const powershellCommand = `irm ${shellSingleQuote(installPs1Url)} | iex`;
     const nodeCommand = `curl -fsSL ${shellSingleQuote(scriptUrl)} -o openmotion-agent-bridge.mjs && node openmotion-agent-bridge.mjs --server ${shellSingleQuote(serverUrl)} --token ${shellSingleQuote(rawToken)} --name ${shellSingleQuote(safeLabel)}`;
     const localCommand = `node --experimental-strip-types gateway/agent-bridge.ts --server ${shellSingleQuote(serverUrl)} --token ${shellSingleQuote(rawToken)} --name ${shellSingleQuote(safeLabel)}`;
 
@@ -456,7 +458,9 @@ export class AgentRuntimeRegistry {
       serverUrl,
       scriptUrl,
       installScriptUrl,
+      installPs1Url,
       curlCommand,
+      powershellCommand,
       nodeCommand,
       localCommand,
     };
@@ -668,14 +672,16 @@ export class AgentRuntimeRegistry {
     }, 15_000);
     pingTimer.unref();
 
-    res.once('close', () => {
+    const cleanupBridgeStream = () => {
       clearInterval(pingTimer);
       const current = this.bridgeStreams.get(runtimeId);
       if (current) {
         current.delete(res);
         if (!current.size) this.bridgeStreams.delete(runtimeId);
       }
-    });
+    };
+    res.once('close', cleanupBridgeStream);
+    res.once('error', cleanupBridgeStream);
   }
 
   async inspectBridgeAgent(runtimeId: string, agentId: string): Promise<LocalAgent> {
@@ -994,6 +1000,9 @@ export class AgentRuntimeRegistry {
       }
     }
     this.bridgeStreams.clear();
+    for (const [key, registry] of registries) {
+      if (registry === this) registries.delete(key);
+    }
     await this.queue.catch(() => {});
   }
 }

@@ -25,20 +25,8 @@ const display = object({ revision, versionId: id, previewUrl: { type: 'string', 
   ['revision', 'versionId', 'previewUrl', 'visibility', 'contentVerified', 'evidence']);
 const read = { readOnlyHint: true, openWorldHint: false };
 const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-export const cloudShareTool = {
-  name: 'openmotion_cloud_share',
-  title: 'OpenMotion · Cloud Share',
-  description: 'Deploy and inspect an interactive public OpenDesign Cloud preview link for an HTML game-project or design-project, automatically bundling local referenced media assets and relative scripts/styles. Requires a signed-in OpenDesign account for publish, stop, or resume; status works anytime.',
-  inputSchema: object({
-    action: { enum: ['status', 'publish', 'stop', 'resume'], description: 'status reads deployment state; publish deploys or updates the stable share URL; stop disables link access; resume reopens a stopped link.' },
-    kind: { enum: ['game-project', 'design-project'] },
-    projectId: id,
-  }, ['action', 'kind', 'projectId']),
-  annotations: { ...write, openWorldHint: true },
-};
 export const phase1Tools = [
   ...gameTools,
-  cloudShareTool,
   workspaceAssetUseTool,
   assetLibraryTool,
   projectArchiveTool,

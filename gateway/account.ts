@@ -39,6 +39,16 @@ export type OpenDesignWorkspacePrincipal = {
   workspaceMemberId: string;
   workspaceType: 'personal' | 'team';
 };
+export type OpenDesignWorkspaceInfo = {
+  workspaceId: string;
+  workspaceName: string;
+  workspaceType: 'personal' | 'team';
+  workspaceMemberId: string;
+  role: string;
+  isDefault: boolean;
+  memberStatus: string;
+  lifecycleState: string;
+};
 type Profile = { apiUrl?: string; controlKey?: string; controlKeyId?: string; runtimeKey?: string; pendingLogin?: unknown; user?: { id?: string; name?: string; email?: string } };
 /** Connector-owned credentials file. `pendingRevocations` holds keys whose remote revocation has not been confirmed yet. */
 type CredentialsFile = { profiles?: Record<string, Profile>; pendingRevocations?: unknown[] };
@@ -410,19 +420,16 @@ export class OpenDesignAccount {
       signal,
     );
   }
-  async workspacePrincipal(signal?: AbortSignal): Promise<OpenDesignWorkspacePrincipal | null> {
-    if (this.options.workspacePrincipal) return this.options.workspacePrincipal(signal);
-    const profile = await this.profile();
-    if (!signedInProfile(profile)) return null;
-    const apiBase = (profile!.apiUrl?.trim() || productionApi).replace(/\/$/, '');
-    const timeoutSignal = AbortSignal.timeout(12_000);
+  private async fetchWorkspaceRecords(profile: Profile, signal?: AbortSignal, timeoutMs = 15_000): Promise<Record<string, unknown>[]> {
+    const apiBase = (profile.apiUrl?.trim() || productionApi).replace(/\/$/, '');
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     const fetcher = this.options.fetcher ?? fetch;
     let response: Response;
     try {
-      response = await fetcher(apiBase + '/api/v1/workspaces', {
+      response = await fetcher(`${apiBase}/api/v1/workspaces`, {
         method: 'GET',
-        headers: { Authorization: 'Bearer ' + profile!.controlKey, Accept: 'application/json' },
+        headers: { Authorization: `Bearer ${profile.controlKey}`, Accept: 'application/json' },
         redirect: 'error',
         signal: combinedSignal,
       });
@@ -430,17 +437,35 @@ export class OpenDesignAccount {
       if (signal?.aborted) throw error;
       throw new AccountRequestError('');
     }
-    const data = await response.json().catch(() => null) as { items?: unknown[]; error?: unknown } | null;
+    const payload = await response.json().catch(() => null) as {
+      workspaces?: unknown[];
+      items?: unknown[];
+      error?: unknown;
+    } | unknown[] | null;
     if (!response.ok) {
-      if (response.status === 401) this.rejectedKeyId = profile!.controlKeyId;
-      const code = typeof data?.error === 'string' && /^[a-z0-9_]{1,64}$/.test(data.error) ? ': ' + data.error : '';
-      throw new AccountRequestError('API request failed with status ' + response.status + code);
+      if (response.status === 401 || response.status === 403) {
+        this.rejectedKeyId = profile.controlKeyId;
+      }
+      const errField = !Array.isArray(payload) ? payload?.error : undefined;
+      const code = typeof errField === 'string' && /^[a-z0-9_]{1,64}$/.test(errField) ? `: ${errField}` : '';
+      throw new AccountRequestError(`API request failed with status ${response.status}${code}`);
     }
-    const items = Array.isArray(data?.items) ? data.items : [];
+    const items = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.workspaces)
+        ? payload.workspaces
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : [];
+    return items.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'));
+  }
+  async workspacePrincipal(signal?: AbortSignal): Promise<OpenDesignWorkspacePrincipal | null> {
+    if (this.options.workspacePrincipal) return this.options.workspacePrincipal(signal);
+    const profile = await this.profile();
+    if (!signedInProfile(profile)) return null;
+    const items = await this.fetchWorkspaceRecords(profile!, signal, 12_000);
     const active: Array<OpenDesignWorkspacePrincipal & { isDefault?: boolean }> = [];
-    for (const entry of items) {
-      if (!entry || typeof entry !== 'object') continue;
-      const raw = entry as Record<string, unknown>;
+    for (const raw of items) {
       const workspaceId = typeof raw.workspaceId === 'string' ? raw.workspaceId.trim() : '';
       const workspaceName = typeof raw.workspaceName === 'string' ? raw.workspaceName.trim() : '';
       const workspaceMemberId = typeof raw.workspaceMemberId === 'string' ? raw.workspaceMemberId.trim() : '';
@@ -466,6 +491,42 @@ export class OpenDesignAccount {
           workspaceType: chosen.workspaceType,
         }
       : null;
+  }
+  async runWithEnv(
+    args: string[],
+    extraEnv: Record<string, string> = {},
+    options: { signal?: AbortSignal; timeoutMs?: number; maxBuffer?: number } = {},
+  ): Promise<string> {
+    if (this.options.run) return this.options.run(args, options.signal);
+    return this.executeConnector(
+      args,
+      Object.keys(extraEnv).length ? extraEnv : undefined,
+      options.timeoutMs ?? 120_000,
+      options.maxBuffer ?? 16 * 1024 * 1024,
+      options.signal,
+    );
+  }
+  async isSignedIn(): Promise<boolean> {
+    return signedInProfile(await this.profile());
+  }
+  async listWorkspaces(signal?: AbortSignal): Promise<OpenDesignWorkspaceInfo[]> {
+    const profile = await this.profile();
+    if (!signedInProfile(profile) || !profile?.controlKey) {
+      throw new Error('OPENDESIGN_SIGN_IN_REQUIRED: Sign in to OpenDesign in Settings -> Account before deploying to the web.');
+    }
+    const items = await this.fetchWorkspaceRecords(profile, signal, 15_000);
+    return items
+      .filter(item => typeof item.workspaceId === 'string' && item.memberStatus !== 'removed' && item.lifecycleState !== 'deleted')
+      .map(item => ({
+        workspaceId: String(item.workspaceId),
+        workspaceName: typeof item.workspaceName === 'string' ? item.workspaceName : 'Personal',
+        workspaceType: item.workspaceType === 'team' ? 'team' : 'personal',
+        workspaceMemberId: typeof item.workspaceMemberId === 'string' ? item.workspaceMemberId : String(profile.user?.id || ''),
+        role: typeof item.role === 'string' ? item.role : 'owner',
+        isDefault: Boolean(item.isDefault),
+        memberStatus: typeof item.memberStatus === 'string' ? item.memberStatus : 'active',
+        lifecycleState: typeof item.lifecycleState === 'string' ? item.lifecycleState : 'active',
+      }));
   }
   async summary(refresh = false): Promise<AccountSummary> {
     const generation = this.generation;

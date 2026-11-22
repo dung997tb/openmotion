@@ -309,7 +309,17 @@ export function ModeComposerTopBar({
   const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion' || modeId === 'audio');
   const { catalog } = useMediaCatalog(needsMediaCatalog);
   const [openMenu, setOpenMenu] = useState<
-    'video-model' | 'image-model' | 'audio-model' | 'import' | 'coding-workdir' | 'game-genre' | 'game-style' | 'game-setting' | null
+    | 'video-model'
+    | 'image-model'
+    | 'audio-model'
+    | 'import'
+    | 'coding-workdir'
+    | 'game-genre'
+    | 'game-style'
+    | 'game-setting'
+    | 'game-orientation'
+    | 'game-players'
+    | null
   >(null);
   const [urlDraft, setUrlDraft] = useState(options.webReferenceUrl);
   const [workdirDraft, setWorkdirDraft] = useState(options.codingWorkdir);
@@ -389,6 +399,7 @@ export function ModeComposerTopBar({
             type="button"
             className="om-sa-composer-top-pill"
             data-active={isActiveEngine || undefined}
+            data-open={openMenu === menuKey || undefined}
             aria-pressed={isActiveEngine}
             disabled={disabled}
           >
@@ -404,7 +415,7 @@ export function ModeComposerTopBar({
               <RemixIcon name="add-line" size={13} />
             )}
             <span className="om-sa-composer-top-pill-label">{label}</span>
-            <RemixIcon name="arrow-down-s-line" size={14} />
+            <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
           </Button>
         }
       >
@@ -796,17 +807,20 @@ export function ModeComposerTopBar({
               type="button"
               className="om-sa-composer-top-pill"
               data-active={Boolean(selectedId) || openMenu === menuKey || undefined}
+              data-open={openMenu === menuKey || undefined}
               disabled={disabled}
             >
-              {selectedCover ? (
-                <img className="om-sa-game-pill-thumb" src={selectedCover} alt="" />
-              ) : (
-                <RemixIcon name={fallbackIcon} size={13} />
-              )}
-              <span className="om-sa-composer-top-pill-label">
-                {selectedId ? t(labels[selectedId]) : t(label)}
+              <span key={selectedId ?? 'any'} className="om-sa-pill-swap">
+                {selectedCover ? (
+                  <img className="om-sa-game-pill-thumb" src={selectedCover} alt="" />
+                ) : (
+                  <RemixIcon name={fallbackIcon} size={13} />
+                )}
+                <span className="om-sa-composer-top-pill-label">
+                  {selectedId ? t(labels[selectedId]) : t(label)}
+                </span>
               </span>
-              <RemixIcon name="arrow-down-s-line" size={14} />
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
             </Button>
           }
         >
@@ -896,37 +910,168 @@ export function ModeComposerTopBar({
           covers: settingCovers,
           onSelect: id => onChange({ gameSetting: id as GameSetting | null }),
         })}
-        <Button
-          variant="plain"
-          type="button"
-          className="om-sa-composer-top-pill"
-          data-active={options.gameOrientation === 'portrait' || undefined}
-          aria-pressed={options.gameOrientation === 'portrait'}
-          disabled={disabled}
-          onClick={() => {
-            setOpenMenu(null);
-            onChange({ gameOrientation: options.gameOrientation === 'portrait' ? 'landscape' : 'portrait' });
-          }}
+        <Popover
+          open={openMenu === 'game-orientation'}
+          onOpenChange={next => setOpenMenu(next ? 'game-orientation' : null)}
+          side="top"
+          align="start"
+          aria-label={t('Screen layout')}
+          className="om-sa-mode-popover om-sa-game-choice-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={options.gameOrientation === 'portrait' || openMenu === 'game-orientation' || undefined}
+              data-open={openMenu === 'game-orientation' || undefined}
+              aria-haspopup="listbox"
+              aria-expanded={openMenu === 'game-orientation'}
+              disabled={disabled}
+            >
+              <span key={options.gameOrientation} className="om-sa-pill-swap">
+                <RemixIcon name={options.gameOrientation === 'portrait' ? 'smartphone-line' : 'computer-line'} size={13} />
+                <span className="om-sa-composer-top-pill-label">
+                  {t(options.gameOrientation === 'portrait' ? 'Portrait' : 'Landscape')}
+                </span>
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
         >
-          <RemixIcon name={options.gameOrientation === 'portrait' ? 'smartphone-line' : 'computer-line'} size={13} />
-          <span>{t(options.gameOrientation === 'portrait' ? 'Portrait' : 'Landscape')}</span>
-        </Button>
-        <Button
-          variant="plain"
-          type="button"
-          role="switch"
-          aria-checked={options.gameMultiplayer}
-          className="om-sa-composer-top-pill"
-          data-active={options.gameMultiplayer || undefined}
-          disabled={disabled}
-          onClick={() => {
-            setOpenMenu(null);
-            onChange({ gameMultiplayer: !options.gameMultiplayer });
-          }}
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t('Screen layout')}</span>
+            </div>
+            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Screen layout')}>
+              {([
+                {
+                  id: 'landscape' as const,
+                  label: 'Landscape',
+                  ratio: '16:9',
+                  description: 'Desktop & widescreen browser play',
+                },
+                {
+                  id: 'portrait' as const,
+                  label: 'Portrait',
+                  ratio: '9:16',
+                  description: 'Mobile & one-thumb vertical play',
+                },
+              ]).map(item => {
+                const selected = options.gameOrientation === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    variant="plain"
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={selected || undefined}
+                    className="om-sa-game-choice-row"
+                    onClick={() => {
+                      onChange({ gameOrientation: item.id });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span className="om-sa-game-choice-visual" aria-hidden="true">
+                      <span className="om-sa-ratio-glyph" data-ratio={item.ratio} />
+                    </span>
+                    <span className="om-sa-game-choice-copy">
+                      <span className="om-sa-game-choice-title">
+                        <strong>{t(item.label)}</strong>
+                        <small>{item.ratio}</small>
+                      </span>
+                      <span>{t(item.description)}</span>
+                    </span>
+                    <span className="om-sa-game-choice-check" aria-hidden="true">
+                      {selected && <RemixIcon name="check-line" size={15} />}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
+
+        <Popover
+          open={openMenu === 'game-players'}
+          onOpenChange={next => setOpenMenu(next ? 'game-players' : null)}
+          side="top"
+          align="end"
+          aria-label={t('Players')}
+          className="om-sa-mode-popover om-sa-game-choice-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={options.gameMultiplayer || openMenu === 'game-players' || undefined}
+              data-open={openMenu === 'game-players' || undefined}
+              aria-haspopup="listbox"
+              aria-expanded={openMenu === 'game-players'}
+              disabled={disabled}
+            >
+              <span key={options.gameMultiplayer ? 'multi' : 'solo'} className="om-sa-pill-swap">
+                <RemixIcon name={options.gameMultiplayer ? 'group-line' : 'user-3-line'} size={13} />
+                <span className="om-sa-composer-top-pill-label">
+                  {t(options.gameMultiplayer ? 'Multiplayer' : 'Single player')}
+                </span>
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
         >
-          <RemixIcon name="group-line" size={13} />
-          <span>{t('Multiplayer')}</span>
-        </Button>
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t('Players')}</span>
+            </div>
+            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Players')}>
+              {([
+                {
+                  multiplayer: false,
+                  icon: 'user-3-line',
+                  label: 'Single player',
+                  description: 'Solo arcade, story, or puzzle session',
+                },
+                {
+                  multiplayer: true,
+                  icon: 'group-line',
+                  label: 'Multiplayer',
+                  description: 'Shared room link so friends can join live',
+                },
+              ]).map(item => {
+                const selected = options.gameMultiplayer === item.multiplayer;
+                return (
+                  <Button
+                    key={item.label}
+                    variant="plain"
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={selected || undefined}
+                    className="om-sa-game-choice-row"
+                    onClick={() => {
+                      onChange({ gameMultiplayer: item.multiplayer });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span className="om-sa-game-choice-visual" aria-hidden="true">
+                      <RemixIcon name={item.icon} size={15} />
+                    </span>
+                    <span className="om-sa-game-choice-copy">
+                      <span className="om-sa-game-choice-title">
+                        <strong>{t(item.label)}</strong>
+                      </span>
+                      <span>{t(item.description)}</span>
+                    </span>
+                    <span className="om-sa-game-choice-check" aria-hidden="true">
+                      {selected && <RemixIcon name="check-line" size={15} />}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
       </div>
     );
   }

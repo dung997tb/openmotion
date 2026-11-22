@@ -5,10 +5,11 @@ import { createPortal } from 'react-dom';
 import { gameGenres, gameSettings, gameStyles, type GameCard, type GameCreated, type GameGenre, type GameSetting, type GameStyle } from '../../../../shared/game-contract';
 import { buildSuperAgentHandoff } from '../../../../shared/capability-hub';
 import { preservePresentation } from '../../../../shared/workspace-url';
-import { CloudSharePopover } from '../../components/CloudSharePopover';
 import { StudioToastViewport } from '../../components/StudioToastViewport';
+import { WebPublishPopover } from '../../components/WebPublishPopover';
 import { useToast } from '../../hooks/useToast';
 import { useI18n } from '../../i18n/I18n';
+import { useVisibilityPolling } from '../../hooks/useVisibilityPolling';
 import { RemixIcon } from '../../icons/RemixIcons';
 import { WorkspaceBack } from '../WorkspaceBack';
 import { useOptionalWorkspaceChrome } from '../WorkspaceChromeContext';
@@ -110,12 +111,7 @@ export function GameStudio({
   }).catch(() => { setGames(current => current.some(game => game.source === 'mine') ? current : bundledGames); setOffline(true); });
   useEffect(() => { void load(); }, []);
   // Poll every 4 s while the page is visible, so drafts an Agent starts from its chat show up and open on their own.
-  useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') void load(); };
-    const timer = setInterval(tick, 4000);
-    document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-  }, []);
+  useVisibilityPolling(() => load(), { intervalMs: 4000, immediate: false });
   useEffect(() => {
     const scroller = root.current;
     if (!scroller) return;
@@ -418,7 +414,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
     catch (error) { notify(t('The trailer could not be started: {reason}', { reason: (error as Error).message }), 'error'); }
   };
   const openTrailerProject = () => { if (trailer?.projectId) window.location.assign(trailerProjectHref(trailer.projectId, location.search)); };
-  useEffect(() => { close.current?.focus(); const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && document.activeElement !== frame.current && !(document.activeElement instanceof Element && document.activeElement.closest('.om-cloud-share-popover'))) onClose(); }; addEventListener('keydown', key); return () => removeEventListener('keydown', key); }, []);
+  useEffect(() => { close.current?.focus(); const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && document.activeElement !== frame.current && !(document.activeElement instanceof Element && document.activeElement.closest('.om-web-publish-popover'))) onClose(); }; addEventListener('keydown', key); return () => removeEventListener('keydown', key); }, []);
   const act = (request: () => Promise<GameCard>) => offline ? notify(t('Start the local game service to save reactions.'), 'info') : void request().then(onChange).catch(() => notify(t('Could not save. Try again.'), 'error'));
   // Games are published to this computer only. The link is copied for local use and labelled as such.
   const share = async () => {
@@ -481,10 +477,11 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
           {trailerReady && <Button variant="plain" role="tab" className="om-nav-item" aria-selected={view === 'trailer'} onClick={() => setView('trailer')}><RemixIcon name="film-line" size={15} />{t('Trailer')}</Button>}
         </div> : <span />}
         <span className="om-game-preview-tools">
-          {playable && !game.external && (
-            <CloudSharePopover
-              kind="game-project"
-              projectId={game.id}
+          {playable && !game.external && !offline && (
+            <WebPublishPopover
+              targetKind="game"
+              targetId={game.id}
+              title={gameTitle(game)}
               revisionKey={game.updatedAt}
               onNotify={(message, tone) => notify(message, tone ?? 'info')}
             />

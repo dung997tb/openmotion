@@ -421,7 +421,7 @@
     "Link access": "链接访问",
     "The link is disabled. Turn Link access back on to reopen this preview.": "链接已关闭，重新开启「链接访问」即可恢复访问此预览。",
     "Recipients can view and play this live preview — not your conversation or code.": "获得链接的人可在线打开并交互试玩，无法看到你的对话或源码。",
-    "Share link copied": "已复制分享链接",
+    "Share link copied": "分享链接已复制",
     "Could not copy share link": "复制分享链接失败",
     "Copy share link": "复制分享链接",
     "Deploying update…": "正在更新部署…",
@@ -470,7 +470,12 @@
     "Show full prompt": "展开全文",
     "Full prompt": "完整提问",
     "Collapse": "收起",
-    "{count} lines": "{count} 行"
+    "{count} lines": "{count} 行",
+    "Screen layout": "画面方向",
+    "Desktop & widescreen browser play": "桌面端与宽屏网页游玩",
+    "Mobile & one-thumb vertical play": "手机端与单手竖屏游玩",
+    "Solo arcade, story, or puzzle session": "单人街机、剧情或解谜体验",
+    "Shared room link so friends can join live": "支持房间链接邀请好友实时联机"
   },
   "ja": {
     "All resources": "すべてのリソース",
@@ -943,7 +948,12 @@
     "Show full prompt": "全文を表示",
     "Full prompt": "プロンプト全文",
     "Collapse": "折りたたむ",
-    "{count} lines": "{count} 行"
+    "{count} lines": "{count} 行",
+    "Screen layout": "画面の向き",
+    "Desktop & widescreen browser play": "デスクトップ・ワイド画面向け",
+    "Mobile & one-thumb vertical play": "モバイル・片手縦持ち向け",
+    "Solo arcade, story, or puzzle session": "1人用アーケード・ストーリー・パズル",
+    "Shared room link so friends can join live": "ルームリンクで友達とリアルタイム対戦・協力"
   },
   "ko": {
     "All resources": "모든 리소스",
@@ -1367,7 +1377,7 @@
     "Link access": "링크 액세스",
     "The link is disabled. Turn Link access back on to reopen this preview.": "링크가 비활성화되었습니다. 미리보기를 다시 열려면 링크 액세스를 켜세요.",
     "Recipients can view and play this live preview — not your conversation or code.": "링크를 받은 사람은 라이브 미리보기를 보고 플레이할 수 있지만 대화나 코드는 볼 수 없습니다.",
-    "Share link copied": "공유 링크를 복사했습니다",
+    "Share link copied": "공유 링크가 복사되었습니다",
     "Could not copy share link": "공유 링크를 복사하지 못했습니다",
     "Copy share link": "공유 링크 복사",
     "Deploying update…": "업데이트 배포 중…",
@@ -1416,7 +1426,12 @@
     "Show full prompt": "전체 보기",
     "Full prompt": "전체 프롬프트",
     "Collapse": "접기",
-    "{count} lines": "{count}줄"
+    "{count} lines": "{count}줄",
+    "Screen layout": "화면 방향",
+    "Desktop & widescreen browser play": "데스크톱 및 와이드 브라우저 플레이",
+    "Mobile & one-thumb vertical play": "모바일 및 한 손 세로 플레이",
+    "Solo arcade, story, or puzzle session": "솔로 아케이드, 스토리, 퍼즐 플레이",
+    "Shared room link so friends can join live": "방 링크로 친구와 실시간 멀티플레이"
   },
   "de": {
     "All resources": "Alle Ressourcen",
@@ -1889,7 +1904,12 @@
     "Show full prompt": "Vollständigen Prompt anzeigen",
     "Full prompt": "Vollständiger Prompt",
     "Collapse": "Einklappen",
-    "{count} lines": "{count} Zeilen"
+    "{count} lines": "{count} Zeilen",
+    "Screen layout": "Bildschirmausrichtung",
+    "Desktop & widescreen browser play": "Desktop- & Breitbild-Browser",
+    "Mobile & one-thumb vertical play": "Mobil & Einhand-Hochformat",
+    "Solo arcade, story, or puzzle session": "Solo-Arcade-, Story- oder Rätselspiel",
+    "Shared room link so friends can join live": "Raumlink zum gemeinsamen Live-Spielen"
   },
   "fr": {
     "All resources": "Toutes les ressources",
@@ -2362,7 +2382,12 @@
     "Show full prompt": "Afficher tout le prompt",
     "Full prompt": "Prompt complet",
     "Collapse": "Réduire",
-    "{count} lines": "{count} lignes"
+    "{count} lines": "{count} lignes",
+    "Screen layout": "Orientation de l’écran",
+    "Desktop & widescreen browser play": "Jeu sur ordinateur et écran large",
+    "Mobile & one-thumb vertical play": "Jeu mobile vertical à une main",
+    "Solo arcade, story, or puzzle session": "Partie solo arcade, histoire ou puzzle",
+    "Shared room link so friends can join live": "Lien de salon pour jouer en direct à plusieurs"
   },
   "ru": {
     "All resources": "Все ресурсы",
@@ -2835,7 +2860,12 @@
     "Show full prompt": "Показать полностью",
     "Full prompt": "Полный запрос",
     "Collapse": "Свернуть",
-    "{count} lines": "{count} строк"
+    "{count} lines": "{count} строк",
+    "Screen layout": "Ориентация экрана",
+    "Desktop & widescreen browser play": "Для ПК и широкоэкранного браузера",
+    "Mobile & one-thumb vertical play": "Для телефона и игры одной рукой",
+    "Solo arcade, story, or puzzle session": "Одиночная аркада, история или головоломка",
+    "Shared room link so friends can join live": "Ссылка на комнату для совместной игры онлайн"
   },
   "es": {
     "All resources": "Todos los recursos",
@@ -3308,7 +3338,12 @@
     "Show full prompt": "Mostrar todo el prompt",
     "Full prompt": "Prompt completo",
     "Collapse": "Contraer",
-    "{count} lines": "{count} líneas"
+    "{count} lines": "{count} líneas",
+    "Screen layout": "Orientación de pantalla",
+    "Desktop & widescreen browser play": "Juego en escritorio y pantalla ancha",
+    "Mobile & one-thumb vertical play": "Juego móvil vertical con una mano",
+    "Solo arcade, story, or puzzle session": "Partida individual arcade, historia o puzle",
+    "Shared room link so friends can join live": "Enlace de sala para jugar en vivo con amigos"
   },
   "pt-BR": {
     "All resources": "Todos os recursos",
@@ -3732,7 +3767,7 @@
     "Link access": "Acesso por link",
     "The link is disabled. Turn Link access back on to reopen this preview.": "O link está desativado. Ative Acesso por link novamente para reabrir esta visualização.",
     "Recipients can view and play this live preview — not your conversation or code.": "Quem receber o link pode visualizar e jogar a prévia ao vivo — não sua conversa ou código.",
-    "Share link copied": "Link de compartilhamento copiado",
+    "Share link copied": "Link copiado",
     "Could not copy share link": "Não foi possível copiar o link",
     "Copy share link": "Copiar link",
     "Deploying update…": "Atualizando implantação…",
@@ -3781,7 +3816,12 @@
     "Show full prompt": "Mostrar prompt completo",
     "Full prompt": "Prompt completo",
     "Collapse": "Recolher",
-    "{count} lines": "{count} linhas"
+    "{count} lines": "{count} linhas",
+    "Screen layout": "Orientação da tela",
+    "Desktop & widescreen browser play": "Jogo em desktop e tela widescreen",
+    "Mobile & one-thumb vertical play": "Jogo vertical para celular com uma mão",
+    "Solo arcade, story, or puzzle session": "Partida solo arcade, história ou quebra-cabeça",
+    "Shared room link so friends can join live": "Link de sala para amigos entrarem ao vivo"
   },
   "it": {
     "All resources": "Tutte le risorse",
@@ -4205,7 +4245,7 @@
     "Link access": "Accesso tramite link",
     "The link is disabled. Turn Link access back on to reopen this preview.": "Il link è disattivato. Riattiva Accesso tramite link per riaprire questa anteprima.",
     "Recipients can view and play this live preview — not your conversation or code.": "Chi riceve il link può visualizzare e provare questa anteprima dal vivo — non la conversazione o il codice.",
-    "Share link copied": "Link condiviso copiato",
+    "Share link copied": "Link di condivisione copiato",
     "Could not copy share link": "Impossibile copiare il link condiviso",
     "Copy share link": "Copia link condiviso",
     "Deploying update…": "Aggiornamento deploy…",
@@ -4254,7 +4294,12 @@
     "Show full prompt": "Mostra prompt completo",
     "Full prompt": "Prompt completo",
     "Collapse": "Comprimi",
-    "{count} lines": "{count} righe"
+    "{count} lines": "{count} righe",
+    "Screen layout": "Orientamento schermo",
+    "Desktop & widescreen browser play": "Gioco su desktop e browser widescreen",
+    "Mobile & one-thumb vertical play": "Gioco mobile verticale con una mano",
+    "Solo arcade, story, or puzzle session": "Partita in solitaria arcade, storia o puzzle",
+    "Shared room link so friends can join live": "Link stanza per giocare dal vivo con amici"
   },
   "tr": {
     "All resources": "Tüm kaynaklar",
@@ -4727,6 +4772,11 @@
     "Show full prompt": "Tam istemi göster",
     "Full prompt": "Tam istem",
     "Collapse": "Daralt",
-    "{count} lines": "{count} satır"
+    "{count} lines": "{count} satır",
+    "Screen layout": "Ekran yönü",
+    "Desktop & widescreen browser play": "Masaüstü ve geniş ekran tarayıcı oyunu",
+    "Mobile & one-thumb vertical play": "Mobil ve tek elle dikey oyun",
+    "Solo arcade, story, or puzzle session": "Tek kişilik arcade, hikâye veya bulmaca",
+    "Shared room link so friends can join live": "Arkadaşlarla canlı oynamak için oda bağlantısı"
   }
 }

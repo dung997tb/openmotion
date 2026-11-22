@@ -1308,8 +1308,8 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   const viewer = document.querySelector('.om-sa-viewer')!;
   expect(viewer).toBeTruthy();
   // Share belongs in the active tab toolbar (compact), never in the outer browser window tab strip
-  expect(viewer.querySelector('.om-sa-viewer-tabs-bar .om-cloud-share-trigger')).toBeNull();
-  const toolbarShareBtn = viewer.querySelector('.om-sa-viewer-toolbar .om-cloud-share-trigger--compact');
+  expect(viewer.querySelector('.om-sa-viewer-tabs-bar .om-web-publish-trigger')).toBeNull();
+  const toolbarShareBtn = viewer.querySelector('.om-sa-viewer-toolbar .om-web-publish-trigger--compact');
   expect(toolbarShareBtn).toBeTruthy();
   // Non-web game tab omits disabled Back/Forward browser history arrows
   expect(viewer.querySelector('.om-sa-nav-btns button[aria-label="Back"]')).toBeNull();
@@ -1719,7 +1719,7 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     expect(topBar.textContent).toContain('Style');
     expect(topBar.textContent).toContain('Setting');
     expect(topBar.textContent).toContain('Landscape');
-    expect(topBar.textContent).toContain('Multiplayer');
+    expect(topBar.textContent).toContain('Single player');
 
     // Open Style popover and pick Pixel art
     const styleTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Style')) as HTMLButtonElement;
@@ -1730,14 +1730,28 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     await act(async () => pixelOption.click());
     await flush();
 
-    // Toggle Portrait & Multiplayer
-    const landscapeBtn = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Landscape')) as HTMLButtonElement;
-    await act(async () => landscapeBtn.click());
-    const multiplayerBtn = topBar.querySelector('button[role="switch"]') as HTMLButtonElement;
-    await act(async () => multiplayerBtn.click());
+    // Open Orientation dropdown and select Portrait (9:16)
+    const orientationTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Landscape')) as HTMLButtonElement;
+    expect(orientationTrigger.getAttribute('aria-haspopup')).toBe('listbox');
+    await act(async () => orientationTrigger.click());
     await flush();
-    expect(multiplayerBtn.getAttribute('aria-checked')).toBe('true');
+    const portraitOption = [...document.querySelectorAll('.om-sa-game-choice-row')].find(b => b.textContent?.includes('Portrait')) as HTMLButtonElement;
+    expect(portraitOption).toBeTruthy();
+    expect(portraitOption.textContent).toContain('9:16');
+    await act(async () => portraitOption.click());
+    await flush();
     expect(topBar.textContent).toContain('Portrait');
+
+    // Open Players dropdown and select Multiplayer
+    const playersTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Single player')) as HTMLButtonElement;
+    expect(playersTrigger.getAttribute('aria-haspopup')).toBe('listbox');
+    await act(async () => playersTrigger.click());
+    await flush();
+    const multiplayerOption = [...document.querySelectorAll('.om-sa-game-choice-row')].find(b => b.textContent?.includes('Multiplayer')) as HTMLButtonElement;
+    expect(multiplayerOption).toBeTruthy();
+    await act(async () => multiplayerOption.click());
+    await flush();
+    expect(topBar.textContent).toContain('Multiplayer');
 
     // Send brief -> creates Game Studio project and starts Super Agent game turn
     const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;

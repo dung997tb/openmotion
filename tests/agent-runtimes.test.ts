@@ -7,7 +7,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { startAgentBridge } from '../gateway/agent-bridge.ts';
-import { renderBridgeInstallShellScript, renderStandaloneBridgeScript } from '../gateway/agent-bridge-script.ts';
+import {
+  renderBridgeInstallPowerShellScript,
+  renderBridgeInstallShellScript,
+  renderStandaloneBridgeScript,
+} from '../gateway/agent-bridge-script.ts';
+import { LocalAgentDirectory } from '../gateway/local-agents.ts';
 import {
   agentRuntimesFor,
   allowedHosts,
@@ -447,8 +452,8 @@ test('separate AgentRuntimeRegistry instances isolate fallback empty state acros
     await regA.close();
     await regB.close();
   } finally {
-    await rm(dirA, { recursive: true, force: true });
-    await rm(dirB, { recursive: true, force: true });
+    await rm(dirA, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await rm(dirB, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -481,5 +486,60 @@ test('successful generic CLI Super Agent turns transition to idle instead of can
   } finally {
     await service.close();
     await rm(scriptDir, { recursive: true, force: true });
+  }
+}));
+
+test('Windows PowerShell bridge installer and LocalAgentDirectory warmup work across platforms', () => fixture(async store => {
+  const sampleToken = `om_brg_${'c'.repeat(32)}`;
+  const psScript = renderBridgeInstallPowerShellScript({
+    serverUrl: 'https://cloud.example.com',
+    token: sampleToken,
+  });
+  assert.match(psScript, /\$ErrorActionPreference = 'Stop'/);
+  assert.match(psScript, /https:\/\/cloud\.example\.com\/motion-api\/agent-runtimes\/bridge\/script/);
+  assert.throws(() => renderBridgeInstallPowerShellScript({ serverUrl: 'https://cloud.example.com', token: 'bad;echo' }));
+
+  const inspected: string[] = [];
+  const directory = new LocalAgentDirectory(
+    store.directory,
+    async bin => (bin === 'codex' || bin === 'claude' ? `/usr/local/bin/${bin}` : null),
+    async (_bin, args) => {
+      if (args.includes('--version')) return { ok: true, text: '1.0.0' };
+      return { ok: true, text: '' };
+    },
+    async () => {},
+    {
+      codex: async () => {
+        inspected.push('codex');
+        return { models: [{ id: 'gpt-5', label: 'GPT-5', source: 'cli' }], auth: 'signed-in' };
+      },
+      claude: async () => {
+        inspected.push('claude');
+        return { models: [{ id: 'sonnet', label: 'Sonnet', source: 'cli' }], version: '2.0.0' };
+      },
+    },
+  );
+  const warmed = await directory.warmup();
+  assert.deepEqual(inspected.sort(), ['claude', 'codex']);
+  assert.ok(warmed.agents.find(a => a.id === 'codex')?.models.length);
+
+  const running = await startServer(store, 0, { editor: false });
+  const port = (running.server.address() as { port: number }).port;
+  const origin = `http://127.0.0.1:${port}`;
+  try {
+    const createRes = await fetch(`${origin}${AGENT_RUNTIMES_API}/bridge/tokens`, {
+      method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'Windows Rig' }),
+    });
+    assert.equal(createRes.status, 200);
+    const bundle = (await createRes.json()) as any;
+    assert.match(bundle.powershellCommand, /install\.ps1\?token=/);
+
+    const psRes = await fetch(`${origin}${AGENT_RUNTIMES_API}/bridge/install.ps1?token=${bundle.token}`);
+    assert.equal(psRes.status, 200);
+    assert.match(await psRes.text(), /openmotion-agent-bridge\.mjs/);
+  } finally {
+    await running.close();
   }
 }));

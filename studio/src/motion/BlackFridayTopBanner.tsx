@@ -44,16 +44,35 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   }, [trackingPage]);
 
   useEffect(() => {
-    const sync = () => {
-      if (document.hidden) return;
-      if (!blackFridayActive()) { window.clearInterval(timer); onExpire?.(); return; }
-      setTime(readCountdown());
+    let timer: number | undefined;
+    const stopTimer = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
     };
-    const timer = window.setInterval(sync, 1000);
-    document.addEventListener('visibilitychange', sync);
+    const tick = () => {
+      if (document.hidden) {
+        stopTimer();
+        return;
+      }
+      if (!blackFridayActive()) {
+        stopTimer();
+        onExpire?.();
+        return;
+      }
+      setTime(readCountdown());
+      if (timer === undefined) {
+        timer = window.setInterval(tick, 1000);
+      }
+    };
+    if (!document.hidden) {
+      timer = window.setInterval(tick, 1000);
+    }
+    document.addEventListener('visibilitychange', tick);
     return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', sync);
+      stopTimer();
+      document.removeEventListener('visibilitychange', tick);
     };
   }, [onExpire]);
 

@@ -5,8 +5,18 @@ import { transcriptsFor, closeTranscripts } from './gateway/transcription.ts';
 import { projectArchiveHttp } from './gateway/project-archive-http.ts';
 import { modelMetadata } from './gateway/model-metadata.ts';
 import { assetConversations } from './gateway/asset-chat.ts';
-import { agentRuntimesFor, isHostAllowed, resolvePublicOrigin } from './gateway/agent-runtimes.ts';
-import { renderBridgeInstallShellScript, renderStandaloneBridgeScript } from './gateway/agent-bridge-script.ts';
+import { agentRuntimesFor, isHostAllowed, isLocalDirectEnabled, resolvePublicOrigin } from './gateway/agent-runtimes.ts';
+import { renderBridgeInstallPowerShellScript, renderBridgeInstallShellScript, renderStandaloneBridgeScript } from './gateway/agent-bridge-script.ts';
+import { mcpHttpFor } from './gateway/mcp-http.ts';
+import { contentBatchesFor } from './gateway/content-batch.ts';
+import { triggersFor } from './gateway/triggers.ts';
+import { closeWebPublishFor, webPublishFor } from './gateway/web-publish.ts';
+import { closeDesignDeployFor } from './gateway/design-deploy.ts';
+import { AdaptivePoller } from './shared/lifecycle.ts';
+import { mapWebPublishError, resolveWebPublishTarget } from './gateway/web-publish-ops.ts';
+import { webPublishTargetKinds, type WebPublishMode, type WebPublishTargetKind } from './shared/web-publish.ts';
+import { createAutomationHost } from './gateway/automation-host.ts';
+import { MCP_HTTP_PATH } from './shared/mcp-http.ts';
 import { superAgentConversations } from './gateway/super-agent.ts';
 import { collectWorkspaceResources } from './gateway/super-agent-resources.ts';
 import { assetHttp } from './gateway/asset-http.ts';
@@ -37,7 +47,7 @@ import { creationMode, creationModes, artifactViewers, availableSession, type Cr
 import { gatewayFor } from './gateway/service.ts';
 import { providerDirectory, setDefaultModel, syncProvider } from './gateway/settings.ts';
 import { isMediaProvider, registeredProvider } from './shared/provider-registry.ts';
-import { localAgentsFor } from './gateway/local-agents.ts';
+import { closeLocalAgentsFor, localAgentsFor } from './gateway/local-agents.ts';
 import { WorkspaceBrowser } from './browser.ts';
 import { Phase1Service } from './phase1.ts';
 import { phase1McpCapabilities } from './shared/phase1-tools.ts';
@@ -59,11 +69,9 @@ import { brandKitsFor } from './gateway/brand-kits.ts';
 import { AssetLibrary } from './gateway/asset-library.ts';
 import { scenarioHttp } from './gateway/scenario-http.ts';
 import { designHttp } from './design-projects.ts';
-import { CloudShareError, cloudShareFor } from './gateway/cloud-share.ts';
-import type { CloudShareKind } from './shared/cloud-share.ts';
 
 const sharedStore = new WorkspaceStore();
-export type Service = { trackingHosts?: Map<string, { host: HostContext; createdAt: number }>; diagnostics?: { running: boolean; lastExport: number; events: number; window: number }; studio?: Studio; runtimeRoot?: string; nativeRoot?: string; ffmpeg?: boolean; switching?: boolean; studioPort?: number; browser?: WorkspaceBrowser; editorToken?: string; ensureStudio?: (projectId?: string) => Promise<Studio>; launchStudio?: (directory: string, port: number) => Promise<Studio>; phase1?: Phase1Service; phase1Mutation?: Promise<void>; tracking?: OmTracking };
+export type Service = { trackingHosts?: Map<string, { host: HostContext; createdAt: number }>; diagnostics?: { running: boolean; lastExport: number; events: number; window: number }; studio?: Studio; runtimeRoot?: string; nativeRoot?: string; ffmpeg?: boolean; ffmpegPromise?: Promise<boolean>; poller?: AdaptivePoller; switching?: boolean; studioPort?: number; browser?: WorkspaceBrowser; editorToken?: string; ensureStudio?: (projectId?: string) => Promise<Studio>; launchStudio?: (directory: string, port: number) => Promise<Studio>; phase1?: Phase1Service; phase1Mutation?: Promise<void>; tracking?: OmTracking };
 const service: Service = {};
 const working = new Set<string>();
 const runningExports = new Map<string, AbortController>();
@@ -254,6 +262,43 @@ async function input(req: IncomingMessage, maxBytes = 9 * 1024 * 1024) {
   }
   return JSON.parse(Buffer.concat(chunks).toString());
 }
+async function readRawBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw new Error('提交内容超过大小限制');
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function invokePhase1WithTracking(
+  store: WorkspaceStore,
+  context: Service,
+  originUrl: string,
+  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string },
+) {
+  if (!context.runtimeRoot) throw new Error('RUNTIME_NOT_READY');
+  const phase1 = ensurePhase1(store, context, originUrl);
+  const host = validHostContext(data.trackingHost) ? data.trackingHost : unknownHost;
+  let result = await phase1.call(data.name, data.arguments ?? {}, host, {
+    attributeEntry: Object.hasOwn(data, 'trackingHost'),
+  });
+  if (host.host_agent !== 'unknown' && context.tracking?.enabled() && (result.previewUrl || result.previewHandoff)) {
+    const hosts = context.trackingHosts ??= new Map();
+    for (const [key, value] of hosts) if (Date.now() - value.createdAt > 86_400_000) hosts.delete(key);
+    let token = uuid.test(data.trackingContext) ? data.trackingContext : crypto.randomUUID();
+    const existing = hosts.get(token);
+    if (existing && (['host_agent', 'host_agent_source', 'mcp_client_name', 'mcp_client_version'] as const)
+      .some(key => existing.host[key] !== host[key])) token = crypto.randomUUID();
+    if (!hosts.has(token) && hosts.size >= 256) hosts.delete(hosts.keys().next().value!);
+    hosts.set(token, { host, createdAt: Date.now() });
+    result = previewTrackingContext(result, originUrl, token);
+  }
+  return result;
+}
+
 function revision(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw new Error('需要 openmotion_get_project 返回的 expectedRevision');
 }
@@ -377,15 +422,32 @@ const sideEffectingGet = [/^\/api\/settings\/account$/, /^\/api\/models$/, /^\/a
 
 export async function handler(req: IncomingMessage, res: ServerResponse, store = sharedStore, context = service) {
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store');
+  if (req.method && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && context.poller) {
+    res.once('finish', () => context.poller?.nudge());
+  }
   try {
     const host = req.headers.host;
     if (host && !isHostAllowed(host)) return json(res, 403, { error: '只允许本地访问' });
     const rawPath = (req.url || '/').split('?', 1)[0];
+    if (rawPath === MCP_HTTP_PATH) {
+      const mcpProtoHeader = Array.isArray(req.headers['x-forwarded-proto']) ? req.headers['x-forwarded-proto'][0] : req.headers['x-forwarded-proto'];
+      const mcpProto = mcpProtoHeader?.split(',')[0]?.trim().toLowerCase() === 'https' && (process.env.MOTION_PUBLIC_ORIGIN || process.env.MOTION_DEPLOYMENT_MODE) ? 'https' : 'http';
+      const mcpOrigin = new URL(`${mcpProto}://${host || 'localhost'}`).origin;
+      await mcpHttpFor(store).handle(req, res, {
+        editorToken: context.editorToken,
+        invokePhase1: payload => invokePhase1WithTracking(store, context, mcpOrigin, payload),
+      });
+      return;
+    }
     const isBridgeDaemonRoute =
       /^\/(?:motion|design)-api\/agent-runtimes\/bridge\/(?:register|heartbeat|stream|events|tool-call)$/.test(rawPath)
       && typeof req.headers.authorization === 'string'
       && /^Bearer\s+/i.test(req.headers.authorization);
-    if (!['GET', 'HEAD'].includes(req.method || '') && !isBridgeDaemonRoute && (!req.headers.origin || new URL(req.headers.origin).host !== host)) {
+    const isTriggerWebhookRoute =
+      /^\/(?:motion|design)-api\/triggers\/[a-f0-9-]{36}\/fire$/.test(rawPath)
+      && ((typeof req.headers.authorization === 'string' && /^Bearer\s+/i.test(req.headers.authorization))
+        || typeof req.headers['x-openmotion-signature'] === 'string');
+    if (!['GET', 'HEAD'].includes(req.method || '') && !isBridgeDaemonRoute && !isTriggerWebhookRoute && (!req.headers.origin || new URL(req.headers.origin).host !== host)) {
       return json(res, 403, { error: '仅允许当前预览页面发起修改' });
     }
     const projectHeader = req.headers['x-opendesign-project-id'];
@@ -459,6 +521,21 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         res.end(shellScript);
         return;
       }
+      if (url.pathname === '/api/agent-runtimes/bridge/install.ps1' && req.method === 'GET') {
+        const rawToken = url.searchParams.get('token') ?? '';
+        try {
+          await registry.authenticateBridgeToken(rawToken, true);
+        } catch (error) {
+          return json(res, 401, { error: error instanceof Error ? error.message : 'Unauthorized bridge token' });
+        }
+        const psScript = renderBridgeInstallPowerShellScript({ serverUrl: publicOrigin, token: rawToken });
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Length': Buffer.byteLength(psScript),
+        });
+        res.end(psScript);
+        return;
+      }
       if (url.pathname === '/api/agent-runtimes/bridge/tokens' && req.method === 'POST') {
         const data = req.headers['content-type']?.includes('application/json') ? await input(req, 16 * 1024) : {};
         return json(res, 200, await registry.createBridgeToken(data.label, publicOrigin));
@@ -516,6 +593,192 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         }
       }
       return json(res, 404, { error: 'Agent runtime endpoint not found' });
+    }
+    if (motionRequest && url.pathname.startsWith('/api/mcp/')) {
+      const mcpGateway = mcpHttpFor(store);
+      if (url.pathname === '/api/mcp/status' && req.method === 'GET') {
+        return json(res, 200, await mcpGateway.status(originUrl));
+      }
+      if (url.pathname === '/api/mcp/tokens') {
+        if (req.method === 'GET') return json(res, 200, { tokens: await mcpGateway.tokenStore.list() });
+        if (req.method === 'POST') {
+          const data = req.headers['content-type']?.includes('application/json') ? await input(req, 16 * 1024) : {};
+          return json(res, 201, await mcpGateway.tokenStore.create(data.label, data.scope, `${publicOrigin}${MCP_HTTP_PATH}`));
+        }
+      }
+      const revokeMcpToken = url.pathname.match(/^\/api\/mcp\/tokens\/([a-f0-9-]+)$/);
+      if (revokeMcpToken && req.method === 'DELETE') {
+        return json(res, 200, await mcpGateway.tokenStore.revoke(revokeMcpToken[1]));
+      }
+      return json(res, 404, { error: 'MCP management endpoint not found' });
+    }
+    if (motionRequest && url.pathname.startsWith('/api/content-batches')) {
+      const batches = contentBatchesFor(store);
+      const automationHost = createAutomationHost({
+        store: store.workspaceStore ?? store,
+        origin: () => originUrl,
+        phase1: () => ensurePhase1(store, context, originUrl),
+        runtimeRoot: context.runtimeRoot,
+      });
+      if (url.pathname === '/api/content-batches' && req.method === 'GET') {
+        return json(res, 200, await batches.list(url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined));
+      }
+      if (url.pathname === '/api/content-batches/catalog' && req.method === 'GET') {
+        return json(res, 200, batches.catalog());
+      }
+      if (url.pathname === '/api/content-batches' && req.method === 'POST') {
+        const data = await input(req, 512 * 1024);
+        return json(res, 201, await batches.create(data, automationHost));
+      }
+      const bundleDownload = url.pathname.match(/^\/api\/content-batches\/bundles\/([a-f0-9-]+)\/file$/);
+      if (bundleDownload && req.method === 'GET') {
+        const filePath = batches.bundleFile(bundleDownload[1]);
+        const info = await stat(filePath).catch(() => null);
+        if (!info || !info.isFile()) return json(res, 404, { error: 'Batch bundle not found' });
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Length': info.size,
+          'Content-Disposition': `attachment; filename="openmotion-batch-${bundleDownload[1].slice(0, 8)}.zip"`,
+        });
+        await new Promise<void>((resolve, reject) => {
+          const stream = createReadStream(filePath);
+          stream.on('error', reject);
+          res.on('finish', resolve);
+          res.on('close', () => { stream.destroy(); resolve(); });
+          stream.pipe(res);
+        });
+        return;
+      }
+      const batchAction = url.pathname.match(/^\/api\/content-batches\/([a-f0-9-]+)(?:\/(start|cancel|retry|export))?$/);
+      if (batchAction) {
+        const [, batchId, action] = batchAction;
+        if (!action && req.method === 'GET') return json(res, 200, { batch: await batches.get(batchId) });
+        if (action && req.method === 'POST') {
+          const data = req.headers['content-type']?.includes('application/json') ? await input(req, 64 * 1024) : {};
+          if (action === 'start') return json(res, 200, { batch: await batches.start(batchId, automationHost, { wait: data.wait === true }) });
+          if (action === 'cancel') return json(res, 200, { batch: await batches.cancel(batchId) });
+          if (action === 'retry') return json(res, 200, { batch: await batches.retryFailed(batchId, automationHost, { wait: data.wait === true }) });
+          if (action === 'export') return json(res, 200, { bundle: await batches.exportBundle(batchId) });
+        }
+      }
+      return json(res, 404, { error: 'Content batch endpoint not found' });
+    }
+    if (motionRequest && url.pathname.startsWith('/api/triggers')) {
+      const triggers = triggersFor(store);
+      const automationHost = createAutomationHost({
+        store: store.workspaceStore ?? store,
+        origin: () => originUrl,
+        phase1: () => ensurePhase1(store, context, originUrl),
+        runtimeRoot: context.runtimeRoot,
+      });
+      if (url.pathname === '/api/triggers' && req.method === 'GET') {
+        return json(res, 200, await triggers.list());
+      }
+      if (url.pathname === '/api/triggers' && req.method === 'POST') {
+        return json(res, 201, await triggers.create(await input(req, 128 * 1024)));
+      }
+      if (url.pathname === '/api/triggers/runs' && req.method === 'GET') {
+        return json(res, 200, await triggers.runs(url.searchParams.get('triggerId') ?? undefined));
+      }
+      const triggerRoute = url.pathname.match(/^\/api\/triggers\/([a-f0-9-]+)(?:\/(fire|runs))?$/);
+      if (triggerRoute) {
+        const [, triggerId, action] = triggerRoute;
+        if (!action && req.method === 'GET') return json(res, 200, { trigger: await triggers.get(triggerId) });
+        if (!action && req.method === 'PATCH') return json(res, 200, { trigger: await triggers.update(triggerId, await input(req, 128 * 1024)) });
+        if (!action && req.method === 'DELETE') return json(res, 200, await triggers.delete(triggerId));
+        if (action === 'runs' && req.method === 'GET') return json(res, 200, await triggers.runs(triggerId));
+        if (action === 'fire' && req.method === 'POST') {
+          const rawBody = await readRawBody(req, 1024 * 1024);
+          let payload: Record<string, unknown> = {};
+          if (rawBody.trim()) {
+            try { payload = JSON.parse(rawBody); } catch { return json(res, 400, { error: 'Invalid JSON trigger payload' }); }
+          }
+          const hasWebhookCreds =
+            (typeof req.headers.authorization === 'string' && /^Bearer\s+/i.test(req.headers.authorization))
+            || typeof req.headers['x-openmotion-signature'] === 'string';
+          let source: 'webhook' | 'manual' = 'manual';
+          if (!req.headers.origin || hasWebhookCreds) {
+            try {
+              const sigHeader = Array.isArray(req.headers['x-openmotion-signature'])
+                ? req.headers['x-openmotion-signature'][0]
+                : req.headers['x-openmotion-signature'];
+              await triggers.authenticateWebhook(triggerId, { authorization: req.headers.authorization, signature: sigHeader }, rawBody);
+              source = 'webhook';
+            } catch (err) {
+              return json(res, 401, { error: err instanceof Error ? err.message : 'Unauthorized webhook' });
+            }
+          }
+          const wait = url.searchParams.get('wait') === '1' || (payload as any).wait === true;
+          return json(res, 200, await triggers.fire(triggerId, payload, automationHost, source, { wait }));
+        }
+      }
+      return json(res, 404, { error: 'Trigger endpoint not found' });
+    }
+    if (motionRequest && (url.pathname === '/api/web-publish' || url.pathname.startsWith('/api/web-publish/'))) {
+      const rootStore = store.workspaceStore ?? store;
+      const publishService = webPublishFor(rootStore.directory, gatewayFor(store, context.tracking).account);
+      try {
+        if (url.pathname === '/api/web-publish' && req.method === 'GET') {
+          return json(res, 200, await publishService.listAll());
+        }
+        const publishRoute = url.pathname.match(/^\/api\/web-publish\/([^/]+)\/([^/]+)$/);
+        if (publishRoute) {
+          const rawKind = decodeURIComponent(publishRoute[1]);
+          const targetId = decodeURIComponent(publishRoute[2]);
+          if (!(webPublishTargetKinds as readonly string[]).includes(rawKind)) {
+            return json(res, 400, {
+              error: {
+                code: 'INVALID_ARGUMENT',
+                message: `targetKind must be one of ${webPublishTargetKinds.join(', ')}`,
+              },
+            });
+          }
+          const targetKind = rawKind as WebPublishTargetKind;
+          if (req.method === 'GET') {
+            const filePath = url.searchParams.get('filePath') ?? undefined;
+            const refresh = url.searchParams.get('refresh') === '1';
+            const sourcePath = url.searchParams.get('sourcePath') ?? undefined;
+            const target =
+              targetKind === 'html' && !sourcePath
+                ? { kind: 'html' as const, id: targetId, entryPath: filePath || 'index.html' }
+                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath }, originUrl);
+            return json(res, 200, await publishService.status(target, { filePath, refresh }));
+          }
+          if (req.method === 'POST') {
+            const body = await input(req, 32 * 1024).catch(() => ({}));
+            const filePath = typeof body?.filePath === 'string' ? body.filePath : undefined;
+            const sourcePath = typeof body?.sourcePath === 'string' ? body.sourcePath : undefined;
+            const title = typeof body?.name === 'string' ? body.name : typeof body?.title === 'string' ? body.title : undefined;
+            const target = await resolveWebPublishTarget(
+              rootStore,
+              { targetKind, targetId, sourcePath, filePath, title },
+              originUrl,
+            );
+            const result = await publishService.publish(target, {
+              filePath,
+              workspaceId: typeof body?.workspaceId === 'string' ? body.workspaceId : undefined,
+              mode: body?.deployMode as WebPublishMode | undefined,
+              name: title,
+            });
+            return json(res, 200, result);
+          }
+          if (req.method === 'DELETE') {
+            const body = await input(req, 16 * 1024).catch(() => ({}));
+            const filePath = url.searchParams.get('filePath')
+              ?? (typeof body?.filePath === 'string' ? body.filePath : undefined);
+            const sourcePath = typeof body?.sourcePath === 'string' ? body.sourcePath : undefined;
+            const target =
+              targetKind === 'html' && !sourcePath
+                ? { kind: 'html' as const, id: targetId, entryPath: filePath || 'index.html' }
+                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath }, originUrl);
+            return json(res, 200, await publishService.unpublish(target, { filePath }));
+          }
+        }
+        return json(res, 404, { error: { code: 'NOT_FOUND', message: 'Web publish endpoint not found' } });
+      } catch (error) {
+        const mapped = mapWebPublishError(error);
+        return json(res, mapped.status, { error: { code: mapped.code, message: mapped.message } });
+      }
     }
     if (motionRequest && url.pathname.startsWith('/api/super-agent')) {
       const superAgent = superAgentConversations(store);
@@ -658,31 +921,6 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
     if (motionRequest && url.pathname.startsWith('/api/assets/') && await assetHttp(req, res, url, store)) return;
     if (motionRequest && await brandKitHttp(req, res, url, store.directory, input)) return;
     if ((url.pathname === '/api/games' || url.pathname.startsWith('/api/games/')) && await gameHttp(req, res, url, (store.workspaceStore ?? store).directory, input, context.runtimeRoot)) return;
-    const cloudShareMatch = url.pathname.match(/^\/api\/cloud-share\/([^/]+)\/([^/]+)(?:\/(publish|stop|resume))?$/);
-    if (cloudShareMatch) {
-      const [, rawKind, rawProjectId, action] = cloudShareMatch;
-      let kind: CloudShareKind;
-      let projectId: string;
-      try {
-        kind = decodeURIComponent(rawKind) as CloudShareKind;
-        projectId = decodeURIComponent(rawProjectId);
-      } catch {
-        return json(res, 400, { error: 'Invalid cloud share path', code: 'CLOUD_SHARE_INVALID_PROJECT_ID' });
-      }
-      const cloud = cloudShareFor(store.workspaceStore ?? store, gatewayFor(store, context.tracking).account);
-      try {
-        if (!action && req.method === 'GET') return json(res, 200, await cloud.status(kind, projectId));
-        if (action === 'publish' && req.method === 'POST') return json(res, 200, await cloud.publish(kind, projectId));
-        if (action === 'stop' && req.method === 'POST') return json(res, 200, await cloud.stop(kind, projectId));
-        if (action === 'resume' && req.method === 'POST') return json(res, 200, await cloud.resume(kind, projectId));
-        return json(res, 405, { error: 'Unsupported cloud share request' });
-      } catch (error) {
-        if (error instanceof CloudShareError) {
-          return json(res, error.status, { error: error.message, code: error.code });
-        }
-        throw error;
-      }
-    }
     if (motionRequest && url.pathname.startsWith('/api/design/') && await designHttp(req, res, url, (store.workspaceStore ?? store).directory, new URL(editorUrl).origin, input, ref => new AssetLibrary(store.workspaceStore ?? store).resolve(ref))) return;
     if (motionRequest && ['/api/diagnostics', '/api/diagnostics/events'].includes(url.pathname)) {
       // Downloads are POST-only: cross-origin links must not trigger a collection.
@@ -749,25 +987,9 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       return json(res, statuses.includes('full') ? 429 : 200, { accepted: statuses.filter((status: string) => status === 'queued').length });
     }
     if (motionRequest && url.pathname === '/api/phase1/call' && req.method === 'POST') {
-      if (!context.runtimeRoot) throw new Error('RUNTIME_NOT_READY');
-      const phase1 = ensurePhase1(store, context, new URL(editorUrl).origin);
       const data = await input(req);
       try {
-        const host = validHostContext(data.trackingHost) ? data.trackingHost : unknownHost;
-        let result = await phase1.call(data.name, data.arguments ?? {}, host, {
-          attributeEntry: Object.hasOwn(data, 'trackingHost'),
-        });
-        if (host.host_agent !== 'unknown' && context.tracking?.enabled() && (result.previewUrl || result.previewHandoff)) {
-          const hosts = context.trackingHosts ??= new Map();
-          for (const [key, value] of hosts) if (Date.now() - value.createdAt > 86_400_000) hosts.delete(key);
-          let token = uuid.test(data.trackingContext) ? data.trackingContext : crypto.randomUUID();
-          const existing = hosts.get(token);
-          if (existing && (['host_agent', 'host_agent_source', 'mcp_client_name', 'mcp_client_version'] as const)
-            .some(key => existing.host[key] !== host[key])) token = crypto.randomUUID();
-          if (!hosts.has(token) && hosts.size >= 256) hosts.delete(hosts.keys().next().value!);
-          hosts.set(token, { host, createdAt: Date.now() });
-          result = previewTrackingContext(result, new URL(editorUrl).origin, token);
-        }
+        const result = await invokePhase1WithTracking(store, context, new URL(editorUrl).origin, data);
         return json(res, 200, result);
       }
       catch (error) {
@@ -780,14 +1002,23 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
     }
     if (req.method === 'GET' && ['/api/integration', '/connect/guide', '/connect/config'].includes(url.pathname)) {
       const address = new URL(editorUrl);
-      const info: IntegrationInfo = containerIntegration({
-        templateSource: templateCatalogFor(store.directory).source,
-        templateEnvironment: templateCatalogFor(store.directory).environment as 'dev' | 'prod',
-        name: 'OpenMotion', version: VERSION, previewUrl: address.origin, dataDirectory: store.directory,
-        transport: { type: 'stdio', command: process.execPath, args: ['--experimental-strip-types', path.join(pluginRoot, 'mcp.ts')], cwd: pluginRoot,
-          env: { MOTION_DATA_DIR: store.directory, PORT: address.port || '80', MOTION_TEMPLATE_SOURCE: templateCatalogFor(store.directory).source, ...Object.fromEntries(['MOTION_TEMPLATE_ENV', 'MOTION_TEMPLATE_RESOURCE_ID', 'MOTION_TEMPLATE_LOCALE', 'MOTION_BROWSER_PATH', 'HYPERFRAMES_BROWSER_PATH', 'HYPERFRAMES_FFMPEG_PATH', 'HYPERFRAMES_FFPROBE_PATH', 'FFMPEG_PATH', 'FFPROBE_PATH'].filter(key => process.env[key]).map(key => [key, process.env[key]!])) } },
-        tools: mcpTools.map(({ name, description }) => ({ name, description })),
-      }, process.env.MOTION_CONTAINER_NAME);
+      const mcpGateway = mcpHttpFor(store);
+      const info: IntegrationInfo = {
+        ...containerIntegration({
+          templateSource: templateCatalogFor(store.directory).source,
+          templateEnvironment: templateCatalogFor(store.directory).environment as 'dev' | 'prod',
+          name: 'OpenMotion', version: VERSION, previewUrl: address.origin, dataDirectory: store.directory,
+          transport: { type: 'stdio', command: process.execPath, args: ['--experimental-strip-types', path.join(pluginRoot, 'mcp.ts')], cwd: pluginRoot,
+            env: { MOTION_DATA_DIR: store.directory, PORT: address.port || '80', MOTION_TEMPLATE_SOURCE: templateCatalogFor(store.directory).source, ...Object.fromEntries(['MOTION_TEMPLATE_ENV', 'MOTION_TEMPLATE_RESOURCE_ID', 'MOTION_TEMPLATE_LOCALE', 'MOTION_BROWSER_PATH', 'HYPERFRAMES_BROWSER_PATH', 'HYPERFRAMES_FFMPEG_PATH', 'HYPERFRAMES_FFPROBE_PATH', 'FFMPEG_PATH', 'FFPROBE_PATH'].filter(key => process.env[key]).map(key => [key, process.env[key]!])) } },
+          tools: mcpTools.map(({ name, description }) => ({ name, description })),
+        }, process.env.MOTION_CONTAINER_NAME),
+        httpTransport: {
+          type: 'streamable-http',
+          url: `${publicOrigin}${MCP_HTTP_PATH}`,
+          authScheme: 'bearer',
+          authRequired: mcpGateway.isAuthRequired(),
+        },
+      };
       if (url.pathname === '/api/integration') return json(res, 200, info);
       const selected = integrationHost(url.searchParams.get('host'));
       if (url.pathname === '/connect/guide') {
@@ -803,6 +1034,9 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       res.writeHead(302, { Location: '/?panel=connections&host=' + integrationHost(url.searchParams.get('host')) }); return res.end();
     }
     if (url.pathname === '/api/health' && req.method === 'GET') {
+      if (context.ffmpeg === undefined && context.ffmpegPromise) {
+        await Promise.race([context.ffmpegPromise, new Promise<void>(resolve => setTimeout(resolve, 150))]);
+      }
       const nativeRuntime = await nativeRuntimeStatus(context.nativeRoot ?? pluginRoot);
       return json(res, 200, {
         service: 'motion-preview', protocol: 2, version: VERSION, dataDirectory: store.directory, mcp: phase1McpCapabilities,
@@ -1060,7 +1294,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       return await proxyStudio(req, res, url, context.studio.url, disposition);
     }
     if (req.method !== 'GET') return json(res, 405, { error: '不支持此操作' });
-    if (await serveEditorFile(url, res)) return;
+    if (await serveEditorFile(url, res, req)) return;
     return json(res, 404, { error: 'Not found' });
   } catch (error) {
     if (res.headersSent) res.destroy();
@@ -1096,12 +1330,35 @@ export async function startServer(store = sharedStore, port = Number(process.env
   const host = bindHost();
   await access(path.join(pluginRoot, 'studio/build/index.html')).catch(() => { throw new Error('编辑器尚未构建，请先运行 npm run build:studio。'); });
   const runtimeRoot = await ensureRuntime(store.directory, false);
-  await configureNativeEnvironment(pluginRoot);
+  const [, , tracking] = await Promise.all([
+    configureNativeEnvironment(pluginRoot),
+    recoverProjectTransactions(store, runtimeRoot),
+    createAppTracking(store.directory, 'mcp'),
+  ]);
   void startNativePreparation(pluginRoot).catch(error => console.error('Native preparation could not start: ' + error.message));
-  await recoverProjectTransactions(store, runtimeRoot);
-  const ffmpeg = await execute(process.env.HYPERFRAMES_FFMPEG_PATH || process.env.FFMPEG_PATH || 'ffmpeg', ['-version'], pluginRoot, 5000).then(r => r.code === 0, () => false);
-  const context: Service = { runtimeRoot, nativeRoot: pluginRoot, ffmpeg, studioPort: !port || port === 65535 ? 4174 : port + 1, editorToken: options.editorToken,
-    tracking: await createAppTracking(store.directory, 'mcp') };
+  const context: Service = {
+    runtimeRoot,
+    nativeRoot: pluginRoot,
+    studioPort: !port || port === 65535 ? 4174 : port + 1,
+    editorToken: options.editorToken,
+    tracking,
+  };
+  const ffmpegPromise = execute(
+    process.env.HYPERFRAMES_FFMPEG_PATH || process.env.FFMPEG_PATH || 'ffmpeg',
+    ['-version'],
+    pluginRoot,
+    5000,
+  )
+    .then(r => {
+      const ok = r.code === 0;
+      context.ffmpeg = ok;
+      return ok;
+    })
+    .catch(() => {
+      context.ffmpeg = false;
+      return false;
+    });
+  context.ffmpegPromise = ffmpegPromise;
   store.tracking = context.tracking;
   context.launchStudio = async (directory, chosenPort) => {
     if (!process.env.OPENMOTION_EDITOR_LOCK_FD) return startStudio(runtimeRoot, directory, path.join(store.directory, 'studio.log'), chosenPort, store.directory);
@@ -1147,15 +1404,104 @@ export async function startServer(store = sharedStore, port = Number(process.env
   gateway.account.options.track = record => context.tracking?.track('account_sign_in_result', record);
   // `node --test` runs use synthetic connectors; skip the real installation there. Closing the service stops an unfinished one.
   if (!process.env.NODE_TEST_CONTEXT) gateway.account.prefetch();
-  const tick = () => {
-    void renderNext(store, runtimeRoot, context.tracking).catch(error => console.error(error.message));
-    void gateway.tick().catch(() => console.error('Model gateway queue could not be processed'));
-    void transcriptsFor(store).tick().catch(() => console.error('Transcription queue could not be processed'));
+  let warmupTimer: ReturnType<typeof setTimeout> | undefined;
+  if (!process.env.NODE_TEST_CONTEXT && isLocalDirectEnabled()) {
+    warmupTimer = setTimeout(() => {
+      warmupTimer = undefined;
+      void localAgentsFor(store.directory).warmup().catch(() => {});
+    }, 1800);
+    warmupTimer.unref();
+  }
+  let lastTriggerTick = 0;
+  const triggerHost = createAutomationHost({
+    store: store.workspaceStore ?? store,
+    origin: () => origin,
+    phase1: () => ensurePhase1(store, context, origin),
+    runtimeRoot,
+  });
+  const poller = new AdaptivePoller({
+    activeIntervalMs: 500,
+    idleIntervalsMs: [1500, 3500, 5000],
+    unref: true,
+    run: async () => {
+      let triggeredCount = 0;
+      await Promise.allSettled([
+        renderNext(store, runtimeRoot, context.tracking).catch(error => console.error(error.message)),
+        gateway.tick().catch(() => console.error('Model gateway queue could not be processed')),
+        transcriptsFor(store).tick().catch(() => console.error('Transcription queue could not be processed')),
+        (async () => {
+          if (Date.now() - lastTriggerTick >= 5000) {
+            lastTriggerTick = Date.now();
+            triggeredCount = await triggersFor(store).tick(triggerHost).catch(() => 0);
+          }
+        })(),
+      ]);
+      return working.size > 0 || runningExports.size > 0 || gateway.active.size > 0 || triggeredCount > 0;
+    },
+  });
+  context.poller = poller;
+  poller.start();
+
+  const rootDir = (store.workspaceStore ?? store).directory;
+  return {
+    server,
+    get activeToolCalls() {
+      return (context.phase1?.pending ?? 0) + assetConversations(store).pending + superAgentConversations(store).pending;
+    },
+    openProject: async (projectId: string) =>
+      openProject(store, context, origin, (await store.get()).revision, { projectId }, store.projectId),
+    get studio() {
+      return context.studio!;
+    },
+    ensureStudio: context.ensureStudio,
+    info: async () => {
+      if (context.ffmpeg === undefined && context.ffmpegPromise) {
+        await Promise.race([context.ffmpegPromise, new Promise<void>(resolve => setTimeout(resolve, 150))]);
+      }
+      return {
+        previewUrl: origin,
+        studioUrl: context.studio?.alive() ? `${origin}/#project/${store.projectId}` : undefined,
+        engine: 'hyperframes',
+        ready: true,
+        editorReady: Boolean(context.studio?.alive()),
+        ffmpeg: Boolean(context.ffmpeg),
+        revision: (await store.get()).revision,
+        dataDirectory: store.directory,
+        browserOpened: false,
+        nativeRuntime: await nativeRuntimeStatus(pluginRoot),
+        authoringGuide: path.join(runtimeRoot, 'node_modules/hyperframes/dist/skills/hyperframes/SKILL.md'),
+        hyperframesCli: cliPath(runtimeRoot),
+      };
+    },
+    close: async () => {
+      poller.stop();
+      if (warmupTimer) {
+        clearTimeout(warmupTimer);
+        warmupTimer = undefined;
+      }
+      for (const controller of runningExports.values()) {
+        controller.abort();
+      }
+      context.trackingHosts?.clear();
+      await closeTranscripts(store);
+      await context.browser?.close();
+      await brandKitsFor(store.directory).close();
+      await gateway.close();
+      await assetConversations(store).close();
+      await superAgentConversations(store).close();
+      await agentRuntimesFor(store.directory).close();
+      await mcpHttpFor(store).close();
+      await contentBatchesFor(store).close();
+      await triggersFor(store).close();
+      closeLocalAgentsFor(rootDir);
+      closeWebPublishFor(rootDir);
+      closeDesignDeployFor(rootDir);
+      server.closeAllConnections();
+      server.close();
+      await context.studio?.close();
+      await closeTracking(context.tracking);
+    },
   };
-  const timer = setInterval(tick, 500); tick();
-  return { server, get activeToolCalls() { return (context.phase1?.pending ?? 0) + assetConversations(store).pending + superAgentConversations(store).pending; }, openProject: async (projectId: string) => openProject(store, context, origin, (await store.get()).revision, { projectId }, store.projectId), get studio() { return context.studio!; }, ensureStudio: context.ensureStudio,
-    info: async () => ({ previewUrl: origin, studioUrl: context.studio?.alive() ? `${origin}/#project/${store.projectId}` : undefined, engine: 'hyperframes', ready: true, editorReady: Boolean(context.studio?.alive()), ffmpeg, revision: (await store.get()).revision, dataDirectory: store.directory, browserOpened: false, nativeRuntime: await nativeRuntimeStatus(pluginRoot), authoringGuide: path.join(runtimeRoot, 'node_modules/hyperframes/dist/skills/hyperframes/SKILL.md'), hyperframesCli: cliPath(runtimeRoot) }),
-    close: async () => { clearInterval(timer); await closeTranscripts(store); await context.browser?.close(); await brandKitsFor(store.directory).close(); await gateway.close(); await assetConversations(store).close(); await superAgentConversations(store).close(); await agentRuntimesFor(store.directory).close(); server.closeAllConnections(); server.close(); await context.studio?.close(); await closeTracking(context.tracking); } };
 }
 if (isMain(import.meta.url)) {
   try {
@@ -1165,8 +1511,34 @@ if (isMain(import.meta.url)) {
     } else {
       const running = await startServer();
       console.log(`Motion + Hyperframes Studio: http://localhost:${process.env.PORT || 4173}`);
-      const stop = async () => { stopCommands(); await running.close(); process.exit(0); };
-      process.once('SIGTERM', stop); process.once('SIGINT', stop);
+      let stopping = false;
+      let parentWatchdog: ReturnType<typeof setInterval> | undefined;
+      const stop = async () => {
+        if (stopping) return;
+        stopping = true;
+        if (parentWatchdog) {
+          clearInterval(parentWatchdog);
+          parentWatchdog = undefined;
+        }
+        stopCommands();
+        await running.close();
+        process.exit(0);
+      };
+      const parentPid = Number(process.env.MOTION_PARENT_PID || 0);
+      if (Number.isInteger(parentPid) && parentPid > 1 && parentPid !== process.pid) {
+        parentWatchdog = setInterval(() => {
+          try {
+            process.kill(parentPid, 0);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException)?.code === 'ESRCH') {
+              void stop();
+            }
+          }
+        }, 3_000);
+        parentWatchdog.unref();
+      }
+      process.once('SIGTERM', () => void stop());
+      process.once('SIGINT', () => void stop());
     }
   } catch (error) { console.error(error); process.exitCode = 1; }
 }

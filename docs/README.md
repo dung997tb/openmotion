@@ -41,6 +41,7 @@
 - [model-gateway.md](model-gateway.md)
 - [Application settings and model connections](provider-settings.md)
 - [Local Agent installation, sign-in and model selection](local-agents.md)
+- [Cross-Platform MCP-First Architecture (Web, Desktop, Cloud Bridge & Batch Content)](cross-platform-mcp-architecture.md) · [Interactive Visual Architecture & System Boundaries Diagram (HTML)](architecture-map.html)
 - [Agent Runtimes, Cloud Bridge & Self-Hosted Service Protocol (`openmotion-agent-v1`)](agent-runtime-architecture.md)
 - [openmotion-director.md](openmotion-director.md)
 - [motion-extension-scope.md](motion-extension-scope.md)
