@@ -155,11 +155,25 @@ it("requests the promoted isolated frame's current manifest instead of keeping t
   const postMessage = vi.fn();
   Object.defineProperty(iframe, "contentWindow", { value: { postMessage } });
   const processTimelineMessage = vi.fn();
-  hydrateTimelineFromPreview({ iframe, adapter: { getDuration: () => 2 } as never,
-    processTimelineMessage, enrichMissingCompositions: vi.fn(), applyPreviewAudioState: vi.fn(),
-    attachIframeShortcutListeners: vi.fn(), syncTimelineElements: vi.fn() });
-  expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
-    type: "handshake", timelineOnly: true, projectId: "p", token: "test-lease",
-  }), "https://preview.example");
+  hydrateTimelineFromPreview({
+    iframe,
+    adapter: {
+      play: vi.fn(),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      getTime: () => 0,
+      getDuration: () => 2,
+      isPlaying: () => false,
+    },
+    processTimelineMessage,
+    enrichMissingCompositions: vi.fn(),
+    applyPreviewAudioState: vi.fn(),
+    attachIframeShortcutListeners: vi.fn(),
+    syncTimelineElements: vi.fn(),
+  });
+  expect(postMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ type: "handshake", timelineOnly: true, projectId: "p", token: "test-lease" }),
+    "https://preview.example",
+  );
   expect(processTimelineMessage).not.toHaveBeenCalled();
 });
