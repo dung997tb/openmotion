@@ -825,15 +825,15 @@ export class SuperAgentConversations {
     return readFile(filePath);
   }
 
-  private async maybeAutoPresentDevServer(active: ActiveSuperAgentChat, text: string, ownOrigin?: string): Promise<string | undefined> {
-    if (!text) return undefined;
+  private autoPresentDevServerSync(active: ActiveSuperAgentChat, text: string, ownOrigin?: string): { id?: string; changed: boolean } {
+    if (!text) return { changed: false };
     const url = extractLocalDevServerUrl(text, ownOrigin);
-    if (!url) return undefined;
+    if (!url) return { changed: false };
     active.devServerUrls ??= new Set();
     const existing = active.chat.artifacts.find(a => a.kind === 'web' && a.url === url);
     if (active.devServerUrls.has(url) || existing) {
       active.devServerUrls.add(url);
-      return existing?.id;
+      return { id: existing?.id, changed: false };
     }
     active.devServerUrls.add(url);
     const now = Date.now();
@@ -846,8 +846,15 @@ export class SuperAgentConversations {
       createdAt: now,
       updatedAt: now,
     }, true);
-    await this.persist(active, true);
-    return stored.id;
+    return { id: stored.id, changed: true };
+  }
+
+  private async maybeAutoPresentDevServer(active: ActiveSuperAgentChat, text: string, ownOrigin?: string): Promise<string | undefined> {
+    const result = this.autoPresentDevServerSync(active, text, ownOrigin);
+    if (result.changed) {
+      await this.persist(active, true);
+    }
+    return result.id;
   }
 
   async subscribe(id: string, res: ServerResponse): Promise<void> {
@@ -2525,7 +2532,7 @@ export class SuperAgentConversations {
         const out = item.aggregatedOutput ?? item.stdout ?? item.stderr ?? streamedOut ?? '';
         const command = typeof item.command === 'string' ? item.command : prev?.event.command;
         const devArtifactId = ok && out
-          ? await this.maybeAutoPresentDevServer(active, out, runtime.origin).catch(() => undefined)
+          ? this.autoPresentDevServerSync(active, out, runtime.origin).id
           : undefined;
         const ev: SuperAgentToolEvent = {
           callId: itemId,

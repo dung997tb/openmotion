@@ -442,8 +442,8 @@ test('separate AgentRuntimeRegistry instances isolate fallback empty state acros
     const created = await regA.createBridgeToken('Workspace A', 'http://127.0.0.1:4173');
     const dirResultB = await regB.directory('http://127.0.0.1:4173');
     assert.equal(dirResultB.tokens.length, 0);
-    assert.equal(await regB.authenticateBridgeToken(created.token), null);
-    assert.ok(await regA.authenticateBridgeToken(created.token));
+    await assert.rejects(() => regB.authenticateBridgeToken(created.token, true), /Unauthorized bridge token/);
+    assert.ok(await regA.authenticateBridgeToken(created.token, true));
     await regA.close();
     await regB.close();
   } finally {

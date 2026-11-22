@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { WorkspaceStore } from '../store.ts';
+import type { WorkspaceStore } from '../workspace.ts';
 import { DesignError, designProjectsFor } from '../design-projects.ts';
 import { GameError, gameProjectsFor } from '../game-projects.ts';
 import {

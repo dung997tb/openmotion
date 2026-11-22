@@ -994,6 +994,7 @@ export class AgentRuntimeRegistry {
       }
     }
     this.bridgeStreams.clear();
+    await this.queue.catch(() => {});
   }
 }
 
