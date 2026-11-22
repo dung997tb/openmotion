@@ -2,6 +2,7 @@ import { Dialog } from '@base-ui/react/dialog';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LOCAL_DIRECT_RUNTIME_ID, type AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { assetMediaUrl } from '../../../shared/asset-library';
+import type { SuperAgentHandoffPayload } from '../../../shared/capability-hub';
 import { designRoutes } from '../../../shared/design-project';
 import {
   NEW_VIEWER_TAB_ID,
@@ -9,6 +10,7 @@ import {
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
+  type SuperAgentIntent,
   type SuperAgentPermissionMode,
   type SuperAgentResourceAttachment,
   type SuperAgentResourceCatalog,
@@ -147,7 +149,7 @@ function resourceToArtifactPatch(
       title: item.title,
       subtitle: item.subtitle || 'Game Studio',
       projectId: item.id,
-      url: `/api/games/${encodeURIComponent(item.id)}/play/index.html`,
+      url: `/motion-api/games/${encodeURIComponent(item.id)}/play/index.html`,
     };
   }
   return null;
@@ -220,7 +222,7 @@ export function SuperAgentWorkspace({
   onChatIdChange: (id: string | null, replace?: boolean) => void;
   onOpenDesignProject: (projectId: string) => void;
   onOpenMotionProject: (projectId: string) => void;
-  onOpenGameStudio?: (projectId: string) => void;
+  onOpenGameStudio?: (gameId?: string) => void;
   onOpenAsset: (assetId: string, versionId?: string) => void;
   onOpenBrandKit: (kitId?: string) => void;
   onOpenAgentSettings: () => void;
@@ -269,6 +271,8 @@ export function SuperAgentWorkspace({
   const [attachments, setAttachments] = useState<SuperAgentResourceAttachment[]>([]);
   const [draftSeed, setDraftSeed] = useState<{ id: number; text: string; mode?: SuperAgentCreationModeId } | null>(null);
   const handoffSeqRef = useRef(0);
+  const [pendingAutoSend, setPendingAutoSend] = useState<{ id: number; payload: SuperAgentHandoffPayload } | null>(null);
+  const dispatchedHandoffIdsRef = useRef<Set<number>>(new Set());
 
   const [selection, setSelection] = useState<AgentSelection>({
     engine: 'codex',
@@ -524,39 +528,84 @@ export function SuperAgentWorkspace({
     if (!active) return;
     const payload = consumeSuperAgentHandoff();
     if (!payload) return;
-    if (payload.attachments?.length) {
-      setAttachments(prev => {
-        const next = [...prev];
-        for (const att of payload.attachments!) {
-          if (!next.some(existing => resourceKey(existing) === resourceKey(att))) {
-            next.push(att);
-          }
+    const seq = ++handoffSeqRef.current;
+    const mergedAttachments = (() => {
+      const next: SuperAgentResourceAttachment[] = payload.newChat === false ? [...attachments] : [];
+      for (const att of payload.attachments ?? []) {
+        if (!next.some(existing => resourceKey(existing) === resourceKey(att))) {
+          next.push(att);
         }
-        return next.slice(0, 30);
+      }
+      return next.slice(0, 30);
+    })();
+
+    setAttachments(mergedAttachments);
+
+    if (payload.autoSend) {
+      setPendingAutoSend({
+        id: seq,
+        payload: {
+          ...payload,
+          attachments: mergedAttachments,
+        },
       });
+      return;
     }
+
+    if (payload.newChat !== false && !payload.initialArtifact) {
+      setActiveChat(null);
+      setViewerOpen(false);
+    }
+
     setDraftSeed({
-      id: ++handoffSeqRef.current,
+      id: seq,
       text: payload.prompt,
       mode: payload.mode,
     });
+
+    if (payload.initialArtifact) {
+      void createSuperAgentChat({
+        ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+        engine: selection.engine,
+        model: selection.model !== 'default' ? selection.model : undefined,
+        permissionMode,
+        ...(payload.mode === 'game' ? { intent: 'game' as SuperAgentIntent } : {}),
+        ...(payload.title ? { title: payload.title } : {}),
+        initialArtifact: payload.initialArtifact,
+      })
+        .then(created => {
+          applyChatSnapshot(created.conversation, true);
+          if (created.conversation.artifacts.length > 0) setViewerOpen(true);
+          onChatIdChange(created.conversation.id, true);
+        })
+        .catch(() => { /* composer still holds draft + attachments */ });
+    }
+
     showToast(t('Loaded into Super Agent'), 'info', 'feedback');
-  }, [active, showToast, t]);
+  }, [active, attachments, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange, showToast, t]);
 
   useEffect(() => {
     applyPendingHandoff();
     return subscribeSuperAgentHandoff(applyPendingHandoff);
   }, [applyPendingHandoff]);
 
-  const ensureChatCreated = useCallback(async (): Promise<SuperAgentChat> => {
-    if (activeChat) return activeChat;
+  const ensureChatCreated = useCallback(async (init?: {
+    intent?: SuperAgentIntent;
+    title?: string;
+    initialArtifact?: Partial<SuperAgentArtifact>;
+  }): Promise<SuperAgentChat> => {
+    if (activeChat && !init?.initialArtifact) return activeChat;
     const created = await createSuperAgentChat({
       ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
       engine: selection.engine,
       model: selection.model !== 'default' ? selection.model : undefined,
       permissionMode,
+      ...(init?.intent ? { intent: init.intent } : {}),
+      ...(init?.title ? { title: init.title } : {}),
+      ...(init?.initialArtifact ? { initialArtifact: init.initialArtifact } : {}),
     });
     applyChatSnapshot(created.conversation, true);
+    if (created.conversation.artifacts.length > 0) setViewerOpen(true);
     onChatIdChange(created.conversation.id, true);
     return created.conversation;
   }, [activeChat, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange]);
@@ -631,14 +680,27 @@ export function SuperAgentWorkspace({
 
   const handleSend = async (
     text: string,
-    meta?: { mode?: SuperAgentCreationModeId; workingDir?: string },
+    meta?: {
+      mode?: SuperAgentCreationModeId;
+      workingDir?: string;
+      overrideAttachments?: SuperAgentResourceAttachment[];
+      initialArtifact?: Partial<SuperAgentArtifact>;
+    },
   ): Promise<boolean> => {
     setSending(true);
     try {
-      const target = await ensureChatCreated();
+      const target = await ensureChatCreated(
+        meta?.mode === 'game' || meta?.initialArtifact
+          ? {
+              ...(meta?.mode === 'game' ? { intent: 'game' } : {}),
+              ...(meta?.initialArtifact ? { initialArtifact: meta.initialArtifact } : {}),
+            }
+          : undefined,
+      );
       const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `sa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const outgoingAttachments = meta?.overrideAttachments ?? attachments;
       const result = await startSuperAgentTurn(target.id, {
         requestId,
         text,
@@ -649,7 +711,7 @@ export function SuperAgentWorkspace({
         model: selection.model,
         reasoning: selection.reasoning,
         permissionMode,
-        attachments,
+        attachments: outgoingAttachments,
       });
       applyChatSnapshot(result.conversation, false);
       setAttachments([]);
@@ -715,6 +777,16 @@ export function SuperAgentWorkspace({
   };
 
   const handleOpenResource = async (item: SuperAgentResourceAttachment) => {
+    if (item.kind === 'browser-annotation') {
+      if (item.annotation?.artifactId && activeChat?.artifacts.some(a => a.id === item.annotation!.artifactId)) {
+        void handleOpenArtifactId(item.annotation.artifactId);
+        return;
+      }
+      if (item.annotation?.pageUrl && /^https?:\/\//i.test(item.annotation.pageUrl)) {
+        void handleOpenWebUrl(item.annotation.pageUrl);
+        return;
+      }
+    }
     const patch = resourceToArtifactPatch(item);
     if (!patch) {
       setAttachments(prev =>
@@ -726,7 +798,7 @@ export function SuperAgentWorkspace({
       return;
     }
     try {
-      const target = await ensureChatCreated();
+      const target = await ensureChatCreated(item.kind === 'game-project' ? { intent: 'game' } : undefined);
       const res = await updateSuperAgentChat(target.id, { addArtifact: patch });
       applyChatSnapshot(res.conversation, false);
       setViewerOpen(true);
@@ -744,6 +816,24 @@ export function SuperAgentWorkspace({
         : [...prev, att].slice(0, 30),
     );
     showToast(t('Attached "{title}" to prompt', { title: att.title }), 'info', 'feedback');
+  };
+
+  const handleAttachBrowserAnnotation = (
+    attachment: SuperAgentResourceAttachment,
+    sendImmediately = false,
+  ) => {
+    const nextAttachments = attachments.some(existing => resourceKey(existing) === resourceKey(attachment))
+      ? attachments
+      : [...attachments, attachment].slice(0, 30);
+    setAttachments(nextAttachments);
+    const busy = activeChat?.state === 'running' || activeChat?.state === 'waiting';
+    if (sendImmediately && !busy && !sending) {
+      const promptText = attachment.annotation?.comment?.trim()
+        || t('Update the page based on the attached browser preview annotation.');
+      void handleSend(promptText, { overrideAttachments: nextAttachments });
+      return;
+    }
+    showToast(t('Attached annotation to prompt'), 'info', 'feedback');
   };
 
   const handleCloseTab = (tabId: string) => {
@@ -821,6 +911,129 @@ export function SuperAgentWorkspace({
       loading: false,
     };
   }, [availableRuntimes, agentsLoaded, selection.runtimeId, selection.engine, runtimesDir, t]);
+
+  useEffect(() => {
+    if (!active || !pendingAutoSend || !agentsLoaded) return;
+    const needsAgentSync = agentStatus.ready && Boolean(
+      !engineInitialized.current
+      && agentDir
+      && ((agentDir.default && agents.some(item => item.id === agentDir.default!.agent))
+        || (!activeChat && agents.some(item => item.installed && item.auth !== 'signed-out'))),
+    );
+    const needsRuntimeSync = agentStatus.ready && Boolean(
+      runtimesDir
+      && !selection.runtimeId
+      && (runtimesDir.defaultRuntimeId || !runtimesDir.localDirectAvailable)
+      && runtimesDir.runtimes.some(item => item.status === 'online'),
+    );
+    if (needsAgentSync || needsRuntimeSync) return;
+    if (dispatchedHandoffIdsRef.current.has(pendingAutoSend.id)) return;
+    dispatchedHandoffIdsRef.current.add(pendingAutoSend.id);
+    setPendingAutoSend(null);
+
+    const { payload } = pendingAutoSend;
+    const handoffAttachments = payload.attachments ?? [];
+
+    if (!agentStatus.ready) {
+      setDraftSeed({
+        id: pendingAutoSend.id,
+        text: payload.prompt,
+        mode: payload.mode,
+      });
+      if (payload.initialArtifact) {
+        void createSuperAgentChat({
+          ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+          engine: selection.engine,
+          model: selection.model !== 'default' ? selection.model : undefined,
+          permissionMode,
+          ...(payload.mode === 'game' ? { intent: 'game' as SuperAgentIntent } : {}),
+          ...(payload.title ? { title: payload.title } : {}),
+          initialArtifact: payload.initialArtifact,
+        })
+          .then(created => {
+            applyChatSnapshot(created.conversation, true);
+            if (created.conversation.artifacts.length > 0) setViewerOpen(true);
+            onChatIdChange(created.conversation.id, true);
+          })
+          .catch(() => { /* keep draft seed only */ });
+      }
+      showToast(t('Loaded into Super Agent'), 'info', 'feedback');
+      return;
+    }
+
+    void (async () => {
+      setSending(true);
+      try {
+        const useExisting = payload.newChat === false && activeChat && !payload.initialArtifact;
+        const target = useExisting
+          ? activeChat
+          : (
+              await createSuperAgentChat({
+                ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+                engine: selection.engine,
+                model: selection.model !== 'default' ? selection.model : undefined,
+                permissionMode,
+                ...(payload.mode === 'game' ? { intent: 'game' as SuperAgentIntent } : {}),
+                ...(payload.title ? { title: payload.title } : {}),
+                ...(payload.initialArtifact ? { initialArtifact: payload.initialArtifact } : {}),
+              })
+            ).conversation;
+
+        if (target.id !== activeChat?.id) {
+          applyChatSnapshot(target, true);
+          if (target.artifacts.length > 0) setViewerOpen(true);
+          onChatIdChange(target.id, true);
+        }
+
+        const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `sa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        const result = await startSuperAgentTurn(target.id, {
+          requestId,
+          text: payload.prompt,
+          ...(payload.mode ? { mode: payload.mode } : {}),
+          ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
+          engine: selection.engine,
+          model: selection.model,
+          reasoning: selection.reasoning,
+          permissionMode,
+          attachments: handoffAttachments,
+        });
+        applyChatSnapshot(result.conversation, false);
+        setAttachments([]);
+        setDraftSeed({ id: ++handoffSeqRef.current, text: '' });
+      } catch (error) {
+        setAttachments(handoffAttachments);
+        setDraftSeed({
+          id: ++handoffSeqRef.current,
+          text: payload.prompt,
+          mode: payload.mode,
+        });
+        showToast(error instanceof Error ? error.message : t('Could not start Super Agent'));
+      } finally {
+        setSending(false);
+      }
+    })();
+  }, [
+    active,
+    pendingAutoSend,
+    agentsLoaded,
+    agentDir,
+    agents,
+    runtimesDir,
+    agentStatus.ready,
+    activeChat,
+    selection.runtimeId,
+    selection.engine,
+    selection.model,
+    selection.reasoning,
+    permissionMode,
+    applyChatSnapshot,
+    onChatIdChange,
+    showToast,
+    t,
+  ]);
 
   const getDockedSidebarWidth = useCallback(() => {
     if (!sidebarDockedRef.current) return 0;
@@ -958,6 +1171,7 @@ export function SuperAgentWorkspace({
             onOpenAgentSettings={onOpenAgentSettings}
             onOpenRuntimeSettings={openRuntimes}
             onOpenModelSettings={onOpenModelSettings}
+            onOpenGameStudio={onOpenGameStudio ? () => onOpenGameStudio() : undefined}
             onOpenMcp={onOpenMcp}
             onError={message => showToast(message)}
           />
@@ -1020,6 +1234,8 @@ export function SuperAgentWorkspace({
                 setViewerOpen(false);
               }}
               onAttachArtifact={handleAttachArtifact}
+              onAttachBrowserAnnotation={handleAttachBrowserAnnotation}
+              onNotify={(msg, tone) => showToast(msg, tone === 'error' ? 'error' : 'info', 'feedback')}
               onOpenInDesignStudio={onOpenDesignProject}
               onOpenInMotionStudio={onOpenMotionProject}
               onOpenInGameStudio={onOpenGameStudio}

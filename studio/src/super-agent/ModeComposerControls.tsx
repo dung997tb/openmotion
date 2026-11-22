@@ -1,9 +1,27 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useMemo, useState } from 'react';
+import {
+  gameGenres,
+  gameSettings,
+  gameStyles,
+  type GameCard,
+  type GameGenre,
+  type GameSetting,
+  type GameStyle,
+} from '../../../shared/game-contract';
 import type { Modality, Model } from '../../../shared/gateway';
 import { Popover } from '../components/ui/Popover';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import {
+  genreCovers,
+  genreLabels,
+  genrePlaceholders,
+  settingCovers,
+  settingLabels,
+  styleCovers,
+  styleLabels,
+} from '../motion/game/gameCatalog';
 import { providerReady } from '../motion/imageMenuModels';
 import { ModelAvatar } from '../motion/settingsPrimitives';
 import { useMediaCatalog } from '../motion/useMediaCatalog';
@@ -45,10 +63,13 @@ export type ModeComposerOptions = {
   webTarget: 'responsive' | 'mobile' | 'dashboard';
   webReferenceUrl: string;
 
-  // HTML Game
-  gameEngine: 'canvas2d' | 'webgl' | 'dom';
-  gameViewport: '16:9' | '9:16' | 'fullscreen';
-  gameControls: 'keyboard-mouse' | 'touch' | 'both';
+  // Game Studio
+  gameGenre: GameGenre | null;
+  gameStyle: GameStyle | null;
+  gameSetting: GameSetting | null;
+  gameOrientation: 'landscape' | 'portrait';
+  gameMultiplayer: boolean;
+  gameTemplate: GameCard | null;
 
   // Pure Coding
   codingWorkdir: string;
@@ -83,9 +104,12 @@ export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
   webTarget: 'responsive',
   webReferenceUrl: '',
 
-  gameEngine: 'canvas2d',
-  gameViewport: '16:9',
-  gameControls: 'keyboard-mouse',
+  gameGenre: 'shooter',
+  gameStyle: null,
+  gameSetting: null,
+  gameOrientation: 'landscape',
+  gameMultiplayer: false,
+  gameTemplate: null,
 
   codingWorkdir: '',
   codingFocus: 'general',
@@ -114,18 +138,6 @@ const MOTION_STYLE_LABELS: Record<ModeComposerOptions['motionStyle'], string> = 
   product: 'Product Launch',
   editorial: 'Editorial',
   minimal: 'Minimal',
-};
-
-const GAME_ENGINE_LABELS: Record<ModeComposerOptions['gameEngine'], string> = {
-  canvas2d: 'Canvas 2D',
-  webgl: 'WebGL / 3D',
-  dom: 'DOM Arcade',
-};
-
-const GAME_CONTROL_LABELS: Record<ModeComposerOptions['gameControls'], string> = {
-  'keyboard-mouse': 'Keyboard + Mouse',
-  touch: 'Touch / Mobile',
-  both: 'Keyboard + Touch',
 };
 
 const AUDIO_TYPE_LABELS: Record<ModeComposerOptions['audioType'], string> = {
@@ -178,6 +190,9 @@ export function getModeComposerPlaceholder(
   }
   if (mode.id === 'motion' && options.motionEngine === 'video-model') {
     return t('Describe the AI video shot you want to generate with Seedance or your video model…');
+  }
+  if (mode.id === 'game') {
+    return t(genrePlaceholders[options.gameGenre ?? 'none']);
   }
   return t(mode.placeholder);
 }
@@ -242,10 +257,13 @@ export function formatModePromptPrefix(
     if (options.codingFocus === 'general') return '';
     return `[Coding: ${CODING_FOCUS_LABELS[options.codingFocus]}]`;
   } else if (mode.id === 'game') {
-    parts.push('Mode: HTML Game');
-    parts.push(`Engine: ${GAME_ENGINE_LABELS[options.gameEngine]}`);
-    parts.push(`Viewport: ${options.gameViewport}`);
-    parts.push(`Controls: ${GAME_CONTROL_LABELS[options.gameControls]}`);
+    parts.push('Mode: Game Studio');
+    if (options.gameGenre) parts.push(`Genre: ${genreLabels[options.gameGenre]}`);
+    if (options.gameStyle) parts.push(`Style: ${styleLabels[options.gameStyle]}`);
+    if (options.gameSetting) parts.push(`Setting: ${settingLabels[options.gameSetting]}`);
+    parts.push(`Layout: ${options.gameOrientation === 'portrait' ? 'Portrait (9:16)' : 'Landscape (16:9)'}`);
+    parts.push(`Players: ${options.gameMultiplayer ? 'Multiplayer' : 'Single player'}`);
+    if (options.gameTemplate) parts.push(`Template: ${options.gameTemplate.title}`);
   } else {
     parts.push(`Mode: ${mode.label}`);
   }
@@ -290,7 +308,9 @@ export function ModeComposerTopBar({
   const { t } = useI18n();
   const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion' || modeId === 'audio');
   const { catalog } = useMediaCatalog(needsMediaCatalog);
-  const [openMenu, setOpenMenu] = useState<'video-model' | 'image-model' | 'audio-model' | 'import' | 'coding-workdir' | null>(null);
+  const [openMenu, setOpenMenu] = useState<
+    'video-model' | 'image-model' | 'audio-model' | 'import' | 'coding-workdir' | 'game-genre' | 'game-style' | 'game-setting' | null
+  >(null);
   const [urlDraft, setUrlDraft] = useState(options.webReferenceUrl);
   const [workdirDraft, setWorkdirDraft] = useState(options.codingWorkdir);
 
@@ -735,6 +755,178 @@ export function ModeComposerTopBar({
             </div>
           </div>
         </Popover>
+      </div>
+    );
+  }
+
+  if (modeId === 'game') {
+    const renderGameArtPicker = ({
+      menuKey,
+      fallbackIcon,
+      label,
+      clearLabel,
+      selectedId,
+      items,
+      labels,
+      covers,
+      onSelect,
+    }: {
+      menuKey: 'game-genre' | 'game-style' | 'game-setting';
+      fallbackIcon: string;
+      label: string;
+      clearLabel: string;
+      selectedId: string | null;
+      items: readonly string[];
+      labels: Record<string, string>;
+      covers: Record<string, string | null>;
+      onSelect: (id: string | null) => void;
+    }) => {
+      const selectedCover = selectedId ? covers[selectedId] : null;
+      return (
+        <Popover
+          open={openMenu === menuKey}
+          onOpenChange={next => setOpenMenu(next ? menuKey : null)}
+          side="top"
+          align="start"
+          aria-label={t(label)}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={Boolean(selectedId) || openMenu === menuKey || undefined}
+              disabled={disabled}
+            >
+              {selectedCover ? (
+                <img className="om-sa-game-pill-thumb" src={selectedCover} alt="" />
+              ) : (
+                <RemixIcon name={fallbackIcon} size={13} />
+              )}
+              <span className="om-sa-composer-top-pill-label">
+                {selectedId ? t(labels[selectedId]) : t(label)}
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t(label)}</span>
+              {selectedId && (
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  onClick={() => {
+                    onSelect(null);
+                    setOpenMenu(null);
+                  }}
+                >
+                  {t(clearLabel)}
+                </Button>
+              )}
+            </div>
+            <div className="om-sa-game-art-grid" role="group" aria-label={t(label)}>
+              {items.map(id => {
+                const activeItem = selectedId === id;
+                const cover = covers[id];
+                return (
+                  <Button
+                    key={id}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-game-art-option"
+                    aria-pressed={activeItem}
+                    data-active={activeItem || undefined}
+                    onClick={() => {
+                      onSelect(activeItem ? null : id);
+                      setOpenMenu(null);
+                    }}
+                  >
+                    {cover ? (
+                      <img src={cover} alt="" />
+                    ) : (
+                      <span className="om-sa-game-art-fallback" aria-hidden="true">
+                        <RemixIcon name={fallbackIcon} size={18} />
+                      </span>
+                    )}
+                    <span>{t(labels[id])}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
+      );
+    };
+
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Game studio options')}>
+        {renderGameArtPicker({
+          menuKey: 'game-genre',
+          fallbackIcon: 'gamepad-line',
+          label: 'Genre',
+          clearLabel: 'Any genre',
+          selectedId: options.gameGenre,
+          items: gameGenres,
+          labels: genreLabels,
+          covers: genreCovers,
+          onSelect: id => onChange({ gameGenre: id as GameGenre | null }),
+        })}
+        {renderGameArtPicker({
+          menuKey: 'game-style',
+          fallbackIcon: 'brush-line',
+          label: 'Style',
+          clearLabel: 'Any style',
+          selectedId: options.gameStyle,
+          items: gameStyles,
+          labels: styleLabels,
+          covers: styleCovers,
+          onSelect: id => onChange({ gameStyle: id as GameStyle | null }),
+        })}
+        {renderGameArtPicker({
+          menuKey: 'game-setting',
+          fallbackIcon: 'landscape-line',
+          label: 'Setting',
+          clearLabel: 'Any setting',
+          selectedId: options.gameSetting,
+          items: gameSettings,
+          labels: settingLabels,
+          covers: settingCovers,
+          onSelect: id => onChange({ gameSetting: id as GameSetting | null }),
+        })}
+        <Button
+          variant="plain"
+          type="button"
+          className="om-sa-composer-top-pill"
+          data-active={options.gameOrientation === 'portrait' || undefined}
+          aria-pressed={options.gameOrientation === 'portrait'}
+          disabled={disabled}
+          onClick={() => {
+            setOpenMenu(null);
+            onChange({ gameOrientation: options.gameOrientation === 'portrait' ? 'landscape' : 'portrait' });
+          }}
+        >
+          <RemixIcon name={options.gameOrientation === 'portrait' ? 'smartphone-line' : 'computer-line'} size={13} />
+          <span>{t(options.gameOrientation === 'portrait' ? 'Portrait' : 'Landscape')}</span>
+        </Button>
+        <Button
+          variant="plain"
+          type="button"
+          role="switch"
+          aria-checked={options.gameMultiplayer}
+          className="om-sa-composer-top-pill"
+          data-active={options.gameMultiplayer || undefined}
+          disabled={disabled}
+          onClick={() => {
+            setOpenMenu(null);
+            onChange({ gameMultiplayer: !options.gameMultiplayer });
+          }}
+        >
+          <RemixIcon name="group-line" size={13} />
+          <span>{t('Multiplayer')}</span>
+        </Button>
       </div>
     );
   }
@@ -1316,88 +1508,5 @@ export function ModeComposerControls({
     );
   }
 
-  // game mode
-  const gameSummary = `${t(GAME_ENGINE_LABELS[options.gameEngine])} · ${options.gameViewport}`;
-  return (
-    <div className="om-sa-mode-controls" role="group" aria-label={t('HTML Game options')}>
-      <Popover
-        open={openMenu === 'params'}
-        onOpenChange={next => setOpenMenu(next ? 'params' : null)}
-        side="top"
-        align="start"
-        aria-label={t('Game engine & viewport')}
-        className="om-sa-mode-popover"
-        trigger={
-          <Button
-            variant="plain"
-            type="button"
-            className="om-sa-mode-param-trigger"
-            data-active={openMenu === 'params' || undefined}
-            disabled={disabled}
-          >
-            <RemixIcon name="code-s-slash-line" size={13} />
-            <span className="om-sa-mode-param-label">{gameSummary}</span>
-            <RemixIcon name="arrow-down-s-line" size={14} />
-          </Button>
-        }
-      >
-        <div className="om-sa-mode-menu">
-          <div className="om-sa-mode-field">
-            <span className="om-sa-popover-label">{t('Renderer')}</span>
-            <div className="om-sa-popover-pills">
-              {(['canvas2d', 'webgl', 'dom'] as const).map(engine => (
-                <Button
-                  key={engine}
-                  variant="plain"
-                  type="button"
-                  className="om-sa-popover-pill"
-                  aria-pressed={options.gameEngine === engine}
-                  data-active={options.gameEngine === engine || undefined}
-                  onClick={() => onChange({ gameEngine: engine })}
-                >
-                  {t(GAME_ENGINE_LABELS[engine])}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="om-sa-mode-field">
-            <span className="om-sa-popover-label">{t('Viewport')}</span>
-            <div className="om-sa-popover-pills">
-              {(['16:9', '9:16', 'fullscreen'] as const).map(vp => (
-                <Button
-                  key={vp}
-                  variant="plain"
-                  type="button"
-                  className="om-sa-popover-pill"
-                  aria-pressed={options.gameViewport === vp}
-                  data-active={options.gameViewport === vp || undefined}
-                  onClick={() => onChange({ gameViewport: vp })}
-                >
-                  {vp === 'fullscreen' ? t('Fullscreen') : vp}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="om-sa-mode-field">
-            <span className="om-sa-popover-label">{t('Controls')}</span>
-            <div className="om-sa-popover-pills">
-              {(['keyboard-mouse', 'touch', 'both'] as const).map(ctrl => (
-                <Button
-                  key={ctrl}
-                  variant="plain"
-                  type="button"
-                  className="om-sa-popover-pill"
-                  aria-pressed={options.gameControls === ctrl}
-                  data-active={options.gameControls === ctrl || undefined}
-                  onClick={() => onChange({ gameControls: ctrl })}
-                >
-                  {t(GAME_CONTROL_LABELS[ctrl])}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Popover>
-    </div>
-  );
+  return null;
 }

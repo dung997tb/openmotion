@@ -1,3 +1,5 @@
+import type { BrowserPickedElement, BrowserRect } from './browser.ts';
+
 export const SUPER_AGENT_API = '/motion-api/super-agent';
 
 export type SuperAgentEngine = string;
@@ -14,7 +16,26 @@ export type SuperAgentResourceKind =
   | 'motion-project'
   | 'workflow'
   | 'model'
-  | 'game-project';
+  | 'game-project'
+  | 'browser-annotation';
+
+export type SuperAgentBrowserAnnotation = {
+  mode: 'select' | 'region' | 'draw' | 'screenshot' | 'console';
+  pageUrl: string;
+  pageTitle?: string;
+  comment?: string;
+  element?: BrowserPickedElement;
+  region?: BrowserRect;
+  viewport?: { width: number; height: number };
+  strokeCount?: number;
+  strokeBounds?: BrowserRect;
+  screenshotUrl?: string;
+  screenshotPath?: string;
+  consoleErrors?: string[];
+  artifactId?: string;
+  artifactKind?: SuperAgentArtifactKind;
+  projectId?: string;
+};
 
 export type SuperAgentResourceAttachment = {
   id: string;
@@ -27,6 +48,7 @@ export type SuperAgentResourceAttachment = {
   previewUrl?: string;
   swatches?: string[];
   tags?: string[];
+  annotation?: SuperAgentBrowserAnnotation;
 };
 
 export type SuperAgentResourceCounts = {
@@ -890,8 +912,13 @@ export function detectIntentFromPrompt(
   if (/^\[Mode:\s*Website & App/i.test(source)) return 'website';
   if (/^\[Mode:\s*Slides & Docs/i.test(source)) return 'slides';
 
-  // Explicit OpenMotion tool names always map to their creative domain first
-  if (/\bopenmotion_game_/i.test(source)) return 'game';
+  // Explicit OpenMotion tool names or attached game projects always map to their creative domain first
+  if (
+    /\bopenmotion_game_|openmotion-game|openmotion:\/\/workflow\/game\//i.test(source)
+    || attachments?.some(att => att.kind === 'game-project')
+  ) {
+    return 'game';
+  }
   if (/\bopenmotion_design_/i.test(source)) return 'website';
   if (/\bopenmotion_(?:create_project|edit_project|export_request)\b/i.test(source)) return 'video';
 
@@ -905,7 +932,7 @@ export function detectIntentFromPrompt(
   }
 
   // Creative deliverables
-  if (/(?:\b(?:arcade|shooter|puzzle|webgl|playable)\s+)?\bgame\b|小游戏|写个游戏|做个游戏/i.test(source)) {
+  if (/(?:\b(?:arcade|shooter|puzzle|webgl|playable)\s+)?\bgame\b|小游戏|写个游戏|做个游戏|游戏|射击游戏|闯关|联机游戏/i.test(source)) {
     return 'game';
   }
   if (/(?:landing page|dashboard|\bwebsite\b|web app|mobile app|\bprototype\b|网站|网页|落地页|仪表盘|原型)/i.test(source)) {
@@ -1028,6 +1055,11 @@ function stripPromptNoise(raw: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 
+  const gameBriefMatch = cleaned.match(/^Use the openmotion-game Skill[\s\S]*?\bBrief:\s*([^\n]+?)(?:\s+(?:Ask at most|Propose a visual|Set building|Read openmotion|$))/i);
+  if (gameBriefMatch?.[1]?.trim()) {
+    return gameBriefMatch[1].trim();
+  }
+
   cleaned = cleaned
     .replace(/^(?:(?:can you |could you )?please(?: help(?: me)?)?|help me|use\s+openmotion_[a-z0-9_]+(?:\s+and\s+openmotion_[a-z0-9_]+)*\s+to|call\s+openmotion_[a-z0-9_]+(?:\s+with\s+[^\s,]+)?\s+(?:and|to)?)\s+/i, '')
     .replace(/^(?:请帮我|麻烦帮我|麻烦你|能否帮我|请你|帮我|我想)\s*/, '')
@@ -1109,7 +1141,7 @@ export function superAgentIntentMeta(intent?: SuperAgentIntent): {
     case 'audio':
       return { icon: 'music-2-line', tone: 'audio', label: 'Audio' };
     case 'game':
-      return { icon: 'sparkling-line', tone: 'agent', label: 'Game' };
+      return { icon: 'gamepad-line', tone: 'agent', label: 'Game' };
     case 'website':
       return { icon: 'layout-line', tone: 'agent', label: 'Website & App' };
     case 'slides':

@@ -31,13 +31,14 @@ const inputs: Record<string, object> = {
   openmotion_design_project: { action: 'list' },
   openmotion_design_edit: { action: 'list_versions', projectId },
   openmotion_design_comments: { action: 'list', projectId },
+  openmotion_cloud_share: { action: 'status', kind: 'design-project', projectId },
 };
 
-test('all twenty-two registered domain names reuse public schemas and forward unchanged inputs and results', async () => {
+test('all twenty-three registered domain names reuse public schemas and forward unchanged inputs and results', async () => {
   const calls: { url: string; init?: RequestInit }[] = [];
   const result = { projectId, previewHandoff: { state: 'pending' }, nested: { value: 42 } };
   const tools = buildOpenMotionWebMcpTools(async (url, init) => { calls.push({ url, init }); return Response.json(result); });
-  assert.equal(tools.length, 22);
+  assert.equal(tools.length, 23);
   assert.deepEqual(tools.map(tool => tool.name).sort(), Object.keys(inputs).sort());
   // Game tools are external-Agent-only and deliberately excluded from WebMCP.
   const browserTools = phase1Tools.filter(tool => !tool.name.startsWith('openmotion_game_'));

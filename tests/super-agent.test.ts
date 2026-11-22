@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designProjectsFor } from '../design-projects.ts';
+import path from 'node:path';
+import { designHttp, designProjectsFor } from '../design-projects.ts';
+import { gameHttp, gameProjectsFor } from '../game-projects.ts';
+import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from '../shared/preview-bridge.ts';
 import { Phase1Service } from '../phase1.ts';
 import { pluginRoot } from '../hyperframes.ts';
-import { SuperAgentConversations, superAgentConversations } from '../gateway/super-agent.ts';
+import {
+  SuperAgentConversations,
+  extractLocalDevServerUrl,
+  formatBrowserAnnotationsContext,
+  superAgentConversations,
+} from '../gateway/super-agent.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
 import { fixture } from './fixtures.ts';
@@ -429,22 +437,40 @@ test('deleting a conversation during an in-flight tool call prevents recreating 
     },
   };
 
-  const service = new SuperAgentConversations(store, {
-    resolveAgent: async () => '/usr/local/bin/codex',
-    spawnCodex: (_bin, _cwd, onMessage) => {
-      const rpc = new FakeRpc(onMessage, (msg, fake) => {
-        if (msg.method === 'turn/start') {
-          queueMicrotask(() => {
-            fake.emit({
-              method: 'item/tool/call',
-              id: 50,
-              params: { tool: 'openmotion_create_project', callId: 'call-del-1', arguments: { title: 'Race' } },
-            });
+  class DeleteRaceRpc {
+    onNotification: (msg: any) => void;
+    closed = false;
+
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, _onError: (err: Error) => void) {
+      this.onNotification = onNotification;
+    }
+
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-del-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'item/tool/call',
+            id: 50,
+            params: { tool: 'openmotion_create_project', callId: 'call-del-1', arguments: { title: 'Race' } },
           });
-        }
-      });
-      return rpc as any;
-    },
+        });
+        return { turn: { id: 'turn-del-1' } };
+      }
+      return {};
+    }
+
+    send() {}
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: DeleteRaceRpc as unknown as typeof AssetAgentRpc,
   });
 
   const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
@@ -462,4 +488,483 @@ test('deleting a conversation during an in-flight tool call prevents recreating 
   assert.equal(existsSync(chatPath), false);
   await assert.rejects(() => service.get(chat.id), /CONVERSATION_NOT_FOUND/);
   await service.close();
+}));
+
+test('SuperAgentConversations supports game intent, initial game artifact, openmotion_game_* live updates, and GET /api/games/:id/files', () => fixture(async store => {
+  const createdGame = await gameProjectsFor(store.directory).create({
+    prompt: 'Neon space drifter',
+    genre: 'shooter',
+    style: 'pixel',
+    setting: 'space',
+    multiplayer: false,
+    orientation: 'portrait',
+  });
+  const gameId = createdGame.game.id;
+
+  const phase1 = new Phase1Service(store, pluginRoot, {
+    origin: () => 'http://127.0.0.1:4173',
+    nativeUrl: () => undefined,
+    openProject: async () => {},
+    mutation: async fn => fn(),
+    cancel: async () => ({ id: 'x', state: 'cancelled' } as any),
+  });
+
+  class GameToolRpc {
+    onNotification: (msg: any) => void;
+    closed = false;
+
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, _onError: (err: Error) => void) {
+      this.onNotification = onNotification;
+    }
+
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-game-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 201,
+            method: 'item/tool/call',
+            params: {
+              callId: 'g1',
+              tool: 'openmotion_game_write_files',
+              arguments: {
+                id: gameId,
+                files: [
+                  { path: 'index.html', content: '<!doctype html><canvas id="c"></canvas><script src="./logic.js"></script>' },
+                  { path: 'logic.js', content: 'window.__GAME_READY__ = true;' },
+                ],
+              },
+            },
+          });
+        });
+        return { turn: { id: 'turn-game-1' } };
+      }
+      return {};
+    }
+
+    send(payload: any) {
+      if (payload.id === 201) {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 202,
+            method: 'item/tool/call',
+            params: {
+              callId: 'g2',
+              tool: 'openmotion_game_update_meta',
+              arguments: {
+                id: gameId,
+                title: 'Star Drifter 99',
+                description: 'Portrait space wave dodger',
+                controls: 'Move with arrow keys',
+              },
+            },
+          });
+        });
+      }
+      if (payload.id === 202) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'item/completed',
+            params: { item: { id: 'msg-g1', type: 'agentMessage', text: 'Updated **Star Drifter 99**.' } },
+          });
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-game-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: GameToolRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  const chat = await service.create({
+    engine: 'codex',
+    intent: 'game',
+    permissionMode: 'auto',
+    initialArtifact: {
+      id: `game:${gameId}`,
+      kind: 'game-project',
+      title: createdGame.game.title,
+      projectId: gameId,
+      scenario: 'portrait',
+      url: `/motion-api/games/${gameId}/play/index.html`,
+    },
+  });
+  assert.equal(chat.intent, 'game');
+  assert.equal(chat.activeArtifactId, `game:${gameId}`);
+
+  await service.start(chat.id, {
+    requestId: 'req-game-turn-1',
+    mode: 'game',
+    text: `Update game ${gameId} with faster meteors`,
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 80; i++) {
+    const snap = await service.get(chat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+
+  const done = await service.get(chat.id);
+  assert.equal(done.state, 'idle');
+  assert.equal(done.intent, 'game');
+  assert.equal(done.title, 'Star Drifter 99');
+  const gameArtifact = done.artifacts.find(item => item.kind === 'game-project' && item.projectId === gameId);
+  assert.ok(gameArtifact);
+  assert.equal(gameArtifact.title, 'Star Drifter 99');
+  assert.equal(gameArtifact.scenario, 'portrait');
+  assert.equal(gameArtifact.url, `/motion-api/games/${gameId}/play/index.html`);
+  assert.equal(done.activeArtifactId, gameArtifact.id);
+
+  // Verify GET /api/games/:id/files HTTP handler returns written game source inventory
+  let statusCode = 0;
+  let bodyText = '';
+  const handled = await gameHttp(
+    { method: 'GET', headers: {} } as any,
+    {
+      writeHead(code: number) { statusCode = code; },
+      end(chunk: string) { bodyText += chunk; },
+    } as any,
+    new URL(`http://127.0.0.1:4173/api/games/${encodeURIComponent(gameId)}/files`),
+    store.directory,
+    async () => ({}),
+  );
+  assert.equal(handled, true);
+  assert.equal(statusCode, 200);
+  const filesRes = JSON.parse(bodyText) as { files: Array<{ path: string; bytes: number }> };
+  assert.ok(filesRes.files.some(f => f.path === 'index.html'));
+  assert.ok(filesRes.files.some(f => f.path === 'logic.js'));
+
+  await service.close();
+}));
+
+test('extractLocalDevServerUrl, annotation image persistence, and lean Coding prompt injection', () => fixture(async store => {
+  assert.equal(
+    extractLocalDevServerUrl('  VITE v6.0 ready\n  ➜  Local:   http://localhost:5173/dashboard\n', 'http://127.0.0.1:4173'),
+    'http://localhost:5173/dashboard',
+  );
+  assert.equal(
+    extractLocalDevServerUrl('\u001b[32m➜\u001b[39m  \u001b[1mLocal:\u001b[22m   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m', 'http://127.0.0.1:4173'),
+    'http://localhost:5173/',
+  );
+  assert.equal(
+    extractLocalDevServerUrl('Listening on http://0.0.0.0:3000.', 'http://127.0.0.1:4173'),
+    'http://127.0.0.1:3000/',
+  );
+  assert.equal(
+    extractLocalDevServerUrl('OpenMotion UI at http://localhost:4173/agent', 'http://127.0.0.1:4173'),
+    null,
+  );
+
+  let capturedPrompt = '';
+  class CodingAnnotationRpc {
+    onNotification: (msg: any) => void;
+    closed = false;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string, params?: any) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-coding-annot' } };
+      if (method === 'turn/start') {
+        capturedPrompt = String(params?.input?.[0]?.text ?? '');
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-coding-annot', status: 'completed' } },
+          });
+        });
+        return { turn: { id: 'turn-coding-annot' } };
+      }
+      return {};
+    }
+    send() {}
+    close() { this.closed = true; }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: CodingAnnotationRpc as unknown as typeof AssetAgentRpc,
+  });
+  const chat = await service.create({ engine: 'codex', intent: 'coding', permissionMode: 'auto' });
+
+  const pngBytes = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  ]);
+  const saved = await service.saveAnnotationImage(chat.id, pngBytes);
+  const loaded = await service.readAnnotationImage(chat.id, saved.filename);
+  assert.deepEqual(loaded, pngBytes);
+  await assert.rejects(service.saveAnnotationImage(chat.id, Buffer.from('not-a-png')), /Invalid PNG/);
+  await assert.rejects(service.readAnnotationImage(chat.id, '../escape.png'), /Invalid annotation/);
+
+  const phase1 = new Phase1Service(store, undefined, pluginRoot);
+  await service.start(chat.id, {
+    requestId: 'req-coding-annot-1',
+    mode: 'coding',
+    text: 'Make this CTA rounded and purple',
+    attachments: [{
+      id: 'annot-1',
+      kind: 'browser-annotation',
+      title: 'HeroButton · button.cta',
+      subtitle: 'http://localhost:5173/',
+      previewUrl: `/motion-api/super-agent/chats/${chat.id}/annotations/${saved.filename}`,
+      annotation: {
+        mode: 'select',
+        pageUrl: 'http://localhost:5173/',
+        comment: 'Make this CTA rounded and purple',
+        screenshotPath: saved.path,
+        element: {
+          tagName: 'button',
+          selector: 'button.cta',
+          label: 'Get Started',
+          htmlPreview: '<button class="cta">Get Started</button>',
+          styles: { borderRadius: '4px' },
+          rect: { x: 20, y: 30, width: 120, height: 40 },
+          viewport: { width: 1280, height: 800 },
+          pageUrl: 'http://localhost:5173/',
+          componentName: 'HeroButton',
+          sourceFile: 'src/HeroButton.tsx',
+          sourceLine: 18,
+        },
+      },
+    }],
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 60; i++) {
+    const snap = await service.get(chat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+
+  assert.ok(capturedPrompt.includes('<openmotion-browser-annotations>'));
+  assert.ok(capturedPrompt.includes('button.cta'));
+  assert.ok(capturedPrompt.includes('HeroButton'));
+  assert.ok(capturedPrompt.includes('src/HeroButton.tsx'));
+  assert.ok(capturedPrompt.includes(saved.path));
+  assert.equal(capturedPrompt.includes('<openmotion-workspace-context>'), false);
+
+  const formatted = formatBrowserAnnotationsContext([]);
+  assert.equal(formatted, '');
+
+  const allowedDir = path.dirname(saved.path);
+  const confinedOut = formatBrowserAnnotationsContext([{
+    id: 'bad-path-1',
+    kind: 'browser-annotation',
+    title: 'Bad path',
+    annotation: {
+      mode: 'select',
+      pageUrl: 'http://localhost:5173/',
+      screenshotPath: '/etc/passwd',
+    },
+  }, {
+    id: 'good-path-1',
+    kind: 'browser-annotation',
+    title: 'Good path',
+    annotation: {
+      mode: 'select',
+      pageUrl: 'http://localhost:5173/',
+      screenshotPath: saved.path,
+    },
+  }], allowedDir);
+  assert.equal(confinedOut.includes('/etc/passwd'), false);
+  assert.ok(confinedOut.includes(saved.path));
+
+  const formattedDraw = formatBrowserAnnotationsContext([{
+    id: 'draw-1',
+    kind: 'browser-annotation',
+    title: 'Circle boss',
+    annotation: {
+      mode: 'draw',
+      pageUrl: '/motion-api/games/g1/play/index.html',
+      comment: 'Shrink boss hitbox',
+      strokeCount: 2,
+      strokeBounds: { x: 100, y: 120, width: 220, height: 180 },
+    },
+  }]);
+  assert.ok(formattedDraw.includes('"strokeCount": 2'));
+  assert.ok(formattedDraw.includes('"width": 220'));
+
+  await service.close();
+}));
+
+test('Claude tool_result and Codex streaming command output auto-present local dev servers', () => fixture(async store => {
+  const phase1: any = { call: async () => ({ ok: true }) };
+  const claudeService = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/usr/local/bin/claude',
+    runClaude: async ({ onEvent }) => {
+      await onEvent({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command: 'npm run dev' } }],
+        },
+      });
+      await onEvent({
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'bash-1',
+            content: '  ➜  Local:   \u001b[36mhttp://localhost:\u001b[1m5174\u001b[22m/\u001b[39m',
+          }],
+        },
+      });
+    },
+  });
+  const claudeChat = await claudeService.create({ engine: 'claude', intent: 'coding', permissionMode: 'auto' });
+  await claudeService.start(claudeChat.id, { requestId: 'req-claude-dev-1', mode: 'coding', text: 'Run dev server' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+  for (let i = 0; i < 60; i++) {
+    const snap = await claudeService.get(claudeChat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+  const doneClaude = await claudeService.get(claudeChat.id);
+  assert.equal(doneClaude.artifacts.some(a => a.kind === 'web' && a.url === 'http://localhost:5174/'), true);
+  await claudeService.close();
+
+  class StreamingCodexRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-stream-dev' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'item/started',
+            params: { item: { id: 'cmd-1', type: 'commandExecution', command: 'npm run dev' } },
+          });
+          this.onNotification({
+            method: 'item/commandExecution/outputDelta',
+            params: { itemId: 'cmd-1', delta: 'Local: http://localhost:5175/\n' },
+          });
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-stream-dev', status: 'completed' } },
+          });
+        });
+        return { turn: { id: 'turn-stream-dev' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+  }
+
+  const codexService = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: StreamingCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const codexChat = await codexService.create({ engine: 'codex', intent: 'coding', permissionMode: 'auto' });
+  await codexService.start(codexChat.id, { requestId: 'req-codex-dev-1', mode: 'coding', text: 'Start dev server' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+  for (let i = 0; i < 60; i++) {
+    const snap = await codexService.get(codexChat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+  const doneCodex = await codexService.get(codexChat.id);
+  assert.equal(doneCodex.artifacts.some(a => a.kind === 'web' && a.url === 'http://localhost:5175/'), true);
+  await codexService.close();
+}));
+
+test('shared preview-bridge injects safely under strict CSP on Design/Game previews and preview-snapshot blocks SSRF paths', () => fixture(async store => {
+  assert.equal(isValidPreviewBridgeToken('omb_valid1234'), true);
+  assert.equal(isValidPreviewBridgeToken('bad'), false);
+  assert.equal(isValidPreviewBridgeToken('bad<script>'), false);
+
+  const injected = injectPreviewBridgeHtml('<html><body><div id="app">Hi</div></body></html>\n', 'omb_valid1234').toString('utf8');
+  assert.ok(injected.includes('data-om-preview-bridge'));
+  assert.ok(injected.includes("'__reactFiber$'"));
+  const scriptMatch = /<script data-om-preview-bridge>\s*([\s\S]*?)\s*<\/script>/.exec(injected);
+  assert.ok(scriptMatch?.[1]);
+  assert.doesNotThrow(() => new Function(scriptMatch![1]));
+  assert.ok(injected.includes('om:preview-pick'));
+  assert.ok(injected.includes('om:preview-console'));
+  assert.ok(injected.includes('om:preview-capture'));
+
+  const uninjected = injectPreviewBridgeHtml('<html><body>Hi</body></html>', 'bad!').toString('utf8');
+  assert.equal(uninjected, '<html><body>Hi</body></html>');
+
+  // Verify designHttp ?omBridge= preserves sandbox CSP
+  const dproj = await designProjectsFor(store.directory).create({ scenario: 'prototype', title: 'Bridge Web', requestId: 'req-dbridge-1' });
+  let dStatus = 0;
+  let dHeaders: Record<string, unknown> = {};
+  let dBody = Buffer.alloc(0);
+  const dHandled = await designHttp(
+    { method: 'GET', headers: {} } as any,
+    {
+      writeHead(code: number, headers: Record<string, unknown>) { dStatus = code; dHeaders = headers; },
+      end(chunk: Buffer | string) { dBody = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); },
+    } as any,
+    new URL(`http://127.0.0.1:4173/api/design/raw/${encodeURIComponent(dproj.id)}/index.html?omBridge=omb_valid1234`),
+    store.directory,
+    'http://127.0.0.1:4173',
+    async () => ({}),
+  );
+  assert.equal(dHandled, true);
+  assert.equal(dStatus, 200);
+  assert.ok(String(dHeaders['Content-Security-Policy']).includes('sandbox allow-scripts'));
+  assert.ok(dBody.toString('utf8').includes('data-om-preview-bridge'));
+
+  // Verify gameHttp ?omBridge= preserves strict CSP & accurate Content-Length
+  const createdGame = await gameProjectsFor(store.directory, pluginRoot).create({ prompt: 'Bridge game check', multiplayer: false });
+  let gStatus = 0;
+  let gHeaders: Record<string, unknown> = {};
+  let gBody = Buffer.alloc(0);
+  const gHandled = await gameHttp(
+    { method: 'GET', headers: {} } as any,
+    {
+      writeHead(code: number, headers: Record<string, unknown>) { gStatus = code; gHeaders = headers; },
+      end(chunk: Buffer | string) { gBody = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); },
+    } as any,
+    new URL(`http://127.0.0.1:4173/api/games/${encodeURIComponent(createdGame.game.id)}/play/index.html?omBridge=omb_valid1234`),
+    store.directory,
+    async () => ({}),
+  );
+  assert.equal(gHandled, true);
+  assert.equal(gStatus, 200);
+  assert.equal(Number(gHeaders['Content-Length']), gBody.length);
+  assert.ok(String(gHeaders['Content-Security-Policy']).includes("worker-src 'none'"));
+  assert.ok(gBody.toString('utf8').includes('data-om-preview-bridge'));
+
+  // Verify preview-snapshot rejects unsafe/external paths
+  const req = transport(store);
+  const chatRes = await req('/motion-api/super-agent/chats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ engine: 'codex', title: 'Snapshot Guard Chat' }),
+  });
+  const chat = (await chatRes.json()).conversation;
+  for (const badPath of ['https://evil.com/index.html', '/motion-api/design/raw/../../etc/passwd', '/etc/hosts']) {
+    const badRes = await req(`/motion-api/super-agent/chats/${chat.id}/preview-snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: badPath }),
+    });
+    assert.ok(badRes.status >= 400);
+  }
+  await superAgentConversations(store).close();
 }));

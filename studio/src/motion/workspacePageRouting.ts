@@ -28,7 +28,7 @@ export { findTemplateCollection, type TemplateCollection } from './templateColle
 export const defaultDesignScene = 'prototype';
 export type DesignSceneTarget = DesignScenarioId | 'projects';
 export type ScenarioWorkspaceMode = 'manual' | 'agent';
-export type WorkspacePage = ExploreFilters & { motion: boolean; superAgent: boolean; superAgentChat: string | null; cinemaLanding?: true; cinemaTemplate?: string | null; designScene?: DesignSceneTarget | null; designProject?: string | null; soundTab?: SoundTabId | null; specialty: TechniqueStudio | null; assetId: string | null; assetVersion: string | null; explore: boolean; scenarioHub: boolean; scenarioCategory: ScenarioCategory | null; scenario: ScenarioId | null; scenarioRun: string | null; scenarioStep: string | null; scenarioMode: ScenarioWorkspaceMode | null; studio: StudioDestination | null; settings: SettingsSection | null; assets: boolean; skills: boolean; skillCategory: SkillCategory | null; skill: string | null; templates: boolean; templateCollection: TemplateCollection | null; modelOverview: string | null; modelHub: string | null; creators: boolean; creator: string | null; mcpInSettings: boolean; mcpExample?: string | null; client: McpClient; setup: 'agent' | 'manual'; provider: string | null; template: string | null; brandKit: string | null };
+export type WorkspacePage = ExploreFilters & { motion: boolean; superAgent: boolean; superAgentChat: string | null; cinemaLanding?: true; cinemaTemplate?: string | null; designScene?: DesignSceneTarget | null; designProject?: string | null; soundTab?: SoundTabId | null; specialty: TechniqueStudio | null; gameId?: string | null; assetId: string | null; assetVersion: string | null; explore: boolean; scenarioHub: boolean; scenarioCategory: ScenarioCategory | null; scenario: ScenarioId | null; scenarioRun: string | null; scenarioStep: string | null; scenarioMode: ScenarioWorkspaceMode | null; studio: StudioDestination | null; settings: SettingsSection | null; assets: boolean; skills: boolean; skillCategory: SkillCategory | null; skill: string | null; templates: boolean; templateCollection: TemplateCollection | null; modelOverview: string | null; modelHub: string | null; creators: boolean; creator: string | null; mcpInSettings: boolean; mcpExample?: string | null; client: McpClient; setup: 'agent' | 'manual'; provider: string | null; template: string | null; brandKit: string | null };
 
 export function changesWorkspaceDestination(patch: Partial<WorkspacePage>): boolean {
   return ['explore', 'motion', 'superAgent', 'cinemaLanding', 'designScene', 'scenario', 'scenarioHub', 'studio', 'modelOverview', 'modelHub', 'specialty', 'assets', 'skills', 'settings'].some(key => key in patch);
@@ -73,6 +73,7 @@ export function readWorkspacePage(search: string, hash = '', pathname = ''): Wor
   const studio = landing ? sceneDestination(landing, null, model)
     : studioKind ? { ...studioDestination(studioKind, extendedSoundTab?.backingScene ?? sceneId, model), ...(home ? { home: true as const } : {}), ...(isAudioTab ? { mediaTab: true as const } : {}) } : null;
   const specialty = studio ? null : collection ?? null;
+  const gameId = specialty?.id === 'game' ? query.get('game') || null : null;
   const community = exploreCommunities.find(item => item.id === query.get('community'))?.id ?? null;
   const medium = (['image', 'video', 'audio'] as const).find(value => value === query.get('medium')) ?? null;
   const skill = query.get('skill') || null;
@@ -83,7 +84,7 @@ export function readWorkspacePage(search: string, hash = '', pathname = ''): Wor
     : page === 'skills' || collection?.techniques.some(id => id === skill) || (landing && isStudioTechnique(skill)) ? skill : null;
   return { motion: page === 'motion', superAgent: page === 'agent', superAgentChat: page === 'agent' ? query.get('chat') || null : null, ...(cinemaLanding && { cinemaLanding: true }), ...(cinemaTemplate && { cinemaTemplate }),
     ...(designScene ? { designScene } : {}), ...(designProject ? { designProject } : {}), ...(extendedSoundTab ? { soundTab: extendedSoundTab.id } : {}),
-    modelOverview: page === 'model' ? model : null, modelHub: page === 'model-hub' ? query.get('hub') || null : null, creators, creator: creators ? query.get('creator')?.trim() || null : null, specialty, community, medium, assetId: page === 'assets' ? query.get('asset') || null : null,
+    modelOverview: page === 'model' ? model : null, modelHub: page === 'model-hub' ? query.get('hub') || null : null, creators, creator: creators ? query.get('creator')?.trim() || null : null, specialty, ...(gameId ? { gameId } : {}), community, medium, assetId: page === 'assets' ? query.get('asset') || null : null,
     assetVersion: page === 'assets' && query.get('asset') ? query.get('version') || null : null, explore: page === 'explore', scenarioHub, scenarioCategory, scenario, scenarioRun, scenarioStep, scenarioMode, studio, settings, brandKit: settings === 'brand-kit' ? query.get('kit') || null : null, assets: page === 'assets', skills: page === 'skills', skillCategory: page === 'skills' ? skillCategories.find(value => value === (query.get('category') ?? query.get('skillCategory'))) ?? null : null, skill: selectedSkill, templates, templateCollection,
     mcpInSettings: page === 'settings' && settings === 'mcp',
     mcpExample: settings === 'mcp' ? query.get('example') : null,
@@ -135,14 +136,20 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
     page.modelOverview = patch.modelOverview ?? null;
     page.modelHub = patch.modelHub ?? null;
     page.specialty = patch.specialty ?? null;
+    page.gameId = page.specialty?.id === 'game' ? (patch.gameId ?? null) : null;
     page.assets = Boolean(patch.assets);
     page.skills = Boolean(patch.skills);
     page.settings = patch.settings ?? null;
     page.mcpInSettings = page.settings === 'mcp' && Boolean(patch.mcpInSettings);
-  } else if ('soundTab' in patch) {
-    page.soundTab = page.studio?.studio.id === 'sound' && !page.studio.landing && isExtendedSoundTab(patch.soundTab) ? patch.soundTab : null;
+  } else if ('soundTab' in patch || 'gameId' in patch) {
+    if ('soundTab' in patch) {
+      page.soundTab = page.studio?.studio.id === 'sound' && !page.studio.landing && isExtendedSoundTab(patch.soundTab) ? patch.soundTab : null;
+    }
+    if ('gameId' in patch) {
+      page.gameId = page.specialty?.id === 'game' ? (patch.gameId ?? null) : null;
+    }
   }
-  if (current.specialty?.id === 'game' && page.specialty?.id !== 'game') url.searchParams.delete('game');
+  if (current.specialty?.id === 'game' || page.specialty?.id === 'game') url.searchParams.delete('game');
   const inSettings = Boolean(page.settings) && page.settings !== 'brand-kit' && (page.settings !== 'mcp' || page.mcpInSettings);
   if (!inSettings) url.searchParams.delete('entry_from');
   if (page.explore) {
@@ -167,6 +174,7 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
   } else if (page.specialty) {
     url.pathname = `/studios/${encodeURIComponent(page.specialty.id)}`;
     if (page.specialty.techniques.some(id => id === page.skill)) url.searchParams.set('skill', page.skill!);
+    if (page.specialty.id === 'game' && page.gameId) url.searchParams.set('game', page.gameId);
   } else if (page.scenario) {
     const matched = findScenario(page.scenario);
     if (matched) {

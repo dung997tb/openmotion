@@ -1,9 +1,11 @@
+import type { BrowserScreenshotResult } from '../../../shared/browser';
 import {
   SUPER_AGENT_API,
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
   type SuperAgentEngine,
+  type SuperAgentIntent,
   type SuperAgentPermissionMode,
   type SuperAgentResourceCatalog,
   type SuperAgentTurnInput,
@@ -42,6 +44,8 @@ export async function listSuperAgentChats() {
 
 export async function createSuperAgentChat(body: {
   title?: string;
+  intent?: SuperAgentIntent;
+  initialArtifact?: Partial<SuperAgentArtifact>;
   runtimeId?: string;
   engine?: SuperAgentEngine;
   model?: string;
@@ -118,4 +122,40 @@ export function closeSuperAgentBrowserTab(chatId: string, tabId: string): Promis
     () => undefined,
     () => undefined,
   );
+}
+
+/** Uploads a PNG annotation screenshot for a Super Agent conversation and returns its serving URL + workspace path. */
+export async function uploadSuperAgentAnnotationImage(
+  chatId: string,
+  dataUrl: string,
+): Promise<{ id: string; screenshotUrl: string; screenshotPath: string }> {
+  const response = await fetch(`${SUPER_AGENT_API}/chats/${encodeURIComponent(chatId)}/annotations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value?.error || `HTTP ${response.status}`);
+  return value as { id: string; screenshotUrl: string; screenshotPath: string };
+}
+
+/** Captures a server-rendered PNG snapshot of a same-origin Design or Game HTML preview. */
+export async function captureSuperAgentPreviewSnapshot(
+  chatId: string,
+  previewPath: string,
+  width?: number,
+  height?: number,
+): Promise<BrowserScreenshotResult> {
+  const response = await fetch(`${SUPER_AGENT_API}/chats/${encodeURIComponent(chatId)}/preview-snapshot`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      path: previewPath,
+      ...(typeof width === 'number' ? { width } : {}),
+      ...(typeof height === 'number' ? { height } : {}),
+    }),
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value?.error || `HTTP ${response.status}`);
+  return value as BrowserScreenshotResult;
 }

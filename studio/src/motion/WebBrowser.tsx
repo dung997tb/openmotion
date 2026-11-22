@@ -1,41 +1,124 @@
 import { Button } from 'open-design-ui/button';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import type { BrowserInput, WebPageState } from '../../../shared/browser';
+import type {
+  BrowserCommandAction,
+  BrowserConsoleEntry,
+  BrowserInput,
+  BrowserInspectResult,
+  BrowserRect,
+  BrowserScreenshotResult,
+  WebPageState,
+} from '../../../shared/browser';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useI18n } from '../i18n/I18n';
 
-export type WebBrowserHandle = { command: (action: 'back' | 'forward' | 'reload' | 'stop' | 'navigate', url?: string) => Promise<void> };
+export type WebBrowserHandle = {
+  command: (action: BrowserCommandAction, value?: unknown) => Promise<WebPageState>;
+  inspectAt: (x: number, y: number) => Promise<BrowserInspectResult>;
+  screenshot: (clip?: BrowserRect) => Promise<BrowserScreenshotResult>;
+  getViewport: () => { width: number; height: number };
+  getRenderedImage: () => HTMLImageElement | null;
+  clearConsole: () => Promise<void>;
+};
+
 export const browserEndpoint = (session: string, tab: string) => `/design-api/sessions/${encodeURIComponent(session)}/browser/${encodeURIComponent(tab)}`;
-export async function browserRequest(endpoint: string, data?: unknown, method = 'POST') {
+
+export async function browserJsonRequest<T>(endpoint: string, data?: unknown, method = 'POST'): Promise<T> {
   const response = await fetch(endpoint, { method, headers: { 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const value = await response.json();
   if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
-  return value as WebPageState;
+  return value as T;
+}
+
+export async function browserRequest(endpoint: string, data?: unknown, method = 'POST') {
+  return browserJsonRequest<WebPageState>(endpoint, data, method);
 }
 
 /** Only pixels and whitelisted input cross this boundary; web documents never run in the workspace DOM. */
-export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabId: string; url: string; endpoint?: string; onState: (state: WebPageState) => void }>(function WebBrowser({ sessionId, tabId, url, endpoint: customEndpoint, onState }, ref) {
+export const WebBrowser = forwardRef<WebBrowserHandle, {
+  sessionId: string;
+  tabId: string;
+  url: string;
+  endpoint?: string;
+  interactive?: boolean;
+  fixedViewport?: { width: number; height: number; dpr?: number } | null;
+  onState: (state: WebPageState) => void;
+  onConsoleSnapshot?: (entries: BrowserConsoleEntry[]) => void;
+  onConsoleEntry?: (entry: BrowserConsoleEntry) => void;
+}>(function WebBrowser({
+  sessionId,
+  tabId,
+  url,
+  endpoint: customEndpoint,
+  interactive = true,
+  fixedViewport = null,
+  onState,
+  onConsoleSnapshot,
+  onConsoleEntry,
+}, ref) {
   const { t } = useI18n();
   const endpoint = customEndpoint ?? browserEndpoint(sessionId, tabId);
   const surface = useRef<HTMLDivElement>(null), keyboard = useRef<HTMLTextAreaElement>(null);
   const picture = useRef<HTMLImageElement>(null), ready = useRef(false), queue = useRef(Promise.resolve());
   const report = useRef(onState), initialUrl = useRef(url), composing = useRef(false), pointerTime = useRef(0);
+  const consoleSnapshotRef = useRef(onConsoleSnapshot), consoleEntryRef = useRef(onConsoleEntry);
+  const interactiveRef = useRef(interactive), fixedViewportRef = useRef(fixedViewport);
   const frameViewport = useRef<{ width: number; height: number } | null>(null);
   const lastSentViewport = useRef<{ width: number; height: number; dpr: number } | null>(null);
   const hasFrameRef = useRef(false);
   report.current = onState;
   initialUrl.current = url;
+  consoleSnapshotRef.current = onConsoleSnapshot;
+  consoleEntryRef.current = onConsoleEntry;
+  interactiveRef.current = interactive;
+  fixedViewportRef.current = fixedViewport;
   const [error, setError] = useState(''), [hasFrame, setHasFrame] = useState(false), [attempt, setAttempt] = useState(0);
   const currentDpr = () => (typeof window !== 'undefined' ? Math.min(2, Math.max(1, Math.round((window.devicePixelRatio || 1) * 2) / 2)) : 1);
   const measureBounds = () => {
+    const fixed = fixedViewportRef.current;
+    if (fixed && fixed.width >= 20 && fixed.height >= 20) {
+      return { width: Math.round(fixed.width), height: Math.round(fixed.height), dpr: fixed.dpr ?? currentDpr() };
+    }
     const bounds = surface.current?.getBoundingClientRect();
     if (!bounds || bounds.width < 20 || bounds.height < 20) return null;
     return { width: Math.round(bounds.width), height: Math.round(bounds.height), dpr: currentDpr() };
   };
-  useImperativeHandle(ref, () => ({ command: async (action, address) => {
-    if (!ready.current) throw new Error(t('Browser is connecting. Please try again.'));
-    setError(''); await browserRequest(`${endpoint}/command`, { action, url: address });
-  } }), [endpoint, t]);
+  useImperativeHandle(ref, () => ({
+    command: async (action, value) => {
+      if (!ready.current) throw new Error(t('Browser is connecting. Please try again.'));
+      setError('');
+      const state = await browserRequest(`${endpoint}/command`, {
+        action,
+        ...(action === 'navigate' && typeof value === 'string' ? { url: value } : {}),
+        ...(value !== undefined ? { value } : {}),
+      });
+      report.current(state);
+      return state;
+    },
+    inspectAt: async (x, y) => {
+      if (!ready.current) throw new Error(t('Browser is connecting. Please try again.'));
+      return browserJsonRequest<BrowserInspectResult>(`${endpoint}/inspect`, { x, y });
+    },
+    screenshot: async clip => {
+      if (!ready.current) throw new Error(t('Browser is connecting. Please try again.'));
+      return browserJsonRequest<BrowserScreenshotResult>(`${endpoint}/screenshot`, clip ? { clip } : {});
+    },
+    getViewport: () => {
+      const vp = frameViewport.current ?? fixedViewportRef.current;
+      if (vp) return { width: vp.width, height: vp.height };
+      const img = picture.current;
+      return {
+        width: img?.naturalWidth || img?.clientWidth || surface.current?.clientWidth || 1280,
+        height: img?.naturalHeight || img?.clientHeight || surface.current?.clientHeight || 800,
+      };
+    },
+    getRenderedImage: () => picture.current,
+    clearConsole: async () => {
+      if (!ready.current) return;
+      await browserJsonRequest<{ cleared: boolean }>(`${endpoint}/console`, undefined, 'DELETE');
+      consoleSnapshotRef.current?.([]);
+    },
+  }), [endpoint, t]);
   function input(event: BrowserInput) {
     if (!ready.current) return;
     queue.current = queue.current.then(async () => { await browserRequest(`${endpoint}/input`, event); }).catch(reason => setError(reason.message));
@@ -58,6 +141,16 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
         if (disposed) return;
         const state: WebPageState = JSON.parse((event as MessageEvent).data);
         report.current(state); setError(state.error || '');
+      });
+      events.addEventListener('console_snapshot', event => {
+        if (disposed) return;
+        const entries = JSON.parse((event as MessageEvent).data) as BrowserConsoleEntry[];
+        consoleSnapshotRef.current?.(entries);
+      });
+      events.addEventListener('console', event => {
+        if (disposed) return;
+        const entry = JSON.parse((event as MessageEvent).data) as BrowserConsoleEntry;
+        consoleEntryRef.current?.(entry);
       });
       events.addEventListener('frame', event => {
         if (disposed || !picture.current) return;
@@ -132,6 +225,15 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
       picture.current?.removeAttribute('src');
     };
   }, [endpoint, attempt, t]);
+  useEffect(() => {
+    if (!ready.current) return;
+    const next = measureBounds();
+    if (!next) return;
+    const prev = lastSentViewport.current;
+    if (prev && prev.width === next.width && prev.height === next.height && prev.dpr === next.dpr) return;
+    lastSentViewport.current = next;
+    void browserRequest(`${endpoint}/resize`, next).catch(reason => setError(reason.message));
+  }, [endpoint, fixedViewport?.width, fixedViewport?.height, fixedViewport?.dpr]);
   const point = (x: number, y: number) => {
     const img = picture.current!;
     const bounds = img.getBoundingClientRect();
@@ -147,6 +249,7 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
   useEffect(() => {
     const node = surface.current!;
     const wheel = (event: WheelEvent) => {
+      if (!interactiveRef.current) return;
       event.preventDefault();
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? node.clientHeight : 1;
       input({ type: 'wheel', ...point(event.clientX, event.clientY), deltaX: event.deltaX * unit, deltaY: event.deltaY * unit });
@@ -157,9 +260,9 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
   return <div className="motion-web-browser" ref={surface} aria-label={t('Web page')}>
     <img ref={picture} className="motion-web-page" data-loaded={hasFrame || undefined} alt={t('Web page')} draggable={false} hidden={!hasFrame}
       onContextMenu={event => event.preventDefault()}
-      onPointerDown={event => { event.preventDefault(); keyboard.current?.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId); input({ type: 'pointer', event: 'down', ...point(event.clientX, event.clientY), button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clickCount: event.detail }); }}
-      onPointerUp={event => input({ type: 'pointer', event: 'up', ...point(event.clientX, event.clientY), button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clickCount: event.detail })}
-      onPointerMove={event => { if (Date.now() - pointerTime.current < 60) return; pointerTime.current = Date.now(); input({ type: 'pointer', event: 'move', ...point(event.clientX, event.clientY), button: 'left' }); }} />
+      onPointerDown={event => { if (!interactive) return; event.preventDefault(); keyboard.current?.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId); input({ type: 'pointer', event: 'down', ...point(event.clientX, event.clientY), button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clickCount: event.detail }); }}
+      onPointerUp={event => { if (!interactive) return; input({ type: 'pointer', event: 'up', ...point(event.clientX, event.clientY), button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clickCount: event.detail }); }}
+      onPointerMove={event => { if (!interactive || Date.now() - pointerTime.current < 60) return; pointerTime.current = Date.now(); input({ type: 'pointer', event: 'move', ...point(event.clientX, event.clientY), button: 'left' }); }} />
     <textarea ref={keyboard} className="motion-browser-keyboard" aria-label={t('Web page keyboard')} autoComplete="off" autoCapitalize="off" spellCheck={false}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={event => { composing.current = false; input({ type: 'text', text: event.currentTarget.value }); event.currentTarget.value = ''; }}
       onInput={event => { if (!composing.current && event.currentTarget.value) { input({ type: 'text', text: event.currentTarget.value }); event.currentTarget.value = ''; } }}

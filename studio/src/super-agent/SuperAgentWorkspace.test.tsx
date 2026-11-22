@@ -8,15 +8,85 @@ import { I18nProvider } from '../i18n/I18n';
 import { ApplicationHeader } from '../motion/ApplicationChrome';
 import { WorkspaceChromeContext } from '../motion/WorkspaceChromeContext';
 import { SUPER_AGENT_API } from '../../../shared/super-agent';
+import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
+import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { clampSuperAgentViewerWidth, SuperAgentWorkspace } from './SuperAgentWorkspace';
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { SimpleMarkdown } from './SimpleMarkdown';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('../motion/WebBrowser', () => ({
-  WebBrowser: ({ url }: { url: string }) => <div data-testid="mock-web-browser">{url}</div>,
-}));
+vi.mock('../motion/WebBrowser', async () => {
+  const React = await import('react');
+  const WebBrowser = React.forwardRef(function MockWebBrowser(
+    { url, onState }: { url: string; onState?: (state: any) => void },
+    ref: React.ForwardedRef<any>,
+  ) {
+    const imgRef = React.useRef<HTMLImageElement>(null);
+    React.useEffect(() => {
+      onState?.({
+        url,
+        title: 'Local App',
+        canGoBack: true,
+        canGoForward: false,
+        loading: false,
+        colorScheme: 'auto',
+        zoom: 1,
+        consoleCount: 0,
+        errorCount: 0,
+      });
+    }, [url]);
+    React.useImperativeHandle(ref, () => ({
+      command: async (action: string, value?: unknown) => ({
+        url,
+        title: 'Local App',
+        canGoBack: true,
+        canGoForward: false,
+        loading: false,
+        colorScheme: action === 'set-color-scheme' ? value : 'auto',
+        zoom: action === 'set-zoom' && typeof value === 'number' ? value : 1,
+        consoleCount: 0,
+        errorCount: 0,
+      }),
+      inspectAt: async () => ({
+        element: {
+          tagName: 'button',
+          selector: '#hero-btn',
+          label: 'Launch',
+          htmlPreview: '<button id="hero-btn">Launch</button>',
+          styles: { display: 'inline-flex', backgroundColor: 'rgb(0, 0, 0)' },
+          rect: { x: 40, y: 50, width: 120, height: 40 },
+          viewport: { width: 1280, height: 800 },
+          pageUrl: url,
+          componentName: 'HeroButton',
+          sourceFile: 'src/HeroButton.tsx',
+          sourceLine: 24,
+        },
+        viewport: { width: 1280, height: 800 },
+        pageUrl: url,
+        pageTitle: 'Local App',
+      }),
+      screenshot: async () => ({
+        dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        mimeType: 'image/png',
+        width: 1280,
+        height: 800,
+        pageUrl: url,
+        pageTitle: 'Local App',
+      }),
+      getViewport: () => ({ width: 1280, height: 800 }),
+      getRenderedImage: () => imgRef.current,
+      clearConsole: async () => undefined,
+    }));
+    return (
+      <div data-testid="mock-web-browser">
+        <img ref={imgRef} alt={url} />
+        {url}
+      </div>
+    );
+  });
+  return { WebBrowser };
+});
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -543,7 +613,7 @@ it('suspends active viewer iframes when inactive, uses throttled thumb previews 
   await flush();
   expect(deleteCalls.some(url => url.endsWith('/browser/web-example'))).toBe(true);
 
-  // Opening a new conversation & clicking Interactive HTML Game uses ScaledPreviewThumb (?thumb=1) instead of raw unthrottled iframes.
+  // Opening a new conversation & clicking Build a website uses ScaledPreviewThumb (?thumb=1) instead of raw unthrottled iframes.
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
@@ -552,12 +622,12 @@ it('suspends active viewer iframes when inactive, uses throttled thumb previews 
           ...sampleResources,
           items: [
             {
-              id: 'webgl-shader',
+              id: 'proto-landing',
               kind: 'design-template',
-              title: 'WebGL Shader',
-              subtitle: 'webgl',
-              scenario: 'webgl',
-              previewUrl: '/motion-api/design/catalog/templates/webgl-shader/preview/index.html',
+              title: 'Interactive Landing',
+              subtitle: 'prototype',
+              scenario: 'prototype',
+              previewUrl: '/motion-api/design/catalog/templates/proto-landing/preview/index.html',
             },
           ],
         }),
@@ -588,10 +658,16 @@ it('suspends active viewer iframes when inactive, uses throttled thumb previews 
     });
     await flush();
 
-    const gameBtn = [...document.querySelectorAll('button')].find(
-      b => b.textContent?.includes('Build a game') || b.textContent?.includes('Interactive HTML Game'),
+    const moreBtn = [...document.querySelectorAll('button')].find(
+      b => b.textContent?.includes('Explore more'),
     )!;
-    await act(async () => gameBtn.click());
+    await act(async () => moreBtn.click());
+    await flush();
+
+    const webBtn = [...document.querySelectorAll('button')].find(
+      b => b.textContent?.includes('Build a website'),
+    )!;
+    await act(async () => webBtn.click());
     await flush();
     await flush();
 
@@ -734,6 +810,19 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(document.querySelector('.om-sa-md-table')).toBeTruthy();
   expect(document.querySelector('.om-sa-md-task')).toBeTruthy();
 
+  // Completed turn auto-collapses the Work Log while showing FilesChangedCard below assistant summary
+  expect(document.querySelector('.om-sa-work-items')).toBeNull();
+  const assistantEl = document.querySelector('.om-sa-assistant-content')!;
+  const filesChangedEl = document.querySelector('.om-sa-files-changed')!;
+  expect(assistantEl.compareDocumentPosition(filesChangedEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(filesChangedEl.textContent).toContain('styles.css');
+  expect(filesChangedEl.querySelector('.om-sa-diff-pre')).toBeNull();
+  await act(async () => {
+    filesChangedEl.querySelector<HTMLButtonElement>('.om-sa-file-row-trigger')!.click();
+  });
+  await flush();
+  expect(filesChangedEl.querySelector('.om-sa-diff-pre')?.textContent).toContain('+gap: 8px;');
+
   // Expand Work Log and verify command + diff lines
   const workBtn = document.querySelector<HTMLButtonElement>('.om-sa-work-summary-btn')!;
   await act(async () => workBtn.click());
@@ -792,6 +881,54 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   await flush();
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Running node -v');
   expect(document.querySelector('.om-sa-plan-card')?.textContent).toContain('Check Node version');
+
+  // Long user prompt defaults to collapsed, expands on click, and collapses cleanly via top pill
+  const longPromptChat: SuperAgentChat = {
+    ...timelineChat,
+    messages: [
+      {
+        id: 'u-long',
+        role: 'user',
+        text: Array.from({ length: 12 }, (_, i) => `Brief line ${i + 1}: detailed requirement specification for game loop.`).join('\n'),
+        attachments: [{ kind: 'game-project', id: 'g-1', title: 'Make an original game in the spirit of Little Prince' }],
+        createdAt: 1000,
+      },
+    ],
+  };
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={longPromptChat}
+          busy={false}
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={onOpenArtifactId}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={onCopyText}
+          onApprove={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  const bubble = document.querySelector('.om-sa-user-bubble-collapsible')!;
+  expect(bubble.hasAttribute('data-collapsed')).toBe(true);
+  expect(bubble.textContent).toContain('Show full prompt');
+  expect(bubble.textContent).toContain('12 lines');
+
+  await act(async () => {
+    bubble.querySelector<HTMLButtonElement>('.om-sa-user-bubble-toggle')!.click();
+  });
+  await flush();
+  expect(bubble.hasAttribute('data-expanded')).toBe(true);
+  expect(bubble.querySelector('.om-sa-user-collapse-pill')?.textContent).toContain('Collapse');
+
+  await act(async () => {
+    bubble.querySelector<HTMLButtonElement>('.om-sa-user-collapse-pill')!.click();
+  });
+  await flush();
+  expect(bubble.hasAttribute('data-collapsed')).toBe(true);
 
   // Direct SimpleMarkdown strikethrough + hr + bare link rendering
   await act(async () => {
@@ -1002,4 +1139,806 @@ it('enters pure Coding mode from starter card without creative templates and ren
   });
   await flush();
   expect(document.querySelector('.om-sa-stream-title-icon[data-tone="coding"]')).toBeTruthy();
+});
+
+it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon, and views/codes game artifacts', async () => {
+  const GAME_CHAT_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  const GAME_ID = 'game-star-99';
+  let createBody: any = null;
+  let turnBody: any = null;
+  const onOpenGameStudio = vi.fn();
+
+  const gameChat: SuperAgentChat = {
+    id: GAME_CHAT_ID,
+    title: 'Neon wave dodger',
+    intent: 'game',
+    engine: 'codex',
+    model: 'gpt-5',
+    permissionMode: 'on-request',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'idle',
+    messages: [
+      { id: 'm1', role: 'user', text: 'Build Neon wave dodger', createdAt: 1001 },
+      { id: 'm2', role: 'assistant', text: 'Ready to play in the Artifact Viewer.', createdAt: 1002 },
+    ],
+    artifacts: [
+      {
+        id: `game:${GAME_ID}`,
+        kind: 'game-project',
+        title: 'Star Dodge',
+        subtitle: 'shooter · Game Studio',
+        projectId: GAME_ID,
+        scenario: 'portrait',
+        revision: 'rev-game-1',
+        url: `/motion-api/games/${GAME_ID}/play/index.html`,
+        createdAt: 1002,
+        updatedAt: 1002,
+      },
+    ],
+    activeArtifactId: `game:${GAME_ID}`,
+    approvals: [],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({
+        agents: [{ id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [{ id: 'gpt-5', label: 'GPT-5' }] }],
+      });
+    }
+    if (url.startsWith('/motion-api/agent-runtimes')) {
+      return json({
+        localDirectAvailable: true,
+        runtimes: [
+          {
+            id: 'local-direct',
+            kind: 'local-direct',
+            name: 'This computer',
+            status: 'online',
+            agents: [
+              { id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [{ id: 'gpt-5', label: 'GPT-5' }] },
+            ],
+            runnableAgentIds: ['codex'],
+          },
+        ],
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) return json(sampleResources);
+    if (url === `${SUPER_AGENT_API}/chats` && (!init?.method || init.method === 'GET')) {
+      return json({
+        conversations: [
+          {
+            id: GAME_CHAT_ID,
+            title: 'Star Dodge',
+            intent: 'game',
+            engine: 'codex',
+            state: 'idle',
+            artifactCount: 1,
+            messageCount: 2,
+            createdAt: 1000,
+            updatedAt: 2000,
+          },
+        ],
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && init?.method === 'POST') {
+      createBody = init.body ? JSON.parse(String(init.body)) : {};
+      return json({
+        conversation: { ...gameChat, messages: [], artifacts: [], activeArtifactId: undefined },
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}/turn` && init?.method === 'POST') {
+      turnBody = init.body ? JSON.parse(String(init.body)) : {};
+      return json({ conversation: gameChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}`) {
+      return json({ conversation: gameChat });
+    }
+    if (url === `/motion-api/games/${GAME_ID}/files`) {
+      return json({ files: [{ path: 'index.html', bytes: 64 }, { path: 'logic.js', bytes: 32 }] });
+    }
+    if (url.startsWith(`/motion-api/games/${GAME_ID}/play/index.html`)) {
+      return new Response('<!doctype html><canvas id="dodge"></canvas>', { status: 200 });
+    }
+    if (url.startsWith(`/motion-api/games/${GAME_ID}/play/logic.js`)) {
+      return new Response('console.log("star dodge");', { status: 200 });
+    }
+    return json({});
+  }) as any;
+
+  queueSuperAgentHandoff(buildSuperAgentHandoff(
+    {
+      kind: 'game-project',
+      id: GAME_ID,
+      title: 'Neon wave dodger',
+      subtitle: 'shooter · Single player',
+      genre: 'shooter',
+    },
+    {
+      prompt: 'Brief: Neon wave dodger',
+      autoSend: true,
+      newChat: true,
+    },
+  ));
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenGameStudio={onOpenGameStudio}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  // Auto-dispatched queued game handoff with game intent & attachment
+  expect(createBody?.intent).toBe('game');
+  expect(turnBody?.mode).toBe('game');
+  expect(turnBody?.attachments?.[0]?.id).toBe(GAME_ID);
+
+  // Sidebar & header display recognizable gamepad-line icon
+  const sidebarIconSvg = document.querySelector('.om-sa-chat-icon[data-intent="game"] svg');
+  expect(sidebarIconSvg?.getAttribute('data-remix-icon')).toBe('gamepad-line');
+  const headerIconSvg = document.querySelector('.om-sa-stream-title-icon svg');
+  expect(headerIconSvg?.getAttribute('data-remix-icon')).toBe('gamepad-line');
+
+  // Viewer opens game iframe in portrait viewport & supports Code inspection + Open in Game Studio
+  const viewer = document.querySelector('.om-sa-viewer')!;
+  expect(viewer).toBeTruthy();
+  const stage = viewer.querySelector('.om-sa-iframe-stage');
+  expect(stage?.getAttribute('data-viewport')).toBe('mobile');
+  const iframe = viewer.querySelector('iframe');
+  expect(iframe?.getAttribute('src')).toContain(`/motion-api/games/${GAME_ID}/play/index.html`);
+
+  const codeBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
+  await act(async () => codeBtn.click());
+  await flush();
+  expect(viewer.textContent).toContain('index.html');
+  expect(viewer.textContent).toContain('<canvas id="dodge"></canvas>');
+
+  const openStudioBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.includes('Open in Game Studio')) as HTMLButtonElement;
+  await act(async () => openStudioBtn.click());
+  expect(onOpenGameStudio).toHaveBeenCalledWith(GAME_ID);
+});
+
+it('supports web preview device toolbar, browser options menu, and visual element annotation into composer', async () => {
+  const WEB_CHAT_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  const webChat: SuperAgentChat = {
+    id: WEB_CHAT_ID,
+    title: 'Local Vite Preview',
+    engine: 'codex',
+    model: 'gpt-5',
+    intent: 'coding',
+    permissionMode: 'auto',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'idle',
+    messages: [],
+    artifacts: [
+      {
+        id: 'web-local-1',
+        kind: 'web',
+        title: 'localhost:5173',
+        subtitle: 'Local dev server',
+        url: 'http://localhost:5173/',
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+    ],
+    activeArtifactId: 'web-local-1',
+    approvals: [],
+  };
+
+  let lastTurnBody: any = null;
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/settings/agents')) {
+      return json({
+        agents: [
+          {
+            id: 'codex',
+            label: 'Codex',
+            icon: 'codex',
+            installed: true,
+            auth: 'signed-in',
+            models: [{ id: 'gpt-5', label: 'GPT-5', reasoning: ['low', 'medium', 'high'] }],
+          },
+        ],
+      });
+    }
+    if (url.includes('/settings/runtimes')) return json({ runtimes: [] });
+    if (url.includes(`${SUPER_AGENT_API}/resources`)) return json(sampleResources);
+    if (url === `${SUPER_AGENT_API}/chats`) return json({ conversations: [{ ...webChat }] });
+    if (url === `${SUPER_AGENT_API}/chats/${WEB_CHAT_ID}`) return json({ conversation: webChat });
+    if (url === `${SUPER_AGENT_API}/chats/${WEB_CHAT_ID}/annotations` && init?.method === 'POST') {
+      return json({
+        id: 'shot-1',
+        screenshotUrl: `/motion-api/super-agent/chats/${WEB_CHAT_ID}/annotations/shot-1.png`,
+        screenshotPath: '/tmp/shot-1.png',
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${WEB_CHAT_ID}/turn` && init?.method === 'POST') {
+      lastTurnBody = init.body ? JSON.parse(String(init.body)) : null;
+      return json({ conversation: webChat });
+    }
+    return json({});
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={WEB_CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  const viewerToggle = [...document.querySelectorAll('button')].find(
+    b => b.getAttribute('aria-label') === 'Artifact Viewer',
+  ) as HTMLButtonElement;
+  expect(viewerToggle).toBeTruthy();
+  await act(async () => viewerToggle.click());
+  for (let i = 0; i < 30 && !document.querySelector('.om-sa-viewer'); i++) {
+    await flush();
+  }
+
+  const viewer = document.querySelector('.om-sa-viewer')!;
+  expect(viewer).toBeTruthy();
+  for (let i = 0; i < 20 && !viewer.querySelector('[data-testid="mock-web-browser"]'); i++) {
+    await flush();
+  }
+  expect(viewer.querySelector('[data-testid="mock-web-browser"]')).toBeTruthy();
+
+  // Live WebBrowser title updates the tab title and Web tabs avoid duplicating External Link in toolbar
+  expect(viewer.querySelector('.om-sa-viewer-tab-btn')?.textContent).toContain('Local App');
+  expect(viewer.querySelector('.om-sa-context-actions a[aria-label="Open in external browser"]')).toBeNull();
+
+  // Open Device Toolbar and switch to Mobile preset
+  const deviceBtn = viewer.querySelector('button[aria-label="Show device toolbar"]') as HTMLButtonElement;
+  expect(deviceBtn).toBeTruthy();
+  await act(async () => deviceBtn.click());
+  await flush();
+  const mobilePreset = [...viewer.querySelectorAll('.om-sa-device-btn')].find(b => b.textContent?.includes('Mobile')) as HTMLButtonElement;
+  expect(mobilePreset).toBeTruthy();
+  await act(async () => mobilePreset.click());
+  await flush();
+  expect(viewer.querySelector('.om-sa-device-dims')?.textContent).toContain('390 × 844');
+
+  // Open Browser options menu and inspect items (including Open in new window)
+  const menuBtn = viewer.querySelector('button[aria-label="Browser options"]') as HTMLButtonElement;
+  expect(menuBtn).toBeTruthy();
+  await act(async () => menuBtn.click());
+  await flush();
+  const menu = document.querySelector('.om-sa-browser-menu')!;
+  expect(menu).toBeTruthy();
+  expect(menu.textContent).toContain('Hard reload');
+  expect(menu.textContent).toContain('Appearance');
+  expect(menu.textContent).toContain('Clear cookies');
+  expect(menu.textContent).toContain('Clear cache');
+  expect(menu.textContent).toContain('Open in new window');
+  await act(async () => menuBtn.click());
+  await flush();
+
+  // Activate annotation overlay
+  const annotBtn = viewer.querySelector('button[aria-label="Annotate elements, regions, and drawings"]') as HTMLButtonElement;
+  expect(annotBtn).toBeTruthy();
+  await act(async () => annotBtn.click());
+  await flush();
+
+  const overlay = viewer.querySelector('.om-sa-annot-layer')!;
+  expect(overlay).toBeTruthy();
+  expect(overlay.textContent).toContain('Select');
+  expect(overlay.textContent).toContain('Region');
+  expect(overlay.textContent).toContain('Draw');
+  expect(overlay.textContent).toContain('Erase');
+
+  // Mock layout geometry for element picking on the overlay
+  const img = viewer.querySelector('[data-testid="mock-web-browser"] img') as HTMLElement;
+  const layerEl = overlay as HTMLElement;
+  img.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1280, height: 800, right: 1280, bottom: 800, x: 0, y: 0, toJSON: () => ({}) });
+  layerEl.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1280, height: 800, right: 1280, bottom: 800, x: 0, y: 0, toJSON: () => ({}) });
+
+  const backdrop = overlay.querySelector('.om-sa-annot-backdrop') as HTMLElement;
+  await act(async () => {
+    backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 60, clientY: 60 }));
+    backdrop.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, clientX: 60, clientY: 60 }));
+  });
+  await flush();
+  await flush();
+
+  const noteInput = viewer.querySelector('.om-sa-annot-input') as HTMLInputElement;
+  expect(noteInput).toBeTruthy();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(noteInput, 'Make button rounded');
+    noteInput.dispatchEvent(new Event('input', { bubbles: true }));
+    noteInput.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const attachBtn = viewer.querySelector('.om-sa-annot-attach-btn') as HTMLButtonElement;
+  expect(attachBtn).toBeTruthy();
+  await act(async () => attachBtn.click());
+  await flush();
+  await flush();
+
+  // Verify annotation chip attached in composer, click opens preview Popover, and send button enabled without textarea text
+  const chip = document.querySelector('.om-sa-composer-chips .om-sa-attachment-chip[data-kind="browser-annotation"]');
+  expect(chip).toBeTruthy();
+  expect(chip?.textContent).toContain('Make button rounded');
+
+  const chipTrigger = chip!.querySelector('.om-sa-chip-main') as HTMLButtonElement;
+  expect(chipTrigger).toBeTruthy();
+  await act(async () => chipTrigger.click());
+  await flush();
+  const previewPopover = document.querySelector('.om-sa-annot-preview-popover');
+  expect(previewPopover).toBeTruthy();
+  expect(previewPopover?.querySelector('img.om-sa-annot-preview-img')).toBeTruthy();
+  expect(previewPopover?.textContent).toContain('#hero-btn');
+  const previewJumpBtn = [...previewPopover!.querySelectorAll('button')].find(b => b.textContent?.includes('Preview')) as HTMLButtonElement;
+  expect(previewJumpBtn).toBeTruthy();
+  await act(async () => previewJumpBtn.click());
+  await flush();
+  expect(document.querySelector('.om-sa-annot-preview-popover')).toBeNull();
+  expect(document.querySelector('.om-sa-composer-chips .om-sa-attachment-chip[data-kind="browser-annotation"]')).toBeTruthy();
+
+  const sendBtn = document.querySelector('.om-sa-send-btn') as HTMLButtonElement;
+  expect(sendBtn).toBeTruthy();
+  expect(sendBtn.disabled).toBe(false);
+  await act(async () => sendBtn.click());
+  await flush();
+  await flush();
+
+  expect(lastTurnBody).toBeTruthy();
+  expect(lastTurnBody.attachments?.[0]?.kind).toBe('browser-annotation');
+  expect(lastTurnBody.attachments?.[0]?.annotation?.element?.selector).toBe('#hero-btn');
+  expect(lastTurnBody.attachments?.[0]?.annotation?.comment).toBe('Make button rounded');
+});
+
+it('switches Super Agent Game mode into Game Studio UI, supports style/orientation/multiplayer pickers, and scaffolds playable game chats', async () => {
+  const GAME_CHAT_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+  const CREATED_GAME_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+  let createGameBody: any = null;
+  let createChatBody: any = null;
+  let turnBody: any = null;
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  const createdChat: SuperAgentChat = {
+    id: GAME_CHAT_ID,
+    title: 'Neon Arena',
+    engine: 'codex',
+    model: 'gpt-5',
+    intent: 'game',
+    permissionMode: 'auto',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'running',
+    messages: [],
+    artifacts: [],
+    approvals: [],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (url.includes('/settings/agents')) {
+      return json({
+        agents: [
+          {
+            id: 'codex',
+            label: 'Codex',
+            icon: 'codex',
+            installed: true,
+            auth: 'signed-in',
+            models: [{ id: 'gpt-5', label: 'GPT-5', reasoning: ['medium'] }],
+          },
+        ],
+      });
+    }
+    if (url.includes('/motion-api/agent-runtimes')) {
+      return json({
+        runtimes: [
+          {
+            id: 'local-direct',
+            kind: 'local-direct',
+            name: 'This computer',
+            status: 'online',
+            agents: [{ id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [] }],
+            runnableAgentIds: ['codex'],
+          },
+        ],
+      });
+    }
+    if (url.includes(`${SUPER_AGENT_API}/resources`)) {
+      return json({ counts: { assets: 0, brandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, motionProjects: 0, designProjects: 0, gameProjects: 0 }, items: [] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') return json({ conversations: [] });
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'POST') {
+      createChatBody = JSON.parse(String(init?.body ?? '{}'));
+      return json({ conversation: createdChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}/turn` && method === 'POST') {
+      turnBody = JSON.parse(String(init?.body ?? '{}'));
+      return json({ conversation: { ...createdChat, state: 'running' } });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}`) return json({ conversation: createdChat });
+    if (url.endsWith('/motion-api/games') && method === 'GET') return json({ games: [] });
+    if (url.endsWith('/motion-api/games') && method === 'POST') {
+      createGameBody = JSON.parse(String(init?.body ?? '{}'));
+      return json({
+        game: {
+          id: CREATED_GAME_ID,
+          title: 'Neon Co-op',
+          description: createGameBody.prompt,
+          genre: createGameBody.genre ?? 'shooter',
+          style: createGameBody.style ?? null,
+          setting: createGameBody.setting ?? null,
+          multiplayer: Boolean(createGameBody.multiplayer),
+          maxPlayers: createGameBody.multiplayer ? 4 : 1,
+          orientation: createGameBody.orientation ?? 'landscape',
+          status: 'draft',
+          cover: null,
+          playUrl: `/api/games/${CREATED_GAME_ID}/play/index.html`,
+          plays: 0,
+          likes: 0,
+          dislikes: 0,
+          reaction: 0,
+          favorite: false,
+          source: 'mine',
+          remixOf: null,
+          controls: '',
+          createdAt: '2026-11-22T00:00:00.000Z',
+          updatedAt: '2026-11-22T00:00:00.000Z',
+        },
+        agentInstruction: 'Use openmotion_game_* tools to build Neon Co-op.',
+      });
+    }
+    return json({});
+  });
+
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const flush = async () => {
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+  };
+
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <SuperAgentWorkspace
+            active
+            chatId={null}
+            onChatIdChange={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn()}
+            onOpenGameStudio={vi.fn()}
+            onOpenAsset={vi.fn()}
+            onOpenBrandKit={vi.fn()}
+            onOpenAgentSettings={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+    await flush();
+
+    // Enter Game Studio mode inside Super Agent
+    const gameStarter = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('Build a game'))!;
+    expect(gameStarter).toBeTruthy();
+    await act(async () => gameStarter.click());
+    await flush();
+
+    // Verifies Game Studio hero, 6 genre strip buttons, top controls, and game market template cards
+    expect(container.textContent).toContain('Create your own game in minutes');
+    expect(container.querySelectorAll('.om-sa-game-genre-card').length).toBe(6);
+    expect(container.querySelectorAll('.om-sa-game-showcase-card').length).toBeGreaterThan(0);
+
+    const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+    expect(topBar).toBeTruthy();
+    expect(topBar.textContent).toContain('Shooter');
+    expect(topBar.textContent).toContain('Style');
+    expect(topBar.textContent).toContain('Setting');
+    expect(topBar.textContent).toContain('Landscape');
+    expect(topBar.textContent).toContain('Multiplayer');
+
+    // Open Style popover and pick Pixel art
+    const styleTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Style')) as HTMLButtonElement;
+    await act(async () => styleTrigger.click());
+    await flush();
+    const pixelOption = [...document.querySelectorAll('.om-sa-game-art-option')].find(b => b.textContent?.includes('Pixel art')) as HTMLButtonElement;
+    expect(pixelOption).toBeTruthy();
+    await act(async () => pixelOption.click());
+    await flush();
+
+    // Toggle Portrait & Multiplayer
+    const landscapeBtn = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Landscape')) as HTMLButtonElement;
+    await act(async () => landscapeBtn.click());
+    const multiplayerBtn = topBar.querySelector('button[role="switch"]') as HTMLButtonElement;
+    await act(async () => multiplayerBtn.click());
+    await flush();
+    expect(multiplayerBtn.getAttribute('aria-checked')).toBe('true');
+    expect(topBar.textContent).toContain('Portrait');
+
+    // Send brief -> creates Game Studio project and starts Super Agent game turn
+    const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'Co-op pixel shooter in space');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const sendBtn = container.querySelector('.om-sa-send-btn') as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(false);
+    await act(async () => sendBtn.click());
+    await flush();
+
+    expect(createGameBody).toEqual({
+      prompt: 'Co-op pixel shooter in space',
+      genre: 'shooter',
+      style: 'pixel',
+      setting: null,
+      multiplayer: true,
+      orientation: 'portrait',
+    });
+    expect(createChatBody?.intent).toBe('game');
+    expect(turnBody?.mode).toBe('game');
+    expect(turnBody?.attachments?.some((att: any) => att.kind === 'game-project' && att.id === CREATED_GAME_ID)).toBe(true);
+    expect(turnBody?.text).toContain('openmotion_present_artifact');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it('supports unified Phase 2 Game preview console drawer ("Fix with Agent"), element picking, and Draw strokes', async () => {
+  const GAME_CHAT_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+  const GAME_ID = '11111111-1111-1111-1111-111111111111';
+  const gameChat: SuperAgentChat = {
+    id: GAME_CHAT_ID,
+    title: 'Orbit Defender',
+    engine: 'codex',
+    model: 'gpt-5',
+    intent: 'game',
+    permissionMode: 'auto',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'idle',
+    messages: [],
+    artifacts: [
+      {
+        id: `game:${GAME_ID}`,
+        kind: 'game-project',
+        title: 'Orbit Defender',
+        subtitle: 'shooter · Game Studio',
+        projectId: GAME_ID,
+        scenario: 'landscape',
+        revision: '1',
+        url: `/motion-api/games/${GAME_ID}/play/index.html`,
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+    ],
+    activeArtifactId: `game:${GAME_ID}`,
+    approvals: [],
+  };
+
+  const turns: any[] = [];
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/settings/agents')) {
+      return json({
+        agents: [
+          {
+            id: 'codex',
+            label: 'Codex',
+            icon: 'codex',
+            installed: true,
+            auth: 'signed-in',
+            models: [{ id: 'gpt-5', label: 'GPT-5', reasoning: ['medium'] }],
+          },
+        ],
+      });
+    }
+    if (url.includes('/settings/runtimes')) return json({ runtimes: [] });
+    if (url.includes(`${SUPER_AGENT_API}/resources`)) return json(sampleResources);
+    if (url === `${SUPER_AGENT_API}/chats`) return json({ conversations: [{ ...gameChat }] });
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}`) return json({ conversation: gameChat });
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}/annotations` && init?.method === 'POST') {
+      return json({
+        id: 'game-shot-1',
+        screenshotUrl: `/motion-api/super-agent/chats/${GAME_CHAT_ID}/annotations/game-shot-1.png`,
+        screenshotPath: '/tmp/game-shot-1.png',
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}/preview-snapshot` && init?.method === 'POST') {
+      return json({
+        dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        mimeType: 'image/png',
+        width: 800,
+        height: 600,
+        pageUrl: `/motion-api/games/${GAME_ID}/play/index.html`,
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}/turn` && init?.method === 'POST') {
+      turns.push(init.body ? JSON.parse(String(init.body)) : null);
+      return json({ conversation: gameChat });
+    }
+    return json({});
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={GAME_CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenGameStudio={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const viewerToggle = [...document.querySelectorAll('button')].find(
+    b => b.getAttribute('aria-label') === 'Artifact Viewer',
+  ) as HTMLButtonElement;
+  await act(async () => viewerToggle.click());
+  for (let i = 0; i < 30 && !document.querySelector('.om-sa-viewer iframe'); i++) {
+    await flush();
+  }
+
+  const viewer = document.querySelector('.om-sa-viewer')!;
+  const iframe = viewer.querySelector('iframe') as HTMLIFrameElement;
+  expect(iframe).toBeTruthy();
+  const bridgeToken = new URL(iframe.getAttribute('src')!, 'http://localhost').searchParams.get('omBridge')!;
+  expect(bridgeToken).toBeTruthy();
+
+  // Dispatch runtime error & warning from sandboxed game bridge
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'om:preview-console', token: bridgeToken, level: 'error', text: 'ReferenceError: boss is undefined', timestamp: 1 },
+    }));
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'om:preview-console', token: bridgeToken, level: 'warn', text: 'Low FPS warning', timestamp: 2 },
+    }));
+  });
+  await flush();
+
+  expect(viewer.querySelector('.om-sa-console-toolbar-badge')?.textContent).toBe('1');
+  const consoleBtn = viewer.querySelector('button[aria-label="Open console"]') as HTMLButtonElement;
+  await act(async () => consoleBtn.click());
+  await flush();
+
+  const drawer = viewer.querySelector('.om-sa-console-drawer')!;
+  expect(drawer.textContent).toContain('ReferenceError: boss is undefined');
+  const errorsFilter = [...drawer.querySelectorAll('.om-sa-console-filter-btn')].find(b => b.textContent === 'Errors') as HTMLButtonElement;
+  await act(async () => errorsFilter.click());
+  await flush();
+  expect(drawer.textContent).not.toContain('Low FPS warning');
+
+  const fixBtn = [...drawer.querySelectorAll('button')].find(b => b.textContent?.includes('Fix with Agent')) as HTMLButtonElement;
+  await act(async () => fixBtn.click());
+  await flush();
+  expect(turns.length).toBe(1);
+  expect(turns[0].attachments?.[0]?.annotation?.mode).toBe('console');
+  expect(turns[0].attachments?.[0]?.annotation?.consoleErrors?.[0]).toContain('boss is undefined');
+
+  // Toggle Annotate -> verify Select (picked via bridge) and Draw freehand stroke
+  const annotBtn = viewer.querySelector('button[aria-label="Annotate elements, regions, and drawings"]') as HTMLButtonElement;
+  await act(async () => annotBtn.click());
+  await flush();
+
+  const overlay = viewer.querySelector('.om-sa-annot-layer') as HTMLElement;
+  expect(overlay.textContent).toContain('Select');
+  const frameEl = viewer.querySelector('.om-sa-iframe-frame') as HTMLElement;
+  frameEl.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+  overlay.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'om:preview-pick',
+        token: bridgeToken,
+        element: {
+          tagName: 'canvas',
+          selector: '#game-canvas',
+          label: 'GameCanvas',
+          htmlPreview: '<canvas id="game-canvas"></canvas>',
+          styles: { display: 'block' },
+          rect: { x: 10, y: 10, width: 300, height: 200 },
+          viewport: { width: 800, height: 600 },
+        },
+        viewport: { width: 800, height: 600 },
+        rect: { x: 10, y: 10, width: 300, height: 200 },
+      },
+    }));
+  });
+  await flush();
+  expect(viewer.querySelector('.om-sa-annot-badge')?.textContent).toContain('#game-canvas');
+
+  // Clear element pin, switch to Draw mode, draw a stroke, and Attach
+  const clearDraftBtn = [...overlay.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Clear') as HTMLButtonElement;
+  await act(async () => clearDraftBtn.click());
+  const drawBtn = [...overlay.querySelectorAll('button')].find(b => b.textContent?.includes('Draw')) as HTMLButtonElement;
+  await act(async () => drawBtn.click());
+  await flush();
+
+  const backdrop = overlay.querySelector('.om-sa-annot-backdrop') as HTMLElement;
+  backdrop.setPointerCapture = vi.fn();
+
+  await act(async () => {
+    backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 50, clientY: 60 }));
+  });
+  await act(async () => {
+    backdrop.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 120, clientY: 140 }));
+  });
+  await act(async () => {
+    backdrop.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, clientX: 120, clientY: 140 }));
+  });
+  await flush();
+
+  const noteInput = viewer.querySelector('.om-sa-annot-input') as HTMLInputElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(noteInput, 'Add explosion glow here');
+    noteInput.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const attachBtn = viewer.querySelector('.om-sa-annot-attach-btn') as HTMLButtonElement;
+  await act(async () => attachBtn.click());
+  for (let i = 0; i < 80 && !document.querySelector('.om-sa-composer-chips .om-sa-attachment-chip[data-kind="browser-annotation"]'); i++) {
+    await flush();
+  }
+
+  const chip = document.querySelector('.om-sa-composer-chips .om-sa-attachment-chip[data-kind="browser-annotation"]');
+  expect(chip?.textContent).toContain('Add explosion glow here');
+
+  const sendBtn = document.querySelector('.om-sa-send-btn') as HTMLButtonElement;
+  await act(async () => sendBtn.click());
+  await flush();
+  expect(turns.length).toBe(2);
+  expect(turns[1].attachments?.[0]?.annotation?.mode).toBe('draw');
+  expect(turns[1].attachments?.[0]?.annotation?.strokeCount).toBe(1);
+  expect(turns[1].attachments?.[0]?.annotation?.strokeBounds).toBeTruthy();
 });

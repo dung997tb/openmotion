@@ -279,7 +279,7 @@ export function AgentRuntimeSettings({
           <span className="om-badge" data-active={onlineCount > 0 || undefined}>
             {t(modeBadgeLabel)}
           </span>
-          <Button variant="ghost" className="om-button h-auto" onClick={onRefresh}>
+          <Button variant="ghost" className="om-button" onClick={onRefresh}>
             <RemixIcon name="refresh-line" size={14} />
             {t('Refresh')}
           </Button>
@@ -293,7 +293,7 @@ export function AgentRuntimeSettings({
           {directory.defaultRuntimeId && (
             <Button
               variant="ghost"
-              className="om-button h-auto"
+              className="om-button"
               disabled={busyId === 'clear-default'}
               onClick={() => void handleSetDefault(null)}
             >
@@ -348,7 +348,7 @@ export function AgentRuntimeSettings({
                     {isOnline && !isDefault && runtime.enabled !== false && (
                       <Button
                         variant="ghost"
-                        className="om-button h-auto"
+                        className="om-button"
                         disabled={busyId === runtime.id}
                         onClick={() => void handleSetDefault(runtime.id)}
                       >
@@ -358,7 +358,7 @@ export function AgentRuntimeSettings({
                     {runtime.kind === 'local-bridge' && isOnline && (
                       <Button
                         variant="ghost"
-                        className="om-button h-auto"
+                        className="om-button"
                         disabled={busyId === runtime.id}
                         onClick={() => void handleRescanBridge(runtime)}
                       >
@@ -369,7 +369,7 @@ export function AgentRuntimeSettings({
                     {runtime.kind === 'local-bridge' && runtime.tokenId && (
                       <Button
                         variant="ghost"
-                        className="om-button h-auto"
+                        className="om-button"
                         disabled={busyId === runtime.tokenId}
                         onClick={() => void handleRevokeToken(runtime.tokenId!)}
                       >
@@ -381,7 +381,7 @@ export function AgentRuntimeSettings({
                       <>
                         <Button
                           variant="ghost"
-                          className="om-button h-auto"
+                          className="om-button"
                           disabled={busyId === runtime.id}
                           onClick={() => void handleTestSavedService(runtime)}
                         >
@@ -390,7 +390,7 @@ export function AgentRuntimeSettings({
                         </Button>
                         <Button
                           variant="ghost"
-                          className="om-button h-auto"
+                          className="om-button"
                           disabled={busyId === runtime.id}
                           onClick={() => void handleToggleService(runtime)}
                         >
@@ -398,7 +398,7 @@ export function AgentRuntimeSettings({
                         </Button>
                         <Button
                           variant="ghost"
-                          className="om-button h-auto"
+                          className="om-button"
                           disabled={busyId === runtime.id}
                           onClick={() => void handleRemoveService(runtime)}
                         >
@@ -421,7 +421,7 @@ export function AgentRuntimeSettings({
           <h2 className="om-subtitle">{t('Connect a Computer')}</h2>
         </div>
 
-        <div className="om-runtime-generate-row">
+        <div className="om-control-row om-runtime-generate-row">
           <label className="om-field om-runtime-label-input">
             <RemixIcon name="computer-line" size={15} />
             <input
@@ -435,7 +435,7 @@ export function AgentRuntimeSettings({
           </label>
           <Button
             variant="ghost"
-            className="om-button h-auto"
+            className="om-button"
             data-primary
             disabled={generating}
             onClick={() => void handleGenerateBundle()}
@@ -470,7 +470,7 @@ export function AgentRuntimeSettings({
               <div className="om-runtime-row-actions">
                 <Button
                   variant="ghost"
-                  className="om-button h-auto"
+                  className="om-button"
                   data-primary
                   onClick={() => void handleCopy(activeCommand)}
                 >
@@ -511,7 +511,7 @@ export function AgentRuntimeSettings({
                 <div className="om-runtime-row-actions">
                   <Button
                     variant="ghost"
-                    className="om-button h-auto"
+                    className="om-button"
                     disabled={busyId === token.id}
                     onClick={() => void handleRevokeToken(token.id)}
                   >
@@ -543,7 +543,7 @@ export function AgentRuntimeSettings({
           </div>
           <Button
             variant="ghost"
-            className="om-button h-auto"
+            className="om-button"
             onClick={() => {
               setAddingService(value => !value);
               setProbePreview(null);
@@ -650,7 +650,7 @@ export function AgentRuntimeSettings({
               <Button
                 variant="ghost"
                 type="button"
-                className="om-button h-auto"
+                className="om-button"
                 disabled={testingDraft || !svcEndpoint.trim()}
                 onClick={() => void handleTestDraft()}
               >
@@ -660,7 +660,7 @@ export function AgentRuntimeSettings({
               <Button
                 variant="ghost"
                 type="submit"
-                className="om-button h-auto"
+                className="om-button"
                 data-primary
                 disabled={savingService || !svcEndpoint.trim()}
               >

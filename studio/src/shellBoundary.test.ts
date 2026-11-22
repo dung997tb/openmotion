@@ -210,9 +210,9 @@ describe("Studio entry shell dependency boundary", () => {
 });
 
 describe("workspace route registry", () => {
-  it("marks only editor, explore, and assets as keepAlive", () => {
+  it("marks only agent, editor, explore, and assets as keepAlive", () => {
     const keepAliveIds = workspaceRouteRegistry.filter((r) => r.keepAlive).map((r) => r.id);
-    expect(keepAliveIds.sort()).toEqual(["assets", "editor", "explore"]);
+    expect(keepAliveIds.sort()).toEqual(["agent", "assets", "editor", "explore"]);
   });
 
   it("resolves active routes, tracking pages, and arrival views consistently", () => {

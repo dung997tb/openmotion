@@ -35,7 +35,12 @@ export function resourceKey(item: Pick<SuperAgentResourceAttachment, 'kind' | 'i
   return `${item.kind}:${item.id}:${item.versionId ?? ''}`;
 }
 
-export function resourceIcon(item: Pick<SuperAgentResourceAttachment, 'kind' | 'modality'>): string {
+export function resourceIcon(item: Pick<SuperAgentResourceAttachment, 'kind' | 'modality' | 'annotation'>): string {
+  if (item.kind === 'browser-annotation') {
+    if (item.annotation?.mode === 'screenshot') return 'camera-line';
+    if (item.annotation?.mode === 'console') return 'terminal-box-fill';
+    return 'focus-3-line';
+  }
   if (item.kind === 'asset' || item.kind === 'model') {
     if (item.modality === 'video') return 'movie-line';
     if (item.modality === 'audio') return 'music-2-line';
@@ -64,6 +69,7 @@ export function resourceKindLabel(kind: SuperAgentResourceKind): string {
     case 'workflow': return 'Workflow';
     case 'model': return 'Model';
     case 'game-project': return 'Game project';
+    case 'browser-annotation': return 'Browser annotation';
     default: return 'Resource';
   }
 }

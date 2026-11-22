@@ -7,6 +7,7 @@ import type { LocalAgent } from '../../../shared/local-agents';
 import {
   modeToSuperAgentIntent,
   superAgentIntentMeta,
+  type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentEngine,
   type SuperAgentPermissionMode,
@@ -21,6 +22,18 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { uploadLibraryAsset } from '../motion/assetClient';
+import {
+  communityRemixPrompt,
+  composeBrief,
+  gameApi,
+  rememberInstruction,
+} from '../motion/game/gameCatalog';
+import {
+  buildDirectGamePrompt,
+  localizedGameTitle,
+  toGameArtifact,
+  toGameResourceAttachment,
+} from '../motion/game/gameSuperAgent';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
@@ -51,7 +64,7 @@ const PRIMARY_STARTERS: {
   { id: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
   { id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
-  { id: 'game', tone: 'agent', icon: 'sparkling-line', title: 'Build a game' },
+  { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game' },
 ];
 
 const EXTRA_STARTERS: {
@@ -107,6 +120,7 @@ export function ConversationStream({
   onOpenAgentSettings,
   onOpenRuntimeSettings,
   onOpenModelSettings,
+  onOpenGameStudio,
   onOpenMcp,
   onError,
 }: {
@@ -132,7 +146,15 @@ export function ConversationStream({
   onRenameChat: (title: string) => Promise<void> | void;
   onChangeSelection: (next: AgentSelection) => void;
   onChangePermissionMode: (next: SuperAgentPermissionMode) => void;
-  onSend: (text: string, meta?: { mode?: SuperAgentCreationModeId; workingDir?: string }) => Promise<boolean>;
+  onSend: (
+    text: string,
+    meta?: {
+      mode?: SuperAgentCreationModeId;
+      workingDir?: string;
+      overrideAttachments?: SuperAgentResourceAttachment[];
+      initialArtifact?: Partial<SuperAgentArtifact>;
+    },
+  ) => Promise<boolean>;
   onStop: () => void;
   onApprove: (approvalId: string, accepted: boolean) => void;
   onResourcesUploaded?: () => void;
@@ -144,10 +166,11 @@ export function ConversationStream({
   onOpenAgentSettings: () => void;
   onOpenRuntimeSettings?: () => void;
   onOpenModelSettings?: () => void;
+  onOpenGameStudio?: () => void;
   onOpenMcp: () => void;
   onError: (message: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [text, setText] = useState('');
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -164,6 +187,8 @@ export function ConversationStream({
   const inspectedEnginesRef = useRef<Set<SuperAgentEngine>>(new Set());
   const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(null);
   const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(DEFAULT_MODE_COMPOSER_OPTIONS);
+  const [scaffoldingGame, setScaffoldingGame] = useState(false);
+  const [previewingChipKey, setPreviewingChipKey] = useState<string | null>(null);
   const mediaModelsRef = useRef<Model[]>([]);
   const activeMode = findSuperAgentMode(activeModeId);
   const headerIntentMeta = superAgentIntentMeta(
@@ -197,8 +222,15 @@ export function ConversationStream({
       setMoreStartersOpen(false);
       setModelMenuOpen(false);
       setApprovalMenuOpen(false);
+      setPreviewingChipKey(null);
     }
   }, [active]);
+
+  useEffect(() => {
+    if (previewingChipKey && !attachments.some(att => resourceKey(att) === previewingChipKey)) {
+      setPreviewingChipKey(null);
+    }
+  }, [attachments, previewingChipKey]);
   const listRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -222,7 +254,18 @@ export function ConversationStream({
   const selectedModelMeta = activeAgent?.models.find(m => m.id === selection.model);
   const reasoningEfforts = selectedModelMeta?.reasoning ?? [];
   const busy = chat?.state === 'running' || chat?.state === 'waiting';
-  const canSubmit = Boolean(text.trim()) && !sending && !busy && !loading && runnableEngines.length > 0;
+  const hasBrowserAnnotation = attachments.some(att => att.kind === 'browser-annotation');
+  const gameBrief = activeMode?.id === 'game'
+    ? composeBrief({
+        prompt: text,
+        genre: modeOptions.gameGenre,
+        style: modeOptions.gameStyle,
+        setting: modeOptions.gameSetting,
+        multiplayer: modeOptions.gameMultiplayer,
+      })
+    : '';
+  const hasGameStudioBrief = activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate || gameBrief);
+  const canSubmit = (Boolean(text.trim()) || hasBrowserAnnotation || hasGameStudioBrief) && !sending && !scaffoldingGame && !busy && !loading && runnableEngines.length > 0;
 
   const engineChoices = useMemo(() => {
     if (activeRuntime?.kind === 'remote-service') {
@@ -289,7 +332,10 @@ export function ConversationStream({
 
   useEffect(() => {
     setRenaming(false);
-    setActiveModeId(null);
+    if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
+      setActiveModeId(null);
+      setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
+    }
     followRef.current = true;
   }, [chat?.id]);
 
@@ -311,10 +357,70 @@ export function ConversationStream({
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    if (activeMode?.id === 'game' && !chat?.messages.length && !attachments.some(att => att.kind === 'game-project')) {
+      const selectedTemplate = modeOptions.gameTemplate;
+      setScaffoldingGame(true);
+      try {
+        const created = selectedTemplate && !selectedTemplate.external
+          ? await gameApi.remix(selectedTemplate.id)
+          : await gameApi.create(
+              selectedTemplate?.external
+                ? {
+                    prompt: [communityRemixPrompt(selectedTemplate), text.trim()].filter(Boolean).join('\n\n'),
+                    genre: modeOptions.gameGenre ?? selectedTemplate.genre,
+                    style: modeOptions.gameStyle ?? selectedTemplate.style,
+                    setting: modeOptions.gameSetting ?? selectedTemplate.setting,
+                    multiplayer: modeOptions.gameMultiplayer,
+                    orientation: modeOptions.gameOrientation,
+                  }
+                : {
+                    prompt: text.trim() || gameBrief,
+                    genre: modeOptions.gameGenre,
+                    style: modeOptions.gameStyle,
+                    setting: modeOptions.gameSetting,
+                    multiplayer: modeOptions.gameMultiplayer,
+                    orientation: modeOptions.gameOrientation,
+                  },
+            );
+        rememberInstruction(created.game.id, created.agentInstruction);
+        const displayTitle = localizedGameTitle(created.game, locale);
+        const ready = created.game.status === 'ready' || created.game.status === 'published';
+        const promptBody = buildDirectGamePrompt(
+          created.game,
+          created.agentInstruction,
+          selectedTemplate && text.trim() ? text.trim() : undefined,
+        );
+        const nextAttachments = [...attachments, toGameResourceAttachment(created.game, displayTitle)];
+        const ok = await onSend(promptBody, {
+          mode: 'game',
+          overrideAttachments: nextAttachments,
+          ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
+        });
+        if (ok) {
+          setText('');
+          setActiveModeId(null);
+          updateModeOptions({ gameTemplate: null });
+          followRef.current = true;
+        }
+        return;
+      } catch {
+        // Fall back to prompt prefix when offline or local game service is unavailable.
+      } finally {
+        setScaffoldingGame(false);
+      }
+    }
+
     const prefix = activeMode
       ? formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current)
       : '';
-    const promptBody = prefix ? `${prefix} ${text.trim()}` : text.trim();
+    const annotationSummary = attachments
+      .filter(att => att.kind === 'browser-annotation')
+      .map(att => att.annotation?.comment?.trim() || '')
+      .filter(Boolean)
+      .join('\n')
+      || (hasBrowserAnnotation ? t('Update the page based on the attached browser preview annotations.') : '');
+    const rawBody = text.trim() || annotationSummary;
+    const promptBody = prefix ? `${prefix} ${rawBody}` : rawBody;
     const ok = await onSend(promptBody, {
       ...(activeMode ? { mode: activeMode.id } : {}),
       ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
@@ -324,6 +430,7 @@ export function ConversationStream({
     if (ok) {
       setText('');
       setActiveModeId(null);
+      updateModeOptions({ gameTemplate: null });
       followRef.current = true;
     }
   };
@@ -523,6 +630,8 @@ export function ConversationStream({
               active={active}
               mode={activeMode}
               attachments={attachments}
+              modeOptions={modeOptions}
+              onChangeModeOptions={updateModeOptions}
               onToggleAttachment={toggleResourceAttachment}
               onPickPrompt={prompt => {
                 setText(prompt);
@@ -532,7 +641,11 @@ export function ConversationStream({
                 setResourceCategory(category ?? 'all');
                 setResourceMenuOpen(true);
               }}
-              onClose={() => setActiveModeId(null)}
+              onOpenGameStudio={onOpenGameStudio}
+              onClose={() => {
+                setActiveModeId(null);
+                updateModeOptions({ gameTemplate: null });
+              }}
             />
           ) : (
           <div className="om-sa-home">
@@ -684,28 +797,152 @@ export function ConversationStream({
         )}
 
         <div className="om-sa-composer">
-          {attachments.length > 0 && (
+          {(attachments.length > 0 || (activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate))) && (
             <div className="om-sa-composer-chips">
-              {attachments.map(att => (
-                <span key={resourceKey(att)} className="om-sa-attachment-chip">
-                  <RemixIcon name={resourceIcon(att)} size={13} />
-                  <span>{att.title}</span>
+              {activeMode?.id === 'game' && modeOptions.gameTemplate && (
+                <span className="om-sa-attachment-chip">
+                  <RemixIcon name="gamepad-line" size={13} />
+                  <span>{t('Based on {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
                   <IconButton
                     variant="plain"
                     className="om-sa-chip-remove"
-                    aria-label={t('Remove {title}', { title: att.title })}
-                    onClick={() =>
-                      onAttachmentsChange(attachments.filter(item => resourceKey(item) !== resourceKey(att)))
-                    }
+                    aria-label={t('Remove {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}
+                    onClick={() => updateModeOptions({ gameTemplate: null })}
                     icon={<RemixIcon name="close-line" size={12} />}
                   />
                 </span>
-              ))}
+              )}
+              {attachments.map(att => {
+                const key = resourceKey(att);
+                const isBrowserAnnotation = att.kind === 'browser-annotation';
+                const chipTitle = isBrowserAnnotation
+                  ? (att.annotation?.comment || att.title)
+                  : att.title;
+                const tooltipLabel = isBrowserAnnotation
+                  ? [
+                      att.annotation?.element?.componentName,
+                      att.annotation?.element?.selector,
+                      att.annotation?.pageUrl || att.subtitle,
+                    ].filter(Boolean).join(' · ')
+                  : '';
+                if (!isBrowserAnnotation) {
+                  return (
+                    <span key={key} className="om-sa-attachment-chip">
+                      <RemixIcon name={resourceIcon(att)} size={13} />
+                      <span>{chipTitle}</span>
+                      <IconButton
+                        variant="plain"
+                        className="om-sa-chip-remove"
+                        aria-label={t('Remove {title}', { title: chipTitle })}
+                        onClick={() =>
+                          onAttachmentsChange(attachments.filter(item => resourceKey(item) !== key))
+                        }
+                        icon={<RemixIcon name="close-line" size={12} />}
+                      />
+                    </span>
+                  );
+                }
+
+                const annot = att.annotation;
+                const sourceLoc = annot?.element?.sourceFile
+                  ? `${annot.element.sourceFile}${typeof annot.element.sourceLine === 'number' ? `:${annot.element.sourceLine}` : ''}`
+                  : '';
+                const chipTrigger = (
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-chip-main"
+                    aria-label={chipTitle}
+                  >
+                    {att.previewUrl ? (
+                      <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
+                    ) : (
+                      <RemixIcon name={resourceIcon(att)} size={13} />
+                    )}
+                    <span>{chipTitle}</span>
+                  </Button>
+                );
+
+                return (
+                  <span
+                    key={key}
+                    className="om-sa-attachment-chip"
+                    data-kind="browser-annotation"
+                  >
+                    <Popover
+                      open={previewingChipKey === key}
+                      onOpenChange={open => setPreviewingChipKey(open ? key : null)}
+                      side="top"
+                      align="start"
+                      tooltip={tooltipLabel || undefined}
+                      aria-label={chipTitle}
+                      className="om-sa-annot-preview-popover"
+                      trigger={chipTrigger}
+                    >
+                      <div className="om-sa-annot-preview-body">
+                        {att.previewUrl && (
+                          <img className="om-sa-annot-preview-img" src={att.previewUrl} alt={chipTitle} />
+                        )}
+                        <div className="om-sa-annot-preview-meta">
+                          <strong>{chipTitle}</strong>
+                          {(annot?.element?.componentName || annot?.element?.selector) && (
+                            <code>
+                              {annot.element.componentName ? `${annot.element.componentName} · ` : ''}
+                              {annot.element.selector}
+                            </code>
+                          )}
+                          {sourceLoc && <small className="om-sa-annot-preview-source">{sourceLoc}</small>}
+                          {annot?.region && (
+                            <small>
+                              {annot.region.width}×{annot.region.height} @ {annot.region.x},{annot.region.y}
+                            </small>
+                          )}
+                          {annot?.consoleErrors && annot.consoleErrors.length > 0 && (
+                            <pre className="om-sa-annot-preview-logs">
+                              {annot.consoleErrors.slice(0, 4).join('\n')}
+                            </pre>
+                          )}
+                          {(annot?.pageUrl || att.subtitle) && (
+                            <small className="om-sa-annot-preview-url">{annot?.pageUrl || att.subtitle}</small>
+                          )}
+                        </div>
+                        <div className="om-sa-annot-preview-actions">
+                          <Button
+                            variant="plain"
+                            type="button"
+                            className="om-sa-toolbar-btn"
+                            onClick={() => {
+                              setPreviewingChipKey(null);
+                              onPreviewAttachment(att);
+                            }}
+                          >
+                            <RemixIcon name="eye-line" size={13} />
+                            <span>{t('Preview')}</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </Popover>
+                    <IconButton
+                      variant="plain"
+                      className="om-sa-chip-remove"
+                      aria-label={t('Remove {title}', { title: chipTitle })}
+                      onClick={() => {
+                        if (previewingChipKey === key) setPreviewingChipKey(null);
+                        onAttachmentsChange(attachments.filter(item => resourceKey(item) !== key));
+                      }}
+                      icon={<RemixIcon name="close-line" size={12} />}
+                    />
+                  </span>
+                );
+              })}
               <Button
                 variant="plain"
                 type="button"
                 className="om-sa-chip-clear"
-                onClick={() => onAttachmentsChange([])}
+                onClick={() => {
+                  onAttachmentsChange([]);
+                  updateModeOptions({ gameTemplate: null });
+                }}
               >
                 {t('Clear')}
               </Button>
@@ -789,7 +1026,10 @@ export function ConversationStream({
                     variant="plain"
                     className="om-sa-chip-remove"
                     aria-label={t('Clear mode')}
-                    onClick={() => setActiveModeId(null)}
+                    onClick={() => {
+                      setActiveModeId(null);
+                      updateModeOptions({ gameTemplate: null });
+                    }}
                     icon={<RemixIcon name="close-line" size={12} />}
                   />
                 </span>
@@ -832,7 +1072,7 @@ export function ConversationStream({
                     )}
                     {activeRuntime && activeRuntime.kind !== 'local-direct' && (
                       <span className="om-sa-runtime-chip">
-                        <RemixIcon name={activeRuntime.kind === 'local-bridge' ? 'link-line' : 'plug-line'} size={11} />
+                        <RemixIcon name={activeRuntime.kind === 'local-bridge' ? 'link' : 'plug-line'} size={11} />
                         <span>{activeRuntime.name}</span>
                       </span>
                     )}
@@ -845,7 +1085,7 @@ export function ConversationStream({
                     <div className="om-sa-runtime-pills" role="group" aria-label={t('Execution runtime')}>
                       {runtimes.map(rt => {
                         const isRtActive = activeRuntime?.id === rt.id;
-                        const icon = rt.kind === 'local-bridge' ? 'link-line' : rt.kind === 'remote-service' ? 'plug-line' : 'computer-line';
+                        const icon = rt.kind === 'local-bridge' ? 'link' : rt.kind === 'remote-service' ? 'plug-line' : 'computer-line';
                         return (
                           <Button
                             key={rt.id}

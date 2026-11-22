@@ -7,6 +7,7 @@ import type { AssetDraft } from '../motion/AssetComposer';
 import type { CinemaTemplate } from '../motion/cinemaTemplates';
 import { mediaEditorDestination, motionStudio, type StudioDestination } from '../motion/creativeStudios';
 import { reportCreativeClick } from '../motion/exploreTracking';
+import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import type { McpClient } from '../motion/mcpClients';
 import type { McpEntry } from '../motion/pageTracking';
 import { SettingsSurfaceBoundary } from '../motion/SettingsSurfaceBoundary';
@@ -204,6 +205,27 @@ export function RouteViewport({
             }
             onStartScenario={id => openScenario(id, undefined, true)}
             onOpenScenarioHub={() => openScenarioHub(true)}
+            onOpenGameStudio={gameId => {
+              const gameStudio = creativeStudios.find(
+                (s): s is TechniqueStudio => s.surface === 'techniques' && s.id === 'game',
+              );
+              if (gameStudio) {
+                navigatePage(
+                  { specialty: gameStudio, gameId: gameId ?? null, skill: null, templates: false, ...lastExplore },
+                  false,
+                  'from-page',
+                );
+              }
+            }}
+            onBuildGameInSuperAgent={() => {
+              queueSuperAgentHandoff({
+                prompt: '',
+                mode: 'game',
+                newChat: true,
+                autoSend: false,
+              });
+              navigatePage({ superAgent: true, superAgentChat: null, templates: false });
+            }}
             filters={lastExplore}
             onChooseStudio={studio => chooseStudio(studio, undefined, true)}
             active={page.explore && !connectionsOpen}
@@ -478,9 +500,9 @@ export function RouteViewport({
             onChatIdChange={(chat, replace) => navigatePage({ superAgent: true, superAgentChat: chat, templates: false }, replace)}
             onOpenDesignProject={id => navigatePage({ designScene: 'projects', designProject: id, templates: false })}
             onOpenMotionProject={id => { void openMotionProject(id); }}
-            onOpenGameStudio={() => {
+            onOpenGameStudio={gameId => {
               const gameStudio = creativeStudios.find((s): s is TechniqueStudio => s.surface === 'techniques' && s.id === 'game');
-              if (gameStudio) navigatePage({ specialty: gameStudio, skill: null, templates: false });
+              if (gameStudio) navigatePage({ specialty: gameStudio, gameId: gameId || null, skill: null, templates: false });
             }}
             onOpenAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion: assetVersion ?? null, templates: false })}
             onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId && !kitId.startsWith('catalog:') ? kitId : null, templates: false })}
@@ -494,7 +516,7 @@ export function RouteViewport({
       {page.specialty?.id === 'game' && !skillsOpen && !settings && !templatesPage && (
         <div className="om-skills-host">
           <RouteSurface>
-            <LazyGameStudio onExplore={returnToExplore} onOpenMcp={() => openMcp(undefined, undefined, true)} />
+            <LazyGameStudio onExplore={returnToExplore} onOpenMcp={() => openMcp(undefined, undefined, true)} initialGameId={page.gameId ?? null} />
           </RouteSurface>
         </div>
       )}

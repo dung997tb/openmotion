@@ -3,6 +3,7 @@ import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { blackFridayTemplates } from '../../../shared/black-friday-collection';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { gameGenres, type GameCard, type GameGenre } from '../../../shared/game-contract';
 import type { SuperAgentResourceAttachment } from '../../../shared/super-agent';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ScaledPreviewThumb } from '../design/ScaledPreviewThumb';
@@ -11,11 +12,26 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { groupBrandSeries, rankDiscoverySeries } from '../motion/brandStoryData';
 import { cinemaTemplates } from '../motion/cinemaTemplates';
 import { gptImageStory, seedanceStory } from '../motion/exploreModelStories';
+import {
+  bundledGames,
+  communityGames,
+  coverUrl,
+  gameApi,
+  genreCovers,
+  genreLabels,
+} from '../motion/game/gameCatalog';
+import {
+  GAME_STUDIO_QUICK_IDEAS,
+  localizedGameDescription,
+  localizedGameTitle,
+  toGameResourceAttachment,
+} from '../motion/game/gameSuperAgent';
 import { sceneExamples } from '../motion/sceneShowcase';
 import { motionSkills, skillCategories, type MotionSkill, type SkillCategory } from '../motion/skillCatalog';
 import { templateCollectionFacets, templatesInCollection, type TemplateCollection } from '../motion/templateCollections';
 import { aiTechnologyIndustry, purposeOrder } from '../motion/templateDiscoveryTaxonomy';
 import { useCoveredTemplates } from '../motion/useCoveredTemplates';
+import type { ModeComposerOptions } from './ModeComposerControls';
 import { resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import { fetchWorkspaceResources } from './superAgentClient';
 
@@ -103,17 +119,18 @@ export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
   {
     id: 'game',
     tone: 'agent',
-    icon: 'sparkling-line',
-    label: 'HTML Game',
-    title: 'Build a playable HTML game',
-    subtitle: 'Attach interactive Prototype/WebGL references or Brand Kits, then play directly inside the Artifact Viewer.',
-    placeholder: 'Describe the playable HTML5 Canvas or WebGL game you want to build…',
+    icon: 'gamepad-line',
+    label: 'Game Studio',
+    title: 'Create your own game in minutes',
+    subtitle: 'Pick a genre, style and setting, describe your game in one line and your Agent builds a playable web game.',
+    placeholder: 'Describe the game you want to make',
     defaultPrompt: 'Build a playable retro neon arcade space-shooter game in HTML5 Canvas with keyboard and mouse controls, score & wave HUD, particle explosions, and a restart button. Preview it in the Artifact Viewer.',
-    pickerCategory: 'design-template',
+    pickerCategory: 'projects',
     quickIdeas: [
-      { title: 'Neon arcade space shooter', prompt: 'Build a retro neon space-shooter game in HTML5 Canvas with mouse/keyboard controls, waves, score HUD, and explosions.' },
-      { title: 'Physics puzzle game', prompt: 'Create an interactive 2D physics puzzle game with 5 handcrafted levels, move counter, and instant restart.' },
-      { title: 'Interactive WebGL playground', prompt: 'Build an interactive WebGL particle & shader playground reacting to mouse movement with live parameter controls.' },
+      { title: 'Co-op 3D crystal defense', prompt: 'Defend a glowing arena crystal through 5 waves with 1–4 co-op players, dash/nova skills, and an instant invite link.' },
+      { title: 'Retro pixel platformer', prompt: 'Build a crisp pixel-art platformer with tight jump physics, hidden coins, hazards, and a dramatic boss arena.' },
+      { title: 'Portrait one-tap arcade', prompt: 'Create an addictive 9:16 portrait one-tap arcade game playable with one thumb, instant restarts, and combo multipliers.' },
+      { title: 'Cyberpunk drift racer', prompt: 'Build a neon night-time 3D street racing game with smooth drifting, nitro boost pads, and lap time records.' },
     ],
   },
   {
@@ -421,17 +438,23 @@ export function ModeResourceShowcase({
   active = true,
   mode,
   attachments,
+  modeOptions,
+  onChangeModeOptions,
   onToggleAttachment,
   onPickPrompt,
   onOpenAllResources,
+  onOpenGameStudio,
   onClose,
 }: {
   active?: boolean;
   mode: SuperAgentModeSpec;
   attachments: SuperAgentResourceAttachment[];
+  modeOptions?: ModeComposerOptions;
+  onChangeModeOptions?: (patch: Partial<ModeComposerOptions>) => void;
   onToggleAttachment: (item: SuperAgentResourceAttachment) => void;
   onPickPrompt: (prompt: string) => void;
   onOpenAllResources: (category: ResourceCategoryTab) => void;
+  onOpenGameStudio?: () => void;
   onClose: () => void;
 }) {
   const { t, locale } = useI18n();
@@ -448,17 +471,27 @@ export function ModeResourceShowcase({
     [coveredMotion.catalog],
   );
 
-  // Full workspace catalogs cached per kind for Design templates, Brand Kits, Design Skills, Assets.
+  // Full workspace catalogs cached per kind for Design templates, Brand Kits, Design Skills, Assets, and Game Studio.
   const [designTemplates, setDesignTemplates] = useState<SuperAgentResourceAttachment[] | null>(null);
   const [brandKits, setBrandKits] = useState<SuperAgentResourceAttachment[] | null>(null);
   const [designSkills, setDesignSkills] = useState<SuperAgentResourceAttachment[] | null>(null);
   const [assets, setAssets] = useState<SuperAgentResourceAttachment[] | null>(null);
+  const [gameCatalog, setGameCatalog] = useState<GameCard[]>(() => [...communityGames, ...bundledGames]);
   const [loadingKind, setLoadingKind] = useState<string | null>(null);
 
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [activeSkillCategory, setActiveSkillCategory] = useState<SkillCategory | 'all'>('all');
   const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const publishedGameTemplates = useMemo(
+    () => gameCatalog.filter(g => g.source !== 'mine' && g.status === 'published'),
+    [gameCatalog],
+  );
+  const myGames = useMemo(
+    () => gameCatalog.filter(g => g.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [gameCatalog],
+  );
 
   // Build real categories & live counts per mode.
   const filters = useMemo<FilterOption[]>(() => {
@@ -493,16 +526,19 @@ export function ModeResourceShowcase({
         ];
       }
       case 'game': {
-        const webgl = (designTemplates ?? []).filter(i => i.scenario === 'webgl');
-        const live = (designTemplates ?? []).filter(i => i.scenario === 'live-artifact');
-        const proto = (designTemplates ?? []).filter(i => i.scenario === 'prototype');
+        const portraitCount = publishedGameTemplates.filter(g => g.orientation === 'portrait').length;
         return [
-          { id: 'all', label: 'All templates', count: designTemplates ? webgl.length + live.length + proto.length : undefined },
-          ...(webgl.length ? [{ id: 'webgl', label: 'WebGL', count: webgl.length }] : []),
-          ...(live.length ? [{ id: 'live-artifact', label: 'Interactive', count: live.length }] : []),
-          ...(proto.length ? [{ id: 'prototype', label: 'Prototype', count: proto.length }] : []),
+          { id: 'all', label: 'All games', count: publishedGameTemplates.length },
+          ...(myGames.length > 0 ? [{ id: 'mine', label: 'My games', count: myGames.length }] : []),
+          ...gameGenres
+            .map(g => ({
+              id: `genre:${g}`,
+              label: genreLabels[g],
+              count: publishedGameTemplates.filter(item => item.genre === g).length,
+            }))
+            .filter(item => item.count > 0),
+          ...(portraitCount > 0 ? [{ id: 'portrait', label: 'Portrait games', count: portraitCount }] : []),
           { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
-          { id: 'design-skill', label: 'Design Skills', count: designSkills?.length },
         ];
       }
       case 'motion': {
@@ -556,7 +592,7 @@ export function ModeResourceShowcase({
         ];
       }
     }
-  }, [mode.id, designTemplates, brandKits, designSkills, assets, coveredMotion.catalog, motionCatalog, motionPurposes, isZh]);
+  }, [mode.id, designTemplates, brandKits, designSkills, assets, publishedGameTemplates, myGames, coveredMotion.catalog, motionCatalog, motionPurposes, isZh]);
 
   // Reset active tab when switching mode.
   useEffect(() => {
@@ -597,10 +633,17 @@ export function ModeResourceShowcase({
       }
     };
 
-    if (mode.id === 'website' || mode.id === 'deck' || mode.id === 'game') {
+    if (mode.id === 'website' || mode.id === 'deck') {
       void ensure('design-template');
       if (activeFilter === 'brand-kit') void ensure('brand-kit');
       if (activeFilter === 'design-skill') void ensure('design-skill');
+    } else if (mode.id === 'game') {
+      if (activeFilter === 'brand-kit') void ensure('brand-kit');
+      void gameApi.catalog().then(res => {
+        if (!cancelled && Array.isArray(res?.games)) {
+          setGameCatalog([...communityGames, ...(res.games.length ? res.games : bundledGames)]);
+        }
+      }).catch(() => { /* fallback keeps bundled + community games */ });
     } else if (mode.id === 'motion') {
       if (activeFilter === 'brand-kit') void ensure('brand-kit');
     } else if (mode.id === 'image') {
@@ -683,7 +726,24 @@ export function ModeResourceShowcase({
     return all.filter(i => i.scenario !== 'deck' && i.scenario !== 'document' && i.scenario !== 'webgl');
   }, [curatedCards, activeFilter, activeSkillCategory, mode.id, brandKits, designSkills, assets, motionCatalog, locale, designTemplates]);
 
-  const totalCount = curatedCards ? curatedCards.length : resourceItems.length;
+  const showGameCards = mode.id === 'game' && activeFilter !== 'brand-kit';
+
+  const filteredGames = useMemo<GameCard[]>(() => {
+    if (!showGameCards) return [];
+    if (activeFilter === 'mine') return myGames;
+    if (activeFilter === 'portrait') return publishedGameTemplates.filter(g => g.orientation === 'portrait');
+    if (activeFilter.startsWith('genre:')) {
+      const genreId = activeFilter.slice(6) as GameGenre;
+      return publishedGameTemplates.filter(item => item.genre === genreId);
+    }
+    return publishedGameTemplates;
+  }, [showGameCards, activeFilter, publishedGameTemplates, myGames]);
+
+  const totalCount = showGameCards
+    ? filteredGames.length
+    : curatedCards
+      ? curatedCards.length
+      : resourceItems.length;
   const hasMore = visibleCount < totalCount;
 
   // Automatic continuous scrolling via IntersectionObserver.
@@ -709,13 +769,14 @@ export function ModeResourceShowcase({
       || (activeFilter === 'brand-kit' && brandKits === null)
       || (activeFilter === 'design-skill' && designSkills === null)
       || (activeFilter === 'asset' && assets === null)
-      || ((mode.id === 'website' || mode.id === 'deck' || mode.id === 'game') && activeFilter !== 'brand-kit' && activeFilter !== 'design-skill' && designTemplates === null)
+      || ((mode.id === 'website' || mode.id === 'deck') && activeFilter !== 'brand-kit' && activeFilter !== 'design-skill' && designTemplates === null)
       || (loadingKind !== null && totalCount === 0)
     );
 
   const selectedKeys = useMemo(() => new Set(attachments.map(resourceKey)), [attachments]);
-  const visibleCurated = curatedCards ? curatedCards.slice(0, visibleCount) : null;
-  const visibleResources = !curatedCards ? resourceItems.slice(0, visibleCount) : [];
+  const visibleGames = showGameCards ? filteredGames.slice(0, visibleCount) : null;
+  const visibleCurated = !showGameCards && curatedCards ? curatedCards.slice(0, visibleCount) : null;
+  const visibleResources = !showGameCards && !curatedCards ? resourceItems.slice(0, visibleCount) : [];
 
   return (
     <div className="om-sa-mode-showcase">
@@ -736,21 +797,74 @@ export function ModeResourceShowcase({
           <h2>{t(mode.title)}</h2>
           <p className="om-muted">{t(mode.subtitle)}</p>
         </div>
+
+        {mode.id === 'game' && (
+          <div className="om-sa-game-genre-strip" role="group" aria-label={t('Genre')}>
+            {gameGenres.map(id => {
+              const selected = modeOptions?.gameGenre === id;
+              const cover = genreCovers[id];
+              return (
+                <Button
+                  key={id}
+                  variant="plain"
+                  type="button"
+                  className="om-sa-game-genre-card"
+                  aria-pressed={selected}
+                  data-active={selected || undefined}
+                  onClick={() => onChangeModeOptions?.({ gameGenre: selected ? null : id })}
+                >
+                  <span className="om-sa-game-genre-art" aria-hidden="true">
+                    {cover ? <img src={cover} alt="" /> : <RemixIcon name="gamepad-line" size={22} />}
+                  </span>
+                  <span>{t(genreLabels[id])}</span>
+                </Button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="om-sa-mode-ideas">
-          {mode.quickIdeas.map(idea => (
-            <Button
-              key={idea.title}
-              variant="plain"
-              type="button"
-              className="om-sa-idea-chip"
-              onClick={() => onPickPrompt(t(idea.prompt))}
-            >
-              <span className="om-sa-tone-icon" data-tone={mode.tone} aria-hidden="true">
-                <RemixIcon name="sparkling-line" size={12} />
-              </span>
-              <span>{t(idea.title)}</span>
-            </Button>
-          ))}
+          {mode.id === 'game' ? (
+            GAME_STUDIO_QUICK_IDEAS.map(idea => (
+              <Button
+                key={idea.title}
+                variant="plain"
+                type="button"
+                className="om-sa-idea-chip"
+                onClick={() => {
+                  onChangeModeOptions?.({
+                    gameGenre: idea.genre,
+                    gameStyle: idea.style,
+                    gameSetting: idea.setting,
+                    gameOrientation: idea.orientation,
+                    gameMultiplayer: idea.multiplayer,
+                    gameTemplate: null,
+                  });
+                  onPickPrompt(t(idea.prompt));
+                }}
+              >
+                <span className="om-sa-tone-icon" data-tone={mode.tone} aria-hidden="true">
+                  <RemixIcon name={idea.multiplayer ? 'group-line' : 'sparkling-line'} size={12} />
+                </span>
+                <span>{t(idea.title)}</span>
+              </Button>
+            ))
+          ) : (
+            mode.quickIdeas.map(idea => (
+              <Button
+                key={idea.title}
+                variant="plain"
+                type="button"
+                className="om-sa-idea-chip"
+                onClick={() => onPickPrompt(t(idea.prompt))}
+              >
+                <span className="om-sa-tone-icon" data-tone={mode.tone} aria-hidden="true">
+                  <RemixIcon name="sparkling-line" size={12} />
+                </span>
+                <span>{t(idea.title)}</span>
+              </Button>
+            ))
+          )}
         </div>
       </div>
 
@@ -774,20 +888,32 @@ export function ModeResourceShowcase({
               </Button>
             ))}
           </div>
-          <Button
-            variant="plain"
-            type="button"
-            className="om-sa-showcase-more"
-            onClick={() => onOpenAllResources(
-              activeFilter === 'brand-kit' ? 'brand-kit'
-                : activeFilter === 'asset' ? 'asset'
-                : activeFilter === 'skills' || activeFilter === 'design-skill' ? 'skills'
-                : mode.pickerCategory,
-            )}
-          >
-            <span>{t('View all')}</span>
-            <RemixIcon name="arrow-right-up-line" size={13} />
-          </Button>
+          {mode.id === 'game' && onOpenGameStudio ? (
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-showcase-more"
+              onClick={onOpenGameStudio}
+            >
+              <span>{t('Go to Game Studio')}</span>
+              <RemixIcon name="arrow-right-up-line" size={13} />
+            </Button>
+          ) : (
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-showcase-more"
+              onClick={() => onOpenAllResources(
+                activeFilter === 'brand-kit' ? 'brand-kit'
+                  : activeFilter === 'asset' ? 'asset'
+                  : activeFilter === 'skills' || activeFilter === 'design-skill' ? 'skills'
+                  : mode.pickerCategory,
+              )}
+            >
+              <span>{t('View all')}</span>
+              <RemixIcon name="arrow-right-up-line" size={13} />
+            </Button>
+          )}
         </div>
 
         {mode.id === 'motion' && activeFilter === 'skills' && (
@@ -826,7 +952,88 @@ export function ModeResourceShowcase({
         )}
 
         <div className="om-sa-showcase-grid" aria-busy={isLoading}>
-          {visibleCurated ? (
+          {visibleGames ? (
+            visibleGames.length === 0 ? (
+              <div className="om-sa-showcase-empty">
+                <p className="om-muted">{t('No matching games')}</p>
+                {onOpenGameStudio && (
+                  <Button
+                    variant="ghost"
+                    className="om-button h-auto"
+                    onClick={onOpenGameStudio}
+                  >
+                    {t('Go to Game Studio')}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              visibleGames.map(game => {
+                const title = localizedGameTitle(game, locale);
+                const desc = localizedGameDescription(game, locale);
+                const cover = coverUrl(game) ?? (game.source === 'mine' ? genreCovers[game.genre] : null);
+                const isMine = activeFilter === 'mine';
+                const mineAttachment = isMine ? toGameResourceAttachment(game, title) : null;
+                const isSelected = isMine
+                  ? Boolean(mineAttachment && selectedKeys.has(resourceKey(mineAttachment)))
+                  : modeOptions?.gameTemplate?.id === game.id;
+
+                return (
+                  <Button
+                    key={game.id}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-showcase-card om-sa-game-showcase-card"
+                    aria-pressed={isSelected}
+                    data-selected={isSelected || undefined}
+                    onClick={() => {
+                      if (isMine && mineAttachment) {
+                        onToggleAttachment(mineAttachment);
+                        return;
+                      }
+                      onChangeModeOptions?.({
+                        gameTemplate: isSelected ? null : game,
+                        ...(!isSelected
+                          ? {
+                              gameGenre: game.genre,
+                              gameStyle: game.style,
+                              gameSetting: game.setting,
+                              gameOrientation: game.orientation ?? 'landscape',
+                              gameMultiplayer: game.multiplayer,
+                            }
+                          : {}),
+                      });
+                    }}
+                  >
+                    <div className="om-sa-showcase-thumb" aria-hidden="true">
+                      {cover ? (
+                        <img src={cover} alt="" loading="lazy" decoding="async" />
+                      ) : (
+                        <div className="om-sa-showcase-icon-fallback" style={{ height: '100%' }}>
+                          <RemixIcon name="gamepad-line" size={24} />
+                        </div>
+                      )}
+                      <div className="om-sa-game-card-badges">
+                        <span className="om-sa-game-card-badge">{t(genreLabels[game.genre])}</span>
+                        {game.multiplayer && (
+                          <span className="om-sa-game-card-badge">{t('Multiplayer')}</span>
+                        )}
+                        {game.orientation === 'portrait' && (
+                          <span className="om-sa-game-card-badge">{t('Portrait')}</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="om-sa-showcase-check" aria-hidden="true">
+                      <RemixIcon name={isSelected ? 'check-line' : 'add-line'} size={13} />
+                    </span>
+                    <div className="om-sa-showcase-meta">
+                      <strong>{title}</strong>
+                      <small>{desc || `${t(genreLabels[game.genre])} · ${game.multiplayer ? t('Multiplayer') : t('Single player')}`}</small>
+                    </div>
+                  </Button>
+                );
+              })
+            )
+          ) : visibleCurated ? (
             visibleCurated.map(card => (
               <Button
                 key={card.id}

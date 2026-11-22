@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import type {
@@ -10,6 +10,7 @@ import type {
   SuperAgentToolCategory,
   SuperAgentToolEvent,
 } from '../../../shared/super-agent';
+import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
@@ -65,30 +66,53 @@ function categoryIcon(category: SuperAgentToolCategory | undefined, status: Supe
   }
 }
 
-function artifactKindIcon(kind: SuperAgentArtifact['kind']): string {
-  switch (kind) {
+function artifactDeliverableMeta(artifact: SuperAgentArtifact): {
+  icon: string;
+  tone: 'coding' | 'image' | 'video' | 'audio' | 'agent';
+  typeLabel: string;
+} {
+  switch (artifact.kind) {
     case 'design-project':
-      return 'layout-line';
+      if (artifact.scenario === 'deck' || artifact.scenario === 'document') {
+        return { icon: 'slideshow-line', tone: 'audio', typeLabel: 'Slides & Docs' };
+      }
+      return { icon: 'layout-line', tone: 'agent', typeLabel: 'Interactive Prototype' };
     case 'motion-project':
-      return 'movie-line';
+      return { icon: 'movie-line', tone: 'video', typeLabel: 'Motion Video' };
     case 'motion-export':
-      return 'clapperboard-line';
+      return { icon: 'clapperboard-line', tone: 'video', typeLabel: 'Motion Video' };
     case 'asset-image':
-      return 'image-line';
+      return { icon: 'image-line', tone: 'image', typeLabel: 'Image Artwork' };
     case 'asset-video':
-      return 'film-line';
+      return { icon: 'film-line', tone: 'video', typeLabel: 'Video Asset' };
     case 'asset-audio':
-      return 'music-2-line';
+      return { icon: 'music-2-line', tone: 'audio', typeLabel: 'Audio Track' };
     case 'brand-kit':
-      return 'palette-line';
+      return { icon: 'palette-line', tone: 'image', typeLabel: 'Brand Kit' };
     case 'game-project':
-      return 'gamepad-line';
+      return { icon: 'sparkling-line', tone: 'agent', typeLabel: 'HTML Game' };
     case 'web':
-      return 'global-line';
+      return { icon: 'global-line', tone: 'coding', typeLabel: 'Web Page' };
     default:
-      return 'file-line';
+      return { icon: 'file-line', tone: 'agent', typeLabel: 'Artifact' };
   }
 }
+
+const RAW_ARTIFACT_SUBTITLES = new Set([
+  'prototype',
+  'website',
+  'deck',
+  'document',
+  'game',
+  'motion',
+  'video',
+  'image',
+  'audio',
+  'brand-kit',
+  'design-project',
+  'motion-project',
+  'game-project',
+]);
 
 function collectTurnFiles(workItems: SuperAgentMessage[]): SuperAgentFileOperation[] {
   const byPath = new Map<string, SuperAgentFileOperation>();
@@ -241,40 +265,46 @@ function ToolStepRow({
         {ev.summary && ev.summary !== ev.label && (
           <span className="om-sa-tool-summary" title={ev.summary}>{ev.summary}</span>
         )}
-        {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
-          <span className="om-sa-diff-badges">
-            {fileOp.addedLines !== undefined && fileOp.addedLines > 0 && (
-              <span className="om-sa-diff-add">+{fileOp.addedLines}</span>
-            )}
-            {fileOp.removedLines !== undefined && fileOp.removedLines > 0 && (
-              <span className="om-sa-diff-del">-{fileOp.removedLines}</span>
-            )}
-          </span>
-        )}
-        {ev.exitCode !== undefined && (
-          <span className="om-sa-exit-pill" data-ok={ev.exitCode === 0 || undefined}>
-            {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
-          </span>
-        )}
-        {ev.durationMs !== undefined && status !== 'running' && (
-          <span className="om-sa-step-time">{formatElapsedDuration(ev.durationMs)}</span>
-        )}
-        {ev.artifactId && (
-          <Button
-            variant="plain"
-            type="button"
-            className="om-sa-tool-view-btn"
-            onClick={event => {
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenArtifactId(ev.artifactId!);
-            }}
-          >
-            <span>{t('View in Viewer')}</span>
-            <RemixIcon name="arrow-right-up-line" size={13} />
-          </Button>
-        )}
-        {hasBody && <RemixIcon name="arrow-down-s-line" size={14} />}
+        <span className="om-sa-step-trail">
+          {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
+            <span className="om-sa-diff-badges">
+              {fileOp.addedLines !== undefined && fileOp.addedLines > 0 && (
+                <span className="om-sa-diff-add">+{fileOp.addedLines}</span>
+              )}
+              {fileOp.removedLines !== undefined && fileOp.removedLines > 0 && (
+                <span className="om-sa-diff-del">-{fileOp.removedLines}</span>
+              )}
+            </span>
+          )}
+          {ev.exitCode !== undefined && (
+            <span className="om-sa-exit-pill" data-ok={ev.exitCode === 0 || undefined}>
+              {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
+            </span>
+          )}
+          {ev.durationMs !== undefined && status !== 'running' && (
+            <span className="om-sa-step-time">{formatElapsedDuration(ev.durationMs)}</span>
+          )}
+          {ev.artifactId && (
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-tool-view-btn"
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenArtifactId(ev.artifactId!);
+              }}
+            >
+              <span>{t('View in Viewer')}</span>
+              <RemixIcon name="arrow-right-up-line" size={13} />
+            </Button>
+          )}
+          {hasBody && (
+            <span className="om-sa-step-chevron" aria-hidden="true">
+              <RemixIcon name="arrow-down-s-line" size={14} />
+            </span>
+          )}
+        </span>
       </summary>
       {hasBody && (
         <div className="om-sa-tool-body">
@@ -297,16 +327,16 @@ function ToolStepRow({
             </div>
           ))}
           {ev.inputPreview && ev.category !== 'command' && diffFiles.length === 0 && (
-            <>
-              <span className="om-eyebrow">{t('Input')}</span>
-              <pre className="om-code-block">{ev.inputPreview}</pre>
-            </>
+            <div className="om-sa-tool-section">
+              <span className="om-sa-tool-section-label">{t('Input')}</span>
+              <pre className="om-sa-tool-pre">{ev.inputPreview}</pre>
+            </div>
           )}
           {ev.outputPreview && (
-            <>
-              <span className="om-eyebrow">{t('Output')}</span>
-              <pre className="om-code-block">{ev.outputPreview}</pre>
-            </>
+            <div className="om-sa-tool-section">
+              <span className="om-sa-tool-section-label">{t('Output')}</span>
+              <pre className="om-sa-tool-pre">{ev.outputPreview}</pre>
+            </div>
           )}
         </div>
       )}
@@ -333,13 +363,23 @@ function ReasoningStepRow({ message }: { message: SuperAgentMessage }) {
         {!isStreaming && message.text && (
           <span className="om-sa-tool-summary">{message.text.slice(0, 120)}</span>
         )}
-        <RemixIcon name="arrow-down-s-line" size={14} />
+        <span className="om-sa-step-trail">
+          <span className="om-sa-step-chevron" aria-hidden="true">
+            <RemixIcon name="arrow-down-s-line" size={14} />
+          </span>
+        </span>
       </summary>
       {message.text && (
         <div className="om-sa-reasoning-body">{message.text}</div>
       )}
     </details>
   );
+}
+
+function displayChangedFilePath(raw: string): string {
+  const scratchMatch = raw.match(/super-agent\/work\/[^/]+\/(.+)$/);
+  if (scratchMatch?.[1]) return scratchMatch[1];
+  return raw;
 }
 
 function FilesChangedCard({
@@ -350,7 +390,8 @@ function FilesChangedCard({
   onCopyText: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [openDiffs, setOpenDiffs] = useState<Record<string, boolean>>({});
   if (!files.length) return null;
 
   const totalAdd = files.reduce((sum, f) => sum + (f.addedLines ?? 0), 0);
@@ -381,33 +422,70 @@ function FilesChangedCard({
       </Button>
       {expanded && (
         <div className="om-sa-files-changed-list">
-          {files.map(file => (
-            <div key={file.path} className="om-sa-file-change-item">
-              <div className="om-sa-file-change-row">
-                <span className="om-sa-file-action-badge" data-action={file.action}>
-                  {file.action === 'create' ? 'A' : file.action === 'delete' ? 'D' : 'M'}
-                </span>
-                <Button
-                  variant="plain"
-                  type="button"
-                  className="om-sa-file-path-btn"
-                  title={t('Copy path')}
-                  onClick={() => onCopyText(file.path)}
-                >
-                  {file.path}
-                </Button>
-                <span className="om-sa-diff-badges">
-                  {file.addedLines !== undefined && file.addedLines > 0 && (
-                    <span className="om-sa-diff-add">+{file.addedLines}</span>
-                  )}
-                  {file.removedLines !== undefined && file.removedLines > 0 && (
-                    <span className="om-sa-diff-del">-{file.removedLines}</span>
-                  )}
-                </span>
+          {files.map(file => {
+            const hasDiff = Boolean(file.diffPreview);
+            const diffOpen = Boolean(openDiffs[file.path]);
+            const labelPath = displayChangedFilePath(file.path);
+            return (
+              <div key={file.path} className="om-sa-file-change-item">
+                <div className="om-sa-file-change-row">
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-file-row-trigger"
+                    aria-expanded={hasDiff ? diffOpen : undefined}
+                    title={file.path}
+                    onClick={() => {
+                      if (hasDiff) {
+                        setOpenDiffs(prev => ({ ...prev, [file.path]: !prev[file.path] }));
+                      } else {
+                        onCopyText(file.path);
+                      }
+                    }}
+                  >
+                    <span
+                      className="om-sa-file-row-chevron"
+                      data-open={diffOpen || undefined}
+                      data-hidden={!hasDiff || undefined}
+                      aria-hidden="true"
+                    >
+                      <RemixIcon name="arrow-down-s-line" size={13} />
+                    </span>
+                    <span className="om-sa-file-action-badge" data-action={file.action}>
+                      {file.action === 'create' ? 'A' : file.action === 'delete' ? 'D' : 'M'}
+                    </span>
+                    <span className="om-sa-file-path-text">{labelPath}</span>
+                    <span className="om-sa-file-row-trail">
+                      {(file.addedLines !== undefined && file.addedLines > 0) || (file.removedLines !== undefined && file.removedLines > 0) ? (
+                        <span className="om-sa-diff-badges">
+                          {file.addedLines !== undefined && file.addedLines > 0 && (
+                            <span className="om-sa-diff-add">+{file.addedLines}</span>
+                          )}
+                          {file.removedLines !== undefined && file.removedLines > 0 && (
+                            <span className="om-sa-diff-del">-{file.removedLines}</span>
+                          )}
+                        </span>
+                      ) : null}
+                    </span>
+                  </Button>
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    className="om-sa-file-copy-btn"
+                    aria-label={t('Copy path')}
+                    title={t('Copy path')}
+                    onClick={() => onCopyText(file.path)}
+                    icon={<RemixIcon name="file-copy-line" size={12} />}
+                  />
+                </div>
+                {hasDiff && diffOpen && file.diffPreview && (
+                  <div className="om-sa-file-diff-drawer">
+                    <UnifiedDiffView diff={file.diffPreview} />
+                  </div>
+                )}
               </div>
-              {file.diffPreview && <UnifiedDiffView diff={file.diffPreview} />}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -418,16 +496,22 @@ function WorkLogSection({
   turn,
   isActiveTurn,
   onOpenArtifactId,
-  onCopyText,
 }: {
   turn: TurnGroup;
   isActiveTurn: boolean;
   onOpenArtifactId: (artifactId: string) => void;
-  onCopyText: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const shouldAutoExpand = isActiveTurn || turn.hasRunning || turn.hasFailure || turn.assistantItems.length === 0;
+  const isTurnFinished = !isActiveTurn && !turn.hasRunning && turn.assistantItems.length > 0;
+  const shouldAutoExpand = !isTurnFinished;
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (isTurnFinished) {
+      setUserToggled(null);
+    }
+  }, [isTurnFinished]);
+
   const expanded = userToggled ?? shouldAutoExpand;
 
   if (!turn.workItems.length) return null;
@@ -452,20 +536,15 @@ function WorkLogSection({
         aria-expanded={expanded}
         onClick={() => setUserToggled(prev => !(prev ?? shouldAutoExpand))}
       >
-        <span className="om-sa-work-chevron" data-open={expanded || undefined}>
-          <RemixIcon name="arrow-down-s-line" size={14} />
-        </span>
         <span className="om-sa-work-summary-label">{summaryTitle}</span>
-        {turn.changedFiles.length > 0 && (
-          <span className="om-sa-work-pill">
-            {t('{count} files', { count: turn.changedFiles.length })}
-          </span>
-        )}
-        {turn.hasFailure && (
+        {!isTurnFinished && turn.hasFailure && (
           <span className="om-sa-work-pill" data-tone="danger">
             {t('Needs attention')}
           </span>
         )}
+        <span className="om-sa-work-chevron" data-open={expanded || undefined}>
+          <RemixIcon name="arrow-down-s-line" size={14} />
+        </span>
       </Button>
       {expanded && (
         <div className="om-sa-work-items">
@@ -481,9 +560,6 @@ function WorkLogSection({
             ),
           )}
         </div>
-      )}
-      {!isActiveTurn && turn.changedFiles.length > 0 && (
-        <FilesChangedCard files={turn.changedFiles} onCopyText={onCopyText} />
       )}
     </div>
   );
@@ -554,6 +630,127 @@ function LiveTurnStatusBar({
   );
 }
 
+function isLongUserQuery(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length > 260) return true;
+  return trimmed.split(/\r?\n/).length > 4;
+}
+
+function UserMessageBubble({ text }: { text: string }) {
+  const { t } = useI18n();
+  const isLong = useMemo(() => isLongUserQuery(text), [text]);
+  const lineCount = useMemo(() => text.trim().split(/\r?\n/).length, [text]);
+  const [pinnedOpen, setPinnedOpen] = useState(false);
+  const [hoverExpanded, setHoverExpanded] = useState(false);
+  const hoverTimerRef = useRef<number | null>(null);
+  const suppressHoverRef = useRef(false);
+
+  useEffect(() => () => {
+    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+  }, []);
+
+  if (!isLong) {
+    return <div className="om-sa-user-bubble">{text}</div>;
+  }
+
+  const expanded = pinnedOpen || hoverExpanded;
+
+  const clearHoverTimer = () => {
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
+
+  const handleMouseEnter = () => {
+    if (pinnedOpen || hoverExpanded || suppressHoverRef.current) return;
+    clearHoverTimer();
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = null;
+      setHoverExpanded(true);
+    }, 240);
+  };
+
+  const handleMouseLeave = () => {
+    clearHoverTimer();
+    suppressHoverRef.current = false;
+    if (!pinnedOpen && hoverExpanded) {
+      setHoverExpanded(false);
+    }
+  };
+
+  const handleExpandClick = () => {
+    clearHoverTimer();
+    suppressHoverRef.current = false;
+    setPinnedOpen(true);
+    setHoverExpanded(false);
+  };
+
+  const handleCollapseClick = () => {
+    clearHoverTimer();
+    suppressHoverRef.current = true;
+    setPinnedOpen(false);
+    setHoverExpanded(false);
+  };
+
+  const metaHint = lineCount > 4
+    ? t('{count} lines', { count: lineCount })
+    : `${text.trim().length.toLocaleString()} chars`;
+
+  return (
+    <div
+      className="om-sa-user-bubble om-sa-user-bubble-collapsible"
+      data-expanded={expanded || undefined}
+      data-collapsed={!expanded || undefined}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      {expanded && (
+        <div className="om-sa-user-bubble-bar">
+          <span className="om-sa-user-bubble-meta">
+            {t('Full prompt')} · {metaHint}
+          </span>
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-user-collapse-pill"
+            aria-expanded="true"
+            onClick={handleCollapseClick}
+          >
+            <span>{t('Collapse')}</span>
+            <span className="om-sa-user-toggle-chevron" data-open aria-hidden="true">
+              <RemixIcon name="arrow-down-s-line" size={14} />
+            </span>
+          </Button>
+        </div>
+      )}
+
+      <div
+        className="om-sa-user-bubble-text"
+        onClick={!expanded ? handleExpandClick : undefined}
+      >
+        {text}
+      </div>
+
+      <Button
+        variant="plain"
+        type="button"
+        className="om-sa-user-bubble-toggle"
+        aria-expanded={expanded}
+        onClick={expanded ? handleCollapseClick : handleExpandClick}
+      >
+        <span className="om-sa-user-toggle-hint">{metaHint}</span>
+        <span className="om-sa-user-toggle-cta">
+          <span>{expanded ? t('Collapse') : t('Show full prompt')}</span>
+          <span className="om-sa-user-toggle-chevron" data-open={expanded || undefined} aria-hidden="true">
+            <RemixIcon name="arrow-down-s-line" size={14} />
+          </span>
+        </span>
+      </Button>
+    </div>
+  );
+}
+
 export function ExecutionTimeline({
   chat,
   busy,
@@ -592,21 +789,42 @@ export function ExecutionTimeline({
                 <div className="om-sa-message-body">
                   {turn.user.attachments && turn.user.attachments.length > 0 && (
                     <div className="om-sa-msg-attachments">
-                      {turn.user.attachments.map(att => (
-                        <Button
-                          key={resourceKey(att)}
-                          variant="plain"
-                          type="button"
-                          className="om-sa-attachment-chip"
-                          onClick={() => onPreviewAttachment(att)}
-                        >
-                          <RemixIcon name={resourceIcon(att)} size={13} />
-                          <span>{att.title}</span>
-                        </Button>
-                      ))}
+                      {turn.user.attachments.map(att => {
+                        const isBrowserAnnotation = att.kind === 'browser-annotation';
+                        const chipTitle = isBrowserAnnotation
+                          ? (att.annotation?.comment || att.title)
+                          : att.title;
+                        const tooltipLabel = isBrowserAnnotation
+                          ? [
+                              att.annotation?.element?.componentName,
+                              att.annotation?.element?.selector,
+                              att.annotation?.pageUrl || att.subtitle,
+                            ].filter(Boolean).join(' · ')
+                          : '';
+                        const chip = (
+                          <Button
+                            key={resourceKey(att)}
+                            variant="plain"
+                            type="button"
+                            className="om-sa-attachment-chip"
+                            data-kind={isBrowserAnnotation ? 'browser-annotation' : undefined}
+                            onClick={() => onPreviewAttachment(att)}
+                          >
+                            {isBrowserAnnotation && att.previewUrl ? (
+                              <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
+                            ) : (
+                              <RemixIcon name={resourceIcon(att)} size={13} />
+                            )}
+                            <span>{chipTitle}</span>
+                          </Button>
+                        );
+                        return isBrowserAnnotation && tooltipLabel ? (
+                          <Tooltip key={resourceKey(att)} label={tooltipLabel}>{chip}</Tooltip>
+                        ) : chip;
+                      })}
                     </div>
                   )}
-                  <div className="om-sa-user-bubble">{turn.user.text}</div>
+                  <UserMessageBubble text={turn.user.text} />
                 </div>
               </article>
             )}
@@ -615,14 +833,10 @@ export function ExecutionTimeline({
               turn={turn}
               isActiveTurn={isActiveTurn}
               onOpenArtifactId={onOpenArtifactId}
-              onCopyText={onCopyText}
             />
 
             {turn.assistantItems.map(msg => (
               <article key={msg.id} className="om-sa-message" data-role="assistant">
-                <span className="om-creation-icon om-sa-avatar" data-tone="agent" aria-hidden="true">
-                  <RemixIcon name="sparkling-fill" size={16} />
-                </span>
                 <div className="om-sa-message-body">
                   <div className="om-sa-assistant-content">
                     <SimpleMarkdown
@@ -636,26 +850,43 @@ export function ExecutionTimeline({
             ))}
 
             {turn.artifacts.length > 0 && (
-              <div className="om-sa-deliverables">
-                {turn.artifacts.map(artifact => (
-                  <Button
-                    key={artifact.id}
-                    variant="plain"
-                    type="button"
-                    className="om-sa-deliverable-card"
-                    onClick={() => onOpenArtifactId(artifact.id)}
-                  >
-                    <span className="om-sa-deliverable-icon" aria-hidden="true">
-                      <RemixIcon name={artifactKindIcon(artifact.kind)} size={15} />
-                    </span>
-                    <span className="om-sa-deliverable-meta">
-                      <strong>{artifact.title}</strong>
-                      {artifact.subtitle && <small>{artifact.subtitle}</small>}
-                    </span>
-                    <RemixIcon name="arrow-right-up-line" size={14} />
-                  </Button>
-                ))}
+              <div className="om-sa-deliverables" data-count={turn.artifacts.length === 1 ? 'single' : 'multi'}>
+                {turn.artifacts.map(artifact => {
+                  const meta = artifactDeliverableMeta(artifact);
+                  const rawSub = (artifact.subtitle ?? '').trim();
+                  const subDetail = rawSub && !RAW_ARTIFACT_SUBTITLES.has(rawSub.toLowerCase()) ? rawSub : '';
+                  const subtitleText = subDetail ? `${t(meta.typeLabel)} · ${subDetail}` : t(meta.typeLabel);
+                  return (
+                    <Button
+                      key={artifact.id}
+                      variant="plain"
+                      type="button"
+                      className="om-sa-deliverable-card"
+                      onClick={() => onOpenArtifactId(artifact.id)}
+                    >
+                      <span className="om-sa-deliverable-icon" data-tone={meta.tone} aria-hidden="true">
+                        {artifact.kind === 'asset-image' && artifact.url ? (
+                          <img className="om-sa-deliverable-thumb" src={artifact.url} alt="" />
+                        ) : (
+                          <RemixIcon name={meta.icon} size={20} />
+                        )}
+                      </span>
+                      <span className="om-sa-deliverable-meta">
+                        <strong>{artifact.title}</strong>
+                        <small>{subtitleText}</small>
+                      </span>
+                      <span className="om-sa-deliverable-action" aria-hidden="true">
+                        <span>{t('Open')}</span>
+                        <RemixIcon name="arrow-right-up-line" size={14} />
+                      </span>
+                    </Button>
+                  );
+                })}
               </div>
+            )}
+
+            {!isActiveTurn && turn.changedFiles.length > 0 && (
+              <FilesChangedCard files={turn.changedFiles} onCopyText={onCopyText} />
             )}
 
             {!isActiveTurn && turn.assistantItems.length > 0 && (

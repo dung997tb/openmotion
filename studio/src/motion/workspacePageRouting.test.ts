@@ -265,10 +265,10 @@ it('routes Super Agent mode and selected conversation URLs cleanly without leaki
 
   const fromStudio = 'http://localhost/?page=design&scene=prototype';
   const agentHref = workspacePageHref(fromStudio, { superAgent: true, superAgentChat: chatId, templates: false });
-  expect(agentHref).toBe(`/?page=agent&chat=${chatId}`);
+  expect(agentHref).toBe(`/agent/${chatId}`);
 
   const backToExplore = new URL(workspacePageHref(`http://localhost${agentHref}`, { explore: true }), 'http://localhost');
-  expect(backToExplore.searchParams.get('page')).toBe('explore');
+  expect(backToExplore.pathname).toBe('/explore');
   expect(backToExplore.searchParams.has('chat')).toBe(false);
 });
 
@@ -413,4 +413,27 @@ it('restores a Skill brief in the unified editor and ignores unknown Skills ther
 it('still parses bookmarked legacy Studio scene links', () => {
   expect(readWorkspacePage('?page=cinema&scene=text-to-video').studio).toMatchObject({ studio: { id: 'cinema' }, scene: { id: 'text-to-video' } });
   expect(readWorkspacePage('?page=sound&scene=music').studio).toMatchObject({ studio: { id: 'sound' }, scene: { id: 'music' } });
+});
+
+it('round-trips ?game=<id> on /studios/game and clears it when navigating away', () => {
+  const parsed = readWorkspacePage('?game=game-123', '', '/studios/game');
+  expect(parsed.specialty?.id).toBe('game');
+  expect(parsed.gameId).toBe('game-123');
+
+  const opened = workspacePageHref('http://localhost/agent/chat-1', {
+    specialty: parsed.specialty,
+    gameId: 'game-123',
+    skill: null,
+    templates: false,
+  });
+  expect(opened).toBe('/studios/game?game=game-123');
+
+  const withOverlay = workspacePageHref('http://localhost/studios/game?game=game-123', { templates: true });
+  expect(withOverlay).toBe('/studios/game?game=game-123&templates=1');
+
+  const cleared = workspacePageHref('http://localhost/studios/game?game=game-123', { specialty: parsed.specialty, gameId: null });
+  expect(cleared).toBe('/studios/game');
+
+  const leftGame = workspacePageHref('http://localhost/studios/game?game=game-123', { superAgent: true, superAgentChat: null });
+  expect(leftGame).toBe('/agent');
 });

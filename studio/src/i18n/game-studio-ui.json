@@ -137,7 +137,9 @@
     "Could not copy. Select the instruction and copy it.": "复制失败，请选中下面的指令手动复制。",
     "Agent instruction": "给 Agent 的指令",
     "Loading instruction…": "正在加载指令…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。"
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。",
+    "Continue in Super Agent": "在 Super Agent 中继续",
+    "Edit & optimize in Super Agent": "在 Super Agent 中二创与优化"
   },
   "ja": {
     "3D": "3D",
@@ -277,7 +279,9 @@
     "Could not copy. Select the instruction and copy it.": "コピーできませんでした。指示を選択してコピーしてください。",
     "Agent instruction": "エージェントへの指示",
     "Loading instruction…": "指示を読み込み中…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。"
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。",
+    "Continue in Super Agent": "Super Agent で続ける",
+    "Edit & optimize in Super Agent": "Super Agent で編集・最適化"
   },
   "ko": {
     "3D": "3D",
@@ -417,7 +421,9 @@
     "Could not copy. Select the instruction and copy it.": "복사하지 못했습니다. 지시를 선택해 복사하세요.",
     "Agent instruction": "Agent 지시",
     "Loading instruction…": "지시를 불러오는 중…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다.",
+    "Continue in Super Agent": "Super Agent에서 계속하기",
+    "Edit & optimize in Super Agent": "Super Agent에서 편집 및 최적화"
   },
   "de": {
     "3D": "3D",
@@ -557,7 +563,9 @@
     "Could not copy. Select the instruction and copy it.": "Kopieren fehlgeschlagen. Markiere die Anweisung und kopiere sie.",
     "Agent instruction": "Anweisung für den Agent",
     "Loading instruction…": "Anweisung wird geladen…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst.",
+    "Continue in Super Agent": "In Super Agent fortfahren",
+    "Edit & optimize in Super Agent": "In Super Agent bearbeiten & optimieren"
   },
   "fr": {
     "3D": "3D",
@@ -697,7 +705,9 @@
     "Could not copy. Select the instruction and copy it.": "Copie impossible. Sélectionnez l’instruction pour la copier.",
     "Agent instruction": "Instruction pour l’agent",
     "Loading instruction…": "Chargement de l’instruction…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même.",
+    "Continue in Super Agent": "Continuer dans Super Agent",
+    "Edit & optimize in Super Agent": "Modifier et optimiser dans Super Agent"
   },
   "ru": {
     "3D": "3D",
@@ -837,7 +847,9 @@
     "Could not copy. Select the instruction and copy it.": "Не удалось скопировать. Выделите инструкцию и скопируйте вручную.",
     "Agent instruction": "Инструкция для агента",
     "Loading instruction…": "Загрузка инструкции…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами.",
+    "Continue in Super Agent": "Продолжить в Super Agent",
+    "Edit & optimize in Super Agent": "Редактировать и улучшать в Super Agent"
   },
   "es": {
     "3D": "3D",
@@ -977,7 +989,9 @@
     "Could not copy. Select the instruction and copy it.": "No se pudo copiar. Selecciona la instrucción y cópiala.",
     "Agent instruction": "Instrucción para el agente",
     "Loading instruction…": "Cargando instrucción…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú.",
+    "Continue in Super Agent": "Continuar en Super Agent",
+    "Edit & optimize in Super Agent": "Editar y optimizar en Super Agent"
   },
   "pt-BR": {
     "3D": "3D",
@@ -1117,7 +1131,9 @@
     "Could not copy. Select the instruction and copy it.": "Não foi possível copiar. Selecione a instrução e copie.",
     "Agent instruction": "Instrução para o agente",
     "Loading instruction…": "Carregando instrução…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo.",
+    "Continue in Super Agent": "Continuar no Super Agent",
+    "Edit & optimize in Super Agent": "Editar e otimizar no Super Agent"
   },
   "it": {
     "3D": "3D",
@@ -1257,7 +1273,9 @@
     "Could not copy. Select the instruction and copy it.": "Copia non riuscita. Seleziona l’istruzione e copiala.",
     "Agent instruction": "Istruzione per l’agente",
     "Loading instruction…": "Caricamento istruzione…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu.",
+    "Continue in Super Agent": "Continua in Super Agent",
+    "Edit & optimize in Super Agent": "Modifica e ottimizza in Super Agent"
   },
   "tr": {
     "3D": "3D",
@@ -1397,6 +1415,8 @@
     "Could not copy. Select the instruction and copy it.": "Kopyalanamadı. Talimatı seçip kopyala.",
     "Agent instruction": "Agent talimatı",
     "Loading instruction…": "Talimat yükleniyor…",
-    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın."
+    "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın.",
+    "Continue in Super Agent": "Super Agent'ta devam et",
+    "Edit & optimize in Super Agent": "Super Agent'ta düzenle ve iyileştir"
   }
 }

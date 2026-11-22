@@ -1,4 +1,4 @@
-import type { SuperAgentResourceAttachment } from './super-agent.ts';
+import type { SuperAgentArtifact, SuperAgentResourceAttachment } from './super-agent.ts';
 
 export type CapabilityDomainId =
   | 'motion'
@@ -228,6 +228,7 @@ export type CapabilityResourceRef =
 export type SuperAgentHandoffPayload = {
   prompt: string;
   attachments?: SuperAgentResourceAttachment[];
+  initialArtifact?: Partial<SuperAgentArtifact>;
   mode?: 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
   title?: string;
   autoSend?: boolean;
@@ -409,8 +410,9 @@ export function buildResourceMcpPrompt(
     case 'game-project':
       return [
         `Use OpenMotion MCP tools to inspect or extend Game Studio project "${ref.title}" (${ref.id}).`,
-        `1. Inspect files with openmotion_game_get(id="${ref.id}") and read code via openmotion_game_read_file.`,
-        `2. Write updates via openmotion_game_write_files(id="${ref.id}"), validate via openmotion_game_validate(id="${ref.id}"), and capture cover / publish when requested.`,
+        `1. Read openmotion://workflow/game/start, inspect files with openmotion_game_get(id="${ref.id}"), and read code via openmotion_game_read_file.`,
+        `2. Optionally generate sprites, backgrounds, or sound via openmotion_assets_use(action="generate") and reference them with /motion-api/assets/<assetId>/versions/<versionId>/media.`,
+        `3. Write updates via openmotion_game_write_files(id="${ref.id}"), validate via openmotion_game_validate(id="${ref.id}"), and present the playable game via openmotion_present_artifact(kind="game-project", projectId="${ref.id}").`,
         customPrompt ? `Brief: ${customPrompt}` : null,
         localeLine || null,
       ].filter(Boolean).join('\n');
@@ -452,7 +454,13 @@ function defaultModeForRef(ref: CapabilityResourceRef): SuperAgentHandoffPayload
 
 export function buildSuperAgentHandoff(
   ref: CapabilityResourceRef,
-  options: { prompt?: string; locale?: string; autoSend?: boolean } = {},
+  options: {
+    prompt?: string;
+    locale?: string;
+    autoSend?: boolean;
+    newChat?: boolean;
+    initialArtifact?: Partial<SuperAgentArtifact>;
+  } = {},
 ): SuperAgentHandoffPayload {
   const custom = options.prompt?.trim();
   const baseAttachment = capabilityRefToAttachment(ref);
@@ -505,8 +513,10 @@ export function buildSuperAgentHandoff(
   return {
     prompt,
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(options.initialArtifact ? { initialArtifact: options.initialArtifact } : {}),
     mode: defaultModeForRef(ref),
     title: ref.title,
     autoSend: options.autoSend,
+    ...(options.newChat !== undefined ? { newChat: options.newChat } : {}),
   };
 }

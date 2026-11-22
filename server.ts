@@ -59,6 +59,8 @@ import { brandKitsFor } from './gateway/brand-kits.ts';
 import { AssetLibrary } from './gateway/asset-library.ts';
 import { scenarioHttp } from './gateway/scenario-http.ts';
 import { designHttp } from './design-projects.ts';
+import { CloudShareError, cloudShareFor } from './gateway/cloud-share.ts';
+import type { CloudShareKind } from './shared/cloud-share.ts';
 
 const sharedStore = new WorkspaceStore();
 export type Service = { trackingHosts?: Map<string, { host: HostContext; createdAt: number }>; diagnostics?: { running: boolean; lastExport: number; events: number; window: number }; studio?: Studio; runtimeRoot?: string; nativeRoot?: string; ffmpeg?: boolean; switching?: boolean; studioPort?: number; browser?: WorkspaceBrowser; editorToken?: string; ensureStudio?: (projectId?: string) => Promise<Studio>; launchStudio?: (directory: string, port: number) => Promise<Studio>; phase1?: Phase1Service; phase1Mutation?: Promise<void>; tracking?: OmTracking };
@@ -531,7 +533,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
           return json(res, 200, { conversation: await superAgent.create(data) });
         }
       }
-      const saBrowser = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)\/browser\/([a-z0-9-]{1,80})(?:\/(events|command|resize|input))?$/);
+      const saBrowser = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)\/browser\/([a-z0-9-]{1,80})(?:\/(events|command|resize|input|inspect|screenshot|console))?$/);
       if (saBrowser) {
         const [, chatId, tabId, action] = saBrowser;
         await superAgent.get(chatId);
@@ -545,15 +547,66 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         if (!action && req.method === 'DELETE') { await browser.remove(browserSession, tabId); return json(res, 200, { closed: true }); }
         const tab = await browser.get(browserSession, tabId);
         if (action === 'events' && req.method === 'GET') { await tab.watch(res); return; }
+        if (action === 'console' && req.method === 'GET') { return json(res, 200, { entries: tab.getConsoleEntries() }); }
+        if (action === 'console' && req.method === 'DELETE') { tab.clearConsoleEntries(); return json(res, 200, { cleared: true }); }
         if (req.method === 'POST') {
           const data = await input(req);
-          if (action === 'command') await tab.command(data.action, data.url);
+          if (action === 'command') await tab.command(data.action, data.url ?? data.value);
           else if (action === 'resize') await tab.resize(data.width, data.height, data.dpr);
           else if (action === 'input') await tab.input(data);
+          else if (action === 'inspect') return json(res, 200, await tab.inspectAt(data.x, data.y));
+          else if (action === 'screenshot') return json(res, 200, await tab.screenshot(data.clip));
           else throw new Error('未知浏览器操作');
           return json(res, 200, tab.state);
         }
         return json(res, 405, { error: '浏览器操作不支持此请求方式' });
+      }
+      const saAnnotations = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)\/annotations(?:\/([a-z0-9-]{1,80}\.png))?$/);
+      if (saAnnotations) {
+        const [, chatId, filename] = saAnnotations;
+        if (!filename && req.method === 'POST') {
+          const data = await input(req, 12 * 1024 * 1024);
+          const rawUrl = typeof data.dataUrl === 'string' ? data.dataUrl : '';
+          const matched = /^data:image\/png;base64,([a-z0-9+/=]+)$/i.exec(rawUrl);
+          if (!matched) throw new Error('无效标注截图格式');
+          const saved = await superAgent.saveAnnotationImage(chatId, Buffer.from(matched[1], 'base64'));
+          return json(res, 200, {
+            id: saved.id,
+            screenshotUrl: `/motion-api/super-agent/chats/${encodeURIComponent(chatId)}/annotations/${saved.filename}`,
+            screenshotPath: saved.path,
+          });
+        }
+        if (filename && req.method === 'GET') {
+          const buf = await superAgent.readAnnotationImage(chatId, filename);
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=3600' });
+          res.end(buf);
+          return;
+        }
+        return json(res, 405, { error: 'Unsupported Super Agent annotation request' });
+      }
+      const saPreviewSnapshot = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)\/preview-snapshot$/);
+      if (saPreviewSnapshot) {
+        const [, chatId] = saPreviewSnapshot;
+        await superAgent.get(chatId);
+        if (req.method !== 'POST') return json(res, 405, { error: 'Unsupported Super Agent snapshot request' });
+        if (!context.runtimeRoot) throw new Error('浏览器服务尚未就绪');
+        const data = await input(req);
+        const rawPath = typeof data.path === 'string' ? data.path.trim() : '';
+        if (
+          !rawPath
+          || rawPath.includes('..')
+          || rawPath.includes('\\')
+          || !/^\/(?:motion-api|api)\/(?:design\/raw\/|games\/[^/]+\/play\/)[^\s#]*$/.test(rawPath)
+        ) {
+          throw new Error('无效预览路径');
+        }
+        const parsedTarget = new URL(rawPath, originUrl);
+        if (parsedTarget.origin !== new URL(originUrl).origin) {
+          throw new Error('无效预览路径');
+        }
+        parsedTarget.searchParams.delete('omBridge');
+        const browser = context.browser ??= new WorkspaceBrowser(context.runtimeRoot);
+        return json(res, 200, await browser.snapshot(parsedTarget.href, { width: data.width, height: data.height, dpr: 1 }));
       }
       const saChat = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)(?:\/(events|turn|stop|approve))?$/);
       if (saChat) {
@@ -565,7 +618,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         }
         if (action === 'events' && req.method === 'GET') { await superAgent.subscribe(id, res); return; }
         if (req.method === 'POST') {
-          const data = req.headers['content-type']?.includes('application/json') ? await input(req, 256 * 1024) : {};
+          const data = req.headers['content-type']?.includes('application/json') ? await input(req, 512 * 1024) : {};
           if (action === 'turn') {
             return json(res, 200, {
               conversation: await superAgent.start(id, data, {
@@ -605,6 +658,31 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
     if (motionRequest && url.pathname.startsWith('/api/assets/') && await assetHttp(req, res, url, store)) return;
     if (motionRequest && await brandKitHttp(req, res, url, store.directory, input)) return;
     if ((url.pathname === '/api/games' || url.pathname.startsWith('/api/games/')) && await gameHttp(req, res, url, (store.workspaceStore ?? store).directory, input, context.runtimeRoot)) return;
+    const cloudShareMatch = url.pathname.match(/^\/api\/cloud-share\/([^/]+)\/([^/]+)(?:\/(publish|stop|resume))?$/);
+    if (cloudShareMatch) {
+      const [, rawKind, rawProjectId, action] = cloudShareMatch;
+      let kind: CloudShareKind;
+      let projectId: string;
+      try {
+        kind = decodeURIComponent(rawKind) as CloudShareKind;
+        projectId = decodeURIComponent(rawProjectId);
+      } catch {
+        return json(res, 400, { error: 'Invalid cloud share path', code: 'CLOUD_SHARE_INVALID_PROJECT_ID' });
+      }
+      const cloud = cloudShareFor(store.workspaceStore ?? store, gatewayFor(store, context.tracking).account);
+      try {
+        if (!action && req.method === 'GET') return json(res, 200, await cloud.status(kind, projectId));
+        if (action === 'publish' && req.method === 'POST') return json(res, 200, await cloud.publish(kind, projectId));
+        if (action === 'stop' && req.method === 'POST') return json(res, 200, await cloud.stop(kind, projectId));
+        if (action === 'resume' && req.method === 'POST') return json(res, 200, await cloud.resume(kind, projectId));
+        return json(res, 405, { error: 'Unsupported cloud share request' });
+      } catch (error) {
+        if (error instanceof CloudShareError) {
+          return json(res, error.status, { error: error.message, code: error.code });
+        }
+        throw error;
+      }
+    }
     if (motionRequest && url.pathname.startsWith('/api/design/') && await designHttp(req, res, url, (store.workspaceStore ?? store).directory, new URL(editorUrl).origin, input, ref => new AssetLibrary(store.workspaceStore ?? store).resolve(ref))) return;
     if (motionRequest && ['/api/diagnostics', '/api/diagnostics/events'].includes(url.pathname)) {
       // Downloads are POST-only: cross-origin links must not trigger a collection.

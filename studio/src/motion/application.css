@@ -685,7 +685,8 @@
 
 .om-runtime-nav-entry { margin-bottom: var(--motion-space-4); border: 1px solid var(--motion-border-subtle); background: var(--motion-inset); transition: background var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out); }
 .om-runtime-page { container-type: inline-size; container-name: runtime-page; min-width: 0; }
-.om-runtime-page .om-button { white-space: nowrap; flex-shrink: 0; transition: background var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out); }
+[data-motion-studio] .om-runtime-page :is(.om-field:has(input):not(:has(textarea)), .om-select-trigger, .om-button) { box-sizing: border-box; height: var(--motion-control); min-height: var(--motion-control); padding-block: 0; }
+.om-runtime-page .om-button { white-space: nowrap; flex-shrink: 0; padding-inline: var(--motion-space-12); transition: background var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out); }
 .om-runtime-page .om-button:active:not(:disabled) { transform: scale(0.985); }
 .om-runtime-card { display: grid; align-content: start; justify-items: stretch; gap: var(--motion-space-14); width: 100%; min-width: 0; transition: border-color var(--motion-duration-normal) var(--motion-ease-out); }
 .om-runtime-head,
@@ -695,19 +696,18 @@
 .om-runtime-head-actions { display: flex; align-items: center; gap: var(--motion-space-8); flex-wrap: wrap; flex-shrink: 0; }
 .om-runtime-empty-hint { margin: 0; padding: var(--motion-space-14); border-radius: var(--motion-radius-md); background: var(--motion-inset); width: 100%; box-sizing: border-box; }
 .om-runtime-help-text { margin: var(--motion-space-8) 0 0; font-size: var(--motion-text-xs); line-height: 1.55; animation: om-runtime-reveal var(--motion-duration-normal) var(--motion-ease-out); }
-.om-runtime-generate-row { display: flex; align-items: center; gap: var(--motion-space-10); flex-wrap: wrap; width: 100%; min-width: 0; }
-.om-runtime-label-input { flex: 1 1 260px; min-width: 0; min-height: 38px; transition: border-color var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out); }
-.om-runtime-generate-row > .om-button { min-height: 38px; }
+.om-runtime-generate-row { display: flex; align-items: center; gap: var(--motion-space-8); flex-wrap: wrap; width: 100%; min-width: 0; }
+.om-runtime-label-input { flex: 1 1 260px; min-width: 0; transition: border-color var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out); }
 .om-runtime-bundle { display: grid; gap: var(--motion-space-12); padding: var(--motion-space-14); border-radius: var(--motion-radius-md); background: var(--motion-inset); width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; animation: om-runtime-reveal var(--motion-duration-normal) var(--motion-ease-out); }
 .om-runtime-bundle .om-code-block { margin: 0; padding: var(--motion-space-12); border-radius: var(--motion-radius-sm); background: var(--motion-bg); border: 1px solid var(--motion-border-subtle); overflow-x: auto; max-width: 100%; max-height: 160px; white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
 .om-runtime-script-tabs { display: inline-flex; align-items: center; gap: var(--motion-space-2); padding: var(--motion-space-2); border-radius: var(--motion-radius-md); background: var(--motion-bg); border: 1px solid var(--motion-border-subtle); flex-wrap: wrap; }
-.om-runtime-script-tab { min-height: 28px; padding: var(--motion-space-4) var(--motion-space-10); border-radius: var(--motion-radius-sm); font-size: var(--motion-text-xs); white-space: nowrap; transition: background var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out); }
+.om-runtime-script-tab { height: var(--motion-control-sm); min-height: var(--motion-control-sm); padding: 0 var(--motion-space-10); border-radius: var(--motion-radius-sm); font-size: var(--motion-text-xs); white-space: nowrap; transition: background var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out); }
 .om-runtime-script-tab[aria-selected="true"] { background: var(--motion-hover); color: var(--motion-text); font-weight: var(--motion-weight-medium); }
 .om-runtime-list { display: grid; gap: var(--motion-space-8); width: 100%; min-width: 0; }
 .om-runtime-row { display: flex; align-items: center; justify-content: space-between; gap: var(--motion-space-12); padding: var(--motion-space-12) var(--motion-space-14); border-radius: var(--motion-radius-md); background: var(--motion-inset); border: 1px solid transparent; flex-wrap: wrap; width: 100%; min-width: 0; box-sizing: border-box; transition: background var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out); animation: om-runtime-reveal var(--motion-duration-normal) var(--motion-ease-out); }
 .om-runtime-row:hover { border-color: var(--motion-border-subtle); }
 .om-runtime-row-lead { display: flex; align-items: center; gap: var(--motion-space-12); flex: 1 1 240px; min-width: 0; }
-.om-runtime-row-icon { width: 36px; height: 36px; border-radius: var(--motion-radius-md); background: var(--motion-hover); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--motion-text); }
+.om-runtime-row-icon { width: 34px; height: 34px; border-radius: var(--motion-radius-md); background: var(--motion-hover); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--motion-text); }
 .om-runtime-row-main { display: grid; gap: var(--motion-space-2); min-width: 0; flex: 1 1 0; }
 .om-runtime-row-main small { overflow-wrap: anywhere; }
 .om-runtime-row-title { display: flex; align-items: center; gap: var(--motion-space-8); flex-wrap: wrap; min-width: 0; }
@@ -718,10 +718,10 @@
 .om-runtime-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--motion-space-14) var(--motion-space-16); width: 100%; min-width: 0; }
 .om-runtime-form-grid > .om-label { display: grid; gap: var(--motion-space-6); width: 100%; min-width: 0; }
 .om-runtime-form-grid > .om-label > span:first-child { font-size: var(--motion-text-xs); font-weight: var(--motion-weight-medium); color: var(--motion-muted); }
-.om-runtime-form-grid .om-field { width: 100%; min-height: 38px; box-sizing: border-box; transition: border-color var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out); }
+.om-runtime-form-grid .om-field { width: 100%; box-sizing: border-box; transition: border-color var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out); }
 .om-runtime-form-grid .om-field:focus-within { border-color: var(--motion-border-strong); }
 .om-runtime-form-grid .om-select-trigger,
-.om-runtime-form-grid [data-slot="select-trigger"] { width: 100%; min-height: 38px; box-sizing: border-box; }
+.om-runtime-form-grid [data-slot="select-trigger"] { width: 100%; box-sizing: border-box; }
 .om-runtime-form-footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--motion-space-8); flex-wrap: wrap; width: 100%; padding-top: var(--motion-space-4); }
 .om-runtime-probe-result { display: inline-flex; align-items: center; gap: var(--motion-space-8); padding: var(--motion-space-10) var(--motion-space-12); border-radius: var(--motion-radius-md); background: var(--motion-danger-soft); color: var(--motion-danger); font-size: var(--motion-text-sm); width: 100%; box-sizing: border-box; animation: om-runtime-reveal var(--motion-duration-fast) var(--motion-ease-out); }
 .om-runtime-probe-result[data-ok="true"] { background: var(--motion-accent-soft); color: var(--motion-accent); }

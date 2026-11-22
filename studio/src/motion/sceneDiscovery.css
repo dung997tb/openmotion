@@ -445,6 +445,8 @@
 .om-claude-stories { display: grid; grid-template-columns: minmax(0, .9fr) repeat(2, minmax(0, 1fr)); gap: var(--motion-space-24); }
 .om-claude-intro { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--motion-space-12); }
 .om-claude-intro .om-discovery-heading { margin-bottom: 0; }
+.om-story-intro-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--motion-space-8); }
+.om-story-intro-actions .om-button { white-space: nowrap; flex-shrink: 0; }
 @container discovery (max-width: 700px) {
   .om-story-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .om-story-gallery > :first-child { grid-column: 1 / -1; }

@@ -33,12 +33,21 @@ async function openSystemBrowser(url: string) {
 }
 const consoleUrl = registeredProvider('account')!.website!;
 export type SignInRecord = EventFields<typeof omEvents['account_sign_in_result']>;
+export type OpenDesignWorkspacePrincipal = {
+  workspaceId: string;
+  workspaceName: string;
+  workspaceMemberId: string;
+  workspaceType: 'personal' | 'team';
+};
 type Profile = { apiUrl?: string; controlKey?: string; controlKeyId?: string; runtimeKey?: string; pendingLogin?: unknown; user?: { id?: string; name?: string; email?: string } };
 /** Connector-owned credentials file. `pendingRevocations` holds keys whose remote revocation has not been confirmed yet. */
 type CredentialsFile = { profiles?: Record<string, Profile>; pendingRevocations?: unknown[] };
 type AccountOptions = {
   pollMs?: number; binary?: string; authorizationMs?: number; log?: (line: string) => void;
-  run?: (args: string[], signal?: AbortSignal) => Promise<string>; spawn?: typeof spawn;
+  run?: (args: string[], signal?: AbortSignal) => Promise<string>;
+  runInWorkspace?: (workspaceId: string, args: string[], signal?: AbortSignal) => Promise<string>;
+  workspacePrincipal?: (signal?: AbortSignal) => Promise<OpenDesignWorkspacePrincipal | null>;
+  spawn?: typeof spawn;
   fetcher?: Fetcher;
   download?: typeof import('./network.ts').streamMedia;
   /** Receives one record per finished sign-in attempt. */
@@ -101,12 +110,30 @@ export class AccountRequestError extends Error {
   readonly status?: number;
   readonly code?: string;
   constructor(stderr: string) {
+    let parsedEnvelope: { status?: number; code?: string } | undefined;
+    try {
+      const parsed: unknown = JSON.parse(stderr.trim());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof (parsed as { error?: unknown }).error === 'string') {
+        const record = parsed as { status?: unknown; errorCode?: unknown };
+        const envelopeStatus = typeof record.status === 'number' && Number.isInteger(record.status) && record.status >= 400 && record.status <= 599
+          ? record.status
+          : undefined;
+        const envelopeCode = typeof record.errorCode === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(record.errorCode)
+          ? record.errorCode
+          : undefined;
+        if (envelopeStatus !== undefined || envelopeCode !== undefined) {
+          parsedEnvelope = { status: envelopeStatus, code: envelopeCode };
+        }
+      }
+    } catch {
+      // Plain-text Vela stderr falls through to regex parsing below.
+    }
     // Generic API errors read `API request failed with status 403: code`; media commands read `<text> (code, HTTP 400)`.
-    const api = /API request failed with status (\d{3})(?:: ([a-z0-9_]{1,64})(?=\s|$))?/.exec(stderr);
+    const api = /API request failed with status (\d{3})(?:: ([A-Za-z0-9_-]{1,64})(?=[\s",}]|$))?/.exec(stderr);
     // A response without a JSON body has an empty code: `(, HTTP 502)`.
-    const media = api ? undefined : [...stderr.matchAll(/\(([^,()]{0,64}), HTTP (\d{3})\)/g)].at(-1);
-    const status = api ? Number(api[1]) : media ? Number(media[2]) : undefined;
-    const code = api ? api[2] : media && /^[a-z0-9_]{1,64}$/.test(media[1]) ? media[1] : undefined;
+    const media = parsedEnvelope || api ? undefined : [...stderr.matchAll(/\(([^,()]{0,64}), HTTP (\d{3})\)/g)].at(-1);
+    const status = parsedEnvelope?.status ?? (api ? Number(api[1]) : media ? Number(media[2]) : undefined);
+    const code = parsedEnvelope?.code ?? (api ? api[2] : media && /^[a-z0-9_]{1,64}$/.test(media[1]) ? media[1] : undefined);
     // Local CLI flag/argument rejections exit without an HTTP status; do not misreport them as connection or sign-in failures.
     const cliInvalid = !status && !code && /(?:^|\n)Error: (?:if any flags in the group |unknown (?:shorthand )?flag:|invalid argument |required flag\(s\) |flag needs an argument:)/.test(stderr);
     super((code && requestMessages[code]) || (cliInvalid ? requestMessages.invalid_request : status === 401 ? requestMessages.unauthorized : status ? jobMessages.service : jobMessages.connection));
@@ -346,11 +373,99 @@ export class OpenDesignAccount {
   }
   /** Prepares the connector after startup so the first sign-in does not wait for it. A failure stays silent; sign-in tries again. */
   prefetch() { void this.prepare().catch(() => {}); }
+  private async executeConnector(
+    args: string[],
+    envOverrides: Record<string, string> | undefined,
+    timeoutMs: number,
+    maxBuffer: number,
+    signal?: AbortSignal,
+  ) {
+    // A workspace can be signed in through the shared account before its own connector is prepared.
+    try {
+      const binary = await this.resolveRuntime().catch(() => this.prepare());
+      const { stdout } = await execute(binary, args, {
+        env: envOverrides ? { ...this.env(), ...envOverrides } : this.env(),
+        timeout: timeoutMs,
+        signal,
+        maxBuffer,
+      });
+      return stdout;
+    } catch (error) {
+      throw new AccountRequestError(String((error as { stderr?: unknown }).stderr ?? ''));
+    }
+  }
   async run(args: string[], signal?: AbortSignal) {
     if (this.options.run) return this.options.run(args, signal);
-    // A workspace can be signed in through the shared account before its own connector is prepared.
-    try { const { stdout } = await execute(await this.resolveRuntime().catch(() => this.prepare()), args, { env: this.env(), timeout: 120_000, signal, maxBuffer: 2 * 1024 * 1024 }); return stdout; }
-    catch (error) { throw new AccountRequestError(String((error as { stderr?: unknown }).stderr ?? '')); }
+    return this.executeConnector(args, undefined, 120_000, 2 * 1024 * 1024, signal);
+  }
+  async runInWorkspace(workspaceId: string, args: string[], signal?: AbortSignal) {
+    const trimmedWorkspaceId = workspaceId.trim();
+    if (!trimmedWorkspaceId) throw new Error('OpenDesign workspace ID is required');
+    if (this.options.runInWorkspace) return this.options.runInWorkspace(trimmedWorkspaceId, args, signal);
+    return this.executeConnector(
+      args,
+      { VELA_INVOCATION_SOURCE: 'open-design', VELA_WORKSPACE_ID: trimmedWorkspaceId },
+      180_000,
+      16 * 1024 * 1024,
+      signal,
+    );
+  }
+  async workspacePrincipal(signal?: AbortSignal): Promise<OpenDesignWorkspacePrincipal | null> {
+    if (this.options.workspacePrincipal) return this.options.workspacePrincipal(signal);
+    const profile = await this.profile();
+    if (!signedInProfile(profile)) return null;
+    const apiBase = (profile!.apiUrl?.trim() || productionApi).replace(/\/$/, '');
+    const timeoutSignal = AbortSignal.timeout(12_000);
+    const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    const fetcher = this.options.fetcher ?? fetch;
+    let response: Response;
+    try {
+      response = await fetcher(apiBase + '/api/v1/workspaces', {
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + profile!.controlKey, Accept: 'application/json' },
+        redirect: 'error',
+        signal: combinedSignal,
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw new AccountRequestError('');
+    }
+    const data = await response.json().catch(() => null) as { items?: unknown[]; error?: unknown } | null;
+    if (!response.ok) {
+      if (response.status === 401) this.rejectedKeyId = profile!.controlKeyId;
+      const code = typeof data?.error === 'string' && /^[a-z0-9_]{1,64}$/.test(data.error) ? ': ' + data.error : '';
+      throw new AccountRequestError('API request failed with status ' + response.status + code);
+    }
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const active: Array<OpenDesignWorkspacePrincipal & { isDefault?: boolean }> = [];
+    for (const entry of items) {
+      if (!entry || typeof entry !== 'object') continue;
+      const raw = entry as Record<string, unknown>;
+      const workspaceId = typeof raw.workspaceId === 'string' ? raw.workspaceId.trim() : '';
+      const workspaceName = typeof raw.workspaceName === 'string' ? raw.workspaceName.trim() : '';
+      const workspaceMemberId = typeof raw.workspaceMemberId === 'string' ? raw.workspaceMemberId.trim() : '';
+      const workspaceType = raw.workspaceType === 'personal' || raw.workspaceType === 'team' ? raw.workspaceType : null;
+      if (!workspaceId || !workspaceName || !workspaceMemberId || !workspaceType) continue;
+      if (raw.memberStatus !== 'active' || raw.lifecycleState !== 'active') continue;
+      active.push({
+        workspaceId,
+        workspaceName,
+        workspaceMemberId,
+        workspaceType,
+        ...(raw.isDefault === true ? { isDefault: true } : {}),
+      });
+    }
+    const chosen = active.find(item => item.workspaceType === 'personal')
+      ?? active.find(item => item.isDefault === true)
+      ?? active[0];
+    return chosen
+      ? {
+          workspaceId: chosen.workspaceId,
+          workspaceName: chosen.workspaceName,
+          workspaceMemberId: chosen.workspaceMemberId,
+          workspaceType: chosen.workspaceType,
+        }
+      : null;
   }
   async summary(refresh = false): Promise<AccountSummary> {
     const generation = this.generation;

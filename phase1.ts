@@ -1,4 +1,5 @@
 import { dispatchGameTool } from './game-projects.ts';
+import { cloudShareFor } from './gateway/cloud-share.ts';
 import { ToolInputError } from './shared/tool-input-error.ts';
 import { assetImportError, toolFailureFields } from './tracking/tool-fields.ts';
 import { readProjectAssetNames } from './project-asset-names.ts';
@@ -382,6 +383,16 @@ export class Phase1Service {
   }
   async dispatch(name: string, args: any, host?: HostContext): Promise<any> {
     if (name.startsWith('motion_game_')) return dispatchGameTool(name, args, this.store.directory, this.runtimeRoot);
+    if (name === 'motion_cloud_share') {
+      const cloud = cloudShareFor(this.store);
+      switch (args.action) {
+        case 'status': return cloud.status(args.kind, args.projectId);
+        case 'publish': return cloud.publish(args.kind, args.projectId);
+        case 'stop': return cloud.stop(args.kind, args.projectId);
+        case 'resume': return cloud.resume(args.kind, args.projectId);
+        default: throw new ToolInputError('action must be status, publish, stop, or resume', 'action', 'invalid_enum');
+      }
+    }
     if (name === 'motion_design_catalog' || name === 'motion_design_project' || name === 'motion_design_edit' || name === 'motion_design_comments') {
       return dispatchDesignTool(name, args, this.store.directory, this.context.origin(), ref => new AssetLibrary(this.store).resolve(ref));
     }

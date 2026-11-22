@@ -73,13 +73,15 @@ function parseBlocks(source: string): Block[] {
       continue;
     }
 
-    const fence = line.match(/^```([\w-]*)\s*$/);
+    const fence = line.match(/^(\s*)```([\w-]*)\s*$/);
     if (fence) {
-      const lang = fence[1] || '';
+      const indent = fence[1] || '';
+      const lang = fence[2] || '';
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+        const raw = lines[i];
+        codeLines.push(indent && raw.startsWith(indent) ? raw.slice(indent.length) : raw);
         i++;
       }
       if (i < lines.length) i++;
@@ -154,7 +156,7 @@ function parseBlocks(source: string): Block[] {
     while (
       i < lines.length
       && lines[i].trim()
-      && !lines[i].startsWith('```')
+      && !/^\s*```/.test(lines[i])
       && !/^#{1,4}\s+/.test(lines[i])
       && !lines[i].startsWith('>')
       && !/^\s*(?:[-*]|\d+\.)\s+/.test(lines[i])

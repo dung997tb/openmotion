@@ -18,6 +18,7 @@ import { readProjectZip } from './shared/project-zip.ts';
 import { zip } from './scripts/zip.mjs';
 import { browserExecutable } from './browser.ts';
 import { validateReviewAnnotation } from './shared/review-comments.ts';
+import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/preview-bridge.ts';
 import { designCatalog } from './shared/design-catalog.ts';
 import {
   designEditorHref, designExportFormats, designRoutes, designScenarios, findDesignScenario, isDesignScenario,
@@ -1723,7 +1724,12 @@ export async function designHttp(
     const rawMatch = /^raw\/([^/]+)\/(.*)$/.exec(sub);
     if (rawMatch && req.method === 'GET') {
       const { body, mime } = await service.readRawFile(rawMatch[1], decodeURIComponent(rawMatch[2]), url.searchParams.get('version'));
-      const out = url.searchParams.get('thumb') === '1' && mime.startsWith('text/html') ? injectThumbPerfGuard(body) : body;
+      const bridgeToken = url.searchParams.get('omBridge');
+      const out = url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')
+        ? injectThumbPerfGuard(body)
+        : mime.startsWith('text/html') && isValidPreviewBridgeToken(bridgeToken)
+          ? injectPreviewBridgeHtml(body, bridgeToken)
+          : body;
       const headers: Record<string, string> = { 'Content-Type': mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
       if (mime.startsWith('text/html')) headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
       res.writeHead(200, headers);
