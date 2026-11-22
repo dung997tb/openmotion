@@ -349,6 +349,20 @@ test('playable-ad briefs are portrait single-player only and carry the ad recipe
   await assert.rejects(service.create({...brief,orientation:'portrait',playableAd:'yes'} as any),/Invalid playableAd/);
 }));
 
+test('a playable ad may name store pages, other games may not; threshold 0 skips the movement assertion',()=>fixture(async(_,workspace)=>{
+  const {service}=await fakeKits(workspace);
+  const store="<script>const config={store:{ios:'https://apps.apple.com/app/id1',android:'https://play.google.com/store/apps/details?id=a.b'}};</script>";
+  const ad=(await service.create({...brief,orientation:'portrait',playableAd:true})).game;
+  await service.write(ad.id,[{path:'index.html',content:store}]);
+  assert.equal((await service.validate(ad.id)).diagnostics.filter((d:any)=>/External network host/.test(d.message)).length,0);
+  const plain=(await service.create(brief)).game;
+  await service.write(plain.id,[{path:'index.html',content:store}]);
+  assert.ok((await service.validate(plain.id)).diagnostics.some((d:any)=>/apps\.apple\.com/.test(d.message)));
+  const base={before:{state:{selfId:'a',players:{a:{x:0,z:0}}}},after:{state:{selfId:'a',phase:'playing',players:{a:{x:0,z:0}}}},clients:1,script:[{type:'click',x:10,y:10}] as any,mobile:{width:390,height:844,scrollWidth:390}};
+  const move=(t?:number)=>gamePlaytestAssertions({...base,movementThreshold:t}).find((a:any)=>a.name==='scriptedMovement')!.passed;
+  assert.equal(move(0),true);assert.equal(move(),false);
+}));
+
 test('single-player 3d selects arcade plus vendor without characters',()=>fixture(async(_,workspace)=>{
   const {service}=await fakeKits(workspace);const {game}=await service.create({...brief,style:'3d'});
   assert.equal((await service.read(game.id,'assets/marker.txt')).content,'arcade asset');

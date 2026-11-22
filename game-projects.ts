@@ -234,7 +234,8 @@ export function gamePlaytestAssertions(input: {before:any;after:any;clients:numb
     ...(input.autoJoin?[{name:'autoJoin',passed:input.autoJoin.joined&&input.autoJoin.elapsedMs!==null&&input.autoJoin.elapsedMs<=5000,expected:'joined within 5000ms without clicks or typing',actual:input.autoJoin,reason:input.autoJoin.joined?undefined:'No joined socket message or authoritative self player before inputs'}]:[]),
     {name:'playerCount',passed:count===input.clients,expected:input.clients,actual:count,reason:state?undefined:'Missing authoritative __omGame state'},
     {name:'phase',passed:input.expectedPhase?phase===input.expectedPhase:['breather','combat','playing','win','loss','over'].includes(phase),expected,actual:phase??null},
-    {name:'scriptedMovement',passed:scripted&&distance!==null&&distance>(input.movementThreshold??.5),expected:`net displacement > ${input.movementThreshold??.5} world units`,actual:distance,reason:scripted?(distance===null?'Missing selfId or authoritative coordinates':undefined):'No directional key input was scripted'},
+    // movementThreshold 0 marks a game with no moving player (tap puzzles, pull-the-pin): movement is not asserted.
+    {name:'scriptedMovement',passed:input.movementThreshold===0||(scripted&&distance!==null&&distance>(input.movementThreshold??.5)),expected:`net displacement > ${input.movementThreshold??.5} world units`,actual:distance,reason:scripted?(distance===null?'Missing selfId or authoritative coordinates':undefined):'No directional key input was scripted'},
     {name:'mobileHorizontalOverflow',passed:input.mobile.width===390&&input.mobile.height===844&&input.mobile.scrollWidth<=391&&!(input.mobile.overflowElements?.length),expected:'390x844 viewport without horizontal overflow',actual:input.mobile},
   ];
 }
@@ -542,7 +543,9 @@ export class GameProjects {
       if(game.multiplayer)for(const message of gameRoomEntryErrors(source))diagnostics.push({path:relative,message});
       for (const match of source.matchAll(/(?:[a-z][a-z0-9+.-]*:\/\/|(?<=["'`(=])\/\/)[^\s"'<>`\\)]+/gi)) {
         const host = new URL(match[0].startsWith('//') ? 'https:' + match[0] : match[0]).hostname;
-        if (!['cdnjs.cloudflare.com','cdn.jsdelivr.net','unpkg.com'].includes(host)) diagnostics.push({ path: relative, message: `External network host is not allowed: ${host}` });
+        // A playable ad may name its app-store pages: they are only opened on the CTA tap, never loaded by the page.
+        const stores = game.playableAd ? ['apps.apple.com','itunes.apple.com','play.google.com'] : [];
+        if (![...stores,'cdnjs.cloudflare.com','cdn.jsdelivr.net','unpkg.com'].includes(host)) diagnostics.push({ path: relative, message: `External network host is not allowed: ${host}` });
       }
     } catch (e) {
       if (relative !== 'client.js' || (e as NodeJS.ErrnoException).code !== 'ENOENT') diagnostics.push({ path: relative, message: (e as Error).message });
