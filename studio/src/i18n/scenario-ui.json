@@ -1003,7 +1003,9 @@
     "Generate cinematic video from text or a first frame.": "用文字或首帧生成电影感视频。",
     "Generate music, sound effects and voiceovers.": "生成音乐、音效和配音。",
     "Your brand": "你的品牌",
-    "Media is added when the images or video are ready": "图片或视频做好后会自动配上"
+    "Media is added when the images or video are ready": "图片或视频做好后会自动配上",
+    "Resize the brief panel": "调整输入栏宽度",
+    "Drag to resize · double-click to reset": "拖动调整宽度 · 双击恢复默认"
   },
   "ja": {
     "$129": "¥19,800",
@@ -2009,7 +2011,9 @@
     "Generate cinematic video from text or a first frame.": "テキストや最初のフレームから映画的な動画を生成します。",
     "Generate music, sound effects and voiceovers.": "音楽・効果音・ナレーションを生成します。",
     "Your brand": "あなたのブランド",
-    "Media is added when the images or video are ready": "画像や動画ができると自動で添付されます"
+    "Media is added when the images or video are ready": "画像や動画ができると自動で添付されます",
+    "Resize the brief panel": "入力パネルの幅を調整",
+    "Drag to resize · double-click to reset": "ドラッグで調整 · ダブルクリックで元に戻す"
   },
   "ko": {
     "$129": "₩169,000",
@@ -3015,7 +3019,9 @@
     "Generate cinematic video from text or a first frame.": "텍스트나 첫 프레임으로 영화 같은 영상을 생성합니다.",
     "Generate music, sound effects and voiceovers.": "음악, 효과음, 보이스오버를 생성합니다.",
     "Your brand": "내 브랜드",
-    "Media is added when the images or video are ready": "이미지나 영상이 준비되면 자동으로 붙습니다"
+    "Media is added when the images or video are ready": "이미지나 영상이 준비되면 자동으로 붙습니다",
+    "Resize the brief panel": "입력 패널 너비 조절",
+    "Drag to resize · double-click to reset": "드래그로 조절 · 더블클릭으로 초기화"
   },
   "de": {
     "$129": "129 €",
@@ -4021,7 +4027,9 @@
     "Generate cinematic video from text or a first frame.": "Erzeuge filmische Videos aus Text oder einem ersten Bild.",
     "Generate music, sound effects and voiceovers.": "Musik, Soundeffekte und Voiceover erzeugen.",
     "Your brand": "Deine Marke",
-    "Media is added when the images or video are ready": "Medien kommen hinzu, sobald Bilder oder Video fertig sind"
+    "Media is added when the images or video are ready": "Medien kommen hinzu, sobald Bilder oder Video fertig sind",
+    "Resize the brief panel": "Breite des Briefing-Bereichs ändern",
+    "Drag to resize · double-click to reset": "Ziehen zum Ändern · Doppelklick zum Zurücksetzen"
   },
   "fr": {
     "$129": "129 €",
@@ -5027,7 +5035,9 @@
     "Generate cinematic video from text or a first frame.": "Générez des vidéos cinématiques à partir d’un texte ou d’une première image.",
     "Generate music, sound effects and voiceovers.": "Générez musique, effets sonores et voix off.",
     "Your brand": "Votre marque",
-    "Media is added when the images or video are ready": "Les médias s’ajoutent quand les images ou la vidéo sont prêtes"
+    "Media is added when the images or video are ready": "Les médias s’ajoutent quand les images ou la vidéo sont prêtes",
+    "Resize the brief panel": "Redimensionner le panneau du brief",
+    "Drag to resize · double-click to reset": "Glissez pour redimensionner · double-cliquez pour réinitialiser"
   },
   "ru": {
     "$129": "129 $",
@@ -6033,7 +6043,9 @@
     "Generate cinematic video from text or a first frame.": "Создавайте кинематографичное видео из текста или первого кадра.",
     "Generate music, sound effects and voiceovers.": "Создавайте музыку, звуковые эффекты и озвучку.",
     "Your brand": "Ваш бренд",
-    "Media is added when the images or video are ready": "Медиа добавятся, когда будут готовы изображения или видео"
+    "Media is added when the images or video are ready": "Медиа добавятся, когда будут готовы изображения или видео",
+    "Resize the brief panel": "Изменить ширину панели брифа",
+    "Drag to resize · double-click to reset": "Перетащите для изменения · двойной щелчок для сброса"
   },
   "es": {
     "$129": "$129",
@@ -7039,7 +7051,9 @@
     "Generate cinematic video from text or a first frame.": "Genera vídeo cinematográfico a partir de texto o un primer fotograma.",
     "Generate music, sound effects and voiceovers.": "Genera música, efectos de sonido y locuciones.",
     "Your brand": "Tu marca",
-    "Media is added when the images or video are ready": "Los medios se añaden cuando las imágenes o el vídeo estén listos"
+    "Media is added when the images or video are ready": "Los medios se añaden cuando las imágenes o el vídeo estén listos",
+    "Resize the brief panel": "Cambiar el ancho del panel del brief",
+    "Drag to resize · double-click to reset": "Arrastra para ajustar · doble clic para restablecer"
   },
   "pt-BR": {
     "$129": "R$ 599",
@@ -8045,7 +8059,9 @@
     "Generate cinematic video from text or a first frame.": "Gere vídeo cinematográfico a partir de texto ou de um primeiro quadro.",
     "Generate music, sound effects and voiceovers.": "Gere música, efeitos sonoros e locuções.",
     "Your brand": "Sua marca",
-    "Media is added when the images or video are ready": "A mídia entra quando as imagens ou o vídeo ficarem prontos"
+    "Media is added when the images or video are ready": "A mídia entra quando as imagens ou o vídeo ficarem prontos",
+    "Resize the brief panel": "Ajustar a largura do painel do briefing",
+    "Drag to resize · double-click to reset": "Arraste para ajustar · clique duplo para redefinir"
   },
   "it": {
     "$129": "129 €",
@@ -9051,7 +9067,9 @@
     "Generate cinematic video from text or a first frame.": "Genera video cinematografici da testo o da un primo fotogramma.",
     "Generate music, sound effects and voiceovers.": "Genera musica, effetti sonori e voci fuori campo.",
     "Your brand": "Il tuo brand",
-    "Media is added when the images or video are ready": "I media si aggiungono quando immagini o video sono pronti"
+    "Media is added when the images or video are ready": "I media si aggiungono quando immagini o video sono pronti",
+    "Resize the brief panel": "Ridimensiona il pannello del brief",
+    "Drag to resize · double-click to reset": "Trascina per ridimensionare · doppio clic per ripristinare"
   },
   "tr": {
     "$129": "129 $",
@@ -10057,6 +10075,8 @@
     "Generate cinematic video from text or a first frame.": "Metinden ya da ilk kareden sinematik video üret.",
     "Generate music, sound effects and voiceovers.": "Müzik, ses efekti ve seslendirme üret.",
     "Your brand": "Markan",
-    "Media is added when the images or video are ready": "Görseller ya da video hazır olunca medya eklenir"
+    "Media is added when the images or video are ready": "Görseller ya da video hazır olunca medya eklenir",
+    "Resize the brief panel": "Brif panelini yeniden boyutlandır",
+    "Drag to resize · double-click to reset": "Boyutlandırmak için sürükle · sıfırlamak için çift tıkla"
   }
 }

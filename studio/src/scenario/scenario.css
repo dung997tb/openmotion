@@ -5079,8 +5079,6 @@ div.om-studio-output:hover {
 
 @media (max-width: 1279px) {
   .om-studio-view {
-    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-    gap: var(--motion-space-14);
     padding: var(--motion-space-14);
   }
 
@@ -5105,5 +5103,60 @@ div.om-studio-output:hover {
 
   .om-studio-input {
     position: static;
+  }
+}
+
+/* Brief | divider | kit: people drag the divider to share the width between the two columns. */
+.om-studio-view {
+  grid-template-columns: var(--om-studio-input-width, 400px) 12px minmax(0, 1fr);
+  column-gap: var(--motion-space-4);
+}
+
+.om-studio-view[data-resizing="true"] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.om-studio-resizer {
+  position: sticky;
+  top: var(--motion-space-16);
+  align-self: stretch;
+  min-height: 120px;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.om-studio-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 36px;
+  transform: translate(-50%, -50%);
+  border-radius: var(--motion-radius-full);
+  background: var(--motion-border);
+  transition: height var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.om-studio-resizer:hover::after {
+  height: 56px;
+  background: var(--motion-border-strong);
+}
+
+.om-studio-resizer[data-dragging="true"]::after,
+.om-studio-resizer:focus-visible::after {
+  height: 64px;
+  background: var(--motion-accent);
+}
+
+@media (max-width: 1023px) {
+  .om-studio-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .om-studio-resizer {
+    display: none;
   }
 }

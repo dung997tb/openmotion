@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { Button } from 'open-design-ui/button';
 import { socialPlatforms, type ScenarioBriefField, type ScenarioDefinition, type ScenarioStepDefinition } from '../../../shared/scenarios';
 import type { PoolItem, PoolRef, ScenarioBundleReceipt, ScenarioRun, ScenarioStepState } from '../../../shared/scenario-runs';
@@ -19,6 +19,21 @@ import { productBrief, readProducts, studioUsesProduct, type StudioProduct } fro
 import { StudioProductPicker } from './StudioProductPicker';
 
 const AUTOSAVE_DELAY_MS = 800;
+const INPUT_WIDTH_KEY = 'openmotion.studio.inputWidth.v1';
+const DEFAULT_INPUT_WIDTH = 400;
+const MIN_INPUT_WIDTH = 280;
+const MAX_INPUT_WIDTH = 720;
+const MIN_OUTPUTS_WIDTH = 420;
+
+function readInputWidth() {
+  try {
+    const stored = Number(localStorage.getItem(INPUT_WIDTH_KEY));
+    if (Number.isFinite(stored) && stored >= MIN_INPUT_WIDTH && stored <= MAX_INPUT_WIDTH) return stored;
+  } catch {
+    // Private windows can refuse storage; the default width applies.
+  }
+  return DEFAULT_INPUT_WIDTH;
+}
 /** After the kit is handed to the Agent, check for returned outputs this often, for at most this long. */
 const HANDOFF_POLL_MS = 8000;
 const HANDOFF_POLL_LIMIT_MS = 15 * 60 * 1000;
@@ -336,8 +351,42 @@ export function ScenarioStudioView({
     }
   };
 
+  // People drag the divider between the brief and the kit; the width is remembered in this browser.
+  const viewRef = useRef<HTMLDivElement>(null);
+  const [inputWidth, setInputWidth] = useState(readInputWidth);
+  const [resizing, setResizing] = useState(false);
+  const [viewWidth, setViewWidth] = useState(1280);
+  useEffect(() => {
+    const element = viewRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => setViewWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const maxInputWidth = Math.max(MIN_INPUT_WIDTH, Math.min(MAX_INPUT_WIDTH, Math.round(viewWidth - MIN_OUTPUTS_WIDTH)));
+  const commitInputWidth = (next: number) => {
+    const clamped = Math.round(Math.min(maxInputWidth, Math.max(MIN_INPUT_WIDTH, next)));
+    setInputWidth(clamped);
+    try { localStorage.setItem(INPUT_WIDTH_KEY, String(clamped)); } catch { /* storage may be unavailable */ }
+  };
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const left = viewRef.current?.querySelector('.om-studio-input')?.getBoundingClientRect().left;
+    if (left === undefined) return;
+    event.preventDefault();
+    setResizing(true);
+    const move = (moveEvent: PointerEvent) => commitInputWidth(moveEvent.clientX - left);
+    const stop = () => {
+      setResizing(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  };
+
   return (
-    <div className="om-studio-view" data-studio-view={scenario.id}>
+    <div className="om-studio-view" data-studio-view={scenario.id} ref={viewRef}
+      style={{ '--om-studio-input-width': `${Math.min(inputWidth, maxInputWidth)}px` } as CSSProperties} data-resizing={resizing ? 'true' : undefined}>
       <section className="om-studio-input" aria-label={t('Your brief')}>
         <h1>{t(studio.title)}</h1>
         <p className="om-studio-input-hint">{t(studio.inputHint)}</p>
@@ -397,6 +446,27 @@ export function ScenarioStudioView({
           <Button variant="plain" size="sm" onClick={() => onOpenMcp()}>{t('Connect an Agent')}</Button>
         </div>}
       </section>
+
+      <div
+        className="om-studio-resizer"
+        role="separator"
+        tabIndex={0}
+        aria-orientation="vertical"
+        aria-label={t('Resize the brief panel')}
+        aria-valuemin={MIN_INPUT_WIDTH}
+        aria-valuemax={maxInputWidth}
+        aria-valuenow={Math.min(inputWidth, maxInputWidth)}
+        data-dragging={resizing ? 'true' : undefined}
+        title={t('Drag to resize · double-click to reset')}
+        onPointerDown={startResize}
+        onDoubleClick={() => commitInputWidth(DEFAULT_INPUT_WIDTH)}
+        onKeyDown={event => {
+          if (event.key === 'ArrowLeft') { event.preventDefault(); commitInputWidth(inputWidth - 24); }
+          else if (event.key === 'ArrowRight') { event.preventDefault(); commitInputWidth(inputWidth + 24); }
+          else if (event.key === 'Home') { event.preventDefault(); commitInputWidth(MIN_INPUT_WIDTH); }
+          else if (event.key === 'End') { event.preventDefault(); commitInputWidth(maxInputWidth); }
+        }}
+      />
 
       <section className="om-studio-outputs" aria-label={t('Your kit')}>
         <header>
