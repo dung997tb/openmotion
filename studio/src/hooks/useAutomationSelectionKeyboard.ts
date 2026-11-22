@@ -14,6 +14,7 @@
  * central dispatcher asks it first and stands down.
  */
 import { useEffect } from "react";
+import { useTimelineReadOnlyPress } from "../player/components/timelineReadOnly";
 import { usePlayerStore, type TimelineElement } from "../player/store/playerStore";
 import { laneFor, withLane } from "../player/components/automationLaneGeometry";
 import { pointInSelection, replaceRange } from "../player/components/automationLaneSelection";
@@ -321,7 +322,9 @@ export function useAutomationSelectionKeyboard({
 }: {
   lanes: UseAutomationLanesResult;
 }): void {
+  const readOnly = !!useTimelineReadOnlyPress();
   useEffect(() => {
+    if (readOnly) return;
     const handler = (e: KeyboardEvent): void => {
       if (isTypingTarget(document.activeElement)) return;
       // Somebody upstream already claimed this key. useAppHotkeys is on
@@ -346,5 +349,5 @@ export function useAutomationSelectionKeyboard({
     };
     document.addEventListener("keydown", handler, true);
     return () => document.removeEventListener("keydown", handler, true);
-  }, [lanes]);
+  }, [lanes, readOnly]);
 }

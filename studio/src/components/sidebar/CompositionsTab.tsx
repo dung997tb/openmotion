@@ -146,9 +146,10 @@ const imageUrlOf = (snapshot: ThumbnailSnapshot) =>
 function useLastFrame(request: ThumbnailRequest | null, snapshot: ThumbnailSnapshot) {
   const current = imageUrlOf(snapshot);
   const [kept, setKept] = useState<{ request: ThumbnailRequest; url: string } | null>(null);
+  if (!request && kept) setKept(null);
   if (request && current && kept?.request !== request) setKept({ request, url: current });
   useLayoutEffect(() => {
-    if (!kept || kept.request === request) return;
+    if (!request || !kept || kept.request === request) return;
     const lease = thumbnailScheduler.acquire(kept.request, () => {});
     return () => lease.release();
   }, [kept, request]);
@@ -159,15 +160,15 @@ function useNearViewport<T extends Element>(): [(element: T | null) => void, boo
   const [element, setElement] = useState<T | null>(null);
   const [near, setNear] = useState(false);
   useEffect(() => {
-    if (!element || near) return;
+    if (!element) return;
     if (typeof IntersectionObserver === "undefined") return setNear(true);
     const observer = new IntersectionObserver(
-      (entries) => entries.some((entry) => entry.isIntersecting) && setNear(true),
+      ([entry]) => setNear(entry.isIntersecting),
       { root: element.closest("[data-composition-list]"), rootMargin: "200px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [element, near]);
+  }, [element]);
   return [setElement, near];
 }
 
@@ -181,7 +182,6 @@ function CompCard({
   isRendering,
   onAddToTimeline,
   contentRevision,
-  previewBooted,
 }: {
   projectId: string;
   comp: string;
@@ -192,7 +192,6 @@ function CompCard({
   isRendering?: boolean;
   onAddToTimeline?: () => void;
   contentRevision: number;
-  previewBooted: boolean;
 }) {
   const { t } = useI18n();
   const previewOrigin = isolatedPreviewOrigin();
@@ -243,13 +242,13 @@ function CompCard({
   const timelineSessionEpoch = usePlayerStore((state) => state.timelineSessionEpoch);
   const thumbnailRequest = useMemo(
     () =>
-      previewBooted && nearViewport
+      nearViewport
         ? compositionThumbnailRequest(thumbnailUrl, projectId, {
             sessionEpoch: timelineSessionEpoch,
             rich: true,
           })
         : null,
-    [previewBooted, nearViewport, thumbnailUrl, projectId, timelineSessionEpoch],
+    [nearViewport, thumbnailUrl, projectId, timelineSessionEpoch],
   );
   const thumbnail = useThumbnailLease(thumbnailRequest);
   const frameUrl = useLastFrame(thumbnailRequest, thumbnail);
@@ -456,7 +455,6 @@ export const CompositionsTab = memo(function CompositionsTab({
 }: CompositionsTabProps) {
   const { t } = useI18n();
   const thumbnailRevisions = usePlayerStore((state) => state.thumbnailRevisions);
-  const previewBooted = usePlayerStore((state) => state.previewBooted);
   if (compositions.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center px-4">
@@ -479,7 +477,6 @@ export const CompositionsTab = memo(function CompositionsTab({
           onAddToTimeline={onAddToTimeline ? () => onAddToTimeline(comp) : undefined}
           isRendering={isRendering}
           contentRevision={thumbnailRevisionOf(thumbnailRevisions, comp)}
-          previewBooted={previewBooted}
         />
       ))}
     </div>

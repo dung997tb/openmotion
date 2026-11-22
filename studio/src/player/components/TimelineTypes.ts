@@ -23,6 +23,8 @@ export interface TimelineClipMenuItem {
 
 export interface TimelineProps
   extends TimelineDropCallbacks, TimelineEditOverrides, TimelineStackingSyncProps {
+  /** Read-only source rows while the active preview is still discovering its authoritative timeline. */
+  initialElements?: TimelineElement[];
   /** Project-scoped reset boundary; soft source refreshes retain the same epoch. */
   sessionEpoch?: number;
   /** Intrinsic track geometry, excluding the host toolbar and footer. */

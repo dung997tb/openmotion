@@ -8,6 +8,7 @@ import { bindPreviewLease } from "../lib/previewLease";
 import { rememberPreviewPosition } from "../lib/previewReconnect";
 import { announcePreviewDocumentLoaded } from "../sceneSwap";
 import { usePlayerStore } from "../store/playerStore";
+import { PreviewCompositionLoading } from "./PreviewCompositionLoading";
 import type { PlayerProps } from "./Player";
 
 /** The remote runtime owns the document. Studio can size the frame and use its scoped message channel. */
@@ -25,6 +26,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
     const lease = useRef<ReturnType<typeof bindPreviewLease> | null>(null);
     const busyRetries = useRef(0);
     const [error, setError] = useState<string>();
+    const [awaitingFirstFrame, setAwaitingFirstFrame] = useState(props.showInitialLoading === true);
     const attach = useCallback((node: HTMLIFrameElement | null) => {
       frame.current = node;
       if (typeof forwardedRef === "function") forwardedRef(node);
@@ -97,6 +99,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         callbacks.current.onLoad();
         if (!passive) announcePreviewDocumentLoaded(iframe!);
         paintFrame = requestAnimationFrame(() => {
+          setAwaitingFirstFrame(false);
           callbacks.current.onCompositionLoadingChange?.(false);
           callbacks.current.onPainted?.({ iframe: iframe!, startedAt, loadId });
           callbacks.current.onReadyToShowChange?.(true);
@@ -139,9 +142,15 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
           referrerPolicy="no-referrer" tabIndex={passive ? -1 : undefined}
           allow={passive ? "autoplay 'none'" : "autoplay; fullscreen"}
           className="absolute left-1/2 top-1/2 max-w-none border-0" />
+        {awaitingFirstFrame && !error && !passive && props.loadingUi !== "host" && <PreviewCompositionLoading />}
         {error && !passive && <div data-testid="composition-preview-error" className="absolute inset-0 flex flex-col items-center justify-center bg-studio-surface text-center">
           <p>{t(error)}</p>
-          <Button variant="plain" onClick={() => { busyRetries.current = 0; void lease.current?.retry(); }}>{t("Retry preview")}</Button>
+          <Button variant="plain" onClick={() => {
+            busyRetries.current = 0;
+            setError(undefined);
+            setAwaitingFirstFrame(props.showInitialLoading === true);
+            void lease.current?.retry();
+          }}>{t("Retry preview")}</Button>
         </div>}
       </div>
     );

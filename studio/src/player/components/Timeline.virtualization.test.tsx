@@ -293,6 +293,25 @@ describe("Timeline row virtualization", { timeout: 30_000 }, () => {
     usePlayerStore.getState().reset();
   });
 
+  it("displays authored track metadata without enabling edits, then uses the runtime rows or its confirmed empty timeline", async () => {
+    const { Timeline } = await import("./Timeline");
+    const { usePlayerStore } = await import("../store/playerStore");
+    const { parseAuthoredTimeline } = await import("../lib/authoredTimeline");
+    const source = parseAuthoredTimeline('<main data-composition-id="master" data-duration="12"><section id="intro" data-start="0" data-duration="4" data-track-index="0"></section></main>', 'index.html', 'project');
+    expect(source?.elements.map(row => row.id)).toEqual(["intro"]);
+    usePlayerStore.getState().beginTimelineSession("project");
+    const { host, root } = await mountTimeline(<Timeline initialElements={source!.elements} readOnly />);
+    expect(host.querySelector(`[data-el-id="${source!.elements[0].key}"]`)).not.toBeNull();
+    expect(usePlayerStore.getState().elements).toEqual([]);
+    await act(async () => usePlayerStore.getState().setElements([{ id: "runtime", tag: "section", start: 0, duration: 4, track: 0 }]));
+    expect(host.querySelector(`[data-el-id="${source!.elements[0].key}"]`)).toBeNull();
+    expect(host.querySelector('[data-el-id="runtime"]')).not.toBeNull();
+    await act(async () => usePlayerStore.setState({ elements: [], clipManifest: [] }));
+    expect(host.querySelector("[data-clip]")).toBeNull();
+    act(() => root.unmount());
+    usePlayerStore.getState().reset();
+  });
+
   it("keeps focus pinning active after the scroll viewport remounts", async () => {
     const [{ Timeline }, { usePlayerStore }] = await Promise.all([
       import("./Timeline"),

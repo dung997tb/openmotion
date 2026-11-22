@@ -1,5 +1,7 @@
+import { parseAuthoredTimeline } from "../../player/lib/authoredTimeline";
+import { normalizeToZones } from "../../player/components/timelineZones";
 import { buildProjectApiPath } from "../../utils/projectRouting";
-import { useContext, useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { useContext, useState, useCallback, useRef, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useTimelinePlayer } from "../../player/hooks/useTimelinePlayer";
 import { usePlayerStore, type TimelineElement } from "../../player/store/playerStore";
 import type { PreviewIframeSlot } from "../../player/hooks/useTimelineSyncCallbacks";
@@ -40,6 +42,7 @@ export interface NLEContextValue {
   handleNavigateComposition: (index: number) => void;
   handleDrillDown: (element: TimelineElement) => void;
   compIdToSrc: Map<string, string>;
+  initialTimelineElements?: TimelineElement[];
   // layout state
   // composition loading
   compositionLoading: boolean;
@@ -105,18 +108,8 @@ export function NLEProvider({
     onPreviewReloadFailed,
   });
 
-  // Reset timeline state when the project changes. Done in an effect, not during
-  // render: reset() updates the player store, and updating another store/component
-  // mid-render triggers React's "Cannot update a component while rendering a
-  // different component" warning. The effect runs right after commit, so the new
-  // project's first frame may briefly show prior timeline state before it clears.
-  //
-  // Also clears the asset preview overlay store: it is project-scoped (see its
-  // doc-comment) but nothing else clears it on project change — EditorShell isn't
-  // keyed by projectId and the overlay stays mounted, so a preview opened in one
-  // project would otherwise keep rendering (and re-fetching from) the old project
-  // after switching.
-  useEffect(() => {
+  // Switch both project-scoped stores before the browser paints the new editor.
+  useLayoutEffect(() => {
     usePlayerStore.getState().beginTimelineSession(projectId);
     useAssetPreviewStore.getState().clearPreviewAsset();
   }, [projectId]);
@@ -202,6 +195,8 @@ export function NLEProvider({
     [compIdToSrc, drillDown, iframeRef_],
   );
 
+  const [authoredTimeline, setAuthoredTimeline] = useState<{ projectId: string; elements: TimelineElement[] } | null>(null);
+
   // Composition ID → file path map from raw index.html
   const compIdToSrcRef = useRef(compIdToSrc);
   compIdToSrcRef.current = compIdToSrc;
@@ -240,6 +235,11 @@ export function NLEProvider({
         // (the runtime drops the linkage when inlining — see getSourceFileForElement).
         setCompositionSourceMap(map);
         onCompIdToSrcChangeRef.current?.(map);
+        const player = usePlayerStore.getState();
+        if (player.timelineProjectId === projectId && !player.timelineReady && !player.elements.length && !player.clipManifest) {
+          const source = parseAuthoredTimeline(html, "index.html", projectId);
+          if (source?.elements.length) setAuthoredTimeline({ projectId, elements: normalizeToZones(source.elements) });
+        }
       })
       .catch((err: unknown) => {
         if (!current || controller.signal.aborted) return;
@@ -327,6 +327,7 @@ export function NLEProvider({
     handleNavigateComposition,
     handleDrillDown,
     compIdToSrc,
+    initialTimelineElements: authoredTimeline?.projectId === projectId && compositionStack.length === 1 ? authoredTimeline.elements : undefined,
     compositionLoading,
     setCompositionLoading,
     timelineDisabled,

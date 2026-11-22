@@ -1,34 +1,10 @@
-import { isCompositionTemplate } from "@hyperframes/parsers/hf-ids";
+import { parseAuthoredTimeline } from "./authoredTimeline";
 import type { RestoreFiles } from "../../utils/gsapUndoRestore";
-import { buildProjectApiPath } from "../../utils/projectRouting";
 import { normalizeToZones } from "../components/timelineZones";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
-import { getTimelineElementIdentity, parseTimelineFromDOM, readTimelineDurationFromDocument } from "./timelineDOM";
+import { getTimelineElementIdentity } from "./timelineDOM";
 
 const IDENTITY_FIELDS = new Set(["id", "key", "hfId", "selector", "selectorIndex", "sourceFile", "track", "authoredTrack"]);
-
-function sourceTimeline(html: string, path: string, fallbackDuration: number) {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  for (const template of Array.from(doc.querySelectorAll("template")).filter(isCompositionTemplate)) template.replaceWith(template.content);
-  const root = doc.querySelector("[data-composition-id]");
-  if (!root) return null;
-  root.setAttribute("data-composition-file", path);
-  const project = usePlayerStore.getState().timelineProjectId;
-  if (project && globalThis.location?.origin) {
-    const base = new URL(buildProjectApiPath(project, `/preview/${path}`), location.origin);
-    for (const media of doc.querySelectorAll("audio[src],video[src],img[src],source[src]")) {
-      const src = media.getAttribute("src");
-      if (!src) continue;
-      try { media.setAttribute("src", new URL(src, base).href); }
-      catch { return null; }
-    }
-  }
-  const duration = readTimelineDurationFromDocument(doc) || fallbackDuration;
-  const elements = parseTimelineFromDOM(doc, duration);
-  const byKey = new Map(elements.map(element => [getTimelineElementIdentity(element), element]));
-  // A dynamic/ambiguous source is left to the real runtime; never guess which duplicate a restore owns.
-  return byKey.size === elements.length ? { byKey, duration } : null;
-}
 
 function changedFields(current: TimelineElement, before: TimelineElement, after: TimelineElement): TimelineElement {
   let next = current;
@@ -49,8 +25,8 @@ export function syncHistoryTimelineFromFiles(activePath: string | null, files: R
   const file = files?.[path];
   if (!file) return false;
   const state = usePlayerStore.getState();
-  const before = sourceTimeline(file.previous, path, state.duration);
-  const after = sourceTimeline(file.restored, path, state.duration);
+  const before = parseAuthoredTimeline(file.previous, path, state.timelineProjectId, state.duration);
+  const after = parseAuthoredTimeline(file.restored, path, state.timelineProjectId, state.duration);
   if (!before || !after) return false;
   let changed = false;
   const existing = new Set(state.elements.map(getTimelineElementIdentity));

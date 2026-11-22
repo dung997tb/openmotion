@@ -1,3 +1,4 @@
+import { FileListLoading } from "./FileListLoading";
 import { PanelEmptyState } from "../ui/PanelEmptyState";
 import { useMvpEditor } from "../../motion/StudioHost";
 import { useI18n } from "../../i18n/I18n";
@@ -7,10 +8,10 @@ import { resolveMasterCompositionPath } from "../../utils/studioUrlState";
 import { useNLEContext } from "../nle/NLEContext";
 import { CompositionsTab } from "./CompositionsTab";
 
-type Props = Omit<ComponentProps<typeof CompositionsTab>, "masterCompositionPath" | "activeComposition">;
+type Props = Omit<ComponentProps<typeof CompositionsTab>, "masterCompositionPath" | "activeComposition"> & { loading?: boolean };
 
 /** The Compositions dock panel body; the root badge comes from the filtered composition list. */
-export function CompositionsPanel(props: Props) {
+export function CompositionsPanel({ loading, ...props }: Props) {
   const { compositionStack, compositionLoading } = useNLEContext();
   const mvp = useMvpEditor();
   const { t } = useI18n();
@@ -19,6 +20,7 @@ export function CompositionsPanel(props: Props) {
   const previewId = compositionStack[compositionStack.length - 1]?.id;
   const activeComposition = previewId === "master" ? masterCompositionPath : previewId ?? null;
   const compositions = empty ? props.compositions.filter(path => path !== masterCompositionPath) : props.compositions;
+  if (loading && !props.compositions.length) return <FileListLoading />;
   if (mvp && compositions.length === 0) return (
     <PanelEmptyState icon="film-line" message={t("No clips yet")} />
   );

@@ -39,7 +39,7 @@ export {
   getTimelineVisibleTimeRange,
 } from "./timelineViewportGeometry";
 
-function TimelineView({ onContentHeightChange }: Pick<TimelineProps, "onContentHeightChange">) {
+function TimelineView({ onContentHeightChange, showInitialTracks }: Pick<TimelineProps, "onContentHeightChange"> & { showInitialTracks: boolean }) {
   const { t } = useI18n();
   const { state, meta } = useTimelineContext();
   const { timelineReady, elements, canvas } = state;
@@ -48,7 +48,7 @@ function TimelineView({ onContentHeightChange }: Pick<TimelineProps, "onContentH
   useEffect(() => {
     if (timelineReady && !changing) onContentHeightChange?.(elements.length || hasPending ? canvas.intrinsicHeight : 128);
   }, [timelineReady, changing, elements.length, hasPending, canvas.intrinsicHeight, onContentHeightChange]);
-  if (!timelineReady || (elements.length === 0 && !hasPending)) {
+  if ((!timelineReady && !showInitialTracks) || (elements.length === 0 && !hasPending)) {
     return <TimelineEmptyStatePart />;
   }
   return (
@@ -67,7 +67,7 @@ const TimelineComposed = memo(function TimelineComposed(props: TimelineProps = {
   const mvp = useMvpEditor();
   return (
     <TimelineProvider {...props} showAudioEffects={mvp ? false : props.showAudioEffects} showKeyframes={mvp ? false : props.showKeyframes}>
-      <TimelineView onContentHeightChange={props.onContentHeightChange} />
+      <TimelineView showInitialTracks={props.initialElements !== undefined} onContentHeightChange={props.onContentHeightChange} />
       <TimelineMediaBar />
     </TimelineProvider>
   );

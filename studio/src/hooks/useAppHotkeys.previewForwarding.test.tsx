@@ -2,7 +2,7 @@
 
 import React, { act, useRef } from "react";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { usePlayerStore } from "../player/store/playerStore";
 import { useAppHotkeys } from "./useAppHotkeys";
@@ -35,6 +35,7 @@ function selection(): DomEditSelection {
 function Harness() {
   const selectionRef = useRef<DomEditSelection | null>(selection());
   const hotkeys = useAppHotkeys({
+    projectId: "current",
     handleTimelineElementsDelete: vi.fn(async () => undefined),
     handleTimelineElementSplit: vi.fn(async () => undefined),
     handleDomEditElementDelete: domDelete,
@@ -63,6 +64,11 @@ function Harness() {
   sync = hotkeys.syncPreviewHotkeys;
   return null;
 }
+
+beforeEach(() => {
+  usePlayerStore.getState().beginTimelineSession("current");
+  usePlayerStore.getState().setTimelineReady(true);
+});
 
 afterEach(() => {
   if (root) act(() => root?.unmount());
@@ -103,17 +109,13 @@ describe("preview iframe hotkey forwarding", () => {
 
   it("blocks editing shortcuts from the visible canvas until its timeline is ready", () => {
     const inner = mountWithPreview();
-    const pane = document.createElement("div");
-    pane.dataset.studioTimeline = "true";
-    pane.setAttribute("aria-busy", "true");
-    document.body.append(pane);
+    usePlayerStore.getState().setTimelineReady(false);
     const pressDelete = () => inner.document.body.dispatchEvent(new inner.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
     pressDelete();
     expect(domDelete).not.toHaveBeenCalled();
-    pane.removeAttribute("aria-busy");
+    usePlayerStore.getState().setTimelineReady(true);
     pressDelete();
     expect(domDelete).toHaveBeenCalledTimes(1);
-    pane.remove();
   });
 
   function mountWithPreview(): Window & typeof globalThis {
@@ -134,19 +136,14 @@ describe("preview iframe hotkey forwarding", () => {
     });
   }
 
-  it('ignores editing shortcuts only while the project is initializing', async () => {
+  it("blocks a previous project's ready timeline even when the timeline dock is hidden", async () => {
     const inner = mountWithPreview();
-    const loading = document.body.appendChild(document.createElement('div'));
-    loading.setAttribute('data-editor-initializing', 'true');
-    await press(inner, { key: 'z', ctrlKey: true });
-    await press(inner, { key: 'Delete' });
+    usePlayerStore.getState().beginTimelineSession("previous");
+    usePlayerStore.getState().setTimelineReady(true);
+    await press(inner, { key: "z", ctrlKey: true });
+    await press(inner, { key: "Delete" });
     expect(historyUndo).not.toHaveBeenCalled();
     expect(domDelete).not.toHaveBeenCalled();
-    loading.setAttribute('data-editor-initializing', 'false');
-    await press(inner, { key: 'z', ctrlKey: true });
-    await press(inner, { key: 'Delete' });
-    expect(historyUndo).toHaveBeenCalledTimes(1);
-    expect(domDelete).toHaveBeenCalledTimes(1);
   });
 
   it("takes one tracked undo step per Cmd+Z pressed inside the preview", async () => {

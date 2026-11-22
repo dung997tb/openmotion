@@ -1,4 +1,4 @@
-import { LivePreviewReadyContext, useMvpEditor } from "../../motion/StudioHost";
+import { useMvpEditor } from "../../motion/StudioHost";
 import { flushSync } from "react-dom";
 import { useI18n } from "../../i18n/I18n";
 import {
@@ -8,7 +8,6 @@ import {
 import {
   memo,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -122,7 +121,6 @@ export const NLEPreview = memo(function NLEPreview({
   const liveGenRef = useRef<number | null>(null);
   const reportPreviewFirstFrame = usePreviewFirstFrameTelemetry(previewSlots);
   const [compositionSize, setCompositionSize] = useState<PreviewCompositionSize | null>(null);
-  const onLivePreviewReady = useContext(LivePreviewReadyContext);
   const poster = usePreviewPoster(projectId, activeKey, directUrl);
   const mvp = useMvpEditor();
   const gutterPx = usePreviewGuidesStore((s) => (s.rulerVisible && !mvp && !presentationMode ? RULER_GUTTER_PX : 0));
@@ -514,7 +512,7 @@ export const NLEPreview = memo(function NLEPreview({
                 <Player
                   key={`${activeKey}-${slot.gen}`}
                   ref={setPreviewIframeRef}
-                  hostCoversInitialLoad={onLivePreviewReady !== null}
+                  showInitialLoading
                   projectId={directUrl ? undefined : projectId}
                   directUrl={directUrl}
                   onLoad={() => {
@@ -523,10 +521,7 @@ export const NLEPreview = memo(function NLEPreview({
                     applyInitialZoom();
                   }}
                   onCompositionLoadingChange={onCompositionLoadingChange}
-                  onReadyToShowChange={(ready) => {
-                    poster.onLiveReadyToShowChange(ready);
-                    if (ready) onLivePreviewReady?.(projectId);
-                  }}
+                  onReadyToShowChange={poster.onLiveReadyToShowChange}
                   onPreviewError={poster.onPreviewError}
                   onPainted={(details) => reportPreviewFirstFrame(slot, details)}
                   portrait={portrait}

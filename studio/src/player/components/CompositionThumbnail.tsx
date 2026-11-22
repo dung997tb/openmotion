@@ -109,7 +109,9 @@ export function compositionThumbnailRequest(
 }
 
 async function loadCompositionImage(url: string, signal: AbortSignal) {
-  let response = await studioApiFetch(url, { signal });
+  // Canvas and editing requests keep their normal browser network priority.
+  const options: RequestInit = { signal, priority: "low" };
+  let response = await studioApiFetch(url, options);
   if (response.status === 202) {
     const cached = new URL(url, window.location.origin);
     cached.searchParams.set("cached", "1");
@@ -129,7 +131,7 @@ async function loadCompositionImage(url: string, signal: AbortSignal) {
         }
         signal.addEventListener("abort", abort, { once: true });
       });
-      response = await studioApiFetch(cached.pathname + cached.search, { signal });
+      response = await studioApiFetch(cached.pathname + cached.search, options);
       delay = Math.min(4000, delay * 2);
     } while (response.status === 204 && Date.now() < deadline);
     if (response.status === 204) throw new Error("Composition thumbnail is still pending");

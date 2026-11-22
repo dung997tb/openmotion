@@ -1,5 +1,5 @@
 import { buildProjectApiPath } from "../utils/projectRouting";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { studioApiFetch } from "../utils/studioApiFetch";
 
 /**
@@ -20,21 +20,29 @@ export function useCompositionContentLoader({
   setActiveCompPath: (path: string | null) => void;
   showToast: (message: string, tone?: "error" | "info") => void;
 }) {
+  const pending = useRef<AbortController | null>(null);
+  useEffect(() => () => pending.current?.abort(), [projectId]);
+
   return useCallback(
     (comp: string) => {
       if (!projectId) return;
+      pending.current?.abort();
+      const controller = new AbortController();
+      pending.current = controller;
       setActiveCompPath(comp.endsWith(".html") ? comp : null);
       setEditingFile({ path: comp, content: null });
-      studioApiFetch(buildProjectApiPath(projectId, `/files/${encodeURIComponent(comp)}`))
+      studioApiFetch(buildProjectApiPath(projectId, `/files/${encodeURIComponent(comp)}`), { signal: controller.signal })
         .then(async (r) => {
           if (!r.ok) throw new Error(`Failed to load ${comp} (${r.status})`);
           return r.json();
         })
         .then((data: { content?: string }) => {
+          if (controller.signal.aborted) return;
           if (typeof data.content !== "string") throw new Error(`No content returned for ${comp}`);
           setEditingFile({ path: comp, content: data.content });
         })
         .catch((err) => {
+          if (controller.signal.aborted) return;
           showToast(err instanceof Error ? err.message : `Failed to load ${comp}`, "error");
         });
     },

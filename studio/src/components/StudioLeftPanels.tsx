@@ -63,6 +63,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
     handleRenameAsset,
     editingFile,
     fileTree,
+    fileTreeLoaded,
     revealSourceOffset,
     handleFileSelect,
     handleCreateFile,
@@ -113,6 +114,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
           <CompositionsPanel
             projectId={projectId}
             compositions={compositions}
+            loading={!fileTreeLoaded}
             onSelect={(...args: Parameters<typeof onSelectComposition>) => {
               trackStudioClick("clips", "select_clip", projectId);
               return onSelectComposition(...args);
@@ -129,6 +131,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
           <AssetsTab
             projectId={projectId}
             assets={assets}
+            loading={!fileTreeLoaded}
             onImport={importAssets}
             onLibraryImport={refreshFileTree}
             onDelete={handleDeleteFile}

@@ -232,7 +232,8 @@ export function useAppHotkeys({
   // ── Keydown dispatch ──
 
   const handleAppKeyDown = useCallback((event: KeyboardEvent) => {
-    if (document.querySelector('[data-editor-initializing="true"], [data-studio-timeline][aria-busy="true"]')) return;
+    const player = usePlayerStore.getState();
+    if (!projectId || player.timelineProjectId !== projectId || !player.timelineReady) return;
     const cb = cbRef.current;
     const key = event.key.toLowerCase();
     if (document.fullscreenElement?.matches('[data-studio-fullscreen-target]')) {
@@ -247,7 +248,7 @@ export function useAppHotkeys({
     if (dispatchLinkShortcut(event, cb)) return;
     if (dispatchModifierKey(event, key, cb)) return;
     dispatchPlainKey(event, key, cb);
-  }, []);
+  }, [projectId]);
 
   // eslint-disable-next-line no-restricted-syntax
   useEffect(() => {

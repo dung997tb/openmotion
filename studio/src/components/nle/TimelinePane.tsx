@@ -11,6 +11,8 @@ import { useTimelineDockSizing } from "./useTimelineDockSizing";
 import { MotionTimelineMedia } from "../../motion/MotionTimelineMedia";
 import { TimelineCompositionNavigation } from "./TimelineCompositionNavigation";
 
+const EMPTY_INITIAL_ELEMENTS: TimelineElement[] = [];
+
 export interface TimelinePaneProps {
   /** Slot rendered above the timeline tracks (toolbar with split, delete, zoom) */
   timelineToolbar?: ReactNode;
@@ -87,8 +89,10 @@ export function TimelinePane({
     updateCompositionStack,
     timelineDisabled: compositionLoading,
     timelineSessionEpoch,
+    initialTimelineElements,
   } = useNLEContext();
 
+  const isCurrentProject = usePlayerStore(state => state.timelineProjectId === projectId);
   const timelineReady = usePlayerStore(state => state.timelineProjectId === projectId && state.timelineReady);
   const timelineDisabled = compositionLoading || !timelineReady;
 
@@ -102,6 +106,8 @@ export function TimelinePane({
       data-studio-timeline="true"
       aria-disabled={timelineDisabled || undefined}
       aria-busy={!timelineReady || undefined}
+      onDragOver={timelineDisabled ? event => event.preventDefault() : undefined}
+      onDrop={timelineDisabled ? event => event.preventDefault() : undefined}
     >
       <div
         className="flex flex-col flex-1 min-h-0 overflow-hidden"
@@ -120,12 +126,14 @@ export function TimelinePane({
         </div>
         <div className="flex min-h-0 flex-1">
           <div className="min-w-0 flex-1">
-            <Timeline
+            {isCurrentProject && <Timeline
+              initialElements={initialTimelineElements ?? EMPTY_INITIAL_ELEMENTS}
+              readOnly={timelineDisabled}
               onContentHeightChange={sizing.onContentHeightChange}
               sessionEpoch={timelineSessionEpoch}
               onSeek={seek}
               onDrillDown={handleDrillDown}
-              renderClipContent={renderClipContent}
+              renderClipContent={timelineDisabled ? undefined : renderClipContent}
               onFileDrop={onFileDrop}
               onDeleteElement={onDeleteElement}
               onAssetDrop={onAssetDrop}
@@ -145,7 +153,7 @@ export function TimelinePane({
               canPasteClip={canPasteClip}
               clipMenuItems={clipMenuItems}
               splitShortcut={splitShortcut}
-            />
+            />}
           </div>
           <AudioMeterStrip />
         </div>
@@ -154,19 +162,7 @@ export function TimelinePane({
       {timelineOverlay && (
         <div className="pointer-events-none absolute inset-0 z-20">{timelineOverlay}</div>
       )}
-      {timelineDisabled && (
-        <div
-          className="absolute inset-0 z-30 cursor-not-allowed bg-black/18 flex items-center justify-center"
-          data-testid="timeline-loading-disabled-overlay"
-          role="status"
-          onPointerDown={(event) => event.preventDefault()}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => event.preventDefault()}
-        >
-          <span className="rounded-md bg-neutral-900/90 px-2.5 py-1 text-[11px] text-neutral-400">
-            {t("Loading composition…")}</span>
-        </div>
-      )}
+      {timelineDisabled && <span className="sr-only" role="status">{t("Loading composition…")}</span>}
     </div>
   );
 }

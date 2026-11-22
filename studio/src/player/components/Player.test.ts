@@ -166,7 +166,7 @@ describe("preview errors", () => {
 
   it("retries a failed preview with a fresh player URL", async () => {
     const onPainted = vi.fn();
-    const { host, player } = await mountPlayer({ onPainted, hostCoversInitialLoad: true });
+    const { host, player } = await mountPlayer({ onPainted, showInitialLoading: true });
     expect(player.getAttribute("assets-loading-ui")).toBe("none");
 
     const finishLoad = async () => {
@@ -197,7 +197,8 @@ describe("preview errors", () => {
 
     const retryUrl = new URL(player.getAttribute("src") ?? "", window.location.origin);
     expect(retryUrl.searchParams.get("_hfStudioRetry")).toBe("1");
-    expect(player.getAttribute("assets-loading-ui")).toBe(null);
+    expect(player.getAttribute("assets-loading-ui")).toBe("none");
+    expect(host.querySelector('[data-testid="composition-loading-overlay"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="composition-preview-error"]')).toBeNull();
 
     await finishLoad();
@@ -391,7 +392,7 @@ describe("ready to show", () => {
     async ({ shadow, video, renderReady, show }) => {
       const onReadyToShowChange = vi.fn();
       const onPainted = vi.fn();
-      const { player } = await mountPlayer({ hostCoversInitialLoad: !shadow, onReadyToShowChange, onPainted });
+      const { player } = await mountPlayer({ showInitialLoading: !shadow, onReadyToShowChange, onPainted });
       // A connected web component can report its initial about:blank before navigation.
       act(() => void player.iframeElement.dispatchEvent(new Event("load")));
       document.body.appendChild(player.iframeElement);
@@ -420,11 +421,19 @@ describe("ready to show", () => {
       }
     });
 
-  it("restores the native loader if the host uncovers a slow preview", async () => {
-    const { player, rerender } = await mountPlayer({ hostCoversInitialLoad: true });
-    expect(player.getAttribute("assets-loading-ui")).toBe("none");
-    await rerender({ hostCoversInitialLoad: false });
-    expect(player.hasAttribute("assets-loading-ui")).toBe(false);
+  it("covers the live canvas immediately until a displayable frame, without covering a hot reload", async () => {
+    const { host, player } = await mountPlayer({ showInitialLoading: true });
+    const cover = () => host.querySelector('[data-testid="composition-loading-overlay"]');
+    expect(cover()?.textContent).toContain("Loading composition");
+    loadAndReady(player);
+    await twoFrames();
+    expect(cover()).not.toBeNull();
+    painted(player);
+    await twoFrames();
+    expect(cover()).toBeNull();
+    loadAndReady(player);
+    await twoFrames();
+    expect(cover()).toBeNull();
   });
 
   it("marks the preview booted at its first frame while media is still buffering", async () => {

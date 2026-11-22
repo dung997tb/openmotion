@@ -25,6 +25,3 @@ export interface StudioHost {
 export const StudioHostContext = createContext<StudioHost | null>(null);
 export const useStudioHost = () => useContext(StudioHostContext);
 export const useMvpEditor = () => useStudioHost()?.mvpEditor === true;
-
-/** Fired by the currently mounted live player once its frame can be shown. */
-export const LivePreviewReadyContext = createContext<((projectId: string) => void) | null>(null);
