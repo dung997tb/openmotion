@@ -1005,7 +1005,9 @@
     "Your brand": "你的品牌",
     "Media is added when the images or video are ready": "图片或视频做好后会自动配上",
     "Resize the brief panel": "调整输入栏宽度",
-    "Drag to resize · double-click to reset": "拖动调整宽度 · 双击恢复默认"
+    "Drag to resize · double-click to reset": "拖动调整宽度 · 双击恢复默认",
+    "Open in a new window": "在新窗口打开",
+    "Full screen": "全屏"
   },
   "ja": {
     "$129": "¥19,800",
@@ -2013,7 +2015,9 @@
     "Your brand": "あなたのブランド",
     "Media is added when the images or video are ready": "画像や動画ができると自動で添付されます",
     "Resize the brief panel": "入力パネルの幅を調整",
-    "Drag to resize · double-click to reset": "ドラッグで調整 · ダブルクリックで元に戻す"
+    "Drag to resize · double-click to reset": "ドラッグで調整 · ダブルクリックで元に戻す",
+    "Open in a new window": "新しいウィンドウで開く",
+    "Full screen": "全画面"
   },
   "ko": {
     "$129": "₩169,000",
@@ -3021,7 +3025,9 @@
     "Your brand": "내 브랜드",
     "Media is added when the images or video are ready": "이미지나 영상이 준비되면 자동으로 붙습니다",
     "Resize the brief panel": "입력 패널 너비 조절",
-    "Drag to resize · double-click to reset": "드래그로 조절 · 더블클릭으로 초기화"
+    "Drag to resize · double-click to reset": "드래그로 조절 · 더블클릭으로 초기화",
+    "Open in a new window": "새 창에서 열기",
+    "Full screen": "전체 화면"
   },
   "de": {
     "$129": "129 €",
@@ -4029,7 +4035,9 @@
     "Your brand": "Deine Marke",
     "Media is added when the images or video are ready": "Medien kommen hinzu, sobald Bilder oder Video fertig sind",
     "Resize the brief panel": "Breite des Briefing-Bereichs ändern",
-    "Drag to resize · double-click to reset": "Ziehen zum Ändern · Doppelklick zum Zurücksetzen"
+    "Drag to resize · double-click to reset": "Ziehen zum Ändern · Doppelklick zum Zurücksetzen",
+    "Open in a new window": "In neuem Fenster öffnen",
+    "Full screen": "Vollbild"
   },
   "fr": {
     "$129": "129 €",
@@ -5037,7 +5045,9 @@
     "Your brand": "Votre marque",
     "Media is added when the images or video are ready": "Les médias s’ajoutent quand les images ou la vidéo sont prêtes",
     "Resize the brief panel": "Redimensionner le panneau du brief",
-    "Drag to resize · double-click to reset": "Glissez pour redimensionner · double-cliquez pour réinitialiser"
+    "Drag to resize · double-click to reset": "Glissez pour redimensionner · double-cliquez pour réinitialiser",
+    "Open in a new window": "Ouvrir dans une nouvelle fenêtre",
+    "Full screen": "Plein écran"
   },
   "ru": {
     "$129": "129 $",
@@ -6045,7 +6055,9 @@
     "Your brand": "Ваш бренд",
     "Media is added when the images or video are ready": "Медиа добавятся, когда будут готовы изображения или видео",
     "Resize the brief panel": "Изменить ширину панели брифа",
-    "Drag to resize · double-click to reset": "Перетащите для изменения · двойной щелчок для сброса"
+    "Drag to resize · double-click to reset": "Перетащите для изменения · двойной щелчок для сброса",
+    "Open in a new window": "Открыть в новом окне",
+    "Full screen": "Полный экран"
   },
   "es": {
     "$129": "$129",
@@ -7053,7 +7065,9 @@
     "Your brand": "Tu marca",
     "Media is added when the images or video are ready": "Los medios se añaden cuando las imágenes o el vídeo estén listos",
     "Resize the brief panel": "Cambiar el ancho del panel del brief",
-    "Drag to resize · double-click to reset": "Arrastra para ajustar · doble clic para restablecer"
+    "Drag to resize · double-click to reset": "Arrastra para ajustar · doble clic para restablecer",
+    "Open in a new window": "Abrir en una ventana nueva",
+    "Full screen": "Pantalla completa"
   },
   "pt-BR": {
     "$129": "R$ 599",
@@ -8061,7 +8075,9 @@
     "Your brand": "Sua marca",
     "Media is added when the images or video are ready": "A mídia entra quando as imagens ou o vídeo ficarem prontos",
     "Resize the brief panel": "Ajustar a largura do painel do briefing",
-    "Drag to resize · double-click to reset": "Arraste para ajustar · clique duplo para redefinir"
+    "Drag to resize · double-click to reset": "Arraste para ajustar · clique duplo para redefinir",
+    "Open in a new window": "Abrir em nova janela",
+    "Full screen": "Tela cheia"
   },
   "it": {
     "$129": "129 €",
@@ -9069,7 +9085,9 @@
     "Your brand": "Il tuo brand",
     "Media is added when the images or video are ready": "I media si aggiungono quando immagini o video sono pronti",
     "Resize the brief panel": "Ridimensiona il pannello del brief",
-    "Drag to resize · double-click to reset": "Trascina per ridimensionare · doppio clic per ripristinare"
+    "Drag to resize · double-click to reset": "Trascina per ridimensionare · doppio clic per ripristinare",
+    "Open in a new window": "Apri in una nuova finestra",
+    "Full screen": "Schermo intero"
   },
   "tr": {
     "$129": "129 $",
@@ -10077,6 +10095,8 @@
     "Your brand": "Markan",
     "Media is added when the images or video are ready": "Görseller ya da video hazır olunca medya eklenir",
     "Resize the brief panel": "Brif panelini yeniden boyutlandır",
-    "Drag to resize · double-click to reset": "Boyutlandırmak için sürükle · sıfırlamak için çift tıkla"
+    "Drag to resize · double-click to reset": "Boyutlandırmak için sürükle · sıfırlamak için çift tıkla",
+    "Open in a new window": "Yeni pencerede aç",
+    "Full screen": "Tam ekran"
   }
 }

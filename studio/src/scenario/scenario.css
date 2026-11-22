@@ -5180,3 +5180,63 @@ div.om-studio-output:hover {
     display: none;
   }
 }
+
+/* Full outputs inline: a page you can scroll, a video you can play or put full screen. */
+.om-studio-output-page,
+.om-studio-output-video,
+.om-studio-output-audio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-8);
+  margin: 0;
+  min-width: 0;
+}
+
+.om-studio-output-page figcaption,
+.om-studio-output-video figcaption,
+.om-studio-output-audio figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--motion-space-8);
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-output-page figcaption a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-4);
+  color: var(--motion-text);
+  text-decoration: none;
+}
+
+.om-studio-output-page figcaption a:hover {
+  color: var(--motion-strong);
+}
+
+.om-studio-output-page iframe {
+  width: 100%;
+  height: min(78vh, 900px);
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-bg);
+}
+
+.om-studio-output-video video {
+  width: 100%;
+  max-height: 72vh;
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-inset);
+}
+
+.om-studio-output-audio audio {
+  width: 100%;
+}
+
+.om-studio-output-video figcaption button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-4);
+  white-space: nowrap;
+}

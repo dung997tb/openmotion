@@ -9,7 +9,8 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { uploadLibraryAsset } from '../motion/assetClient';
 import type { PoolExportOptions } from './AssetPoolPanel';
-import { PoolItemPreviewDialog, PoolThumb } from './PoolItemPreview';
+import { designPreviewUrlForPoolItem, PoolItemPreviewDialog, PoolThumb } from './PoolItemPreview';
+import { assetMediaUrl } from '../../../shared/asset-library';
 import { buildShowcaseSlides } from './ScenarioStage';
 import { scenarioStudio, studioDeliverables } from './scenarioStudios';
 import type { ScenarioRunApi } from './stepContract';
@@ -102,6 +103,25 @@ function stepOutputs(step: ScenarioStepDefinition, state: ScenarioStepState | un
   const posts = iteration?.outputs.flatMap(output => output.type === 'social' ? output.posts : []) ?? [];
   const scripts = iteration?.outputs.flatMap(output => output.type === 'script' ? [output.text] : []) ?? [];
   return { items, posts, scripts };
+}
+
+/** A video plays right in the panel, with a fullscreen button. */
+function InlineVideo({ item }: { item: PoolItem }) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLVideoElement>(null);
+  if (item.ref.type !== 'asset') return null;
+  return (
+    <figure className="om-studio-output-video" data-studio-inline="video">
+      <figcaption>
+        <span>{item.label}</span>
+        <Button variant="plain" size="sm" icon={<RemixIcon name="fullscreen-line" size={14} />}
+          onClick={() => { void ref.current?.requestFullscreen?.().catch(() => {}); }}>
+          {t('Full screen')}
+        </Button>
+      </figcaption>
+      <video ref={ref} controls playsInline preload="metadata" src={assetMediaUrl(item.ref.assetId, item.ref.versionId)} />
+    </figure>
+  );
 }
 
 /** A deliverable tab: the top row switches which output is shown below. */
@@ -517,9 +537,33 @@ export function ScenarioStudioView({
                 </div>
               ) : (
                 <>
-                  {items.length > 0 && (
+                  {/* Pages and videos show in full right here; images open a larger view. */}
+                  {items.filter(item => item.kind === 'page').map(item => {
+                    const url = designPreviewUrlForPoolItem(item);
+                    return url ? (
+                      <figure key={item.id} className="om-studio-output-page" data-studio-inline="page">
+                        <figcaption>
+                          <span>{item.label}</span>
+                          <a href={url} target="_blank" rel="noopener noreferrer">
+                            <RemixIcon name="external-link-line" size={14} aria-hidden="true" />{t('Open in a new window')}
+                          </a>
+                        </figcaption>
+                        <iframe src={url} title={item.label} sandbox="allow-scripts" loading="lazy" />
+                      </figure>
+                    ) : null;
+                  })}
+                  {items.filter(item => item.kind === 'video' && item.ref.type === 'asset').map(item => (
+                    <InlineVideo key={item.id} item={item} />
+                  ))}
+                  {items.filter(item => item.kind === 'audio' && item.ref.type === 'asset').map(item => (
+                    <figure key={item.id} className="om-studio-output-audio" data-studio-inline="audio">
+                      <figcaption>{item.label}</figcaption>
+                      {item.ref.type === 'asset' && <audio controls preload="metadata" src={assetMediaUrl(item.ref.assetId, item.ref.versionId)} />}
+                    </figure>
+                  ))}
+                  {items.some(item => !['page', 'video', 'audio'].includes(item.kind)) && (
                     <div className="om-studio-output-items">
-                      {items.map(item => (
+                      {items.filter(item => !['page', 'video', 'audio'].includes(item.kind)).map(item => (
                         <Button key={item.id} variant="plain" className="om-studio-output-item" aria-label={`${t('Preview')} · ${item.label}`}
                           onClick={() => setPreviewItem(item)}>
                           <PoolThumb item={item} run={run} size="lg" />
