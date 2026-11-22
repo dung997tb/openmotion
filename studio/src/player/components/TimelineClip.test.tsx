@@ -33,6 +33,7 @@ function renderClip({
   theme = defaultTimelineTheme,
   trackLabel,
   mvp = false,
+  readOnly = false,
 }: {
   element: TimelineElement;
   pps?: number;
@@ -41,6 +42,7 @@ function renderClip({
   theme?: TimelineTheme;
   trackLabel?: string;
   mvp?: boolean;
+  readOnly?: boolean;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -57,7 +59,7 @@ function renderClip({
         isSelected={isSelected}
         isHovered={false}
         hasCustomContent={hasCustomContent}
-        capabilities={capabilities}
+        capabilities={{ ...capabilities, readOnly }}
         theme={theme}
         isComposition={false}
         onHoverStart={vi.fn()}
@@ -74,6 +76,16 @@ function renderClip({
 }
 
 describe("TimelineClip", () => {
+  it("shows the authored name and timing while a clip is waiting for its media", () => {
+    const { host, root } = renderClip({
+      element: { id: "intro", label: "Opening", tag: "div", start: 0, duration: 3, track: 0 },
+      mvp: true, readOnly: true, hasCustomContent: false,
+    });
+    expect(host.querySelector(".timeline-clip__name")?.textContent).toBe("Opening");
+    expect(host.querySelector(".timeline-clip__timecode")?.textContent).toBe("0.0-3.0s");
+    act(() => root.unmount());
+  });
+
   it.each(["First Bg", "Other track", undefined])("hides MVP clip titles for track %s while retaining identity, content and badges", (trackLabel) => {
     const { host, root, onClick } = renderClip({
       element: { id: "bg", label: "First Bg", tag: "div", start: 0, duration: 3, track: 0 },
