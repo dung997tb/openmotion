@@ -5,8 +5,8 @@ import type { DomEditSelection } from "../components/editor/domEditing";
 import type { TimelineAssetKind } from "./timelineAssetDrop";
 import { roundToCenti } from "./rounding";
 import { studioApiFetch } from "./studioApiFetch";
+import { getHistoryShortcutLabel } from "./historyShortcuts";
 import { encodeUrlPath } from "@hyperframes/parsers";
-import { getHistoryShortcutLabel } from "./historyShortcut";
 
 export { getHistoryShortcutLabel };
 

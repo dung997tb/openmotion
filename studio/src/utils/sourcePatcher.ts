@@ -3,14 +3,14 @@ import {
   decodeAuthoredAttribute,
   HTML_ATTRIBUTE_ENTITIES,
 } from "@hyperframes/parsers";
-import { escapeRegex } from "./escapeRegex";
+import { escapeRegex } from "./regex";
+
+export { escapeRegex };
 
 /**
  * Source Patcher — Maps visual property edits back to source HTML files.
  * Handles inline style updates, attribute changes, and text content.
  */
-
-export { escapeRegex };
 
 function tagAttribute(tag: string, name: string) {
   return scanHtmlOpeningTags(tag)[0]?.attributes.find((attr) => attr.name === name.toLowerCase());

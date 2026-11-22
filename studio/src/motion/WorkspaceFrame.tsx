@@ -8,21 +8,18 @@ import type { GalleryTemplate } from '../../../shared/catalog';
 import type { McpClient } from './mcpClients';
 import { creativeStudios, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import type { Modality } from '../../../shared/gateway';
-import { hasStudioHome, mediaEditorDestination, motionStudio, scenesForStudio, studioDestination, studioDraftKey, type StudioDestination } from './creativeStudios';
+import { hasStudioHome, scenesForStudio, studioDestination, studioDraftKey, type StudioDestination } from './creativeStudios';
 import type { AssetDraft } from './AssetComposer';
 import type { SkillParameters } from './skillCatalog';
 import { findCinemaTemplate } from './cinemaTemplates';
-import { reportBlackFridayEntry } from './templateLibraryTracking';
-import { Suspense, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
-import { preloadableLazyWithChunkReload } from '../utils/chunkReload';
-import { RouteSurfaceFallback } from './RouteSurfaceFallback';
+import { useState, useRef, useCallback, useEffect, useTransition, type ReactNode } from 'react';
+import { useInRouterContext, useLocation } from 'react-router';
 import { queueSuperAgentHandoff } from './superAgentHandoff';
 import type { SuperAgentHandoffPayload } from '../../../shared/capability-hub';
 import { useI18n } from '../i18n/I18n';
 import { MotionIcon } from './icons';
 import { RemixIcon } from '../icons/RemixIcons';
 import { navigateWorkspace, useWorkspace } from './useWorkspace';
-import { prepareTemplateProject, TemplatePreparationBlockedError } from './templateHandoff';
 import { Tooltip } from '../components/ui/Tooltip';
 import { Dialog } from '@base-ui/react/dialog';
 import { StudioConnectionToast } from '../components/StudioConnectionToast';
@@ -33,111 +30,73 @@ import { trackMotion } from './tracking';
 import { ApplicationHeader, WorkspaceUtilityActions } from './ApplicationChrome';
 import { BlackFridayTopBanner } from './BlackFridayTopBanner';
 import { dismissBannerToday, shouldShowBlackFridayBanner, useMinuteCondition } from './campaignAttribution';
-import type { SettingsSection } from './SettingsCenter';
-import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
 import { Skeleton } from '../components/ui/Skeleton';
-import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type WorkspacePage } from './workspacePageRouting';
+import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type SettingsSection, type WorkspacePage } from './workspacePageRouting';
 import type { SoundTabId } from './soundTabs';
-import { WORKSPACE_LOCATION_CHANGED, initializeWorkspaceHistory, restoreWorkspaceSource, workspaceHistoryIndex, workspaceHistorySource, workspaceSettingsSource, writeWorkspaceHistory } from '../utils/workspaceHistory';
-import { WorkspaceBreadcrumb } from './WorkspaceBreadcrumb';
+import { WORKSPACE_LOCATION_CHANGED, initializeWorkspaceHistory, navigateWorkspaceHistory, readLocationWorkspaceSource, restoreWorkspaceSource, workspaceHistoryIndex, workspaceHistorySource, workspaceSettingsSource, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { clickMethod, searchStarted, trackStudioClick } from './editorTracking';
-import { reportCreativeClick, reportCreativePageView, type CreativePage } from './exploreTracking';
-import { findScenario, type ScenarioId } from '../../../shared/scenarios';
-
-const ExploreStudios = preloadableLazyWithChunkReload(() => import('./ExploreStudios').then(m => ({ default: m.ExploreStudios })));
-const DesignProjectEditor = preloadableLazyWithChunkReload(() => import('../design/DesignProjectEditor').then(m => ({ default: m.DesignProjectEditor })));
-const DesignScenePage = preloadableLazyWithChunkReload(() => import('../design/scenes/DesignScenePage').then(m => ({ default: m.DesignScenePage })));
-const ModelOverview = preloadableLazyWithChunkReload(() => import('./ModelOverview').then(m => ({ default: m.ModelOverview })));
-const ModelHub = preloadableLazyWithChunkReload(() => import('./ModelHub').then(m => ({ default: m.ModelHub })));
-const CreativeWorkspace = preloadableLazyWithChunkReload(() => import('./CreativeWorkspace').then(m => ({ default: m.CreativeWorkspace })));
-const AssetsPage = preloadableLazyWithChunkReload(() => import('./AssetsPage').then(m => ({ default: m.AssetsPage })));
-const SuperAgentWorkspace = preloadableLazyWithChunkReload(() => import('../super-agent/SuperAgentWorkspace').then(m => ({ default: m.SuperAgentWorkspace })));
-const CinemaStudioPage = preloadableLazyWithChunkReload(() => import('./CinemaStudioPage').then(m => ({ default: m.CinemaStudioPage })));
-const MotionStudioPage = preloadableLazyWithChunkReload(() => import('./MotionStudioPage').then(m => ({ default: m.MotionStudioPage })));
-const SkillsPage = preloadableLazyWithChunkReload(() => import('./SkillsPage').then(m => ({ default: m.SkillsPage })));
-const GameStudio = preloadableLazyWithChunkReload(() => import('./game/GameStudio').then(m => ({ default: m.GameStudio })));
-const ConnectionDialog = preloadableLazyWithChunkReload(() => import('./ConnectionDialog').then(m => ({ default: m.ConnectionDialog })));
-const SettingsCenter = preloadableLazyWithChunkReload(() => import('./SettingsCenter').then(m => ({ default: m.SettingsCenter })));
-const McpConnectionPage = preloadableLazyWithChunkReload(() => import('./McpConnectionPage').then(m => ({ default: m.McpConnectionPage })));
-const BrandKitPage = preloadableLazyWithChunkReload(() => import('./BrandKitPage').then(m => ({ default: m.BrandKitPage })));
-const ScenarioHub = preloadableLazyWithChunkReload(() => import('../scenario/ScenarioHub').then(m => ({ default: m.ScenarioHub })));
-const ScenarioWorkspace = preloadableLazyWithChunkReload(() => import('../scenario/ScenarioWorkspace').then(m => ({ default: m.ScenarioWorkspace })));
+import { reportCreativePageView } from './exploreTracking';
+import type { ScenarioId } from '../../../shared/scenarios';
+import { isWorkspacePageOpen, resolveNavTrackingPage, resolveRouteArrival } from '../router/routeRegistry';
+import { RouteViewport } from '../router/RouteViewport';
+import { OverlayLayer } from '../router/OverlayLayer';
+import { StudioRouterProvider } from '../router/createAppRouter';
+import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
+import { preloadAllWorkspacePages, preloadStudioRoute } from '../router/lazyPages';
 
 export type { WorkspaceSurfaceKey } from './WorkspaceChromeContext';
 
 export function preloadWorkspaceSurface(surface: WorkspaceSurfaceKey): void {
-  const loaders: Record<WorkspaceSurfaceKey, () => Promise<unknown>> = {
-    explore: ExploreStudios.preload,
-    agent: SuperAgentWorkspace.preload,
-    design: DesignScenePage.preload,
-    motion: MotionStudioPage.preload,
-    cinema: CinemaStudioPage.preload,
-    creative: CreativeWorkspace.preload,
-    scenarios: ScenarioHub.preload,
-    assets: AssetsPage.preload,
-    skills: SkillsPage.preload,
-    'brand-kit': BrandKitPage.preload,
-    mcp: McpConnectionPage.preload,
-    settings: SettingsCenter.preload,
-    game: GameStudio.preload,
-  };
-  void loaders[surface]?.().catch(() => {});
+  preloadStudioRoute(surface === 'scenarios' ? 'workflows' : surface);
 }
 
 export async function preloadAllWorkspaceSurfaces(): Promise<void> {
-  await Promise.allSettled([
-    ExploreStudios.preload(),
-    DesignProjectEditor.preload(),
-    DesignScenePage.preload(),
-    ModelOverview.preload(),
-    ModelHub.preload(),
-    CreativeWorkspace.preload(),
-    AssetsPage.preload(),
-    SuperAgentWorkspace.preload(),
-    CinemaStudioPage.preload(),
-    MotionStudioPage.preload(),
-    SkillsPage.preload(),
-    GameStudio.preload(),
-    ConnectionDialog.preload(),
-    SettingsCenter.preload(),
-    McpConnectionPage.preload(),
-    BrandKitPage.preload(),
-    ScenarioHub.preload(),
-    ScenarioWorkspace.preload(),
-  ]);
+  await preloadAllWorkspacePages();
 }
 
 import { WorkspaceChromeContext, useWorkspaceChrome, type WorkspaceChrome, type WorkspaceSurfaceKey, type EditorGuard } from './WorkspaceChromeContext';
 export { useWorkspaceChrome, useOptionalWorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 
-export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: {
-  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: () => void;
-}) {
+type WorkspaceFrameProps = {
+  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: (targetHref?: string) => void;
+};
+
+export function WorkspaceFrame(props: WorkspaceFrameProps) {
+  const inRouter = useInRouterContext();
+  if (!inRouter) {
+    return (
+      <StudioRouterProvider>
+        <WorkspaceFrameInner {...props} />
+      </StudioRouterProvider>
+    );
+  }
+  return <WorkspaceFrameInner {...props} />;
+}
+
+function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: WorkspaceFrameProps) {
   const { t, locale } = useI18n();
-  const [page, setPage] = useState(() => readWorkspacePage(location.search, location.hash));
-  const [source, setSource] = useState(workspaceHistorySource);
+  const routerLocation = useLocation();
+  const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname));
+  const [source, setSource] = useState(() => readLocationWorkspaceSource(routerLocation.state));
+  const [isRoutePending, startRouteTransition] = useTransition();
   const sourceUrl = source ? new URL(source.href) : null;
-  const sourcePage = sourceUrl && readWorkspacePage(sourceUrl.search, sourceUrl.hash);
+  const sourcePage = sourceUrl && readWorkspacePage(sourceUrl.search, sourceUrl.hash, sourceUrl.pathname);
   const fromExplore = sourcePage?.explore && !sourcePage.templates && !sourcePage.template;
   const { settings, assets: assetsOpen, skills: skillsOpen, templates: libraryRequested } = page;
   const standaloneMcp = settings === 'mcp' && !page.mcpInSettings;
   const selectedCinemaTemplate = findCinemaTemplate(page.cinemaTemplate);
   const detailOnly = Boolean(page.template) && !libraryRequested;
   const connectionsOpen = libraryRequested || detailOnly;
-  const hostChrome = window.parent !== window && new URLSearchParams(location.search).get('hostChrome') === '1';
+  const hostChrome = window.parent !== window && new URLSearchParams(routerLocation.search).get('hostChrome') === '1';
   const templatesPage = libraryRequested && !hostChrome;
   // Resource pages cover the editor without unmounting it.
-  const pageOpen = templatesPage || page.motion || page.superAgent || page.cinemaLanding || Boolean(page.designScene) || Boolean(page.modelOverview) || Boolean(page.modelHub) || Boolean(page.specialty) || page.explore || page.scenarioHub || Boolean(page.scenario) || assetsOpen || skillsOpen || Boolean(page.studio);
+  const pageOpen = isWorkspacePageOpen(page, templatesPage);
   const lastExplore = useRef({ community: page.community, medium: page.medium });
   if (page.explore) lastExplore.current = { community: page.community, medium: page.medium };
-  const [exploreVisited, setExploreVisited] = useState(page.explore);
-  useEffect(() => { if (page.explore) setExploreVisited(true); }, [page.explore]);
-  const [superAgentVisited, setSuperAgentVisited] = useState(page.superAgent);
-  useEffect(() => { if (page.superAgent) setSuperAgentVisited(true); }, [page.superAgent]);
   const lastAgentChat = useRef<string | null>(page.superAgentChat);
   if (page.superAgent && page.superAgentChat) {
     lastAgentChat.current = page.superAgentChat;
@@ -150,23 +109,25 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   const libraryOpen = useRef(libraryRequested);
   const libraryClosed = useRef(onLibraryClose); libraryClosed.current = onLibraryClose;
   useEffect(() => {
-    const sync = () => {
-      const next = readWorkspacePage(location.search, location.hash);
+    const sync = (search: string, hash: string, pathname: string, locationState?: unknown) => {
+      const next = readWorkspacePage(search, hash, pathname);
       if (libraryOpen.current && !next.templates) libraryClosed.current?.();
       libraryOpen.current = next.templates;
-      setPage(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
-      const nextSource = workspaceHistorySource();
-      setSource(previous => previous?.index === nextSource?.index && previous?.href === nextSource?.href ? previous : nextSource);
+      const nextSource = locationState !== undefined ? readLocationWorkspaceSource(locationState) : workspaceHistorySource();
+      startRouteTransition(() => {
+        setPage(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+        setSource(previous => previous?.index === nextSource?.index && previous?.href === nextSource?.href ? previous : nextSource);
+      });
     };
-    window.addEventListener(WORKSPACE_LOCATION_CHANGED, sync);
-    if (!onNavigate) window.addEventListener('popstate', sync);
+    sync(routerLocation.search, routerLocation.hash, routerLocation.pathname, routerLocation.state);
+    const onLocationChanged = () => sync(location.search, location.hash, location.pathname);
+    window.addEventListener(WORKSPACE_LOCATION_CHANGED, onLocationChanged);
     return () => {
-      window.removeEventListener(WORKSPACE_LOCATION_CHANGED, sync);
-      if (!onNavigate) window.removeEventListener('popstate', sync);
+      window.removeEventListener(WORKSPACE_LOCATION_CHANGED, onLocationChanged);
     };
-  }, [onNavigate]);
+  }, [routerLocation]);
   useEffect(() => {
-    if (isLegacyWorkspaceHref(location.search, page)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }), true);
+    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }), true);
   }, [page]);
   const navigatePage = useCallback((patch: Partial<WorkspacePage>, replace = false, mode?: 'from-page' | 'keep') => {
     const current = new URL(location.href);
@@ -180,9 +141,13 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     } else if (mode !== 'keep' && changesWorkspaceDestination(patch)) {
       nextSource = null;
     }
+    const isSettingsCenter = (url: URL) => {
+      const parsed = readWorkspacePage(url.search, url.hash, url.pathname);
+      return Boolean(parsed.settings) && parsed.settings !== 'brand-kit' && (parsed.settings !== 'mcp' || parsed.mcpInSettings);
+    };
     let settingsSource = null;
-    if (target.searchParams.get('page') === 'settings') {
-      settingsSource = current.searchParams.get('page') === 'settings' ? workspaceSettingsSource() : origin;
+    if (isSettingsCenter(target)) {
+      settingsSource = isSettingsCenter(current) ? workspaceSettingsSource() : origin;
     }
     writeWorkspaceHistory(target, replace, { page: nextSource, settings: settingsSource });
   }, []);
@@ -200,16 +165,31 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   const navigate = useCallback((url: string, replace = false) => {
     if (!onNavigate) { navigateWorkspace(url, replace); return; }
     const target = preservePresentation(url, location.search);
-    writeWorkspaceHistory(target, replace);
-    onNavigate();
+    void navigateWorkspaceHistory(target, replace).then(() => {
+      onNavigate(target);
+    });
   }, [onNavigate]);
-  const workspace = useWorkspace(beforeViewChange, projectId, sessionId, navigate);
+  const workspace = useWorkspace(beforeViewChange, projectId, sessionId, navigate, { externalHistoryGuard: Boolean(onNavigate) });
+  const fallbackActingRef = useRef(false);
+  const [blockerError, setBlockerError] = useState<{ message: string } | null>(null);
+  useEffect(() => { setBlockerError(null); }, [projectId, sessionId]);
+  const handleBlockedError = useCallback((errorMessage: string | null) => {
+    setBlockerError(errorMessage ? { message: errorMessage } : null);
+  }, []);
+  useWorkspaceBlocker({
+    enabled: Boolean(onNavigate),
+    actingRef: workspace.actingRef ?? fallbackActingRef,
+    waitForSaves: beforeViewChange,
+    onBlockedError: handleBlockedError,
+    onProjectChangeProceed: onNavigate,
+  });
+  const navigationError = blockerError ?? workspace.navigationError;
   const navigationToast = useToast();
   useEffect(() => {
-    if (!workspace.navigationError) return;
-    const id = navigationToast.showToast(workspace.navigationError.message, 'error', 'feedback');
+    if (!navigationError) return;
+    const id = navigationToast.showToast(navigationError.message, 'error', 'feedback');
     return () => navigationToast.dismissToast(id);
-  }, [workspace.navigationError, navigationToast.showToast, navigationToast.dismissToast]);
+  }, [navigationError, navigationToast.showToast, navigationToast.dismissToast]);
   const connectionEntry = useRef<McpEntry>('direct_link');
   // A later visit through history or a pasted link has no control behind it.
   useEffect(() => { if (settings !== 'mcp') connectionEntry.current = 'direct_link'; }, [settings]);
@@ -259,8 +239,6 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   const navigationCollapsed = !editorActive;
   const toggleSidebar = useCallback(() => setSidebarOpen(open => !open), []);
   const openEditor = () => { navigatePage({ motion: false, templates: false }); if (narrow) setSidebarOpen(false); };
-  const [assetsVisited, setAssetsVisited] = useState(assetsOpen);
-  useEffect(() => { if (assetsOpen) setAssetsVisited(true); }, [assetsOpen]);
   const openAssets = useCallback(() => { navigatePage({ assets: true, assetId: null, assetVersion: null, templates: false }); }, [navigatePage]);
   const openSkills = useCallback((skillCategory: SkillCategory | null = null, trigger?: HTMLElement) => {
     skillsTrigger.current = trigger ?? null;
@@ -372,7 +350,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     navigatePage({ ...(specialty ? { specialty } : { skills: true }), skill, templates: false, ...lastExplore.current });
   };
   const selectAssetRoute = useCallback((assetId: string | null, assetVersion: string | null) => {
-    if (readWorkspacePage(location.search, location.hash).assets) navigatePage({ assetId, assetVersion });
+    if (readWorkspacePage(location.search, location.hash, location.pathname).assets) navigatePage({ assetId, assetVersion });
   }, [navigatePage]);
   const openStudio = (studio: StudioDestination | null, seed?: string | AssetDraft, fromPage = false) => {
     // A brief started from a technique studio keeps its Skill so its draft stays separate from other studios' briefs.
@@ -422,9 +400,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
   const superAgentActive = page.superAgent && !visibleSettings && !templatesPage;
   const currentPage = templatesPage || page.explore || skillsOpen ? 'explore' : standaloneMcp ? 'mcp' : superAgentActive ? 'agent' : null;
   // Count arrivals to template and discovery pages. Media forms report their own scene views.
-  const routeView = templatesPage ? null : page.explore ? 'explore' : page.motion ? 'motion'
-    : page.designScene && page.designScene !== 'projects' && !page.designProject ? 'design'
-    : page.cinemaLanding ? 'cinema' : page.modelOverview ? 'model:' + page.modelOverview : null;
+  const routeView = resolveRouteArrival(page, templatesPage);
   useEffect(() => {
     if (!routeView) return;
     const hasProject = Boolean(projectId);
@@ -434,9 +410,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     // Only an arrival counts; filter changes within Explore are reported as clicks.
   }, [routeView]);
   // Where the top navigation is shown, so its clicks segment by the page the user was on.
-  const navTrackingPage: CreativePage = templatesPage ? 'studio' : page.explore ? 'explore' : standaloneMcp ? 'mcp'
-    : settings === 'brand-kit' ? 'brand_kit' : settings ? 'settings'
-    : page.modelOverview ? 'model_overview' : page.modelHub ? 'model_hub' : page.studio || page.motion || page.cinemaLanding || page.designScene || page.scenarioHub || page.scenario ? 'creative_studio' : skillsOpen || page.specialty ? 'skills' : assetsOpen ? 'assets' : 'studio';
+  const navTrackingPage = resolveNavTrackingPage(page, { templatesPage, standaloneMcp });
   const returnToExplore = () => {
     if (source && fromExplore && restoreWorkspaceSource(source)) return;
     const filters = page.motion || page.cinemaLanding || page.modelOverview || page.modelHub || page.specialty || page.scenarioHub || page.scenario || page.studio || page.skills
@@ -460,36 +434,33 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     }
     openMcp(client, example);
   };
-  const library = connectionsOpen && <Suspense fallback={templatesPage ? <RouteSurfaceFallback /> : null}><ConnectionDialog collection={page.templateCollection} onCollectionChange={templateCollection => navigatePage({ templateCollection }, true)}
-    collectionSkillOpen={page.templateCollection === 'black-friday' && Boolean(page.skill)} detailOnly={detailOnly}
-    initialTemplate={detailOnly && cardPreview.current?.locale === locale ? cardPreview.current.template : undefined}
-    onBrowseTemplates={() => navigatePage({ templates: true, templateCollection: null, ...(page.templateCollection === 'black-friday' && { skill: null }), template: null })}
-    onOpenSkill={(skill, trigger) => {
-      if (!templatesPage) { openSkill(skill); return; }
-      collectionSkillTrigger.current = trigger;
-      navigatePage({ skill });
-    }}
-    onStartScenario={() => openScenario('black-friday', undefined, true)}
-    inWorkspace={templatesPage}
-    open projectId={projectId} returnFocus={libraryTrigger.current} section="templates"
-    creators={page.creators} creator={page.creator} onCreatorChange={creator => navigatePage({ templates: true, creators: true, creator, template: null })}
-    templateId={page.template} onTemplateChange={template => {
-      if (!detailOnly) navigatePage({ template });
-      else if (template) writeWorkspaceHistory(workspacePageHref(location.href, { template }), true);
-      else closeStandalonePreview();
-    }}
-    busy={libraryBusy} openingDisabled={switchingDisabled} error={workspace.error}
-    onClose={detailOnly ? closeStandalonePreview : () => page.templateCollection === 'black-friday' ? returnToExplore() : navigatePage({ templates: false })}
-    onPrepareTemplate={async (template, requestId) => {
-    try { await beforeViewChange(); }
-    catch (error) { throw new TemplatePreparationBlockedError(error instanceof Error ? error.message : t('Working…')); }
-    return prepareTemplateProject(template, projectId, requestId);
-  }} onOpenProject={id => workspace.open('projects', id)} onOpen={id => { if (!switchingDisabled) void (sessionId ? workspace.createArtifact(sessionId, id) : workspace.startSession(undefined, id)); }} /></Suspense>;
   const showStudioBackToExplore = page.studio?.scene.modality === 'image' && fromExplore && !sourcePage.community && !sourcePage.medium;
-  const mcpPage = settings === 'mcp' && <Suspense fallback={<RouteSurfaceFallback />}><McpConnectionPage entry={connectionEntry.current} projectId={projectId}
-    hasProject={Boolean(projectId)} previewsEnabled={!connectionsOpen} openLibrary={value.openLibrary} openProviders={value.openModelSettings}
-    route={page} onRouteChange={navigatePage} inSettings={page.mcpInSettings}
-    breadcrumb={source && <WorkspaceBreadcrumb source={source} destination="MCP" />} /></Suspense>;
+  const openTemplateFromOverlay = (id: string) => {
+    if (!switchingDisabled) void (sessionId ? workspace.createArtifact(sessionId, id) : workspace.startSession(undefined, id));
+  };
+  const overlaySharedProps = {
+    page,
+    projectId,
+    sessionId,
+    locale,
+    connectionsOpen,
+    templatesPage,
+    detailOnly,
+    libraryBusy,
+    switchingDisabled,
+    workspaceError: workspace.error,
+    cardPreview,
+    libraryTrigger,
+    collectionSkillTrigger,
+    navigatePage,
+    beforeViewChange,
+    closeStandalonePreview,
+    returnToExplore,
+    openSkill,
+    openScenario,
+    openProject: (id: string) => workspace.open('projects', id),
+    openTemplate: openTemplateFromOverlay,
+  };
   return <WorkspaceChromeContext.Provider value={value}>
     <StudioToastViewport {...navigationToast} />
     <StudioConnectionToast reconnecting={reconnecting} />
@@ -507,6 +478,7 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
         onOpenScenarioHub={() => openScenarioHub()}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />
       <div className="motion-workspace">
+      {isRoutePending && <div className="motion-route-progress" role="progressbar" aria-hidden="true" />}
       <Dialog.Portal>
         <Dialog.Backdrop className="hf-overlay-backdrop motion-sidebar-backdrop" />
         <Dialog.Popup id="om-project-navigation" className="motion-sidebar-drawer" aria-label={t('Project list')} onKeyDown={event => event.stopPropagation()}>
@@ -516,158 +488,58 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
       {!narrow && editorRoute && <div id="om-project-navigation" className="om-project-navigation om-collapsible" data-collapsed={!sidebarOpen || navigationCollapsed} aria-hidden={!sidebarOpen || navigationCollapsed} inert={!sidebarOpen || navigationCollapsed}>
         <WorkspaceSidebar archives={archives} currentId={projectId} close={() => setSidebarOpen(false)} query={projectQuery} setQuery={setProjectQuery} openSettings={openSettings} openTemplates={openMotionTemplates} />
       </div>}
-      <div className="motion-workspace-content" hidden={!editorRoute} inert={!editorRoute}>
+      <div className="motion-workspace-content" hidden={!editorRoute} aria-hidden={!editorRoute} inert={!editorRoute}>
         {visibleNotice && <ErrorNotice key={noticeKey} message={notice}
           onDismiss={() => { setDismissedNotice(noticeKey); if (workspaceNotice) workspace.clearError(); }} />}
         {children}
       </div>
-      {(exploreVisited || page.explore) && <div className="om-explore-host" hidden={!page.explore || templatesPage} inert={!page.explore || templatesPage}>
-        <Suspense fallback={<RouteSurfaceFallback />}>
-          <ExploreStudios initialTemplateCollection={page.templateCollection} onModel={openModelFromPage} onModelHub={openModelHub}
-            onOpenMotionEditor={() => void openMotionEditor('last')} motionEditorDisabled={motionEditorDisabled} onOpenBlackFriday={trigger => {
-            reportBlackFridayEntry();
-            value.openLibrary(trigger, undefined, 'black-friday');
-          }} onCreators={trigger => { libraryTrigger.current = trigger; navigatePage({ templates: true, creators: true, creator: null, template: null }); }} onBrandKit={() => openSettings('brand-kit')} onMcp={(client, example) => openMcp(client, example, true)}
-            onSelectDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })}
-            onOpenDesignProject={id => navigatePage({ designScene: 'projects', designProject: id, templates: false, ...lastExplore.current })}
-            onStartScenario={id => openScenario(id, undefined, true)}
-            onOpenScenarioHub={() => openScenarioHub(true)}
-            filters={lastExplore.current} onChooseStudio={studio => chooseStudio(studio, undefined, true)} active={page.explore && !templatesPage && !connectionsOpen} onNavigate={openStudioFromPage} onSkill={openSkill} />
-        </Suspense>
-      </div>}
-      {page.scenarioHub && !templatesPage && !settings && <div className="om-explore-host">
-        <Suspense fallback={<RouteSurfaceFallback />}>
-          <ScenarioHub
-            category={page.scenarioCategory}
-            active={!connectionsOpen}
-            onCategory={scenarioCategory => navigatePage({ scenarioCategory }, true)}
-            onOpenScenario={(id, runId) => openScenario(id, runId, true)}
-            onExplore={returnToExplore}
-          />
-        </Suspense>
-      </div>}
-      {page.scenario && !templatesPage && !settings && <div className="om-assets-host om-scenario-host" style={{ padding: 0 }}>
-        <Suspense fallback={<RouteSurfaceFallback />}>
-          <ScenarioWorkspace
-            key={page.scenario}
-            scenarioId={page.scenario}
-            runId={page.scenarioRun}
-            stepId={page.scenarioStep}
-            mode={page.scenarioMode}
-            active={!connectionsOpen}
-            onRoute={(patch, replace) => navigatePage({
-              ...(patch.run !== undefined ? { scenarioRun: patch.run } : {}),
-              ...(patch.step !== undefined ? { scenarioStep: patch.step } : {}),
-              ...(patch.mode !== undefined ? { scenarioMode: patch.mode } : {}),
-            }, Boolean(replace))}
-            onExplore={returnToExplore}
-            onOpenHub={() => openScenarioHub()}
-            breadcrumb={source && !fromExplore ? <WorkspaceBreadcrumb source={source} destination={t(findScenario(page.scenario)?.title ?? 'Workflows')} /> : undefined}
-            onOpenDesignProject={id => navigatePage({ designScene: 'projects', designProject: id, templates: false, ...lastExplore.current }, false, 'from-page')}
-            onOpenMotionProject={id => workspace.open('projects', id)}
-            onOpenModelHub={openModelHub}
-            onOpenBlackFriday={trigger => {
-              reportBlackFridayEntry();
-              value.openLibrary(trigger, undefined, 'black-friday');
-            }}
-            onOpenTemplateLibrary={trigger => value.openLibrary(trigger)}
-            onOpenStudioScene={(target, prompt) => openStudioFromPage(target, prompt)}
-            onOpenProviders={provider => {
-              if (provider && value.openProviderSettings) value.openProviderSettings(provider);
-              else value.openModelSettings();
-            }}
-            onOpenMcp={example => openMcp(undefined, example, true)}
-          />
-        </Suspense>
-      </div>}
-      {page.cinemaLanding && !templatesPage && !settings && <div className="om-explore-host">
-        <Suspense fallback={<RouteSurfaceFallback />}>
-          <CinemaStudioPage onStart={() => openStudio(mediaEditorDestination('text-to-video'), undefined, true)} onTemplate={(template, position) => {
-            reportCreativeClick('creative_studio', 'studio_bar', 'try_prompt', { studio: 'cinema', scene: template.scene, template: template.id, position });
-            navigatePage({ studio: mediaEditorDestination(template.scene), cinemaTemplate: template.id, templates: false, ...lastExplore.current }, false, 'from-page');
-          }} />
-        </Suspense>
-      </div>}
-      {motionTemplatesOpen && <div className="om-explore-host"><Suspense fallback={<RouteSurfaceFallback />}><MotionStudioPage active={!connectionsOpen}
-        onOpenEditor={() => void openMotionEditor('first')} editorDisabled={motionEditorDisabled}
-        onBackToExplore={fromExplore ? returnToExplore : undefined}
-        onStartScenario={() => openScenario('motion-full-chain', undefined, true)} /></Suspense></div>}
-      {page.modelHub && !templatesPage && <div className="om-explore-host"><Suspense fallback={<RouteSurfaceFallback />}><ModelHub id={page.modelHub} hasProject={Boolean(projectId)} onExplore={returnToExplore} onModel={openModelFromPage} onSettings={openSettings}
-        onProvider={provider => navigatePage({ settings: 'providers', provider, templates: false })}
-        onUse={() => chooseStudio(motionStudio)}
-        onStartScenario={page.modelHub === 'gemini-4' ? () => openScenario('gemini-4-neon', undefined, true) : undefined} /></Suspense></div>}
-      {page.modelOverview && !templatesPage && <div className="om-explore-host"><Suspense fallback={<RouteSurfaceFallback />}><ModelOverview id={page.modelOverview} source={source} onExplore={hostChrome ? returnToExplore : undefined}
-        onProvider={provider => navigatePage({ settings: 'providers', provider: provider ?? null, templates: false })}
-        onScene={(studio, prompt, soundTab) => soundTab
-          ? navigatePage({ studio, soundTab, skill: null, settings: null, assets: false, skills: false, templates: false, ...lastExplore.current }, false, 'from-page')
-          : openStudioFromPage(studio, prompt)} /></Suspense></div>}
-      {page.studio && <div className="om-workspace-layer" hidden={templatesPage} inert={templatesPage}><Suspense fallback={<RouteSurfaceFallback />}><CreativeWorkspace onOpenBrandKit={hostChrome ? () => openSettings('brand-kit') : undefined} soundTab={page.soundTab ?? null} skill={page.skill} onCollection={(specialty, replace) => navigatePage({ specialty, templates: false }, Boolean(replace))}
-        onSelectDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })}
-        breadcrumb={source && page.studio && !showStudioBackToExplore && <WorkspaceBreadcrumb source={source} destination={t(page.studio.landing ? page.studio.scene.label : page.studio.studio.title)} />}
-        onBackToExplore={showStudioBackToExplore || (hostChrome && !source) ? returnToExplore : undefined}
-        onExplore={returnToExplore} drafts={studioDrafts} active={!connectionsOpen} destination={page.studio} visit={studioVisit} hasProject={Boolean(projectId)} cinemaTemplate={selectedCinemaTemplate}
-        onOpenStudio={studio => navigatePage({ studio, templates: false }, false, 'from-page')}
-        onNavigate={(studio, soundTab) => navigatePage({ studio, soundTab: soundTab ?? null, templates: false,
-          cinemaTemplate: studio.scene.modality === 'video' && studio.scene.id === page.studio?.scene.id ? page.cinemaTemplate : null,
-        }, false, 'keep')} /></Suspense></div>}
-      {page.designScene && !templatesPage && (
-        <div className="om-assets-host" style={{ padding: 0 }}>
-          <Suspense fallback={<RouteSurfaceFallback />}>
-            {page.designProject
-              ? <DesignProjectEditor
-                  projectId={page.designProject}
-                  onBack={() => navigatePage({ designScene: page.designScene, designProject: null, templates: false })}
-                  onOpenMcp={() => openMcp(undefined, undefined, true)}
-                />
-              : <DesignScenePage
-                  scene={page.designScene}
-                  onSelectDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false })}
-                  onOpenProject={id => navigatePage({ designScene: page.designScene ?? 'projects', designProject: id, templates: false })}
-                  onExplore={returnToExplore}
-                  onOpenMcp={() => openMcp(undefined, undefined, true)}
-                  onStartScenario={() => openScenario('design-full-chain', undefined, true)}
-                />}
-          </Suspense>
-        </div>
-      )}
-      {(assetsVisited || assetsOpen) && <div className="om-assets-host" hidden={!assetsOpen || Boolean(settings) || templatesPage} inert={!assetsOpen || Boolean(settings) || templatesPage}><Suspense fallback={<RouteSurfaceFallback />}><AssetsPage hasProject={Boolean(projectId)} active={assetsOpen && !settings && !templatesPage} routeId={page.assetId} routeVersion={page.assetVersion} onAssetRoute={selectAssetRoute} /></Suspense></div>}
-      {(superAgentVisited || page.superAgent) && (
-        <div className="om-super-agent-host" hidden={!superAgentActive} inert={!superAgentActive}>
-          <Suspense fallback={<RouteSurfaceFallback />}>
-            <SuperAgentWorkspace
-              active={superAgentActive}
-              chatId={page.superAgentChat}
-              onChatIdChange={(chat, replace) => navigatePage({ superAgent: true, superAgentChat: chat, templates: false }, replace)}
-              onOpenDesignProject={id => navigatePage({ designScene: 'projects', designProject: id, templates: false })}
-              onOpenMotionProject={id => { void workspace.open('projects', id); }}
-              onOpenGameStudio={() => {
-                const gameStudio = creativeStudios.find((s): s is TechniqueStudio => s.surface === 'techniques' && s.id === 'game');
-                if (gameStudio) navigatePage({ specialty: gameStudio, skill: null, templates: false });
-              }}
-              onOpenAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion: assetVersion ?? null, templates: false })}
-              onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId && !kitId.startsWith('catalog:') ? kitId : null, templates: false })}
-              onOpenAgentSettings={() => openSettings('local')}
-              onOpenModelSettings={() => openSettings('models')}
-              onOpenMcp={() => openMcp(undefined, undefined, true)}
-            />
-          </Suspense>
-        </div>
-      )}
-      {page.specialty?.id === 'game' && !skillsOpen && !settings && !templatesPage && <div className="om-skills-host"><Suspense fallback={<RouteSurfaceFallback />}><GameStudio onExplore={returnToExplore} onOpenMcp={() => openMcp(undefined, undefined, true)} /></Suspense></div>}
-      {(skillsOpen || page.specialty) && !(page.specialty?.id === 'game' && !skillsOpen) && !settings && !templatesPage && <div className="om-skills-host"><Suspense fallback={<RouteSurfaceFallback />}><SkillsPage previewsEnabled={!connectionsOpen} briefs={skillBriefs.current} onCreate={openStudioFromPage} key={page.specialty?.id ?? 'skills'} studio={page.specialty ?? undefined} onExplore={returnToExplore} onClose={skillsOpen ? closeSkills : undefined} skillId={page.skill} routeCategory={page.skills ? page.skillCategory : undefined} onCategoryChange={skillCategory => navigatePage({ skillCategory }, true)} onSkillChange={skill => navigatePage({ skill })} hasProject={Boolean(projectId)} /></Suspense></div>}
-      {standaloneMcp && !templatesPage && <SettingsSurfaceBoundary>{mcpPage}</SettingsSurfaceBoundary>}
-      {visibleSettings === 'brand-kit'
-        ? <SettingsSurfaceBoundary key="brand-kit"><Suspense fallback={<RouteSurfaceFallback />}><BrandKitPage inWorkspace={!hostChrome} onClose={openHome} selectedId={page.brandKit} onSelect={brandKit => navigatePage({ brandKit })} previewsEnabled={!connectionsOpen} hasProject={Boolean(projectId)} /></Suspense></SettingsSurfaceBoundary>
-        : visibleSettings && <SettingsSurfaceBoundary key="settings"><Suspense fallback={<RouteSurfaceFallback />}><SettingsCenter hasProject={Boolean(projectId)} section={visibleSettings} onBack={closeSettings}
-          onSection={openSettings} openConnections={entry => openSettings('mcp', entry)} mcp={mcpPage}
-          providerId={page.provider} onProviderChange={provider => navigatePage({ provider })} /></Suspense></SettingsSurfaceBoundary>}
-      {(templatesPage || detailOnly) && library}
-      {templatesPage && page.templateCollection === 'black-friday' && page.skill && <Suspense fallback={null}><SkillsPage detailOnly skillId={page.skill}
-        onSkillChange={skill => navigatePage({ skill })} /></Suspense>}
+      <RouteViewport
+        page={page}
+        projectId={projectId}
+        source={source}
+        fromExplore={Boolean(fromExplore)}
+        hostChrome={hostChrome}
+        templatesPage={templatesPage}
+        connectionsOpen={connectionsOpen}
+        lastExplore={lastExplore.current}
+        motionEditorDisabled={motionEditorDisabled}
+        motionTemplatesOpen={motionTemplatesOpen}
+        standaloneMcp={standaloneMcp}
+        visibleSettings={visibleSettings}
+        showStudioBackToExplore={Boolean(showStudioBackToExplore)}
+        selectedCinemaTemplate={selectedCinemaTemplate}
+        connectionEntry={connectionEntry.current}
+        studioVisit={studioVisit}
+        studioDrafts={studioDrafts}
+        skillBriefs={skillBriefs}
+        libraryTrigger={libraryTrigger}
+        openLibrary={value.openLibrary}
+        openModelSettings={value.openModelSettings}
+        openProviderSettings={value.openProviderSettings}
+        navigatePage={navigatePage}
+        openHome={openHome}
+        openSettings={openSettings}
+        closeSettings={closeSettings}
+        openMcp={openMcp}
+        openSkill={openSkill}
+        closeSkills={closeSkills}
+        openStudio={openStudio}
+        openStudioFromPage={openStudioFromPage}
+        chooseStudio={chooseStudio}
+        openModelFromPage={openModelFromPage}
+        openModelHub={openModelHub}
+        openScenarioHub={openScenarioHub}
+        openScenario={openScenario}
+        openMotionEditor={openMotionEditor}
+        openMotionProject={id => workspace.open('projects', id)}
+        returnToExplore={returnToExplore}
+        selectAssetRoute={selectAssetRoute}
+      />
+      <OverlayLayer {...overlaySharedProps} placement="in-workspace" />
       </div>
     </div>
     </Dialog.Root>
-    {!templatesPage && !detailOnly && library}
+    <OverlayLayer {...overlaySharedProps} placement="portal" />
   </WorkspaceChromeContext.Provider>;
 }
 

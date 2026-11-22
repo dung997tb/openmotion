@@ -2,7 +2,9 @@ import { findTemplateCollection, type TemplateCollection } from './templateColle
 import { skillCategories, type SkillCategory } from './skillCategories';
 import { blackFridaySkillIds } from '../../../shared/black-friday-collection';
 import { isDesignScenario, type DesignScenarioId } from '../../../shared/design-project';
+import { editorProjectIdFromPath, isSpaRoutePath, spaPathnameToSearch } from '../../../shared/spa-routes';
 import { workspacePageName } from '../../../shared/workspace-url';
+import { isValidProjectId, parseProjectIdFromHash } from '../utils/projectRouting';
 import { mcpClients, type McpClient } from './mcpClients';
 import { exploreCommunities, findLandingScene, findMediaStudio, findTechniqueStudio, type ExploreCommunity, type TechniqueStudio, type StudioScene } from '../../../shared/studio-catalog';
 import { findCinemaTemplate } from './cinemaTemplates';
@@ -12,12 +14,13 @@ import { findScenario, findScenarioStep, scenarioCategories, type ScenarioCatego
 
 const scenarioRunUuidPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 
-/** Query pages that are parsed for compatibility and rewritten to their current address. */
-export function isLegacyWorkspaceHref(search: string, page: WorkspacePage) {
-  return new URLSearchParams(search).get('page') === 'design' && Boolean(page.studio?.landing);
+/** Query or semantic Design Studio image URLs parsed for compatibility and rewritten to `/create/:scene`. */
+export function isLegacyWorkspaceHref(search: string, page: WorkspacePage, pathname = '') {
+  const effectiveSearch = pathname && pathname !== '/' ? spaPathnameToSearch(pathname, search) : search;
+  return new URLSearchParams(effectiveSearch).get('page') === 'design' && Boolean(page.studio?.landing);
 }
 
-/** Application pages live in the query; the project hash belongs to the editor. */
+/** Canonical application pages live in semantic pathnames; `#project/<id>` remains owned by the editor. */
 export const settingsSections = ['account', 'subscription', 'providers', 'models', 'local', 'general', 'appearance', 'privacy', 'about', 'help', 'mcp', 'brand-kit'] as const;
 export type SettingsSection = typeof settingsSections[number];
 export type ExploreFilters = { community: ExploreCommunity['id'] | null; medium: StudioScene['modality'] | null };
@@ -31,8 +34,9 @@ export function changesWorkspaceDestination(patch: Partial<WorkspacePage>): bool
   return ['explore', 'motion', 'superAgent', 'cinemaLanding', 'designScene', 'scenario', 'scenarioHub', 'studio', 'modelOverview', 'modelHub', 'specialty', 'assets', 'skills', 'settings'].some(key => key in patch);
 }
 
-export function readWorkspacePage(search: string, hash = ''): WorkspacePage {
-  const query = new URLSearchParams(search), page = workspacePageName(query, hash), section = query.get('section');
+export function readWorkspacePage(search: string, hash = '', pathname = ''): WorkspacePage {
+  const effectiveSearch = pathname && pathname !== '/' ? spaPathnameToSearch(pathname, search) : search;
+  const query = new URLSearchParams(effectiveSearch), page = workspacePageName(query, hash), section = query.get('section');
   const settings = page === 'brand-kit' ? 'brand-kit' : page === 'mcp' ? 'mcp' : page === 'settings'
     ? settingsSections.find(value => value === section) ?? 'general' : null;
   const sceneId = query.get('scene'), model = query.get('model') || null;
@@ -80,7 +84,7 @@ export function readWorkspacePage(search: string, hash = ''): WorkspacePage {
   return { motion: page === 'motion', superAgent: page === 'agent', superAgentChat: page === 'agent' ? query.get('chat') || null : null, ...(cinemaLanding && { cinemaLanding: true }), ...(cinemaTemplate && { cinemaTemplate }),
     ...(designScene ? { designScene } : {}), ...(designProject ? { designProject } : {}), ...(extendedSoundTab ? { soundTab: extendedSoundTab.id } : {}),
     modelOverview: page === 'model' ? model : null, modelHub: page === 'model-hub' ? query.get('hub') || null : null, creators, creator: creators ? query.get('creator')?.trim() || null : null, specialty, community, medium, assetId: page === 'assets' ? query.get('asset') || null : null,
-    assetVersion: page === 'assets' && query.get('asset') ? query.get('version') || null : null, explore: page === 'explore', scenarioHub, scenarioCategory, scenario, scenarioRun, scenarioStep, scenarioMode, studio, settings, brandKit: settings === 'brand-kit' ? query.get('kit') || null : null, assets: page === 'assets', skills: page === 'skills', skillCategory: page === 'skills' ? skillCategories.find(value => value === query.get('skillCategory')) ?? null : null, skill: selectedSkill, templates, templateCollection,
+    assetVersion: page === 'assets' && query.get('asset') ? query.get('version') || null : null, explore: page === 'explore', scenarioHub, scenarioCategory, scenario, scenarioRun, scenarioStep, scenarioMode, studio, settings, brandKit: settings === 'brand-kit' ? query.get('kit') || null : null, assets: page === 'assets', skills: page === 'skills', skillCategory: page === 'skills' ? skillCategories.find(value => value === (query.get('category') ?? query.get('skillCategory'))) ?? null : null, skill: selectedSkill, templates, templateCollection,
     mcpInSettings: page === 'settings' && settings === 'mcp',
     mcpExample: settings === 'mcp' ? query.get('example') : null,
     client: mcpClients.find(value => value.id === query.get('host'))?.id ?? 'codex',
@@ -90,8 +94,16 @@ export function readWorkspacePage(search: string, hash = ''): WorkspacePage {
 }
 
 export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): string {
-  const url = new URL(href), current = readWorkspacePage(url.search, url.hash), page = { ...current, ...patch };
-  const currentSearchPage = url.searchParams.get('page');
+  const url = new URL(href), current = readWorkspacePage(url.search, url.hash, url.pathname), page = { ...current, ...patch };
+  const originalPathname = url.pathname;
+  const pathProject = editorProjectIdFromPath(originalPathname);
+  const rawRetainedProject = pathProject ?? url.searchParams.get('project') ?? parseProjectIdFromHash(url.hash);
+  const retainedProject = rawRetainedProject && isValidProjectId(rawRetainedProject) ? rawRetainedProject : null;
+  const isSpaRoute = originalPathname !== '/' && isSpaRoutePath(originalPathname);
+  const currentSearchPage = new URLSearchParams(
+    isSpaRoute ? spaPathnameToSearch(originalPathname, url.search) : url.search,
+  ).get('page');
+  if (isSpaRoute) url.pathname = '/';
   for (const key of ['page', 'home', 'section', 'templates', 'host', 'setup', 'provider', 'template', 'skill', 'skillCategory', 'kit', 'community', 'medium', 'collection', 'hub', 'designProject', 'cinemaTemplate', 'scenario', 'run', 'step', 'mode', 'category']) url.searchParams.delete(key);
   if (current.settings === 'mcp' || page.settings === 'mcp') url.searchParams.delete('example');
   if (currentSearchPage === 'api') url.searchParams.delete('tool');
@@ -130,76 +142,90 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
   } else if ('soundTab' in patch) {
     page.soundTab = page.studio?.studio.id === 'sound' && !page.studio.landing && isExtendedSoundTab(patch.soundTab) ? patch.soundTab : null;
   }
+  if (current.specialty?.id === 'game' && page.specialty?.id !== 'game') url.searchParams.delete('game');
   const inSettings = Boolean(page.settings) && page.settings !== 'brand-kit' && (page.settings !== 'mcp' || page.mcpInSettings);
   if (!inSettings) url.searchParams.delete('entry_from');
   if (page.explore) {
-    url.searchParams.set('page', 'explore');
+    url.pathname = '/explore';
   } else if (page.motion) {
-    url.searchParams.set('page', 'motion');
+    url.pathname = '/motion';
   } else if (page.superAgent) {
-    url.searchParams.set('page', 'agent');
-    if (page.superAgentChat) url.searchParams.set('chat', page.superAgentChat);
+    url.pathname = page.superAgentChat ? `/agent/${encodeURIComponent(page.superAgentChat)}` : '/agent';
   } else if (page.cinemaLanding) {
-    url.searchParams.set('page', 'cinema');
+    url.pathname = '/cinema';
   } else if (page.designScene) {
-    url.searchParams.set('page', 'design');
-    url.searchParams.set('scene', page.designScene);
-    if (page.designProject) url.searchParams.set('designProject', page.designProject);
+    if (page.designProject) {
+      url.pathname = `/design/projects/${encodeURIComponent(page.designProject)}`;
+      if (page.designScene !== 'projects') url.searchParams.set('scene', page.designScene);
+    } else {
+      url.pathname = `/design/${encodeURIComponent(page.designScene)}`;
+    }
   } else if (page.modelOverview) {
-    url.searchParams.set('page', 'model');
-    url.searchParams.set('model', page.modelOverview);
+    url.pathname = `/models/${encodeURIComponent(page.modelOverview)}`;
   } else if (page.modelHub) {
-    url.searchParams.set('page', 'model-hub');
-    url.searchParams.set('hub', page.modelHub);
+    url.pathname = `/model-hub/${encodeURIComponent(page.modelHub)}`;
   } else if (page.specialty) {
-    url.searchParams.set('page', page.specialty.id);
+    url.pathname = `/studios/${encodeURIComponent(page.specialty.id)}`;
     if (page.specialty.techniques.some(id => id === page.skill)) url.searchParams.set('skill', page.skill!);
   } else if (page.scenario) {
     const matched = findScenario(page.scenario);
     if (matched) {
-      url.searchParams.set('page', 'scenario');
-      url.searchParams.set('scenario', matched.id);
+      url.pathname = `/scenarios/${encodeURIComponent(matched.id)}`;
       if (page.scenarioRun && scenarioRunUuidPattern.test(page.scenarioRun)) url.searchParams.set('run', page.scenarioRun);
       if (page.scenarioStep && findScenarioStep(matched, page.scenarioStep)) url.searchParams.set('step', page.scenarioStep);
       if (page.scenarioMode === 'agent') url.searchParams.set('mode', 'agent');
     } else {
-      url.searchParams.set('page', 'scenarios');
+      url.pathname = '/scenarios';
     }
   } else if (page.scenarioHub) {
-    url.searchParams.set('page', 'scenarios');
+    url.pathname = '/scenarios';
     if (page.scenarioCategory) url.searchParams.set('category', page.scenarioCategory);
   } else if (page.studio) {
-    url.searchParams.set('page', page.studio.landing ? 'create' : page.studio.mediaTab ? page.studio.scene.modality : page.studio.studio.id);
-    if (page.studio.home) url.searchParams.set('home', '1');
-    url.searchParams.set('scene', page.studio.studio.id === 'sound' && !page.studio.landing && !page.studio.home && page.soundTab ? page.soundTab : page.studio.scene.id);
+    const soundSegment = page.studio.studio.id === 'sound' && !page.studio.landing && !page.studio.home && page.soundTab
+      ? page.soundTab
+      : page.studio.scene.id;
+    if (page.studio.landing) {
+      url.pathname = `/create/${encodeURIComponent(page.studio.scene.id)}`;
+    } else if (page.studio.mediaTab) {
+      url.pathname = `/${encodeURIComponent(page.studio.scene.modality)}/${encodeURIComponent(soundSegment)}`;
+    } else if (page.studio.studio.id === 'sound') {
+      url.pathname = page.studio.home ? '/sound' : `/sound/${encodeURIComponent(soundSegment)}`;
+    } else if (page.studio.studio.id === 'cinema') {
+      url.pathname = `/cinema/${encodeURIComponent(page.studio.scene.id)}`;
+    } else if (page.studio.studio.surface === 'techniques') {
+      url.pathname = `/studios/${encodeURIComponent(page.studio.studio.id)}/${encodeURIComponent(page.studio.scene.id)}`;
+    } else {
+      url.pathname = `/${encodeURIComponent(page.studio.studio.id)}/${encodeURIComponent(page.studio.scene.id)}`;
+    }
     if (page.studio.studio.surface === 'techniques' ? page.studio.studio.techniques.some(id => id === page.skill) : page.studio.landing && isStudioTechnique(page.skill)) url.searchParams.set('skill', page.skill!);
     if (page.studio.model) url.searchParams.set('model', page.studio.model);
     if (findCinemaTemplate(page.cinemaTemplate)?.scene === page.studio.scene.id && (page.studio.landing || page.studio.studio.id === 'cinema')) url.searchParams.set('cinemaTemplate', page.cinemaTemplate!);
   } else if (page.skills) {
-    url.searchParams.set('page', 'skills');
-    if (page.skillCategory) url.searchParams.set('skillCategory', page.skillCategory);
-    if (page.skill) url.searchParams.set('skill', page.skill);
+    url.pathname = page.skill ? `/skills/${encodeURIComponent(page.skill)}` : '/skills';
+    if (page.skillCategory) url.searchParams.set('category', page.skillCategory);
   } else if (page.assets) {
-    url.searchParams.set('page', 'assets');
-    if (page.assetId) {
-      url.searchParams.set('asset', page.assetId);
-      if (page.assetVersion) url.searchParams.set('version', page.assetVersion);
-    }
+    url.pathname = page.assetId ? `/assets/${encodeURIComponent(page.assetId)}` : '/assets';
+    if (page.assetId && page.assetVersion) url.searchParams.set('version', page.assetVersion);
   } else if (page.settings === 'brand-kit') {
-    url.searchParams.set('page', 'brand-kit');
-    if (page.brandKit) url.searchParams.set('kit', page.brandKit);
+    url.pathname = page.brandKit ? `/brand-kit/${encodeURIComponent(page.brandKit)}` : '/brand-kit';
   } else if (page.settings === 'mcp') {
-    url.searchParams.set('page', page.mcpInSettings ? 'settings' : 'mcp');
-    if (page.mcpInSettings) url.searchParams.set('section', 'mcp');
+    url.pathname = page.mcpInSettings ? '/settings/mcp' : '/mcp-setup';
     url.searchParams.set('host', page.client);
     if (page.mcpExample) url.searchParams.set('example', page.mcpExample);
     if (page.setup === 'manual') url.searchParams.set('setup', 'manual');
   } else if (page.settings) {
-    url.searchParams.set('page', 'settings');
-    url.searchParams.set('section', page.settings);
+    url.pathname = `/settings/${encodeURIComponent(page.settings)}`;
     if (page.settings === 'providers' && page.provider) url.searchParams.set('provider', page.provider);
-  } else if (!page.templates && workspacePageName(url.searchParams, url.hash) === 'explore') {
-    url.searchParams.set('page', 'editor');
+  } else if (retainedProject) {
+    const encodedProject = encodeURIComponent(retainedProject);
+    url.pathname = `/editor/${encodedProject}`;
+    url.searchParams.delete('project');
+    if (!url.hash.startsWith('#project/')) url.hash = `project/${encodedProject}`;
+  } else if (!page.templates) {
+    url.pathname = '/editor';
+  }
+  if (pathProject && isValidProjectId(pathProject) && !url.pathname.startsWith('/editor') && !url.searchParams.has('project') && !parseProjectIdFromHash(url.hash)) {
+    url.searchParams.set('project', pathProject);
   }
   if (page.explore || page.motion || page.cinemaLanding || page.modelOverview || page.modelHub || page.specialty || page.scenarioHub || page.scenario || page.studio || page.skills) {
     if (page.community) url.searchParams.set('community', page.community);

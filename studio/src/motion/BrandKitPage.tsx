@@ -56,7 +56,8 @@ export function BrandKitPage({
   previewsEnabled?: boolean;
   hasProject?: boolean;
 }) {
-  const { t } = useI18n(),
+  const { t, locale } = useI18n(),
+    chrome = useOptionalWorkspaceChrome(),
     toast = useToast();
   const [kits, setKits] = useState<BrandKit[]>(),
     [error, setError] = useState(false),
