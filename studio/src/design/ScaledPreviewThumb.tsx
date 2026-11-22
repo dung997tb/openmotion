@@ -4,14 +4,19 @@ import { CoverPlaceholder } from '../components/ui/CoverPlaceholder';
 
 const VIRTUAL_WIDTH = 960;
 const VIRTUAL_HEIGHT = 600;
-export const MAX_ACTIVE_THUMBS = 8;
+export const MAX_ACTIVE_THUMBS = 12;
 
 type SlotEntry = {
   hovered: boolean;
   onEvict: () => void;
 };
 
+type WaiterEntry = SlotEntry & {
+  onGrant: () => void;
+};
+
 const activeThumbSlots = new Map<string, SlotEntry>();
+const waitingThumbSlots = new Map<string, WaiterEntry>();
 
 function disposeIframeResources(iframe: HTMLIFrameElement | null): void {
   if (!iframe) return;
@@ -22,12 +27,31 @@ function disposeIframeResources(iframe: HTMLIFrameElement | null): void {
   }
 }
 
-function acquireThumbSlot(id: string, hovered: boolean, onEvict: () => void): boolean {
+function acquireThumbSlot(
+  id: string,
+  hovered: boolean,
+  onEvict: () => void,
+  onGrant?: () => void,
+): boolean {
   if (activeThumbSlots.has(id)) {
     const existing = activeThumbSlots.get(id)!;
     existing.hovered = hovered;
     existing.onEvict = onEvict;
+    waitingThumbSlots.delete(id);
     return true;
+  }
+  if (activeThumbSlots.size < MAX_ACTIVE_THUMBS) {
+    waitingThumbSlots.delete(id);
+    activeThumbSlots.set(id, { hovered, onEvict });
+    return true;
+  }
+  // Only evict an existing visible tile when the user hovers a throttled card; never let
+  // lower rows evict Row 1 visible thumbnails during initial layout/scroll intersection.
+  if (!hovered) {
+    if (onGrant) {
+      waitingThumbSlots.set(id, { hovered, onEvict, onGrant });
+    }
+    return false;
   }
   while (activeThumbSlots.size >= MAX_ACTIVE_THUMBS) {
     let victimKey: string | null = null;
@@ -45,12 +69,26 @@ function acquireThumbSlot(id: string, hovered: boolean, onEvict: () => void): bo
     activeThumbSlots.delete(victimKey);
     victim?.onEvict();
   }
+  waitingThumbSlots.delete(id);
   activeThumbSlots.set(id, { hovered, onEvict });
   return true;
 }
 
+function grantNextWaitingThumb(): void {
+  while (activeThumbSlots.size < MAX_ACTIVE_THUMBS && waitingThumbSlots.size > 0) {
+    const next = waitingThumbSlots.entries().next().value as [string, WaiterEntry] | undefined;
+    if (!next) break;
+    const [nextId, waiter] = next;
+    waitingThumbSlots.delete(nextId);
+    activeThumbSlots.set(nextId, { hovered: waiter.hovered, onEvict: waiter.onEvict });
+    waiter.onGrant();
+  }
+}
+
 function releaseThumbSlot(id: string): void {
-  activeThumbSlots.delete(id);
+  waitingThumbSlots.delete(id);
+  const removed = activeThumbSlots.delete(id);
+  if (removed) grantNextWaitingThumb();
 }
 
 function updateThumbSlotHover(id: string, hovered: boolean): void {
@@ -162,7 +200,12 @@ export function ScaledPreviewThumb({
       setLoaded(false);
       return;
     }
-    const granted = acquireThumbSlot(instanceId, hoveredRef.current, evictSelf);
+    const granted = acquireThumbSlot(
+      instanceId,
+      hoveredRef.current,
+      evictSelf,
+      () => setSlotGranted(true),
+    );
     setSlotGranted(granted);
     return () => {
       releaseThumbSlot(instanceId);

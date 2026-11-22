@@ -1693,6 +1693,31 @@ export async function designHttp(
     if (error instanceof DesignError) return sendJson(error.status, { error: { code: error.code, message: error.message.replace(/^[A-Z_]+:\s*/, '') } });
     return sendJson(500, { error: { code: 'INVALID_ARGUMENT', message: (error as Error)?.message ?? 'Internal error' } });
   };
+  const sendPreviewPreflight = () => {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Range',
+      'Cache-Control': 'no-store',
+    });
+    res.end();
+    return true;
+  };
+  const sendPreviewResponse = (body: Buffer, mime: string, cacheControl: string) => {
+    const headers: Record<string, string> = {
+      // Sandboxed preview frames run without allow-same-origin (origin 'null'), so relative fetches need ACAO.
+      'Access-Control-Allow-Origin': '*',
+      'Content-Type': mime,
+      'Cache-Control': cacheControl,
+      'X-Content-Type-Options': 'nosniff',
+    };
+    if (mime.startsWith('text/html')) {
+      headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
+    }
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return true;
+  };
 
   try {
     const sub = url.pathname.slice('/api/design/'.length);
@@ -1710,19 +1735,18 @@ export async function designHttp(
       }));
     }
     const tplPreview = /^catalog\/templates\/([^/]+)\/preview\/(.*)$/.exec(sub);
-    if (tplPreview && req.method === 'GET') {
-      const id = decodeURIComponent(tplPreview[1]);
-      const rel = decodeURIComponent(tplPreview[2]);
-      const file = catalog.templateFile(id, rel);
-      if (!file) return sendJson(404, { error: { code: 'NOT_FOUND', message: 'Template preview file not found' } });
-      const mime = mimeFor(file);
-      let data: Buffer = await readFile(file);
-      if (url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')) data = injectThumbPerfGuard(data, url.searchParams.get('thumbReady') === '1');
-      const headers: Record<string, string> = { 'Content-Type': mime, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' };
-      if (mime.startsWith('text/html')) headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
-      res.writeHead(200, headers);
-      res.end(data);
-      return true;
+    if (tplPreview) {
+      if (req.method === 'OPTIONS') return sendPreviewPreflight();
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const id = decodeURIComponent(tplPreview[1]);
+        const rel = decodeURIComponent(tplPreview[2]);
+        const file = catalog.templateFile(id, rel);
+        if (!file) return sendJson(404, { error: { code: 'NOT_FOUND', message: 'Template preview file not found' } });
+        const mime = mimeFor(file);
+        let data: Buffer = await readFile(file);
+        if (url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')) data = injectThumbPerfGuard(data, url.searchParams.get('thumbReady') === '1');
+        return sendPreviewResponse(data, mime, 'private, max-age=300');
+      }
     }
     const tplDetail = /^catalog\/templates\/([^/]+)$/.exec(sub);
     if (tplDetail && req.method === 'GET') {
@@ -1759,19 +1783,18 @@ export async function designHttp(
 
     // --- Raw static preview (current or historical ?version=) ---
     const rawMatch = /^raw\/([^/]+)\/(.*)$/.exec(sub);
-    if (rawMatch && req.method === 'GET') {
-      const { body, mime } = await service.readRawFile(rawMatch[1], decodeURIComponent(rawMatch[2]), url.searchParams.get('version'));
-      const bridgeToken = url.searchParams.get('omBridge');
-      const out = url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')
-        ? injectThumbPerfGuard(body)
-        : mime.startsWith('text/html') && isValidPreviewBridgeToken(bridgeToken)
-          ? injectPreviewBridgeHtml(body, bridgeToken)
-          : body;
-      const headers: Record<string, string> = { 'Content-Type': mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
-      if (mime.startsWith('text/html')) headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
-      res.writeHead(200, headers);
-      res.end(out);
-      return true;
+    if (rawMatch) {
+      if (req.method === 'OPTIONS') return sendPreviewPreflight();
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const { body, mime } = await service.readRawFile(rawMatch[1], decodeURIComponent(rawMatch[2]), url.searchParams.get('version'));
+        const bridgeToken = url.searchParams.get('omBridge');
+        const out = url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')
+          ? injectThumbPerfGuard(body)
+          : mime.startsWith('text/html') && isValidPreviewBridgeToken(bridgeToken)
+            ? injectPreviewBridgeHtml(body, bridgeToken)
+            : body;
+        return sendPreviewResponse(out, mime, 'no-store');
+      }
     }
 
     // --- Projects collection ---

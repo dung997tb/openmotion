@@ -10,7 +10,7 @@ import { DesignApiError, designClient } from './designClient';
 import { DesignProjectEditor, buildPresenterPopupHtml, overlayLocalPoint } from './DesignProjectEditor';
 import { DesignProjectList } from './DesignProjectList';
 import { DesignTemplateDetailModal } from './DesignTemplateDetailModal';
-import { ScaledPreviewThumb } from './ScaledPreviewThumb';
+import { ScaledPreviewThumb, MAX_ACTIVE_THUMBS } from './ScaledPreviewThumb';
 import { buildBridgeSrcDoc, looksLikeDeck, parseDeckSlides, parseSpeakerNotes } from './previewBridge';
 
 const projectId = '22222222-2222-4222-8222-222222222222';
@@ -552,5 +552,60 @@ describe('DesignProjectEditor', () => {
     });
     expect(document.querySelectorAll('.om-design-tpl-detail-popup iframe').length).toBe(1);
     expect(document.querySelector('.om-design-tpl-ambient')).toBeNull();
+  });
+
+  it('preserves first-row visible ScaledPreviewThumb slots without eviction and promotes queued thumbnails on release', async () => {
+    vi.stubGlobal('IntersectionObserver', NearScreenIntersectionObserver);
+    try {
+      const ids = Array.from({ length: MAX_ACTIVE_THUMBS + 2 }, (_, idx) => idx);
+      await act(async () => {
+        root.render(
+          <I18nProvider>
+            <div>
+              {ids.map(idx => (
+                <ScaledPreviewThumb
+                  key={idx}
+                  active
+                  src={`/motion-api/design/catalog/templates/sample-${idx}/preview/index.html`}
+                  title={`Card ${idx}`}
+                />
+              ))}
+            </div>
+          </I18nProvider>,
+        );
+        await Promise.resolve();
+      });
+
+      const mountedTitles = [...container.querySelectorAll('iframe')].map(el => el.getAttribute('title'));
+      expect(mountedTitles.length).toBe(MAX_ACTIVE_THUMBS);
+      expect(mountedTitles[0]).toBe('Card 0');
+      expect(mountedTitles).toContain('Card 1');
+      expect(mountedTitles).not.toContain(`Card ${MAX_ACTIVE_THUMBS}`);
+
+      // Unmount Card 0: its freed slot should immediately promote the first queued waiting card.
+      await act(async () => {
+        root.render(
+          <I18nProvider>
+            <div>
+              {ids.slice(1).map(idx => (
+                <ScaledPreviewThumb
+                  key={idx}
+                  active
+                  src={`/motion-api/design/catalog/templates/sample-${idx}/preview/index.html`}
+                  title={`Card ${idx}`}
+                />
+              ))}
+            </div>
+          </I18nProvider>,
+        );
+        await Promise.resolve();
+      });
+
+      const nextTitles = [...container.querySelectorAll('iframe')].map(el => el.getAttribute('title'));
+      expect(nextTitles.length).toBe(MAX_ACTIVE_THUMBS);
+      expect(nextTitles).toContain(`Card ${MAX_ACTIVE_THUMBS}`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
