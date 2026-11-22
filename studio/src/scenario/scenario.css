@@ -5215,12 +5215,22 @@ div.om-studio-output:hover {
   color: var(--motion-strong);
 }
 
-.om-studio-output-page iframe {
+.om-studio-output-page-frame {
+  position: relative;
   width: 100%;
   height: min(78vh, 900px);
+  overflow: hidden;
   border: 1px solid var(--motion-border-subtle);
   border-radius: var(--motion-radius-md);
   background: var(--motion-bg);
+}
+
+.om-studio-output-page-frame iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 0;
+  transform-origin: 0 0;
 }
 
 .om-studio-output-video video {

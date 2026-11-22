@@ -105,6 +105,26 @@ function stepOutputs(step: ScenarioStepDefinition, state: ScenarioStepState | un
   return { items, posts, scripts };
 }
 
+/** A page shows at desktop width (1280px), scaled to fit the panel, and scrolls inside. */
+const PAGE_DESKTOP_WIDTH = 1280;
+function InlinePage({ url, title }: { url: string; title: string }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const element = frame.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => setScale(Math.min(1, entry.contentRect.width / PAGE_DESKTOP_WIDTH)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={frame} className="om-studio-output-page-frame">
+      <iframe src={url} title={title} sandbox="allow-scripts" loading="lazy"
+        style={{ width: PAGE_DESKTOP_WIDTH, height: `${100 / scale}%`, transform: `scale(${scale})` }} />
+    </div>
+  );
+}
+
 /** A video plays right in the panel, with a fullscreen button. */
 function InlineVideo({ item }: { item: PoolItem }) {
   const { t } = useI18n();
@@ -548,7 +568,7 @@ export function ScenarioStudioView({
                             <RemixIcon name="external-link-line" size={14} aria-hidden="true" />{t('Open in a new window')}
                           </a>
                         </figcaption>
-                        <iframe src={url} title={item.label} sandbox="allow-scripts" loading="lazy" />
+                        <InlinePage url={url} title={item.label} />
                       </figure>
                     ) : null;
                   })}
