@@ -1,14 +1,14 @@
-import { Suspense, useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react';
+import { Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import type { ArtifactKind, SessionArtifact } from '../../../shared/session';
 import { EditorLoading, type EditorLoadingLayout } from './EditorLoading';
 import { LivePreviewReadyContext } from './StudioHost';
 import { useDockLayoutStore } from '../components/dock/dockLayoutStore';
-import { MotionProjectEditor } from './MotionProjectEditor';
+import { getMotionProjectEditor } from './MotionProjectEditor';
 
 // Add a viewer adapter here when a mode introduces a new artifact kind.
 // The session and browser shell do not own the editor's internal state.
-const viewers: Record<ArtifactKind, ComponentType<{ resolvedProjectId: string }>> = {
-  'motion-project': MotionProjectEditor,
+const viewers: Record<ArtifactKind, () => ComponentType<{ resolvedProjectId: string }>> = {
+  'motion-project': getMotionProjectEditor,
 };
 
 const errorSurface = '.om-recovery-screen, [data-testid="composition-preview-error"]';
@@ -23,7 +23,8 @@ function isVisibleNotice(node: Element, surface: HTMLElement): boolean {
 }
 
 export function ArtifactViewer({ artifact, loadingLayout }: { artifact: SessionArtifact; loadingLayout?: EditorLoadingLayout | null }) {
-  const Viewer = viewers[artifact.kind];
+  // Preserve the mounted editor when a pending lazy import becomes available.
+  const Viewer = useMemo(() => viewers[artifact.kind](), [artifact.kind]);
   const surface = useRef<HTMLDivElement>(null);
   const [presented, setPresented] = useState(false);
   // This callback belongs to this viewer mount. A cached boot flag, a shadow frame or a
@@ -78,7 +79,7 @@ export function ArtifactViewer({ artifact, loadingLayout }: { artifact: SessionA
 
   return <div className="motion-project-presentation" data-editor-initializing={!presented} aria-busy={!presented}>
     <div ref={surface} className="motion-project-editor" inert={!presented} aria-hidden={!presented}>
-      <LivePreviewReadyContext.Provider value={onLivePreviewReady}>
+      <LivePreviewReadyContext.Provider value={presented ? null : onLivePreviewReady}>
         <Suspense fallback={null}><Viewer resolvedProjectId={artifact.projectId} /></Suspense>
       </LivePreviewReadyContext.Provider>
     </div>

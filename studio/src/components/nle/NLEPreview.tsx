@@ -514,6 +514,7 @@ export const NLEPreview = memo(function NLEPreview({
                 <Player
                   key={`${activeKey}-${slot.gen}`}
                   ref={setPreviewIframeRef}
+                  hostCoversInitialLoad={onLivePreviewReady !== null}
                   projectId={directUrl ? undefined : projectId}
                   directUrl={directUrl}
                   onLoad={() => {

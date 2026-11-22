@@ -166,9 +166,18 @@ describe("preview errors", () => {
 
   it("retries a failed preview with a fresh player URL", async () => {
     const onPainted = vi.fn();
-    const { host, player } = await mountPlayer({ onPainted });
+    const { host, player } = await mountPlayer({ onPainted, hostCoversInitialLoad: true });
+    expect(player.getAttribute("assets-loading-ui")).toBe("none");
 
-    act(() => void player.dispatchEvent(new Event("painted")));
+    const finishLoad = async () => {
+      act(() => {
+        Object.assign(player, { ready: true, painted: true });
+        player.iframeElement.dispatchEvent(new Event("load"));
+        player.dispatchEvent(new Event("painted"));
+      });
+      await twoFrames();
+    };
+    await finishLoad();
 
     act(() => {
       player.dispatchEvent(
@@ -188,9 +197,10 @@ describe("preview errors", () => {
 
     const retryUrl = new URL(player.getAttribute("src") ?? "", window.location.origin);
     expect(retryUrl.searchParams.get("_hfStudioRetry")).toBe("1");
+    expect(player.getAttribute("assets-loading-ui")).toBe(null);
     expect(host.querySelector('[data-testid="composition-preview-error"]')).toBeNull();
 
-    act(() => void player.dispatchEvent(new Event("painted")));
+    await finishLoad();
     expect(onPainted.mock.calls.map(([details]) => details.loadId)).toEqual([1, 2]);
   });
 });
@@ -372,6 +382,51 @@ describe("ready to show", () => {
     expect(usePlayerStore.getState().previewBooted).toBe(true);
   });
 
+  it.each([
+    { shadow: false, video: false, renderReady: true, show: true },
+    { shadow: false, video: true, renderReady: true, show: false },
+    { shadow: false, video: false, renderReady: false, show: false },
+    { shadow: true, video: false, renderReady: true, show: false },
+  ])("shows only a visually ready live document while audio buffers ($shadow, $video, $renderReady)",
+    async ({ shadow, video, renderReady, show }) => {
+      const onReadyToShowChange = vi.fn();
+      const onPainted = vi.fn();
+      const { player } = await mountPlayer({ hostCoversInitialLoad: !shadow, onReadyToShowChange, onPainted });
+      // A connected web component can report its initial about:blank before navigation.
+      act(() => void player.iframeElement.dispatchEvent(new Event("load")));
+      document.body.appendChild(player.iframeElement);
+      const doc = player.iframeElement.contentDocument!;
+      Object.assign(doc.defaultView!, { __playerReady: true, __renderReady: renderReady });
+      Object.assign(player, { ready: true });
+      for (const tag of video ? ["audio", "video"] : ["audio"]) {
+        const media = doc.createElement(tag);
+        Object.defineProperty(media, "readyState", { value: 0 });
+        Object.defineProperty(media, "networkState", { value: 2 });
+        doc.body.append(media);
+      }
+      act(() => void player.dispatchEvent(new Event("ready")));
+      await twoFrames();
+      expect(player.getAttribute("assets-loading-ui")).toBe(shadow ? null : "none");
+      expect(onReadyToShowChange.mock.calls.some(([ready]) => ready)).toBe(show);
+      expect(onPainted).toHaveBeenCalledTimes(show ? 1 : 0);
+      if (show) {
+        painted(player);
+        await twoFrames();
+        expect(onPainted).toHaveBeenCalledTimes(1);
+        shaderState(player, true);
+        expect(onReadyToShowChange).toHaveBeenLastCalledWith(false);
+        painted(player);
+        expect(player.hasAttribute("assets-loading-ui")).toBe(false);
+      }
+    });
+
+  it("restores the native loader if the host uncovers a slow preview", async () => {
+    const { player, rerender } = await mountPlayer({ hostCoversInitialLoad: true });
+    expect(player.getAttribute("assets-loading-ui")).toBe("none");
+    await rerender({ hostCoversInitialLoad: false });
+    expect(player.hasAttribute("assets-loading-ui")).toBe(false);
+  });
+
   it("marks the preview booted at its first frame while media is still buffering", async () => {
     usePlayerStore.setState({ previewBooted: false });
     const onReadyToShowChange = vi.fn();
@@ -492,7 +547,9 @@ describe("ready to show", () => {
     const now = vi.spyOn(performance, "now").mockReturnValue(100);
     const { player } = await mountPlayer({ onPainted });
 
-    painted(player as TestHyperframesPlayer);
+    loadAndReady(player);
+    painted(player);
+    await twoFrames();
 
     expect(onPainted).toHaveBeenCalledWith({
       iframe: (player as TestHyperframesPlayer).iframeElement,

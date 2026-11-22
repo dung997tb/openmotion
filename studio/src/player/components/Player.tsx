@@ -5,6 +5,7 @@ import { useI18n } from "../../i18n/I18n";
 import { buildProjectApiPath } from "../../utils/projectRouting";
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { isLottieAnimationLoaded } from "@hyperframes/core/runtime/lottie-readiness";
+import { scanPendingCompositionAssets } from "@hyperframes/core/composition-readiness";
 import { installAcceleratedCanvasTracker } from "@hyperframes/core/page-motion-blur";
 import { useMountEffect } from "../../hooks/useMountEffect";
 import { applyPreviewVariablesToUrl } from "../../hooks/previewVariablesStore";
@@ -37,7 +38,7 @@ export interface PlayerProps {
   projectId?: string;
   directUrl?: string;
   onLoad: () => void;
-  /** Fires once the loaded document is painted and every loader (shader, assets) has cleared. */
+  /** Signals whether the loaded document can be shown in the editor. */
   onReadyToShowChange?: (ready: boolean) => void;
   onPreviewError?: (message: string) => void;
   onCompositionLoadingChange?: (loading: boolean) => void;
@@ -47,6 +48,8 @@ export interface PlayerProps {
   suppressLoadingOverlay?: boolean;
   loadingUi?: "studio" | "host";
   noLoadTimeout?: boolean;
+  /** The host covers the first live frame with its own loading screen. */
+  hostCoversInitialLoad?: boolean;
 }
 
 interface HyperframesPlayerElement extends HTMLElement {
@@ -148,6 +151,16 @@ export function hasUnloadedAssets(iframe: HTMLIFrameElement, lastResult: boolean
   }
 }
 
+// The runtime's playback handshake also waits for the soundtrack. Once rendering
+// has settled, audio can continue buffering behind an already usable first frame.
+function waitingOnlyForAudio(doc: Document): boolean {
+  const win = doc.defaultView as (Window & { __renderReady?: boolean; __hfLottie?: unknown[] }) | null;
+  if (!win?.__renderReady || win.__hfLottie?.some(anim => !isLottieAnimationLoaded(anim))) return false;
+  const { pendingImages, pendingMedia, fontsLoading } = scanPendingCompositionAssets(doc, { scope: "first-frame" });
+  return !fontsLoading && pendingImages.length === 0 && pendingMedia.length > 0 &&
+    pendingMedia.every(media => media.tagName === "AUDIO");
+}
+
 const runtimeBootedIn = (iframe: HTMLIFrameElement) =>
   (iframe.contentWindow as IframeWindow | null)?.__playerReady === true;
 
@@ -173,12 +186,14 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
       style,
       suppressLoadingOverlay,
       noLoadTimeout,
+      hostCoversInitialLoad,
       ...host
     },
     ref,
   ) => {
   const { t } = useI18n();
     const containerRef = useRef<HTMLDivElement>(null);
+    const playerRef = useRef<HyperframesPlayerElement | null>(null);
     const loadCountRef = useRef(0);
     const assetPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const assetFadeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,6 +207,11 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
     onLoadRef.current = onLoad;
     const onReadyToShowChangeRef = useRef(onReadyToShowChange);
     onReadyToShowChangeRef.current = onReadyToShowChange;
+    const onPaintedRef = useRef(onPainted);
+    onPaintedRef.current = onPainted;
+    const hostCoveredMount = useRef(hostCoversInitialLoad === true).current;
+    const hostCoverRef = useRef(hostCoversInitialLoad);
+    hostCoverRef.current = hostCoversInitialLoad;
     const onPreviewErrorRef = useRef(onPreviewError);
     onPreviewErrorRef.current = onPreviewError;
     const [loaded, setLoaded] = useState(false);
@@ -202,8 +222,14 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
     const [shaderTransitionLoading, setShaderTransitionLoading] = useState(false);
     const [compositionLoading, setCompositionLoading] = useState(true);
     const [painted, setPainted] = useState(false);
+    const [visualFrameReady, setVisualFrameReady] = useState(false);
     const [compositionOverlayDeferred, setCompositionOverlayDeferred] = useState(true);
     const [previewError, setPreviewError] = useState<string | null>(null);
+
+    // A slow open can hand off to the player's loading screen before its first frame.
+    useEffect(() => {
+      if (!hostCoversInitialLoad && !visualFrameReady) playerRef.current?.removeAttribute("assets-loading-ui");
+    }, [hostCoversInitialLoad, visualFrameReady]);
 
     // eslint-disable-next-line no-restricted-syntax
     useEffect(() => {
@@ -245,12 +271,15 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
           setCompositionLoading(true);
           loadStartedAtRef.current = performance.now();
           loadIdRef.current += 1;
+          setVisualFrameReady(false);
+          player.removeAttribute("assets-loading-ui");
           player.removeAttribute("no-load-timeout");
           player.setAttribute("src", retryUrl.origin === window.location.origin ? retryUrl.pathname + retryUrl.search : retryUrl.href);
         };
         retryPreviewRef.current = retryPreview;
         const stopLoadingBrand = brandPlayerLoading(player);
         const iframe = player.iframeElement;
+        playerRef.current = player;
         const preventToggle = (e: Event) => e.stopImmediatePropagation();
         const handleShaderTransitionState = (event: Event) => {
           const loading = getShaderTransitionLoading(event);
@@ -263,10 +292,14 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
           if (iframe.contentDocument && runtimeBootedIn(iframe)) handleLoad();
         };
         const handlePainted = () => {
+          player.removeAttribute("assets-loading-ui");
           setPainted(true);
-          onPainted?.({ iframe, startedAt: loadStartedAtRef.current, loadId: loadIdRef.current });
+          if (!hostCoveredMount) {
+            onPaintedRef.current?.({ iframe, startedAt: loadStartedAtRef.current, loadId: loadIdRef.current });
+          }
         };
         const handleError = (event: Event) => {
+          player.removeAttribute("assets-loading-ui");
           const message = readPreviewErrorMessage(event);
           onPreviewErrorRef.current?.(message);
           setPreviewError(message);
@@ -312,7 +345,13 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
           // slow network.
           if (assetPollRef.current) clearInterval(assetPollRef.current);
           const isContentRefresh = loadCountRef.current > 1;
-          let lastUnloaded = isContentRefresh ? false : hasUnloadedAssets(iframe, false);
+          // The iframe can load about:blank before its actual composition. Ownership
+          // follows the host's cover rather than the number of DOM load events.
+          const audioOnly = Boolean(
+            hostCoverRef.current && retryCountRef.current === 0 && doc && player.ready && waitingOnlyForAudio(doc),
+          );
+          setVisualFrameReady(audioOnly);
+          let lastUnloaded = !audioOnly && !isContentRefresh && hasUnloadedAssets(iframe, false);
           if (lastUnloaded) {
             setAssetsLoading(true);
             const deadline = performance.now() + ASSET_WAIT_DEADLINE_MS;
@@ -351,6 +390,9 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
           (ref as React.MutableRefObject<HTMLIFrameElement | null>).current = iframe;
         }
 
+        // The host already covers this first load. A second asset spinner would add
+        // its fade to the first paint; shader and playback readiness stay native.
+        if (hostCoverRef.current) player.setAttribute("assets-loading-ui", "none");
         player.setAttribute("shader-capture-scale", "1");
         player.setAttribute("shader-loading", "player");
         player.setAttribute("low-power-idle", "");
@@ -369,6 +411,7 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
         enableInteractiveIframe(player);
 
         cleanup = () => {
+          playerRef.current = null;
           stopLoadingBrand();
           iframe.removeEventListener("load", handleLoad);
           player.removeEventListener("click", preventToggle, { capture: true });
@@ -457,13 +500,13 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
     };
 
     const firstFrameShown =
-      loaded && painted && !compositionLoading && !shaderTransitionLoading && !previewError;
+      loaded && (painted || visualFrameReady) && !compositionLoading && !shaderTransitionLoading && !previewError;
     const readyToShow = firstFrameShown && !assetsLoading;
     // Work waiting on the boot starts at the first frame, while media still buffers.
     useEffect(() => {
       if (firstFrameShown) usePlayerStore.getState().markPreviewBooted();
     }, [firstFrameShown]);
-    // `painted` means the player's own loader has finished fading; two frames of grace on top.
+    // Let the frame reach the compositor before dismissing the poster and reporting it.
     useEffect(() => {
       if (!readyToShow) {
         onReadyToShowChangeRef.current?.(false);
@@ -471,7 +514,13 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
       }
       let second = 0;
       const first = requestAnimationFrame(() => {
-        second = requestAnimationFrame(() => onReadyToShowChangeRef.current?.(true));
+        second = requestAnimationFrame(() => {
+          onReadyToShowChangeRef.current?.(true);
+          const iframe = playerRef.current?.iframeElement;
+          if (iframe && hostCoveredMount) {
+            onPaintedRef.current?.({ iframe, startedAt: loadStartedAtRef.current, loadId: loadIdRef.current });
+          }
+        });
       });
       return () => {
         cancelAnimationFrame(first);

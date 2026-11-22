@@ -39,6 +39,7 @@ function ready(projectId = 'first') {
 
 it('presents the current live frame without waiting for sidebar status, timeline readiness or layout polling', async () => {
   await render();
+  const input = container.querySelector('input')!;
   const measure = vi.spyOn(container.querySelector('.dv-groupview')!, 'getBoundingClientRect');
   expect(opening()).toBe(true);
   ready('other');
@@ -47,7 +48,7 @@ it('presents the current live frame without waiting for sidebar status, timeline
   expect(usePlayerStore.getState().timelineReady).toBe(false);
   expect(measure).not.toHaveBeenCalled();
   expect(opening()).toBe(false);
-  const input = container.querySelector('input')!;
+  expect(container.querySelector('input')).toBe(input);
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Changed');
     input.dispatchEvent(new Event('input', { bubbles: true }));
