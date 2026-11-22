@@ -42,15 +42,25 @@ describe("preview lease", () => {
     fetch.mockResolvedValueOnce(grant("A", "initial")).mockResolvedValueOnce(grant("A", "renewed"));
     const prepared = preparePreviewLease("p", origin, new AbortController().signal);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(prepared("other", origin)).toBeUndefined();
-    expect(prepared("p", "https://other.example.test")).toBeUndefined();
     lease = bindPreviewLease(source, origin, navigate, failed, prepared);
     await vi.advanceTimersByTimeAsync(0);
     expect(navigate.mock.calls[0][0].searchParams.get("pt")).toBe("initial");
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(prepared("p", origin)).toBeUndefined();
+    expect(prepared.takeInitial()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(16_000);
     expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ assetLease: "A" });
+  });
+
+  it("keeps asset URLs stable when the editor replaces a preview frame", async () => {
+    fetch.mockResolvedValueOnce(grant("A", "first")).mockResolvedValueOnce(grant("A", "next"));
+    const prepared = preparePreviewLease("p", origin, new AbortController().signal);
+    lease = bindPreviewLease(source, origin, navigate, failed, prepared);
+    await vi.advanceTimersByTimeAsync(0);
+    lease.dispose();
+    lease = bindPreviewLease(source, origin, navigate, failed, prepared);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ assetLease: "A" });
+    expect(navigate.mock.calls[1][0].searchParams.get("pt")).toBe("next");
   });
 
   it.each(["aborted", "expired", "offline", "early-denial"])("fetches a fresh grant when the initial request is %s", async (reason) => {

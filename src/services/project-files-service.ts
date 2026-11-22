@@ -19,7 +19,7 @@ import {
   type ProjectVersionSource,
 } from '../db/schema/project-files.ts';
 import { projectGrants, projects } from '../db/schema/projects.ts';
-import { projectChannel } from '../infra/redis.ts';
+import { projectChannel, workspaceCatalogChannel } from '../infra/redis.ts';
 import { assertTenantScopedKey, catalogBlobKey, workspaceBlobKey } from '../infra/storage.ts';
 import {
   assertWritableProjectPath,
@@ -139,6 +139,7 @@ export interface CommitProjectFilesResult {
   readonly versionsByPath: Record<string, string>;
   readonly writeToken: string;
   readonly affectsPreview: boolean;
+  readonly fileTreeChanged?: boolean;
   readonly affectedCompositions: string[];
   readonly replayed: boolean;
   readonly coalesced?: boolean;
@@ -695,6 +696,9 @@ export class ProjectFilesService {
         }
       }
 
+      if (this.eventBus && input.projectUpdates?.title !== undefined) {
+        void this.eventBus.publish(workspaceCatalogChannel(ctx.workspaceId), { type: 'catalog-changed' }).catch(() => {});
+      }
       const eventPaths = [...new Set([...result.changedPaths, ...result.deletedPaths])];
       if (this.eventBus && eventPaths.length > 0) {
         const event: ProjectEvent = {
@@ -706,6 +710,7 @@ export class ProjectFilesService {
           paths: eventPaths,
           writeToken: result.writeToken,
           affectsPreview: result.affectsPreview,
+          fileTreeChanged: result.fileTreeChanged,
           affectedCompositions: result.affectedCompositions,
           ts: Date.now(),
         };
@@ -1529,6 +1534,9 @@ export class ProjectFilesService {
         versionsByPath,
         writeToken,
         affectsPreview: impact.affectsPreview,
+        // The Studio file tree lists compositions by path. Editing existing HTML only changes its content.
+        fileTreeChanged: sortedDeleted.length > 0 ||
+          sortedChanged.some(path => !currentByPath.has(path) || !/\.html?$/i.test(path)),
         affectedCompositions: impact.affectedCompositions,
         replayed: false,
         coalesced,

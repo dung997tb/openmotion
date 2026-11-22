@@ -38,6 +38,11 @@ export function fontCssCacheKey(hash: string): string {
   return `om:fonts:css:${hash}`;
 }
 
+export function workspaceCatalogChannel(workspaceId: string): string {
+  assertUuid(workspaceId, 'workspaceId');
+  return `om:catalog:${workspaceId}`;
+}
+
 export function projectChannel(workspaceId: string, projectId: string): string {
   assertUuid(workspaceId, 'workspaceId');
   assertUuid(projectId, 'projectId');

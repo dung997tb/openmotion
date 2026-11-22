@@ -1,3 +1,4 @@
+import { etag } from 'hono/etag';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { streamSSE } from 'hono/streaming';
 import { getHyperframeRuntimeScript } from '@hyperframes/core/runtime-script';
 import { CloudError, featureDeferredP2 } from '../../contracts/errors.ts';
 import type { SelectionEvent } from '../../contracts/events.ts';
-import { projectChannel, selectionChannel } from '../../infra/redis.ts';
+import { projectChannel, selectionChannel, workspaceCatalogChannel } from '../../infra/redis.ts';
 import { isUuid } from '../../../shared/project-validation.ts';
 import {
   extractWildcardPath,
@@ -92,11 +93,13 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
   };
 
   // GET /api/projects/:id/lint — Pure in-memory lintProjectInMemory (reads blobs.metadata, zero ffprobe).
-  app.get('/api/projects/:id/lint', async (c) => {
+  app.get('/api/projects/:id/lint', etag(), async (c) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id');
     const virtual = await deps.files.loadVirtualProject(auth, projectId);
     const result = await lintProjectInMemory(virtual);
+    c.header('Cache-Control', 'private, no-cache');
+    c.header('Vary', 'Cookie, Authorization');
     return c.json(result);
   });
 
@@ -210,71 +213,72 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
         return;
       }
 
-      let closed = false;
-      let releaseWait: (() => void) | null = null;
-      const waitClosed = new Promise<void>((resolve) => {
-        releaseWait = resolve;
-      });
-
-      const unsubProject = await deps.eventBus.subscribe(
-        projectChannel(auth.workspaceId, projectId),
-        (payload) => {
-          if (closed || stream.aborted) return;
-          const evt = payload as { type?: string; path?: string; paths?: string[] };
-          const eventName =
-            evt?.type === 'history-changed'
-              ? 'history-changed'
-              : evt?.type === 'media-derived-ready'
-                ? 'media-derived-ready'
-                : evt?.type === 'media-ingest-status'
-                  ? 'media-ingest-status'
-                  : evt?.type === 'render-updated'
-                    ? 'render-updated'
-                    : 'file-change';
-          // Tabs opened before a rolling update may only understand the single-path wire format.
-          const files = evt?.paths;
-          const data = !evt?.path && files?.length && (evt.type === 'file-change' || evt.type === 'files-changed')
-            ? { ...evt, path: files.length === 1 ? files[0] : '.' }
-            : payload;
-          void stream
-            .writeSSE({
-              event: eventName,
-              data: JSON.stringify(data),
-            })
-            .catch(() => {});
-        },
-      );
-
-      const unsubSelection = await deps.eventBus.subscribe(
-        selectionChannel(auth.workspaceId, projectId),
-        (payload) => {
-          if (closed || stream.aborted) return;
-          const sel = payload as StoredSelection;
-          latestSelections.set(`${auth.workspaceId}:${projectId}`, sel);
-          void stream
-            .writeSSE({
-              event: 'selection',
-              data: JSON.stringify(payload),
-            })
-            .catch(() => {});
-        },
-      );
-
-      const keepalive = setInterval(() => {
-        if (closed || stream.aborted) return;
-        void stream.write(': keepalive\n\n').catch(() => {});
-      }, 20_000);
-
-      stream.onAbort(() => {
-        closed = true;
-        releaseWait?.();
-      });
+      const { promise: disconnected, resolve: disconnect } = Promise.withResolvers<void>();
+      stream.onAbort(disconnect);
+      const unsubscribe: Array<() => Promise<void>> = [];
+      let keepalive: ReturnType<typeof setInterval> | undefined;
 
       try {
-        await waitClosed;
+        unsubscribe.push(await deps.eventBus.subscribe(
+          projectChannel(auth.workspaceId, projectId),
+          (payload) => {
+            if (stream.aborted) return;
+            const evt = payload as { type?: string; path?: string; paths?: string[] };
+            const eventName =
+              evt?.type === 'history-changed'
+                ? 'history-changed'
+                : evt?.type === 'media-derived-ready'
+                  ? 'media-derived-ready'
+                  : evt?.type === 'media-ingest-status'
+                    ? 'media-ingest-status'
+                    : evt?.type === 'render-updated'
+                      ? 'render-updated'
+                      : 'file-change';
+            // Tabs opened before a rolling update may only understand the single-path wire format.
+            const files = evt?.paths;
+            const data = !evt?.path && files?.length && (evt.type === 'file-change' || evt.type === 'files-changed')
+              ? { ...evt, path: files.length === 1 ? files[0] : '.' }
+              : payload;
+            void stream
+              .writeSSE({
+                event: eventName,
+                data: JSON.stringify(data),
+              })
+              .catch(() => {});
+          },
+        ));
+
+        unsubscribe.push(await deps.eventBus.subscribe(
+          selectionChannel(auth.workspaceId, projectId),
+          (payload) => {
+            if (stream.aborted) return;
+            const sel = payload as StoredSelection;
+            latestSelections.set(`${auth.workspaceId}:${projectId}`, sel);
+            void stream
+              .writeSSE({
+                event: 'selection',
+                data: JSON.stringify(payload),
+              })
+              .catch(() => {});
+          },
+        ));
+
+        // The signal carries no project metadata. Each recipient reloads its own authorized catalog.
+        unsubscribe.push(await deps.eventBus.subscribe(workspaceCatalogChannel(auth.workspaceId), () => {
+          if (!stream.aborted) void stream.writeSSE({
+            event: 'catalog-changed', data: JSON.stringify({ projectId }),
+          }).catch(() => {});
+        }));
+
+        keepalive = setInterval(() => {
+          if (stream.aborted) return;
+          void stream.write(': keepalive\n\n').catch(() => {});
+        }, 20_000);
+
+        if (!stream.aborted) await disconnected;
       } finally {
         clearInterval(keepalive);
-        await Promise.allSettled([unsubProject(), unsubSelection()]);
+        await Promise.allSettled(unsubscribe.map(stop => stop()));
       }
     });
   });

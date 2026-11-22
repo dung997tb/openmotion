@@ -7,9 +7,9 @@ import { createPreviewBridgeScript } from '../../src/studio/engine/preview-bundl
 it('binds clips to authored files, including nested hosts and repeated scene-local IDs', () => {
   const document = parseHTMLContent(`<html><body><main data-composition-id="root">
     <section id="host" data-hf-id="host-hf" data-composition-id="a" data-composition-file="a.html">
-      <audio id="voice" data-hf-id="a-voice" muted data-hidden data-timeline-locked></audio>
+      <audio id="voice" data-hf-id="a-voice" data-volume="0" muted data-hidden data-timeline-locked></audio>
       <section id="inner-host" data-composition-id="b" data-composition-file="b.html">
-        <span data-hf-id="only-hf"></span><audio id="voice" data-hf-id="b-voice"></audio>
+        <span data-hf-id="only-hf"></span><audio id="voice" data-hf-id="b-voice" data-volume="1.35"></audio>
       </section>
     </section>
   </main></body></html>`);
@@ -34,6 +34,9 @@ it('binds clips to authored files, including nested hosts and repeated scene-loc
   assert.deepEqual(rows.map(row => row.authored?.sourceFile), ['index.html', 'a.html', 'a.html', 'b.html', 'b.html', undefined, undefined]);
   assert.equal(rows[2]?.authored?.hfId, 'a-voice');
   assert.equal(rows[2]?.authored?.muted, true);
+  assert.equal(rows[2]?.authored?.volume, 0);
+  assert.equal(rows[3]?.authored?.volume, 1.35);
+  assert.equal(rows[0]?.authored?.volume, undefined);
   assert.equal(rows[2]?.authored?.timelineLocked, true);
   assert.equal(rows[2]?.authored?.hidden, true);
   assert.equal(rows[3]?.authored?.hfId, 'b-voice');

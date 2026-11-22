@@ -391,6 +391,17 @@ it('reconciles matching render events and catches up both reads after project st
   } finally { vi.useRealTimers(); }
 });
 
+it('refreshes only the catalog when the server reports a workspace change', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    notifyProjectActivity(first, 'catalog-changed');
+    notifyProjectActivity(first, 'catalog-changed');
+    await advance(0);
+    expect(countReads()).toEqual({ status: 1, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
 it('reconciles idle status even without a project stream and pauses reads while offline', async () => {
   vi.useFakeTimers();
   try {

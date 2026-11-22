@@ -47,6 +47,7 @@ export interface UseDomEditTextCommitsParams {
     options?: ResolveDomSelectionOptions,
   ) => Promise<DomEditSelection | null>;
   persistDomEditOperations: PersistDomEditOperations;
+  persistBoundText?: (selection: DomEditSelection, value: string) => Promise<void>;
   resolveImportedFontAsset: (fontFamilyValue: string) => ImportedFontAsset | null;
   readOnlyPreview: boolean;
 }
@@ -84,6 +85,7 @@ export function useDomEditTextCommits({
   buildDomSelectionFromTarget,
   persistDomEditOperations,
   resolveImportedFontAsset,
+  persistBoundText,
   readOnlyPreview,
 }: UseDomEditTextCommitsParams) {
   const latestReadOnlyPreviewRef = useRef(readOnlyPreview);
@@ -184,7 +186,7 @@ export function useDomEditTextCommits({
             editedElement.textContent = value;
           }
         },
-        persist: () =>
+        persist: () => selection.isolatedTarget?.binding && persistBoundText ? persistBoundText(selection, value) :
           persistDomEditOperations(selection, textCommit.operations, {
             label: "Edit text",
             skipRefresh: true,
@@ -214,6 +216,7 @@ export function useDomEditTextCommits({
       applyDomSelection,
       buildDomSelectionFromTarget,
       persistDomEditOperations,
+      persistBoundText,
       previewIframeRef,
       showToast,
     ],

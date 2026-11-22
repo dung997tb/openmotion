@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 interface PreviewEntry {
   url: string;
@@ -60,17 +60,26 @@ export function clearLocalUploadPreview(projectId: string, assetPath: string): v
   notify();
 }
 
+/** Drop unconsumed upload previews (including off-screen files) when their project closes. */
+export function clearProjectUploadPreviews(projectId: string): void {
+  const prefix = `${projectId}\0`;
+  let changed = false;
+  for (const [key, entry] of previews) {
+    if (!key.startsWith(prefix)) continue;
+    previews.delete(key);
+    if (entry.isObjectUrl) URL.revokeObjectURL(entry.url);
+    changed = true;
+  }
+  if (changed) notify();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
 export function useLocalUploadPreview(projectId: string, assetPath: string): string | null {
-  const [url, setUrl] = useState<string | null>(() => getLocalUploadPreview(projectId, assetPath));
-  useEffect(() => {
-    setUrl(getLocalUploadPreview(projectId, assetPath));
-    const onChange = () => setUrl(getLocalUploadPreview(projectId, assetPath));
-    listeners.add(onChange);
-    return () => {
-      listeners.delete(onChange);
-    };
-  }, [projectId, assetPath]);
-  return url;
+  return useSyncExternalStore(subscribe, () => getLocalUploadPreview(projectId, assetPath), () => null);
 }
 
 /**

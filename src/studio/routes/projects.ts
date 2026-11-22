@@ -98,10 +98,9 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
         });
         const proxySettled =
           !proxyTarget || previewProxy?.status === 'ready' || previewProxy?.status === 'failed';
-        if (meta.modality === 'video' || mime.startsWith('video/')) {
-          const spriteSettled = meta.sprite?.status === 'ready' || meta.sprite?.status === 'failed';
-          optimizationStatus = spriteSettled && proxySettled ? 'ready' : 'optimizing';
-        } else if ((meta.modality === 'image' || mime.startsWith('image/')) && proxyTarget) {
+        const isVideo = meta.modality === 'video' || mime.startsWith('video/');
+        const isImage = meta.modality === 'image' || mime.startsWith('image/');
+        if (isVideo || (isImage && proxyTarget)) {
           optimizationStatus = proxySettled ? 'ready' : 'optimizing';
         } else if (meta.modality === 'audio' || mime.startsWith('audio/')) {
           const waveformSettled =

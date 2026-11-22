@@ -40,7 +40,6 @@ import { createLogger } from '../../src/infra/logger.ts';
 import {
   buildImageThumbnailJobId,
   buildPreviewProxyJobId,
-  buildVideoSpriteJobId,
   buildWaveformPeaksJobId,
   validateMediaIngestPayload,
 } from '../../src/infra/queues.ts';
@@ -71,6 +70,7 @@ import {
 } from '../../src/workers/media-generate.ts';
 import {
   AsyncSemaphore,
+  type MediaIngestDeps,
   buildVideoProxyFilterGraph,
   classifyPreviewProxyTarget,
   computeSpriteSamplingPlan,
@@ -313,7 +313,7 @@ function createFakeDb(options: {
 }
 
 describe('worker-media: upload_commit, SDR PNG stripping, Upload-Before-Reference CAS & /tmp cleanup', () => {
-  it('streams staged PNG, strips SDR gAMA tag, generates sharp thumbnail, uploads CAS BEFORE PG tx, deletes staging, and cleans /tmp', async () => {
+  it('streams staged PNG, strips SDR gAMA tag, uploads original CAS BEFORE PG tx, deletes staging, and cleans /tmp', async () => {
     const tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'om-test-media-'));
     try {
       const storage = new InMemoryStorage();
@@ -410,10 +410,8 @@ describe('worker-media: upload_commit, SDR PNG stripping, Upload-Before-Referenc
       assert.ok(storedCas);
       assert.equal(storedCas.bytes.includes(Buffer.from('gAMA', 'ascii')), false);
 
-      // Verify thumbnail was generated via sharp and uploaded.
-      const thumb = storage.objects.get(thumbnailKey(WID_A, finalSha, 'w320'));
-      assert.ok(thumb && thumb.bytes.byteLength > 0);
-      assert.equal(thumb.contentType, 'image/jpeg');
+      assert.equal(storage.objects.has(thumbnailKey(WID_A, finalSha, 'w320')), false);
+      assert.equal(result.thumbnailKey, undefined);
 
       // Verify Upload-Before-Reference invariant: S3 putBlobIfAbsent happened BEFORE db:tx:begin & cas:applyDeltas!
       const s3UploadIdx = orderTrace.findIndex((entry) => entry.startsWith('s3:putBlobIfAbsent:'));
@@ -2374,7 +2372,7 @@ describe('worker-media: Dual-Track Preview Proxy Generation (c1)', () => {
     }
   });
 
-  it('enqueues generate_preview_proxy non-blockingly on upload_commit & url_fetch without failing ingest on queue error', async () => {
+  it('warms only waveform and proxy during upload and probe, and tolerates queue failure during URL ingest', async () => {
     const tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'om-test-proxy-enq-'));
     try {
       const storage = new InMemoryStorage();
@@ -2383,7 +2381,7 @@ describe('worker-media: Dual-Track Preview Proxy Generation (c1)', () => {
       const stagingKey = uploadStagingKey(WID_A, UID_A);
       await storage.putObject(stagingKey, dummyVideo, 'video/mp4');
 
-      const enqueuedProxies: Array<{
+      const enqueued: Array<{
         name: MediaIngestJobName;
         payload: MediaIngestPayloadMap[MediaIngestJobName];
         jobId?: string;
@@ -2413,33 +2411,33 @@ describe('worker-media: Dual-Track Preview Proxy Generation (c1)', () => {
         expiresAt: new Date(Date.now() + 60_000),
       };
 
-      const uploaded = await handleUploadCommitJob(
-        {
-          db: createFakeDb({ selectQueue: [[ticketRow]] }),
-          storage,
-          eventBus: { publish: async () => 1 },
-          logger: SILENT_LOGGER,
-          workerId: 'media-proxy-enq-1',
-          tmpBaseDir: tmpRoot,
-          queues: {
-            enqueueMediaIngest: async (name, payload, opts) => {
-              const validated = validateMediaIngestPayload(name, payload);
-              enqueuedProxies.push({ name, payload: validated, jobId: opts?.jobId });
-              return {} as never;
-            },
+      const deps: MediaIngestDeps = {
+        db: createFakeDb({ selectQueue: [[ticketRow]] }),
+        storage,
+        eventBus: { publish: async () => 1 },
+        logger: SILENT_LOGGER,
+        workerId: 'media-proxy-enq-1',
+        tmpBaseDir: tmpRoot,
+        queues: {
+          enqueueMediaIngest: async (name, payload, opts) => {
+            const validated = validateMediaIngestPayload(name, payload);
+            enqueued.push({ name, payload: validated, jobId: opts?.jobId });
+            return {} as never;
           },
-          probeMedia: async () => ({
-            modality: 'video',
-            mimeType: 'video/mp4',
-            extension: 'mp4',
-            sizeBytes: dummyVideo.byteLength,
-            width: 1920,
-            height: 1080,
-            durationSec: 5,
-          }),
-          generateThumbnailBuffer: async () => Buffer.from('jpg'),
-          applyBlobDeltas: async () => {},
         },
+        probeMedia: async () => ({
+          modality: 'video',
+          mimeType: 'video/mp4',
+          extension: 'mp4',
+          sizeBytes: dummyVideo.byteLength,
+          width: 1920,
+          height: 1080,
+          durationSec: 5,
+        }),
+        applyBlobDeltas: async () => {},
+      };
+      const uploaded = await handleUploadCommitJob(
+        deps,
         {
           jobId: JID_A,
           workspaceId: WID_A,
@@ -2450,12 +2448,24 @@ describe('worker-media: Dual-Track Preview Proxy Generation (c1)', () => {
       );
 
       assert.equal(uploaded.sha256, videoSha);
-      assert.equal(enqueuedProxies.length, 3);
-      const byName = new Map(enqueuedProxies.map((entry) => [entry.name, entry]));
-      assert.equal(byName.get('generate_video_sprite')?.jobId, buildVideoSpriteJobId(WID_A, videoSha));
+      assert.equal(enqueued.length, 2);
+      const byName = new Map(enqueued.map((entry) => [entry.name, entry]));
+      assert.equal(byName.has('generate_video_sprite'), false);
+      assert.equal(byName.has('image_thumbnail'), false);
       assert.equal(byName.get('extract_waveform_peaks')?.jobId, buildWaveformPeaksJobId(WID_A, videoSha));
       assert.equal(byName.get('generate_preview_proxy')?.jobId, buildPreviewProxyJobId(WID_A, videoSha));
-      assert.ok(enqueuedProxies.every((entry) => entry.jobId && !entry.jobId.includes(':')));
+      assert.ok(enqueued.every((entry) => entry.jobId && !entry.jobId.includes(':')));
+
+      enqueued.length = 0;
+      const metadata = await handleMediaProbeJob(deps, {
+        workspaceId: WID_A,
+        blobScope: 'workspace',
+        sha256: videoSha,
+        s3Key: workspaceBlobKey(WID_A, videoSha),
+        projectId: PID_A,
+      });
+      assert.equal(metadata.durationSec, 5);
+      assert.deepEqual(enqueued.map((entry) => entry.name).sort(), ['extract_waveform_peaks', 'generate_preview_proxy']);
 
       // url_fetch with a failing queue MUST still succeed (best-effort non-blocking enqueue).
       const fetched = await handleUrlFetchJob(
@@ -2810,7 +2820,6 @@ describe('worker-media: Video Sprite Sheets, Silent Waveform, CopyObject Promoti
             height: 1080,
             durationSec: 12,
           }),
-          generateThumbnailBuffer: async () => Buffer.from('jpg'),
           applyBlobDeltas: async () => {},
         },
         {

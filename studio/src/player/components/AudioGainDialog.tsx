@@ -98,19 +98,15 @@ export function AudioGainDialog({
   const showToast = shell?.showToast ?? edit.onNotice;
   const peaks = useSourcePeaks(elements, projectId);
   const [mode, setMode] = useState<DialogMode>("adjust");
-  const [values, setValues] = useState<Record<AudioGainMode, number>>(() => ({
-    set: currentGainDb(elements[0]),
-    adjust: 0,
-    "normalize-max": 0,
-    "normalize-all": 0,
-  }));
+  const [drafts, setDrafts] = useState<Partial<Record<AudioGainMode, string>>>({});
+  const valueFor = (field: AudioGainMode) => drafts[field] ?? String(field === "set" ? currentGainDb(elements[0]) : 0);
   const clips: AudioGainClip[] = elements.map((el) => ({
     key: keyOf(el),
     gain: el.volume ?? 1,
     sourcePeak: peaks?.get(keyOf(el)) ?? null,
   }));
   const peakDb = peakAmplitudeDb(clips);
-  const outOfRange = PEAK_MODES.has(mode) && mode !== "loudness" && values[mode] > 0;
+  const outOfRange = PEAK_MODES.has(mode) && mode !== "loudness" && Number(valueFor(mode)) > 0;
   const canApply = !outOfRange && !(PEAK_MODES.has(mode) && peakDb === null);
 
   const apply = async () => {
@@ -123,7 +119,7 @@ export function AudioGainDialog({
         return;
       }
       const byKey = new Map(elements.map((el) => [keyOf(el), el]));
-      const plan = planAudioGain(clips, { mode, db: values[mode] });
+      const plan = planAudioGain(clips, { mode, db: Number(valueFor(mode)) });
       const edits = plan.flatMap(({ key, gain }) => {
         const element = byKey.get(key);
         return element ? [{ element, gain }] : [];
@@ -141,12 +137,13 @@ export function AudioGainDialog({
         step={0.1}
         max={PEAK_MODES.has(rowMode) ? 0 : undefined}
         aria-label={`${t(ROWS.find((row) => row.mode === rowMode)?.label ?? "")} dB`}
-        value={values[rowMode]}
+        value={valueFor(rowMode)}
         disabled={mode !== rowMode}
         className="w-16 rounded border border-neutral-700 bg-neutral-950 px-1 text-right disabled:opacity-50"
-        onChange={(event) =>
-          setValues((prev) => ({ ...prev, [rowMode]: Number(event.target.value) || 0 }))
-        }
+        onChange={(event) => {
+          const value = event.currentTarget.value;
+          setDrafts((prev) => ({ ...prev, [rowMode]: value }));
+        }}
       />
       dB
     </span>

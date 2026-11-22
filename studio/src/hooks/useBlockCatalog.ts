@@ -19,9 +19,10 @@ function loadCatalog(): Promise<CatalogItem[]> {
   catalogRequest ??= studioApiFetch("/api/registry/blocks")
     .then((response) => {
       if (!response.ok) throw new Error("Failed to load catalog");
-      return response.json() as Promise<RegistryItem[]>;
+      return response.json() as Promise<RegistryItem[] | { blocks: RegistryItem[] }>;
     })
-    .then((items) => {
+    .then((body) => {
+      const items = Array.isArray(body) ? body : body.blocks;
       catalogCache = items
         .map((item) => ({ ...item, category: resolveBlockCategory(item.tags) }))
         .sort((a, b) => {

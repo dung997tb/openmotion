@@ -221,6 +221,7 @@ export function useTimelineAssetDropOps({
                 geometry: fitTimelineAssetGeometry(
                   null,
                   resolveTimelineAssetCompositionSize(originalContent),
+                  placement.canvasPosition,
                 ),
               }),
             ),

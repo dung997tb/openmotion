@@ -1,5 +1,5 @@
 import { ExportCompositionSelect } from "./ExportCompositionSelect";
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { NativeRuntimeNotice } from "../NativeRuntimeNotice";
 import { useFileManagerContextOptional } from "../../contexts/FileManagerContext";
 import { RenderQueue } from "./RenderQueue";
@@ -21,6 +21,9 @@ export const RenderQueuePanel = memo(function RenderQueuePanel() {
   const composition = chosen?.projectId === projectId ? chosen.path : activeCompPath || 'index.html';
   const current = composition === (activeCompPath || 'index.html');
   const fileManager = useFileManagerContextOptional();
+
+  const recheck = renderQueue.recheckFfmpeg;
+  useEffect(() => { recheck(); }, [recheck]);
 
   return (
     <div data-testid="export-panel" className="flex h-full min-h-0 flex-col">

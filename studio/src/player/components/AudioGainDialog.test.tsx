@@ -82,6 +82,24 @@ describe("AudioGainDialog", () => {
     await vi.waitFor(() => expect(peakText()).toBe("Peak Amplitude: 0.0 dB"));
   });
 
+  it("reflects remote gain in an open dialog until the user edits that field", () => {
+    stubPeaks({});
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = harness.mount(host);
+    const update = (volume: number) => act(() => root.render(<AudioGainDialog elements={[clip("remote", { volume })]} onClose={() => {}} />));
+    const value = () => row("Set Gain to")?.querySelector<HTMLInputElement>("input[type=number]")?.value;
+    update(1);
+    update(0.5);
+    expect(value()).toBe("-6");
+    choose("Set Gain to");
+    typeDb("Set Gain to", "");
+    expect(value()).toBe("");
+    typeDb("Set Gain to", "-3");
+    update(0.25);
+    expect(value()).toBe("-3");
+  });
+
   it("Set Gain writes every selected clip in one undo step", async () => {
     stubPeaks({});
     const a = clip("set-a");

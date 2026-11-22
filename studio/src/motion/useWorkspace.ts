@@ -189,6 +189,7 @@ export function useWorkspace(waitForSaves: () => Promise<void>, projectId?: stri
     });
     const unsubscribeActivity = subscribeProjectActivity((id, event) => {
       if (id !== projectId) return;
+      if (event === 'catalog-changed') { refreshCatalog(0); return; }
       if (event === 'reconnected') {
         refreshStatus(0);
         refreshCatalog(0);

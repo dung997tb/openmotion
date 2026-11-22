@@ -1,3 +1,4 @@
+import { IsolatedCanvasContextMenu, type CanvasMenuPick } from "./IsolatedCanvasContextMenu";
 import { useIsolatedInlineText } from "./useIsolatedInlineText";
 import { isIsolatedSourceTarget, isolatedPatchTarget, type IsolatedSourceTarget } from "./isolatedSourceTarget";
 import { useIsolatedLayerBounds } from "./useIsolatedLayerBounds";
@@ -6,7 +7,7 @@ import { useDomEditActionsContext } from "../../contexts/DomEditContext";
 import { useStudioShellContext } from "../../contexts/StudioContext";
 import { useI18n } from "../../i18n/I18n";
 import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/previewAdapter";
-import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
+import { projectPreviewAdapter } from "../../player/lib/projectPreviewAdapter";
 import { usePlayerStore } from "../../player/store/playerStore";
 import type { PatchOperation } from "../../utils/sourcePatcher";
 
@@ -18,14 +19,21 @@ interface Drag {
   startY: number;
   frame: DOMRect;
   finishing: boolean;
+  corner?: Corner;
   bounds?: Box;
   offset?: { x: number; y: number };
 }
+
+type Corner = "nw" | "ne" | "sw" | "se";
+const corners: Corner[] = ["nw", "ne", "sw", "se"];
 
 interface DragResult extends IsolatedSourceTarget {
   left: number;
   top: number;
   makeRelative: boolean;
+  corner?: Corner;
+  width?: number;
+  height?: number;
 }
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -37,13 +45,16 @@ function validResult(result: DragResult | null): result is DragResult {
 
 function positionPatch(result: DragResult) {
   const operations: PatchOperation[] = [];
-  if (result.makeRelative === true) {
+  const { corner } = result;
+  if (result.makeRelative === true && (!corner || corner !== "se")) {
     operations.push({ type: "inline-style", property: "position", value: "relative" });
   }
-  operations.push(
-    { type: "inline-style", property: "left", value: result.left + "px" },
-    { type: "inline-style", property: "top", value: result.top + "px" },
-  );
+  if (!corner || corner.endsWith("w")) operations.push({ type: "inline-style", property: "left", value: result.left + "px" });
+  if (!corner || corner.startsWith("n")) operations.push({ type: "inline-style", property: "top", value: result.top + "px" });
+  if (corner) {
+    operations.push({ type: "inline-style", property: "width", value: result.width + "px" },
+      { type: "inline-style", property: "height", value: result.height + "px" });
+  }
   const { sourceFile, ifMatch, target } = isolatedPatchTarget(result);
   return { sourceFile, ifMatch, patches: [{ target, operations }] };
 }
@@ -57,6 +68,7 @@ export function IsolatedCanvasOverlay() {
   const text = useIsolatedInlineText(previewIframeRef, projectId, select && !writeBlockedReason);
   const drag = useRef<Drag | null>(null);
   const lastPick = useRef<Drag | null>(null);
+  const [menu, setMenu] = useState<CanvasMenuPick | null>(null);
   const [box, setBox] = useState<Box | null>(null);
   const overlay = useIsolatedLayerBounds(previewIframeRef, projectId, setBox);
 
@@ -65,6 +77,7 @@ export function IsolatedCanvasOverlay() {
     const active = drag.current;
     active?.adapter.send("canvas-drag", { phase: "cancel", gestureId: active.gestureId });
     drag.current = null;
+    setMenu(null);
     lastPick.current = null;
     setBox(null);
   }, []);
@@ -76,15 +89,20 @@ export function IsolatedCanvasOverlay() {
   }, [projectId, select, writeBlockedReason, cancel]);
 
   function showBounds(active: Drag) {
-    if (active.bounds) setBox({ ...active.bounds,
-      x: active.bounds.x + (active.offset?.x ?? 0), y: active.bounds.y + (active.offset?.y ?? 0) });
+    if (!active.bounds) return;
+    const { x = 0, y = 0 } = active.offset || {};
+    const rect = active.bounds, corner = active.corner;
+    const west = corner?.endsWith("w"), north = corner?.startsWith("n");
+    setBox({ x: rect.x + (corner && !west ? 0 : x), y: rect.y + (corner && !north ? 0 : y),
+      width: Math.max(1, rect.width + (corner ? west ? -x : x : 0)),
+      height: Math.max(1, rect.height + (corner ? north ? -y : y : 0)) });
   }
 
   function begin(event: PointerEvent<HTMLDivElement>) {
     const iframe = previewIframeRef.current;
     if (!iframe || drag.current || event.button !== 0 || !event.isPrimary) return;
-    const adapter = createPreviewAdapter({ iframe });
-    if (adapter.projectId !== projectId || !adapter.token || adapter.targetOrigin !== isolatedPreviewOrigin()) return;
+    const adapter = projectPreviewAdapter(iframe, projectId);
+    if (!adapter) return;
     const frame = iframe.getBoundingClientRect();
     const { clientX: startX, clientY: startY } = event;
     const x = (startX - frame.x) / frame.width, y = (startY - frame.y) / frame.height;
@@ -94,12 +112,13 @@ export function IsolatedCanvasOverlay() {
       observedFrame.current = iframe;
       iframe.addEventListener("load", cancel);
     }
-    const active: Drag = { pointer: event.pointerId, gestureId: crypto.randomUUID(), adapter, frame, startX, startY, finishing: false };
+    const corner = (event.target as HTMLElement).closest<HTMLElement>("[data-resize-corner]")?.dataset.resizeCorner as Corner | undefined;
+    const active: Drag = { corner, pointer: event.pointerId, gestureId: crypto.randomUUID(), adapter, frame, startX, startY, finishing: false };
     drag.current = lastPick.current = active;
     setBox(null);
     const overlay = event.currentTarget.getBoundingClientRect();
     event.currentTarget.setPointerCapture(event.pointerId);
-    void adapter.request<Pick | null>("canvas-drag", { phase: "start", gestureId: active.gestureId, x, y })
+    void adapter.request<Pick | null>("canvas-drag", { phase: "start", gestureId: active.gestureId, x, y, corner })
       .then(pick => {
         if (lastPick.current !== active || !pick?.geometry || !pick.viewport?.width || !pick.viewport.height) return;
         const sx = frame.width / pick.viewport.width, sy = frame.height / pick.viewport.height;
@@ -134,11 +153,12 @@ export function IsolatedCanvasOverlay() {
     void active.adapter.request<DragResult | null>("canvas-drag", payload).then(async result => {
       if (drag.current !== active || previewIframeRef.current !== active.adapter.iframe) return;
       if (createPreviewAdapter({ iframe: active.adapter.iframe }).token !== active.adapter.token) return;
-      if (!validResult(result)) return;
+      if (!validResult(result) || result.corner !== active.corner || (active.corner &&
+        !(Number.isFinite(result.width) && Number.isFinite(result.height) && result.width! > 0 && result.height! > 0))) return;
       // The scoped frame holds the optimistic styles until this write settles.
       // Pointer capture can now serve another source file.
       drag.current = null;
-      const saved = await commitDomEditPatchBatches([positionPatch(result)], { label: "Move layer", coalesceKey: active.gestureId });
+      const saved = await commitDomEditPatchBatches([positionPatch(result)], { label: active.corner ? "Resize layer" : "Move layer", coalesceKey: active.gestureId });
       committed = saved.durable;
       changed = saved.changed;
     }, () => { if (drag.current === active) showToast(t("Preview unavailable"), "error"); }).catch(() => {
@@ -156,10 +176,26 @@ export function IsolatedCanvasOverlay() {
   if (!select || writeBlockedReason) return null;
   return <div ref={overlay} className="absolute inset-0 z-10 touch-none pointer-events-auto" aria-label={t("Composition canvas")}
     style={text.editing ? { pointerEvents: "none" } : undefined} onDoubleClick={text.open}
+    onContextMenu={event => {
+      event.preventDefault();
+      const iframe = previewIframeRef.current;
+      if (!iframe || !projectId) return;
+      const adapter = projectPreviewAdapter(iframe, projectId);
+      if (!adapter) return;
+      const frame = iframe.getBoundingClientRect();
+      setMenu({ adapter, x: (event.clientX - frame.x) / frame.width, y: (event.clientY - frame.y) / frame.height,
+        screenX: event.clientX, screenY: event.clientY });
+    }}
     onPointerDown={begin} onPointerMove={event => update(event, "move")}
     onPointerUp={event => update(event, "finish")} onPointerCancel={event => update(event, "cancel")}
     onLostPointerCapture={event => update(event, "cancel")}>
+    {menu && <IsolatedCanvasContextMenu pick={menu} close={() => setMenu(null)} />}
     {box && <div className="absolute pointer-events-none border border-studio-accent"
-      style={{ left: box.x, top: box.y, width: box.width, height: box.height }} />}
+      style={{ left: box.x, top: box.y, width: box.width, height: box.height }}>
+      {corners.map(corner => <span key={corner} data-resize-corner={corner} aria-label={t("Resize layer")}
+        className="absolute size-2 rounded-sm border border-studio-accent bg-white pointer-events-auto"
+        style={{ left: corner.endsWith("w") ? 0 : "100%", top: corner.startsWith("n") ? 0 : "100%",
+          transform: "translate(-50%, -50%)", cursor: corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize" }} />)}
+    </div>}
   </div>;
 }

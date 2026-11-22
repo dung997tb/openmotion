@@ -19,20 +19,23 @@ async function requestPreviewLease(project: string, assetLease: string | undefin
   return { status: response.status, grant: response.ok ? await response.json() : null };
 }
 
-/** Only the initial live player of this route can take the speculative response. */
-export function preparePreviewLease(projectId: string, origin: string, route: AbortSignal) {
+/** Grant prefetch and asset URL continuity belong to a single open project. */
+export function preparePreviewLease(projectId: string, origin: string, route?: AbortSignal) {
   const project = encodeURIComponent(projectId);
-  const signal = AbortSignal.any([route, AbortSignal.timeout(10_000)]);
-  let pending: Promise<GrantResponse | undefined> | undefined = requestPreviewLease(project, undefined, signal).catch(() => undefined);
-  signal.addEventListener("abort", () => { pending = undefined; }, { once: true });
-  return (requestedProject: string, requestedOrigin: string) => {
-    if (signal.aborted || requestedProject !== project || requestedOrigin !== origin) return;
-    const response = pending;
-    pending = undefined;
-    return response?.then(result => {
-      if (signal.aborted || !result?.grant || !(Date.parse(result.grant.expiresAt) > Date.now())) return;
-      return result;
-    });
+  const signal = route && AbortSignal.any([route, AbortSignal.timeout(10_000)]);
+  let pending: Promise<GrantResponse | undefined> | undefined = signal && requestPreviewLease(project, undefined, signal).catch(() => undefined);
+  signal?.addEventListener("abort", () => { pending = undefined; }, { once: true });
+  return {
+    project, origin,
+    assetLease: undefined as string | undefined,
+    takeInitial() {
+      const response = pending;
+      pending = undefined;
+      return response?.then(result => {
+        if (signal?.aborted || !result?.grant || !(Date.parse(result.grant.expiresAt) > Date.now())) return;
+        return result;
+      });
+    },
   };
 }
 export type PreparedPreviewLease = ReturnType<typeof preparePreviewLease>;
@@ -46,6 +49,7 @@ export function bindPreviewLease(
   prepared?: PreparedPreviewLease,
 ) {
   const project = /^\/api\/projects\/([^/]+)\/preview(?:\/|$)/.exec(source.pathname)?.[1];
+  const scope = prepared?.project === project && prepared?.origin === origin ? prepared : undefined;
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout>;
   let pending = false;
@@ -75,15 +79,15 @@ export function bindPreviewLease(
     pending = true;
     try {
       if (!project) throw new Error("Invalid project preview URL");
-      const initial = prepared?.(project, origin);
-      prepared = undefined;
+      const initial = !assetLease ? scope?.takeInitial() : undefined;
       const early = initial && await initial;
       if (controller.signal.aborted) return;
-      const response = early ?? await requestPreviewLease(project, assetLease, controller.signal);
+      const response = early ?? await requestPreviewLease(project, assetLease ?? scope?.assetLease, controller.signal);
       if (controller.signal.aborted) return;
       if (!response.grant) {
         if (response.status === 401 || response.status === 403 || response.status === 404) {
           assetLease = undefined;
+          if (scope) scope.assetLease = undefined;
           renewAt = Infinity;
           failed(`Preview access denied (HTTP ${response.status})`);
           return;
@@ -105,6 +109,7 @@ export function bindPreviewLease(
         navigate(url);
       }
       assetLease = grant.assetLease;
+      if (scope) scope.assetLease = grant.assetLease;
       expiresAt = deadline;
       navigateOnGrant = false;
       retryDelay = 1000;

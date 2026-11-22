@@ -152,6 +152,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
           : localBase;
         const options = {
           runtimeUrl: '/api/runtime.js', baseHref: templateBase, gsapBaseUrl, capture, variables,
+          cacheProjectScripts: !capture,
           fontCssCache: deps.hotTextCache?.getFontCss && deps.hotTextCache.setFontCss ? {
             getFontCss: deps.hotTextCache.getFontCss.bind(deps.hotTextCache),
             setFontCss: deps.hotTextCache.setFontCss.bind(deps.hotTextCache),
@@ -222,6 +223,13 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
         : c.json({ error: 'Preview asset not found', path: safePath }, 404);
     }
 
+    const scriptRevision = c.req.query('om-script');
+    const versionedScript = file.isText && /\.(?:js|cjs)$/i.test(safePath) && scriptRevision !== undefined;
+    if (versionedScript && scriptRevision !== file.sha256) {
+      c.header('Cache-Control', 'no-store');
+      return c.body(null, 409);
+    }
+
     const forceOriginal = isOriginalTrackRequested((key) => c.req.query(key));
     const readyProxy =
       !file.isText && file.blobScope === 'workspace' && !forceOriginal
@@ -268,7 +276,8 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
       c.header('Content-Type', file.mimeType);
       c.header('Content-Length', String(Buffer.byteLength(content, 'utf8')));
       c.header('ETag', etag);
-      c.header('Cache-Control', 'no-cache');
+      c.header('Cache-Control', versionedScript ? 'private, max-age=300, immutable' : 'no-cache');
+      c.header('Vary', 'Cookie, Authorization');
       return c.body(content, 200);
     }
 

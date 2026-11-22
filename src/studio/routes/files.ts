@@ -6,10 +6,8 @@ import { AUDIO_EXT, IMAGE_EXT, VIDEO_EXT } from '../../../shared/asset-names.ts'
 import { MAX_ASSET_BYTES } from '../../../shared/asset-limits.ts';
 import { projectChannel } from '../../infra/redis.ts';
 import {
-  buildImageThumbnailJobId,
   buildMediaProbeJobId,
   buildPreviewProxyJobId,
-  buildVideoSpriteJobId,
   buildWaveformPeaksJobId,
 } from '../../infra/queues.ts';
 import { workspaceBlobKey } from '../../infra/storage.ts';
@@ -146,6 +144,9 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       );
     }
 
+    // Always reauthorize and revalidate private sources. Identical content needs no second body.
+    c.header('Cache-Control', 'private, no-cache');
+    c.header('Vary', 'Cookie, Authorization');
     const ifNoneMatch = c.req.header('if-none-match');
     if (ifNoneMatch && ifNoneMatch.trim() === version) {
       c.header('ETag', version);
@@ -154,7 +155,6 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
 
     const content = await deps.files.readTextBlob(auth.workspaceId, file.blobScope, file.sha256);
     c.header('ETag', version);
-    c.header('Cache-Control', 'no-store');
     return c.json({
       filename: path.posix.basename(safePath),
       path: safePath,
@@ -600,7 +600,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
         writeToken,
       });
 
-      // Enqueue background media-ingest metadata probing / waveform / thumbnail / sprite / proxy jobs for media uploads.
+      // Warm editing metadata, waveforms and proxies. Thumbnails and sprites are generated on request.
       if (deps.queues) {
         for (const item of prepared) {
           if (item.isText) continue;
@@ -608,7 +608,6 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
           const isVideo = VIDEO_EXT.test(item.path);
           const isAudio = AUDIO_EXT.test(item.path);
           const isImage = IMAGE_EXT.test(item.path);
-          const isSvg = item.path.toLowerCase().endsWith('.svg');
 
           if (isVideo || isAudio || isImage) {
             void deps.queues
@@ -637,36 +636,6 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
                   samples: 2048,
                 },
                 { jobId: buildWaveformPeaksJobId(auth.workspaceId, item.sha256) },
-              )
-              .catch(() => {});
-          }
-          if ((isImage && !isSvg) || isVideo) {
-            void deps.queues
-              .enqueueMediaIngest(
-                'image_thumbnail',
-                {
-                  workspaceId: auth.workspaceId,
-                  blobScope: 'workspace',
-                  sha256: item.sha256,
-                  projectId,
-                  spec: 'w320',
-                  width: 320,
-                },
-                { jobId: buildImageThumbnailJobId(auth.workspaceId, item.sha256, 'w320') },
-              )
-              .catch(() => {});
-          }
-          if (isVideo) {
-            void deps.queues
-              .enqueueMediaIngest(
-                'generate_video_sprite',
-                {
-                  workspaceId: auth.workspaceId,
-                  blobScope: 'workspace',
-                  sha256: item.sha256,
-                  projectId,
-                },
-                { jobId: buildVideoSpriteJobId(auth.workspaceId, item.sha256) },
               )
               .catch(() => {});
           }

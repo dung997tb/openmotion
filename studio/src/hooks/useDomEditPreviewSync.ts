@@ -51,6 +51,10 @@ export function useDomEditPreviewSync({
       if (captionEditMode) return;
       const currentSelection = domEditSelectionRef.current;
       if (!currentSelection) return;
+      if (currentSelection.isolatedTarget) {
+        await refreshDomEditSelectionFromPreview(currentSelection, previewIframe);
+        return;
+      }
       let doc: Document | null = null;
       try {
         doc = previewIframe.contentDocument;

@@ -8,9 +8,12 @@ import { useI18n } from "../../i18n/I18n";
  * AssetCard and FontRow — visual asset tile / row components for the Assets panel.
  * Extracted from AssetsTab.tsx to keep that file under the 600-line CI gate.
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Tooltip } from "../ui/Tooltip";
-import { VideoFrameThumbnail } from "../ui/VideoFrameThumbnail";
+import { useNearViewport } from "../../hooks/useNearViewport";
+import { useThumbnailLease } from "../../hooks/useThumbnailLease";
+import { createVideoThumbnailRequest } from "../../player/lib/videoThumbnailRequest";
+import { mediaThumbnailRevisionOf } from "../../player/store/thumbnailSlice";
 import { VIDEO_EXT, IMAGE_EXT } from "../../utils/mediaTypes";
 import { TIMELINE_ASSET_MIME } from "../../utils/timelineAssetDrop";
 import { ContextMenu } from "./AssetContextMenu";
@@ -20,12 +23,9 @@ import { timelineClipFocusId } from "../../player/components/timelineNavigationI
 import { useAssetPreviewStore } from "../../utils/assetPreviewStore";
 import { findClipForAsset, isPointerClick } from "../../utils/assetClickBehavior";
 import { basename, ext, type CopyFeedback } from "./assetHelpers";
-import { encodePreviewPath, resolveMediaPreviewUrl } from "../../player/components/thumbnailUtils";
-import { buildProjectApiPath } from "../../utils/projectRouting";
+import { resolveMediaPreviewUrl } from "../../player/components/thumbnailUtils";
 import { useCloudDisklessMode } from "../../utils/cloudRuntime";
 import { clearLocalUploadPreview, useLocalUploadPreview } from "../../utils/localUploadPreviewStore";
-import { waitForMediaDerived } from "../../utils/mediaDerivedBus";
-import { studioApiFetch } from "../../utils/studioApiFetch";
 
 /** Drag payload writer shared by the asset tile and the font row: copy effect
  *  plus the timeline-asset MIME and a plain-text path fallback. */
@@ -115,113 +115,18 @@ function useProbedDuration(src: string, skip: boolean): number | null | undefine
   return duration;
 }
 
-/**
- * Cloud-mode video cover image backed by `/api/projects/:id/image-thumbnail/*?w=320`.
- * Avoids mounting one hidden `<video>` element per sidebar card; shows any instant local
- * upload preview while `202 pending` resolves via `media-derived-ready`, and falls back to
- * `<VideoFrameThumbnail>` only if the server cannot generate a thumbnail.
- */
-function CloudVideoPosterThumbnail({
-  projectId,
-  asset,
-  fallbackSrc,
-  localPreview,
-  fallbackLabel,
-}: {
-  projectId: string;
-  asset: string;
-  fallbackSrc: string;
-  localPreview: string | null;
-  fallbackLabel: string;
+function AssetVideoPoster({ projectId, asset, src, duration, localPreview }: {
+  projectId: string; asset: string; src: string; duration?: number; localPreview: string | null;
 }) {
-  const thumbUrl = buildProjectApiPath(projectId, `/image-thumbnail/${encodePreviewPath(asset)}?w=320`);
-  const [phase, setPhase] = useState<"loading" | "ready" | "fallback">("loading");
-  const [cacheBust, setCacheBust] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    setPhase("loading");
-
-    const checkThumbnail = async () => {
-      let delayMs = 500;
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        if (cancelled) return;
-        try {
-          const headRes = await studioApiFetch(thumbUrl, { method: "HEAD", signal: controller.signal });
-          if (cancelled) return;
-          if (headRes.ok) {
-            setCacheBust((n) => n + 1);
-            setPhase("ready");
-            return;
-          }
-          // Trigger on-demand generation via GET once if HEAD returned 404.
-          const getRes = await studioApiFetch(thumbUrl, { signal: controller.signal });
-          if (cancelled) return;
-          if (getRes.status === 200) {
-            setCacheBust((n) => n + 1);
-            setPhase("ready");
-            return;
-          }
-          if (getRes.status === 202) {
-            await waitForMediaDerived(
-              (evt) => evt.kind === "thumbnail" && evt.projectId === projectId,
-              delayMs,
-              controller.signal,
-            ).catch(() => null);
-            delayMs = Math.min(3000, Math.round(delayMs * 1.6));
-            continue;
-          }
-          setPhase("fallback");
-          return;
-        } catch {
-          if (!cancelled) setPhase("fallback");
-          return;
-        }
-      }
-      if (!cancelled) setPhase("fallback");
-    };
-
-    void checkThumbnail();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [projectId, thumbUrl]);
-
-  if (phase === "ready") {
-    const src = cacheBust > 0 ? `${thumbUrl}&v=${cacheBust}` : thumbUrl;
-    return (
-      <img
-        src={src}
-        alt=""
-        draggable={false}
-        loading="lazy"
-        className="w-full h-full object-cover"
-        onLoad={() => {
-          if (localPreview) clearLocalUploadPreview(projectId, asset);
-        }}
-        onError={() => setPhase("fallback")}
-      />
-    );
-  }
-
-  if (localPreview) {
-    return (
-      <img
-        src={localPreview}
-        alt=""
-        draggable={false}
-        className="w-full h-full object-cover"
-      />
-    );
-  }
-
-  if (phase === "fallback") {
-    return <VideoFrameThumbnail src={fallbackSrc} fallbackLabel={fallbackLabel} />;
-  }
-
-  return <div data-thumbnail-loading className="w-full h-full bg-panel-surface animate-pulse motion-reduce:animate-none" />;
+  const sessionEpoch = usePlayerStore((state) => state.timelineSessionEpoch);
+  const request = useMemo(() => createVideoThumbnailRequest({
+    projectId, sessionEpoch, videoSrc: src, duration: duration ?? 1, priority: "visible",
+  }, 1, false), [duration, projectId, sessionEpoch, src]);
+  const snapshot = useThumbnailLease(request);
+  const decoded = snapshot.status === "ready" && snapshot.value.kind === "image" ? snapshot.value.url : null;
+  const poster = decoded ?? localPreview;
+  return poster ? <img src={poster} alt="" draggable={false} className="w-full h-full object-cover"
+    onLoad={() => { if (decoded && localPreview) clearLocalUploadPreview(projectId, asset); }} /> : null;
 }
 
 export interface AssetCardProps {
@@ -268,27 +173,21 @@ export function AssetCard({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const [imgFallbackOriginal, setImgFallbackOriginal] = useState(false);
+  const [card, setCard] = useState<HTMLDivElement | null>(null);
+  const visible = useNearViewport(card);
   const [imgError, setImgError] = useState(false);
   const isCopied = copyFeedback?.path === asset && copyFeedback.ok;
   const fullName = displayName ?? asset.split("/").pop() ?? asset;
   const name = displayName ?? basename(asset);
   const extension = ext(asset);
-  const serveUrl = resolveMediaPreviewUrl(asset, projectId);
+  const sourceUrl = resolveMediaPreviewUrl(asset, projectId);
+  const revision = usePlayerStore((state) => mediaThumbnailRevisionOf(state.thumbnailRevisions, asset));
+  const serveUrl = revision ? `${sourceUrl}?revision=${revision}` : sourceUrl;
   const isVideo = VIDEO_EXT.test(asset);
   const isImage = IMAGE_EXT.test(asset);
-  const isSvg = asset.toLowerCase().endsWith(".svg");
-  const cloudThumbUrl =
-    isCloudMode && isImage && !isSvg
-      ? buildProjectApiPath(projectId, `/image-thumbnail/${encodePreviewPath(asset)}?w=320`)
-      : null;
-  const displayedImageUrl = localPreview ?? (!imgFallbackOriginal && cloudThumbUrl ? cloudThumbUrl : serveUrl);
-  useEffect(() => {
-    setImgFallbackOriginal(false);
-    setImgError(false);
-  }, [asset, projectId]);
+  useEffect(() => { setImgError(false); }, [serveUrl, localPreview]);
   // In cloud mode, duration comes from PG metadata; only fall back to <video> probe in local mode.
-  const probedDuration = useProbedDuration(serveUrl, !isVideo || duration != null || isCloudMode);
+  const probedDuration = useProbedDuration(serveUrl, !visible || !isVideo || duration != null || isCloudMode);
   const resolvedDuration = duration ?? probedDuration ?? undefined;
 
   // Drag-threshold click gate: track pointer-down position so we can ignore
@@ -351,6 +250,7 @@ export function AssetCard({
   return (
     <>
       <div
+        ref={setCard}
         draggable
         role="button"
         tabIndex={0}
@@ -374,40 +274,21 @@ export function AssetCard({
       >
         {/* Thumbnail */}
         <div className="motion-asset-thumbnail w-full aspect-video overflow-hidden bg-neutral-900 relative">
+          {isImage && localPreview && <img src={localPreview} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover" />}
           {isImage && !imgError && (
             <img
-              src={displayedImageUrl}
+              src={serveUrl}
               alt={name}
               draggable={false}
               loading="lazy"
               className="w-full h-full object-cover"
-              onLoad={() => {
-                if (localPreview && displayedImageUrl !== localPreview) {
-                  clearLocalUploadPreview(projectId, asset);
-                }
-              }}
-              onError={() => {
-                if (cloudThumbUrl && !imgFallbackOriginal && !localPreview) {
-                  setImgFallbackOriginal(true);
-                } else {
-                  setImgError(true);
-                }
-              }}
+              onLoad={() => { if (localPreview) clearLocalUploadPreview(projectId, asset); }}
+              onError={() => setImgError(true)}
             />
           )}
           {isVideo && (
             <>
-              {isCloudMode ? (
-                <CloudVideoPosterThumbnail
-                  projectId={projectId}
-                  asset={asset}
-                  fallbackSrc={serveUrl}
-                  localPreview={localPreview}
-                  fallbackLabel={extension}
-                />
-              ) : (
-                <VideoFrameThumbnail src={serveUrl} />
-              )}
+              {visible && <AssetVideoPoster projectId={projectId} asset={asset} src={serveUrl} duration={resolvedDuration} localPreview={localPreview} />}
               {hovered && (
                 <video
                   src={serveUrl}
@@ -420,7 +301,7 @@ export function AssetCard({
               )}
             </>
           )}
-          {((!isImage && !isVideo) || (isImage && imgError)) && (
+          {((!isImage && !isVideo) || (isImage && imgError && !localPreview)) && (
             <div className="w-full h-full flex items-center justify-center">
               <span className="text-[10px] font-medium text-neutral-600">{extension}</span>
             </div>

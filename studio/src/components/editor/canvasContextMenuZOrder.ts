@@ -47,8 +47,8 @@ import { readLayerRevealPriorZ } from "../../player/lib/timelineElementHelpers";
 export type ZOrderAction = "bring-forward" | "send-backward" | "bring-to-front" | "send-to-back";
 
 /** A resolved change: set `element`'s z-index to `zIndex`. */
-export interface ZOrderPatch {
-  element: HTMLElement;
+export interface ZOrderPatch<T = HTMLElement> {
+  element: T;
   zIndex: number;
 }
 
@@ -94,8 +94,8 @@ export function isElementVisibleForZOrder(el: HTMLElement): boolean {
   }
 }
 
-interface RenderEntry {
-  element: HTMLElement;
+interface RenderEntry<T = HTMLElement> {
+  element: T;
   zIndex: number;
   /** Position within the shared parent's children (DOM document order). */
   domIndex: number;
@@ -225,7 +225,7 @@ function getOverlappingFamily(
 }
 
 /** Sort a family into render order (bottom→top): z asc, then DOM position asc. */
-function toRenderOrder(entries: RenderEntry[]): RenderEntry[] {
+function toRenderOrder<T>(entries: RenderEntry<T>[]): RenderEntry<T>[] {
   return [...entries].sort((a, b) => a.zIndex - b.zIndex || a.domIndex - b.domIndex);
 }
 
@@ -235,9 +235,9 @@ function toRenderOrder(entries: RenderEntry[]): RenderEntry[] {
  * and the caller must renumber. Equal-z ties break by DOM order, so a plain
  * equality can flip order unpredictably; require a strict gap and clamp at 0.
  */
-function computeBetweenZ(
-  below: RenderEntry | undefined,
-  above: RenderEntry | undefined,
+function computeBetweenZ<T>(
+  below: RenderEntry<T> | undefined,
+  above: RenderEntry<T> | undefined,
 ): number | null {
   if (below && above) {
     return above.zIndex - below.zIndex >= 2 ? below.zIndex + 1 : null;
@@ -264,16 +264,16 @@ function computeBetweenZ(
  * non-scoped one, reordering an untouched pair (#2202). `renumberScoped` keeps the
  * scoped block inside its original z-band, bounded by the non-scoped siblings.
  */
-function realizeOrder(
-  currentOrder: RenderEntry[],
-  desiredOrder: RenderEntry[],
-  target: HTMLElement,
-  family: RenderEntry[],
-): ZOrderPatch[] | null {
+function realizeOrder<T>(
+  currentOrder: RenderEntry<T>[],
+  desiredOrder: RenderEntry<T>[],
+  target: T,
+  family: RenderEntry<T>[],
+): ZOrderPatch<T>[] | null {
   const targetPos = desiredOrder.findIndex((e) => e.element === target);
   if (targetPos === -1) return null;
 
-  const targetZ = readEffectiveZIndex(target);
+  const targetZ = desiredOrder[targetPos].zIndex;
 
   // ── Fast path: distinct z values → a single between-value move suffices.
   const zValues = currentOrder.map((e) => e.zIndex);
@@ -302,12 +302,12 @@ function realizeOrder(
  * the bracket is too narrow to hold `n` distinct integers, fall back to a
  * whole-family renumber — less minimal but still preserves every relative order.
  */
-function renumberScoped(
-  currentOrder: RenderEntry[],
-  desiredOrder: RenderEntry[],
-  target: HTMLElement,
-  family: RenderEntry[],
-): ZOrderPatch[] | null {
+function renumberScoped<T>(
+  currentOrder: RenderEntry<T>[],
+  desiredOrder: RenderEntry<T>[],
+  target: T,
+  family: RenderEntry<T>[],
+): ZOrderPatch<T>[] | null {
   const scoped = new Set(desiredOrder.map((e) => e.element));
   const nonScoped = family.filter((e) => !scoped.has(e.element));
   const n = desiredOrder.length;
@@ -325,7 +325,7 @@ function renumberScoped(
     if (minStart <= maxStart) {
       let start = Math.max(lo, minStart);
       if (hasUpper) start = Math.min(start, maxStart);
-      const patches: ZOrderPatch[] = [];
+      const patches: ZOrderPatch<T>[] = [];
       desiredOrder.forEach((entry, i) => {
         if (entry.zIndex !== start + i) patches.push({ element: entry.element, zIndex: start + i });
       });
@@ -335,7 +335,7 @@ function renumberScoped(
 
   // ── Fallback: renumber the whole family so relative order is still preserved.
   const desiredGlobal = buildGlobalOrder(family, desiredOrder, target);
-  const patches: ZOrderPatch[] = [];
+  const patches: ZOrderPatch<T>[] = [];
   desiredGlobal.forEach((entry, i) => {
     if (entry.zIndex !== i) patches.push({ element: entry.element, zIndex: i });
   });
@@ -348,11 +348,11 @@ function renumberScoped(
  * neighbour (just above the scoped element below it, else just below the scoped
  * element above it). Used only by the renumber fallback.
  */
-function buildGlobalOrder(
-  family: RenderEntry[],
-  desiredOrder: RenderEntry[],
-  target: HTMLElement,
-): RenderEntry[] {
+function buildGlobalOrder<T>(
+  family: RenderEntry<T>[],
+  desiredOrder: RenderEntry<T>[],
+  target: T,
+): RenderEntry<T>[] {
   const full = toRenderOrder(family);
   const targetEntry = full.find((e) => e.element === target);
   const rest = full.filter((e) => e.element !== target);
@@ -450,10 +450,14 @@ export function resolveZOrderReposition(
   target: HTMLElement,
   desiredOrderBottomToTop: readonly HTMLElement[],
 ): ZOrderPatch[] | null {
-  const { entries } = getFamily(target);
+  return repositionWithinFamily(target, desiredOrderBottomToTop, getFamily(target).entries);
+}
+
+export function repositionWithinFamily<T>(target: T, desiredOrderBottomToTop: readonly T[],
+  entries: RenderEntry<T>[]): ZOrderPatch<T>[] | null {
   if (entries.length < 2) return null;
   const byElement = new Map(entries.map((entry) => [entry.element, entry]));
-  const desired: RenderEntry[] = [];
+  const desired: RenderEntry<T>[] = [];
   for (const el of desiredOrderBottomToTop) {
     const entry = byElement.get(el);
     if (!entry) return null;

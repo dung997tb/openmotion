@@ -1,7 +1,7 @@
 import { isolatedPreviewOrigin, preparePreviewLease, type PreparedPreviewLease } from "../player/lib/previewLease";
 import { InitialPreviewLeaseContext } from "./StudioHost";
 import { Button } from 'open-design-ui/button';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { WorkspaceFrame, WorkspaceMenuButton, useWorkspaceChrome } from './WorkspaceFrame';
 import { requestedProject, validWorkspaceProject, type WorkspaceRoute } from './workspaceRouting';
@@ -29,6 +29,12 @@ export function MotionApp() {
   }, []);
   const [libraryOnly, setLibraryOnly] = useState(() => new URLSearchParams(location.search).get('templates') === '1' && projectId === null && !sessionId);
   const [ready, setReady] = useState<(WorkspaceRoute & { previewLease?: PreparedPreviewLease }) | null>(null);
+  const previewScope = useMemo(() => {
+    if (ready?.previewLease) return ready.previewLease;
+    const id = ready?.artifact?.projectId;
+    const origin = isolatedPreviewOrigin();
+    return id && origin ? preparePreviewLease(id, origin) : undefined;
+  }, [ready]);
   const [error, setError] = useState('');
   const [attempt, retry] = useState(0);
   const surface = useRef<HTMLDivElement>(null);
@@ -89,7 +95,7 @@ export function MotionApp() {
     <div ref={surface} className="motion-project-surface">
     {error ? <><div className="motion-home-navigation"><WorkspaceMenuButton /></div><RecoveryScreen title={t('Could not open project')} message={error}><Button variant="ghost" className="om-button h-auto" data-primary onClick={() => retry(value => value + 1)}>{t('Retry')}</Button><a className="om-button" href="/?page=editor">{t('Open active project')}</a></RecoveryScreen></>
       : ready ? ready.artifact ? (
-        <InitialPreviewLeaseContext.Provider value={ready.previewLease}>
+        <InitialPreviewLeaseContext.Provider value={previewScope}>
           <ArtifactViewer key={ready.artifact.projectId} artifact={ready.artifact} loadingLayout={loadingLayout} />
         </InitialPreviewLeaseContext.Provider>
       ) : <div className="motion-route-state"><WorkspaceMenuButton />{t('Create a project with your Agent to start editing.')}</div>

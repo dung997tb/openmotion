@@ -34,6 +34,10 @@ export function readStudioFileChangePath(payload: unknown): string | null {
   return paths.length === 1 ? normalizeStudioFileChangePath(paths[0]) : ".";
 }
 
+export function readFileTreeChanged(payload: unknown): boolean {
+  return asPayloadRecord(payload)?.fileTreeChanged !== false;
+}
+
 export function readFileChangeAffectsPreview(payload: unknown): boolean {
   return asPayloadRecord(payload)?.affectsPreview !== false;
 }
@@ -49,6 +53,10 @@ export function readFileChangeAffectedCompositions(payload: unknown): readonly s
 }
 
 export function mergeFileChangePayloads(waiting: unknown, incoming: unknown): unknown {
+  const fileTreeChanged = readFileTreeChanged(waiting) || readFileTreeChanged(incoming);
+  if (readFileChangeAffectsPreview(waiting) && !readFileChangeAffectsPreview(incoming)) {
+    return { ...asPayloadRecord(waiting), fileTreeChanged };
+  }
   const before = readFileChangeAffectedCompositions(waiting);
   const after = readFileChangeAffectedCompositions(incoming);
   const merged = before && after ? [...new Set([...before, ...after])] : null;
@@ -56,12 +64,13 @@ export function mergeFileChangePayloads(waiting: unknown, incoming: unknown): un
   const affectsPreview =
     readFileChangeAffectsPreview(waiting) || readFileChangeAffectsPreview(incoming);
   if (readStudioFileChangePath(waiting) === readStudioFileChangePath(incoming)) {
-    return { ...next, affectsPreview, affectedCompositions: merged };
+    return { ...next, affectsPreview, fileTreeChanged, affectedCompositions: merged };
   }
   // Changes to two files are owed: only a project-wide reload ("." path) covers both.
   return {
     path: ".",
     projectId: next?.projectId,
+    fileTreeChanged,
     affectsPreview,
     affectedCompositions: merged,
   };

@@ -18,7 +18,7 @@ import { beginStudioIo } from "../telemetry/ioRecovery";
 import { prepareFontImport } from "../components/editor/fontImport";
 import { manualImportResults, UNKNOWN_IMPORT_REASON, type ManualImportBatch, type ManualImportItem, type ManualImportAttempt, type UploadResponse } from './manualImportResults';
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
-import { captureLocalFilePreview, setLocalUploadPreview } from "../utils/localUploadPreviewStore";
+import { captureLocalFilePreview, clearProjectUploadPreviews, setLocalUploadPreview } from "../utils/localUploadPreviewStore";
 import {
   buildProjectUploadTargetPath,
   isCloudDirectUploadFile,
@@ -105,7 +105,10 @@ export function useFileManager({
     return () => setProjectInventory(null);
   }, [fileTreeLoaded, assets.length, compositions.length]);
 
-  useEffect(() => { importedFontAssetsRef.current = []; }, [projectId]);
+  useEffect(() => {
+    importedFontAssetsRef.current = [];
+    return () => { if (projectId) clearProjectUploadPreviews(projectId); };
+  }, [projectId]);
 
   const updateEditingFileContent = useCallback((path: string, content: string) => {
     if (editingPathRef.current === path) {
@@ -315,23 +318,6 @@ export function useFileManager({
             return { ...entry, targetPath };
           });
 
-          // Kick off zero-network local File previews for instant sidebar/card feedback during upload.
-          const previewById = new Map<string, { url: string; isObjectUrl: boolean }>();
-          await Promise.all(
-            directPlan.map(async (entry) => {
-              const captured = await captureLocalFilePreview(entry.file).catch(() => null);
-              if (captured) {
-                previewById.set(entry.id, captured);
-                update(batch => ({
-                  ...batch,
-                  items: batch.items.map(item =>
-                    item.id === entry.id ? { ...item, previewUrl: captured.url } : item,
-                  ),
-                }));
-              }
-            }),
-          );
-
           let cursor = 0;
           const workerCount = Math.min(2, directPlan.length);
           const runWorker = async () => {
@@ -340,9 +326,15 @@ export function useFileManager({
               cursor += 1;
               if (idx >= directPlan.length) return;
               const entry = directPlan[idx];
-              const preview = previewById.get(entry.id);
-
-              const outcome = await uploadCloudProjectFile({
+              // The two upload workers also bound local video decodes. Reading a poster never delays the upload start.
+              const previewWork = captureLocalFilePreview(entry.file).catch(() => null).then(preview => {
+                if (preview) update(batch => ({
+                  ...batch, items: batch.items.map(item =>
+                    item.id === entry.id ? { ...item, previewUrl: preview.url } : item),
+                }));
+                return preview;
+              });
+              const upload = uploadCloudProjectFile({
                 projectId: pid,
                 file: entry.file,
                 targetPath: entry.targetPath,
@@ -351,16 +343,20 @@ export function useFileManager({
                     ...batch,
                     items: batch.items.map(item =>
                       item.id === entry.id
-                        ? { ...item, phase, progress, ...(preview ? { previewUrl: preview.url } : {}) }
+                        ? { ...item, phase, progress }
                         : item,
                     ),
                   }));
                 },
               });
 
+              const [outcome, preview] = await Promise.all([upload, previewWork]);
+
               if (outcome.status === 'imported' && outcome.path) {
-                if (preview) {
+                if (preview && projectIdRef.current === pid) {
                   setLocalUploadPreview(pid, outcome.path, preview.url, preview.isObjectUrl);
+                } else if (preview?.isObjectUrl) {
+                  URL.revokeObjectURL(preview.url);
                 }
                 directPaths.push(outcome.path);
                 markResults(

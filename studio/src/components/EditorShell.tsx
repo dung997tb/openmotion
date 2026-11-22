@@ -339,6 +339,7 @@ function EditorShellBody({
               previewOverlay={previewOverlay}
               onSelectTimelineElement={onSelectTimelineElement}
               onPreviewBlockDrop={onPreviewBlockDrop}
+              onAssetDrop={onAssetDrop}
             />
           </div>
         </Dock.Panel>

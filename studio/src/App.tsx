@@ -173,7 +173,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     pendingTimelineEditPathRef,
     reloadPreview,
     onOutsideChange: editHistory.noteOutsideChange,
-    onHistoryChanged: editHistory.refresh,
+    onHistoryChanged: editHistory.refreshAfterEvent,
   });
   const invalidateGsapCacheRef = useRef<() => void>(() => {});
   const invalidateGsapCache = useCallback(() => invalidateGsapCacheRef.current(), []);
@@ -259,6 +259,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     projectId,
     activeCompPath,
     domEditSelectionRef: domEditSelectionBridgeRef,
+    fileTree: fileManager.fileTree,
     showToast,
     writeProjectFile: fileManager.writeProjectFile,
     recordEdit: editHistory.recordEdit,

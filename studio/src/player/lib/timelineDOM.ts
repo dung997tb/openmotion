@@ -31,6 +31,7 @@ import {
   buildTimelineElementIdentity,
   getTimelineElementIdentity,
   isTimelineIgnoredElement,
+  isVideoAudible,
   readTimelineElementZIndex,
 } from "./timelineElementHelpers";
 
@@ -193,6 +194,8 @@ export function createTimelineElementFromManifestClip(params: {
     entry.hidden = clip.authored.hidden || undefined;
     entry.timelineLocked = clip.authored.timelineLocked || undefined;
     entry.muted = clip.authored.muted || undefined;
+    entry.hasAudio = isVideoAudible({ tag: entry.tag, hasAudioAttr: clip.authored.hasAudioAttr, muted: clip.authored.muted }) || undefined;
+    if (Number.isFinite(clip.authored.volume)) entry.volume = clip.authored.volume;
   }
   if (clip.assetUrl) entry.src = clip.assetUrl;
   if (clip.kind === "composition" && clip.compositionId) {

@@ -43,7 +43,8 @@ export const PREVIEW_CANVAS_DRAG = `
   function startDrag(message) {
     if (drag) return null;
     const hit = document.elementFromPoint(message.x * innerWidth, message.y * innerHeight);
-    const element = hit?.closest('[id],[data-hf-id]');
+    const corner = ['nw','ne','sw','se'].includes(message.corner) ? message.corner : null;
+    const element = corner ? picked : hit?.closest('[id],[data-hf-id]');
     if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement ||
         element.matches('[data-composition-id],[data-composition-src],[data-hf-scene]') ||
         element.closest('[data-timeline-locked]')) return null;
@@ -53,15 +54,20 @@ export const PREVIEW_CANVAS_DRAG = `
     const style = getComputedStyle(element);
     const makeRelative = style.position === 'static';
     const properties = makeRelative ? ['left', 'top', 'position'] : ['left', 'top'];
+    const width = parseFloat(style.width), height = parseFloat(style.height);
+    if (corner) {
+      if (!(width > 0 && height > 0) || style.display === 'inline' || style.transform !== 'none') return null;
+      properties.push('width','height');
+    }
     const original = Object.fromEntries(properties.map(property => [property, {
       value: element.style[property], priority: element.style.getPropertyPriority(property)
     }]));
     const left = makeRelative ? 0 : parseFloat(style.left) || 0;
     const top = makeRelative ? 0 : parseFloat(style.top) || 0;
     const axes = measureDragAxes(element, left, top, makeRelative, original);
-    if (!axes) return null;
+    if (!axes || (corner && (axes.a <= 0 || axes.d <= 0 || Math.abs(axes.b) + Math.abs(axes.c) > 0.001))) return null;
 
-    drag = { id: message.gestureId, element, original, left, top, makeRelative, axes, selection };
+    drag = { id: message.gestureId, element, original, left, top, makeRelative, axes, selection, width, height, corner };
     return { geometry: selection.geometry, viewport: selection.viewport };
   }
 
@@ -86,12 +92,23 @@ export const PREVIEW_CANVAS_DRAG = `
 
     const dx = message.dx * innerWidth, dy = message.dy * innerHeight;
     const { a, b, c, d, determinant } = drag.axes;
-    const left = Math.round((drag.left + (d * dx - c * dy) / determinant) * 1000) / 1000;
-    const top = Math.round((drag.top + (a * dy - b * dx) / determinant) * 1000) / 1000;
-    if (drag.makeRelative) drag.element.style.position = 'relative';
-    drag.element.style.left = left + 'px';
-    drag.element.style.top = top + 'px';
-    drag.applied = { left: drag.element.style.left, top: drag.element.style.top, position: drag.element.style.position };
+    const round = n => Math.round(n * 1000) / 1000;
+    const offsetX = (d * dx - c * dy) / determinant, offsetY = (a * dy - b * dx) / determinant;
+    const { corner } = drag;
+    const west = corner?.endsWith('w'), north = corner?.startsWith('n');
+    const width = round(Math.max(1, drag.width + (west ? -offsetX : offsetX)));
+    const height = round(Math.max(1, drag.height + (north ? -offsetY : offsetY)));
+    const left = round(drag.left + (corner ? (west ? drag.width - width : 0) : offsetX));
+    const top = round(drag.top + (corner ? (north ? drag.height - height : 0) : offsetY));
+    const applied = {};
+    const set = (key,value) => { drag.element.style[key] = value; applied[key] = drag.element.style[key]; };
+    if (!corner || west || north) {
+      if (drag.makeRelative) set('position','relative');
+      if (!corner || west) set('left',left + 'px');
+      if (!corner || north) set('top',top + 'px');
+    }
+    if (corner) { set('width',width+'px'); set('height',height+'px'); }
+    drag.applied = applied;
     if (message.phase !== 'finish') return null;
     const { sourceFile, elementId, hfId } = drag.selection;
     const { makeRelative } = drag;
@@ -100,6 +117,6 @@ export const PREVIEW_CANVAS_DRAG = `
     delete sourceVersions[sourceFile];
     pendingDrags.set(drag.id, { ...drag, sha256 });
     drag = null;
-    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative };
+    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative, ...(corner && {corner,width,height}) };
   }
 `;

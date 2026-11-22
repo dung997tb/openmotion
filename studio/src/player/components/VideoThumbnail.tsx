@@ -1,24 +1,15 @@
 import { useI18n } from "../../i18n/I18n";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useThumbnailLease } from "../../hooks/useThumbnailLease";
 import { useThumbnailStripSize } from "../../hooks/useThumbnailStripSize";
-import { useCloudDisklessMode } from "../../utils/cloudRuntime";
 import { useLocalUploadPreview } from "../../utils/localUploadPreviewStore";
 import {
-  createThumbnailKey,
   thumbnailScheduler,
   type ThumbnailPriority,
   type ThumbnailSnapshot,
 } from "../lib/thumbnailScheduler";
 import { bindThumbnailPlaybackHold } from "../lib/thumbnailPlaybackHold";
-import {
-  computeSpriteFrameSlice,
-  loadSpriteManifest,
-  resolveSpriteManifestUrl,
-  resolveVideoPosterUrl,
-  type SpriteManifestData,
-} from "../lib/spriteThumbnailLoader";
-import { decodeVideoThumbnail } from "../lib/thumbnailVideoDecoder";
+import { createVideoThumbnailRequest } from "../lib/videoThumbnailRequest";
 import { usePlayerStore } from "../store/playerStore";
 import { ThumbnailTiles } from "./ThumbnailTiles";
 import {
@@ -41,49 +32,6 @@ interface VideoThumbnailProps {
   projectId?: string;
   sessionEpoch?: number;
   priority?: ThumbnailPriority;
-}
-
-function createVideoThumbnailRequest(
-  props: Pick<VideoThumbnailProps, "videoSrc" | "sourceStart" | "sourceRangeDuration"> &
-    Required<Pick<VideoThumbnailProps, "duration" | "projectId" | "sessionEpoch" | "priority">>,
-  frameCount: number,
-  rich: boolean,
-) {
-  const {
-    videoSrc,
-    sourceStart,
-    sourceRangeDuration,
-    duration,
-    projectId,
-    sessionEpoch,
-    priority,
-  } = props;
-  return {
-    key: createThumbnailKey({
-      kind: "video",
-      source: videoSrc,
-      start: sourceStart,
-      duration: sourceRangeDuration ?? duration,
-      frames: frameCount,
-    }),
-    projectId,
-    sessionEpoch,
-    kind: "video" as const,
-    priority,
-    rich,
-    load: (signal: AbortSignal) =>
-      decodeVideoThumbnail(
-        {
-          source: videoSrc,
-          contentVersion: createThumbnailKey({ project: projectId, session: sessionEpoch }),
-          sourceStart,
-          sourceRangeDuration: sourceRangeDuration ?? duration,
-          frameCount,
-          fit: "cover",
-        },
-        signal,
-      ),
-  };
 }
 
 function selectThumbnailSnapshot(
@@ -141,43 +89,7 @@ function useRangeHeldDuringTrim(
   );
 }
 
-type CloudSpriteState =
-  | { status: "disabled"; manifest: null }
-  | { status: "loading"; manifest: null }
-  | { status: "ready"; manifest: SpriteManifestData }
-  | { status: "fallback"; manifest: null };
-
-function useCloudVideoSprite(spriteUrl: string | null, enabled: boolean): CloudSpriteState {
-  const [state, setState] = useState<CloudSpriteState>(() =>
-    enabled && spriteUrl ? { status: "loading", manifest: null } : { status: "disabled", manifest: null },
-  );
-
-  useEffect(() => {
-    if (!enabled || !spriteUrl) {
-      setState({ status: "disabled", manifest: null });
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    setState({ status: "loading", manifest: null });
-    void loadSpriteManifest(spriteUrl, controller.signal).then((manifest) => {
-      if (cancelled) return;
-      if (manifest) {
-        setState({ status: "ready", manifest });
-      } else {
-        setState({ status: "fallback", manifest: null });
-      }
-    });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [enabled, spriteUrl]);
-
-  return state;
-}
-
-/** Sparse, bounded video frames supplied by cloud sprite sheets (preferred) or the shared thumbnail scheduler. */
+/** Sparse frames from the original media, shared across visible clips and asset cards. */
 export const VideoThumbnail = memo(function VideoThumbnail({
   videoSrc,
   label,
@@ -190,11 +102,7 @@ export const VideoThumbnail = memo(function VideoThumbnail({
   priority = "visible",
 }: VideoThumbnailProps) {
   const { t } = useI18n();
-  const isCloudMode = useCloudDisklessMode();
   const [container, setContainerRef, watchGap] = useThumbnailStripSize();
-  const [posterFailed, setPosterFailed] = useState(false);
-  const spriteUrl = useMemo(() => (isCloudMode ? resolveSpriteManifestUrl(videoSrc) : null), [isCloudMode, videoSrc]);
-  const posterUrl = useMemo(() => (isCloudMode ? resolveVideoPosterUrl(videoSrc, 320) : null), [isCloudMode, videoSrc]);
   const localAssetPath = useMemo(() => {
     try {
       const url = new URL(videoSrc, typeof window !== "undefined" ? window.location.href : "http://localhost");
@@ -205,11 +113,6 @@ export const VideoThumbnail = memo(function VideoThumbnail({
     }
   }, [videoSrc]);
   const localPreviewUrl = useLocalUploadPreview(projectId, localAssetPath);
-  const effectivePosterUrl = (!posterFailed && posterUrl) || localPreviewUrl || null;
-  useEffect(() => {
-    setPosterFailed(false);
-  }, [posterUrl]);
-
   const requestFrameCount = useValueAtRest(
     quantizeThumbnailFrameCount(
       computeThumbnailStrip(container.width, 16 / 9, container.height).frameCount,
@@ -225,9 +128,6 @@ export const VideoThumbnail = memo(function VideoThumbnail({
     priority,
   });
   const measured = useValueAtRest(container.width > 0);
-  const sprite = useCloudVideoSprite(spriteUrl, measured && Boolean(spriteUrl));
-  const useClientDecoder = !spriteUrl || sprite.status === "fallback";
-
   const posterRequest = useMemo(
     () => createVideoThumbnailRequest(requestProps, 1, false),
     [requestProps],
@@ -237,70 +137,23 @@ export const VideoThumbnail = memo(function VideoThumbnail({
     [requestFrameCount, requestProps],
   );
   const snapshot = useVideoThumbnailSnapshot(
-    measured && useClientDecoder ? posterRequest : null,
-    measured && useClientDecoder && requestFrameCount > 1 ? richRequest : null,
+    measured ? posterRequest : null,
+    measured && requestFrameCount > 1 ? richRequest : null,
     posterRequest.key,
   );
 
-  const spriteManifest = sprite.status === "ready" ? sprite.manifest : null;
-  const value = !spriteManifest && snapshot.status === "ready" ? snapshot.value : null;
-  const urls =
-    value?.kind === "filmstrip" ? value.urls : value?.kind === "image" ? [value.url] : [];
-  const aspect = spriteManifest
-    ? spriteManifest.frameWidth / spriteManifest.frameHeight
-    : value?.kind === "image" || value?.kind === "filmstrip"
-      ? value.aspect
-      : 16 / 9;
+  const value = snapshot.status === "ready" ? snapshot.value : null;
+  const urls = value?.kind === "filmstrip" ? value.urls : value?.kind === "image" ? [value.url] : [];
+  const aspect = value && value.kind !== "waveform" ? value.aspect : 16 / 9;
   const { frameW, frameCount } = computeThumbnailStrip(container.width, aspect, container.height);
-  const effectiveSourceStart = sourceStart ?? 0;
-  const effectiveRangeDuration = sourceRangeDuration ?? duration;
-  const showLoadingShimmer =
-    (sprite.status === "loading" && !effectivePosterUrl) ||
-    (useClientDecoder && snapshot.status === "loading" && urls.length === 0);
+  const showLoadingShimmer = snapshot.status === "loading" && !localPreviewUrl;
 
   return (
     <div ref={setContainerRef} className="absolute inset-0 overflow-hidden">
-      {spriteManifest && container.height > 0 && (
-        <ThumbnailTiles
-          strip={container}
-          frameW={frameW}
-          frameCount={frameCount}
-          watchGap={watchGap}
-        >
-          {(index) => {
-            const sampleTime =
-              effectiveSourceStart +
-              ((index + 0.5) / Math.max(1, frameCount)) * Math.max(0.01, effectiveRangeDuration);
-            const slice = computeSpriteFrameSlice(spriteManifest, sampleTime, frameW, container.height);
-            return (
-              <div
-                key={index}
-                data-sprite-tile={index}
-                className="relative h-full shrink-0 overflow-hidden bg-neutral-900"
-                style={{
-                  width: frameW,
-                  backgroundImage: `url("${slice.sheetUrl}")`,
-                  backgroundSize: slice.backgroundSize,
-                  backgroundPosition: slice.backgroundPosition,
-                  backgroundRepeat: "no-repeat",
-                }}
-              />
-            );
-          }}
-        </ThumbnailTiles>
+      {!urls.length && localPreviewUrl && (
+        <img src={localPreviewUrl} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
       )}
-      {sprite.status === "loading" && effectivePosterUrl && (
-        <img
-          src={effectivePosterUrl}
-          alt=""
-          draggable={false}
-          onError={() => {
-            if (effectivePosterUrl === posterUrl) setPosterFailed(true);
-          }}
-          className="absolute inset-0 h-full w-full object-cover opacity-80"
-        />
-      )}
-      {!spriteManifest && urls.length > 0 && (
+      {urls.length > 0 && (
         <ThumbnailTiles
           strip={container}
           frameW={frameW}
@@ -334,23 +187,11 @@ export const VideoThumbnail = memo(function VideoThumbnail({
           }}
         />
       )}
-      {useClientDecoder && snapshot.status === "error" && (
+      {!localPreviewUrl && snapshot.status === "error" && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/60">
           <span className="rounded-sm bg-black/50 px-1 text-[8px] text-neutral-500">
             {t("no preview")}</span>
         </div>
-      )}
-      {sprite.status === "loading" && (
-        <span
-          data-sprite-optimizing="true"
-          className="pointer-events-none absolute top-1 right-1 z-10 inline-flex items-center gap-1 rounded-sm bg-neutral-950/75 px-1 py-px text-[8px] font-medium leading-none text-neutral-200"
-        >
-          <span
-            aria-hidden="true"
-            className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-studio-accent motion-reduce:animate-none"
-          />
-          {t("Optimizing")}
-        </span>
       )}
       {label && (
         <div

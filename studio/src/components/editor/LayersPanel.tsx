@@ -387,6 +387,7 @@ const LocalLayersPanel = memo(function LocalLayersPanel({ host }: { host: Layers
     handleContainerPointerMove,
     handleContainerPointerUp,
   } = useLayerDrag({
+    isDraggable: isLayerDraggable,
     visibleLayers,
     scrollContainerRef,
     onReorder: handleReorder,

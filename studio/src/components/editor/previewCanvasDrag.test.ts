@@ -11,17 +11,17 @@ function createScene() {
     element.id = id;
     document.body.append(element);
     vi.spyOn(element, "getBoundingClientRect").mockImplementation(() =>
-      new DOMRect(parseFloat(element.style.left) || 0, parseFloat(element.style.top) || 0, 20, 10));
+      new DOMRect(parseFloat(element.style.left) || 0, parseFloat(element.style.top) || 0, parseFloat(element.style.width) || 20, parseFloat(element.style.height) || 10));
     return element;
   });
   vi.spyOn(document, "elementFromPoint").mockImplementation(x => elements[x < 50 ? 0 : 1]!);
   // Execute the exact child-frame script with deterministic layout measurements.
   const dispatch = new Function("document", "getComputedStyle", "HTMLElement", "sourceVersions", "describe",
-    "innerWidth", "innerHeight", PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
-    document, (el: HTMLElement) => ({ position: el.style.position || "static", left: el.style.left, top: el.style.top }),
+    "innerWidth", "innerHeight", "picked", PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
+    document, (el: HTMLElement) => ({ position: el.style.position || "static", left: el.style.left, top: el.style.top, width: "20px", height: "10px", transform: "none", display: "block" }),
     HTMLElement, { "one.html": originalHash, "two.html": originalHash },
     (el: HTMLElement) => ({ sourceFile: el.id + ".html", elementId: el.id, geometry: el.getBoundingClientRect(),
-      viewport: { width: 100, height: 100 } }), 100, 100,
+      viewport: { width: 100, height: 100 } }), 100, 100, elements[0],
   );
   return { one: elements[0]!, two: elements[1]!,
     gesture: (phase: string, gestureId: string, fields: Record<string, unknown> = {}) =>
@@ -64,4 +64,17 @@ it("rolls back only properties still owned by the failed gesture and permits a r
   expect(one.style.left).toBe("125px");
   gesture("commit", "retry", { changed: false });
   expect(gesture("start", "after-noop")).toBeTruthy();
+});
+
+
+it("resizes the selected corner and rolls back a rejected gesture", () => {
+  const { one, gesture } = createScene();
+  expect(gesture("start", "s", {corner:"se"})).toBeTruthy();
+  expect(gesture("finish", "s")).toMatchObject({corner:"se",width:45,height:60});
+  expect(one.style.width).toBe("45px");
+  expect(one.style.left).toBe("");
+  gesture("cancel", "s");
+  expect(one.style.width).toBe("");
+  expect(gesture("start", "n", {corner:"nw"})).toBeTruthy();
+  expect(gesture("finish","n",{dx:-.1,dy:-.05})).toMatchObject({corner:"nw",left:-10,top:-5,width:30,height:15});
 });

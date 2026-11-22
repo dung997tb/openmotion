@@ -9,6 +9,8 @@ import {
 import { TIMELINE_VIEWPORT_BUDGETS } from "../lib/timelineViewportBudgets";
 import { ThumbnailTiles } from "./ThumbnailTiles";
 import { computeThumbnailStrip, probeImageAspect } from "./thumbnailUtils";
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
+import { loadCloudCompositionPoster } from "../lib/cloudCompositionPoster";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 import { Skeleton } from "../../components/ui/Skeleton";
 
@@ -97,14 +99,23 @@ export function compositionThumbnailRequest(
   projectId: string,
   { sessionEpoch = 0, priority = "visible", rich = false }: Partial<ThumbnailRequest> = {},
 ): ThumbnailRequest {
+  const cloud = getCachedCloudDisklessMode();
+  const identity = new URL(url, window.location.origin);
+  if (cloud) {
+    // A representative is shared by the card and every strip of this composition/selection.
+    identity.searchParams.delete("t");
+    identity.searchParams.delete("output");
+  }
   return {
-    key: createThumbnailKey({ kind: "composition", url }),
+    key: createThumbnailKey({ kind: "composition", url: identity.href, cloud: Number(cloud) }),
     projectId,
     sessionEpoch,
     kind: "composition",
     priority,
     rich,
-    load: (signal: AbortSignal) => loadCompositionImage(url, signal),
+    load: (signal) => cloud
+      ? loadCloudCompositionPoster(identity, projectId, sessionEpoch, signal)
+      : loadCompositionImage(url, signal),
   };
 }
 
@@ -158,7 +169,7 @@ async function loadCompositionImage(url: string, signal: AbortSignal) {
   }
 }
 
-/** Server-rendered composition poster, deduplicated and budgeted by project/session. */
+/** Composition poster, deduplicated and budgeted by project/session. */
 export const CompositionThumbnail = memo(function CompositionThumbnail({
   previewUrl,
   label,

@@ -14,16 +14,19 @@ interface DragState {
   activated: boolean;
 }
 
-export interface LayerReorderEvent {
-  siblingLayers: DomEditLayerItem[];
+type DragRow = { key: string; depth: number };
+
+export interface LayerReorderEvent<Row = DomEditLayerItem> {
+  siblingLayers: Row[];
   fromIndex: number;
   toIndex: number;
 }
 
-export interface UseLayerDragOptions {
-  visibleLayers: DomEditLayerItem[];
+export interface UseLayerDragOptions<Row extends DragRow> {
+  visibleLayers: Row[];
+  isDraggable: (row: Row) => boolean;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
-  onReorder: (event: LayerReorderEvent) => void;
+  onReorder: (event: LayerReorderEvent<Row>) => void;
   onSingleSibling?: () => void;
 }
 
@@ -45,7 +48,7 @@ export function isLayerDraggable(layer: DomEditLayerItem): boolean {
   return true;
 }
 
-function findSiblingIndices(visibleLayers: DomEditLayerItem[], layerIndex: number): number[] {
+function findSiblingIndices(visibleLayers: DragRow[], layerIndex: number): number[] {
   const depth = visibleLayers[layerIndex].depth;
   const indices: number[] = [];
 
@@ -110,12 +113,13 @@ function computeInsertionLineY(
   return siblingRects[insertPos].top - containerRect.top;
 }
 
-export function useLayerDrag({
+export function useLayerDrag<Row extends DragRow>({
+  isDraggable,
   visibleLayers,
   scrollContainerRef,
   onReorder,
   onSingleSibling,
-}: UseLayerDragOptions): UseLayerDragReturn {
+}: UseLayerDragOptions<Row>): UseLayerDragReturn {
   const dragRef = useRef<DragState | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [insertionLineY, setInsertionLineY] = useState<number | null>(null);
@@ -124,7 +128,7 @@ export function useLayerDrag({
     (layerIndex: number, e: React.PointerEvent) => {
       if (e.button !== 0) return;
       const layer = visibleLayers[layerIndex];
-      if (!layer || !isLayerDraggable(layer)) return;
+      if (!layer || !isDraggable(layer)) return;
 
       const siblingIndices = findSiblingIndices(visibleLayers, layerIndex);
       if (siblingIndices.length <= 1) {
@@ -149,7 +153,7 @@ export function useLayerDrag({
         activated: false,
       };
     },
-    [visibleLayers, scrollContainerRef, onSingleSibling],
+    [visibleLayers, scrollContainerRef, onSingleSibling, isDraggable],
   );
 
   const handleContainerPointerMove = useCallback(

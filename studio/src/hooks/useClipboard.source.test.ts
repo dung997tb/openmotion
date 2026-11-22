@@ -118,6 +118,7 @@ function mountClipboard(
   function Harness() {
     api = useClipboard({
       projectId: "p",
+      fileTree: ["compositions/sibling.png"],
       activeCompPath: view.path,
       domEditSelectionRef: domSelectionRef,
       showToast,
@@ -611,5 +612,50 @@ describe("text insertion with locked visual layers", () => {
     expect(view.showToast).toHaveBeenCalled();
     expect(view.showToast.mock.calls.some(([, kind]) => kind === "error")).toBe(false);
     expect(JSON.stringify(view.showToast.mock.calls)).not.toContain("locked clip would have to move");
+  });
+});
+
+describe("clipboard with an isolated preview", () => {
+  function isolate(iframe: HTMLIFrameElement) {
+    Object.defineProperty(iframe, "contentDocument", {
+      get() { throw new DOMException("Blocked a frame", "SecurityError"); },
+    });
+  }
+
+  it("copies all selected clips by scoped source identity", async () => {
+    const sub = SUB.replace(">Sub<", '><img src="sibling.png?x=1">Sub<');
+    const nested = { ...TITLE, id: "nested", hfId: stampedHfId(sub, "h2"), sourceFile: "compositions/sub.html" };
+    usePlayerStore.setState({ elements: [TITLE, nested], selectedElementId: TITLE.id,
+      selectedElementIds: new Set([TITLE.id, nested.id]) });
+    const { clipboard, writes, iframe } = mountClipboard(null, sub);
+    isolate(iframe);
+    expect(clipboard().handleCopy()).toBe(true);
+    await clipboard().handlePaste();
+    expect(writes[0]).toContain('src="compositions/sibling.png?x=1"');
+    expect(writes[0]?.match(/>Title<\/h1>/g)).toHaveLength(2);
+    expect(await clipboard().handleDuplicate()).toBe(true);
+    expect(writes[1]).toContain(">Sub</h2>");
+  });
+
+  it("preserves the whole selection when any intended cut target is absent from source", async () => {
+    const absent = { ...TITLE, id: "absent", hfId: "gone" };
+    usePlayerStore.setState({ elements: [TITLE, absent], selectedElementId: TITLE.id,
+      selectedElementIds: new Set([TITLE.id, absent.id]) });
+    const { clipboard, iframe, deleted, writes } = mountClipboard();
+    isolate(iframe);
+    expect(await clipboard().handleCut()).toBe(false);
+    expect(deleted).toEqual([]);
+    expect(await clipboard().handleDuplicate()).toBe(false);
+    expect(writes).toEqual([]);
+  });
+
+  it("cuts the matching clip when its source identity also appears in the canvas selection", async () => {
+    selectTitle();
+    const selection = { hfId: TITLE_HF_ID, sourceFile: "index.html" } as DomEditSelection;
+    const { clipboard, iframe, deleted, domDeleted } = mountClipboard(selection);
+    isolate(iframe);
+    expect(await clipboard().handleCut()).toBe(true);
+    expect(deleted).toEqual([TITLE.id]);
+    expect(domDeleted).toEqual([]);
   });
 });

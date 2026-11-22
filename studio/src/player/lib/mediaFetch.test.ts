@@ -686,6 +686,18 @@ describe("thumbnail reads", () => {
     expect(ranges).toEqual(["bytes=0-", "bytes=1000-", "bytes=2000-"]);
   });
 
+  it("bounds the very first managed cloud media read and rejects unsafe whole or opaque-range responses", async () => {
+    const ranges = rangeServer(["readable", "hidden", "whole"]);
+    const { fetchFn, getRetryDelay } = mediaUrlSourceOptions("thumbnail", true);
+    await fetchFn(URL_WITH_PATH, { headers: { Range: "bytes=0-" } });
+    for (const start of [1000, 2000]) {
+      const error = await fetchFn(URL_WITH_PATH, { headers: { Range: `bytes=${start}-` } }).catch(e => e);
+      expect(error).toMatchObject({ code: "range-unavailable" });
+      expect(getRetryDelay(0, error)).toBeNull();
+    }
+    expect(ranges).toEqual(["bytes=0-524287", "bytes=1000-525287", "bytes=2000-526287"]);
+  });
+
   it("does not trust a Content-Range for a range it did not ask for", async () => {
     const ranges = rangeServer([{ start: 4096 }]);
     const { fetchFn } = mediaUrlSourceOptions("thumbnail");

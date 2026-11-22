@@ -1,3 +1,5 @@
+import type { PatchTarget } from "./sourcePatcher";
+import { decodedUrlPath } from "@hyperframes/parsers";
 import { ensureHfIds, isCompositionTemplate } from "@hyperframes/parsers/hf-ids";
 import {
   PREVIEW_ONLY_ATTRS,
@@ -28,13 +30,17 @@ function findByAttribute(doc: Document, name: string, value: string): Element | 
   return null;
 }
 
+export type AuthoredIdentity = Pick<PatchTarget, "id" | "hfId">;
+
+/** Look up the stable identity in the owning source file, including composition templates. */
+export function findAuthoredIdentity(doc: Document, { id, hfId }: AuthoredIdentity): Element | null {
+  return (hfId ? findByAttribute(doc, "data-hf-id", hfId) : null) ??
+    (id ? findByAttribute(doc, "id", id) : null);
+}
+
 export function findAuthoredElement(doc: Document, live: Element): Element | null {
   const hfId = live.getAttribute("data-hf-id");
   if (hfId) return findByAttribute(doc, "data-hf-id", hfId);
-  return live.id ? findByAttribute(doc, "id", live.id) : null;
-}
-
-export function findAuthoredElementById(doc: Document, live: Element): Element | null {
   return live.id ? findByAttribute(doc, "id", live.id) : null;
 }
 
@@ -65,15 +71,16 @@ function livePathsOf(live: Element): Set<string> {
 
 // The preview inlines a sub-composition with its relative asset paths rebased to the project
 // root (rewriteAssetPath in @hyperframes/parsers, which is not browser-safe); copy does the same.
-export function authoredMarkup(authored: Element, live: Element, sourceFile: string): string {
+export function authoredMarkup(authored: Element, live: Element | null, sourceFile: string, files: readonly string[] = []): string {
   if (!sourceFile.includes("/")) return authored.outerHTML;
-  const livePaths = livePathsOf(live);
+  const livePaths = live ? livePathsOf(live) : null;
   const rebase = (path: string): string => {
     if (!isRelative(path)) return path;
     const cut = path.search(/[?#]/);
     const suffix = cut < 0 ? "" : path.slice(cut);
-    const rebased = toProjectPath(sourceFile, cut < 0 ? path : path.slice(0, cut)) + suffix;
-    return path.startsWith("../") || livePaths.has(rebased) ? rebased : path;
+    const sibling = toProjectPath(sourceFile, cut < 0 ? path : path.slice(0, cut));
+    const rebased = sibling + suffix;
+    return path.startsWith("../") || (livePaths ? livePaths.has(rebased) : files.includes(decodedUrlPath(sibling))) ? rebased : path;
   };
   const copy = authored.cloneNode(true) as Element;
   for (const el of [copy, ...Array.from(copy.querySelectorAll("*"))]) {

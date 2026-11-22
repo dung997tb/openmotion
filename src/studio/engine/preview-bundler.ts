@@ -1,3 +1,5 @@
+import { PREVIEW_FIRST_FRAME } from './preview-first-frame.ts';
+import { PREVIEW_INSPECTOR } from "./preview-inspector.ts";
 import { PREVIEW_TIMELINE_MANIFEST } from './preview-timeline-manifest.ts';
 import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
@@ -101,6 +103,8 @@ export interface FontCssCachePort {
 
 export interface BundlePreviewOptions {
   readonly entryFile?: string;
+  /** Interactive previews can reuse large classic scripts through their authorized asset base. */
+  readonly cacheProjectScripts?: boolean;
   readonly runtimeUrl?: string;
   readonly baseHref?: string;
   readonly gsapBaseUrl?: string;
@@ -480,10 +484,12 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
   return previewBridgeScript(projectId, `
   var pickMode=false, picked=null;
   function player(){ return window.__player || null; }
+  ${PREVIEW_FIRST_FRAME}
   function timeline(includeManifest){
     var p=player();
-    return {currentTime:p&&typeof p.getTime==='function'?Number(p.getTime())||0:0,
-      duration:p&&typeof p.getDuration==='function'?Number(p.getDuration())||0:0,
+    var currentTime=p&&typeof p.getTime==='function'?Number(p.getTime())||0:0;
+    var duration=p&&typeof p.getDuration==='function'?Number(p.getDuration())||0:0;
+    return {currentTime:currentTime,duration:duration,firstFrame:duration>0?visualFrameStatus(currentTime):'loading',
       isPlaying:p&&typeof p.isPlaying==='function'?p.isPlaying()===true:false,
       width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
       fps:window.__clipManifest&&window.__clipManifest.fps,
@@ -509,11 +515,12 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
   ${PREVIEW_TIMELINE_MANIFEST}
   ${PREVIEW_CANVAS_DRAG}
   ${PREVIEW_INLINE_TEXT}
+  ${PREVIEW_INSPECTOR}
   ${PREVIEW_LAYERS}
   function respond(requestId,result,error){
     post('response',error?{ok:false,error:String(error)}:{ok:true,result:result},requestId);
   }
-  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','canvas-drag','inline-text']}); post('timeline-state',timeline(true)); }
+  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
@@ -534,7 +541,13 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
         else throw new Error('Unsupported playback action');
         post('timeline-state',timeline()); respond(requestId,timeline()); return;
       }
+      if(message.type==='canvas-framing'){
+        var canvas=document.querySelector('[data-composition-id]');
+        respond(requestId,canvas?{sourceFile:${JSON.stringify(compositionPath).replace(/</g, '\\u003c')},fit:canvas.getAttribute('data-canvas-fit')==='cover'?'cover':'contain'}:null); return;
+      }
+      if(message.type==='inspect-element'){ respond(requestId,inspectPreviewElement(message)); return; }
       if(message.type==='layer-tree'){ previewLayerTree(message); return; }
+      if(message.type==='layer-family'){ respond(requestId,previewLayerFamily(message)); return; }
       if(message.type==='layer-select'){ respond(requestId,selectPreviewLayer(message)); return; }
       if(message.type==='inline-text'){
         var textTarget=editInlineText(message);
@@ -543,7 +556,10 @@ export function createPreviewBridgeScript(projectId: string, compositionPath = '
       }
       if(message.type==='canvas-drag'){
         var result=canvasDrag(message);
-        if(message.phase==='start' && result) reportLayerSelection(drag.element,drag.selection);
+        if(message.phase==='start'){
+          const hit=result?drag.element:document.elementFromPoint(message.x * innerWidth,message.y * innerHeight)?.closest('[data-hf-id],[id]');
+          if(hit && hit!==document.body && hit!==document.documentElement) reportLayerSelection(hit, result?drag.selection:describe(hit));
+        }
         if(message.phase==='start' || message.phase==='finish') respond(requestId,result);
         return;
       }
@@ -840,6 +856,13 @@ export async function bundlePreviewInMemory(
     if (el.getAttribute('integrity')?.trim()) continue;
     const jsPath = resolveVirtualPath(sourceDir, decodedUrlPath(src));
     if (!jsPath) continue;
+    const file = project.getFile(jsPath);
+    if (options.cacheProjectScripts && isJavaScriptType(el) && file?.isText && file.sizeBytes >= 32 * 1024
+      && /\.(?:js|cjs)$/i.test(jsPath) && !el.hasAttribute('async') && !el.hasAttribute('defer')
+      && !src.includes('?') && !src.includes('#')) {
+      el.setAttribute('src', `${baseHref}${encodeUrlPath(jsPath)}?om-script=${file.sha256}`);
+      continue;
+    }
     const js = project.readText(jsPath);
     if (js === null) continue;
     el.removeAttribute('src');

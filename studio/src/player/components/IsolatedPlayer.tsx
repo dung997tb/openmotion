@@ -24,7 +24,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
     const source = useRef(props.directUrl ?? (props.projectId && buildProjectApiPath(props.projectId, "/preview")));
     const initialPortrait = useRef(props.portrait);
     const prepared = useContext(InitialPreviewLeaseContext);
-    const initialLease = useRef(props.showInitialLoading ? prepared : undefined);
+    const initialLease = useRef(prepared);
     const passive = props.passive === true;
     const lease = useRef<ReturnType<typeof bindPreviewLease> | null>(null);
     const busyRetries = useRef(0);
@@ -44,6 +44,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       applyPreviewVariablesToUrl(url);
       let size = initialPortrait.current ? [1080, 1920] : [1920, 1080];
       let ready = false;
+      let timelineLoaded = false;
       let runtimeTime: number | undefined;
       let bridge: ReturnType<typeof createPreviewAdapter> | undefined;
       let loadId = 0;
@@ -62,6 +63,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         });
       }
       function fail(message: string) {
+        ready = true;
         clearTimeout(busyTimer);
         clearTimeout(deadline);
         setError(message);
@@ -87,20 +89,30 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         if (event.data.type !== "timeline-state") return;
         if (Number.isFinite(event.data.currentTime)) runtimeTime = event.data.currentTime;
         if (ready || !(event.data.duration > 0)) return;
-        ready = true;
-        busyRetries.current = 0;
-        clearTimeout(busyTimer);
-        setError(undefined);
-        clearTimeout(deadline);
-        const { width, height } = event.data;
-        if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 && width <= 16384 && height <= 16384) {
-          size = [width, height];
-          iframe!.width = String(width);
-          iframe!.height = String(height);
+        if (!timelineLoaded) {
+          timelineLoaded = true;
+          busyRetries.current = 0;
+          clearTimeout(busyTimer);
+          setError(undefined);
+          clearTimeout(deadline);
+          const { width, height } = event.data;
+          if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 && width <= 16384 && height <= 16384) {
+            size = [width, height];
+            iframe!.width = String(width);
+            iframe!.height = String(height);
+          }
+          resize();
+          callbacks.current.onLoad();
+          if (!passive) announcePreviewDocumentLoaded(iframe!);
+          deadline = setTimeout(() => fail("The composition preview did not become ready."), 90_000);
         }
-        resize();
-        callbacks.current.onLoad();
-        if (!passive) announcePreviewDocumentLoaded(iframe!);
+        if (event.data.firstFrame === "loading") return;
+        ready = true;
+        clearTimeout(deadline);
+        if (event.data.firstFrame === "error") {
+          fail("The composition preview did not become ready.");
+          return;
+        }
         paintFrame = requestAnimationFrame(() => {
           setAwaitingFirstFrame(false);
           callbacks.current.onCompositionLoadingChange?.(false);
@@ -115,6 +127,8 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       lease.current = bindPreviewLease(url, props.origin, (next) => {
         if (ready && !passive && !callbacks.current.noLoadTimeout) rememberPreviewPosition(iframe, runtimeTime);
         ready = false;
+        timelineLoaded = false;
+        setAwaitingFirstFrame(callbacks.current.showInitialLoading === true);
         busyForLoad = false;
         clearTimeout(busyTimer);
         setError(undefined);

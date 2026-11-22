@@ -12,6 +12,7 @@ import type { PatchOperation } from "../utils/sourcePatcher";
 import { DomEditPersistUnsafeValueError } from "./domEditPersistFailure";
 import { useDomEditPersist, type RecordEditInput } from "./useDomEditPersist";
 import { useDomEditPositionPatchCommit } from "./useDomEditPositionPatchCommit";
+import { inlineTextBatches } from "../components/editor/isolatedInlineTextPatch";
 import { useDomEditTextCommits } from "./useDomEditTextCommits";
 import { useDomGeometryCommits } from "./useDomGeometryCommits";
 import { useElementLifecycleOps } from "./useElementLifecycleOps";
@@ -250,6 +251,17 @@ export function useDomEditCommits({
     ],
   );
 
+  const persistBoundText = useCallback(async (selection: DomEditSelection, value: string) => {
+    const project = projectIdRef.current;
+    if (!project || !selection.isolatedTarget?.binding) throw new Error("Missing bound text target");
+    const plain = document.createElement("span");
+    plain.textContent = value;
+    const batches = await inlineTextBatches(project, selection.isolatedTarget, plain.innerHTML, value);
+    if (projectIdRef.current !== project) throw new Error("Active project changed before the edit could be saved");
+    const result = await commitDomEditPatchBatches(batches, { label: "Edit text", coalesceKey: "bound-text:" + selection.selector });
+    if (!result.durable) throw new Error("Bound text was not saved");
+  }, [commitDomEditPatchBatches, projectIdRef]);
+
   // ── Text & style commits (delegated to useDomEditTextCommits) ──
 
   const {
@@ -277,6 +289,7 @@ export function useDomEditCommits({
     refreshDomEditSelectionFromPreview,
     buildDomSelectionFromTarget,
     persistDomEditOperations,
+    persistBoundText,
     resolveImportedFontAsset,
     showToast,
   });

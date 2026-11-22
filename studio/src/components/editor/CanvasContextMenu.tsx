@@ -75,6 +75,7 @@ interface CanvasContextMenuProps {
    * Absent when the caller wires no delete persist path (e.g. a legacy mount):
    * the Delete item is then hidden rather than shown as a silent no-op.
    */
+  isolatedZActions?: Partial<Record<ZOrderAction, () => void>>;
   onDelete?: (selection: DomEditSelection) => void;
 }
 
@@ -146,6 +147,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
   onApplyZIndex,
   onZOrderCrossed,
   onDelete,
+  isolatedZActions,
 }: CanvasContextMenuProps) {
   const { t } = useI18n();
   const menuRef = useContextMenuDismiss(onClose);
@@ -155,7 +157,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
   // a z-write reverts on reload and Delete silently no-ops. Hide the group
   // instead. If nothing is actionable (a legacy mount with no handlers at all),
   // don't render the menu — an empty menu is itself a dead-end.
-  const hasZActions = Boolean(onApplyZIndex);
+  const hasZActions = Boolean(onApplyZIndex || isolatedZActions);
   const hasDelete = Boolean(onDelete);
   const hasDivider = hasZActions && hasDelete;
 
@@ -171,6 +173,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
   const el = selection.element;
 
   function handleZAction(action: ZAction) {
+    if (isolatedZActions) { isolatedZActions[action]?.(); onClose(); return; }
     if (!onApplyZIndex) return;
     // Resolved BEFORE the commit path mutates live styles. `crossed` is always
     // resolved (not only for the flash): the host mirrors it into a lane move.
@@ -225,7 +228,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
     >
       {hasZActions &&
         Z_ACTIONS.map(({ action, label }) => {
-          const enabled = isZOrderActionEnabled(el, action);
+          const enabled = isolatedZActions ? Boolean(isolatedZActions[action]) : isZOrderActionEnabled(el, action);
           return (
             <button
               key={action}

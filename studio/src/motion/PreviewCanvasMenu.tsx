@@ -6,6 +6,8 @@ import { useI18n } from '../i18n/I18n';
 import { Button } from 'open-design-ui/button';
 import { Menu, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../components/ui/Menu';
 import { CaretDown } from '../icons/RemixIcons';
+import { projectPreviewAdapter } from '../player/lib/projectPreviewAdapter';
+import { onPreviewContentReplaced } from '../player/sceneSwap';
 import { gatewayRequest } from './gatewayClient';
 
 export function PreviewCanvasMenu() {
@@ -16,10 +18,28 @@ export function PreviewCanvasMenu() {
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   let root: Element | null = null;
   try { root = iframe?.contentDocument?.querySelector('[data-composition-id]') ?? null; } catch { /* A new preview is still loading. */ }
+  const path = shell.activeCompPath || 'index.html';
+  const [framing, setFraming] = useState<{ iframe: HTMLIFrameElement; path: string; fit: CanvasFit } | null>(null);
+  useEffect(() => {
+    if (!iframe || root) return;
+    const adapter = projectPreviewAdapter(iframe, shell.projectId);
+    if (!adapter) return;
+    let sequence = 0;
+    const read = async () => {
+      const id = ++sequence;
+      const value = await adapter.request<{ sourceFile: string; fit: CanvasFit } | null>('canvas-framing').catch(() => null);
+      if (id === sequence) setFraming(value?.sourceFile === path && ['contain', 'cover'].includes(value.fit) ?
+        { iframe, path, fit: value.fit } : null);
+    };
+    void read();
+    const unsubscribe = onPreviewContentReplaced(iframe, read);
+    return () => { ++sequence; unsubscribe(); };
+  }, [iframe, root, path, shell.projectId]);
+  const remoteFit = framing?.iframe === iframe && framing?.path === path ? framing.fit : null;
   const dimensions = shell.compositionDimensions;
   const ratio = dimensions ? canvasRatio(dimensions.width, dimensions.height) : '';
-  const fit: CanvasFit = root?.getAttribute('data-canvas-fit') === 'cover' ? 'cover' : 'contain';
-  const disabled = busy || !root || !dimensions || Boolean(shell.writeBlockedReason) || shell.renderQueue.isRendering;
+  const fit: CanvasFit = root?.getAttribute('data-canvas-fit') === 'cover' ? 'cover' : remoteFit || 'contain';
+  const disabled = busy || (!root && !remoteFit) || !dimensions || Boolean(shell.writeBlockedReason) || shell.renderQueue.isRendering;
   async function change(nextRatio: CanvasRatio, nextFit: CanvasFit) {
     if (running.current || disabled) return;
     running.current = true; setBusy(true);

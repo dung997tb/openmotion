@@ -6,6 +6,7 @@ export interface PreviewLayer {
   kind: PreviewLayerKind;
   isCompHost: boolean;
   z: number;
+  draggable?: boolean;
 }
 
 const layerKinds = ["image", "video", "audio", "vector", "group", "text", "shape"] as const;
