@@ -42,6 +42,7 @@ export function AgentRuntimeSettings({
   const [generating, setGenerating] = useState(false);
   const [bundle, setBundle] = useState<BridgeSetupBundle | null>(null);
   const [scriptTab, setScriptTab] = useState<ScriptTab>('curl');
+  const [copiedCommand, setCopiedCommand] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [addingService, setAddingService] = useState(false);
@@ -58,7 +59,6 @@ export function AgentRuntimeSettings({
   if (!directory) return <SettingsLoading />;
 
   const bridgeRuntimes = directory.runtimes.filter(item => item.kind === 'local-bridge');
-  const remoteServices = directory.runtimes.filter(item => item.kind === 'remote-service');
   const onlineCount = directory.runtimes.filter(item => item.status === 'online').length;
   const unusedTokens = directory.tokens.filter(
     token => !bridgeRuntimes.some(bridge => bridge.tokenId === token.id),
@@ -66,14 +66,16 @@ export function AgentRuntimeSettings({
 
   const modeBadgeLabel =
     directory.deploymentMode === 'cloud'
-      ? 'Cloud control plane'
+      ? 'Cloud workspace'
       : directory.deploymentMode === 'hybrid'
-        ? 'Hybrid runtime mode'
-        : 'Local mode';
+        ? 'Cloud + Local'
+        : 'Running locally';
 
   async function handleCopy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
+      setCopiedCommand(true);
+      window.setTimeout(() => setCopiedCommand(false), 1800);
       showToast(t('Copied to clipboard'), 'info');
     } catch {
       showToast(t('Could not copy. Select and copy the text manually.'), 'error');
@@ -86,10 +88,10 @@ export function AgentRuntimeSettings({
       const next = await createBridgeToken(machineLabel.trim() || undefined);
       setBundle(next);
       setMachineLabel('');
-      showToast(t('Bridge script ready. Run the command on your computer to connect local Agents.'), 'info');
+      showToast(t('Command ready. Copy and run it in Terminal.'), 'info');
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not generate connect script'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not generate connect command'), 'error');
     } finally {
       setGenerating(false);
     }
@@ -100,10 +102,10 @@ export function AgentRuntimeSettings({
     try {
       await revokeBridgeToken(tokenId);
       if (bundle?.tokenId === tokenId) setBundle(null);
-      showToast(t('Bridge token revoked'), 'info');
+      showToast(t('Computer disconnected'), 'info');
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not revoke bridge token'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not disconnect computer'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -118,10 +120,10 @@ export function AgentRuntimeSettings({
     setBusyId(runtime.id);
     try {
       await inspectBridgeAgent(runtime.id, targetAgent.id);
-      showToast(t('Refreshed local Agent status on {name}', { name: runtime.name }), 'info');
+      showToast(t('Refreshed Agents on {name}', { name: runtime.name }), 'info');
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not rescan local machine'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not refresh computer'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -131,10 +133,10 @@ export function AgentRuntimeSettings({
     setBusyId(runtimeId || 'clear-default');
     try {
       await setDefaultRuntime(runtimeId);
-      showToast(t('Default runtime updated'), 'info');
+      showToast(t('Default computer updated'), 'info');
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not update default runtime'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not update default computer'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -155,7 +157,7 @@ export function AgentRuntimeSettings({
       setProbePreview({
         ok: false,
         agents: [],
-        error: err instanceof Error ? err.message : t('Could not reach Agent service'),
+        error: err instanceof Error ? err.message : t('Could not reach Agent server'),
       });
     } finally {
       setTestingDraft(false);
@@ -166,7 +168,7 @@ export function AgentRuntimeSettings({
     setSavingService(true);
     try {
       await createAgentService({
-        name: svcName.trim() || 'Custom Agent Service',
+        name: svcName.trim() || 'Custom Agent Server',
         endpoint: svcEndpoint.trim(),
         authType: svcAuthType,
         ...(svcAuthType === 'api-key' ? { headerName: svcHeaderName.trim() || 'X-API-Key' } : {}),
@@ -177,10 +179,10 @@ export function AgentRuntimeSettings({
       setSvcEndpoint('');
       setSvcSecret('');
       setProbePreview(null);
-      showToast(t('Custom Agent service added'), 'info');
+      showToast(t('Custom Agent server connected'), 'info');
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not save Agent service'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not save Agent server'), 'error');
     } finally {
       setSavingService(false);
     }
@@ -192,15 +194,15 @@ export function AgentRuntimeSettings({
       const result = await testAgentService(runtime.id);
       if (result.ok) {
         showToast(
-          t('Service online · {count} agent(s) discovered', { count: result.agents.length }),
+          t('Server online · {count} Agent(s) available', { count: result.agents.length }),
           'info',
         );
       } else {
-        showToast(result.error || t('Agent service unreachable'), 'error');
+        showToast(result.error || t('Agent server unreachable'), 'error');
       }
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not test Agent service'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not test Agent server'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -211,12 +213,12 @@ export function AgentRuntimeSettings({
     try {
       await updateAgentService(runtime.id, { enabled: runtime.enabled === false });
       showToast(
-        t(runtime.enabled === false ? 'Agent service enabled' : 'Agent service disabled'),
+        t(runtime.enabled === false ? 'Agent server enabled' : 'Agent server paused'),
         'info',
       );
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not update Agent service'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not update Agent server'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -226,10 +228,10 @@ export function AgentRuntimeSettings({
     setBusyId(runtime.id);
     try {
       await deleteAgentService(runtime.id);
-      showToast(t('Agent service removed'), 'info');
+      showToast(t('Agent server removed'), 'info');
       onRefresh();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not remove Agent service'), 'error');
+      showToast(err instanceof Error ? err.message : t('Could not remove Agent server'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -243,22 +245,38 @@ export function AgentRuntimeSettings({
         : bundle.localCommand
     : '';
 
+  const formatRuntimeSummary = (runtime: AgentRuntimeInfo) => {
+    const readyAgents = runtime.agents
+      .filter(a => a.installed && a.auth !== 'signed-out')
+      .map(a => a.label);
+    const previewNames = readyAgents.slice(0, 3).join(', ');
+    const parts: string[] = [t('{count} Agents ready', { count: runtime.runnableAgentIds.length })];
+    if (previewNames) {
+      parts.push(readyAgents.length > 3 ? `${previewNames}…` : previewNames);
+    }
+    if (runtime.kind === 'remote-service' && runtime.endpoint) {
+      parts.push(runtime.endpoint);
+    }
+    if (runtime.error) {
+      parts.push(runtime.error);
+    }
+    return parts.join(' · ');
+  };
+
   return (
     <div className="om-provider-detail-inner om-runtime-page">
-      <header className="om-settings-row">
-        <div className="om-provider-heading">
+      {/* Compact Header */}
+      <header className="om-runtime-head">
+        <div className="om-provider-heading om-runtime-head-copy">
           <span className="om-creation-icon" data-tone="agent" aria-hidden="true">
-            <RemixIcon name="link-line" size={18} />
+            <RemixIcon name="computer-line" size={18} />
           </span>
-          <div>
-            <h1 className="om-title">{t('Agent Runtimes & Cloud Bridge')}</h1>
-            <p className="om-muted">
-              {t('Connect local computers to cloud workspaces via outbound bridge scripts, or register self-hosted Agent services.')}
-            </p>
+          <div className="om-runtime-head-text">
+            <h1 className="om-title">{t('Connected Computers')}</h1>
           </div>
         </div>
-        <div className="om-settings-actions">
-          <span className="om-badge" data-active={onlineCount > 0}>
+        <div className="om-runtime-head-actions">
+          <span className="om-badge" data-active={onlineCount > 0 || undefined}>
             {t(modeBadgeLabel)}
           </span>
           <Button variant="ghost" className="om-button h-auto" onClick={onRefresh}>
@@ -268,15 +286,139 @@ export function AgentRuntimeSettings({
         </div>
       </header>
 
-      {/* Card 1: Connect Local Machine (Bridge Script) */}
-      <section className="om-card om-card-stack">
-        <div className="om-settings-row">
-          <div>
-            <h2 className="om-subtitle">1 · {t('Connect Local Machine (Bridge Script)')}</h2>
-            <p className="om-muted">
-              {t('Run a lightweight outbound bridge script on any laptop or workstation to discover local CLI Agents (Codex, Claude Code, Kimi, Cursor…) and execute cloud Super Agent tasks safely without opening inbound ports or uploading credentials.')}
-            </p>
+      {/* Active Devices */}
+      <section className="om-card om-runtime-card">
+        <div className="om-runtime-card-head">
+          <h2 className="om-subtitle">{t('Devices')}</h2>
+          {directory.defaultRuntimeId && (
+            <Button
+              variant="ghost"
+              className="om-button h-auto"
+              disabled={busyId === 'clear-default'}
+              onClick={() => void handleSetDefault(null)}
+            >
+              {t('Use automatic')}
+            </Button>
+          )}
+        </div>
+
+        {directory.runtimes.length === 0 ? (
+          <p className="om-muted om-runtime-empty-hint">
+            {t('No computer connected yet.')}
+          </p>
+        ) : (
+          <div className="om-runtime-list">
+            {directory.runtimes.map(runtime => {
+              const isDefault = directory.defaultRuntimeId === runtime.id;
+              const isOnline = runtime.status === 'online';
+              return (
+                <div key={runtime.id} className="om-runtime-row">
+                  <div className="om-runtime-row-lead">
+                    <span className="om-runtime-row-icon" aria-hidden="true">
+                      <RemixIcon
+                        name={
+                          runtime.kind === 'local-bridge'
+                            ? 'link-line'
+                            : runtime.kind === 'remote-service'
+                              ? 'plug-line'
+                              : 'computer-line'
+                        }
+                        size={16}
+                      />
+                    </span>
+                    <div className="om-runtime-row-main">
+                      <div className="om-runtime-row-title">
+                        <span
+                          className="om-runtime-dot"
+                          data-online={isOnline || undefined}
+                          aria-hidden="true"
+                        />
+                        <strong>{t(runtime.name)}</strong>
+                        <span className="om-badge" data-active={isOnline || undefined}>
+                          {t(isOnline ? 'Ready' : runtime.status === 'disabled' ? 'Paused' : 'Offline')}
+                        </span>
+                        {isDefault && (
+                          <span className="om-badge" data-active>{t('Default')}</span>
+                        )}
+                      </div>
+                      <small className="om-muted">{formatRuntimeSummary(runtime)}</small>
+                    </div>
+                  </div>
+                  <div className="om-runtime-row-actions">
+                    {isOnline && !isDefault && runtime.enabled !== false && (
+                      <Button
+                        variant="ghost"
+                        className="om-button h-auto"
+                        disabled={busyId === runtime.id}
+                        onClick={() => void handleSetDefault(runtime.id)}
+                      >
+                        {t('Use by default')}
+                      </Button>
+                    )}
+                    {runtime.kind === 'local-bridge' && isOnline && (
+                      <Button
+                        variant="ghost"
+                        className="om-button h-auto"
+                        disabled={busyId === runtime.id}
+                        onClick={() => void handleRescanBridge(runtime)}
+                      >
+                        <RemixIcon name="refresh-line" size={14} />
+                        {t('Refresh')}
+                      </Button>
+                    )}
+                    {runtime.kind === 'local-bridge' && runtime.tokenId && (
+                      <Button
+                        variant="ghost"
+                        className="om-button h-auto"
+                        disabled={busyId === runtime.tokenId}
+                        onClick={() => void handleRevokeToken(runtime.tokenId!)}
+                      >
+                        <RemixIcon name="delete-bin-line" size={14} />
+                        {t('Disconnect')}
+                      </Button>
+                    )}
+                    {runtime.kind === 'remote-service' && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          className="om-button h-auto"
+                          disabled={busyId === runtime.id}
+                          onClick={() => void handleTestSavedService(runtime)}
+                        >
+                          <RemixIcon name="refresh-line" size={14} />
+                          {t('Test')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="om-button h-auto"
+                          disabled={busyId === runtime.id}
+                          onClick={() => void handleToggleService(runtime)}
+                        >
+                          {t(runtime.enabled === false ? 'Enable' : 'Pause')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="om-button h-auto"
+                          disabled={busyId === runtime.id}
+                          onClick={() => void handleRemoveService(runtime)}
+                        >
+                          <RemixIcon name="delete-bin-line" size={14} />
+                          {t('Remove')}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
+        )}
+      </section>
+
+      {/* Connect a Computer: 2 clicks (Generate -> Copy) */}
+      <section className="om-card om-runtime-card">
+        <div className="om-runtime-card-head">
+          <h2 className="om-subtitle">{t('Connect a Computer')}</h2>
         </div>
 
         <div className="om-runtime-generate-row">
@@ -287,8 +429,8 @@ export function AgentRuntimeSettings({
               maxLength={80}
               value={machineLabel}
               onChange={event => setMachineLabel(event.target.value)}
-              placeholder={t('Machine label (e.g. MacBook Pro · Studio)')}
-              aria-label={t('Machine label')}
+              placeholder={t('Computer name (optional)')}
+              aria-label={t('Computer name')}
             />
           </label>
           <Button
@@ -299,18 +441,18 @@ export function AgentRuntimeSettings({
             onClick={() => void handleGenerateBundle()}
           >
             <RemixIcon name="terminal-box-line" size={15} />
-            {t(generating ? 'Generating…' : 'Generate connect script')}
+            {t(generating ? 'Creating…' : 'Get connect command')}
           </Button>
         </div>
 
         {bundle && (
           <div className="om-runtime-bundle">
-            <div className="om-settings-row">
-              <div className="om-runtime-script-tabs" role="tablist" aria-label={t('Bridge launch method')}>
+            <div className="om-runtime-card-head">
+              <div className="om-runtime-script-tabs" role="tablist" aria-label={t('Command format')}>
                 {([
-                  ['curl', 'One-line install'],
-                  ['node', 'Node.js script'],
-                  ['local', 'Local checkout'],
+                  ['curl', 'Quick command'],
+                  ['node', 'Node.js'],
+                  ['local', 'Local source'],
                 ] as const).map(([id, label]) => (
                   <Button
                     key={id}
@@ -325,121 +467,48 @@ export function AgentRuntimeSettings({
                   </Button>
                 ))}
               </div>
-              <span className="om-badge">{bundle.serverUrl}</span>
+              <div className="om-runtime-row-actions">
+                <Button
+                  variant="ghost"
+                  className="om-button h-auto"
+                  data-primary
+                  onClick={() => void handleCopy(activeCommand)}
+                >
+                  <RemixIcon name={copiedCommand ? 'check-line' : 'copy-line'} size={14} />
+                  {t(copiedCommand ? 'Copied' : 'Copy command')}
+                </Button>
+                <a
+                  className="om-button"
+                  href={bundle.scriptUrl}
+                  download="openmotion-agent-bridge.mjs"
+                >
+                  <RemixIcon name="external-link-line" size={14} />
+                  {t('Download .mjs')}
+                </a>
+              </div>
             </div>
 
             <pre className="om-code-block">{activeCommand}</pre>
-
-            <div className="om-settings-actions">
-              <Button
-                variant="ghost"
-                className="om-button h-auto"
-                data-primary
-                onClick={() => void handleCopy(activeCommand)}
-              >
-                <RemixIcon name="copy-line" size={14} />
-                {t('Copy command')}
-              </Button>
-              <a
-                className="om-button"
-                href={bundle.scriptUrl}
-                download="openmotion-agent-bridge.mjs"
-              >
-                <RemixIcon name="external-link-line" size={14} />
-                {t('Download script (.mjs)')}
-              </a>
-              <span className="om-muted om-runtime-token-note">
-                <RemixIcon name="shield-check-line" size={14} />
-                {t('Bridge token is shown once and stored as a SHA-256 hash.')}
-              </span>
-            </div>
           </div>
         )}
 
-        {(bridgeRuntimes.length > 0 || unusedTokens.length > 0) && (
+        {unusedTokens.length > 0 && (
           <div className="om-runtime-list">
-            {bridgeRuntimes.map(bridge => {
-              const installedCount = bridge.agents.filter(a => a.installed).length;
-              const runnableLabels = bridge.agents
-                .filter(a => a.installed && a.auth !== 'signed-out')
-                .slice(0, 4)
-                .map(a => a.label);
-              return (
-                <div key={bridge.id} className="om-runtime-row">
-                  <div className="om-runtime-row-main">
-                    <div className="om-runtime-row-title">
-                      <span
-                        className="om-runtime-dot"
-                        data-online={bridge.status === 'online' || undefined}
-                        aria-hidden="true"
-                      />
-                      <strong>{bridge.name}</strong>
-                      <span className="om-badge" data-active={bridge.status === 'online'}>
-                        {t(bridge.status === 'online' ? 'Online' : 'Offline')}
-                      </span>
-                      {directory.defaultRuntimeId === bridge.id && (
-                        <span className="om-badge" data-active>{t('Default')}</span>
-                      )}
-                    </div>
-                    <small className="om-muted">
-                      {[
-                        bridge.platform && bridge.arch ? `${bridge.platform}/${bridge.arch}` : bridge.platform,
-                        t('{count} Agents installed', { count: installedCount }),
-                        runnableLabels.length ? runnableLabels.join(', ') : undefined,
-                      ].filter(Boolean).join(' · ')}
-                    </small>
-                  </div>
-                  <div className="om-settings-actions">
-                    {bridge.status === 'online' && directory.defaultRuntimeId !== bridge.id && (
-                      <Button
-                        variant="ghost"
-                        className="om-button h-auto"
-                        disabled={busyId === bridge.id}
-                        onClick={() => void handleSetDefault(bridge.id)}
-                      >
-                        {t('Set default')}
-                      </Button>
-                    )}
-                    {bridge.status === 'online' && (
-                      <Button
-                        variant="ghost"
-                        className="om-button h-auto"
-                        disabled={busyId === bridge.id}
-                        onClick={() => void handleRescanBridge(bridge)}
-                      >
-                        <RemixIcon name="refresh-line" size={14} />
-                        {t('Rescan')}
-                      </Button>
-                    )}
-                    {bridge.tokenId && (
-                      <Button
-                        variant="ghost"
-                        className="om-button h-auto"
-                        disabled={busyId === bridge.tokenId}
-                        onClick={() => void handleRevokeToken(bridge.tokenId!)}
-                      >
-                        <RemixIcon name="delete-bin-line" size={14} />
-                        {t('Revoke')}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
             {unusedTokens.map(token => (
               <div key={token.id} className="om-runtime-row">
-                <div className="om-runtime-row-main">
-                  <div className="om-runtime-row-title">
-                    <span className="om-runtime-dot" aria-hidden="true" />
-                    <strong>{token.label}</strong>
-                    <span className="om-badge">{t('Waiting for connection')}</span>
+                <div className="om-runtime-row-lead">
+                  <span className="om-runtime-row-icon" aria-hidden="true">
+                    <RemixIcon name="terminal-box-line" size={15} />
+                  </span>
+                  <div className="om-runtime-row-main">
+                    <div className="om-runtime-row-title">
+                      <span className="om-runtime-dot" aria-hidden="true" />
+                      <strong>{token.label}</strong>
+                      <span className="om-badge">{t('Waiting for Terminal')}</span>
+                    </div>
                   </div>
-                  <small className="om-muted">
-                    {t('Token prefix')}: {token.prefix}…
-                  </small>
                 </div>
-                <div className="om-settings-actions">
+                <div className="om-runtime-row-actions">
                   <Button
                     variant="ghost"
                     className="om-button h-auto"
@@ -447,23 +516,30 @@ export function AgentRuntimeSettings({
                     onClick={() => void handleRevokeToken(token.id)}
                   >
                     <RemixIcon name="delete-bin-line" size={14} />
-                    {t('Revoke')}
+                    {t('Cancel')}
                   </Button>
                 </div>
               </div>
             ))}
           </div>
         )}
+
+        <details className="om-runtime-protocol-doc">
+          <summary className="om-muted">
+            {t('How it works')}
+          </summary>
+          <p className="om-muted om-runtime-help-text">
+            {t('Click "Get connect command", copy it, and paste it into Terminal on your Mac, Windows, or Linux computer. Local Agents (Codex, Claude Code, etc.) appear above automatically and your logins stay on your device.')}
+          </p>
+        </details>
       </section>
 
-      {/* Card 2: Self-Hosted / Custom Agent Services */}
-      <section className="om-card om-card-stack">
-        <div className="om-settings-row">
-          <div>
-            <h2 className="om-subtitle">2 · {t('Custom & Self-Hosted Agent Services')}</h2>
-            <p className="om-muted">
-              {t('Register external Agent runtimes implementing the {protocol} HTTP+SSE protocol for cloud scaling or custom internal Agents.', { protocol: AGENT_SERVICE_PROTOCOL })}
-            </p>
+      {/* Custom Agent Server (compact toggle) */}
+      <section className="om-card om-runtime-card">
+        <div className="om-runtime-card-head">
+          <div className="om-runtime-row-title">
+            <h2 className="om-subtitle">{t('Custom Agent Server')}</h2>
+            <span className="om-badge">{t('Optional')}</span>
           </div>
           <Button
             variant="ghost"
@@ -474,7 +550,7 @@ export function AgentRuntimeSettings({
             }}
           >
             <RemixIcon name={addingService ? 'close-line' : 'add-line'} size={14} />
-            {t(addingService ? 'Cancel' : 'Add Agent Service')}
+            {t(addingService ? 'Cancel' : 'Connect server')}
           </Button>
         </div>
 
@@ -486,9 +562,9 @@ export function AgentRuntimeSettings({
               void handleSaveService();
             }}
           >
-            <div className="om-agent-choice-fields">
+            <div className="om-runtime-form-grid">
               <label className="om-label">
-                <span>{t('Service name')}</span>
+                <span>{t('Server name')}</span>
                 <span className="om-field">
                   <input
                     type="text"
@@ -496,13 +572,13 @@ export function AgentRuntimeSettings({
                     maxLength={80}
                     value={svcName}
                     onChange={event => setSvcName(event.target.value)}
-                    placeholder={t('e.g. Internal Cluster Agent')}
-                    aria-label={t('Service name')}
+                    placeholder={t('e.g. Team Cloud Runner')}
+                    aria-label={t('Server name')}
                   />
                 </span>
               </label>
               <label className="om-label">
-                <span>{t('Service endpoint')}</span>
+                <span>{t('Server URL')}</span>
                 <span className="om-field">
                   <input
                     type="url"
@@ -510,7 +586,7 @@ export function AgentRuntimeSettings({
                     value={svcEndpoint}
                     onChange={event => setSvcEndpoint(event.target.value)}
                     placeholder="https://agent.example.com"
-                    aria-label={t('Service endpoint')}
+                    aria-label={t('Server URL')}
                   />
                 </span>
               </label>
@@ -529,14 +605,14 @@ export function AgentRuntimeSettings({
               </div>
               {svcAuthType !== 'none' && (
                 <label className="om-label">
-                  <span>{t('Credential / API key')}</span>
+                  <span>{t('API key / Token')}</span>
                   <span className="om-field">
                     <input
                       type="password"
                       value={svcSecret}
                       onChange={event => setSvcSecret(event.target.value)}
                       placeholder={t('Stored privately on the server')}
-                      aria-label={t('Credential / API key')}
+                      aria-label={t('API key / Token')}
                     />
                   </span>
                 </label>
@@ -562,8 +638,7 @@ export function AgentRuntimeSettings({
                 <RemixIcon name={probePreview.ok ? 'check-line' : 'close-line'} size={15} />
                 <span>
                   {probePreview.ok
-                    ? t('Connected ({protocol}) · {count} agent(s) discovered', {
-                        protocol: probePreview.protocol || AGENT_SERVICE_PROTOCOL,
+                    ? t('Connected · {count} Agent(s) available', {
                         count: probePreview.agents.length,
                       })
                     : probePreview.error || t('Connection failed')}
@@ -571,7 +646,7 @@ export function AgentRuntimeSettings({
               </div>
             )}
 
-            <div className="om-settings-actions">
+            <div className="om-runtime-form-footer">
               <Button
                 variant="ghost"
                 type="button"
@@ -590,89 +665,16 @@ export function AgentRuntimeSettings({
                 disabled={savingService || !svcEndpoint.trim()}
               >
                 <RemixIcon name="check-line" size={14} />
-                {t(savingService ? 'Saving…' : 'Save service')}
+                {t(savingService ? 'Saving…' : 'Save server')}
               </Button>
             </div>
           </form>
         )}
 
-        {remoteServices.length > 0 && (
-          <div className="om-runtime-list">
-            {remoteServices.map(service => (
-              <div key={service.id} className="om-runtime-row">
-                <div className="om-runtime-row-main">
-                  <div className="om-runtime-row-title">
-                    <span
-                      className="om-runtime-dot"
-                      data-online={service.status === 'online' || undefined}
-                      aria-hidden="true"
-                    />
-                    <strong>{service.name}</strong>
-                    <span className="om-badge" data-active={service.status === 'online'}>
-                      {t(
-                        service.status === 'online'
-                          ? 'Online'
-                          : service.status === 'disabled'
-                            ? 'Disabled'
-                            : 'Offline',
-                      )}
-                    </span>
-                    {directory.defaultRuntimeId === service.id && (
-                      <span className="om-badge" data-active>{t('Default')}</span>
-                    )}
-                  </div>
-                  <small className="om-muted">
-                    {service.endpoint} · {t('{count} Agents', { count: service.agents.length })}
-                    {service.error ? ` · ${service.error}` : ''}
-                  </small>
-                </div>
-                <div className="om-settings-actions">
-                  {service.enabled !== false && directory.defaultRuntimeId !== service.id && (
-                    <Button
-                      variant="ghost"
-                      className="om-button h-auto"
-                      disabled={busyId === service.id}
-                      onClick={() => void handleSetDefault(service.id)}
-                    >
-                      {t('Set default')}
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    disabled={busyId === service.id}
-                    onClick={() => void handleTestSavedService(service)}
-                  >
-                    <RemixIcon name="refresh-line" size={14} />
-                    {t('Test')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    disabled={busyId === service.id}
-                    onClick={() => void handleToggleService(service)}
-                  >
-                    {t(service.enabled === false ? 'Enable' : 'Disable')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    disabled={busyId === service.id}
-                    onClick={() => void handleRemoveService(service)}
-                  >
-                    <RemixIcon name="delete-bin-line" size={14} />
-                    {t('Remove')}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         <details className="om-runtime-protocol-doc">
           <summary className="om-muted">
             <RemixIcon name="code-s-slash-line" size={14} />{' '}
-            {t('Self-hosted Agent Service Protocol ({protocol})', { protocol: AGENT_SERVICE_PROTOCOL })}
+            {t('API protocol ({protocol})', { protocol: AGENT_SERVICE_PROTOCOL })}
           </summary>
           <pre className="om-code-block">{`GET  /health                     -> { ok: true, protocol: "${AGENT_SERVICE_PROTOCOL}", version }
 GET  /v1/agents                  -> { agents: [{ id, label, models: [{ id, label, reasoning? }] }] }
@@ -680,76 +682,6 @@ POST /v1/runs                    -> SSE stream: thread.started | message.delta |
 POST /v1/runs/:runId/tool-results -> { callId, ok, contentItems, structuredContent }
 POST /v1/runs/:runId/cancel      -> { ok: true }`}</pre>
         </details>
-      </section>
-
-      {/* Card 3: Active Runtimes Overview */}
-      <section className="om-card om-card-stack">
-        <div className="om-settings-row">
-          <h2 className="om-subtitle">3 · {t('Active Execution Runtimes')}</h2>
-          {directory.defaultRuntimeId && (
-            <Button
-              variant="ghost"
-              className="om-button h-auto"
-              onClick={() => void handleSetDefault(null)}
-            >
-              {t('Reset default')}
-            </Button>
-          )}
-        </div>
-        {!directory.localDirectAvailable && (
-          <p className="om-muted">
-            {t('Direct local CLI execution is disabled in Cloud control-plane mode. Super Agent executes tasks through your connected local Bridge machines or Custom Agent Services.')}
-          </p>
-        )}
-        <div className="om-runtime-list">
-          {directory.runtimes.map(runtime => (
-            <div key={runtime.id} className="om-runtime-row">
-              <div className="om-runtime-row-main">
-                <div className="om-runtime-row-title">
-                  <RemixIcon
-                    name={
-                      runtime.kind === 'local-bridge'
-                        ? 'link-line'
-                        : runtime.kind === 'remote-service'
-                          ? 'plug-line'
-                          : 'computer-line'
-                    }
-                    size={15}
-                  />
-                  <strong>{t(runtime.name)}</strong>
-                  <span className="om-badge" data-active={runtime.status === 'online'}>
-                    {t(
-                      runtime.kind === 'local-direct'
-                        ? 'Local direct'
-                        : runtime.kind === 'local-bridge'
-                          ? 'Bridge'
-                          : 'Hosted service',
-                    )}
-                  </span>
-                </div>
-                <small className="om-muted">
-                  {t('{ready} ready / {total} agents', {
-                    ready: runtime.runnableAgentIds.length,
-                    total: runtime.agents.length,
-                  })}
-                </small>
-              </div>
-              <div className="om-settings-actions">
-                {directory.defaultRuntimeId === runtime.id ? (
-                  <span className="om-badge" data-active>{t('Default runtime')}</span>
-                ) : runtime.status === 'online' ? (
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    onClick={() => void handleSetDefault(runtime.id)}
-                  >
-                    {t('Set default')}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
       </section>
     </div>
   );

@@ -2,7 +2,7 @@ import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useRef, useState } from 'react';
-import type { SuperAgentChatSummary } from '../../../shared/super-agent';
+import { superAgentIntentMeta, type SuperAgentChatSummary } from '../../../shared/super-agent';
 import { Menu, MenuItem, MenuSeparator } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Tooltip } from '../components/ui/Tooltip';
@@ -66,6 +66,7 @@ export function ConversationSidebar({
           : item.state === 'failed'
             ? 'failed'
             : 'idle';
+    const intentMeta = superAgentIntentMeta(item.intent);
 
     if (isEditing) {
       return (
@@ -112,13 +113,19 @@ export function ConversationSidebar({
           aria-current={isActive ? 'page' : undefined}
           onClick={() => onSelect(item.id)}
         >
-          {statusTone === 'idle' ? (
-            <span className="om-sa-chat-icon" aria-hidden="true">
-              <RemixIcon name={item.pinned ? 'sparkling-fill' : 'chat-1-line'} size={14} />
+          <span className="om-sa-chat-icon-wrap" aria-hidden="true">
+            <span
+              className="om-sa-chat-icon"
+              data-tone={intentMeta.tone}
+              data-intent={item.intent ?? 'chat'}
+              title={t(intentMeta.label)}
+            >
+              <RemixIcon name={intentMeta.icon} size={14} />
             </span>
-          ) : (
-            <span className="om-sa-chat-dot" data-state={statusTone} aria-hidden="true" />
-          )}
+            {statusTone !== 'idle' && (
+              <span className="om-sa-chat-status-badge" data-state={statusTone} />
+            )}
+          </span>
           <span className="om-sa-chat-title">{item.title}</span>
           {item.artifactCount > 0 && (
             <span className="om-sa-chat-count" title={t('{count} artifacts', { count: item.artifactCount })}>
@@ -296,6 +303,7 @@ export function ConversationSidebar({
                         : item.state === 'failed'
                           ? 'failed'
                           : 'idle';
+                  const intentMeta = superAgentIntentMeta(item.intent);
                   return (
                     <Button
                       key={item.id}
@@ -308,7 +316,19 @@ export function ConversationSidebar({
                         setSearchOpen(false);
                       }}
                     >
-                      <span className="om-sa-chat-dot" data-state={statusTone} aria-hidden="true" />
+                      <span className="om-sa-chat-icon-wrap" aria-hidden="true">
+                        <span
+                          className="om-sa-chat-icon"
+                          data-tone={intentMeta.tone}
+                          data-intent={item.intent ?? 'chat'}
+                          title={t(intentMeta.label)}
+                        >
+                          <RemixIcon name={intentMeta.icon} size={14} />
+                        </span>
+                        {statusTone !== 'idle' && (
+                          <span className="om-sa-chat-status-badge" data-state={statusTone} />
+                        )}
+                      </span>
                       <span className="om-sa-chat-title">{item.title}</span>
                       {item.artifactCount > 0 && (
                         <span className="om-sa-chat-count">{item.artifactCount}</span>

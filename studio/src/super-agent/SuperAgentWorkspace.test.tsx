@@ -8,7 +8,9 @@ import { I18nProvider } from '../i18n/I18n';
 import { ApplicationHeader } from '../motion/ApplicationChrome';
 import { WorkspaceChromeContext } from '../motion/WorkspaceChromeContext';
 import { SUPER_AGENT_API } from '../../../shared/super-agent';
-import { SuperAgentWorkspace } from './SuperAgentWorkspace';
+import { clampSuperAgentViewerWidth, SuperAgentWorkspace } from './SuperAgentWorkspace';
+import { ExecutionTimeline } from './ExecutionTimeline';
+import { SimpleMarkdown } from './SimpleMarkdown';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -287,7 +289,7 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
   expect(document.body.textContent).toContain('What can I create for you?');
   expect(document.body.textContent).toContain('Generate image');
   expect(document.body.textContent).toContain('Make a video');
-  expect(document.body.textContent).toContain('Cinema & audio');
+  expect(document.body.textContent).toContain('Create audio');
   expect(document.body.textContent).toContain('Explore more');
 
   // No standalone Resources entry button in the stream header
@@ -341,7 +343,9 @@ it('displays active conversation, tool steps, approvals, and multi-tab Artifact 
   ) as HTMLButtonElement;
   expect(viewerToggle).toBeTruthy();
   await act(async () => viewerToggle.click());
-  await flush();
+  for (let i = 0; i < 30 && !document.querySelector('.om-sa-viewer'); i++) {
+    await flush();
+  }
 
   const viewer = document.querySelector('.om-sa-viewer')!;
   expect(viewer).toBeTruthy();
@@ -597,4 +601,405 @@ it('suspends active viewer iframes when inactive, uses throttled thumb previews 
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('clamps Artifact Viewer width against docked sidebar and center stream across viewport widths', () => {
+  // 1280px screen with 240px docked sidebar + 1px resizer leaves 1039px; min center 300px caps viewer at 739px
+  expect(clampSuperAgentViewerWidth(950, 1280, 240)).toBe(739);
+  expect(clampSuperAgentViewerWidth(560, 1280, 240)).toBe(560);
+  expect(clampSuperAgentViewerWidth(200, 1280, 240)).toBe(320);
+
+  // 1000px mid-width screen with drawer sidebar (0 docked width): 72% cap = min(719, 699) = 699
+  expect(clampSuperAgentViewerWidth(900, 1000, 0)).toBe(699);
+
+  // Tight split (< 620 available) falls back to 55% proportional split without overflowing
+  expect(clampSuperAgentViewerWidth(600, 600, 0)).toBe(329);
+  expect(clampSuperAgentViewerWidth(100, 600, 0)).toBe(329);
+  expect(clampSuperAgentViewerWidth(400, 420, 0)).toBe(240);
+});
+
+it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands, deliverables, and enhanced SimpleMarkdown', async () => {
+  const onCopyText = vi.fn();
+  const onOpenArtifactId = vi.fn();
+  const onOpenWebUrl = vi.fn();
+
+  const timelineChat: SuperAgentChat = {
+    id: CHAT_ID,
+    title: 'Timeline Demo',
+    engine: 'antigravity',
+    permissionMode: 'auto',
+    createdAt: 1000,
+    updatedAt: 5000,
+    state: 'idle',
+    lastTurnDurationMs: 3200,
+    lastTurnUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    artifacts: [
+      {
+        id: 'design:d-99',
+        kind: 'design-project',
+        title: 'Landing Card',
+        subtitle: 'prototype',
+        projectId: 'd-99',
+        createdAt: 2000,
+        updatedAt: 4200,
+      },
+    ],
+    approvals: [],
+    messages: [
+      { id: 'u1', role: 'user', text: 'Inspect and build card', createdAt: 1000 },
+      { id: 'r1', role: 'reasoning', text: 'Planning file edits first', status: 'completed', durationMs: 850, createdAt: 1200 },
+      {
+        id: 't1',
+        role: 'tool',
+        text: 'Executed command',
+        createdAt: 1500,
+        toolEvent: {
+          callId: 'c1',
+          tool: 'run_command',
+          label: 'Checked Node',
+          status: 'completed',
+          category: 'command',
+          command: 'node -v',
+          exitCode: 0,
+          outputPreview: 'v26.11.1',
+          durationMs: 120,
+          startedAt: 1500,
+          finishedAt: 1620,
+        },
+      },
+      {
+        id: 't2',
+        role: 'tool',
+        text: 'Edited styles.css',
+        createdAt: 2000,
+        toolEvent: {
+          callId: 'c2',
+          tool: 'Edit',
+          label: 'Edited styles.css',
+          status: 'completed',
+          category: 'file_edit',
+          fileOp: {
+            action: 'edit',
+            path: 'styles.css',
+            addedLines: 2,
+            removedLines: 1,
+            diffPreview: '-color: red;\n+color: blue;\n+gap: 8px;',
+          },
+          durationMs: 90,
+          startedAt: 2000,
+          finishedAt: 2090,
+        },
+      },
+      {
+        id: 'a1',
+        role: 'assistant',
+        text: [
+          '## Summary',
+          '',
+          '| Step | Status |',
+          '| --- | --- |',
+          '| Node | v26.11.1 |',
+          '',
+          '- [x] Updated `file:///tmp/styles.css`',
+          '',
+          'See [Example Docs](https://example.com/docs).',
+        ].join('\n'),
+        createdAt: 4200,
+      },
+    ],
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={timelineChat}
+          busy={false}
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={onOpenArtifactId}
+          onPreviewAttachment={vi.fn()}
+          onOpenWebUrl={onOpenWebUrl}
+          onCopyText={onCopyText}
+          onApprove={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  expect(document.body.textContent).toContain('Worked for 3.2s · 3 steps');
+  expect(document.body.textContent).toContain('Files changed (1)');
+  expect(document.body.textContent).toContain('Antigravity · 3.2s · 150 tokens');
+  expect(document.querySelector('.om-sa-md-table')).toBeTruthy();
+  expect(document.querySelector('.om-sa-md-task')).toBeTruthy();
+
+  // Expand Work Log and verify command + diff lines
+  const workBtn = document.querySelector<HTMLButtonElement>('.om-sa-work-summary-btn')!;
+  await act(async () => workBtn.click());
+  await flush();
+  expect(document.body.textContent).toContain('Thought for 850ms');
+  expect(document.body.textContent).toContain('Checked Node');
+  expect(document.body.textContent).toContain('exit 0');
+
+  // Deliverable card & viewer link button & file chip
+  const deliverableBtn = document.querySelector<HTMLButtonElement>('.om-sa-deliverable-card')!;
+  await act(async () => deliverableBtn.click());
+  expect(onOpenArtifactId).toHaveBeenCalledWith('design:d-99');
+
+  const viewerLinkBtn = document.querySelector<HTMLButtonElement>('.om-sa-link-viewer-btn')!;
+  await act(async () => viewerLinkBtn.click());
+  expect(onOpenWebUrl).toHaveBeenCalledWith('https://example.com/docs');
+
+  const fileChip = document.querySelector<HTMLButtonElement>('.om-sa-file-chip')!;
+  await act(async () => fileChip.click());
+  expect(onCopyText).toHaveBeenCalledWith('/tmp/styles.css');
+
+  // Verify live active state + plan rendering
+  const liveChat: SuperAgentChat = {
+    ...timelineChat,
+    state: 'running',
+    lastTurnDurationMs: undefined,
+    turnActivity: {
+      phase: 'tool',
+      label: 'Running node -v',
+      activeToolName: 'run_command',
+      startedAt: Date.now() - 1500,
+      updatedAt: Date.now(),
+      plan: [
+        { content: 'Check Node version', status: 'in_progress' },
+        { content: 'Write report', status: 'pending' },
+      ],
+    },
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={liveChat}
+          busy
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={onOpenArtifactId}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={onCopyText}
+          onApprove={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('Running node -v');
+  expect(document.querySelector('.om-sa-plan-card')?.textContent).toContain('Check Node version');
+
+  // Direct SimpleMarkdown strikethrough + hr + bare link rendering
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SimpleMarkdown content={'~~old~~\n\n---\n\nVisit https://openmotion.example.com'} onCopyCode={onCopyText} />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  expect(document.querySelector('.om-sa-md-del')?.textContent).toBe('old');
+  expect(document.querySelector('.om-sa-md-hr')).toBeTruthy();
+  expect(document.querySelector<HTMLAnchorElement>('.om-sa-link')?.href).toBe('https://openmotion.example.com/');
+});
+
+it('enters pure Coding mode from starter card without creative templates and renders sidebar/header intent icons', async () => {
+  const createdId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  let capturedTurnBody: Record<string, any> | null = null;
+
+  const chatsList: SuperAgentChatSummary[] = [
+    {
+      id: CHAT_ID,
+      title: 'Fix parser bug',
+      intent: 'coding',
+      engine: 'codex',
+      state: 'running',
+      artifactCount: 0,
+      messageCount: 1,
+      updatedAt: 4000,
+      createdAt: 1000,
+    },
+    {
+      id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+      title: 'Landing Prototype',
+      intent: 'website',
+      engine: 'codex',
+      state: 'idle',
+      artifactCount: 1,
+      messageCount: 2,
+      updatedAt: 3000,
+      createdAt: 1000,
+    },
+    {
+      id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+      title: 'Promo Reel',
+      intent: 'video',
+      engine: 'codex',
+      state: 'failed',
+      artifactCount: 0,
+      messageCount: 2,
+      updatedAt: 2000,
+      createdAt: 1000,
+    },
+    {
+      id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+      title: 'Explain OAuth tokens',
+      intent: 'chat',
+      pinned: true,
+      engine: 'codex',
+      state: 'idle',
+      artifactCount: 0,
+      messageCount: 2,
+      updatedAt: 1000,
+      createdAt: 1000,
+    },
+  ];
+
+  const codingChat: SuperAgentChat = {
+    ...sampleChat,
+    id: CHAT_ID,
+    title: 'Fix parser bug',
+    intent: 'coding',
+    state: 'running',
+    artifacts: [],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({
+        agents: [{ id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [{ id: 'gpt-5', label: 'GPT-5' }] }],
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) return json(sampleResources);
+    if (url === `${SUPER_AGENT_API}/chats` && (!init?.method || init.method === 'GET')) {
+      return json({ conversations: chatsList });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && init?.method === 'POST') {
+      return json({ conversation: { ...codingChat, id: createdId, state: 'idle', title: 'New conversation', messages: [] } });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${createdId}/turn` && init?.method === 'POST') {
+      capturedTurnBody = init.body ? JSON.parse(String(init.body)) : null;
+      return json({
+        conversation: {
+          ...codingChat,
+          id: createdId,
+          title: 'Inspect package.json',
+          intent: 'coding',
+          workingDir: capturedTurnBody?.workingDir,
+          messages: [{ id: 'u-1', role: 'user', text: capturedTurnBody?.text, createdAt: Date.now() }],
+        },
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}`) {
+      return json({ conversation: codingChat });
+    }
+    return json({});
+  }) as any;
+
+  // 1. Verify starter Coding card + pure coding workspace + submit payload
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  // Sidebar items show matched intent icons & keep badge when running/failed + pinned preserves chat icon
+  expect(document.querySelector('.om-sa-chat-icon[data-intent="coding"][data-tone="coding"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-status-badge[data-state="running"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-icon[data-intent="website"][data-tone="agent"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-icon[data-intent="video"][data-tone="video"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-status-badge[data-state="failed"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-icon[data-intent="chat"][data-tone="neutral"]')).toBeTruthy();
+
+  const codingCard = [...document.querySelectorAll('.om-sa-starter-card')].find(
+    el => el.textContent?.includes('Coding'),
+  ) as HTMLButtonElement;
+  expect(codingCard).toBeTruthy();
+  await act(async () => codingCard.click());
+  await flush();
+
+  expect(document.body.textContent).toContain('Code, debug & ship');
+  expect(document.querySelector('.om-sa-showcase-panel')).toBeNull();
+  expect(document.body.textContent).toContain('Workspace folder');
+  expect(document.body.textContent).toContain('General coding');
+  expect(document.querySelector('.om-sa-stream-title-icon[data-tone="coding"]')).toBeTruthy();
+
+  // Set working folder via popover
+  const folderBtn = [...document.querySelectorAll('.om-sa-composer-top-pill')].find(
+    el => el.textContent?.includes('Workspace folder'),
+  ) as HTMLButtonElement;
+  await act(async () => folderBtn.click());
+  await flush();
+  const folderInput = document.querySelector<HTMLInputElement>('.om-sa-mode-url-input')!;
+  await act(async () => {
+    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    proto.call(folderInput, '/tmp/my-repo');
+    folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+    folderInput.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const applyBtn = [...document.querySelectorAll('.om-sa-popover-pill')].find(
+    el => el.textContent === 'Apply',
+  ) as HTMLButtonElement;
+  await act(async () => applyBtn.click());
+  await flush();
+
+  // Submit prompt and verify clean coding turn payload (no [Mode: ...] noise)
+  const textarea = document.querySelector<HTMLTextAreaElement>('.om-sa-composer textarea')!;
+  await act(async () => {
+    const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    proto.call(textarea, 'Inspect package.json');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flush();
+  const sendBtn = document.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
+  await act(async () => sendBtn.click());
+  await flush();
+
+  expect(capturedTurnBody).toBeTruthy();
+  expect(capturedTurnBody?.mode).toBe('coding');
+  expect(capturedTurnBody?.workingDir).toBe('/tmp/my-repo');
+  expect(capturedTurnBody?.text).toBe('Inspect package.json');
+
+  // 2. Active coding chat renders coding intent icon in header
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  expect(document.querySelector('.om-sa-stream-title-icon[data-tone="coding"]')).toBeTruthy();
 });

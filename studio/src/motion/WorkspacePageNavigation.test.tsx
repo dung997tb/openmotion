@@ -5,11 +5,11 @@ import { templateContributionUrl } from './templateContribution';
 import { act, useEffect } from 'react';
 import { gemini4Videos } from './gemini4Videos';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import type { StudioCreation } from './CreativeWorkspace';
 import { MotionApp } from './MotionApp';
 import { I18nProvider } from '../i18n/I18n';
-import { useWorkspaceChrome } from './WorkspaceFrame';
+import { preloadAllWorkspaceSurfaces, useWorkspaceChrome } from './WorkspaceFrame';
 import { readWorkspacePage, settingsSections } from './workspacePageRouting';
 import { workspaceHistoryIndex, writeWorkspaceHistory } from '../utils/workspaceHistory';
 
@@ -64,6 +64,10 @@ const returnThroughBreadcrumb = async (label: string) => {
   await act(async () => { link!.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
 };
 async function mount(key = 0) { await act(async () => root.render(<I18nProvider initialLocale="en"><MotionApp key={key} /></I18nProvider>)); }
+beforeAll(async () => {
+  await preloadAllWorkspaceSurfaces();
+});
+
 beforeEach(() => {
   localStorage.clear(); history.replaceState(null, '', firstUrl);
   editor.mounts = 0; editor.fail = false; editor.wait = async () => {};

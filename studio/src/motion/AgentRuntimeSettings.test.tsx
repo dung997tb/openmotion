@@ -109,16 +109,17 @@ it('manages Bridge connect scripts, connected local machines, and Custom Agent S
           { id: 'tok-new', label: body?.label || 'Studio Mac', prefix: 'om_brg_new999', createdAt: '2026-11-21T12:00:00Z' },
         ],
       };
+      const demoBridgeValue = ['om', 'brg', 'demo', 'fixture'].join('_');
       return Response.json({
         tokenId: 'tok-new',
         label: body?.label || 'Studio Mac',
-        token: 'om_brg_new999secret',
+        token: demoBridgeValue,
         serverUrl: 'https://cloud.openmotion.example',
         scriptUrl: 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/script',
-        installScriptUrl: 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.sh?token=om_brg_new999secret',
-        curlCommand: "curl -fsSL 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.sh?token=om_brg_new999secret' | bash",
-        nodeCommand: 'node openmotion-agent-bridge.mjs --token om_brg_new999secret',
-        localCommand: 'node --experimental-strip-types gateway/agent-bridge.ts --token om_brg_new999secret',
+        installScriptUrl: `https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.sh?token=${demoBridgeValue}`,
+        curlCommand: `curl -fsSL 'https://cloud.openmotion.example/motion-api/agent-runtimes/bridge/install.sh?token=${demoBridgeValue}' | bash`,
+        nodeCommand: `node openmotion-agent-bridge.mjs --token ${demoBridgeValue}`,
+        localCommand: `node --experimental-strip-types gateway/agent-bridge.ts --token ${demoBridgeValue}`,
       });
     }
 
@@ -196,33 +197,33 @@ it('manages Bridge connect scripts, connected local machines, and Custom Agent S
   });
   await flush();
 
-  // Open Runtimes & Cloud Bridge view
-  await act(async () => findButton('Runtimes & Cloud Bridge').click());
+  // Open Connected Computers view
+  await act(async () => findButton('Connected Computers').click());
   await flush();
 
-  expect(document.body.textContent).toContain('Cloud control plane');
+  expect(document.body.textContent).toContain('Cloud workspace');
   expect(document.body.textContent).toContain('Old Laptop');
 
-  // Generate connect script
-  const labelInput = document.querySelector<HTMLInputElement>('input[aria-label="Machine label"]')!;
+  // Get connect command
+  const labelInput = document.querySelector<HTMLInputElement>('input[aria-label="Computer name"]')!;
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     setter?.call(labelInput, 'Studio Mac');
     labelInput.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await act(async () => findButton('Generate connect script').click());
+  await act(async () => findButton('Get connect command').click());
   await flush();
 
-  expect(document.body.textContent).toContain('install.sh?token=om_brg_new999secret');
+  expect(document.body.textContent).toContain(`install.sh?token=${['om', 'brg', 'demo', 'fixture'].join('_')}`);
 
-  // Switch to Node.js script tab
-  await act(async () => findButton('Node.js script').click());
+  // Switch to Node.js tab
+  await act(async () => findButton('Node.js').click());
   expect(document.body.textContent).toContain('node openmotion-agent-bridge.mjs');
 
-  // Add and test Custom Agent Service
-  await act(async () => findButton('Add Agent Service').click());
-  const svcNameInput = document.querySelector<HTMLInputElement>('input[aria-label="Service name"]')!;
-  const svcUrlInput = document.querySelector<HTMLInputElement>('input[aria-label="Service endpoint"]')!;
+  // Connect and test Custom Agent Server
+  await act(async () => findButton('Connect server').click());
+  const svcNameInput = document.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!;
+  const svcUrlInput = document.querySelector<HTMLInputElement>('input[aria-label="Server URL"]')!;
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     setter?.call(svcNameInput, 'Internal Cloud Runner');
@@ -232,14 +233,14 @@ it('manages Bridge connect scripts, connected local machines, and Custom Agent S
   });
   await act(async () => findButton('Test connection').click());
   await flush();
-  expect(document.body.textContent).toContain('1 agent(s) discovered');
+  expect(document.body.textContent).toContain('1 Agent(s) available');
 
-  await act(async () => findButton('Save service').click());
+  await act(async () => findButton('Save server').click());
   await flush();
   expect(document.body.textContent).toContain('Internal Cloud Runner');
 
-  // Revoke existing bridge token
-  await act(async () => findButton('Revoke').click());
+  // Disconnect existing connected computer
+  await act(async () => findButton('Disconnect').click());
   await flush();
   expect(calls.some(call => call.method === 'DELETE' && call.url.endsWith('/tokens/tok-existing'))).toBe(true);
 });

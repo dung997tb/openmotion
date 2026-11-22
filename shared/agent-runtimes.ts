@@ -1,5 +1,13 @@
 import type { LocalAgent } from './local-agents.ts';
-import type { SuperAgentArtifact, SuperAgentPermissionMode } from './super-agent.ts';
+import type {
+  SuperAgentArtifact,
+  SuperAgentFileOperation,
+  SuperAgentPermissionMode,
+  SuperAgentPlanEntry,
+  SuperAgentToolCategory,
+  SuperAgentTurnActivity,
+  SuperAgentUsage,
+} from './super-agent.ts';
 
 export const AGENT_RUNTIMES_API = '/motion-api/agent-runtimes';
 export const AGENT_SERVICE_PROTOCOL = 'openmotion-agent-v1';
@@ -106,10 +114,40 @@ export type AgentRunDispatch = {
 
 export type AgentRunEvent =
   | { type: 'thread.started'; threadId: string }
+  | { type: 'status.update'; phase: SuperAgentTurnActivity['phase']; label?: string; activeToolName?: string }
+  | { type: 'reasoning.delta'; messageId?: string; delta: string }
+  | { type: 'reasoning.complete'; messageId?: string; text: string; durationMs?: number }
+  | { type: 'plan.update'; entries: SuperAgentPlanEntry[] }
+  | { type: 'usage.update'; usage: SuperAgentUsage }
   | { type: 'message.delta'; messageId?: string; delta: string }
   | { type: 'message.complete'; messageId?: string; text: string }
-  | { type: 'tool.started'; callId: string; tool: string; args?: Record<string, unknown> }
-  | { type: 'tool.finished'; callId: string; tool: string; args?: Record<string, unknown>; ok: boolean; output?: unknown; summary?: string }
+  | {
+      type: 'tool.started';
+      callId: string;
+      tool: string;
+      args?: Record<string, unknown>;
+      category?: SuperAgentToolCategory;
+      title?: string;
+      command?: string;
+      fileOp?: SuperAgentFileOperation;
+      files?: SuperAgentFileOperation[];
+    }
+  | {
+      type: 'tool.finished';
+      callId: string;
+      tool: string;
+      args?: Record<string, unknown>;
+      ok: boolean;
+      output?: unknown;
+      summary?: string;
+      category?: SuperAgentToolCategory;
+      title?: string;
+      command?: string;
+      exitCode?: number;
+      fileOp?: SuperAgentFileOperation;
+      files?: SuperAgentFileOperation[];
+      durationMs?: number;
+    }
   | { type: 'artifact.upsert'; artifact: Partial<SuperAgentArtifact> }
   | { type: 'turn.completed' }
   | { type: 'turn.failed'; error: string };

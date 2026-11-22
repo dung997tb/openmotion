@@ -537,14 +537,17 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         if (!context.runtimeRoot) throw new Error('浏览器服务尚未就绪');
         const browser = context.browser ??= new WorkspaceBrowser(context.runtimeRoot);
         const browserSession = `sa-${chatId}`;
-        if (!action && req.method === 'POST') return json(res, 200, (await browser.open(browserSession, tabId, (await input(req)).url)).state);
+        if (!action && req.method === 'POST') {
+          const data = await input(req);
+          return json(res, 200, (await browser.open(browserSession, tabId, data.url, { width: data.width, height: data.height, dpr: data.dpr })).state);
+        }
         if (!action && req.method === 'DELETE') { await browser.remove(browserSession, tabId); return json(res, 200, { closed: true }); }
         const tab = await browser.get(browserSession, tabId);
         if (action === 'events' && req.method === 'GET') { await tab.watch(res); return; }
         if (req.method === 'POST') {
           const data = await input(req);
           if (action === 'command') await tab.command(data.action, data.url);
-          else if (action === 'resize') await tab.resize(data.width, data.height);
+          else if (action === 'resize') await tab.resize(data.width, data.height, data.dpr);
           else if (action === 'input') await tab.input(data);
           else throw new Error('未知浏览器操作');
           return json(res, 200, tab.state);
@@ -868,14 +871,17 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       await store.session(sessionId);
       if (!context.runtimeRoot) throw new Error('浏览器服务尚未就绪');
       const browser = context.browser ??= new WorkspaceBrowser(context.runtimeRoot);
-      if (!action && req.method === 'POST') return json(res, 200, (await browser.open(sessionId, tabId, (await input(req)).url)).state);
+      if (!action && req.method === 'POST') {
+        const data = await input(req);
+        return json(res, 200, (await browser.open(sessionId, tabId, data.url, { width: data.width, height: data.height, dpr: data.dpr })).state);
+      }
       if (!action && req.method === 'DELETE') { await browser.remove(sessionId, tabId); return json(res, 200, { closed: true }); }
       const tab = await browser.get(sessionId, tabId);
       if (action === 'events' && req.method === 'GET') { await tab.watch(res); return; }
       if (req.method === 'POST') {
         const data = await input(req);
         if (action === 'command') await tab.command(data.action, data.url);
-        else if (action === 'resize') await tab.resize(data.width, data.height);
+        else if (action === 'resize') await tab.resize(data.width, data.height, data.dpr);
         else if (action === 'input') await tab.input(data);
         else throw new Error('未知浏览器操作');
         return json(res, 200, tab.state);

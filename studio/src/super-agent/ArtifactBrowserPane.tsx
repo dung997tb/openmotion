@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { brandCatalogFile, type BrandCatalogEntry } from '../../../shared/brand-catalog';
 import type { BrandKit } from '../../../shared/brand-kit';
 import type { WebPageState } from '../../../shared/browser';
@@ -12,23 +12,32 @@ import {
   type DesignViewportId,
 } from '../../../shared/design-project';
 import {
+  NEW_VIEWER_TAB_ID,
   artifactCanonicalAddress,
+  safeBrowserTabId,
   type SuperAgentArtifact,
   type SuperAgentArtifactKind,
   type SuperAgentResourceAttachment,
 } from '../../../shared/super-agent';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Tooltip } from '../components/ui/Tooltip';
-import { CodeViewer } from '../design/CodeViewer';
 import { designClient } from '../design/designClient';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { WebBrowser, type WebBrowserHandle } from '../motion/WebBrowser';
+import type { WebBrowserHandle } from '../motion/WebBrowser';
+import { lazyWithChunkReload, preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import { resourceIcon } from './ResourcePickerDialog';
 import { superAgentBrowserEndpoint } from './superAgentClient';
 
-export const NEW_VIEWER_TAB_ID = '__new__';
+export { NEW_VIEWER_TAB_ID, safeBrowserTabId };
+
+const CodeViewer = preloadableLazyWithChunkReload(() =>
+  import('../design/CodeViewer').then(m => ({ default: m.CodeViewer })),
+);
+const WebBrowser = lazyWithChunkReload(() =>
+  import('../motion/WebBrowser').then(m => ({ default: m.WebBrowser })),
+);
 
 function artifactTabIcon(kind: SuperAgentArtifactKind): string {
   switch (kind) {
@@ -46,8 +55,12 @@ function artifactTabIcon(kind: SuperAgentArtifactKind): string {
       return 'music-2-line';
     case 'brand-kit':
       return 'palette-line';
+    case 'game-project':
+      return 'gamepad-line';
     case 'web':
       return 'global-line';
+    default:
+      return 'file-line';
   }
 }
 
@@ -66,11 +79,6 @@ function normalizeBrowserAddress(raw: string): string | null {
 
 function searchWebUrl(query: string): string {
   return `https://www.bing.com/search?q=${encodeURIComponent(query.trim())}`;
-}
-
-export function safeBrowserTabId(artifactId: string): string {
-  const cleaned = artifactId.replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 80);
-  return cleaned || 'web-tab';
 }
 
 function ManagedMediaElement({ kind, src }: { kind: 'video' | 'audio'; src: string }) {
@@ -205,7 +213,9 @@ function DesignProjectArtifactView({
               <p>{codeError}</p>
             </div>
           ) : (
-            <CodeViewer content={fileContent} />
+            <Suspense fallback={<div className="om-sa-viewer-loading"><Skeleton style={{ width: '100%', height: 180 }} /></div>}>
+              <CodeViewer content={fileContent} />
+            </Suspense>
           )}
         </div>
       </div>
@@ -463,6 +473,7 @@ export function ArtifactBrowserPane({
   onAttachArtifact,
   onOpenInDesignStudio,
   onOpenInMotionStudio,
+  onOpenInGameStudio,
   onOpenInAssets,
   onOpenInBrandKit,
 }: {
@@ -484,6 +495,7 @@ export function ArtifactBrowserPane({
   onAttachArtifact: (artifact: SuperAgentArtifact) => void;
   onOpenInDesignStudio: (projectId: string) => void;
   onOpenInMotionStudio: (projectId: string) => void;
+  onOpenInGameStudio?: (projectId: string) => void;
   onOpenInAssets: (assetId: string, versionId?: string) => void;
   onOpenInBrandKit: (kitId?: string) => void;
 }) {
@@ -563,14 +575,14 @@ export function ArtifactBrowserPane({
   const quickOpenItems = useMemo(
     () =>
       workspaceItems
-        .filter(item => ['design-project', 'motion-project', 'asset', 'brand-kit'].includes(item.kind)),
+        .filter(item => ['design-project', 'motion-project', 'game-project', 'asset', 'brand-kit'].includes(item.kind)),
     [workspaceItems],
   );
 
   const normalizedNewTabQuery = newTabQuery.trim().toLowerCase();
 
   const matchesFilterArtifact = (item: SuperAgentArtifact) => {
-    if (newTabFilter === 'web-apps' && item.kind !== 'design-project') return false;
+    if (newTabFilter === 'web-apps' && item.kind !== 'design-project' && item.kind !== 'game-project') return false;
     if (newTabFilter === 'motion' && item.kind !== 'motion-project' && item.kind !== 'motion-export') return false;
     if (newTabFilter === 'media' && !['asset-image', 'asset-video', 'asset-audio'].includes(item.kind)) return false;
     if (newTabFilter === 'brand-kit' && item.kind !== 'brand-kit') return false;
@@ -580,7 +592,7 @@ export function ArtifactBrowserPane({
   };
 
   const matchesFilterResource = (item: SuperAgentResourceAttachment) => {
-    if (newTabFilter === 'web-apps' && item.kind !== 'design-project') return false;
+    if (newTabFilter === 'web-apps' && item.kind !== 'design-project' && item.kind !== 'game-project') return false;
     if (newTabFilter === 'motion' && item.kind !== 'motion-project') return false;
     if (newTabFilter === 'media' && item.kind !== 'asset') return false;
     if (newTabFilter === 'brand-kit' && item.kind !== 'brand-kit') return false;
@@ -616,9 +628,11 @@ export function ArtifactBrowserPane({
   const externalHref = activeArtifact
     ? activeArtifact.kind === 'design-project' && activeArtifact.projectId
       ? designRoutes.raw(activeArtifact.projectId, activeArtifact.entry || 'index.html')
-      : activeArtifact.kind === 'web'
+      : activeArtifact.kind === 'game-project' && activeArtifact.url
         ? activeArtifact.url
-        : undefined
+        : activeArtifact.kind === 'web'
+          ? activeArtifact.url
+          : undefined
     : undefined;
 
   const downloadHref = activeArtifact?.downloadUrl
@@ -771,7 +785,7 @@ export function ArtifactBrowserPane({
             />
           </form>
 
-          {addressEditing && addressDraft.trim() && !/^(?:design|motion|export|asset|brand):\/\//i.test(addressDraft.trim()) && (() => {
+          {addressEditing && addressDraft.trim() && !/^(?:design|motion|game|export|asset|brand):\/\//i.test(addressDraft.trim()) && (() => {
             const trimmed = addressDraft.trim();
             const normalized = normalizeBrowserAddress(trimmed);
             const q = trimmed.toLowerCase();
@@ -899,6 +913,31 @@ export function ArtifactBrowserPane({
               <RemixIcon name="movie-line" size={14} />
               <span>{t('Open in Motion Studio')}</span>
             </Button>
+          )}
+
+          {activeArtifact?.kind === 'game-project' && (
+            <>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-toolbar-btn"
+                onClick={() => onAttachArtifact(activeArtifact)}
+              >
+                <RemixIcon name="add-line" size={14} />
+                <span>{t('Attach to Chat')}</span>
+              </Button>
+              {activeArtifact.projectId && onOpenInGameStudio && (
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-toolbar-btn"
+                  onClick={() => onOpenInGameStudio(activeArtifact.projectId!)}
+                >
+                  <RemixIcon name="sparkling-line" size={14} />
+                  <span>{t('Open in Game Studio')}</span>
+                </Button>
+              )}
+            </>
           )}
 
           {activeArtifact && ['asset-image', 'asset-video', 'asset-audio'].includes(activeArtifact.kind) && (
@@ -1158,16 +1197,36 @@ export function ArtifactBrowserPane({
           </div>
         ) : activeArtifact.kind === 'brand-kit' ? (
           <BrandKitArtifactView artifact={activeArtifact} reloadKey={reloadKey} />
+        ) : activeArtifact.kind === 'game-project' && activeArtifact.url ? (
+          <div className="om-sa-iframe-stage" data-viewport="desktop">
+            <div className="om-sa-iframe-frame">
+              <iframe
+                key={`${activeArtifact.projectId ?? activeArtifact.id}:${reloadKey}`}
+                title={activeArtifact.title}
+                src={activeArtifact.url}
+                sandbox="allow-scripts allow-pointer-lock allow-popups allow-modals"
+              />
+            </div>
+          </div>
         ) : activeArtifact.kind === 'web' && activeArtifact.url && chatId ? (
           <div className="om-sa-web-stage">
-            <WebBrowser
-              ref={webRef}
-              sessionId={chatId}
-              tabId={safeBrowserTabId(activeArtifact.id)}
-              endpoint={superAgentBrowserEndpoint(chatId, safeBrowserTabId(activeArtifact.id))}
-              url={activeArtifact.url}
-              onState={setWebState}
-            />
+            <Suspense
+              fallback={
+                <div className="om-sa-viewer-loading">
+                  <Skeleton style={{ width: '48%', height: 24 }} />
+                  <Skeleton style={{ width: '100%', height: 240 }} />
+                </div>
+              }
+            >
+              <WebBrowser
+                ref={webRef}
+                sessionId={chatId}
+                tabId={safeBrowserTabId(activeArtifact.id)}
+                endpoint={superAgentBrowserEndpoint(chatId, safeBrowserTabId(activeArtifact.id))}
+                url={activeArtifact.url}
+                onState={setWebState}
+              />
+            </Suspense>
           </div>
         ) : (
           <div className="om-empty om-sa-viewer-empty">

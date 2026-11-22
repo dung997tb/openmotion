@@ -33,6 +33,7 @@ async function resolvable(candidates: string[]): Promise<Set<string>> {
     "../motion/scenarioNavigation.css",
     "../scenario/scenario.css",
     "../scenario/steps/steps.css",
+    "../super-agent/superAgent.css",
     "../../../packages/design-system/studio/formFields.css",
     "../../../packages/design-system/studio/menuPanels.css",
     "../../../packages/design-system/studio/propertyPanelControls.css",

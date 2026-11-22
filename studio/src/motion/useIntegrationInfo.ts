@@ -5,30 +5,57 @@ const INTEGRATION_CACHE_TTL_MS = 10_000;
 const cacheEnabled = typeof process === 'undefined' || (!process.env?.VITEST && process.env?.NODE_ENV !== 'test');
 
 let cachedIntegration: { value: IntegrationInfo; expiresAt: number } | null = null;
-let inflightIntegration: Promise<IntegrationInfo> | null = null;
+let inflightIntegration: { promise: Promise<IntegrationInfo>; controller: AbortController; subscribers: number } | null = null;
 
-async function loadIntegrationShared(forceRefresh = false): Promise<IntegrationInfo> {
-  if (!forceRefresh && cacheEnabled && cachedIntegration && cachedIntegration.expiresAt > Date.now()) {
-    return cachedIntegration.value;
+function subscribeIntegration(forceRefresh: boolean): { promise: Promise<IntegrationInfo>; cancel: () => void } {
+  if (!cacheEnabled) {
+    const controller = new AbortController();
+    const promise = (async () => {
+      const response = await fetch('/motion-api/integration', { signal: controller.signal });
+      if (!response.ok) throw new Error('Unavailable');
+      const value = await response.json() as IntegrationInfo;
+      if (!isIntegrationInfo(value)) throw new Error('Invalid integration');
+      return value;
+    })();
+    return { promise, cancel: () => controller.abort() };
   }
-  if (!forceRefresh && inflightIntegration) {
-    return inflightIntegration;
+  if (!forceRefresh && cachedIntegration && cachedIntegration.expiresAt > Date.now()) {
+    return { promise: Promise.resolve(cachedIntegration.value), cancel: () => {} };
   }
-  const run = (async () => {
-    const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(8000) : undefined;
-    const response = await fetch('/motion-api/integration', signal ? { signal } : undefined);
-    if (!response.ok) throw new Error('Unavailable');
-    const value = await response.json() as IntegrationInfo;
-    if (!isIntegrationInfo(value)) throw new Error('Invalid integration');
-    if (cacheEnabled) {
-      cachedIntegration = { value, expiresAt: Date.now() + INTEGRATION_CACHE_TTL_MS };
-    }
-    return value;
-  })();
-  inflightIntegration = run;
-  return run.finally(() => {
-    if (inflightIntegration === run) inflightIntegration = null;
-  });
+  if (forceRefresh || !inflightIntegration) {
+    const controller = new AbortController();
+    const entry = {
+      controller,
+      subscribers: 0,
+      promise: (async () => {
+        const response = await fetch('/motion-api/integration', { signal: controller.signal });
+        if (!response.ok) throw new Error('Unavailable');
+        const value = await response.json() as IntegrationInfo;
+        if (!isIntegrationInfo(value)) throw new Error('Invalid integration');
+        cachedIntegration = { value, expiresAt: Date.now() + INTEGRATION_CACHE_TTL_MS };
+        return value;
+      })(),
+    };
+    inflightIntegration = entry;
+    void entry.promise.finally(() => {
+      if (inflightIntegration === entry) inflightIntegration = null;
+    });
+  }
+  const active = inflightIntegration!;
+  active.subscribers++;
+  let cancelled = false;
+  return {
+    promise: active.promise,
+    cancel: () => {
+      if (cancelled) return;
+      cancelled = true;
+      active.subscribers = Math.max(0, active.subscribers - 1);
+      if (active.subscribers === 0 && inflightIntegration === active) {
+        inflightIntegration = null;
+        active.controller.abort();
+      }
+    },
+  };
 }
 
 export function useIntegrationInfo() {
@@ -45,10 +72,14 @@ export function useIntegrationInfo() {
       setInfo(null);
     }
     setFailed(false);
-    void loadIntegrationShared(forceRefresh)
+    const sub = subscribeIntegration(forceRefresh);
+    void sub.promise
       .then(value => { if (!cancelled) setInfo(value); })
       .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      sub.cancel();
+    };
   }, [attempt]);
   return { info, failed, retry: () => retry(value => value + 1) };
 }

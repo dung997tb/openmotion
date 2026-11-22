@@ -97,12 +97,14 @@ type ActiveBridgeRun = {
   reject: (error: Error) => void;
 };
 
-const EMPTY_STATE: StoredRuntimesState = {
-  tokens: [],
-  bridges: [],
-  services: [],
-  defaultRuntimeId: null,
-};
+function createEmptyState(): StoredRuntimesState {
+  return {
+    tokens: [],
+    bridges: [],
+    services: [],
+    defaultRuntimeId: null,
+  };
+}
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -234,10 +236,10 @@ export class AgentRuntimeRegistry {
 
   private async loadState(): Promise<StoredRuntimesState> {
     if (!this.statePromise) {
-      this.statePromise = readSettings<Partial<StoredRuntimesState>>(this.file, EMPTY_STATE).then(raw => ({
-        tokens: Array.isArray(raw.tokens) ? raw.tokens : [],
-        bridges: Array.isArray(raw.bridges) ? raw.bridges : [],
-        services: Array.isArray(raw.services) ? raw.services : [],
+      this.statePromise = readSettings<Partial<StoredRuntimesState>>(this.file, createEmptyState()).then(raw => ({
+        tokens: Array.isArray(raw.tokens) ? structuredClone(raw.tokens) : [],
+        bridges: Array.isArray(raw.bridges) ? structuredClone(raw.bridges) : [],
+        services: Array.isArray(raw.services) ? structuredClone(raw.services) : [],
         defaultRuntimeId: typeof raw.defaultRuntimeId === 'string' ? raw.defaultRuntimeId : null,
       }));
     }

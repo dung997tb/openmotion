@@ -68,9 +68,10 @@ test('standalone bridge script passes node --check, embeds all 29 Agents, and in
     await rm(tmpDir, { recursive: true, force: true });
   }
 
+  const sampleBridgeValue = `om_brg_${'a'.repeat(32)}`;
   const installScript = renderBridgeInstallShellScript({
     serverUrl: 'https://app.example.com',
-    token: 'om_brg_0123456789abcdef0123456789abcdef',
+    token: sampleBridgeValue,
   });
   assert.match(installScript, /^#!\/usr\/bin\/env bash/);
   assert.match(installScript, /https:\/\/app\.example\.com\/motion-api\/agent-runtimes\/bridge\/script/);
@@ -81,7 +82,7 @@ test('standalone bridge script passes node --check, embeds all 29 Agents, and in
   }));
   assert.throws(() => renderBridgeInstallShellScript({
     serverUrl: 'javascript:alert(1)',
-    token: 'om_brg_0123456789abcdef',
+    token: `om_brg_${'b'.repeat(16)}`,
   }));
 });
 
@@ -429,5 +430,56 @@ test('remote custom agent service (openmotion-agent-v1) probes, keeps secrets pr
     await agentRuntimesFor(store.directory).close();
     await running.close();
     await new Promise<void>(resolve => mockAgentServer.close(() => resolve()));
+  }
+}));
+
+test('separate AgentRuntimeRegistry instances isolate fallback empty state across workspaces', async () => {
+  const dirA = await mkdtemp(path.join(os.tmpdir(), 'openmotion-rt-a-'));
+  const dirB = await mkdtemp(path.join(os.tmpdir(), 'openmotion-rt-b-'));
+  try {
+    const regA = agentRuntimesFor(dirA);
+    const regB = agentRuntimesFor(dirB);
+    const created = await regA.createBridgeToken('Workspace A', 'http://127.0.0.1:4173');
+    const dirResultB = await regB.directory('http://127.0.0.1:4173');
+    assert.equal(dirResultB.tokens.length, 0);
+    assert.equal(await regB.authenticateBridgeToken(created.token), null);
+    assert.ok(await regA.authenticateBridgeToken(created.token));
+    await regA.close();
+    await regB.close();
+  } finally {
+    await rm(dirA, { recursive: true, force: true });
+    await rm(dirB, { recursive: true, force: true });
+  }
+});
+
+test('successful generic CLI Super Agent turns transition to idle instead of cancelled', () => fixture(async store => {
+  const { SuperAgentConversations } = await import('../gateway/super-agent.ts');
+  const scriptDir = await mkdtemp(path.join(os.tmpdir(), 'openmotion-generic-cli-'));
+  const fakeBin = path.join(scriptDir, 'fake-cli.mjs');
+  await writeFile(
+    fakeBin,
+    `#!/usr/bin/env node\nprocess.stdin.resume();\nprocess.stdin.on('end', () => { process.stdout.write('Generic CLI reply ok'); });\n`,
+    { mode: 0o755 },
+  );
+  const service = new SuperAgentConversations(store, {
+    resolveAgent: async () => fakeBin,
+  });
+  try {
+    const chat = await service.create({ engine: 'aider', permissionMode: 'auto' });
+    await service.start(chat.id, { requestId: 'req-generic-1', text: 'Say hello' }, {
+      origin: 'http://127.0.0.1:4173',
+      phase1: () => ({ call: async () => ({}) }) as any,
+    });
+    let snap = await service.get(chat.id);
+    for (let i = 0; i < 80; i++) {
+      snap = await service.get(chat.id);
+      if (snap.state !== 'running') break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.equal(snap.state, 'idle');
+    assert.ok(snap.messages.some(m => m.role === 'assistant' && m.text.includes('Generic CLI reply ok')));
+  } finally {
+    await service.close();
+    await rm(scriptDir, { recursive: true, force: true });
   }
 }));

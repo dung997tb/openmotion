@@ -15,10 +15,20 @@ import {
 } from '../shared/agent-runtimes.ts';
 import { isMain } from '../shared/entry.ts';
 import { localAgents, type AgentDefinition, type LocalAgent } from '../shared/local-agents.ts';
+import { countUnifiedDiffStats, type SuperAgentFileOperation, type SuperAgentPlanEntry, type SuperAgentUsage } from '../shared/super-agent.ts';
 import { consumeSseFrames, sanitizeServiceError } from './agent-service-adapter.ts';
 import { AssetAgentRpc } from './asset-chat.ts';
 import { LocalAgentDirectory, resolveLocalAgent } from './local-agents.ts';
 import type { ClaudeTurnRunner } from './super-agent.ts';
+import {
+  AcpBootstrapError,
+  runAcpAdapter,
+  runAgyPrintStreamAdapter,
+  runCliFallbackAdapter,
+  runPiRpcAdapter,
+  type AcpMcpServerEntry,
+  type ProviderAdapterCallbacks,
+} from './super-agent-adapters.ts';
 
 export type AgentBridgeOptions = {
   serverUrl: string;
@@ -243,7 +253,7 @@ export async function runMcpRelayFromEnv(): Promise<void> {
         },
       });
     } else if (msg.method === 'tools/call') {
-      const toolName = String(msg.params?.name || '').replace(/^mcp__openmotion__/, '');
+      const toolName = String(msg.params?.name || '').replace(/^mcp_+openmotion_+/, '');
       const toolArgs = msg.params?.arguments && typeof msg.params.arguments === 'object' ? msg.params.arguments : {};
       try {
         const response = await fetch(`${serverUrl}${AGENT_RUNTIMES_API}/bridge/tool-call`, {
@@ -354,6 +364,58 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
     await postJson('/bridge/events', { runId, event });
   };
 
+  const makeBridgeCallbacks = (runId: string): ProviderAdapterCallbacks => ({
+    onThreadId: threadId => sendRunEvent(runId, { type: 'thread.started', threadId }),
+    onStatus: (phase, label, activeToolName) => sendRunEvent(runId, {
+      type: 'status.update',
+      phase,
+      ...(label ? { label } : {}),
+      ...(activeToolName ? { activeToolName } : {}),
+    }),
+    onReasoningDelta: (id, delta) => sendRunEvent(runId, { type: 'reasoning.delta', messageId: id, delta }),
+    onReasoningComplete: (id, text, durationMs) => sendRunEvent(runId, { type: 'reasoning.complete', messageId: id, text, durationMs }),
+    onMessageDelta: (id, delta) => sendRunEvent(runId, { type: 'message.delta', messageId: id, delta }),
+    onMessageComplete: (id, text) => sendRunEvent(runId, { type: 'message.complete', messageId: id, text }),
+    onToolStarted: async ev => {
+      if (ev.tool.startsWith('openmotion_')) return;
+      await sendRunEvent(runId, {
+        type: 'tool.started',
+        callId: ev.callId,
+        tool: ev.tool,
+        category: ev.category,
+        title: ev.label,
+        command: ev.command,
+        fileOp: ev.fileOp,
+        files: ev.files,
+      });
+    },
+    onToolUpdated: async () => {
+      /* Final completion emitted via tool.finished */
+    },
+    onToolFinished: async (ev, rawResult, toolArgs) => {
+      if (ev.tool.startsWith('openmotion_')) return;
+      await sendRunEvent(runId, {
+        type: 'tool.finished',
+        callId: ev.callId,
+        tool: ev.tool,
+        args: toolArgs,
+        ok: ev.status === 'completed',
+        output: rawResult ?? ev.outputPreview,
+        summary: ev.summary,
+        category: ev.category,
+        title: ev.label,
+        command: ev.command,
+        exitCode: ev.exitCode,
+        fileOp: ev.fileOp,
+        files: ev.files,
+        durationMs: ev.durationMs,
+      });
+    },
+    onPlanUpdate: entries => sendRunEvent(runId, { type: 'plan.update', entries }),
+    onUsageUpdate: usage => sendRunEvent(runId, { type: 'usage.update', usage }),
+    onApprovalRequest: async () => false,
+  });
+
   const executeDispatchedTurn = async (dispatch: AgentRunDispatch) => {
     const runController = new AbortController();
     let killActive = () => {};
@@ -426,6 +488,26 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
                     id,
                     error: { code: -32601, message: 'Bridge session does not support this interactive host request' },
                   });
+                } else if (method === 'turn/started') {
+                  await sendRunEvent(dispatch.runId, { type: 'status.update', phase: 'thinking' });
+                } else if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
+                  await sendRunEvent(dispatch.runId, {
+                    type: 'reasoning.delta',
+                    messageId: String(p.itemId || 'reasoning'),
+                    delta: String(p.delta ?? ''),
+                  });
+                } else if (method === 'item/started' && p.item && ['commandExecution', 'fileChange', 'webSearch'].includes(p.item.type)) {
+                  const it = p.item;
+                  await sendRunEvent(dispatch.runId, {
+                    type: 'tool.started',
+                    callId: String(it.id || randomUUID()),
+                    tool: String(it.type),
+                    args: it.type === 'commandExecution'
+                      ? { command: it.command }
+                      : it.type === 'webSearch'
+                        ? { query: it.query }
+                        : { changes: it.changes },
+                  });
                 } else if (method === 'item/agentMessage/delta') {
                   await sendRunEvent(dispatch.runId, {
                     type: 'message.delta',
@@ -438,6 +520,71 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
                     messageId: String(p.item.id || 'assistant'),
                     text: String(p.item.text ?? ''),
                   });
+                } else if (method === 'item/completed' && p.item?.type === 'reasoning') {
+                  const summaryParts = Array.isArray(p.item.summary) ? p.item.summary.map((s: any) => String(s?.text ?? s ?? '')).filter(Boolean) : [];
+                  const contentParts = Array.isArray(p.item.content) ? p.item.content.map((c: any) => String(c?.text ?? c ?? '')).filter(Boolean) : [];
+                  const fullText = [p.item.text, ...summaryParts, ...contentParts].filter(Boolean).join('\n').trim();
+                  if (fullText) {
+                    await sendRunEvent(dispatch.runId, {
+                      type: 'reasoning.complete',
+                      messageId: String(p.item.id || 'reasoning'),
+                      text: fullText,
+                    });
+                  }
+                } else if (method === 'item/completed' && p.item?.type === 'commandExecution') {
+                  const it = p.item;
+                  const ok = it.status !== 'failed' && it.status !== 'declined' && (typeof it.exitCode !== 'number' || it.exitCode === 0);
+                  await sendRunEvent(dispatch.runId, {
+                    type: 'tool.finished',
+                    callId: String(it.id),
+                    tool: 'commandExecution',
+                    ok,
+                    category: 'command',
+                    command: typeof it.command === 'string' ? it.command : undefined,
+                    exitCode: typeof it.exitCode === 'number' ? it.exitCode : undefined,
+                    output: it.aggregatedOutput ?? it.stdout ?? it.stderr,
+                    durationMs: typeof it.durationMs === 'number' ? it.durationMs : undefined,
+                  });
+                } else if (method === 'item/completed' && p.item?.type === 'fileChange') {
+                  const it = p.item;
+                  const files: SuperAgentFileOperation[] = Array.isArray(it.changes)
+                    ? it.changes.filter((c: any) => c && typeof c.path === 'string').map((c: any) => {
+                        const k = String(c.kind || 'update').toLowerCase();
+                        const action: SuperAgentFileOperation['action'] = k.includes('add') || k.includes('create') ? 'create' : k.includes('del') ? 'delete' : 'edit';
+                        const diffStr = typeof c.diff === 'string' ? c.diff : '';
+                        const stats = diffStr ? countUnifiedDiffStats(diffStr) : undefined;
+                        return { action, path: String(c.path), ...(stats ?? {}), ...(diffStr ? { diffPreview: diffStr.slice(0, 4000) } : {}) };
+                      })
+                    : [];
+                  await sendRunEvent(dispatch.runId, {
+                    type: 'tool.finished',
+                    callId: String(it.id),
+                    tool: 'fileChange',
+                    ok: it.status !== 'failed' && it.status !== 'declined',
+                    category: files[0]?.action === 'create' ? 'file_write' : files[0]?.action === 'delete' ? 'file_delete' : 'file_edit',
+                    fileOp: files[0],
+                    files,
+                  });
+                } else if (method === 'turn/plan/updated' && Array.isArray(p.plan)) {
+                  const entries: SuperAgentPlanEntry[] = p.plan
+                    .filter((e: any) => e && typeof (e.step ?? e.content) === 'string')
+                    .map((e: any) => ({
+                      content: String(e.step ?? e.content),
+                      status: String(e.status || '').toLowerCase() === 'completed'
+                        ? 'completed'
+                        : String(e.status || '').toLowerCase().includes('progress')
+                          ? 'in_progress'
+                          : 'pending',
+                    }));
+                  await sendRunEvent(dispatch.runId, { type: 'plan.update', entries });
+                } else if (method === 'thread/tokenUsage/updated' && p.tokenUsage?.total) {
+                  const t = p.tokenUsage.total;
+                  const usage: SuperAgentUsage = {
+                    ...(typeof t.inputTokens === 'number' ? { inputTokens: t.inputTokens } : {}),
+                    ...(typeof t.outputTokens === 'number' ? { outputTokens: t.outputTokens } : {}),
+                    ...(typeof t.totalTokens === 'number' ? { totalTokens: t.totalTokens } : {}),
+                  };
+                  await sendRunEvent(dispatch.runId, { type: 'usage.update', usage });
                 } else if (method === 'turn/completed') {
                   if (p.turn?.error?.message) {
                     await sendRunEvent(dispatch.runId, {
@@ -544,6 +691,16 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
             } else if (
               event.type === 'stream_event'
               && event.event?.type === 'content_block_delta'
+              && event.event?.delta?.type === 'thinking_delta'
+            ) {
+              await sendRunEvent(dispatch.runId, {
+                type: 'reasoning.delta',
+                messageId: 'claude-thinking',
+                delta: String(event.event.delta.thinking ?? event.event.delta.text ?? ''),
+              });
+            } else if (
+              event.type === 'stream_event'
+              && event.event?.type === 'content_block_delta'
               && event.event?.delta?.type === 'text_delta'
             ) {
               await sendRunEvent(dispatch.runId, {
@@ -554,10 +711,19 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
             } else if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
               let fullText = '';
               for (const block of event.message.content) {
-                if (block.type === 'text' && typeof block.text === 'string') {
+                if (block.type === 'thinking') {
+                  const text = String(block.thinking ?? block.text ?? '').trim();
+                  if (text) {
+                    await sendRunEvent(dispatch.runId, {
+                      type: 'reasoning.complete',
+                      messageId: 'claude-thinking',
+                      text,
+                    });
+                  }
+                } else if (block.type === 'text' && typeof block.text === 'string') {
                   fullText += block.text;
-                } else if (block.type === 'tool_use' && block.id && block.name && !String(block.name).startsWith('mcp__openmotion__')) {
-                  const toolName = String(block.name).replace(/^mcp__openmotion__/, '');
+                } else if (block.type === 'tool_use' && block.id && block.name && !/^mcp_+openmotion_+/.test(String(block.name))) {
+                  const toolName = String(block.name).replace(/^mcp_+openmotion_+/, '');
                   const toolArgs = block.input && typeof block.input === 'object' ? block.input : {};
                   toolInputs.set(block.id, { name: toolName, args: toolArgs });
                   await sendRunEvent(dispatch.runId, {
@@ -600,8 +766,25 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
                   summary: summarizeBridgeToolOutput(parsed),
                 });
               }
-            } else if (event.type === 'result' && event.is_error) {
-              throw new Error(typeof event.result === 'string' ? event.result : 'Claude turn failed');
+            } else if (event.type === 'result') {
+              if (event.usage && typeof event.usage === 'object') {
+                const u = event.usage;
+                const inputTokens = typeof u.input_tokens === 'number' ? u.input_tokens : undefined;
+                const outputTokens = typeof u.output_tokens === 'number' ? u.output_tokens : undefined;
+                if (inputTokens !== undefined || outputTokens !== undefined) {
+                  await sendRunEvent(dispatch.runId, {
+                    type: 'usage.update',
+                    usage: {
+                      ...(inputTokens !== undefined ? { inputTokens } : {}),
+                      ...(outputTokens !== undefined ? { outputTokens } : {}),
+                      ...(inputTokens !== undefined && outputTokens !== undefined ? { totalTokens: inputTokens + outputTokens } : {}),
+                    },
+                  });
+                }
+              }
+              if (event.is_error || event.is_api_error_message) {
+                throw new Error(typeof event.result === 'string' ? event.result : 'Claude turn failed');
+              }
             }
           },
         });
@@ -611,40 +794,85 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
         return;
       }
 
-      // Generic CLI fallback for any of the remaining discovered local CLIs
-      const args = [...(def?.startArgs ?? [])];
-      if (dispatch.model && dispatch.model !== 'default' && def?.modelFlag) {
-        args.push(def.modelFlag, dispatch.model);
+      // ACP, Pi RPC, and non-interactive CLI fallbacks for remaining local CLIs
+      const callbacks = makeBridgeCallbacks(dispatch.runId);
+      killActive = () => runController.abort();
+      const model = dispatch.model && dispatch.model !== 'default' ? dispatch.model : undefined;
+      const reasoning = dispatch.reasoning && dispatch.reasoning !== 'default' ? dispatch.reasoning : undefined;
+
+      if (def && (def.acpArgs !== undefined || def.acpBin)) {
+        const toolsB64 = Buffer.from(JSON.stringify(dispatch.dynamicTools), 'utf8').toString('base64');
+        const mcpServers: AcpMcpServerEntry[] = dispatch.dynamicTools.length > 0
+          ? [
+              {
+                name: 'openmotion',
+                command: process.execPath,
+                args: ['--experimental-strip-types', BRIDGE_PATH, '--mcp-relay'],
+                env: [
+                  { name: 'OM_BRIDGE_SERVER', value: serverUrl },
+                  { name: 'OM_BRIDGE_TOKEN', value: token },
+                  { name: 'OM_BRIDGE_RUN_ID', value: dispatch.runId },
+                  { name: 'OM_BRIDGE_TOOLS_B64', value: toolsB64 },
+                ],
+              },
+            ]
+          : [];
+        try {
+          await runAcpAdapter({
+            agentDef: def,
+            bin,
+            cwd: workRoot,
+            prompt: dispatch.prompt,
+            instructions: dispatch.instructions,
+            model,
+            reasoning,
+            threadId: dispatch.threadId,
+            permissionMode: dispatch.permissionMode,
+            mcpServers,
+            resolveBin,
+            signal: runController.signal,
+            callbacks,
+          });
+        } catch (err) {
+          if (err instanceof AcpBootstrapError && def.id === 'antigravity' && !runController.signal.aborted) {
+            await runAgyPrintStreamAdapter({
+              bin,
+              cwd: workRoot,
+              prompt: dispatch.prompt,
+              instructions: dispatch.instructions,
+              model,
+              reasoning,
+              threadId: dispatch.threadId,
+              permissionMode: dispatch.permissionMode,
+              signal: runController.signal,
+              callbacks,
+            });
+          } else {
+            throw err;
+          }
+        }
+      } else if (def?.id === 'pi') {
+        await runPiRpcAdapter({
+          bin,
+          cwd: workRoot,
+          prompt: dispatch.prompt,
+          instructions: dispatch.instructions,
+          model,
+          signal: runController.signal,
+          callbacks,
+        });
+      } else {
+        await runCliFallbackAdapter({
+          agentDef: def,
+          bin,
+          cwd: workRoot,
+          prompt: dispatch.prompt,
+          instructions: dispatch.instructions,
+          model,
+          signal: runController.signal,
+          callbacks,
+        });
       }
-      const msgId = randomUUID();
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(bin, args, { cwd: workRoot, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-        let stderr = '';
-        let stdout = '';
-        const abortChild = () => {
-          try { child.kill('SIGTERM'); } catch { /* ignore */ }
-        };
-        runController.signal.addEventListener('abort', abortChild, { once: true });
-        killActive = abortChild;
-        child.stdout.setEncoding('utf8');
-        child.stdout.on('data', (chunk: string) => {
-          stdout += chunk;
-          void sendRunEvent(dispatch.runId, { type: 'message.delta', messageId: msgId, delta: chunk }).catch(() => {});
-        });
-        child.stderr.setEncoding('utf8');
-        child.stderr.on('data', (chunk: string) => {
-          stderr = (stderr + chunk).slice(-8000);
-        });
-        child.once('error', reject);
-        child.once('close', code => {
-          runController.signal.removeEventListener('abort', abortChild);
-          if (runController.signal.aborted) resolve();
-          else if (code && code !== 0 && !stdout.trim()) reject(new Error(stderr.trim() || `${def?.label || dispatch.engine} exited (${code})`));
-          else resolve();
-        });
-        child.stdin.on('error', () => {});
-        child.stdin.end(`${dispatch.instructions}\n\n${dispatch.prompt}\n`);
-      });
       if (!runController.signal.aborted) {
         await sendRunEvent(dispatch.runId, { type: 'turn.completed' });
       }

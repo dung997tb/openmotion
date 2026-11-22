@@ -342,3 +342,124 @@ test('HTTP /motion-api/super-agent/* routes serve resources, CRUD chats, SSE ini
 
   await superAgentConversations(store).close();
 }));
+
+test('local Claude runtime enforces on-request approvals for paid generation through the host MCP bridge', () => fixture(async store => {
+  const { readFile } = await import('node:fs/promises');
+  let generationExecuted = false;
+  const phase1: any = {
+    call: async (name: string, args: Record<string, unknown>) => {
+      if (name === 'openmotion_assets_use' && args.action === 'generate') {
+        generationExecuted = true;
+        return { job: { id: 'job-claude-1', state: 'queued' } };
+      }
+      return {};
+    },
+  };
+
+  let approvalObserved = false;
+  const service = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/usr/local/bin/claude',
+    runClaude: async ({ mcpConfigPath, onEvent }) => {
+      const cfg = JSON.parse(await readFile(mcpConfigPath, 'utf8'));
+      const server = cfg.mcpServers.openmotion;
+      assert.equal(server.type, 'http');
+      const callPromise = fetch(server.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...server.headers },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 7,
+          method: 'tools/call',
+          params: {
+            name: 'openmotion_assets_use',
+            arguments: { action: 'generate', modality: 'image', prompt: 'neon poster' },
+          },
+        }),
+      });
+      // Wait for approval gate to appear
+      for (let i = 0; i < 60; i++) {
+        const current = await service.get(chat.id);
+        if (current.approvals.length > 0) {
+          approvalObserved = true;
+          assert.equal(current.state, 'waiting');
+          assert.equal(generationExecuted, false);
+          await service.answer(chat.id, current.approvals[0].id, true);
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      const res = await callPromise;
+      const body = await res.json() as any;
+      assert.equal(body.result.isError, false);
+      await onEvent({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Queued your image after approval.' }] },
+      });
+    },
+  });
+
+  const chat = await service.create({ engine: 'claude', permissionMode: 'on-request' });
+  await service.start(chat.id, { requestId: 'req-claude-approval-1', text: 'Generate a neon poster' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 80; i++) {
+    const snap = await service.get(chat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  const done = await service.get(chat.id);
+  assert.equal(approvalObserved, true);
+  assert.equal(generationExecuted, true);
+  assert.equal(done.state, 'idle');
+  await service.close();
+}));
+
+test('deleting a conversation during an in-flight tool call prevents recreating the chat file', () => fixture(async store => {
+  const { existsSync } = await import('node:fs');
+  let releaseTool!: () => void;
+  let toolStarted!: () => void;
+  const toolStartedPromise = new Promise<void>(resolve => { toolStarted = resolve; });
+  const phase1: any = {
+    call: async () => {
+      toolStarted();
+      await new Promise<void>(resolve => { releaseTool = resolve; });
+      return { ok: true };
+    },
+  };
+
+  const service = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/usr/local/bin/codex',
+    spawnCodex: (_bin, _cwd, onMessage) => {
+      const rpc = new FakeRpc(onMessage, (msg, fake) => {
+        if (msg.method === 'turn/start') {
+          queueMicrotask(() => {
+            fake.emit({
+              method: 'item/tool/call',
+              id: 50,
+              params: { tool: 'openmotion_create_project', callId: 'call-del-1', arguments: { title: 'Race' } },
+            });
+          });
+        }
+      });
+      return rpc as any;
+    },
+  });
+
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+  await service.start(chat.id, { requestId: 'req-del-race-1', text: 'Create project' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  await toolStartedPromise;
+  const removePromise = service.remove(chat.id);
+  releaseTool();
+  await removePromise;
+
+  const chatPath = path.join(store.directory, 'super-agent', 'chats', `${chat.id}.json`);
+  assert.equal(existsSync(chatPath), false);
+  await assert.rejects(() => service.get(chat.id), /CONVERSATION_NOT_FOUND/);
+  await service.close();
+}));

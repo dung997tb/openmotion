@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import type { Model } from '../../../shared/gateway';
 import type { LocalAgent } from '../../../shared/local-agents';
-import type {
-  SuperAgentChat,
-  SuperAgentEngine,
-  SuperAgentPermissionMode,
-  SuperAgentResourceAttachment,
-  SuperAgentResourceCounts,
+import {
+  modeToSuperAgentIntent,
+  superAgentIntentMeta,
+  type SuperAgentChat,
+  type SuperAgentEngine,
+  type SuperAgentPermissionMode,
+  type SuperAgentResourceAttachment,
+  type SuperAgentResourceCounts,
 } from '../../../shared/super-agent';
 import { assetMediaUrl, assetVersion } from '../../../shared/asset-library';
 import { Popover } from '../components/ui/Popover';
@@ -19,11 +21,11 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { uploadLibraryAsset } from '../motion/assetClient';
-import { WorkingIndicator } from '../motion/AssetCreationVisuals';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
+import { ExecutionTimeline } from './ExecutionTimeline';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
   findSuperAgentMode,
@@ -38,17 +40,17 @@ import {
   ModeComposerTopBar,
   type ModeComposerOptions,
 } from './ModeComposerControls';
-import { SimpleMarkdown } from './SimpleMarkdown';
 
 const PRIMARY_STARTERS: {
   id: SuperAgentCreationModeId;
-  tone: 'agent' | 'image' | 'video' | 'audio';
+  tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
 }[] = [
+  { id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
   { id: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
-  { id: 'media', tone: 'audio', icon: 'music-2-line', title: 'Cinema & audio' },
+  { id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
   { id: 'game', tone: 'agent', icon: 'sparkling-line', title: 'Build a game' },
 ];
 
@@ -58,6 +60,7 @@ const EXTRA_STARTERS: {
   icon: string;
   title: string;
 }[] = [
+  { id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema video' },
   { id: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
   { id: 'website', tone: 'image', icon: 'layout-line', title: 'Build a website' },
 ];
@@ -79,6 +82,7 @@ export function ConversationStream({
   viewerOpen,
   counts,
   attachments,
+  draftSeed = null,
   agents,
   agentsLoaded = true,
   runtimes,
@@ -98,6 +102,7 @@ export function ConversationStream({
   onAttachmentsChange,
   onOpenArtifactId,
   onPreviewAttachment,
+  onOpenWebUrl,
   onCopyText,
   onOpenAgentSettings,
   onOpenRuntimeSettings,
@@ -114,6 +119,7 @@ export function ConversationStream({
   viewerOpen: boolean;
   counts: SuperAgentResourceCounts | null;
   attachments: SuperAgentResourceAttachment[];
+  draftSeed?: { id: number; text: string; mode?: SuperAgentCreationModeId } | null;
   agents: LocalAgent[];
   agentsLoaded?: boolean;
   runtimes?: AgentRuntimeInfo[];
@@ -126,13 +132,14 @@ export function ConversationStream({
   onRenameChat: (title: string) => Promise<void> | void;
   onChangeSelection: (next: AgentSelection) => void;
   onChangePermissionMode: (next: SuperAgentPermissionMode) => void;
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string, meta?: { mode?: SuperAgentCreationModeId; workingDir?: string }) => Promise<boolean>;
   onStop: () => void;
   onApprove: (approvalId: string, accepted: boolean) => void;
   onResourcesUploaded?: () => void;
   onAttachmentsChange: (next: SuperAgentResourceAttachment[]) => void;
   onOpenArtifactId: (artifactId: string) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
+  onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
   onOpenAgentSettings: () => void;
   onOpenRuntimeSettings?: () => void;
@@ -159,6 +166,9 @@ export function ConversationStream({
   const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(DEFAULT_MODE_COMPOSER_OPTIONS);
   const mediaModelsRef = useRef<Model[]>([]);
   const activeMode = findSuperAgentMode(activeModeId);
+  const headerIntentMeta = superAgentIntentMeta(
+    chat?.intent ?? (activeMode ? modeToSuperAgentIntent(activeMode.id) : undefined),
+  );
   const updateModeOptions = useCallback((patch: Partial<ModeComposerOptions>) => {
     setModeOptions(prev => ({ ...prev, ...patch }));
   }, []);
@@ -169,6 +179,17 @@ export function ConversationStream({
   useEffect(() => {
     setBrowsingEngine(selection.engine);
   }, [selection.engine]);
+
+  const appliedDraftSeedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
+    appliedDraftSeedRef.current = draftSeed.id;
+    setText(draftSeed.text);
+    if (draftSeed.mode && !chat?.messages.length) {
+      setActiveModeId(draftSeed.mode);
+    }
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [draftSeed, chat?.messages.length]);
 
   useEffect(() => {
     if (!active) {
@@ -290,10 +311,16 @@ export function ConversationStream({
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    const promptBody = activeMode
-      ? `${formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current)} ${text.trim()}`
-      : text.trim();
-    const ok = await onSend(promptBody);
+    const prefix = activeMode
+      ? formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current)
+      : '';
+    const promptBody = prefix ? `${prefix} ${text.trim()}` : text.trim();
+    const ok = await onSend(promptBody, {
+      ...(activeMode ? { mode: activeMode.id } : {}),
+      ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
+        ? { workingDir: modeOptions.codingWorkdir.trim() }
+        : {}),
+    });
     if (ok) {
       setText('');
       setActiveModeId(null);
@@ -388,7 +415,14 @@ export function ConversationStream({
                 if (next && next !== chat.title) void onRenameChat(next);
               }}
             >
-              <RemixIcon name="chat-1-line" size={15} />
+              <span
+                className="om-sa-stream-title-icon"
+                data-tone={headerIntentMeta.tone}
+                title={t(headerIntentMeta.label)}
+                aria-hidden="true"
+              >
+                <RemixIcon name={headerIntentMeta.icon} size={15} />
+              </span>
               <input
                 autoFocus
                 maxLength={100}
@@ -425,7 +459,14 @@ export function ConversationStream({
                 setRenaming(true);
               }}
             >
-              <RemixIcon name="chat-1-line" size={15} />
+              <span
+                className="om-sa-stream-title-icon"
+                data-tone={headerIntentMeta.tone}
+                title={t(headerIntentMeta.label)}
+                aria-hidden="true"
+              >
+                <RemixIcon name={headerIntentMeta.icon} size={15} />
+              </span>
               <span>{chat ? chat.title : t('New conversation')}</span>
               {chat && <RemixIcon name="edit-line" size={12} />}
             </Button>
@@ -580,150 +621,17 @@ export function ConversationStream({
           </div>
           )
         ) : (
-          <div className="om-sa-message-list">
-            {chat.messages.map(message => {
-              if (message.role === 'tool') {
-                const ev = message.toolEvent;
-                return (
-                  <details key={message.id} className="om-sa-tool-row">
-                    <summary>
-                      <span className="om-sa-tool-status" data-status={ev?.status ?? 'completed'}>
-                        <RemixIcon
-                          name={
-                            ev?.status === 'running'
-                              ? 'loader-4-line'
-                              : ev?.status === 'failed'
-                                ? 'error-warning-line'
-                                : 'checkbox-circle-line'
-                          }
-                          size={15}
-                        />
-                      </span>
-                      <span className="om-sa-tool-label">{t(ev?.label || message.text)}</span>
-                      {ev?.summary && <span className="om-sa-tool-summary">{ev.summary}</span>}
-                      {ev?.artifactId && (
-                        <Button
-                          variant="plain"
-                          type="button"
-                          className="om-sa-tool-view-btn"
-                          onClick={event => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            onOpenArtifactId(ev.artifactId!);
-                          }}
-                        >
-                          <span>{t('View in Viewer')}</span>
-                          <RemixIcon name="arrow-right-up-line" size={13} />
-                        </Button>
-                      )}
-                      <RemixIcon name="arrow-down-s-line" size={14} />
-                    </summary>
-                    <div className="om-sa-tool-body">
-                      {ev?.inputPreview && (
-                        <>
-                          <span className="om-eyebrow">{t('Input')}</span>
-                          <pre className="om-code-block">{ev.inputPreview}</pre>
-                        </>
-                      )}
-                      {ev?.outputPreview && (
-                        <>
-                          <span className="om-eyebrow">{t('Output')}</span>
-                          <pre className="om-code-block">{ev.outputPreview}</pre>
-                        </>
-                      )}
-                    </div>
-                  </details>
-                );
-              }
-
-              return (
-                <article key={message.id} className="om-sa-message" data-role={message.role}>
-                  {message.role === 'assistant' && (
-                    <span className="om-creation-icon om-sa-avatar" data-tone="agent" aria-hidden="true">
-                      <RemixIcon name="sparkling-fill" size={16} />
-                    </span>
-                  )}
-                  <div className="om-sa-message-body">
-                    {message.attachments && message.attachments.length > 0 && (
-                      <div className="om-sa-msg-attachments">
-                        {message.attachments.map(att => (
-                          <Button
-                            key={resourceKey(att)}
-                            variant="plain"
-                            type="button"
-                            className="om-sa-attachment-chip"
-                            onClick={() => onPreviewAttachment(att)}
-                          >
-                            <RemixIcon name={resourceIcon(att)} size={13} />
-                            <span>{att.title}</span>
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                    {message.role === 'user' ? (
-                      <div className="om-sa-user-bubble">{message.text}</div>
-                    ) : (
-                      <div className="om-sa-assistant-content">
-                        <SimpleMarkdown content={message.text} onCopyCode={onCopyText} />
-                      </div>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-
-            {busy && !chat.approvals.length && (
-              <div className="om-creation-thinking om-sa-thinking" role="status">
-                <WorkingIndicator />
-                <span>{t('Super Agent is working…')}</span>
-              </div>
-            )}
-
-            {chat.error && (
-              <div className="om-card om-sa-error-card" role="alert">
-                <RemixIcon name="error-warning-line" size={18} />
-                <div>
-                  <strong>{t('Conversation paused')}</strong>
-                  <p className="om-muted">{chat.error}</p>
-                </div>
-              </div>
-            )}
-
-            {chat.approvals.map(approval => (
-              <section key={approval.id} className="om-creation-approval om-sa-approval">
-                <div className="om-creation-row">
-                  <span className="om-creation-icon" data-tone="audio">
-                    <RemixIcon name="shield-check-line" size={18} />
-                  </span>
-                  <div>
-                    <h3 className="om-subtitle">{t(approval.title)}</h3>
-                    <p className="om-muted">{t('Review this action before it runs.')}</p>
-                  </div>
-                </div>
-                <pre className="om-code-block">{approval.detail}</pre>
-                <div className="om-asset-actions">
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    disabled={sending}
-                    onClick={() => onApprove(approval.id, false)}
-                  >
-                    {t('Decline')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    data-primary
-                    disabled={sending}
-                    onClick={() => onApprove(approval.id, true)}
-                  >
-                    <RemixIcon name="check-line" size={15} />
-                    <span>{t('Approve')}</span>
-                  </Button>
-                </div>
-              </section>
-            ))}
-          </div>
+          <ExecutionTimeline
+            chat={chat}
+            busy={busy}
+            sending={sending}
+            engineLabel={effectiveAgents.find(a => a.id === chat.engine)?.label ?? chat.engine}
+            onOpenArtifactId={onOpenArtifactId}
+            onPreviewAttachment={onPreviewAttachment}
+            onOpenWebUrl={onOpenWebUrl}
+            onCopyText={onCopyText}
+            onApprove={onApprove}
+          />
         )}
       </div>
 
@@ -1174,8 +1082,8 @@ export function ConversationStream({
                         (onOpenRuntimeSettings ?? onOpenAgentSettings)();
                       }}
                     >
-                      <RemixIcon name="link-line" size={15} />
-                      <span>{t('Runtimes & Cloud Bridge')}</span>
+                      <RemixIcon name="computer-line" size={15} />
+                      <span>{t('Connected Computers')}</span>
                       <RemixIcon name="arrow-right-up-line" size={14} />
                     </Button>
                     <Button

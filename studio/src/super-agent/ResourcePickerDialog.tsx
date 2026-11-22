@@ -15,7 +15,9 @@ export type ResourceCategoryTab =
   | 'motion-template'
   | 'design-template'
   | 'skills'
-  | 'projects';
+  | 'projects'
+  | 'workflow'
+  | 'model';
 
 const CATEGORY_TABS: { id: ResourceCategoryTab; label: string; icon: string }[] = [
   { id: 'all', label: 'All resources', icon: 'apps-2-line' },
@@ -25,6 +27,8 @@ const CATEGORY_TABS: { id: ResourceCategoryTab; label: string; icon: string }[] 
   { id: 'design-template', label: 'Design templates', icon: 'layout-line' },
   { id: 'skills', label: 'Skills', icon: 'sparkling-line' },
   { id: 'projects', label: 'Projects', icon: 'stack-line' },
+  { id: 'workflow', label: 'Workflows', icon: 'route-line' },
+  { id: 'model', label: 'Models', icon: 'robot-line' },
 ];
 
 export function resourceKey(item: Pick<SuperAgentResourceAttachment, 'kind' | 'id' | 'versionId'>): string {
@@ -32,16 +36,18 @@ export function resourceKey(item: Pick<SuperAgentResourceAttachment, 'kind' | 'i
 }
 
 export function resourceIcon(item: Pick<SuperAgentResourceAttachment, 'kind' | 'modality'>): string {
-  if (item.kind === 'asset') {
+  if (item.kind === 'asset' || item.kind === 'model') {
     if (item.modality === 'video') return 'movie-line';
     if (item.modality === 'audio') return 'music-2-line';
-    return 'image-line';
+    return item.kind === 'model' ? 'robot-line' : 'image-line';
   }
   if (item.kind === 'brand-kit') return 'palette-line';
   if (item.kind === 'motion-template') return 'film-line';
   if (item.kind === 'design-template') return 'layout-line';
   if (item.kind === 'skill' || item.kind === 'design-skill') return 'sparkling-line';
   if (item.kind === 'motion-project') return 'clapperboard-line';
+  if (item.kind === 'game-project') return 'gamepad-line';
+  if (item.kind === 'workflow') return 'route-line';
   return 'code-s-slash-line';
 }
 
@@ -55,6 +61,10 @@ export function resourceKindLabel(kind: SuperAgentResourceKind): string {
     case 'design-skill': return 'Design skill';
     case 'design-project': return 'Design project';
     case 'motion-project': return 'Motion project';
+    case 'workflow': return 'Workflow';
+    case 'model': return 'Model';
+    case 'game-project': return 'Game project';
+    default: return 'Resource';
   }
 }
 
@@ -231,7 +241,7 @@ export function ResourcePickerPanel({
               >
                 <div className="om-sa-resource-thumb" aria-hidden="true">
                   {showThumb ? (
-                    <img src={item.previewUrl} alt="" loading="lazy" />
+                    <img src={item.previewUrl} alt="" loading="lazy" decoding="async" />
                   ) : item.swatches?.length ? (
                     <div className="om-sa-resource-swatches">
                       {item.swatches.slice(0, 4).map((swatch, idx) => (

@@ -1,24 +1,29 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LOCAL_DIRECT_RUNTIME_ID, type AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { assetMediaUrl } from '../../../shared/asset-library';
 import { designRoutes } from '../../../shared/design-project';
-import type {
-  SuperAgentArtifact,
-  SuperAgentChat,
-  SuperAgentChatSummary,
-  SuperAgentPermissionMode,
-  SuperAgentResourceAttachment,
-  SuperAgentResourceCatalog,
+import {
+  NEW_VIEWER_TAB_ID,
+  safeBrowserTabId,
+  type SuperAgentArtifact,
+  type SuperAgentChat,
+  type SuperAgentChatSummary,
+  type SuperAgentPermissionMode,
+  type SuperAgentResourceAttachment,
+  type SuperAgentResourceCatalog,
 } from '../../../shared/super-agent';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
+import { RouteSurfaceFallback } from '../motion/RouteSurfaceFallback';
+import { consumeSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
 import { useLocalAgents } from '../motion/useLocalAgents';
-import { ArtifactBrowserPane, NEW_VIEWER_TAB_ID, safeBrowserTabId } from './ArtifactBrowserPane';
+import { preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { ConversationSidebar } from './ConversationSidebar';
 import { ConversationStream, type AgentSelection } from './ConversationStream';
+import type { SuperAgentCreationModeId } from './ModeResourceShowcase';
 import { resourceKey } from './ResourcePickerDialog';
 import {
   approveSuperAgentAction,
@@ -35,6 +40,37 @@ import {
 } from './superAgentClient';
 import './superAgent.css';
 
+const ArtifactBrowserPane = preloadableLazyWithChunkReload(() =>
+  import('./ArtifactBrowserPane').then(m => ({ default: m.ArtifactBrowserPane })),
+);
+
+export const preloadArtifactBrowserPane = ArtifactBrowserPane.preload;
+
+const MIN_CENTER_WIDTH = 300;
+const MIN_VIEWER_WIDTH = 320;
+const RESIZER_WIDTH = 1;
+const COMPACT_THREE_PANE_WIDTH = 1180;
+
+export function clampSuperAgentViewerWidth(
+  desiredWidth: number,
+  totalWidth: number,
+  sidebarWidth: number,
+): number {
+  const desired = Math.round(desiredWidth);
+  if (totalWidth <= 0) {
+    return Math.max(MIN_VIEWER_WIDTH, Math.min(960, desired));
+  }
+  const available = Math.max(0, Math.floor(totalWidth - sidebarWidth - RESIZER_WIDTH));
+  if (available <= MIN_CENTER_WIDTH + MIN_VIEWER_WIDTH) {
+    return Math.max(240, Math.floor(available * 0.55));
+  }
+  const maxViewer = Math.max(
+    MIN_VIEWER_WIDTH,
+    Math.min(Math.floor(available * 0.72), available - MIN_CENTER_WIDTH),
+  );
+  return Math.max(MIN_VIEWER_WIDTH, Math.min(maxViewer, desired));
+}
+
 function upsertSummary(
   list: SuperAgentChatSummary[],
   chat: SuperAgentChat,
@@ -42,11 +78,12 @@ function upsertSummary(
   const summary: SuperAgentChatSummary = {
     id: chat.id,
     title: chat.title,
+    intent: chat.intent,
     ...(chat.pinned ? { pinned: true } : {}),
     engine: chat.engine,
     state: chat.state,
     artifactCount: chat.artifacts.length,
-    messageCount: chat.messages.filter(m => m.role !== 'tool').length,
+    messageCount: chat.messages.filter(m => m.role !== 'tool' && m.role !== 'reasoning').length,
     updatedAt: chat.updatedAt,
     createdAt: chat.createdAt,
   };
@@ -103,6 +140,16 @@ function resourceToArtifactPatch(
       kitId: item.id,
     };
   }
+  if (item.kind === 'game-project') {
+    return {
+      id: `game:${item.id}`,
+      kind: 'game-project',
+      title: item.title,
+      subtitle: item.subtitle || 'Game Studio',
+      projectId: item.id,
+      url: `/api/games/${encodeURIComponent(item.id)}/play/index.html`,
+    };
+  }
   return null;
 }
 
@@ -144,6 +191,14 @@ function artifactToResourceAttachment(artifact: SuperAgentArtifact): SuperAgentR
       subtitle: artifact.subtitle,
     };
   }
+  if (artifact.kind === 'game-project' && artifact.projectId) {
+    return {
+      id: artifact.projectId,
+      kind: 'game-project',
+      title: artifact.title,
+      subtitle: artifact.subtitle,
+    };
+  }
   return null;
 }
 
@@ -153,6 +208,7 @@ export function SuperAgentWorkspace({
   onChatIdChange,
   onOpenDesignProject,
   onOpenMotionProject,
+  onOpenGameStudio,
   onOpenAsset,
   onOpenBrandKit,
   onOpenAgentSettings,
@@ -164,6 +220,7 @@ export function SuperAgentWorkspace({
   onChatIdChange: (id: string | null, replace?: boolean) => void;
   onOpenDesignProject: (projectId: string) => void;
   onOpenMotionProject: (projectId: string) => void;
+  onOpenGameStudio?: (projectId: string) => void;
   onOpenAsset: (assetId: string, versionId?: string) => void;
   onOpenBrandKit: (kitId?: string) => void;
   onOpenAgentSettings: () => void;
@@ -210,6 +267,8 @@ export function SuperAgentWorkspace({
 
   const [resourcesCatalog, setResourcesCatalog] = useState<SuperAgentResourceCatalog | null>(null);
   const [attachments, setAttachments] = useState<SuperAgentResourceAttachment[]>([]);
+  const [draftSeed, setDraftSeed] = useState<{ id: number; text: string; mode?: SuperAgentCreationModeId } | null>(null);
+  const handoffSeqRef = useRef(0);
 
   const [selection, setSelection] = useState<AgentSelection>({
     engine: 'codex',
@@ -223,6 +282,7 @@ export function SuperAgentWorkspace({
       ? window.matchMedia('(max-width: 900px)').matches
       : false,
   );
+  const [containerWidth, setContainerWidth] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerExpanded, setViewerExpanded] = useState(false);
@@ -231,12 +291,30 @@ export function SuperAgentWorkspace({
   const [activeTabId, setActiveTabId] = useState<string>(NEW_VIEWER_TAB_ID);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const sidebarDockedRef = useRef(true);
   const dragStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const lastArtifactStateRef = useRef<{ chatId: string | null; activeId?: string; sig: string }>({
     chatId: null,
     sig: '',
   });
   const prevBusyRef = useRef(false);
+
+  const sidebarAsDrawer = narrow || (
+    viewerOpen
+    && !viewerExpanded
+    && containerWidth > 0
+    && containerWidth < COMPACT_THREE_PANE_WIDTH
+  );
+  const sidebarDocked = !sidebarAsDrawer && sidebarOpen;
+  sidebarDockedRef.current = sidebarDocked;
+
+  const prevSidebarAsDrawerRef = useRef(sidebarAsDrawer);
+  useEffect(() => {
+    if (sidebarAsDrawer && !prevSidebarAsDrawerRef.current) {
+      setSidebarOpen(false);
+    }
+    prevSidebarAsDrawerRef.current = sidebarAsDrawer;
+  }, [sidebarAsDrawer]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -249,6 +327,23 @@ export function SuperAgentWorkspace({
     mq.addEventListener('change', sync);
     return () => mq.removeEventListener('change', sync);
   }, []);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => {
+      const next = el.clientWidth;
+      setContainerWidth(prev => (prev === next ? prev : next));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(el);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [active]);
 
   // Sync engine/model selection with Settings → Local Agents default (both on initial load and after user changes it)
   const engineInitialized = useRef(false);
@@ -419,6 +514,40 @@ export function SuperAgentWorkspace({
     };
   }, [active, chatId, chatRetry, applyChatSnapshot]);
 
+  useEffect(() => {
+    if (viewerOpen || (activeChat?.artifacts.length ?? 0) > 0) {
+      void ArtifactBrowserPane.preload().catch(() => {});
+    }
+  }, [viewerOpen, activeChat?.artifacts.length]);
+
+  const applyPendingHandoff = useCallback(() => {
+    if (!active) return;
+    const payload = consumeSuperAgentHandoff();
+    if (!payload) return;
+    if (payload.attachments?.length) {
+      setAttachments(prev => {
+        const next = [...prev];
+        for (const att of payload.attachments!) {
+          if (!next.some(existing => resourceKey(existing) === resourceKey(att))) {
+            next.push(att);
+          }
+        }
+        return next.slice(0, 30);
+      });
+    }
+    setDraftSeed({
+      id: ++handoffSeqRef.current,
+      text: payload.prompt,
+      mode: payload.mode,
+    });
+    showToast(t('Loaded into Super Agent'), 'info', 'feedback');
+  }, [active, showToast, t]);
+
+  useEffect(() => {
+    applyPendingHandoff();
+    return subscribeSuperAgentHandoff(applyPendingHandoff);
+  }, [applyPendingHandoff]);
+
   const ensureChatCreated = useCallback(async (): Promise<SuperAgentChat> => {
     if (activeChat) return activeChat;
     const created = await createSuperAgentChat({
@@ -443,7 +572,7 @@ export function SuperAgentWorkspace({
       setAttachments([]);
       applyChatSnapshot(created.conversation, true);
       onChatIdChange(created.conversation.id);
-      if (narrow) setSidebarOpen(false);
+      if (sidebarAsDrawer) setSidebarOpen(false);
     } catch (error) {
       showToast(error instanceof Error ? error.message : t('Could not create conversation'));
     }
@@ -500,7 +629,10 @@ export function SuperAgentWorkspace({
     }
   };
 
-  const handleSend = async (text: string): Promise<boolean> => {
+  const handleSend = async (
+    text: string,
+    meta?: { mode?: SuperAgentCreationModeId; workingDir?: string },
+  ): Promise<boolean> => {
     setSending(true);
     try {
       const target = await ensureChatCreated();
@@ -510,6 +642,8 @@ export function SuperAgentWorkspace({
       const result = await startSuperAgentTurn(target.id, {
         requestId,
         text,
+        ...(meta?.mode ? { mode: meta.mode } : {}),
+        ...(meta?.workingDir ? { workingDir: meta.workingDir } : {}),
         ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
         engine: selection.engine,
         model: selection.model,
@@ -688,9 +822,23 @@ export function SuperAgentWorkspace({
     };
   }, [availableRuntimes, agentsLoaded, selection.runtimeId, selection.engine, runtimesDir, t]);
 
+  const getDockedSidebarWidth = useCallback(() => {
+    if (!sidebarDockedRef.current) return 0;
+    const sidebarEl = rootRef.current?.querySelector<HTMLElement>('.om-sa-sidebar-slot');
+    const measured = sidebarEl ? Math.round(sidebarEl.getBoundingClientRect().width) : 0;
+    return measured > 0 ? measured : 240;
+  }, []);
+
+  const effectiveViewerWidth =
+    viewerExpanded || narrow || viewerWidth === null
+      ? null
+      : clampSuperAgentViewerWidth(viewerWidth, containerWidth, getDockedSidebarWidth());
+
+  const maxViewerWidth = clampSuperAgentViewerWidth(10_000, containerWidth, getDockedSidebarWidth());
+
   const startResize = (clientX: number) => {
-    const currentWidth = viewerWidth
-      ?? Math.round(rootRef.current?.querySelector<HTMLElement>('.om-sa-viewer-slot')?.getBoundingClientRect().width ?? 560);
+    const currentWidth = effectiveViewerWidth
+      ?? Math.round(rootRef.current?.querySelector<HTMLElement>('.om-sa-viewer-slot')?.getBoundingClientRect().width || clampSuperAgentViewerWidth(560, containerWidth, getDockedSidebarWidth()));
     dragStartRef.current = { startX: clientX, startWidth: currentWidth };
   };
 
@@ -698,9 +846,10 @@ export function SuperAgentWorkspace({
     const onMove = (event: PointerEvent) => {
       const drag = dragStartRef.current;
       if (!drag) return;
-      const maxWidth = Math.max(420, Math.floor((rootRef.current?.clientWidth ?? 1200) * 0.7));
+      const totalWidth = rootRef.current?.clientWidth ?? 0;
+      const dockedSidebar = getDockedSidebarWidth();
       const delta = drag.startX - event.clientX;
-      setViewerWidth(Math.max(340, Math.min(maxWidth, drag.startWidth + delta)));
+      setViewerWidth(clampSuperAgentViewerWidth(drag.startWidth + delta, totalWidth, dockedSidebar));
     };
     const onUp = () => {
       dragStartRef.current = null;
@@ -713,7 +862,7 @@ export function SuperAgentWorkspace({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
     };
-  }, []);
+  }, [getDockedSidebarWidth]);
 
   const sidebarNode = (
     <ConversationSidebar
@@ -723,7 +872,7 @@ export function SuperAgentWorkspace({
       agentStatus={agentStatus}
       onSelect={id => {
         onChatIdChange(id);
-        if (narrow) setSidebarOpen(false);
+        if (sidebarAsDrawer) setSidebarOpen(false);
       }}
       onCreate={() => void handleCreateConversation()}
       onTogglePin={(id, pinned) => void handleTogglePin(id, pinned)}
@@ -749,13 +898,13 @@ export function SuperAgentWorkspace({
     >
       <StudioToastViewport toasts={toasts} dismissToast={dismissToast} />
 
-      {!narrow && sidebarOpen && (
+      {!sidebarAsDrawer && sidebarOpen && (
         <div className="om-sa-sidebar-slot">
           {sidebarNode}
         </div>
       )}
 
-      {narrow && (
+      {sidebarAsDrawer && (
         <Dialog.Root open={sidebarOpen} onOpenChange={setSidebarOpen}>
           <Dialog.Portal>
             <Dialog.Backdrop className="om-sa-dialog-backdrop" />
@@ -774,10 +923,11 @@ export function SuperAgentWorkspace({
             loading={loadingChat}
             loadFailed={loadFailed}
             sending={sending}
-            sidebarOpen={!narrow && sidebarOpen}
+            sidebarOpen={!sidebarAsDrawer && sidebarOpen}
             viewerOpen={viewerOpen}
             counts={resourcesCatalog?.counts ?? null}
             attachments={attachments}
+            draftSeed={draftSeed}
             agents={agents}
             agentsLoaded={agentsLoaded}
             runtimes={availableRuntimes}
@@ -803,6 +953,7 @@ export function SuperAgentWorkspace({
             onAttachmentsChange={setAttachments}
             onOpenArtifactId={artifactId => void handleOpenArtifactId(artifactId)}
             onPreviewAttachment={att => void handleOpenResource(att)}
+            onOpenWebUrl={url => void handleOpenWebUrl(url)}
             onCopyText={code => void handleCopyText(code)}
             onOpenAgentSettings={onOpenAgentSettings}
             onOpenRuntimeSettings={openRuntimes}
@@ -819,21 +970,25 @@ export function SuperAgentWorkspace({
           tabIndex={0}
           aria-orientation="vertical"
           aria-label={t('Resize Artifact Viewer')}
-          aria-valuemin={340}
-          aria-valuemax={960}
-          aria-valuenow={viewerWidth ?? 560}
+          aria-valuemin={MIN_VIEWER_WIDTH}
+          aria-valuemax={maxViewerWidth}
+          aria-valuenow={effectiveViewerWidth ?? clampSuperAgentViewerWidth(560, containerWidth, getDockedSidebarWidth())}
           className="om-sa-resizer"
           onPointerDown={event => {
             event.preventDefault();
             startResize(event.clientX);
           }}
           onKeyDown={event => {
+            const totalWidth = rootRef.current?.clientWidth ?? containerWidth;
+            const dockedSidebar = getDockedSidebarWidth();
+            const current = effectiveViewerWidth
+              ?? Math.round(rootRef.current?.querySelector<HTMLElement>('.om-sa-viewer-slot')?.getBoundingClientRect().width || clampSuperAgentViewerWidth(560, totalWidth, dockedSidebar));
             if (event.key === 'ArrowLeft') {
               event.preventDefault();
-              setViewerWidth(v => Math.min(960, (v ?? 560) + 24));
+              setViewerWidth(clampSuperAgentViewerWidth(current + 24, totalWidth, dockedSidebar));
             } else if (event.key === 'ArrowRight') {
               event.preventDefault();
-              setViewerWidth(v => Math.max(340, (v ?? 560) - 24));
+              setViewerWidth(clampSuperAgentViewerWidth(current - 24, totalWidth, dockedSidebar));
             }
           }}
         />
@@ -842,33 +997,36 @@ export function SuperAgentWorkspace({
       {viewerOpen && (
         <div
           className="om-sa-viewer-slot"
-          style={viewerExpanded || narrow || viewerWidth === null ? undefined : { width: viewerWidth, flexBasis: viewerWidth, flexGrow: 0, flexShrink: 0 }}
+          style={effectiveViewerWidth === null ? undefined : { width: effectiveViewerWidth, flexBasis: effectiveViewerWidth, flexGrow: 0, flexShrink: 1, maxWidth: '100%' }}
         >
-          <ArtifactBrowserPane
-            active={active}
-            chatId={activeChat?.id ?? null}
-            artifacts={activeChat?.artifacts ?? []}
-            openTabIds={openTabIds}
-            activeTabId={activeTabId}
-            expanded={viewerExpanded}
-            workspaceItems={resourcesCatalog?.items ?? []}
-            onSelectTab={id => void handleOpenArtifactId(id)}
-            onCloseTab={handleCloseTab}
-            onNewTab={() => setActiveTabId(NEW_VIEWER_TAB_ID)}
-            onOpenWebUrl={url => void handleOpenWebUrl(url)}
-            onOpenArtifact={id => void handleOpenArtifactId(id)}
-            onOpenResource={item => void handleOpenResource(item)}
-            onToggleExpand={() => setViewerExpanded(v => !v)}
-            onClosePane={() => {
-              setViewerExpanded(false);
-              setViewerOpen(false);
-            }}
-            onAttachArtifact={handleAttachArtifact}
-            onOpenInDesignStudio={onOpenDesignProject}
-            onOpenInMotionStudio={onOpenMotionProject}
-            onOpenInAssets={onOpenAsset}
-            onOpenInBrandKit={onOpenBrandKit}
-          />
+          <Suspense fallback={<RouteSurfaceFallback compact />}>
+            <ArtifactBrowserPane
+              active={active}
+              chatId={activeChat?.id ?? null}
+              artifacts={activeChat?.artifacts ?? []}
+              openTabIds={openTabIds}
+              activeTabId={activeTabId}
+              expanded={viewerExpanded}
+              workspaceItems={resourcesCatalog?.items ?? []}
+              onSelectTab={id => void handleOpenArtifactId(id)}
+              onCloseTab={handleCloseTab}
+              onNewTab={() => setActiveTabId(NEW_VIEWER_TAB_ID)}
+              onOpenWebUrl={url => void handleOpenWebUrl(url)}
+              onOpenArtifact={id => void handleOpenArtifactId(id)}
+              onOpenResource={item => void handleOpenResource(item)}
+              onToggleExpand={() => setViewerExpanded(v => !v)}
+              onClosePane={() => {
+                setViewerExpanded(false);
+                setViewerOpen(false);
+              }}
+              onAttachArtifact={handleAttachArtifact}
+              onOpenInDesignStudio={onOpenDesignProject}
+              onOpenInMotionStudio={onOpenMotionProject}
+              onOpenInGameStudio={onOpenGameStudio}
+              onOpenInAssets={onOpenAsset}
+              onOpenInBrandKit={onOpenBrandKit}
+            />
+          </Suspense>
         </div>
       )}
     </div>

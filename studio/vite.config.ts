@@ -52,6 +52,33 @@ export default defineConfig({
           if (id.includes('/node_modules/lucide-react/')) {
             return 'vendor-icons';
           }
+          if (id.includes('/node_modules/@codemirror/') || id.includes('/node_modules/@lezer/')) {
+            return 'vendor-codemirror';
+          }
+          if (id.includes('/node_modules/dockview-core/')) {
+            return 'vendor-dockview';
+          }
+          if (
+            id.includes('/node_modules/@babel/parser/')
+            || id.includes('/node_modules/recast/')
+            || id.includes('/node_modules/ast-types/')
+            || id.includes('/node_modules/esprima/')
+            || id.includes('/node_modules/acorn/')
+          ) {
+            return 'vendor-ast';
+          }
+          if (id.includes('/node_modules/@hyperframes/')) {
+            return 'vendor-hyperframes';
+          }
+          if (id.includes('/node_modules/gsap/')) {
+            return 'vendor-gsap';
+          }
+          if (id.includes('/node_modules/linkedom/')) {
+            return 'vendor-linkedom';
+          }
+          if (id.includes('/studio/src/i18n/') && id.endsWith('.json')) {
+            return 'vendor-i18n';
+          }
         },
       },
     },

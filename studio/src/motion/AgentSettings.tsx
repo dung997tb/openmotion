@@ -60,8 +60,8 @@ export function AgentSettings() {
           setDetail(true);
         }}
       >
-        <RemixIcon name="link-line" size={16} />
-        <span className="om-provider-item-name">{t('Runtimes & Cloud Bridge')}</span>
+        <RemixIcon name="computer-line" size={16} />
+        <span className="om-provider-item-name">{t('Connected Computers')}</span>
         {runtimes.data && (
           <span className="om-badge" data-active={onlineRuntimeCount > 0 || undefined}>
             {onlineRuntimeCount}

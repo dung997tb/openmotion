@@ -17,12 +17,14 @@ export type ModeComposerOptions = {
   imageQuality: 'standard' | 'high';
   imageCount: 1 | 2 | 4;
 
-  // Cinema & Audio (also supports switching directly to Motion graphics)
-  mediaSubMode: 'video' | 'motion' | 'audio';
+  // Cinema Video (also supports switching directly to Motion graphics)
+  mediaSubMode: 'video' | 'motion';
   videoModelId: string;
   videoAspect: '16:9' | '9:16' | '1:1' | '21:9';
   videoDuration: '5s' | '8s' | '10s' | '15s';
   videoSpeed: 'fast' | 'standard' | 'cinema';
+
+  // Audio & Sound
   audioModelId: string;
   audioType: 'music' | 'voiceover' | 'sfx';
   audioDuration: '10s' | '30s' | '60s';
@@ -47,6 +49,10 @@ export type ModeComposerOptions = {
   gameEngine: 'canvas2d' | 'webgl' | 'dom';
   gameViewport: '16:9' | '9:16' | 'fullscreen';
   gameControls: 'keyboard-mouse' | 'touch' | 'both';
+
+  // Pure Coding
+  codingWorkdir: string;
+  codingFocus: 'general' | 'debug' | 'refactor' | 'test' | 'review';
 };
 
 export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
@@ -80,6 +86,9 @@ export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
   gameEngine: 'canvas2d',
   gameViewport: '16:9',
   gameControls: 'keyboard-mouse',
+
+  codingWorkdir: '',
+  codingFocus: 'general',
 };
 
 const WEB_TARGET_LABELS: Record<ModeComposerOptions['webTarget'], string> = {
@@ -131,20 +140,41 @@ const VIDEO_SPEED_LABELS: Record<ModeComposerOptions['videoSpeed'], string> = {
   cinema: 'Cinema',
 };
 
+const CODING_FOCUS_LABELS: Record<ModeComposerOptions['codingFocus'], string> = {
+  general: 'General coding',
+  debug: 'Debug & fix',
+  refactor: 'Refactor',
+  test: 'Tests',
+  review: 'Code review',
+};
+
 export function getModeComposerPlaceholder(
   mode: SuperAgentModeSpec | null,
   options: ModeComposerOptions,
   t: (text: string) => string,
 ): string {
   if (!mode) return t('Ask Super Agent to build a game, website, video, deck, or asset…');
+  if (mode.id === 'coding') {
+    if (options.codingFocus === 'debug') return t('Describe the bug, stack trace, or failing behavior to investigate and fix…');
+    if (options.codingFocus === 'refactor') return t('Describe the module or code pattern to refactor cleanly…');
+    if (options.codingFocus === 'test') return t('Describe the tests to write or run in this repository…');
+    if (options.codingFocus === 'review') return t('Describe the diff, branch, or files to review…');
+    return t(mode.placeholder);
+  }
   if (mode.id === 'media') {
-    if (options.mediaSubMode === 'audio') {
-      return t('Describe the soundtrack, voiceover, or sound effect you want to create…');
-    }
     if (options.mediaSubMode === 'motion') {
       return t('Describe the editable Motion graphics film you want to build…');
     }
     return t('Describe the cinema video shot, camera motion, and lighting you want to generate…');
+  }
+  if (mode.id === 'audio') {
+    if (options.audioType === 'voiceover') {
+      return t('Write the narration script or describe the voiceover tone you want to generate…');
+    }
+    if (options.audioType === 'sfx') {
+      return t('Describe the sound effects or foley audio cues you want to generate…');
+    }
+    return t('Describe the soundtrack, mood, tempo, or audio you want to create…');
   }
   if (mode.id === 'motion' && options.motionEngine === 'video-model') {
     return t('Describe the AI video shot you want to generate with Seedance or your video model…');
@@ -172,22 +202,22 @@ export function formatModePromptPrefix(
     if (options.imageQuality === 'high') parts.push('Quality: High / 2K');
     if (options.imageCount > 1) parts.push(`Count: ${options.imageCount} variations`);
   } else if (mode.id === 'media') {
-    if (options.mediaSubMode === 'video') {
-      parts.push('Mode: AI Cinema Video (Video Model)');
-      const modelLabel = findModelLabel(options.videoModelId);
-      if (modelLabel) parts.push(`Video Model: ${modelLabel}`);
-      parts.push(`Format: ${options.videoAspect} · ${options.videoDuration} · ${VIDEO_SPEED_LABELS[options.videoSpeed]}`);
-    } else if (options.mediaSubMode === 'motion') {
+    if (options.mediaSubMode === 'motion') {
       parts.push('Mode: Motion graphics (Editable HyperFrames Code)');
       parts.push(`Format: ${options.motionAspect} · ${options.motionDuration} · ${options.motionFps}`);
       parts.push(`Style: ${MOTION_STYLE_LABELS[options.motionStyle]}`);
     } else {
-      parts.push('Mode: Audio Studio');
-      const modelLabel = findModelLabel(options.audioModelId);
-      if (modelLabel) parts.push(`Audio Model: ${modelLabel}`);
-      parts.push(`Type: ${AUDIO_TYPE_LABELS[options.audioType]}`);
-      parts.push(`Duration: ${options.audioDuration}`);
+      parts.push('Mode: AI Cinema Video (Video Model)');
+      const modelLabel = findModelLabel(options.videoModelId);
+      if (modelLabel) parts.push(`Video Model: ${modelLabel}`);
+      parts.push(`Format: ${options.videoAspect} · ${options.videoDuration} · ${VIDEO_SPEED_LABELS[options.videoSpeed]}`);
     }
+  } else if (mode.id === 'audio') {
+    parts.push('Mode: Audio & Sound');
+    const modelLabel = findModelLabel(options.audioModelId);
+    if (modelLabel) parts.push(`Audio Model: ${modelLabel}`);
+    parts.push(`Type: ${AUDIO_TYPE_LABELS[options.audioType]}`);
+    parts.push(`Duration: ${options.audioDuration}`);
   } else if (mode.id === 'motion') {
     if (options.motionEngine === 'video-model') {
       parts.push('Mode: AI Cinema Video (Video Model)');
@@ -208,6 +238,9 @@ export function formatModePromptPrefix(
     parts.push('Mode: Website & App');
     parts.push(`Target: ${WEB_TARGET_LABELS[options.webTarget]}`);
     if (options.webReferenceUrl.trim()) parts.push(`Reference URL: ${options.webReferenceUrl.trim()}`);
+  } else if (mode.id === 'coding') {
+    if (options.codingFocus === 'general') return '';
+    return `[Coding: ${CODING_FOCUS_LABELS[options.codingFocus]}]`;
   } else if (mode.id === 'game') {
     parts.push('Mode: HTML Game');
     parts.push(`Engine: ${GAME_ENGINE_LABELS[options.gameEngine]}`);
@@ -255,14 +288,19 @@ export function ModeComposerTopBar({
   onOpenModelSettings: () => void;
 }) {
   const { t } = useI18n();
-  const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion');
+  const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion' || modeId === 'audio');
   const { catalog } = useMediaCatalog(needsMediaCatalog);
-  const [openMenu, setOpenMenu] = useState<'video-model' | 'image-model' | 'audio-model' | 'import' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'video-model' | 'image-model' | 'audio-model' | 'import' | 'coding-workdir' | null>(null);
   const [urlDraft, setUrlDraft] = useState(options.webReferenceUrl);
+  const [workdirDraft, setWorkdirDraft] = useState(options.codingWorkdir);
 
   useEffect(() => {
     setUrlDraft(options.webReferenceUrl);
   }, [options.webReferenceUrl]);
+
+  useEffect(() => {
+    setWorkdirDraft(options.codingWorkdir);
+  }, [options.codingWorkdir]);
 
   useEffect(() => {
     if (!active) setOpenMenu(null);
@@ -443,7 +481,6 @@ export function ModeComposerTopBar({
     const isMotionActive = modeId === 'motion'
       ? options.motionEngine === 'motion'
       : options.mediaSubMode === 'motion';
-    const isAudioActive = modeId === 'media' && options.mediaSubMode === 'audio';
 
     return (
       <div className="om-sa-composer-top-bar" role="group" aria-label={t('Video generation options')}>
@@ -479,15 +516,21 @@ export function ModeComposerTopBar({
           <RemixIcon name={isMotionActive ? 'check-line' : 'add-line'} size={13} />
           <span>{t('Motion graphics')}</span>
         </Button>
+      </div>
+    );
+  }
 
-        {modeId === 'media' && renderFloatingModelPill({
+  if (modeId === 'audio') {
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Audio model')}>
+        {renderFloatingModelPill({
           menuKey: 'audio-model',
           modality: 'audio',
           selectedId: options.audioModelId,
-          isActiveEngine: isAudioActive,
-          fallbackLabel: t('Audio'),
+          isActiveEngine: true,
+          fallbackLabel: t('Audio model'),
           title: t('Audio model'),
-          onSelect: id => onChange({ mediaSubMode: 'audio', audioModelId: id }),
+          onSelect: id => onChange({ audioModelId: id }),
         })}
       </div>
     );
@@ -609,6 +652,86 @@ export function ModeComposerTopBar({
                 <span>{t('Attach Design Template')}</span>
                 <RemixIcon name="arrow-right-up-line" size={14} />
               </Button>
+            </div>
+          </div>
+        </Popover>
+      </div>
+    );
+  }
+
+  if (modeId === 'coding') {
+    const trimmed = options.codingWorkdir.trim();
+    const shortDir = trimmed ? (trimmed.split(/[\\/]/).filter(Boolean).pop() || trimmed) : '';
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Working directory')}>
+        <Popover
+          open={openMenu === 'coding-workdir'}
+          onOpenChange={next => setOpenMenu(next ? 'coding-workdir' : null)}
+          side="top"
+          align="start"
+          aria-label={t('Working directory')}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={Boolean(trimmed) || openMenu === 'coding-workdir' || undefined}
+              disabled={disabled}
+            >
+              <RemixIcon name="folder-line" size={13} />
+              <span className="om-sa-composer-top-pill-label" title={trimmed || undefined}>
+                {shortDir || t('Workspace folder')}
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Local project folder path')}</span>
+              <div className="om-sa-mode-url-row">
+                <input
+                  type="text"
+                  className="om-sa-mode-url-input"
+                  value={workdirDraft}
+                  placeholder="/path/to/repo"
+                  onChange={event => setWorkdirDraft(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      onChange({ codingWorkdir: workdirDraft.trim() });
+                      setOpenMenu(null);
+                    }
+                  }}
+                />
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  data-active
+                  onClick={() => {
+                    onChange({ codingWorkdir: workdirDraft.trim() });
+                    setOpenMenu(null);
+                  }}
+                >
+                  {t('Apply')}
+                </Button>
+                {trimmed && (
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    onClick={() => {
+                      setWorkdirDraft('');
+                      onChange({ codingWorkdir: '' });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    {t('Clear')}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </Popover>
@@ -920,73 +1043,77 @@ export function ModeComposerControls({
   }
 
   if (modeId === 'media') {
+    return (
+      <div className="om-sa-mode-controls" role="group" aria-label={t('Cinema Video options')}>
+        {options.mediaSubMode === 'motion' ? renderMotionParamsPopover() : renderVideoParamsPopover()}
+      </div>
+    );
+  }
+
+  if (modeId === 'audio') {
     const audioSummary = `${t(AUDIO_TYPE_LABELS[options.audioType])} · ${options.audioDuration}`;
     return (
-      <div className="om-sa-mode-controls" role="group" aria-label={t('Cinema & Audio options')}>
-        {options.mediaSubMode === 'video' && renderVideoParamsPopover()}
-        {options.mediaSubMode === 'motion' && renderMotionParamsPopover()}
-        {options.mediaSubMode === 'audio' && (
-          <Popover
-            open={openMenu === 'params'}
-            onOpenChange={next => setOpenMenu(next ? 'params' : null)}
-            side="top"
-            align="start"
-            aria-label={t('Audio parameters')}
-            className="om-sa-mode-popover"
-            trigger={
-              <Button
-                variant="plain"
-                type="button"
-                className="om-sa-mode-param-trigger"
-                data-active={openMenu === 'params' || undefined}
-                disabled={disabled}
-              >
-                <RemixIcon name="music-2-line" size={13} />
-                <span className="om-sa-mode-param-label">{audioSummary}</span>
-                <RemixIcon name="arrow-down-s-line" size={14} />
-              </Button>
-            }
-          >
-            <div className="om-sa-mode-menu">
-              <div className="om-sa-mode-field">
-                <span className="om-sa-popover-label">{t('Audio type')}</span>
-                <div className="om-sa-popover-pills">
-                  {(['music', 'voiceover', 'sfx'] as const).map(kind => (
-                    <Button
-                      key={kind}
-                      variant="plain"
-                      type="button"
-                      className="om-sa-popover-pill"
-                      aria-pressed={options.audioType === kind}
-                      data-active={options.audioType === kind || undefined}
-                      onClick={() => onChange({ audioType: kind })}
-                    >
-                      {t(AUDIO_TYPE_LABELS[kind])}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="om-sa-mode-field">
-                <span className="om-sa-popover-label">{t('Duration')}</span>
-                <div className="om-sa-popover-pills">
-                  {(['10s', '30s', '60s'] as const).map(dur => (
-                    <Button
-                      key={dur}
-                      variant="plain"
-                      type="button"
-                      className="om-sa-popover-pill"
-                      aria-pressed={options.audioDuration === dur}
-                      data-active={options.audioDuration === dur || undefined}
-                      onClick={() => onChange({ audioDuration: dur })}
-                    >
-                      {dur}
-                    </Button>
-                  ))}
-                </div>
+      <div className="om-sa-mode-controls" role="group" aria-label={t('Audio & Sound options')}>
+        <Popover
+          open={openMenu === 'params'}
+          onOpenChange={next => setOpenMenu(next ? 'params' : null)}
+          side="top"
+          align="start"
+          aria-label={t('Audio parameters')}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-mode-param-trigger"
+              data-active={openMenu === 'params' || undefined}
+              disabled={disabled}
+            >
+              <RemixIcon name="music-2-line" size={13} />
+              <span className="om-sa-mode-param-label">{audioSummary}</span>
+              <RemixIcon name="arrow-down-s-line" size={14} />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Audio type')}</span>
+              <div className="om-sa-popover-pills">
+                {(['music', 'voiceover', 'sfx'] as const).map(kind => (
+                  <Button
+                    key={kind}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.audioType === kind}
+                    data-active={options.audioType === kind || undefined}
+                    onClick={() => onChange({ audioType: kind })}
+                  >
+                    {t(AUDIO_TYPE_LABELS[kind])}
+                  </Button>
+                ))}
               </div>
             </div>
-          </Popover>
-        )}
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Duration')}</span>
+              <div className="om-sa-popover-pills">
+                {(['10s', '30s', '60s'] as const).map(dur => (
+                  <Button
+                    key={dur}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.audioDuration === dur}
+                    data-active={options.audioDuration === dur || undefined}
+                    onClick={() => onChange({ audioDuration: dur })}
+                  >
+                    {dur}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Popover>
       </div>
     );
   }
@@ -1075,6 +1202,58 @@ export function ModeComposerControls({
                     onClick={() => onChange({ deckDensity: density })}
                   >
                     {t(DECK_DENSITY_LABELS[density])}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Popover>
+      </div>
+    );
+  }
+
+  if (modeId === 'coding') {
+    return (
+      <div className="om-sa-mode-controls" role="group" aria-label={t('Coding focus')}>
+        <Popover
+          open={openMenu === 'params'}
+          onOpenChange={next => setOpenMenu(next ? 'params' : null)}
+          side="top"
+          align="start"
+          aria-label={t('Coding focus')}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-mode-param-trigger"
+              data-active={openMenu === 'params' || undefined}
+              disabled={disabled}
+            >
+              <RemixIcon name="code-s-slash-line" size={13} />
+              <span className="om-sa-mode-param-label">{t(CODING_FOCUS_LABELS[options.codingFocus])}</span>
+              <RemixIcon name="arrow-down-s-line" size={14} />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Coding focus')}</span>
+              <div className="om-sa-popover-pills">
+                {(['general', 'debug', 'refactor', 'test', 'review'] as const).map(focus => (
+                  <Button
+                    key={focus}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.codingFocus === focus}
+                    data-active={options.codingFocus === focus || undefined}
+                    onClick={() => {
+                      onChange({ codingFocus: focus });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    {t(CODING_FOCUS_LABELS[focus])}
                   </Button>
                 ))}
               </div>

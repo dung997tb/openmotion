@@ -19,11 +19,11 @@ import { useCoveredTemplates } from '../motion/useCoveredTemplates';
 import { resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import { fetchWorkspaceResources } from './superAgentClient';
 
-export type SuperAgentCreationModeId = 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media';
+export type SuperAgentCreationModeId = 'coding' | 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
 
 export type SuperAgentModeSpec = {
   id: SuperAgentCreationModeId;
-  tone: 'agent' | 'image' | 'video' | 'audio';
+  tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   label: string;
   title: string;
@@ -35,6 +35,23 @@ export type SuperAgentModeSpec = {
 };
 
 export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
+  {
+    id: 'coding',
+    tone: 'coding',
+    icon: 'code-s-slash-line',
+    label: 'Coding',
+    title: 'Code, debug & ship',
+    subtitle: 'Pure coding workspace for inspecting repositories, editing files, running shell commands, and reviewing diffs.',
+    placeholder: 'Ask your coding agent to inspect files, fix a bug, refactor, or run tests…',
+    defaultPrompt: 'Inspect the working directory, run git status or check the files present, and summarize the structure.',
+    pickerCategory: 'all',
+    quickIdeas: [
+      { title: 'Inspect repo & architecture', prompt: 'Inspect the repository structure and explain the main modules and entry points.' },
+      { title: 'Debug & fix an issue', prompt: 'Reproduce and diagnose the bug, apply a minimal clean fix, and verify with tests.' },
+      { title: 'Write & run tests', prompt: 'Add focused unit tests for the changed behavior and run the test suite to verify everything passes.' },
+      { title: 'Refactor & review diff', prompt: 'Refactor the duplicated logic into a small clean helper, then review the git diff.' },
+    ],
+  },
   {
     id: 'website',
     tone: 'agent',
@@ -119,16 +136,32 @@ export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
     id: 'media',
     tone: 'video',
     icon: 'clapperboard-line',
-    label: 'Cinema & Audio',
-    title: 'Direct cinema shots & sound',
-    subtitle: 'Choose a Cinema Studio shot template or Sound Studio audio preset to seed your prompt, or attach workspace media.',
-    placeholder: 'Describe the video clip, soundtrack, SFX, or voiceover you want to create…',
-    defaultPrompt: 'Inspect my configured video and audio models, then help me generate a short cinematic clip or background soundtrack in workspace assets and show it in the Artifact Viewer.',
+    label: 'Cinema Video',
+    title: 'Direct cinema shots',
+    subtitle: 'Choose a Cinema Studio shot template or Seedance scene to seed your prompt, or switch to Motion graphics anytime.',
+    placeholder: 'Describe the cinema video shot, camera motion, and lighting you want to generate…',
+    defaultPrompt: 'Inspect my configured video models and help me generate a short cinematic shot in workspace assets, then show it in the Artifact Viewer.',
     pickerCategory: 'asset',
     quickIdeas: [
       { title: 'Cinematic B-roll shot', prompt: 'Generate a 5-second cinematic camera-movement shot based on the attached still reference.' },
-      { title: 'Product launch soundtrack', prompt: 'Compose an upbeat 30-second electronic product launch soundtrack with a clean build-up.' },
-      { title: 'Narration & sound effects', prompt: 'Generate a warm voiceover intro and crisp UI transition sound effects in workspace assets.' },
+      { title: 'Product slow-motion reveal', prompt: 'Direct a 5-second studio macro slow-motion product reveal with dramatic rim lighting.' },
+      { title: 'Multi-shot story sequence', prompt: 'Create a 3-shot cinematic sequence with matching lighting and smooth camera push-in.' },
+    ],
+  },
+  {
+    id: 'audio',
+    tone: 'audio',
+    icon: 'music-2-line',
+    label: 'Audio & Sound',
+    title: 'Create sound & audio',
+    subtitle: 'Compose original soundtracks, studio voiceovers, podcast intros, or crisp sound effects into workspace assets.',
+    placeholder: 'Describe the soundtrack, voiceover, podcast, or sound effect you want to create…',
+    defaultPrompt: 'Inspect my configured audio models and help me compose a 30-second product launch soundtrack or narration in workspace assets, then preview it in the Artifact Viewer.',
+    pickerCategory: 'asset',
+    quickIdeas: [
+      { title: 'Product launch soundtrack', prompt: 'Compose an upbeat 30-second electronic product launch soundtrack with a clean build-up and crisp finale.' },
+      { title: 'Warm narration voiceover', prompt: 'Generate a warm, natural studio voiceover intro suitable for a 20-second product film.' },
+      { title: 'UI & transition sound effects', prompt: 'Create a set of crisp UI click, swoosh, and reveal transition sound effects for motion design.' },
     ],
   },
 ];
@@ -269,22 +302,21 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
       prompt: ex.prompt,
     })),
   );
-  const audio: CuratedShowcaseCard[] = [
-    ...sceneExamples.music.map((ex, idx) => ({
-      id: `audio-${idx}`,
-      title: ex.title,
-      subtitle: [ex.kind || 'Audio', ex.model, ex.seconds ? `${ex.seconds}s` : ''].filter(Boolean).join(' · '),
-      poster: ex.poster,
-      prompt: ex.prompt,
-    })),
-    ...sceneExamples.speech.map((ex, idx) => ({
-      id: `speech-${idx}`,
-      title: ex.title,
-      subtitle: 'Text to speech',
-      poster: ex.poster,
-      prompt: ex.prompt,
-    })),
-  ];
+  const music: CuratedShowcaseCard[] = sceneExamples.music.map((ex, idx) => ({
+    id: `audio-${idx}`,
+    title: ex.title,
+    subtitle: [ex.kind || 'Audio', ex.model, ex.seconds ? `${ex.seconds}s` : ''].filter(Boolean).join(' · '),
+    poster: ex.poster,
+    prompt: ex.prompt,
+  }));
+  const speech: CuratedShowcaseCard[] = sceneExamples.speech.map((ex, idx) => ({
+    id: `speech-${idx}`,
+    title: ex.title,
+    subtitle: 'Text to speech',
+    poster: ex.poster,
+    prompt: ex.prompt,
+  }));
+  const audio: CuratedShowcaseCard[] = [...music, ...speech];
 
   const dedupe = (list: CuratedShowcaseCard[]) => {
     const seenTitles = new Set<string>();
@@ -304,12 +336,14 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
     return [...primary, ...secondary];
   };
 
-  if (category === 'all-media') return dedupe([...cinema, ...seedance, ...videoScenes, ...audio]);
+  if (category === 'all-media') return dedupe([...cinema, ...seedance, ...videoScenes]);
   if (category === 'ai-video') return dedupe([...cinema, ...seedance, ...videoScenes]);
   if (category === 'cinema') return cinema;
   if (category === 'seedance') return seedance;
   if (category === 'video-scenes') return videoScenes;
-  if (category === 'audio') return audio;
+  if (category === 'all-audio' || category === 'audio') return dedupe(audio);
+  if (category === 'music') return dedupe(music);
+  if (category === 'speech') return dedupe(speech);
   return dedupe([...cinema, ...seedance, ...videoScenes]);
 }
 
@@ -361,7 +395,7 @@ function ResourceShowcaseThumb({ item, active = true }: { item: SuperAgentResour
   if (showImg) {
     return (
       <div className="om-sa-showcase-thumb" aria-hidden="true">
-        <img src={item.previewUrl} alt="" loading="lazy" onError={() => setImgFailed(true)} />
+        <img src={item.previewUrl} alt="" loading="lazy" decoding="async" onError={() => setImgFailed(true)} />
       </div>
     );
   }
@@ -429,6 +463,8 @@ export function ModeResourceShowcase({
   // Build real categories & live counts per mode.
   const filters = useMemo<FilterOption[]>(() => {
     switch (mode.id) {
+      case 'coding':
+        return [];
       case 'website': {
         const all = (designTemplates ?? []).filter(i => i.scenario !== 'deck' && i.scenario !== 'document' && i.scenario !== 'webgl');
         const proto = (designTemplates ?? []).filter(i => i.scenario === 'prototype');
@@ -503,13 +539,20 @@ export function ModeResourceShowcase({
       case 'media': {
         const hasFull = Boolean(coveredMotion.catalog);
         return [
-          { id: 'all-media', label: 'All', count: buildCinemaCardsByCategory('all-media', isZh).length },
-          { id: 'ai-video', label: 'AI Video & Seedance', count: buildCinemaCardsByCategory('ai-video', isZh).length },
+          { id: 'all-media', label: 'All video', count: buildCinemaCardsByCategory('all-media', isZh).length },
           { id: 'motion-video', label: 'Motion graphics', count: hasFull ? motionCatalog.length : undefined },
           { id: 'cinema', label: 'Cinema Studio', count: cinemaTemplates.length },
+          { id: 'seedance', label: 'Seedance 2.5', count: seedanceStory.cases.length },
           { id: 'video-scenes', label: 'Camera & multi-shot', count: buildCinemaCardsByCategory('video-scenes', isZh).length },
-          { id: 'audio', label: 'Music & Sound', count: sceneExamples.music.length + sceneExamples.speech.length },
-          { id: 'asset', label: 'Workspace Assets', count: assets?.length },
+          { id: 'asset', label: 'Workspace Assets', count: assets ? assets.filter(a => a.modality === 'video').length : undefined },
+        ];
+      }
+      case 'audio': {
+        return [
+          { id: 'all-audio', label: 'All audio', count: buildCinemaCardsByCategory('all-audio', isZh).length },
+          { id: 'music', label: 'Music & Soundtracks', count: sceneExamples.music.length },
+          { id: 'speech', label: 'Voiceover & Speech', count: sceneExamples.speech.length },
+          { id: 'asset', label: 'Workspace Audio', count: assets ? assets.filter(a => a.modality === 'audio').length : undefined },
         ];
       }
     }
@@ -564,7 +607,7 @@ export function ModeResourceShowcase({
       if (activeFilter === 'design-template') void ensure('design-template');
       if (activeFilter === 'asset') void ensure('asset');
       if (activeFilter === 'brand-kit') void ensure('brand-kit');
-    } else if (mode.id === 'media') {
+    } else if (mode.id === 'media' || mode.id === 'audio') {
       if (activeFilter === 'asset') void ensure('asset');
     }
 
@@ -573,12 +616,12 @@ export function ModeResourceShowcase({
     };
   }, [mode.id, activeFilter, designTemplates, brandKits, designSkills, assets]);
 
-  // Resolve active curated cards (Image / Cinema / Sound / AI Video).
+  // Resolve active curated cards (Image / Cinema / Audio / AI Video).
   const curatedCards = useMemo<CuratedShowcaseCard[] | null>(() => {
     if (mode.id === 'image' && activeFilter !== 'asset' && activeFilter !== 'brand-kit' && activeFilter !== 'design-template') {
       return buildImageCardsByCategory(activeFilter);
     }
-    if (mode.id === 'media' && activeFilter !== 'asset' && activeFilter !== 'motion-video') {
+    if ((mode.id === 'media' || mode.id === 'audio') && activeFilter !== 'asset' && activeFilter !== 'motion-video') {
       return buildCinemaCardsByCategory(activeFilter, isZh);
     }
     if (mode.id === 'motion' && activeFilter === 'ai-video') {
@@ -607,6 +650,8 @@ export function ModeResourceShowcase({
     if (activeFilter === 'asset') {
       const all = assets ?? [];
       if (mode.id === 'image') return all.filter(a => a.modality === 'image');
+      if (mode.id === 'audio') return all.filter(a => a.modality === 'audio');
+      if (mode.id === 'media') return all.filter(a => a.modality === 'video');
       return all;
     }
     if (mode.id === 'media' && activeFilter === 'motion-video') {
@@ -709,6 +754,7 @@ export function ModeResourceShowcase({
         </div>
       </div>
 
+      {mode.id !== 'coding' && (
       <section className="om-sa-showcase-panel">
         <div className="om-sa-showcase-bar">
           <div className="om-sa-showcase-tabs" role="tablist" aria-label={t('Template filters')}>
@@ -794,6 +840,7 @@ export function ModeResourceShowcase({
                     src={card.poster}
                     alt=""
                     loading="lazy"
+                    decoding="async"
                     style={card.posterPosition ? { objectPosition: card.posterPosition } : undefined}
                   />
                 </div>
@@ -864,6 +911,7 @@ export function ModeResourceShowcase({
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

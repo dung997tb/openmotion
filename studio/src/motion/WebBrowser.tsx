@@ -20,9 +20,18 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
   const surface = useRef<HTMLDivElement>(null), keyboard = useRef<HTMLTextAreaElement>(null);
   const picture = useRef<HTMLImageElement>(null), ready = useRef(false), queue = useRef(Promise.resolve());
   const report = useRef(onState), initialUrl = useRef(url), composing = useRef(false), pointerTime = useRef(0);
+  const frameViewport = useRef<{ width: number; height: number } | null>(null);
+  const lastSentViewport = useRef<{ width: number; height: number; dpr: number } | null>(null);
+  const hasFrameRef = useRef(false);
   report.current = onState;
   initialUrl.current = url;
   const [error, setError] = useState(''), [hasFrame, setHasFrame] = useState(false), [attempt, setAttempt] = useState(0);
+  const currentDpr = () => (typeof window !== 'undefined' ? Math.min(2, Math.max(1, Math.round((window.devicePixelRatio || 1) * 2) / 2)) : 1);
+  const measureBounds = () => {
+    const bounds = surface.current?.getBoundingClientRect();
+    if (!bounds || bounds.width < 20 || bounds.height < 20) return null;
+    return { width: Math.round(bounds.width), height: Math.round(bounds.height), dpr: currentDpr() };
+  };
   useImperativeHandle(ref, () => ({ command: async (action, address) => {
     if (!ready.current) throw new Error(t('Browser is connecting. Please try again.'));
     setError(''); await browserRequest(`${endpoint}/command`, { action, url: address });
@@ -34,7 +43,8 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
   useEffect(() => {
     let disposed = false, events: EventSource | undefined, timer: ReturnType<typeof setTimeout> | undefined;
     let observer: ResizeObserver | undefined;
-    ready.current = false; setError(''); setHasFrame(false);
+    ready.current = false; hasFrameRef.current = false; frameViewport.current = null; lastSentViewport.current = null;
+    setError(''); setHasFrame(false);
 
     const stopStream = () => {
       events?.close();
@@ -51,8 +61,27 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
       });
       events.addEventListener('frame', event => {
         if (disposed || !picture.current) return;
-        picture.current.src = `data:image/jpeg;base64,${JSON.parse((event as MessageEvent).data).data}`;
-        setHasFrame(true);
+        const payload = JSON.parse((event as MessageEvent).data) as { data: string; width?: number; height?: number; dpr?: number };
+        const current = measureBounds();
+        if (!hasFrameRef.current && current && payload.width && payload.height) {
+          const widthRatio = Math.abs(payload.width - current.width) / Math.max(1, current.width);
+          const heightRatio = Math.abs(payload.height - current.height) / Math.max(1, current.height);
+          if (widthRatio > 0.2 || heightRatio > 0.2) return;
+        }
+        if (payload.width && payload.height) {
+          frameViewport.current = { width: payload.width, height: payload.height };
+        }
+        const img = picture.current;
+        img.src = `data:image/jpeg;base64,${payload.data}`;
+        if (!hasFrameRef.current) {
+          const reveal = () => {
+            if (disposed) return;
+            hasFrameRef.current = true;
+            setHasFrame(true);
+          };
+          if (typeof img.decode === 'function') void img.decode().then(reveal, reveal);
+          else reveal();
+        }
       });
       events.onerror = () => { if (!disposed) setError(t('Browser connection interrupted. Retry to reconnect.')); };
     };
@@ -65,22 +94,37 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     void (async () => {
-      await browserRequest(endpoint, { url: initialUrl.current });
+      let initial = measureBounds();
+      if (!initial) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (disposed) return;
+        initial = measureBounds();
+      }
+      if (initial) lastSentViewport.current = initial;
+      await browserRequest(endpoint, {
+        url: initialUrl.current,
+        ...(initial ? { width: initial.width, height: initial.height, dpr: initial.dpr } : {}),
+      });
       if (disposed) return;
       if (attempt > 0) await browserRequest(`${endpoint}/command`, { action: 'navigate', url: initialUrl.current });
       ready.current = true;
       startStream();
       const resize = () => {
         clearTimeout(timer); timer = setTimeout(() => {
-          const bounds = surface.current?.getBoundingClientRect();
-          if (bounds && !disposed) void browserRequest(`${endpoint}/resize`, { width: bounds.width, height: bounds.height }).catch(reason => setError(reason.message));
-        }, 100);
+          const next = measureBounds();
+          if (!next || disposed) return;
+          const prev = lastSentViewport.current;
+          if (prev && prev.width === next.width && prev.height === next.height && prev.dpr === next.dpr) return;
+          lastSentViewport.current = next;
+          void browserRequest(`${endpoint}/resize`, next).catch(reason => setError(reason.message));
+        }, 120);
       };
-      observer = new ResizeObserver(resize); observer.observe(surface.current!); resize();
+      observer = new ResizeObserver(resize); observer.observe(surface.current!);
     })().catch(reason => { if (!disposed) setError(reason.message); });
     return () => {
       disposed = true;
       ready.current = false;
+      hasFrameRef.current = false;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       stopStream();
       observer?.disconnect();
@@ -89,8 +133,16 @@ export const WebBrowser = forwardRef<WebBrowserHandle, { sessionId: string; tabI
     };
   }, [endpoint, attempt, t]);
   const point = (x: number, y: number) => {
-    const bounds = picture.current!.getBoundingClientRect();
-    return { x: (x - bounds.left) * picture.current!.naturalWidth / bounds.width, y: (y - bounds.top) * picture.current!.naturalHeight / bounds.height };
+    const img = picture.current!;
+    const bounds = img.getBoundingClientRect();
+    const vp = frameViewport.current ?? { width: img.naturalWidth || bounds.width, height: img.naturalHeight || bounds.height };
+    const scale = Math.min(bounds.width / Math.max(1, vp.width), bounds.height / Math.max(1, vp.height));
+    const renderedW = Math.max(1, vp.width * scale);
+    const renderedH = Math.max(1, vp.height * scale);
+    return {
+      x: Math.max(0, Math.min(vp.width, ((x - bounds.left) / renderedW) * vp.width)),
+      y: Math.max(0, Math.min(vp.height, ((y - bounds.top) / renderedH) * vp.height)),
+    };
   };
   useEffect(() => {
     const node = surface.current!;
