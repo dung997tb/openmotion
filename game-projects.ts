@@ -1010,9 +1010,12 @@ export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: U
         ? injectPreviewBridgeHtml(file.data, bridgeToken)
         : file.data;
       const origin = new URL(url); if (req.headers?.host) origin.host = req.headers.host;
+      const encodedId = encodeURIComponent(id);
+      const assetOrigins = `${origin.origin}/api/assets/ ${origin.origin}/motion-api/assets/`;
+      const playOrigins = `${origin.origin}/api/games/${encodedId}/play/ ${origin.origin}/motion-api/games/${encodedId}/play/`;
       const sockets = ['/api/games', '/motion-api/games'].map(prefix => `${origin.protocol === 'https:' ? 'wss:' : 'ws:'}//${origin.host}${prefix}/${id}/rooms/`).join(' ');
       const executable = /^(?:text\/html|image\/svg\+xml)/.test(file.mime);
-      const csp = "sandbox allow-scripts allow-pointer-lock allow-popups allow-modals; default-src 'self' data: blob:; connect-src 'self' blob: data: " + sockets + " https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline'; worker-src 'none'";
+      const csp = `sandbox allow-scripts allow-pointer-lock allow-popups allow-modals; default-src 'self' data: blob: ${playOrigins} ${assetOrigins}; connect-src 'self' blob: data: ${playOrigins} ${assetOrigins} ${sockets} https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${playOrigins} https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' ${playOrigins}; worker-src 'none'`;
       res.writeHead(200, { 'Access-Control-Allow-Origin':'*', 'Content-Type':file.mime, 'Content-Length':payload.length, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', ...(executable ? { 'Content-Security-Policy': csp } : {}) }); res.end(payload); return true;
     }
     if (parts.length === 2 && req.method === 'POST') {

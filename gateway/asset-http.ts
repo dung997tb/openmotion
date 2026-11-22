@@ -35,7 +35,7 @@ export async function assetHttp(req: IncomingMessage, res: ServerResponse, url: 
     } finally { await rm(filename, { force: true }); }
     return true;
   }
-  const media = url.pathname.match(/^\/api\/assets\/([^/]+)\/versions\/([^/]+)\/file$/);
+  const media = url.pathname.match(/^\/api\/assets\/([^/]+)\/versions\/([^/]+)\/(?:file|media)$/);
   if (!media || !['GET', 'HEAD'].includes(req.method ?? '')) return false;
   if (!libraryId(media[1]) || !libraryId(media[2])) throw new Error('ASSET_VERSION_UNAVAILABLE');
   const { filename, version } = await library.resolve({ assetId: media[1], versionId: media[2] }, true);
@@ -52,7 +52,7 @@ export async function assetHttp(req: IncomingMessage, res: ServerResponse, url: 
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= info.size) { res.writeHead(416, { 'Content-Range': `bytes */${info.size}` }); res.end(); return true; }
       status = 206; res.setHeader('Content-Range', `bytes ${start}-${end}/${info.size}`);
     }
-    res.writeHead(status, { 'Content-Type': version.mimeType, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes',
+    res.writeHead(status, { 'Access-Control-Allow-Origin': '*', 'Content-Type': version.mimeType, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes',
       'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff',
       ...(url.searchParams.has('download') ? { 'Content-Disposition': `attachment; filename="${version.filename}"` } : {}) });
     if (req.method === 'HEAD') res.end();

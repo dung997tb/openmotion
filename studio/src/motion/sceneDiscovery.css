@@ -442,7 +442,8 @@
 .om-story-gallery { grid-template-columns: minmax(0, 1.35fr) repeat(2, minmax(0, 1fr)); }
 .om-story-gallery .om-scene-tile-art { height: clamp(150px, 16cqw, 245px); aspect-ratio: auto; }
 .om-story-action-skeleton { width: 8rem; height: var(--motion-control); }
-.om-claude-stories { display: grid; grid-template-columns: minmax(0, .9fr) repeat(2, minmax(0, 1fr)); gap: var(--motion-space-24); }
+.om-claude-stories { display: grid; grid-template-columns: minmax(0, .9fr) repeat(2, minmax(0, 1fr)); gap: var(--motion-space-24); scroll-margin-top: calc(var(--motion-space-40) + var(--motion-space-32)); }
+[id^="explore-"] { scroll-margin-top: calc(var(--motion-space-40) + var(--motion-space-32)); }
 .om-claude-intro { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--motion-space-12); }
 .om-claude-intro .om-discovery-heading { margin-bottom: 0; }
 .om-story-intro-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--motion-space-8); }

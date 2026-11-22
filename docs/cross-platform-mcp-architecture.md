@@ -102,7 +102,7 @@ Batch content optimization exposes one shared capability (`gateway/content-batch
 - **`agent-optimize` mode**: Dispatches each item through Super Agent (`local-direct`, `local-bridge`, or `remote-service`) with structured optimization rubrics so an AI Agent evaluates, edits, and produces artifacts in parallel.
 - **`scenario-matrix` mode**: Executes full multi-step Scenario Workflows (`gateway/scenario-runs.ts`) across a matrix of products, audiences, or locales.
 - **Triggers (`gateway/triggers.ts`)**: Fires an MCP tool, Content Batch, or Super Agent turn via authenticated incoming webhooks (`Bearer om_trg_...` or HMAC `X-OpenMotion-Signature: sha256=...`), interval schedules (`>= 60s`), or manual runs.
-- **Open Design Cloud Web Publishing (`gateway/web-publish.ts`, `gateway/web-publish-ops.ts`, `gateway/design-deploy.ts`)**: Reuses the shared Open Design sign-in (`gateway/account.ts`) to publish any HTML-expressed OpenMotion deliverable — **Design Studio** pages, **Game Studio** playable HTML games, **Motion** HTML bundles, or standalone `.html`/static folders — via `openmotion_assets_use(action="web_publish")`, `openmotion_design_project(action="deploy|deploy_status|unpublish")`, or `/motion-api/web-publish/:kind/:id`, minting stable HTTPS share URLs.
+- **Open Design Cloud Web Publishing (`gateway/web-publish.ts`, `gateway/web-publish-bundle.ts`, `gateway/web-publish-ops.ts`, `gateway/design-deploy.ts`)**: Reuses the shared Open Design sign-in (`gateway/account.ts`) to automatically stage and bundle referenced local workspace media (`_shared-assets/`), track SHA-256 content `freshness`, and publish any HTML-expressed OpenMotion deliverable — **Design Studio** pages, **Game Studio** playable HTML games, **Motion** HTML bundles, or standalone `.html`/static folders — via one unified `WebPublishPopover` across Design Studio, Game Studio, and Super Agent's `ArtifactBrowserPane`, as well as `openmotion_assets_use(action="web_publish")`, `openmotion_design_project(action="deploy|deploy_status|unpublish")`, or `/motion-api/web-publish/:kind/:id`, minting stable HTTPS share URLs.
 
 ---
 
@@ -114,7 +114,7 @@ OpenMotion's desktop wrapper lives in the standalone `desktop/` package so root 
 | --- | --- | --- | --- |
 | **macOS** | `titleBarStyle: 'hiddenInset'`, `trafficLightPosition: { x: 14, y: 15 }`, header left inset `78px` (collapses to `0px` in fullscreen) | Native macOS traffic lights | `.dmg` + `.zip` (`arm64`, `x64`) |
 | **Windows** | `titleBarStyle: 'hidden'` + dynamic theme-synced `titleBarOverlay`, header right inset `138px` | Native Windows caption overlay | NSIS installer (`.exe`) + Portable (`x64`, `arm64`) |
-| **Linux** | Frameless custom header (`insetRight: 132px`) or native window frame (`OPENMOTION_DESKTOP_NATIVE_FRAME=1`) | Shared `IconButton` window controls (`Minimize`, `Maximize/Restore`, `Close`) | `AppImage`, `.deb`, `.rpm` (`x64`, `arm64`) |
+| **Linux** | Frameless custom header (`insetRight: 132px`) or native window frame (`MOTION_LINUX_NATIVE_FRAME=1`) | Shared `IconButton` window controls (`Minimize`, `Maximize/Restore`, `Close`) | `AppImage`, `.deb`, `.rpm` (`x64`, `arm64`) |
 
 ### Desktop Lifecycle & Support Features
 

@@ -1352,11 +1352,11 @@
         boundary: 'B-E',
         title: 'Open Design 云端通用 HTML 发布与外部云出口',
         subtitle: '面向 Design、Game、Motion 及任意静态 HTML 文件/目录的统一云端发布与分享通道 (`amr-api.open-design.ai`)。',
-        role: '通过 `WebPublishService`（`gateway/web-publish.ts`）统一抽象并驱动 `@powerformer/vela-cli`，执行工作区绑定、安全暂存过滤（剥离 `.env` / `.git` / 符号链接）、`_commentFiles` 收据入账验证与稳定 slug 绑定，为任意 HTML 产物生成唯一 `https://open-design.app/artifact/<projectId>/<slug>` 链接，并收口 BYOK 与桌面更新。',
-        allow: ['支持通过 Design / Game Studio 共享 `WebPublishPopover`、`openmotion_assets_use(action="web_publish")` 或 `openmotion_design_project(action="deploy")` 完成一键发布、更新、暂停与恢复。'],
+        role: '通过 `WebPublishService`（`gateway/web-publish.ts`）与 `web-publish-bundle.ts` 自动扫描打包工作区本地媒体至 `_shared-assets/`、计算 SHA-256 `freshness` 过期指纹，并驱动 `@powerformer/vela-cli` 执行工作区绑定、安全暂存过滤（剥离 `.env` / `.git` / 符号链接）、`_commentFiles` 收据入账验证与稳定 slug 绑定，为任意 HTML 产物生成唯一 `https://open-design.app/artifact/<projectId>/<slug>` 链接，并收口 BYOK 与桌面更新。',
+        allow: ['支持通过 Design Studio / Game Studio / Super Agent `ArtifactBrowserPane` 共享的 `WebPublishPopover`（「Share」弹窗）、`openmotion_assets_use(action="web_publish")` 或 `openmotion_design_project(action="deploy")` 完成一键发布、更新、暂停与恢复。'],
         deny: ['对任何非 HTTPS、包含凭据信息或不符合 canonical path 规范的分享链接一律拦截，防止链接伪造。'],
         proto: '`@powerformer/vela-cli` + HTTPS OpenDesign Cloud API + BYOK HTTPS',
-        files: ['shared/web-publish.ts', 'gateway/web-publish.ts', 'gateway/web-publish-ops.ts', 'gateway/design-deploy.ts', 'studio/src/components/WebPublishPopover.tsx']
+        files: ['shared/web-publish.ts', 'gateway/web-publish.ts', 'gateway/web-publish-bundle.ts', 'gateway/web-publish-ops.ts', 'gateway/design-deploy.ts', 'studio/src/components/WebPublishPopover.tsx', 'studio/src/super-agent/ArtifactBrowserPane.tsx']
       }
     };
 
@@ -1481,12 +1481,12 @@
       },
       'cloud-deploy': {
         title: '链路 5 · 通用 HTML 云端发布（Design / Game / HTML）与唯一分享链接闭环',
-        subtitle: '将 Design Studio 页面、Game Studio 游戏或任意静态 HTML 文件/目录一键发布到 Open Design Cloud，通过同一套服务与弹窗服务于 Studio UI 和外部 MCP。',
-        role: '通过 `WebPublishService` 统一抽象与 `targetKind` (`design` | `game` | `html` | `motion`) 解耦，实现安全过滤上传、收据入账校验及云端分享链接全生命周期管理。',
-        allow: ['通过 `openmotion_assets_use(action="web_publish", ...)`、`openmotion_design_project(action="deploy")`、`/motion-api/web-publish/:kind/:id` 或共享 `WebPublishPopover` 执行全流程管理。'],
+        subtitle: '将 Design Studio 页面、Game Studio 游戏或任意静态 HTML 文件/目录一键发布到 Open Design Cloud，通过同一套域服务、本地资源打包器与 `WebPublishPopover` 服务于全端 UI 与外部 MCP。',
+        role: '通过 `WebPublishService` 统一抽象、`web-publish-bundle.ts` 自动抓取工作区媒体至 `_shared-assets/` 及 `targetKind` (`design` | `game` | `html` | `motion`) 解耦，实现 SHA-256 内容新鲜度（`freshness`）检测、安全过滤上传、收据入账校验及云端分享链接全生命周期管理。',
+        allow: ['通过 `openmotion_assets_use(action="web_publish", ...)`、`openmotion_design_project(action="deploy")`、`/motion-api/web-publish/:kind/:id` 或 Design / Game / Super Agent `ArtifactBrowserPane` 共享的 `WebPublishPopover` 执行全流程管理。'],
         deny: ['自动剥离 `.env*`、`.git`、`node_modules` 及符号链接；停止后的分享链接不可在未明确声明 `resume` 或 `new_link` 时静默覆盖。'],
-        proto: 'Studio / HTTP `/mcp` → `WebPublishService` → `@powerformer/vela-cli` → `amr-api.open-design.ai` → `https://open-design.app/artifact/...`',
-        files: ['shared/web-publish.ts', 'gateway/web-publish.ts', 'gateway/web-publish-ops.ts', 'gateway/design-deploy.ts', 'studio/src/components/WebPublishPopover.tsx', 'tests/web-publish.test.ts'],
+        proto: 'Studio / HTTP `/mcp` → `WebPublishService` + `web-publish-bundle.ts` → `@powerformer/vela-cli` → `https://open-design.app/artifact/...`',
+        files: ['shared/web-publish.ts', 'gateway/web-publish.ts', 'gateway/web-publish-bundle.ts', 'gateway/web-publish-ops.ts', 'gateway/design-deploy.ts', 'studio/src/components/WebPublishPopover.tsx', 'studio/src/super-agent/ArtifactBrowserPane.tsx', 'tests/e2e-deploy-game-chain.test.ts'],
         nodes: ['web-browser', 'ext-agents', 'http-gateway', 'mcp-http', 'mcp-registry', 'domain-core', 'local-store', 'cloud-deploy'],
         boundaries: ['B-B', 'B-C', 'B-E'],
         edges: [
@@ -1495,8 +1495,8 @@
           ['domain-core', 'local-store'], ['domain-core', 'cloud-deploy']
         ],
         steps: [
-          '用户在 Design/Game Studio 点击共享「Share live」弹窗，或外部 Agent 经由 `/mcp` 调用 `openmotion_assets_use(action="web_publish", ...)` / `openmotion_design_project(action="deploy")`。',
-          '`WebPublishService` 解析目标类型（`design` / `game` / `html` / `motion`），校验 OpenDesign 登录态并在 `<dataDirectory>/web-publications/` 锁定唯一 `slug` 与 `sourceFileId`。',
+          '用户在 Design Studio、Game Studio 或 Super Agent `ArtifactBrowserPane` 点击共享「Share」弹窗（`WebPublishPopover`），或外部 Agent 经由 `/mcp` 调用 `openmotion_assets_use(action="web_publish", ...)` / `openmotion_design_project(action="deploy")`。',
+          '`WebPublishService` 与 `web-publish-bundle.ts` 解析目标类型（`design` / `game` / `html` / `motion`），自动打包 `/motion-api/assets/...` 至 `_shared-assets/`、计算 SHA-256 `freshness`，并在 `<dataDirectory>/web-publications/` 锁定唯一 `slug` 与 `sourceFileId`。',
           '安全暂存过滤后调用 `@powerformer/vela-cli` 依次完成：`ensure-private` → `register-resource` → `resource push` → `_commentFiles` 收据入账回读校验 → `share publish`。',
           '校验并持久化云端返回的唯一 HTTPS 分享链接（`https://open-design.app/artifact/<projectId>/<slug>`），支持后续同链升级、暂停与恢复。'
         ]
