@@ -1382,6 +1382,9 @@ export class SuperAgentConversations {
         }
       },
       onReasoningDelta: (id, delta) => {
+        if (active.chat.turnActivity?.phase !== 'thinking') {
+          this.updateActivity(active, { phase: 'thinking' });
+        }
         const msgId = `reasoning:${id}`;
         const existing = active.chat.messages.find(m => m.id === msgId);
         const started = active.reasoningStartedAt?.get(msgId) ?? existing?.createdAt ?? Date.now();
@@ -1485,6 +1488,9 @@ export class SuperAgentConversations {
           createdAt: existing?.createdAt ?? merged.startedAt,
           toolEvent: merged,
         }, true);
+        if (!active.stopped && active.chat.turnActivity?.phase === 'tool') {
+          this.updateActivity(active, { phase: 'thinking' });
+        }
       },
       onPlanUpdate: entries => {
         this.updateActivity(active, { plan: entries }, true);
@@ -3434,7 +3440,11 @@ export class SuperAgentConversations {
 
   async close(): Promise<void> {
     clearInterval(this.heartbeatTimer);
-    await Promise.all([...this.active.keys()].map(id => this.stop(id)));
+    await Promise.all(
+      [...this.active.keys()].map(id =>
+        this.stop(id, 'Server restarted while the Agent was running. Click Continue to resume from where it left off.', 'failed'),
+      ),
+    );
     for (const timer of this.emitTimers.values()) clearTimeout(timer);
     this.emitTimers.clear();
     for (const set of this.listeners.values()) {

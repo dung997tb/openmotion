@@ -11,7 +11,7 @@ import { SUPER_AGENT_API } from '../../../shared/super-agent';
 import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
 import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { clampSuperAgentViewerWidth, SuperAgentWorkspace } from './SuperAgentWorkspace';
-import { ExecutionTimeline } from './ExecutionTimeline';
+import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { SimpleMarkdown } from './SimpleMarkdown';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -2187,4 +2187,200 @@ it('clicking New task resets to a clean draft without creating a persisted chat 
   expect(onChatIdChange).toHaveBeenCalledWith(null);
   expect(document.body.textContent).toContain('What can I create for you?');
   expect(document.querySelector('.om-sa-viewer')).toBeNull();
+});
+
+it('renders persistent live progress dock, ticking step timers, and Continue recovery card for stopped or failed runs', async () => {
+  const onContinue = vi.fn();
+
+  // 1. Live progress dock with determinate plan progress & streaming reasoning/tool timers
+  const baseChat: SuperAgentChat = {
+    id: CHAT_ID,
+    title: 'Build Racing Game Studio Project',
+    intent: 'game',
+    engine: 'antigravity',
+    permissionMode: 'on-request',
+    createdAt: Date.now() - 20_000,
+    updatedAt: Date.now(),
+    state: 'idle',
+    messages: [],
+    artifacts: [],
+    approvals: [],
+  };
+
+  const liveChat: SuperAgentChat = {
+    ...baseChat,
+    state: 'running',
+    updatedAt: Date.now(),
+    lastTurnDurationMs: undefined,
+    turnActivity: {
+      phase: 'thinking',
+      label: 'Antigravity',
+      startedAt: Date.now() - 12_400,
+      updatedAt: Date.now(),
+      plan: [
+        { content: 'Read workflow guide', status: 'completed' },
+        { content: 'Build racing game canvas', status: 'in_progress' },
+        { content: 'Verify and present', status: 'pending' },
+      ],
+    },
+    messages: [
+      { id: 'u-1', role: 'user', text: 'Build a racing game', createdAt: Date.now() - 15_000 },
+      {
+        id: 't-1',
+        role: 'tool',
+        text: 'openmotion_game_write_files',
+        createdAt: Date.now() - 4_000,
+        toolEvent: {
+          callId: 'call-write',
+          tool: 'openmotion_game_write_files',
+          label: 'Write game files',
+          status: 'running',
+          category: 'file_write',
+          startedAt: Date.now() - 3_200,
+        },
+      },
+      {
+        id: 'r-1',
+        role: 'reasoning',
+        text: 'Preparing track physics and HUD...',
+        status: 'streaming',
+        createdAt: Date.now() - 2_300,
+      },
+    ],
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <div>
+          <ExecutionTimeline
+            chat={liveChat}
+            busy
+            sending={false}
+            hideInlineStatus
+            engineLabel="Antigravity"
+            onOpenArtifactId={vi.fn()}
+            onPreviewAttachment={vi.fn()}
+            onCopyText={vi.fn()}
+            onApprove={vi.fn()}
+            onContinue={onContinue}
+          />
+          <SuperAgentLiveProgressDock
+            chat={liveChat}
+            busy
+            sending={false}
+            engineLabel="Antigravity"
+          />
+        </div>
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const dock = document.querySelector('.om-sa-progress-dock')!;
+  expect(dock).toBeTruthy();
+  expect(dock.textContent).toContain('Thinking…');
+  expect(dock.textContent).toContain('1/3 tasks');
+  const progressBar = dock.querySelector('.om-sa-progress-bar') as HTMLElement;
+  expect(progressBar.getAttribute('data-determinate')).toBe('true');
+  expect(progressBar.style.width).toBe('33%');
+  expect(document.querySelector('.om-sa-work-summary-timer')).toBeTruthy();
+  expect(document.querySelector('.om-sa-reasoning-label')?.textContent).toMatch(/Thinking… · \d+(?:\.\d+)?s/);
+
+  // 2. Cancelled mid-run turn renders recovery card with step summary and Continue button
+  const cancelledChat: SuperAgentChat = {
+    ...baseChat,
+    state: 'cancelled',
+    error: undefined,
+    lastTurnDurationMs: 116_000,
+    messages: [
+      { id: 'u-1', role: 'user', text: 'Build a racing game', createdAt: 1000 },
+      {
+        id: 't-done',
+        role: 'tool',
+        text: 'openmotion_read_workflow',
+        createdAt: 2000,
+        toolEvent: {
+          callId: 'c-done',
+          tool: 'openmotion_read_workflow',
+          label: 'Read workflow guidance',
+          status: 'completed',
+          category: 'mcp',
+          startedAt: 2000,
+          finishedAt: 3200,
+          durationMs: 1200,
+        },
+      },
+      {
+        id: 'r-done',
+        role: 'reasoning',
+        text: 'Considering 2D widescreen racing...',
+        status: 'completed',
+        durationMs: 54_000,
+        createdAt: 3500,
+      },
+    ],
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={cancelledChat}
+          busy={false}
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={vi.fn()}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={vi.fn()}
+          onApprove={vi.fn()}
+          onContinue={onContinue}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const interruptedCard = document.querySelector('.om-sa-interrupted-card')!;
+  expect(interruptedCard).toBeTruthy();
+  expect(interruptedCard.textContent).toContain('Stopped before finishing');
+  expect(interruptedCard.textContent).toContain('2 steps');
+  const continueBtn = interruptedCard.querySelector('.om-sa-continue-btn') as HTMLButtonElement;
+  expect(continueBtn.textContent).toContain('Continue');
+  await act(async () => continueBtn.click());
+  expect(onContinue).toHaveBeenCalledTimes(1);
+
+  // 3. Failed turn with chat.error also offers Continue inside .om-sa-error-card
+  const failedChat: SuperAgentChat = {
+    ...cancelledChat,
+    state: 'failed',
+    error: 'Server restarted while the Agent was running. Click Continue to resume from where it left off.',
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={failedChat}
+          busy={false}
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={vi.fn()}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={vi.fn()}
+          onApprove={vi.fn()}
+          onContinue={onContinue}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const errorCard = document.querySelector('.om-sa-error-card')!;
+  expect(errorCard).toBeTruthy();
+  expect(errorCard.textContent).toContain('Server restarted while the Agent was running.');
+  const errorContinueBtn = errorCard.querySelector('.om-sa-continue-btn') as HTMLButtonElement;
+  expect(errorContinueBtn).toBeTruthy();
+  await act(async () => errorContinueBtn.click());
+  expect(onContinue).toHaveBeenCalledTimes(2);
 });

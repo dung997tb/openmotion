@@ -39,6 +39,52 @@ export function formatElapsedDuration(ms?: number): string {
   return `${mins}m ${remSecs}s`;
 }
 
+function useLiveElapsedMs(startedAt: number | undefined, active: boolean, intervalMs = 500): number {
+  const [elapsedMs, setElapsedMs] = useState(() =>
+    active && typeof startedAt === 'number' ? Math.max(0, Date.now() - startedAt) : 0,
+  );
+  useEffect(() => {
+    if (!active || typeof startedAt !== 'number') {
+      setElapsedMs(0);
+      return;
+    }
+    const tick = () => setElapsedMs(Math.max(0, Date.now() - startedAt));
+    tick();
+    const timer = window.setInterval(tick, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [active, startedAt, intervalMs]);
+  return elapsedMs;
+}
+
+function countCompletedWorkItems(workItems: SuperAgentMessage[]): number {
+  let completed = 0;
+  for (const item of workItems) {
+    if (item.role === 'tool') {
+      if (item.toolEvent?.status && item.toolEvent.status !== 'running') completed += 1;
+    } else if (item.status !== 'streaming') {
+      completed += 1;
+    }
+  }
+  return completed;
+}
+
+function resolveLiveTurnStatusText(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  options: { chat: SuperAgentChat | null; sending?: boolean; engineLabel?: string },
+): string {
+  if (options.sending && options.chat?.state !== 'running' && options.chat?.state !== 'waiting') {
+    return t('Sending…');
+  }
+  const activity = options.chat?.turnActivity;
+  const phase = activity?.phase ?? 'thinking';
+  const targetLabel = activity?.label || options.engineLabel || 'Super Agent';
+  if (phase === 'connecting') return t('Connecting to {agent}…', { agent: targetLabel });
+  if (phase === 'tool') return t(activity?.label || 'Running {tool}…', { tool: activity?.activeToolName || 'tool' });
+  if (phase === 'streaming') return t('Writing response…');
+  if (phase === 'waiting_approval') return t('Waiting for approval…');
+  return t('Thinking…');
+}
+
 function categoryIcon(category: SuperAgentToolCategory | undefined, status: SuperAgentToolEvent['status']): string {
   if (status === 'running') return 'loader-4-line';
   if (status === 'failed') return 'error-warning-line';
@@ -245,11 +291,16 @@ function ToolStepRow({
 }) {
   const { t } = useI18n();
   const ev = message.toolEvent;
+  const isRunning = ev?.status === 'running';
+  const liveElapsedMs = useLiveElapsedMs(ev?.startedAt, isRunning);
   if (!ev) return null;
   const status = ev.status ?? 'completed';
   const fileOp = ev.fileOp ?? ev.files?.[0];
   const diffFiles = (ev.files ?? (fileOp ? [fileOp] : [])).filter(f => f.diffPreview);
   const hasBody = Boolean(ev.command || diffFiles.length > 0 || ev.inputPreview || ev.outputPreview);
+  const displayDurationMs = status === 'running'
+    ? (liveElapsedMs >= 1000 ? liveElapsedMs : undefined)
+    : ev.durationMs;
 
   return (
     <details className="om-sa-tool-row" open={status === 'failed' || undefined}>
@@ -281,8 +332,8 @@ function ToolStepRow({
               {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
             </span>
           )}
-          {ev.durationMs !== undefined && status !== 'running' && (
-            <span className="om-sa-step-time">{formatElapsedDuration(ev.durationMs)}</span>
+          {displayDurationMs !== undefined && (
+            <span className="om-sa-step-time">{formatElapsedDuration(displayDurationMs)}</span>
           )}
           {ev.artifactId && (
             <Button
@@ -347,10 +398,13 @@ function ToolStepRow({
 function ReasoningStepRow({ message }: { message: SuperAgentMessage }) {
   const { t } = useI18n();
   const isStreaming = message.status === 'streaming';
+  const liveElapsedMs = useLiveElapsedMs(message.createdAt, isStreaming);
   const durationLabel = !isStreaming && message.durationMs !== undefined
     ? t('Thought for {duration}', { duration: formatElapsedDuration(message.durationMs) })
     : isStreaming
-      ? t('Thinking…')
+      ? (liveElapsedMs >= 1000
+          ? `${t('Thinking…')} · ${formatElapsedDuration(liveElapsedMs)}`
+          : t('Thinking…'))
       : t('Reasoning');
 
   return (
@@ -509,6 +563,9 @@ function WorkLogSection({
   const isTurnFinished = !isActiveTurn && !turn.hasRunning && turn.assistantItems.length > 0;
   const shouldAutoExpand = !isTurnFinished;
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
+  const isRunning = isActiveTurn || turn.hasRunning;
+  const liveStart = turn.workItems[0]?.createdAt ?? turn.user?.createdAt;
+  const liveRunningMs = useLiveElapsedMs(liveStart, isRunning);
 
   useEffect(() => {
     if (isTurnFinished) {
@@ -522,9 +579,12 @@ function WorkLogSection({
 
   const toolCount = turn.workItems.filter(m => m.role === 'tool').length;
   const stepCount = turn.workItems.length;
+  const completedCount = countCompletedWorkItems(turn.workItems);
   const durationStr = formatElapsedDuration(turn.durationMs);
-  const summaryTitle = isActiveTurn || turn.hasRunning
-    ? t('Running steps ({count})', { count: stepCount })
+  const summaryTitle = isRunning
+    ? (completedCount > 0
+        ? t('Running steps ({done}/{total})', { done: completedCount, total: stepCount })
+        : t('Running steps ({count})', { count: stepCount }))
     : durationStr
       ? t('Worked for {duration} · {count} steps', { duration: durationStr, count: stepCount })
       : toolCount > 0
@@ -540,7 +600,15 @@ function WorkLogSection({
         aria-expanded={expanded}
         onClick={() => setUserToggled(prev => !(prev ?? shouldAutoExpand))}
       >
+        {isRunning && (
+          <span className="om-sa-work-summary-spinner" aria-hidden="true">
+            <RemixIcon name="loader-4-line" size={13} />
+          </span>
+        )}
         <span className="om-sa-work-summary-label">{summaryTitle}</span>
+        {isRunning && liveRunningMs >= 1000 && (
+          <span className="om-sa-work-summary-timer">{formatElapsedDuration(liveRunningMs)}</span>
+        )}
         {!isTurnFinished && turn.hasFailure && (
           <span className="om-sa-work-pill" data-tone="danger">
             {t('Needs attention')}
@@ -569,6 +637,33 @@ function WorkLogSection({
   );
 }
 
+function LivePlanCard({ plan }: { plan: NonNullable<SuperAgentChat['turnActivity']>['plan'] }) {
+  const { t } = useI18n();
+  if (!plan || !plan.length) return null;
+  return (
+    <div className="om-sa-plan-card">
+      <div className="om-sa-plan-head">{t('Plan')}</div>
+      <ul className="om-sa-plan-list">
+        {plan.map((entry, idx) => (
+          <li key={idx} className="om-sa-plan-item" data-status={entry.status}>
+            <RemixIcon
+              name={
+                entry.status === 'completed'
+                  ? 'checkbox-circle-line'
+                  : entry.status === 'in_progress'
+                    ? 'loader-4-line'
+                    : 'checkbox-blank-line'
+              }
+              size={14}
+            />
+            <span>{entry.content}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function LiveTurnStatusBar({
   chat,
   engineLabel,
@@ -578,28 +673,8 @@ function LiveTurnStatusBar({
 }) {
   const { t } = useI18n();
   const startedAt = chat.turnActivity?.startedAt || chat.updatedAt;
-  const [elapsedMs, setElapsedMs] = useState(() => Math.max(0, Date.now() - startedAt));
-
-  useEffect(() => {
-    setElapsedMs(Math.max(0, Date.now() - startedAt));
-    const timer = window.setInterval(() => {
-      setElapsedMs(Math.max(0, Date.now() - startedAt));
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [startedAt]);
-
-  const phase = chat.turnActivity?.phase ?? 'thinking';
-  const targetLabel = chat.turnActivity?.label || engineLabel || 'Super Agent';
-  const statusText =
-    phase === 'connecting'
-      ? t('Connecting to {agent}…', { agent: targetLabel })
-      : phase === 'tool'
-        ? t(chat.turnActivity?.label || 'Running {tool}…', { tool: chat.turnActivity?.activeToolName || 'tool' })
-        : phase === 'streaming'
-          ? t('Writing response…')
-          : phase === 'waiting_approval'
-            ? t('Waiting for approval…')
-            : t('Thinking…');
+  const elapsedMs = useLiveElapsedMs(startedAt, true, 200);
+  const statusText = resolveLiveTurnStatusText(t, { chat, engineLabel });
 
   return (
     <div className="om-sa-live-status-wrap">
@@ -608,28 +683,70 @@ function LiveTurnStatusBar({
         <span className="om-sa-live-status-label">{statusText}</span>
         <span className="om-sa-live-timer">{formatElapsedDuration(elapsedMs)}</span>
       </div>
-      {chat.turnActivity?.plan && chat.turnActivity.plan.length > 0 && (
-        <div className="om-sa-plan-card">
-          <div className="om-sa-plan-head">{t('Plan')}</div>
-          <ul className="om-sa-plan-list">
-            {chat.turnActivity.plan.map((entry, idx) => (
-              <li key={idx} className="om-sa-plan-item" data-status={entry.status}>
-                <RemixIcon
-                  name={
-                    entry.status === 'completed'
-                      ? 'checkbox-circle-line'
-                      : entry.status === 'in_progress'
-                        ? 'loader-4-line'
-                        : 'checkbox-blank-line'
-                  }
-                  size={14}
-                />
-                <span>{entry.content}</span>
-              </li>
-            ))}
-          </ul>
+      <LivePlanCard plan={chat.turnActivity?.plan} />
+    </div>
+  );
+}
+
+export function SuperAgentLiveProgressDock({
+  chat,
+  busy,
+  sending,
+  engineLabel,
+}: {
+  chat: SuperAgentChat | null;
+  busy: boolean;
+  sending: boolean;
+  engineLabel?: string;
+}) {
+  const { t } = useI18n();
+  const active = busy || sending;
+  const [mountStartedAt] = useState(() => Date.now());
+  const startedAt = busy ? (chat?.turnActivity?.startedAt || chat?.updatedAt || mountStartedAt) : mountStartedAt;
+  const elapsedMs = useLiveElapsedMs(startedAt, active, 200);
+  const lastTurnStats = useMemo(() => {
+    if (!chat) return { total: 0, done: 0 };
+    const workItems: SuperAgentMessage[] = [];
+    for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
+      const m = chat.messages[i];
+      if (m.role === 'user') break;
+      if (m.role === 'reasoning' || m.role === 'tool') workItems.push(m);
+    }
+    return { total: workItems.length, done: countCompletedWorkItems(workItems) };
+  }, [chat]);
+
+  if (!active || (chat?.approvals.length ?? 0) > 0) return null;
+
+  const plan = chat?.turnActivity?.plan ?? [];
+  const planTotal = plan.length;
+  const planDone = plan.filter(item => item.status === 'completed').length;
+  const determinatePct = planTotal > 0 ? Math.max(8, Math.min(100, Math.round((planDone / planTotal) * 100))) : undefined;
+  const statusText = resolveLiveTurnStatusText(t, { chat, sending, engineLabel });
+  const stepMeta = planTotal > 0
+    ? t('{done}/{total} tasks', { done: planDone, total: planTotal })
+    : lastTurnStats.total > 0
+      ? t('{done}/{total} steps', { done: lastTurnStats.done, total: lastTurnStats.total })
+      : '';
+
+  return (
+    <div className="om-sa-progress-dock" role="status" aria-live="polite">
+      <div className="om-sa-progress-track" aria-hidden="true">
+        <div
+          className="om-sa-progress-bar"
+          data-determinate={determinatePct !== undefined || undefined}
+          style={determinatePct !== undefined ? { width: `${determinatePct}%` } : undefined}
+        />
+      </div>
+      <div className="om-sa-progress-row">
+        <div className="om-sa-progress-main">
+          <WorkingIndicator />
+          <span className="om-sa-live-status-label">{statusText}</span>
         </div>
-      )}
+        <div className="om-sa-progress-meta">
+          {stepMeta && <span className="om-sa-progress-steps">{stepMeta}</span>}
+          <span className="om-sa-live-timer">{formatElapsedDuration(elapsedMs)}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -759,25 +876,44 @@ export function ExecutionTimeline({
   chat,
   busy,
   sending,
+  hideInlineStatus,
+  continueDisabled,
   engineLabel,
   onOpenArtifactId,
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
   onApprove,
+  onContinue,
 }: {
   chat: SuperAgentChat;
   busy: boolean;
   sending: boolean;
+  hideInlineStatus?: boolean;
+  continueDisabled?: boolean;
   engineLabel?: string;
   onOpenArtifactId: (artifactId: string) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
   onApprove: (approvalId: string, accepted: boolean) => void;
+  onContinue?: () => void;
 }) {
   const { t } = useI18n();
   const turns = useMemo(() => groupMessagesIntoTurns(chat), [chat]);
+  const lastTurn = turns[turns.length - 1];
+  const showInterruptedCard = !busy && !sending && !chat.error && (
+    chat.state === 'cancelled'
+    || (chat.state === 'idle' && Boolean(lastTurn) && lastTurn.workItems.length > 0 && lastTurn.assistantItems.length === 0 && lastTurn.artifacts.length === 0)
+  );
+  const interruptedMeta = [
+    lastTurn?.workItems.length ? t('{count} steps', { count: lastTurn.workItems.length }) : '',
+    lastTurn?.durationMs !== undefined
+      ? formatElapsedDuration(lastTurn.durationMs)
+      : chat.lastTurnDurationMs !== undefined
+        ? formatElapsedDuration(chat.lastTurnDurationMs)
+        : '',
+  ].filter(Boolean).join(' · ');
 
   return (
     <div className="om-sa-message-list">
@@ -919,16 +1055,57 @@ export function ExecutionTimeline({
       })}
 
       {busy && !chat.approvals.length && (
-        <LiveTurnStatusBar chat={chat} engineLabel={engineLabel} />
+        hideInlineStatus
+          ? <LivePlanCard plan={chat.turnActivity?.plan} />
+          : <LiveTurnStatusBar chat={chat} engineLabel={engineLabel} />
       )}
 
       {chat.error && (
         <div className="om-card om-sa-error-card" role="alert">
-          <RemixIcon name="error-warning-line" size={18} />
-          <div>
+          <span className="om-sa-error-icon" aria-hidden="true">
+            <RemixIcon name="error-warning-line" size={18} />
+          </span>
+          <div className="om-sa-error-copy">
             <strong>{t('Conversation paused')}</strong>
             <p className="om-muted">{chat.error}</p>
           </div>
+          {onContinue && (
+            <Button
+              variant="secondary"
+              className="om-button om-sa-continue-btn"
+              disabled={continueDisabled || busy || sending}
+              onClick={onContinue}
+            >
+              <RemixIcon name="play-fill" size={14} />
+              <span>{t('Continue')}</span>
+            </Button>
+          )}
+        </div>
+      )}
+
+      {showInterruptedCard && (
+        <div className="om-card om-sa-interrupted-card" role="status">
+          <span className="om-sa-interrupted-icon" aria-hidden="true">
+            <RemixIcon name="pause-line" size={18} />
+          </span>
+          <div className="om-sa-interrupted-copy">
+            <strong>{t(chat.state === 'cancelled' ? 'Stopped before finishing' : 'No final response yet')}</strong>
+            <p className="om-muted">
+              {interruptedMeta ? `${interruptedMeta} · ` : ''}
+              {t('Resume from where it stopped, or send a new instruction below.')}
+            </p>
+          </div>
+          {onContinue && (
+            <Button
+              variant="primary"
+              className="om-button om-sa-continue-btn"
+              disabled={continueDisabled}
+              onClick={onContinue}
+            >
+              <RemixIcon name="play-fill" size={14} />
+              <span>{t('Continue')}</span>
+            </Button>
+          )}
         </div>
       )}
 

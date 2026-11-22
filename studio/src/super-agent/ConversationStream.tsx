@@ -38,7 +38,7 @@ import { gatewayRequest } from '../motion/gatewayClient';
 import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
-import { ExecutionTimeline } from './ExecutionTimeline';
+import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
   findSuperAgentMode,
@@ -584,8 +584,13 @@ export function ConversationStream({
             </Button>
           )}
           {chat && chat.state !== 'idle' && (
-            <span className="om-badge" data-active={chat.state === 'running' || undefined}>
-              {t(chat.state === 'running' ? 'Working…' : chat.state === 'waiting' ? 'Approval needed' : chat.state === 'failed' ? 'Stopped' : 'Cancelled')}
+            <span className="om-badge om-sa-head-status-badge" data-active={chat.state === 'running' || undefined}>
+              {chat.state === 'running' && (
+                <span className="om-sa-head-spinner" aria-hidden="true">
+                  <RemixIcon name="loader-4-line" size={12} />
+                </span>
+              )}
+              <span>{t(chat.state === 'running' ? 'Working…' : chat.state === 'waiting' ? 'Approval needed' : chat.state === 'failed' ? 'Stopped' : 'Cancelled')}</span>
             </span>
           )}
         </div>
@@ -748,18 +753,27 @@ export function ConversationStream({
           <ExecutionTimeline
             chat={chat}
             busy={busy}
-            sending={sending}
+            sending={sending || scaffoldingGame}
+            hideInlineStatus
+            continueDisabled={sending || scaffoldingGame || busy || runnableEngines.length === 0}
             engineLabel={effectiveAgents.find(a => a.id === chat.engine)?.label ?? chat.engine}
             onOpenArtifactId={onOpenArtifactId}
             onPreviewAttachment={onPreviewAttachment}
             onOpenWebUrl={onOpenWebUrl}
             onCopyText={onCopyText}
             onApprove={onApprove}
+            onContinue={() => void onSend(t('Continue from where you stopped and finish the task.'))}
           />
         )}
       </div>
 
       <div className="om-sa-composer-wrap">
+        <SuperAgentLiveProgressDock
+          chat={chat}
+          busy={busy}
+          sending={sending || scaffoldingGame}
+          engineLabel={activeAgent?.label ?? chat?.engine}
+        />
         {agentsLoaded && !runnableEngines.length && (
           <div className="om-sa-agent-banner">
             <RemixIcon name="plug-line" size={15} />
@@ -1453,10 +1467,11 @@ export function ConversationStream({
                   variant="plain"
                   className="om-sa-send-btn"
                   data-ready={canSubmit || undefined}
+                  data-sending={(sending || scaffoldingGame) || undefined}
                   aria-label={t('Send')}
                   disabled={!canSubmit}
                   onClick={() => void handleSubmit()}
-                  icon={<RemixIcon name={sending ? 'loader-4-line' : 'arrow-right-line'} size={18} />}
+                  icon={<RemixIcon name={(sending || scaffoldingGame) ? 'loader-4-line' : 'arrow-right-line'} size={18} />}
                 />
               )}
             </div>

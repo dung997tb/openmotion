@@ -475,7 +475,15 @@
     "Desktop & widescreen browser play": "桌面端与宽屏网页游玩",
     "Mobile & one-thumb vertical play": "手机端与单手竖屏游玩",
     "Solo arcade, story, or puzzle session": "单人街机、剧情或解谜体验",
-    "Shared room link so friends can join live": "支持房间链接邀请好友实时联机"
+    "Shared room link so friends can join live": "支持房间链接邀请好友实时联机",
+    "Stopped before finishing": "生成未完成即停止",
+    "No final response yet": "暂未返回最终结果",
+    "Resume from where it stopped, or send a new instruction below.": "可从中断处继续完成，或在下方发送新指令。",
+    "Continue from where you stopped and finish the task.": "请从刚才停止的地方继续，完成剩余任务。",
+    "Sending…": "正在发送…",
+    "Running steps ({done}/{total})": "执行步骤中（{done}/{total}）",
+    "{done}/{total} steps": "{done}/{total} 步",
+    "{done}/{total} tasks": "{done}/{total} 项任务"
   },
   "ja": {
     "All resources": "すべてのリソース",
@@ -953,7 +961,15 @@
     "Desktop & widescreen browser play": "デスクトップ・ワイド画面向け",
     "Mobile & one-thumb vertical play": "モバイル・片手縦持ち向け",
     "Solo arcade, story, or puzzle session": "1人用アーケード・ストーリー・パズル",
-    "Shared room link so friends can join live": "ルームリンクで友達とリアルタイム対戦・協力"
+    "Shared room link so friends can join live": "ルームリンクで友達とリアルタイム対戦・協力",
+    "Stopped before finishing": "完了前に停止しました",
+    "No final response yet": "まだ最終応答がありません",
+    "Resume from where it stopped, or send a new instruction below.": "中断した箇所から再開するか、下に新しい指示を入力してください。",
+    "Continue from where you stopped and finish the task.": "先ほど停止した箇所から続行し、タスクを完了してください。",
+    "Sending…": "送信中…",
+    "Running steps ({done}/{total})": "ステップ実行中（{done}/{total}）",
+    "{done}/{total} steps": "{done}/{total} ステップ",
+    "{done}/{total} tasks": "{done}/{total} 件のタスク"
   },
   "ko": {
     "All resources": "모든 리소스",
@@ -1431,7 +1447,15 @@
     "Desktop & widescreen browser play": "데스크톱 및 와이드 브라우저 플레이",
     "Mobile & one-thumb vertical play": "모바일 및 한 손 세로 플레이",
     "Solo arcade, story, or puzzle session": "솔로 아케이드, 스토리, 퍼즐 플레이",
-    "Shared room link so friends can join live": "방 링크로 친구와 실시간 멀티플레이"
+    "Shared room link so friends can join live": "방 링크로 친구와 실시간 멀티플레이",
+    "Stopped before finishing": "완료 전에 중지되었습니다",
+    "No final response yet": "아직 최종 응답이 없습니다",
+    "Resume from where it stopped, or send a new instruction below.": "중단된 위치에서 이어서 진행하거나 아래에 새 지시를 보내세요.",
+    "Continue from where you stopped and finish the task.": "방금 멈춘 곳부터 이어서 작업을 완료해 주세요.",
+    "Sending…": "전송 중…",
+    "Running steps ({done}/{total})": "단계 실행 중 ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total}단계",
+    "{done}/{total} tasks": "{done}/{total}개 작업"
   },
   "de": {
     "All resources": "Alle Ressourcen",
@@ -1909,7 +1933,15 @@
     "Desktop & widescreen browser play": "Desktop- & Breitbild-Browser",
     "Mobile & one-thumb vertical play": "Mobil & Einhand-Hochformat",
     "Solo arcade, story, or puzzle session": "Solo-Arcade-, Story- oder Rätselspiel",
-    "Shared room link so friends can join live": "Raumlink zum gemeinsamen Live-Spielen"
+    "Shared room link so friends can join live": "Raumlink zum gemeinsamen Live-Spielen",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   },
   "fr": {
     "All resources": "Toutes les ressources",
@@ -2387,7 +2419,15 @@
     "Desktop & widescreen browser play": "Jeu sur ordinateur et écran large",
     "Mobile & one-thumb vertical play": "Jeu mobile vertical à une main",
     "Solo arcade, story, or puzzle session": "Partie solo arcade, histoire ou puzzle",
-    "Shared room link so friends can join live": "Lien de salon pour jouer en direct à plusieurs"
+    "Shared room link so friends can join live": "Lien de salon pour jouer en direct à plusieurs",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   },
   "ru": {
     "All resources": "Все ресурсы",
@@ -2865,7 +2905,15 @@
     "Desktop & widescreen browser play": "Для ПК и широкоэкранного браузера",
     "Mobile & one-thumb vertical play": "Для телефона и игры одной рукой",
     "Solo arcade, story, or puzzle session": "Одиночная аркада, история или головоломка",
-    "Shared room link so friends can join live": "Ссылка на комнату для совместной игры онлайн"
+    "Shared room link so friends can join live": "Ссылка на комнату для совместной игры онлайн",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   },
   "es": {
     "All resources": "Todos los recursos",
@@ -3343,7 +3391,15 @@
     "Desktop & widescreen browser play": "Juego en escritorio y pantalla ancha",
     "Mobile & one-thumb vertical play": "Juego móvil vertical con una mano",
     "Solo arcade, story, or puzzle session": "Partida individual arcade, historia o puzle",
-    "Shared room link so friends can join live": "Enlace de sala para jugar en vivo con amigos"
+    "Shared room link so friends can join live": "Enlace de sala para jugar en vivo con amigos",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   },
   "pt-BR": {
     "All resources": "Todos os recursos",
@@ -3821,7 +3877,15 @@
     "Desktop & widescreen browser play": "Jogo em desktop e tela widescreen",
     "Mobile & one-thumb vertical play": "Jogo vertical para celular com uma mão",
     "Solo arcade, story, or puzzle session": "Partida solo arcade, história ou quebra-cabeça",
-    "Shared room link so friends can join live": "Link de sala para amigos entrarem ao vivo"
+    "Shared room link so friends can join live": "Link de sala para amigos entrarem ao vivo",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   },
   "it": {
     "All resources": "Tutte le risorse",
@@ -4299,7 +4363,15 @@
     "Desktop & widescreen browser play": "Gioco su desktop e browser widescreen",
     "Mobile & one-thumb vertical play": "Gioco mobile verticale con una mano",
     "Solo arcade, story, or puzzle session": "Partita in solitaria arcade, storia o puzzle",
-    "Shared room link so friends can join live": "Link stanza per giocare dal vivo con amici"
+    "Shared room link so friends can join live": "Link stanza per giocare dal vivo con amici",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   },
   "tr": {
     "All resources": "Tüm kaynaklar",
@@ -4777,6 +4849,14 @@
     "Desktop & widescreen browser play": "Masaüstü ve geniş ekran tarayıcı oyunu",
     "Mobile & one-thumb vertical play": "Mobil ve tek elle dikey oyun",
     "Solo arcade, story, or puzzle session": "Tek kişilik arcade, hikâye veya bulmaca",
-    "Shared room link so friends can join live": "Arkadaşlarla canlı oynamak için oda bağlantısı"
+    "Shared room link so friends can join live": "Arkadaşlarla canlı oynamak için oda bağlantısı",
+    "Stopped before finishing": "Stopped before finishing",
+    "No final response yet": "No final response yet",
+    "Resume from where it stopped, or send a new instruction below.": "Resume from where it stopped, or send a new instruction below.",
+    "Continue from where you stopped and finish the task.": "Continue from where you stopped and finish the task.",
+    "Sending…": "Sending…",
+    "Running steps ({done}/{total})": "Running steps ({done}/{total})",
+    "{done}/{total} steps": "{done}/{total} steps",
+    "{done}/{total} tasks": "{done}/{total} tasks"
   }
 }

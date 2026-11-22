@@ -548,12 +548,45 @@ export function SuperAgentWorkspace({
         if (!cancelled) setLoadingChat(false);
       });
 
-    const unsubscribe = subscribeSuperAgentChat(chatId, next => {
-      if (!cancelled) applyChatSnapshot(next, false);
-    });
+    let resyncTimer: number | null = null;
+    const resyncChat = () => {
+      if (cancelled) return;
+      void getSuperAgentChat(chatId)
+        .then(result => {
+          if (!cancelled) applyChatSnapshot(result.conversation, false);
+        })
+        .catch(() => { /* keep last known state while offline */ });
+    };
+    const scheduleResync = () => {
+      if (cancelled || resyncTimer !== null) return;
+      resyncTimer = window.setTimeout(() => {
+        resyncTimer = null;
+        resyncChat();
+      }, 1500);
+    };
+    const onVisibilityChange = () => {
+      if (!document.hidden && prevBusyRef.current) {
+        resyncChat();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const unsubscribe = subscribeSuperAgentChat(
+      chatId,
+      next => {
+        if (resyncTimer !== null) {
+          window.clearTimeout(resyncTimer);
+          resyncTimer = null;
+        }
+        if (!cancelled) applyChatSnapshot(next, false);
+      },
+      scheduleResync,
+    );
 
     return () => {
       cancelled = true;
+      if (resyncTimer !== null) window.clearTimeout(resyncTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       unsubscribe();
     };
   }, [active, chatId, chatRetry, applyChatSnapshot]);

@@ -6606,3 +6606,189 @@
     transform: none;
   }
 }
+
+/* Live Super Agent progress dock, ticking step timers, and recovery cards */
+.om-sa-head-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-6);
+}
+
+.om-sa-head-spinner,
+.om-sa-work-summary-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--motion-accent);
+  flex: 0 0 auto;
+}
+
+.om-sa-head-spinner svg,
+.om-sa-work-summary-spinner svg,
+.om-sa-send-btn[data-sending] svg {
+  animation: om-sa-spin 1s linear infinite;
+}
+
+.om-sa-work-summary-timer {
+  color: var(--motion-muted);
+  font-family: var(--motion-font-mono);
+  font-size: var(--motion-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.om-sa-send-btn[data-stop] {
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--motion-danger) 42%, transparent);
+  animation: om-sa-stop-pulse 1.8s var(--motion-ease-out) infinite;
+}
+
+@keyframes om-sa-stop-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--motion-danger) 36%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--motion-danger) 0%, transparent);
+  }
+}
+
+.om-sa-progress-dock {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  border: 1px solid var(--motion-border-subtle);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-panel);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.om-sa-progress-track {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  background: var(--motion-inset);
+  overflow: hidden;
+}
+
+.om-sa-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 34%;
+  border-radius: var(--motion-radius-full);
+  background: var(--motion-accent);
+  animation: om-sa-progress-slide 1.25s var(--motion-ease-out) infinite;
+}
+
+.om-sa-progress-bar[data-determinate] {
+  animation: none;
+  transition: width var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+.om-sa-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--motion-space-12);
+  padding: var(--motion-space-8) var(--motion-space-12);
+  min-width: 0;
+}
+
+.om-sa-progress-main {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.om-sa-progress-main .om-sa-live-status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-sa-progress-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  flex: 0 0 auto;
+}
+
+.om-sa-progress-steps {
+  font-size: var(--motion-text-xs);
+  color: var(--motion-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.om-sa-error-card,
+.om-sa-interrupted-card {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-12);
+  padding: var(--motion-space-12) var(--motion-space-16);
+  background: var(--motion-panel);
+}
+
+.om-sa-error-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--motion-danger);
+}
+
+.om-sa-interrupted-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--motion-muted);
+}
+
+.om-sa-error-copy,
+.om-sa-interrupted-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.om-sa-error-copy > strong,
+.om-sa-interrupted-copy > strong {
+  font-size: var(--motion-text-sm);
+  font-weight: var(--motion-weight-semibold);
+  color: var(--motion-strong);
+}
+
+.om-sa-error-copy > p,
+.om-sa-interrupted-copy > p {
+  margin: 0;
+  font-size: var(--motion-text-xs);
+}
+
+.om-sa-continue-btn {
+  height: var(--motion-control);
+  min-height: var(--motion-control);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .om-sa-error-card,
+  .om-sa-interrupted-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .om-sa-continue-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .om-sa-head-spinner svg,
+  .om-sa-work-summary-spinner svg,
+  .om-sa-send-btn[data-sending] svg,
+  .om-sa-send-btn[data-stop],
+  .om-sa-progress-bar {
+    animation: none;
+  }
+}

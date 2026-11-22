@@ -1254,3 +1254,70 @@ test('shared preview-bridge injects safely under strict CSP on Design/Game previ
   }
   await superAgentConversations(store).close();
 }));
+
+test('SuperAgentConversations marks interrupted shutdown runs failed and resets tool activity phase back to thinking', () => fixture(async store => {
+  const phase1 = new Phase1Service(store, pluginRoot, {
+    origin: () => 'http://127.0.0.1:4173',
+    nativeUrl: () => undefined,
+    openProject: async () => {},
+    mutation: async fn => fn(),
+    cancel: async () => ({ id: 'x', state: 'cancelled' } as any),
+  });
+
+  let releaseTurn!: () => void;
+  const turnBlocked = new Promise<void>(resolve => { releaseTurn = resolve; });
+  const observedPhases: string[] = [];
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/agy',
+    runAcp: async opts => {
+      await opts.callbacks.onStatus('connecting', 'Antigravity');
+      await opts.callbacks.onToolStarted({
+        callId: 'c1',
+        tool: 'openmotion_read_workflow',
+        label: 'Read workflow guidance',
+        status: 'running',
+        category: 'mcp',
+        startedAt: Date.now(),
+      });
+      await opts.callbacks.onToolFinished({
+        callId: 'c1',
+        tool: 'openmotion_read_workflow',
+        label: 'Read workflow guidance',
+        status: 'completed',
+        category: 'mcp',
+        startedAt: Date.now() - 50,
+        finishedAt: Date.now(),
+        durationMs: 50,
+      }, { ok: true }, {});
+      await opts.callbacks.onReasoningDelta('r1', 'Considering racing layout...');
+      const midSnap = await service.get(chat.id);
+      if (midSnap.turnActivity?.phase) observedPhases.push(midSnap.turnActivity.phase);
+      await Promise.race([
+        turnBlocked,
+        new Promise<void>(resolve => opts.signal.addEventListener('abort', () => resolve(), { once: true })),
+      ]);
+    },
+  });
+
+  const chat = await service.create({ engine: 'antigravity', intent: 'game', permissionMode: 'auto' });
+  await service.start(chat.id, { requestId: 'req-agy-close-1', text: 'Build racing game' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 60; i++) {
+    if (observedPhases.length > 0) break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+  assert.deepEqual(observedPhases, ['thinking']);
+
+  await service.close();
+  releaseTurn();
+
+  const reloaded = new SuperAgentConversations(store);
+  const afterClose = await reloaded.get(chat.id);
+  assert.equal(afterClose.state, 'failed');
+  assert.match(afterClose.error || '', /Server restarted while the Agent was running/);
+  await reloaded.close();
+}));

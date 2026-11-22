@@ -703,6 +703,13 @@ async function runSingleAcpAttempt(
       await flushAssistantText();
       const usage = normalizeUsage(promptResult?.usage);
       if (usage) await callbacks.onUsageUpdate(usage);
+      const stopReason = typeof promptResult?.stopReason === 'string' ? promptResult.stopReason : '';
+      if (stopReason === 'cancelled' && !signal.aborted) {
+        throw new Error('Agent run was cancelled before finishing. Click Continue to resume.');
+      }
+      if (stopReason === 'max_tokens' || stopReason === 'max_turn_requests') {
+        throw new Error('Agent reached its turn limit before finishing. Click Continue to keep going.');
+      }
       succeed();
     })().catch(err => {
       if (!promptStarted && err instanceof Error) {
