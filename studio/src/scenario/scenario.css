@@ -5065,3 +5065,45 @@ div.om-studio-output:hover {
   grid-auto-columns: minmax(150px, 1fr);
   overflow-x: auto;
 }
+
+/* Medium widths: a narrower brief column, tighter gutters, and nothing wider than the page. */
+.om-studio-view > * {
+  min-width: 0;
+}
+
+.om-studio-output-panel,
+.om-studio-output-grid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 1279px) {
+  .om-studio-view {
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: var(--motion-space-14);
+    padding: var(--motion-space-14);
+  }
+
+  .om-studio-input,
+  .om-studio-outputs {
+    padding: var(--motion-space-14);
+  }
+
+  .om-studio-output-grid[role="tablist"] {
+    grid-auto-columns: minmax(132px, 1fr);
+  }
+
+  .om-studio-output-items {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 1023px) {
+  .om-studio-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .om-studio-input {
+    position: static;
+  }
+}
