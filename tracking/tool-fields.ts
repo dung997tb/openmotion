@@ -13,6 +13,7 @@ const actionSets = {
   openmotion_design_project: ['create', 'list', 'get', 'rename', 'duplicate', 'trash', 'restore', 'delete', 'open', 'open_in', 'export', 'import'],
   openmotion_design_edit: ['read_file', 'write', 'list_versions', 'restore_version', 'import_asset'],
   openmotion_design_comments: ['list', 'create', 'update', 'delete'],
+  openmotion_cloud_share: ['status', 'publish', 'stop', 'resume'],
 } as const;
 const targets = ['project', 'templates', 'providers'] as const;
 export const toolDimensions = { action: [...new Set(Object.values(actionSets).flat())], target: targets } as const;
