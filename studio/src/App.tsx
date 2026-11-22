@@ -117,11 +117,13 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const handleDomZIndexReorderCommitRef = useRef<TimelineZIndexReorderCommit | null>(null);
   const pendingTimelineEditPathRef = useRef(new Set<string>());
   const isGestureRecordingRef = useRef(false);
-  const setRefreshKey = useCallback((next: SetStateAction<number>) => {
+  const invalidateGsapCacheRef = useRef<(path?: string) => void>(() => {});
+  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string) => {
+    invalidateGsapCacheRef.current(path);
     requestPreviewReload();
     setRefreshKeyState(next);
   }, []);
-  const reloadPreview = useCallback(() => setRefreshKey((k) => k + 1), [setRefreshKey]);
+  const reloadPreview = useCallback((path?: string) => setRefreshKey((k) => k + 1, path), [setRefreshKey]);
   const fileManagerResult = useFileManager({
     projectId,
     showToast,
@@ -175,8 +177,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     onOutsideChange: editHistory.noteOutsideChange,
     onHistoryChanged: editHistory.refreshAfterEvent,
   });
-  const invalidateGsapCacheRef = useRef<() => void>(() => {});
-  const invalidateGsapCache = useCallback(() => invalidateGsapCacheRef.current(), []);
+  const invalidateGsapCache = useCallback((path?: string) => invalidateGsapCacheRef.current(path), []);
   const timelineEditing = useTimelineEditing({
     projectId,
     activeCompPath,

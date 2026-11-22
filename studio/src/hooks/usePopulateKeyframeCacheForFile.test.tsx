@@ -15,8 +15,8 @@ import {
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-function HookHost({ sourceFile = "index.html", version = 1, projectId = "demo" }) {
-  usePopulateKeyframeCacheForFile(projectId, sourceFile, version);
+function HookHost({ sourceFile = "index.html", version = 1, projectId = "demo", changedPath = "" }) {
+  usePopulateKeyframeCacheForFile(projectId, sourceFile, version, undefined, changedPath);
   return null;
 }
 
@@ -166,7 +166,7 @@ describe("usePopulateKeyframeCacheForFile", () => {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ animations: [] }) });
       }),
     );
-    const render = async (props: { sourceFile: string; version: number }) => {
+    const render = async (props: { sourceFile: string; version: number; changedPath?: string }) => {
       await act(async () => {
         if (!root) {
           container = document.createElement("div");
@@ -189,6 +189,19 @@ describe("usePopulateKeyframeCacheForFile", () => {
 
     await render({ sourceFile: "index.html", version: 2 });
     expect(urls.length).toBe(loaded * 2);
+    urls.length = 0;
+    await render({ sourceFile: "index.html", version: 3, changedPath: "index.html" });
+    expect(urls.map(url => url.split("/").at(-1))).toEqual(["index.html"]);
+    urls.length = 0;
+    await render({ sourceFile: "index.html", version: 4, changedPath: "compositions/keyframe-lab.html" });
+    expect(urls.map(url => url.split("/").at(-1))).toEqual(["compositions%2Fkeyframe-lab.html"]);
+    urls.length = 0;
+    // A batched render may cover more writes than its last path describes.
+    await render({ sourceFile: "index.html", version: 6, changedPath: "index.html" });
+    expect(urls.length).toBe(loaded);
+    urls.length = 0;
+    await render({ sourceFile: "index.html", version: 7, changedPath: "." });
+    expect(urls.length).toBe(loaded);
   });
 
   it("reprojects loaded ASTs against new clip timing without reading unchanged source files", async () => {
