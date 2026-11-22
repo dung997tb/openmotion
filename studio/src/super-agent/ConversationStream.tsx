@@ -59,12 +59,14 @@ const PRIMARY_STARTERS: {
   tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
+  featured?: boolean;
+  badge?: string;
 }[] = [
+  { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game', featured: true, badge: 'New' },
   { id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
   { id: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
   { id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
-  { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game' },
 ];
 
 const EXTRA_STARTERS: {
@@ -212,6 +214,9 @@ export function ConversationStream({
     setText(draftSeed.text);
     if (draftSeed.mode && !chat?.messages.length) {
       setActiveModeId(draftSeed.mode);
+    } else if (!draftSeed.mode) {
+      setActiveModeId(null);
+      setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [draftSeed, chat?.messages.length]);
@@ -661,13 +666,19 @@ export function ConversationStream({
                   type="button"
                   className="om-sa-starter-card"
                   data-tone={card.tone}
+                  data-featured={card.featured || undefined}
                   onClick={() => {
                     setActiveModeId(card.id);
                     composerRef.current?.focus();
                   }}
                 >
-                  <span className="om-sa-starter-icon" data-tone={card.tone} aria-hidden="true">
-                    <RemixIcon name={card.icon} size={20} />
+                  <span className="om-sa-starter-head">
+                    <span className="om-sa-starter-icon" data-tone={card.tone} aria-hidden="true">
+                      <RemixIcon name={card.icon} size={20} />
+                    </span>
+                    {card.badge && (
+                      <span className="om-sa-starter-badge" lang="en">{card.badge}</span>
+                    )}
                   </span>
                   <strong>{t(card.title)}</strong>
                 </Button>

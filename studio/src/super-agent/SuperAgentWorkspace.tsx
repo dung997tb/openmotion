@@ -650,21 +650,21 @@ export function SuperAgentWorkspace({
     return created.conversation;
   }, [activeChat, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange]);
 
-  const handleCreateConversation = async () => {
-    try {
-      const created = await createSuperAgentChat({
-        ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
-        engine: selection.engine,
-        model: selection.model !== 'default' ? selection.model : undefined,
-        permissionMode,
-      });
-      setAttachments([]);
-      applyChatSnapshot(created.conversation, true);
-      onChatIdChange(created.conversation.id);
-      if (sidebarAsDrawer) setSidebarOpen(false);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('Could not create conversation'));
+  const handleCreateConversation = () => {
+    setActiveChat(null);
+    setLoadingChat(false);
+    setLoadFailed(false);
+    setAttachments([]);
+    setOpenTabIds([]);
+    setActiveTabId(NEW_VIEWER_TAB_ID);
+    setViewerOpen(false);
+    setViewerExpanded(false);
+    lastArtifactStateRef.current = { chatId: null, sig: '', artifactIds: [], presentedById: {} };
+    setDraftSeed({ id: ++handoffSeqRef.current, text: '' });
+    if (chatId !== null) {
+      onChatIdChange(null);
     }
+    if (sidebarAsDrawer) setSidebarOpen(false);
   };
 
   const handleTogglePin = async (id: string, pinned: boolean) => {
@@ -1127,7 +1127,7 @@ export function SuperAgentWorkspace({
         onChatIdChange(id);
         if (sidebarAsDrawer) setSidebarOpen(false);
       }}
-      onCreate={() => void handleCreateConversation()}
+      onCreate={handleCreateConversation}
       onTogglePin={(id, pinned) => void handleTogglePin(id, pinned)}
       onRename={(id, title) => handleRename(id, title)}
       onDelete={id => void handleDelete(id)}

@@ -1747,14 +1747,6 @@ export function ArtifactBrowserPane({
         </div>
 
         <div className="om-sa-viewer-win-actions">
-          {!showNewTab && activeArtifact?.projectId && (activeArtifact.kind === 'game-project' || activeArtifact.kind === 'design-project') && (
-            <CloudSharePopover
-              kind={activeArtifact.kind}
-              projectId={activeArtifact.projectId}
-              revisionKey={activeArtifact.revision ?? String(activeArtifact.updatedAt)}
-              onNotify={onNotify}
-            />
-          )}
           <Tooltip label={t(expanded ? 'Restore viewer' : 'Expand viewer')}>
             <IconButton
               variant="ghost"
@@ -1778,26 +1770,30 @@ export function ArtifactBrowserPane({
 
       <div className="om-sa-viewer-toolbar">
         <div className="om-sa-nav-btns">
-          <Tooltip label={t('Back')}>
-            <IconButton
-              variant="ghost"
-              className="motion-icon-button"
-              aria-label={t('Back')}
-              disabled={activeArtifact?.kind !== 'web' || !webState?.canGoBack}
-              onClick={handleBack}
-              icon={<RemixIcon name="arrow-left-line" size={15} />}
-            />
-          </Tooltip>
-          <Tooltip label={t('Forward')}>
-            <IconButton
-              variant="ghost"
-              className="motion-icon-button"
-              aria-label={t('Forward')}
-              disabled={activeArtifact?.kind !== 'web' || !webState?.canGoForward}
-              onClick={handleForward}
-              icon={<RemixIcon name="arrow-right-line" size={15} />}
-            />
-          </Tooltip>
+          {(activeArtifact?.kind === 'web' || showNewTab) && (
+            <>
+              <Tooltip label={t('Back')}>
+                <IconButton
+                  variant="ghost"
+                  className="motion-icon-button"
+                  aria-label={t('Back')}
+                  disabled={activeArtifact?.kind !== 'web' || !webState?.canGoBack}
+                  onClick={handleBack}
+                  icon={<RemixIcon name="arrow-left-line" size={15} />}
+                />
+              </Tooltip>
+              <Tooltip label={t('Forward')}>
+                <IconButton
+                  variant="ghost"
+                  className="motion-icon-button"
+                  aria-label={t('Forward')}
+                  disabled={activeArtifact?.kind !== 'web' || !webState?.canGoForward}
+                  onClick={handleForward}
+                  icon={<RemixIcon name="arrow-right-line" size={15} />}
+                />
+              </Tooltip>
+            </>
+          )}
           <Tooltip label={t('Reload')}>
             <IconButton
               variant="ghost"
@@ -1904,93 +1900,122 @@ export function ArtifactBrowserPane({
         </div>
 
         <div className="om-sa-context-actions">
-          {(activeArtifact?.kind === 'design-project' || (activeArtifact?.kind === 'game-project' && Boolean(activeArtifact.projectId))) && (
-            <div className="om-sa-segmented" role="group" aria-label={t('View mode')}>
-              <Button
-                variant="plain"
-                type="button"
-                aria-label={t('Preview')}
-                title={t('Preview')}
-                data-active={viewMode === 'preview' || undefined}
-                onClick={() => setViewMode('preview')}
-              >
-                <RemixIcon name="eye-line" size={14} />
-                <span>{t('Preview')}</span>
-              </Button>
-              <Button
-                variant="plain"
-                type="button"
-                aria-label={t('Code')}
-                title={t('Code')}
-                data-active={viewMode === 'code' || undefined}
-                onClick={() => setViewMode('code')}
-              >
-                <RemixIcon name="code-s-slash-line" size={14} />
-                <span>{t('Code')}</span>
-              </Button>
-            </div>
-          )}
+          {(() => {
+            const hasModeSwitch = activeArtifact?.kind === 'design-project' || (activeArtifact?.kind === 'game-project' && Boolean(activeArtifact.projectId));
+            const canCloudShare = !showNewTab && Boolean(activeArtifact?.projectId) && (activeArtifact?.kind === 'game-project' || activeArtifact?.kind === 'design-project');
+            const activeDeviceIcon = activeArtifact?.kind === 'web'
+              ? (webDevicePreset === 'mobile' ? 'smartphone-line' : webDevicePreset === 'tablet' ? 'tablet-line' : 'computer-line')
+              : (viewport === 'mobile' ? 'smartphone-line' : viewport === 'tablet' ? 'tablet-line' : 'computer-line');
+            return (
+              <>
+                {hasModeSwitch && (
+                  <div className="om-sa-segmented" role="group" aria-label={t('View mode')}>
+                    <Button
+                      variant="plain"
+                      type="button"
+                      aria-label={t('Preview')}
+                      title={t('Preview')}
+                      data-active={viewMode === 'preview' || undefined}
+                      onClick={() => setViewMode('preview')}
+                    >
+                      <RemixIcon name="eye-line" size={13} />
+                      <span>{t('Preview')}</span>
+                    </Button>
+                    <Button
+                      variant="plain"
+                      type="button"
+                      aria-label={t('Code')}
+                      title={t('Code')}
+                      data-active={viewMode === 'code' || undefined}
+                      onClick={() => setViewMode('code')}
+                    >
+                      <RemixIcon name="code-s-slash-line" size={13} />
+                      <span>{t('Code')}</span>
+                    </Button>
+                  </div>
+                )}
 
-          {supportsAnnotate && (
-            <>
-              <Tooltip label={t('Annotate elements, regions, and drawings')}>
-                <IconButton
-                  variant="ghost"
-                  className="motion-icon-button om-sa-annotate-btn"
-                  data-active={annotateActive || undefined}
-                  aria-label={t('Annotate elements, regions, and drawings')}
-                  onClick={() => {
-                    setAnnotateActive(v => {
-                      const next = !v;
-                      if (next) setAnnotTool('select');
-                      return next;
-                    });
-                  }}
-                  icon={<RemixIcon name="focus-3-line" size={15} />}
-                />
-              </Tooltip>
+                {hasModeSwitch && supportsAnnotate && (
+                  <span className="om-sa-toolbar-divider" aria-hidden="true" />
+                )}
 
-              <Tooltip label={t('Capture screenshot to chat')}>
-                <IconButton
-                  variant="ghost"
-                  className="motion-icon-button"
-                  aria-label={t('Capture screenshot to chat')}
-                  disabled={capturingScreenshot}
-                  onClick={() => void handleCaptureScreenshot()}
-                  icon={<RemixIcon name={capturingScreenshot ? 'loader-4-line' : 'camera-line'} size={15} />}
-                />
-              </Tooltip>
+                {supportsAnnotate && (
+                  <div className="om-sa-tool-group">
+                    <Tooltip label={t('Annotate elements, regions, and drawings')}>
+                      <IconButton
+                        variant="ghost"
+                        className="motion-icon-button om-sa-annotate-btn"
+                        data-active={annotateActive || undefined}
+                        aria-label={t('Annotate elements, regions, and drawings')}
+                        onClick={() => {
+                          setAnnotateActive(v => {
+                            const next = !v;
+                            if (next) setAnnotTool('select');
+                            return next;
+                          });
+                        }}
+                        icon={<RemixIcon name="focus-3-line" size={15} />}
+                      />
+                    </Tooltip>
 
-              <Tooltip label={t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}>
-                <IconButton
-                  variant="ghost"
-                  className="motion-icon-button"
-                  data-active={deviceBarOpen || undefined}
-                  aria-label={t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}
-                  onClick={() => setDeviceBarOpen(v => !v)}
-                  icon={<RemixIcon name="computer-line" size={15} />}
-                />
-              </Tooltip>
+                    <Tooltip label={t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}>
+                      <IconButton
+                        variant="ghost"
+                        className="motion-icon-button"
+                        data-active={deviceBarOpen || undefined}
+                        aria-label={t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}
+                        onClick={() => setDeviceBarOpen(v => !v)}
+                        icon={<RemixIcon name={activeDeviceIcon} size={15} />}
+                      />
+                    </Tooltip>
 
-              {(webErrorCount > 0 || consoleOpen) && (
-                <Tooltip label={t('Console & errors')}>
-                  <Button
-                    variant="ghost"
-                    type="button"
-                    className="motion-icon-button om-sa-console-toggle-btn"
-                    data-active={consoleOpen || undefined}
-                    aria-label={t('Open console')}
-                    onClick={() => setConsoleOpen(v => !v)}
-                  >
-                    <RemixIcon name="terminal-box-fill" size={15} />
-                    {webErrorCount > 0 && (
-                      <span className="om-sa-console-toolbar-badge">{webErrorCount > 99 ? '99+' : webErrorCount}</span>
+                    <Tooltip label={t('Capture screenshot to chat')}>
+                      <IconButton
+                        variant="ghost"
+                        className="motion-icon-button om-sa-toolbar-secondary-tool"
+                        aria-label={t('Capture screenshot to chat')}
+                        disabled={capturingScreenshot}
+                        onClick={() => void handleCaptureScreenshot()}
+                        icon={<RemixIcon name={capturingScreenshot ? 'loader-4-line' : 'camera-line'} size={15} />}
+                      />
+                    </Tooltip>
+
+                    {(webErrorCount > 0 || consoleOpen) && (
+                      <Tooltip label={t('Console & errors')}>
+                        <Button
+                          variant="ghost"
+                          type="button"
+                          className="motion-icon-button om-sa-console-toggle-btn"
+                          data-active={consoleOpen || undefined}
+                          aria-label={t('Open console')}
+                          onClick={() => setConsoleOpen(v => !v)}
+                        >
+                          <RemixIcon name="terminal-box-fill" size={15} />
+                          {webErrorCount > 0 && (
+                            <span className="om-sa-console-toolbar-badge">{webErrorCount > 99 ? '99+' : webErrorCount}</span>
+                          )}
+                        </Button>
+                      </Tooltip>
                     )}
-                  </Button>
-                </Tooltip>
-              )}
-            </>
-          )}
+                  </div>
+                )}
+
+                {canCloudShare && (hasModeSwitch || supportsAnnotate) && (
+                  <span className="om-sa-toolbar-divider" aria-hidden="true" />
+                )}
+
+                {canCloudShare && activeArtifact?.projectId && (activeArtifact.kind === 'game-project' || activeArtifact.kind === 'design-project') && (
+                  <CloudSharePopover
+                    compact
+                    kind={activeArtifact.kind}
+                    projectId={activeArtifact.projectId}
+                    revisionKey={activeArtifact.revision ?? String(activeArtifact.updatedAt)}
+                    onNotify={onNotify}
+                  />
+                )}
+              </>
+            );
+          })()}
 
           {activeArtifact && (
             <Popover
@@ -2029,6 +2054,20 @@ export function ArtifactBrowserPane({
 
                 {supportsAnnotate && (
                   <>
+                    <Button
+                      variant="plain"
+                      type="button"
+                      role="menuitem"
+                      className="om-sa-browser-menu-item"
+                      disabled={capturingScreenshot}
+                      onClick={() => {
+                        setBrowserMenuOpen(false);
+                        void handleCaptureScreenshot();
+                      }}
+                    >
+                      <RemixIcon name="camera-line" size={14} />
+                      <span>{t('Capture screenshot to chat')}</span>
+                    </Button>
                     <Button
                       variant="plain"
                       type="button"
@@ -2308,21 +2347,32 @@ export function ArtifactBrowserPane({
                   </Button>
                 ))}
               </div>
-              {fixedViewport && (
-                <div className="om-sa-device-dims">
-                  <span>{fixedViewport.width} × {fixedViewport.height}</span>
-                  <Tooltip label={t('Rotate viewport')}>
-                    <IconButton
-                      variant="plain"
-                      className="om-sa-device-rotate"
-                      aria-label={t('Rotate viewport')}
-                      data-active={webDeviceRotated || undefined}
-                      onClick={() => setWebDeviceRotated(v => !v)}
-                      icon={<RemixIcon name="refresh-line" size={13} />}
-                    />
-                  </Tooltip>
-                </div>
-              )}
+              <div className="om-sa-device-right">
+                {fixedViewport && (
+                  <div className="om-sa-device-dims">
+                    <span>{fixedViewport.width} × {fixedViewport.height}</span>
+                    <Tooltip label={t('Rotate viewport')}>
+                      <IconButton
+                        variant="plain"
+                        className="om-sa-device-rotate"
+                        aria-label={t('Rotate viewport')}
+                        data-active={webDeviceRotated || undefined}
+                        onClick={() => setWebDeviceRotated(v => !v)}
+                        icon={<RemixIcon name="refresh-line" size={13} />}
+                      />
+                    </Tooltip>
+                  </div>
+                )}
+                <Tooltip label={t('Hide device toolbar')}>
+                  <IconButton
+                    variant="plain"
+                    className="om-sa-device-close"
+                    aria-label={t('Hide device toolbar')}
+                    onClick={() => setDeviceBarOpen(false)}
+                    icon={<RemixIcon name="close-line" size={13} />}
+                  />
+                </Tooltip>
+              </div>
             </>
           ) : (
             <>
@@ -2344,14 +2394,25 @@ export function ArtifactBrowserPane({
                   </Button>
                 ))}
               </div>
-              {(() => {
-                const activePreset = designViewports.find(item => item.id === viewport);
-                return activePreset?.width && activePreset?.height ? (
-                  <div className="om-sa-device-dims">
-                    <span>{activePreset.width} × {activePreset.height}</span>
-                  </div>
-                ) : null;
-              })()}
+              <div className="om-sa-device-right">
+                {(() => {
+                  const activePreset = designViewports.find(item => item.id === viewport);
+                  return activePreset?.width && activePreset?.height ? (
+                    <div className="om-sa-device-dims">
+                      <span>{activePreset.width} × {activePreset.height}</span>
+                    </div>
+                  ) : null;
+                })()}
+                <Tooltip label={t('Hide device toolbar')}>
+                  <IconButton
+                    variant="plain"
+                    className="om-sa-device-close"
+                    aria-label={t('Hide device toolbar')}
+                    onClick={() => setDeviceBarOpen(false)}
+                    icon={<RemixIcon name="close-line" size={13} />}
+                  />
+                </Tooltip>
+              </div>
             </>
           )}
         </div>

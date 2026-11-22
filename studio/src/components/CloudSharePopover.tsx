@@ -26,6 +26,7 @@ export function CloudSharePopover({
   onNotify,
   side = 'bottom',
   align = 'end',
+  compact = false,
 }: {
   kind: CloudShareKind;
   projectId: string;
@@ -33,6 +34,7 @@ export function CloudSharePopover({
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
+  compact?: boolean;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -191,14 +193,18 @@ export function CloudSharePopover({
       className="om-cloud-share-popover"
       trigger={
         <Button
-          variant="ghost"
+          variant={compact ? 'plain' : 'ghost'}
           type="button"
-          className="om-button om-cloud-share-trigger h-auto"
-          data-primary
+          className={compact ? 'om-cloud-share-trigger om-cloud-share-trigger--compact' : 'om-button om-cloud-share-trigger h-auto'}
+          data-primary={compact ? undefined : true}
+          data-active={open || undefined}
+          data-live={linkStatus === 'active' || undefined}
+          aria-label={t('Share')}
+          title={t('Share')}
           aria-expanded={open}
         >
-          <RemixIcon name="share-forward-line" size={14} />
-          <span>{t('Share')}</span>
+          <RemixIcon name="share-forward-line" size={compact ? 13 : 14} />
+          <span className="om-cloud-share-trigger-label">{t('Share')}</span>
           {linkStatus === 'active' && <span className="om-cloud-share-dot" aria-hidden="true" />}
         </Button>
       }

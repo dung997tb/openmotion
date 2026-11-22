@@ -346,6 +346,7 @@ function buildValidatedArtifact(input: Partial<SuperAgentArtifact>, now = Date.n
     mimeType: input.mimeType,
     createdAt: now,
     updatedAt: now,
+    ...(typeof input.presentedAt === 'number' && Number.isFinite(input.presentedAt) ? { presentedAt: input.presentedAt } : {}),
   };
 }
 
@@ -756,7 +757,14 @@ export class SuperAgentConversations {
       chat.permissionMode = patch.permissionMode;
     }
     if (patch.addArtifact && patch.addArtifact.kind) {
-      const stored = upsertChatArtifact(chat, buildValidatedArtifact(patch.addArtifact), true);
+      const validated = buildValidatedArtifact(patch.addArtifact);
+      const existing = chat.artifacts.find(item => item.id === validated.id);
+      const presentedAt = Math.max(Date.now(), validated.presentedAt ?? 0, (existing?.presentedAt ?? 0) + 1);
+      const stored = upsertChatArtifact(chat, {
+        ...validated,
+        presentedAt,
+        updatedAt: presentedAt,
+      }, true);
       const artIntent = artifactToSuperAgentIntent(stored);
       if (artIntent) chat.intent = artIntent;
     }
@@ -3284,6 +3292,28 @@ export class SuperAgentConversations {
       active.persistTimer = undefined;
     }
     active.persistDirty = false;
+    if (!error && state === 'idle' && !active.deleted) {
+      const candidateGameIds = new Set<string>([
+        ...(active.writtenGameCodeIds ?? []),
+        ...(active.touchedGameIds ?? []),
+      ]);
+      for (const gameId of candidateGameIds) {
+        const artifactId = `game:${gameId}`;
+        const existing = active.chat.artifacts.find(item => item.id === artifactId);
+        const wroteRunnable = Boolean(active.writtenGameCodeIds?.has(gameId));
+        const alreadyPresentedThisTurn = Boolean(active.presentedArtifactIds?.has(artifactId));
+        if (!wroteRunnable && existing) continue;
+        const game = await gameProjectsFor(this.store.directory).get(gameId).catch(() => null);
+        if (!game) continue;
+        const isReady = game.status === 'ready' || game.status === 'published';
+        if (!wroteRunnable && !isReady) continue;
+        if (alreadyPresentedThisTurn && existing?.revision === String(game.updatedAt || '')) continue;
+        const artifact = await this.resolvePresentedArtifact({ kind: 'game-project', projectId: gameId }).catch(() => null);
+        if (artifact) {
+          this.presentChatArtifactSync(active, artifact);
+        }
+      }
+    }
     const finishedAt = Date.now();
     active.chat.lastTurnDurationMs = Math.max(0, finishedAt - active.turnStartedAt);
     if (active.chat.turnActivity?.usage) {
@@ -3309,28 +3339,6 @@ export class SuperAgentConversations {
     active.chat.state = error ? 'failed' : state;
     active.chat.error = error?.slice(0, 1000);
     active.chat.approvals = [];
-    if (!error && state === 'idle' && !active.deleted) {
-      const candidateGameIds = new Set<string>([
-        ...(active.writtenGameCodeIds ?? []),
-        ...(active.touchedGameIds ?? []),
-      ]);
-      for (const gameId of candidateGameIds) {
-        const artifactId = `game:${gameId}`;
-        const existing = active.chat.artifacts.find(item => item.id === artifactId);
-        const wroteRunnable = Boolean(active.writtenGameCodeIds?.has(gameId));
-        const alreadyPresentedThisTurn = Boolean(active.presentedArtifactIds?.has(artifactId));
-        if (!wroteRunnable && existing) continue;
-        const game = await gameProjectsFor(this.store.directory).get(gameId).catch(() => null);
-        if (!game) continue;
-        const isReady = game.status === 'ready' || game.status === 'published';
-        if (!wroteRunnable && !isReady) continue;
-        if (alreadyPresentedThisTurn && existing?.revision === String(game.updatedAt || '')) continue;
-        const artifact = await this.resolvePresentedArtifact({ kind: 'game-project', projectId: gameId }).catch(() => null);
-        if (artifact) {
-          this.presentChatArtifactSync(active, artifact);
-        }
-      }
-    }
     active.chat.intent = inferSuperAgentIntent(active.chat);
     if (!error && !active.chat.titleCustomized) {
       const firstUserText =

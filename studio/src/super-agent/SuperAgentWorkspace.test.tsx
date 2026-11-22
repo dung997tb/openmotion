@@ -1307,6 +1307,14 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   // Viewer opens game iframe in portrait viewport & supports Code inspection + Open in Game Studio
   const viewer = document.querySelector('.om-sa-viewer')!;
   expect(viewer).toBeTruthy();
+  // Share belongs in the active tab toolbar (compact), never in the outer browser window tab strip
+  expect(viewer.querySelector('.om-sa-viewer-tabs-bar .om-cloud-share-trigger')).toBeNull();
+  const toolbarShareBtn = viewer.querySelector('.om-sa-viewer-toolbar .om-cloud-share-trigger--compact');
+  expect(toolbarShareBtn).toBeTruthy();
+  // Non-web game tab omits disabled Back/Forward browser history arrows
+  expect(viewer.querySelector('.om-sa-nav-btns button[aria-label="Back"]')).toBeNull();
+  expect(viewer.querySelector('.om-sa-nav-btns button[aria-label="Forward"]')).toBeNull();
+  expect(viewer.querySelector('.om-sa-nav-btns button[aria-label="Reload"]')).toBeTruthy();
   const stage = viewer.querySelector('.om-sa-iframe-stage');
   expect(stage?.getAttribute('data-viewport')).toBe('mobile');
   const iframe = viewer.querySelector('iframe');
@@ -1324,6 +1332,11 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   await act(async () => desktopPresetBtn.click());
   await flush();
   expect(stage?.getAttribute('data-viewport')).toBe('desktop');
+  const deviceCloseBtn = deviceBar!.querySelector('.om-sa-device-close') as HTMLButtonElement;
+  expect(deviceCloseBtn).toBeTruthy();
+  await act(async () => deviceCloseBtn.click());
+  await flush();
+  expect(viewer.querySelector('.om-sa-device-bar')).toBeNull();
 
   const codeBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
   await act(async () => codeBtn.click());
@@ -2121,4 +2134,43 @@ it('auto-opens and re-opens the right Artifact Viewer tab whenever a game artifa
   expect(viewer).toBeTruthy();
   iframe = viewer.querySelector('iframe');
   expect(iframe?.getAttribute('src')).toContain('p=7000');
+});
+
+it('clicking New task resets to a clean draft without creating a persisted chat until submission', async () => {
+  const onChatIdChange = vi.fn();
+  const fetchSpy = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={CHAT_ID}
+          onChatIdChange={onChatIdChange}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const newTaskBtn = document.querySelector('.om-sa-new-chat-btn') as HTMLButtonElement;
+  expect(newTaskBtn).toBeTruthy();
+
+  fetchSpy.mockClear();
+  await act(async () => newTaskBtn.click());
+  await flush();
+
+  const createCalls = fetchSpy.mock.calls.filter(
+    ([input, init]) => String(input) === `${SUPER_AGENT_API}/chats` && init?.method === 'POST',
+  );
+  expect(createCalls).toHaveLength(0);
+  expect(onChatIdChange).toHaveBeenCalledWith(null);
+  expect(document.body.textContent).toContain('What can I create for you?');
+  expect(document.querySelector('.om-sa-viewer')).toBeNull();
 });
