@@ -129,7 +129,7 @@ export class AccountRequestError extends Error {
       // Plain-text Vela stderr falls through to regex parsing below.
     }
     // Generic API errors read `API request failed with status 403: code`; media commands read `<text> (code, HTTP 400)`.
-    const api = /API request failed with status (\d{3})(?:: ([A-Za-z0-9_-]{1,64})(?=[\s",}]|$))?/.exec(stderr);
+    const api = /API request failed with status (\d{3})(?:: ([a-z0-9_]{1,64})(?=\s|$))?/.exec(stderr);
     // A response without a JSON body has an empty code: `(, HTTP 502)`.
     const media = parsedEnvelope || api ? undefined : [...stderr.matchAll(/\(([^,()]{0,64}), HTTP (\d{3})\)/g)].at(-1);
     const status = parsedEnvelope?.status ?? (api ? Number(api[1]) : media ? Number(media[2]) : undefined);
