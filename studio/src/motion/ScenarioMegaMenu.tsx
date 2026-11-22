@@ -92,7 +92,7 @@ export function ScenarioMegaMenu({
     <div className="om-scenario-mega" data-studio-scene={scene}>
       <div className="om-studio-mega-head">
         <RemixIcon name="sparkling-fill" size={16} aria-hidden="true" />
-        <h2>{t('Studios')}</h2>
+        <h2>{t('All studios')}</h2>
         <span>{t('One brief in, a full kit out')}</span>
       </div>
       <div className="om-studio-mega-scenes" role="tablist" aria-label={t('Scenes')}>
