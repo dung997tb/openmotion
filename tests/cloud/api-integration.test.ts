@@ -1012,9 +1012,13 @@ describe('Cloud API Entrypoint — End-to-End Product, Studio & Streamable HTTP 
 
     // 4. tools/list must advertise all 22 registered domain openmotion_* tools
     const listPayload = await callMcp(2, 'tools/list');
-    const tools = (listPayload.result?.tools ?? []) as Array<{ name: string }>;
+    const tools = (listPayload.result?.tools ?? []) as Array<{ name: string; description: string }>;
     assert.equal(tools.length, phase1Tools.length);
     assert.equal(tools.length, 22);
+    const transcriptGuide = tools.find(tool => tool.name === 'openmotion_assets_use')?.description;
+    assert.ok(transcriptGuide);
+    assert.match(transcriptGuide, /Cloud ASR submit\/status is unavailable/);
+    assert.match(transcriptGuide, /your own execution environment[\s\S]+ffmpeg[\s\S]+speech-to-text[\s\S]+caption_add/);
 
     // MCP discovery returns the whole index, including entries beyond Studio's page limit.
     const templateIds = Array.from({ length: 501 }, (_, i) => `mcp-template-${i}`);
