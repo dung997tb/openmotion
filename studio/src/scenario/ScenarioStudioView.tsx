@@ -466,7 +466,9 @@ export function ScenarioStudioView({
           else if (event.key === 'Home') { event.preventDefault(); commitInputWidth(MIN_INPUT_WIDTH); }
           else if (event.key === 'End') { event.preventDefault(); commitInputWidth(maxInputWidth); }
         }}
-      />
+      >
+        <span className="om-studio-resizer-grip" aria-hidden="true" />
+      </div>
 
       <section className="om-studio-outputs" aria-label={t('Your kit')}>
         <header>

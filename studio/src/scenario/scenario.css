@@ -5108,7 +5108,7 @@ div.om-studio-output:hover {
 
 /* Brief | divider | kit: people drag the divider to share the width between the two columns. */
 .om-studio-view {
-  grid-template-columns: var(--om-studio-input-width, 400px) 12px minmax(0, 1fr);
+  grid-template-columns: var(--om-studio-input-width, 400px) 16px minmax(0, 1fr);
   column-gap: var(--motion-space-4);
 }
 
@@ -5127,28 +5127,48 @@ div.om-studio-output:hover {
   touch-action: none;
 }
 
-.om-studio-resizer::after {
+/* A visible grip: a full-height guide line plus a dotted handle, like a split-view divider. */
+.om-studio-resizer::before {
   content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--motion-border-subtle);
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.om-studio-resizer-grip {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 2px;
-  height: 36px;
+  width: 12px;
+  height: 48px;
   transform: translate(-50%, -50%);
-  border-radius: var(--motion-radius-full);
-  background: var(--motion-border);
-  transition: height var(--motion-duration-fast) var(--motion-ease-out), background var(--motion-duration-fast) var(--motion-ease-out);
+  border: 1px solid var(--motion-border);
+  border-radius: var(--motion-radius-pill);
+  background-color: var(--motion-raised);
+  background-image: radial-gradient(circle, var(--motion-muted) 1px, transparent 1.5px);
+  background-size: 5px 6px;
+  background-position: center;
+  box-shadow: var(--motion-shadow-xs);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out), height var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.om-studio-resizer:hover::after {
-  height: 56px;
-  background: var(--motion-border-strong);
-}
-
-.om-studio-resizer[data-dragging="true"]::after,
-.om-studio-resizer:focus-visible::after {
-  height: 64px;
+.om-studio-resizer:hover::before,
+.om-studio-resizer[data-dragging="true"]::before,
+.om-studio-resizer:focus-visible::before {
   background: var(--motion-accent);
+}
+
+.om-studio-resizer:hover .om-studio-resizer-grip,
+.om-studio-resizer[data-dragging="true"] .om-studio-resizer-grip,
+.om-studio-resizer:focus-visible .om-studio-resizer-grip {
+  height: 64px;
+  border-color: var(--motion-accent);
+  background-color: var(--motion-hover);
 }
 
 @media (max-width: 1023px) {
