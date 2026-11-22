@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { usePlayerStore } from "../player";
 import { buildStudioSelectionSnapshot } from "../utils/studioSelectionSnapshot";
@@ -26,13 +26,30 @@ function reportSelectionPublishError(error: unknown): void {
   console.warn("[Studio] Failed to update agent selection context", error);
 }
 
-function putSelection(projectId: string, selection: unknown, signal?: AbortSignal): Promise<void> {
-  return studioApiFetch(`/api/projects/${encodeURIComponent(projectId)}/selection`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selection }),
-    signal,
-  }).then(() => undefined);
+// The selection is also cleared during iframe replacement and on project exit.
+// Send those transitions through the same publisher as ordinary selection changes.
+function selectionPublisher(projectId: string | null) {
+  let lastBody: string | undefined;
+  let pending: AbortController | undefined;
+  return async (selection: ReturnType<typeof buildStudioSelectionSnapshot> | null) => {
+    const body = JSON.stringify({ selection });
+    if (!projectId || body === lastBody) return;
+    pending?.abort();
+    const request = new AbortController();
+    pending = request;
+    lastBody = body;
+    try {
+      const response = await studioApiFetch(`/api/projects/${encodeURIComponent(projectId)}/selection`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body, signal: request.signal,
+      });
+      if (!response.ok) throw new Error(`Selection update failed (HTTP ${response.status})`);
+    } catch (error) {
+      if (pending === request) lastBody = undefined;
+      reportSelectionPublishError(error);
+    } finally {
+      if (pending === request) pending = undefined;
+    }
+  };
 }
 
 export function useStudioSelectionPublisher({
@@ -43,6 +60,7 @@ export function useStudioSelectionPublisher({
   previewDocumentVersion,
   refreshDomEditSelectionFromPreview,
 }: UseStudioSelectionPublisherParams): void {
+  const publish = useMemo(() => selectionPublisher(projectId), [projectId]);
   const lastSelectionRefreshKeyRef = useRef(refreshKey);
   const pendingSelectionRefreshKeyRef = useRef<number | null>(null);
 
@@ -56,21 +74,14 @@ export function useStudioSelectionPublisher({
           currentTime: usePlayerStore.getState().currentTime,
         })
       : null;
-    const controller = new AbortController();
-    void putSelection(projectId, selection, controller.signal).catch(reportSelectionPublishError);
-    return () => controller.abort();
-  }, [domEditSelection, projectId]);
+    void publish(selection);
+  }, [domEditSelection, projectId, publish]);
 
   // Clear server-side agent context when Studio leaves a project. Without this,
   // a long-running multi-project preview server can keep serving the last
   // selected element for a project after its tab/session unmounts.
   // eslint-disable-next-line no-restricted-syntax
-  useEffect(() => {
-    if (!projectId) return;
-    return () => {
-      void putSelection(projectId, null).catch(reportSelectionPublishError);
-    };
-  }, [projectId]);
+  useEffect(() => () => { void publish(null); }, [publish]);
 
   // On external file edits, the iframe reloads while React keeps the previous
   // DOM selection object alive. Clear the agent-facing snapshot immediately so
@@ -83,10 +94,8 @@ export function useStudioSelectionPublisher({
     lastSelectionRefreshKeyRef.current = refreshKey;
     pendingSelectionRefreshKeyRef.current = domEditSelectionRef.current ? refreshKey : null;
     if (!projectId || !domEditSelectionRef.current) return;
-    const controller = new AbortController();
-    void putSelection(projectId, null, controller.signal).catch(reportSelectionPublishError);
-    return () => controller.abort();
-  }, [domEditSelectionRef, projectId, refreshKey]);
+    void publish(null);
+  }, [domEditSelectionRef, projectId, publish, refreshKey]);
 
   // `refreshPreviewDocumentVersion` ticks after iframe load and shortly after.
   // Consume one pending refresh per external reload: enough to re-resolve the
