@@ -449,3 +449,19 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* All studios: creative studios use their tone and icon as card art. */
+.om-nav-all-studios {
+  width: min(760px, calc(100vw - var(--motion-space-24)));
+}
+
+.om-studio-mega-art-icon {
+  display: grid;
+  place-items: center;
+  color: var(--motion-strong);
+  background: var(--motion-raised);
+}
+
+.om-studio-mega-art-icon[data-tone="image"] { color: var(--motion-accent); }
+.om-studio-mega-art-icon[data-tone="video"] { color: var(--motion-warning); }
+.om-studio-mega-art-icon[data-tone="audio"] { color: var(--motion-success); }

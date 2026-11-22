@@ -4239,7 +4239,30 @@
 }
 
 .om-studio-idea {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 100%;
   min-height: 112px;
+  padding: var(--motion-space-10) var(--motion-space-12);
+  resize: vertical;
+  line-height: var(--motion-leading-body);
+}
+
+:root[data-motion-ui][data-motion-studio] .om-studio-input :is(.om-studio-idea, .om-studio-fields input) {
+  background: var(--motion-bg);
+  border: 1px solid var(--motion-border);
+  border-radius: var(--motion-radius-md);
+  color: var(--motion-strong);
+}
+
+:root[data-motion-ui][data-motion-studio] .om-studio-input :is(.om-studio-idea, .om-studio-fields input):focus {
+  border-color: var(--motion-focus);
+  box-shadow: 0 0 0 2px var(--motion-accent-soft);
+}
+
+/* Fixed-height rows never shrink under the brief box when it is resized. */
+.om-studio-input > * {
+  flex-shrink: 0;
 }
 
 .om-studio-fields {
@@ -4907,35 +4930,120 @@ div.om-studio-output:hover {
 
 .om-studio-output-posts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--motion-space-10);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-items: start;
+  gap: var(--motion-space-12);
 }
 
+/* Each post looks like it will on the platform: account row, media in the post's aspect, caption. */
 .om-studio-output-post {
-  display: grid;
-  align-content: start;
-  gap: var(--motion-space-6);
-  padding: var(--motion-space-10);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--motion-border-subtle);
-  border-radius: var(--motion-radius-md);
+  border-radius: var(--motion-radius-lg);
   background: var(--motion-raised);
   color: var(--motion-text);
   font-size: var(--motion-text-sm);
   line-height: var(--motion-leading-body);
 }
 
-.om-studio-output-post strong {
+.om-studio-output-post > header {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  padding: var(--motion-space-8) var(--motion-space-10);
+}
+
+.om-studio-output-post > header > span {
+  display: grid;
+  min-width: 0;
+}
+
+.om-studio-output-post > header strong {
+  color: var(--motion-strong);
+  font-size: var(--motion-text-sm);
+}
+
+.om-studio-output-post > header small {
   color: var(--motion-muted);
   font-size: var(--motion-text-xs);
-  text-transform: uppercase;
 }
 
-.om-studio-output-post h3,
-.om-studio-output-post p {
+.om-studio-output-post-media {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-height: 420px;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 0;
+  background: var(--motion-inset);
+}
+
+.om-studio-output-post-media > *:first-child {
+  width: 100%;
+  height: 100%;
+}
+
+.om-studio-output-post-media img,
+.om-studio-output-post-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.om-studio-output-post-placeholder {
+  display: grid !important;
+  place-content: center;
+  justify-items: center;
+  gap: var(--motion-space-4);
+  padding: var(--motion-space-16);
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+  text-align: center;
+}
+
+.om-studio-output-post-more,
+.om-studio-output-post-aspect {
+  position: absolute;
+  padding: var(--motion-space-2) var(--motion-space-6);
+  border-radius: var(--motion-radius-pill);
+  background: var(--motion-panel);
+  color: var(--motion-text);
+  font-size: var(--motion-text-xs);
+}
+
+.om-studio-output-post-more {
+  top: var(--motion-space-6);
+  right: var(--motion-space-6);
+}
+
+.om-studio-output-post-aspect {
+  bottom: var(--motion-space-6);
+  left: var(--motion-space-6);
+  color: var(--motion-muted);
+}
+
+.om-studio-output-post-body {
+  display: grid;
+  gap: var(--motion-space-6);
+  padding: var(--motion-space-10);
+}
+
+.om-studio-output-post-body h3,
+.om-studio-output-post-body p {
   margin: 0;
+  white-space: pre-line;
 }
 
-.om-studio-output-post > span {
+.om-studio-output-post-body h3 {
+  color: var(--motion-strong);
+  font-size: var(--motion-text-sm);
+}
+
+.om-studio-output-post-body > span {
   color: var(--motion-accent);
   font-size: var(--motion-text-xs);
 }

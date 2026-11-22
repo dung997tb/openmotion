@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Button } from 'open-design-ui/button';
-import type { ScenarioBriefField, ScenarioDefinition, ScenarioStepDefinition } from '../../../shared/scenarios';
+import { socialPlatforms, type ScenarioBriefField, type ScenarioDefinition, type ScenarioStepDefinition } from '../../../shared/scenarios';
 import type { PoolItem, PoolRef, ScenarioBundleReceipt, ScenarioRun, ScenarioStepState } from '../../../shared/scenario-runs';
 import { Checkbox } from '../components/ui/Checkbox';
 import { FieldInput, FieldTextarea } from '../components/ui/FormField';
@@ -14,6 +14,7 @@ import { buildShowcaseSlides } from './ScenarioStage';
 import { scenarioStudio, studioDeliverables } from './scenarioStudios';
 import type { ScenarioRunApi } from './stepContract';
 import { briefPresetsFor } from './steps/briefPresets';
+import { SocialPlatformGlyph } from './steps/SocialPlatformGlyph';
 import { productBrief, readProducts, studioUsesProduct, type StudioProduct } from './productLibrary';
 import { StudioProductPicker } from './StudioProductPicker';
 
@@ -455,14 +456,38 @@ export function ScenarioStudioView({
                   )}
                   {posts.length > 0 && (
                     <div className="om-studio-output-posts">
-                      {posts.map(post => (
-                        <article key={post.id} className="om-studio-output-post">
-                          <strong>{post.platform}</strong>
-                          {post.title && <h3>{post.title}</h3>}
-                          <p>{post.text}</p>
-                          {post.hashtags.length > 0 && <span>{post.hashtags.map(tag => '#' + tag.replace(/^#/, '')).join(' ')}</span>}
-                        </article>
-                      ))}
+                      {posts.map(post => {
+                        const media = post.mediaPoolItemIds.map(id => poolById.get(id)).filter((item): item is PoolItem => Boolean(item));
+                        const platform = socialPlatforms.find(item => item.id === post.platform);
+                        return (
+                          <article key={post.id} className="om-studio-output-post" data-platform={post.platform}>
+                            <header>
+                              <SocialPlatformGlyph platform={post.platform} size="md" />
+                              <span>
+                                <strong>{briefText(run?.brief, 'brandName') || t('Your brand')}</strong>
+                                <small>{platform ? t(platform.label) : post.platform}</small>
+                              </span>
+                            </header>
+                            <Button variant="plain" className="om-studio-output-post-media" style={{ aspectRatio: post.aspect.replace(':', ' / ') }}
+                              disabled={!media.length} aria-label={`${t('Preview')} · ${platform ? t(platform.label) : post.platform}`}
+                              onClick={() => media[0] && setPreviewItem(media[0])}>
+                              {media[0] ? <PoolThumb item={media[0]} run={run} size="lg" /> : (
+                                <span className="om-studio-output-post-placeholder">
+                                  <RemixIcon name="image-line" size={20} />
+                                  <span>{t('Media is added when the images or video are ready')}</span>
+                                </span>
+                              )}
+                              {media.length > 1 && <span className="om-studio-output-post-more">1/{media.length}</span>}
+                              <span className="om-studio-output-post-aspect">{post.aspect}</span>
+                            </Button>
+                            <div className="om-studio-output-post-body">
+                              {post.title && <h3>{post.title}</h3>}
+                              <p>{post.text}</p>
+                              {post.hashtags.length > 0 && <span>{post.hashtags.map(tag => '#' + tag.replace(/^#/, '')).join(' ')}</span>}
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
                   )}
                   {scripts.map((text, index) => <pre key={index} className="om-studio-output-script">{text}</pre>)}

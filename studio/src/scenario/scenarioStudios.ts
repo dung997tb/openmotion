@@ -60,3 +60,19 @@ export function studiosForScene(scene: StudioSceneId): ScenarioDefinition[] {
 export function studioDeliverables(scenario: ScenarioDefinition): ScenarioStepDefinition[] {
   return scenario.steps.filter(step => step.type !== 'brief');
 }
+
+/** Scenes for the creative studios, so All studios can show every studio in one scene-tabbed collection. */
+export const creativeStudioScenes: Record<string, readonly Exclude<StudioSceneId, 'all'>[]> = {
+  motion: ['marketing', 'social', 'film'],
+  design: ['ecommerce', 'marketing'],
+  cinema: ['film'],
+  sound: ['film', 'social'],
+  shorts: ['social'],
+  marketing: ['ecommerce', 'marketing'],
+  explainer: ['marketing', 'social'],
+  '3d': ['film'],
+  game: ['social'],
+};
+
+export const creativeStudioInScene = (studioId: string, scene: StudioSceneId) =>
+  scene === 'all' || (creativeStudioScenes[studioId] ?? []).some(id => id === scene);

@@ -87,80 +87,74 @@ async function renderNav(overrides: Partial<CreativeNavigationProps> = {}) {
   return props;
 }
 
-it('places Studios with a New badge directly after Explore, opens scene tabs over all 5 workflow studios and recent runs', async () => {
+const allStudiosButton = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(btn => btn.textContent?.trim() === 'All studios')!;
+
+async function openAllStudios() {
+  await act(async () => {
+    allStudiosButton().click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  return document.querySelector<HTMLElement>('.om-nav-all-studios')!;
+}
+
+it('keeps the media menus first, Motion, Design and Game right after the divider, and All studios last with every studio', async () => {
   const props = await renderNav();
   const slots = [...container.querySelectorAll<HTMLElement>('.om-creative-strip > [data-nav-slot]')];
   const labels = slots.map(slot => {
     const btn = slot.querySelector<HTMLButtonElement>('button:not([aria-expanded])');
     return btn?.getAttribute('aria-label') ?? btn?.textContent?.trim();
   });
-  expect(labels[0]).toBe('Explore');
-  expect(labels[1]).toBe('Studios');
-  expect(labels[2]).toBe('Image');
+  expect(labels.slice(0, 8)).toEqual(['Explore', 'Image', 'Video', 'Audio', 'MCP', 'Motion Studio', 'Design Studio', 'Game Studio']);
+  expect(slots[5].hasAttribute('data-studio-start')).toBe(true);
+  expect(allStudiosButton()).toBeDefined();
 
-  const workflowsBtn = slots[1].querySelector<HTMLButtonElement>('button[aria-label="Studios"]')!;
-  expect(workflowsBtn.querySelector('[data-nav-badge="New"]')?.textContent).toBe('New');
-  expect(workflowsBtn.getAttribute('aria-current')).toBeNull();
-
-  // Open mega menu via trigger button.
-  const trigger = slots[1].querySelector<HTMLButtonElement>('button[aria-label="Studios · One brief in, a full kit out"]')!;
-  await act(async () => {
-    trigger.click();
-    await new Promise(resolve => setTimeout(resolve, 0));
-  });
-
-  const menu = document.querySelector<HTMLElement>('.om-creative-menu-workflows')!;
-  expect(menu).not.toBeNull();
-  const sceneTabs = [...menu.querySelectorAll<HTMLButtonElement>('[data-studio-scene-tab]')];
+  let panel = await openAllStudios();
+  expect(panel).not.toBeNull();
+  const sceneTabs = [...panel.querySelectorAll<HTMLButtonElement>('[data-studio-scene-tab]')];
   expect(sceneTabs.map(tab => tab.textContent)).toEqual(['All scenes', 'E-commerce', 'Marketing', 'Social', 'Film']);
-  expect(sceneTabs[0].getAttribute('aria-selected')).toBe('true');
+  const creative = () => [...panel.querySelectorAll<HTMLElement>('[data-creative-studio]')].map(tile => tile.dataset.creativeStudio);
+  const workflows = () => [...panel.querySelectorAll<HTMLElement>('[data-scenario-tile]')].map(tile => tile.dataset.scenarioTile);
+  expect(creative().slice(0, 3)).toEqual(['motion', 'design', 'game']);
+  expect(creative()).toHaveLength(9);
+  expect(workflows()).toEqual(scenarioDefinitions.map(scenario => scenario.id));
 
-  const tiles = [...menu.querySelectorAll<HTMLButtonElement>('[data-scenario-tile]')];
-  expect(tiles).toHaveLength(scenarioDefinitions.length);
-  expect(tiles.map(tile => tile.dataset.scenarioTile)).toEqual(scenarioDefinitions.map(s => s.id));
-  expect(tiles.find(tile => tile.dataset.scenarioTile === 'black-friday')?.textContent).toContain('Promo Kit Studio');
-
-  // The E-commerce scene keeps only the commerce studios.
+  // The E-commerce scene keeps the studios made for selling products.
   await act(async () => sceneTabs[1].click());
-  expect([...menu.querySelectorAll<HTMLButtonElement>('[data-scenario-tile]')].map(tile => tile.dataset.scenarioTile))
-    .toEqual(['design-full-chain', 'black-friday']);
+  expect(creative()).toEqual(['design', 'marketing']);
+  expect(workflows()).toEqual(['design-full-chain', 'black-friday']);
   await act(async () => sceneTabs[0].click());
 
-  // Lazy recent run appears in footer and opens with runId.
-  const runBtn = menu.querySelector<HTMLButtonElement>('.om-scenario-mega-run')!;
-  expect(runBtn).not.toBeNull();
+  // A creative studio opens that studio.
+  await act(async () => panel.querySelector<HTMLButtonElement>('[data-creative-studio="game"]')!.click());
+  expect(props.onChooseStudio).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'game' }));
+
+  // A recent run reopens its draft.
+  panel = await openAllStudios();
+  const runBtn = panel.querySelector<HTMLButtonElement>('.om-scenario-mega-run')!;
   expect(runBtn.textContent).toContain('Holiday Tote Campaign');
   await act(async () => runBtn.click());
   expect(props.onOpenScenario).toHaveBeenCalledWith('black-friday', '11111111-1111-1111-1111-111111111111');
 
-  // Reopen and click a scenario tile directly.
-  await act(async () => trigger.click());
-  const designTile = document.querySelector<HTMLButtonElement>('[data-scenario-tile="design-full-chain"]')!;
-  await act(async () => designTile.click());
+  // A scene studio opens the studio; All workflows opens the hub.
+  panel = await openAllStudios();
+  await act(async () => panel.querySelector<HTMLButtonElement>('[data-scenario-tile="design-full-chain"]')!.click());
   expect(props.onOpenScenario).toHaveBeenLastCalledWith('design-full-chain', undefined);
-
-  // Reopen and click All workflows footer button.
-  await act(async () => trigger.click());
-  const allBtn = document.querySelector<HTMLButtonElement>('.om-scenario-mega-all')!;
+  panel = await openAllStudios();
+  const allBtn = panel.querySelector<HTMLButtonElement>('.om-scenario-mega-all')!;
   expect(allBtn.textContent).toContain('All workflows');
   await act(async () => allBtn.click());
   expect(props.onOpenScenarioHub).toHaveBeenCalledOnce();
 });
 
-it('sets aria-current="page" on Studios for hub and active scenario routes, and highlights the active tile', async () => {
-  await renderNav({ currentPage: null, scenarioActive: 'hub' });
-  const workflowsBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Studios"]')!;
-  expect(workflowsBtn.getAttribute('aria-current')).toBe('page');
-
+it('marks All studios as current on a scene studio and highlights that studio', async () => {
   await renderNav({ currentPage: null, scenarioActive: 'ai-influencer' as ScenarioId });
-  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Studios"]')?.getAttribute('aria-current')).toBe('page');
-  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Studios · One brief in, a full kit out"]')!;
-  await act(async () => trigger.click());
+  expect(allStudiosButton().getAttribute('aria-current')).toBe('page');
+  await openAllStudios();
   expect(document.querySelector('[data-scenario-tile="ai-influencer"]')?.getAttribute('aria-current')).toBe('page');
   expect(document.querySelector('[data-scenario-tile="black-friday"]')?.getAttribute('aria-current')).toBeNull();
 });
 
-it('moves Studios into the More Studio overflow panel on narrow widths and keeps hub navigation working', async () => {
+it('keeps All studios visible on narrow widths and moves the tabs that do not fit into it', async () => {
   const resizeCallbacks: ResizeObserverCallback[] = [];
   vi.stubGlobal(
     'ResizeObserver',
@@ -174,7 +168,7 @@ it('moves Studios into the More Studio overflow panel on narrow widths and keeps
   );
   const originalRect = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.hasAttribute('data-nav-slot') || this.querySelector?.('button')?.textContent === 'More Studio') {
+    if (this.hasAttribute('data-nav-slot') || this.querySelector?.('button')?.textContent === 'All studios') {
       return { width: 120, height: 32, top: 0, left: 0, right: 120, bottom: 32, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
     }
     return originalRect.call(this);
@@ -189,17 +183,16 @@ it('moves Studios into the More Studio overflow panel on narrow widths and keeps
 
   const props = await renderNav();
   const slots = [...container.querySelectorAll<HTMLElement>('.om-creative-strip > [data-nav-slot]')];
-  // With 245px available and 120px per slot + 120px More trigger, only slot 0 (Explore) stays visible; slot 1 (Workflows) overflows.
+  // 245px fits Explore plus the All studios trigger; everything else moves into All studios.
   expect(slots[0].hasAttribute('data-stowed')).toBe(false);
   expect(slots[1].hasAttribute('data-stowed')).toBe(true);
+  expect(allStudiosButton().closest('[data-stowed]')).toBeNull();
 
-  const moreBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(btn => btn.textContent?.trim() === 'More Studio')!;
-  await act(async () => moreBtn.click());
-  const overflowTools = document.querySelector<HTMLElement>('.om-nav-more-tools')!;
-  expect(overflowTools).not.toBeNull();
-  const overflowWorkflows = overflowTools.querySelector<HTMLButtonElement>('button[aria-label="Studios"]')!;
-  expect(overflowWorkflows).not.toBeNull();
-  await act(async () => overflowWorkflows.click());
+  const panel = await openAllStudios();
+  const overflowTools = panel.querySelector<HTMLElement>('.om-nav-more-tools')!;
+  expect(overflowTools.textContent).toContain('MCP');
+  expect(panel.querySelector('[data-creative-studio="motion"]')).not.toBeNull();
+  await act(async () => panel.querySelector<HTMLButtonElement>('.om-scenario-mega-all')!.click());
   expect(props.onOpenScenarioHub).toHaveBeenCalledOnce();
 });
 

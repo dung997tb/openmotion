@@ -6,7 +6,17 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { scenarioCover } from '../scenario/scenarioCovers';
 import { scenarioClient } from '../scenario/scenarioClient';
-import { scenarioStudio, studioDeliverables, studioScenes, studiosForScene, type StudioSceneId } from '../scenario/scenarioStudios';
+import { creativeStudioInScene, scenarioStudio, studioDeliverables, studioScenes, studiosForScene, type StudioSceneId } from '../scenario/scenarioStudios';
+import type { CreativeStudio } from '../../../shared/studio-catalog';
+import { studioIconTone } from './creativeStudios';
+
+/** One-line descriptions for the studios that have no brief hint. */
+const studioSummary: Record<string, string> = {
+  motion: 'Edit motion films on a timeline with your Agent.',
+  design: 'Generate and edit product images, posters and pages.',
+  cinema: 'Generate cinematic video from text or a first frame.',
+  sound: 'Generate music, sound effects and voiceovers.',
+};
 import { ExploreCoverImage } from './ExploreCoverImage';
 import './scenarioNavigation.css';
 
@@ -37,10 +47,17 @@ export function ScenarioMegaMenu({
   activeScenarioId,
   onSelect,
   onOpenHub,
+  creative = [],
+  onSelectStudio,
+  showScenarios = true,
 }: {
   activeScenarioId: ScenarioId | 'hub' | null;
   onSelect: (id: ScenarioId, runId?: string) => void;
   onOpenHub: () => void;
+  /** Creative studios (Motion, Design, Cinema…) shown first in the same collection. */
+  creative?: { studio: CreativeStudio; current: boolean; cover?: string }[];
+  onSelectStudio?: (studio: CreativeStudio) => void;
+  showScenarios?: boolean;
 }) {
   const { t } = useI18n();
   const [recentRuns, setRecentRuns] = useState<ScenarioRunSummary[]>([]);
@@ -68,7 +85,8 @@ export function ScenarioMegaMenu({
     };
   }, []);
 
-  const studios = studiosForScene(scene);
+  const studios = showScenarios ? studiosForScene(scene) : [];
+  const creativeInScene = creative.filter(item => creativeStudioInScene(item.studio.id, scene));
 
   return (
     <div className="om-scenario-mega" data-studio-scene={scene}>
@@ -93,6 +111,25 @@ export function ScenarioMegaMenu({
         ))}
       </div>
       <div className="om-studio-mega-grid" role="tabpanel">
+        {creativeInScene.map(({ studio, current, cover }) => (
+          <Button
+            key={studio.id}
+            variant="plain"
+            className="om-studio-mega-card"
+            data-creative-studio={studio.id}
+            aria-current={current ? 'page' : undefined}
+            onClick={() => onSelectStudio?.(studio)}
+          >
+            <span className={`om-studio-mega-art${cover ? '' : ' om-studio-mega-art-icon'}`} data-tone={studioIconTone(studio)} aria-hidden="true">
+              {cover ? <ExploreCoverImage src={cover} eager /> : <RemixIcon name={studio.icon} size={28} />}
+              {'navBadge' in studio && studio.navBadge && (
+                <span className="om-badge" data-nav-badge={studio.navBadge} lang="en">{studio.navBadge}</span>
+              )}
+            </span>
+            <strong className="om-studio-mega-title">{t(studio.title)}</strong>
+            <span className="om-studio-mega-kit">{'briefHint' in studio ? t(studio.briefHint) : t(studioSummary[studio.id] ?? '')}</span>
+          </Button>
+        ))}
         {studios.map(scenario => (
           <Button
             key={scenario.id}
