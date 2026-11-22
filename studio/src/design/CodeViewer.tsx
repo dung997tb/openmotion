@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import './codeViewer.css';
 
 type TokenKind = 'plain' | 'tag' | 'attr' | 'string' | 'comment' | 'keyword' | 'number';
 type Token = { kind: TokenKind; text: string };

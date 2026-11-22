@@ -370,7 +370,11 @@ function ReasoningStepRow({ message }: { message: SuperAgentMessage }) {
         </span>
       </summary>
       {message.text && (
-        <div className="om-sa-reasoning-body">{message.text}</div>
+        <div className="om-sa-reasoning-body">
+          {message.text.trim().split(/\n{2,}/).map((para, idx) => (
+            <p key={idx} className="om-sa-reasoning-para">{para.trim()}</p>
+          ))}
+        </div>
       )}
     </details>
   );

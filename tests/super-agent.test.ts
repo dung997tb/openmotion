@@ -650,6 +650,292 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   await service.close();
 }));
 
+test('game generation suppresses premature starter-kit artifacts during building and auto-presents on ready or turn completion', () => fixture(async store => {
+  const phase1 = new Phase1Service(store, pluginRoot, {
+    origin: () => 'http://127.0.0.1:4173',
+    nativeUrl: () => undefined,
+    openProject: async () => {},
+    mutation: async fn => fn(),
+    cancel: async () => ({ id: 'x', state: 'cancelled' } as any),
+  });
+  const draftA = await gameProjectsFor(store.directory).create({
+    prompt: 'Starlit little prince planet exploration game',
+    genre: 'story',
+    orientation: 'landscape',
+    multiplayer: false,
+  });
+  const gameIdA = draftA.game.id;
+  assert.equal(draftA.game.status, 'draft');
+
+  let turnCount = 0;
+  let capturedSnapshots: Array<{ step: string; count: number; active?: string }> = [];
+  let serviceRef!: SuperAgentConversations;
+  let chatIdA = '';
+
+  class StagedGameRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-staged-game' } };
+      if (method === 'turn/start') {
+        turnCount += 1;
+        if (turnCount === 1) {
+          queueMicrotask(() => {
+            this.onNotification({
+              id: 301,
+              method: 'item/tool/call',
+              params: {
+                callId: 'sg-1',
+                tool: 'openmotion_game_read_file',
+                arguments: { id: gameIdA, path: 'index.html' },
+              },
+            });
+          });
+        } else {
+          queueMicrotask(() => {
+            this.onNotification({
+              id: 311,
+              method: 'item/tool/call',
+              params: {
+                callId: 'sg-4',
+                tool: 'openmotion_game_write_files',
+                arguments: {
+                  id: gameIdA,
+                  files: [
+                    { path: 'index.html', content: '<!doctype html><title>Celestial Star Journey</title><canvas id="sky"></canvas>' },
+                    { path: 'logic.js', content: 'export const version = 2;' },
+                  ],
+                },
+              },
+            });
+          });
+        }
+        return { turn: { id: `turn-staged-${turnCount}` } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      const recordAndSend = async (step: string, nextMsg: any) => {
+        const snap = await serviceRef.get(chatIdA);
+        capturedSnapshots.push({ step, count: snap.artifacts.length, active: snap.activeArtifactId });
+        this.onNotification(nextMsg);
+      };
+      if (payload.id === 301) {
+        void recordAndSend('after_read', {
+          id: 302,
+          method: 'item/tool/call',
+          params: {
+            callId: 'sg-2',
+            tool: 'openmotion_game_set_status',
+            arguments: { id: gameIdA, status: 'building' },
+          },
+        });
+      } else if (payload.id === 302) {
+        void recordAndSend('after_building', {
+          id: 303,
+          method: 'item/tool/call',
+          params: {
+            callId: 'sg-3',
+            tool: 'openmotion_game_write_files',
+            arguments: {
+              id: gameIdA,
+              files: [{ path: 'design/style.md', content: '# Visual Style\nWarm gouache starfields.' }],
+            },
+          },
+        });
+      } else if (payload.id === 303) {
+        void recordAndSend('after_style_md', {
+          method: 'turn/completed',
+          params: { turn: { id: 'turn-staged-1', status: 'completed' } },
+        });
+      } else if (payload.id === 311) {
+        void recordAndSend('after_code_still_building', {
+          id: 312,
+          method: 'item/tool/call',
+          params: {
+            callId: 'sg-5',
+            tool: 'openmotion_game_update_meta',
+            arguments: {
+              id: gameIdA,
+              title: 'Celestial Star Journey',
+              description: 'Gouache planet hopping adventure',
+            },
+          },
+        });
+      } else if (payload.id === 312) {
+        void recordAndSend('after_meta_still_building', {
+          id: 313,
+          method: 'item/tool/call',
+          params: {
+            callId: 'sg-6',
+            tool: 'openmotion_game_set_status',
+            arguments: { id: gameIdA, status: 'ready' },
+          },
+        });
+      } else if (payload.id === 313) {
+        void recordAndSend('after_ready', {
+          method: 'turn/completed',
+          params: { turn: { id: 'turn-staged-2', status: 'completed' } },
+        });
+      }
+    }
+    close() {}
+  }
+
+  serviceRef = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: StagedGameRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  const chatA = await serviceRef.create({
+    engine: 'codex',
+    intent: 'game',
+    permissionMode: 'auto',
+  });
+  chatIdA = chatA.id;
+
+  // Turn 1: read starter files + set status=building + write design/style.md ONLY
+  await serviceRef.start(chatIdA, {
+    requestId: 'req-staged-1',
+    mode: 'game',
+    text: `Plan visual style for game ${gameIdA}`,
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 80; i++) {
+    const snap = await serviceRef.get(chatIdA);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+
+  const afterTurn1 = await serviceRef.get(chatIdA);
+  assert.equal(afterTurn1.state, 'idle');
+  assert.equal(afterTurn1.artifacts.length, 0, 'design/style.md and building status must not prematurely register starter kit');
+  assert.equal(afterTurn1.activeArtifactId, undefined);
+  for (const snap of capturedSnapshots) {
+    assert.equal(snap.count, 0, `expected 0 artifacts at ${snap.step}`);
+    assert.equal(snap.active, undefined, `expected no activeArtifactId at ${snap.step}`);
+  }
+
+  // Turn 2: write runnable code -> update meta -> set status=ready -> must auto-present immediately
+  capturedSnapshots = [];
+  await serviceRef.start(chatIdA, {
+    requestId: 'req-staged-2',
+    mode: 'game',
+    text: `Implement and finalize game ${gameIdA}`,
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 80; i++) {
+    const snap = await serviceRef.get(chatIdA);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+
+  const afterTurn2 = await serviceRef.get(chatIdA);
+  assert.equal(afterTurn2.state, 'idle');
+  assert.equal(capturedSnapshots.find(s => s.step === 'after_code_still_building')?.count, 0);
+  assert.equal(capturedSnapshots.find(s => s.step === 'after_meta_still_building')?.count, 0);
+  assert.equal(capturedSnapshots.find(s => s.step === 'after_ready')?.active, `game:${gameIdA}`);
+  const readyArt = afterTurn2.artifacts.find(item => item.id === `game:${gameIdA}`);
+  assert.ok(readyArt);
+  assert.equal(readyArt.title, 'Celestial Star Journey');
+  assert.equal(typeof readyArt.presentedAt, 'number');
+  assert.ok((readyArt.presentedAt ?? 0) > 0);
+  assert.equal(afterTurn2.activeArtifactId, `game:${gameIdA}`);
+
+  await serviceRef.close();
+
+  // Part C: end-of-turn auto-present safety net when Agent writes runnable code and finishes without set_status("ready") or present_artifact
+  const draftB = await gameProjectsFor(store.directory).create({
+    prompt: 'Fast neon breakout shooter',
+    genre: 'shooter',
+    orientation: 'portrait',
+    multiplayer: false,
+  });
+  const gameIdB = draftB.game.id;
+
+  class ForgotPresentRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-forgot-present' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 401,
+            method: 'item/tool/call',
+            params: {
+              callId: 'fp-1',
+              tool: 'openmotion_game_write_files',
+              arguments: {
+                id: gameIdB,
+                files: [
+                  { path: 'index.html', content: '<!doctype html><canvas id="breakout"></canvas>' },
+                  { path: 'client.js', content: 'console.log("ready");' },
+                ],
+              },
+            },
+          });
+        });
+        return { turn: { id: 'turn-forgot-present' } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      if (payload.id === 401) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-forgot-present', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const serviceB = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: ForgotPresentRpc as unknown as typeof AssetAgentRpc,
+  });
+  const chatB = await serviceB.create({
+    engine: 'codex',
+    intent: 'game',
+    permissionMode: 'auto',
+  });
+  await serviceB.start(chatB.id, {
+    requestId: 'req-forgot-present',
+    mode: 'game',
+    text: `Build game ${gameIdB}`,
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+  for (let i = 0; i < 80; i++) {
+    const snap = await serviceB.get(chatB.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+  const doneB = await serviceB.get(chatB.id);
+  assert.equal(doneB.state, 'idle');
+  assert.equal(doneB.activeArtifactId, `game:${gameIdB}`);
+  const autoPresented = doneB.artifacts.find(item => item.id === `game:${gameIdB}`);
+  assert.ok(autoPresented);
+  assert.ok((autoPresented.presentedAt ?? 0) > 0);
+  await serviceB.close();
+}));
+
 test('extractLocalDevServerUrl, annotation image persistence, and lean Coding prompt injection', () => fixture(async store => {
   assert.equal(
     extractLocalDevServerUrl('  VITE v6.0 ready\n  ➜  Local:   http://localhost:5173/dashboard\n', 'http://127.0.0.1:4173'),

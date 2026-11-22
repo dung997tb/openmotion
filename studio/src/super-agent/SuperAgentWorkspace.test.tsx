@@ -1239,7 +1239,14 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
       return json({ conversation: gameChat });
     }
     if (url === `/motion-api/games/${GAME_ID}/files`) {
-      return json({ files: [{ path: 'index.html', bytes: 64 }, { path: 'logic.js', bytes: 32 }] });
+      return json({
+        files: [
+          { path: 'vendor/three-helper.js', bytes: 128 },
+          { path: 'design/plan.md', bytes: 48 },
+          { path: 'logic.js', bytes: 32 },
+          { path: 'index.html', bytes: 64 },
+        ],
+      });
     }
     if (url.startsWith(`/motion-api/games/${GAME_ID}/play/index.html`)) {
       return new Response('<!doctype html><canvas id="dodge"></canvas>', { status: 200 });
@@ -1305,13 +1312,39 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   const iframe = viewer.querySelector('iframe');
   expect(iframe?.getAttribute('src')).toContain(`/motion-api/games/${GAME_ID}/play/index.html`);
 
+  // Unified Device toolbar toggle works for Game preview viewports
+  const deviceBtn = viewer.querySelector('button[aria-label="Show device toolbar"]') as HTMLButtonElement;
+  expect(deviceBtn).toBeTruthy();
+  await act(async () => deviceBtn.click());
+  await flush();
+  const deviceBar = viewer.querySelector('.om-sa-device-bar');
+  expect(deviceBar).toBeTruthy();
+  const desktopPresetBtn = [...deviceBar!.querySelectorAll('button')].find(b => b.textContent?.includes('Desktop')) as HTMLButtonElement;
+  expect(desktopPresetBtn).toBeTruthy();
+  await act(async () => desktopPresetBtn.click());
+  await flush();
+  expect(stage?.getAttribute('data-viewport')).toBe('desktop');
+
   const codeBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
   await act(async () => codeBtn.click());
   await flush();
   expect(viewer.textContent).toContain('index.html');
   expect(viewer.textContent).toContain('<canvas id="dodge"></canvas>');
+  expect(viewer.querySelector('.om-sa-code-sidebar')).toBeTruthy();
+  expect(viewer.querySelector('button[aria-label="Copy"]')).toBeTruthy();
+  // vendor/ folder is collapsed by default while design/ is expanded
+  const folders = [...viewer.querySelectorAll('details.om-sa-code-folder')] as HTMLDetailsElement[];
+  const designFolder = folders.find(el => el.textContent?.includes('design'));
+  const vendorFolder = folders.find(el => el.textContent?.includes('vendor'));
+  expect(designFolder?.hasAttribute('open')).toBe(true);
+  expect(vendorFolder?.hasAttribute('open')).toBe(false);
 
-  const openStudioBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.includes('Open in Game Studio')) as HTMLButtonElement;
+  const menuBtn = viewer.querySelector('button[aria-label="Browser options"]') as HTMLButtonElement;
+  expect(menuBtn).toBeTruthy();
+  await act(async () => menuBtn.click());
+  await flush();
+  const openStudioBtn = [...document.querySelectorAll('.om-sa-browser-menu button')].find(b => b.textContent?.includes('Open in Game Studio')) as HTMLButtonElement;
+  expect(openStudioBtn).toBeTruthy();
   await act(async () => openStudioBtn.click());
   expect(onOpenGameStudio).toHaveBeenCalledWith(GAME_ID);
 });
@@ -1941,4 +1974,151 @@ it('supports unified Phase 2 Game preview console drawer ("Fix with Agent"), ele
   expect(turns[1].attachments?.[0]?.annotation?.mode).toBe('draw');
   expect(turns[1].attachments?.[0]?.annotation?.strokeCount).toBe(1);
   expect(turns[1].attachments?.[0]?.annotation?.strokeBounds).toBeTruthy();
+});
+
+it('auto-opens and re-opens the right Artifact Viewer tab whenever a game artifact is presented via presentedAt', async () => {
+  const GAME_CHAT_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+  const GAME_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+  const baseChat: SuperAgentChat = {
+    id: GAME_CHAT_ID,
+    title: 'Celestial Star Journey',
+    engine: 'codex',
+    model: 'gpt-5',
+    intent: 'game',
+    permissionMode: 'auto',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'running',
+    messages: [
+      { id: 'u-1', role: 'user', text: 'Build Celestial Star Journey', createdAt: 1000 },
+    ],
+    artifacts: [],
+    approvals: [],
+  };
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/settings/agents')) {
+      return json({
+        agents: [{ id: 'codex', label: 'Codex', detected: true, binary: '/usr/local/bin/codex', models: [{ id: 'gpt-5', label: 'GPT-5' }] }],
+        defaultAgent: 'codex',
+      });
+    }
+    if (url.endsWith('/super-agent/resources')) return json(sampleResources);
+    if (url.endsWith('/super-agent/chats')) return json({ conversations: [{ ...baseChat, messageCount: 1, artifactCount: 0 }] });
+    if (url.endsWith(`/super-agent/chats/${GAME_CHAT_ID}`)) return json({ conversation: baseChat });
+    if (url.includes(`/games/${GAME_ID}/files`)) return json({ files: [{ path: 'index.html', bytes: 64 }] });
+    if (url.includes('/api/account')) return json({ signedIn: false });
+    return json({});
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={GAME_CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenGameStudio={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  // While building with no ready artifact, the Artifact Viewer stays closed.
+  expect(document.querySelector('.om-sa-viewer')).toBeNull();
+
+  const sse = MockEventSource.instances.at(-1)!;
+  expect(sse).toBeTruthy();
+  const emitChat = async (next: SuperAgentChat) => {
+    const listeners = sse.listeners.get('chat') ?? [];
+    await act(async () => {
+      for (const fn of listeners) {
+        fn({ data: JSON.stringify(next) } as MessageEvent);
+      }
+    });
+    await flush();
+  };
+
+  // Once the game finishes and calls unified presentation (presentedAt = 5000), viewer auto-opens with the game tab.
+  const presentedOnce: SuperAgentChat = {
+    ...baseChat,
+    state: 'idle',
+    updatedAt: 5000,
+    activeArtifactId: `game:${GAME_ID}`,
+    artifacts: [
+      {
+        id: `game:${GAME_ID}`,
+        kind: 'game-project',
+        title: 'Celestial Star Journey',
+        subtitle: 'story · Game Studio',
+        projectId: GAME_ID,
+        scenario: 'landscape',
+        revision: 'rev-1',
+        url: `/motion-api/games/${GAME_ID}/play/index.html`,
+        createdAt: 5000,
+        updatedAt: 5000,
+        presentedAt: 5000,
+      },
+    ],
+  };
+  await emitChat(presentedOnce);
+
+  let viewer = document.querySelector('.om-sa-viewer')!;
+  expect(viewer).toBeTruthy();
+  let iframe = viewer.querySelector('iframe');
+  expect(iframe?.getAttribute('src')).toContain(`/motion-api/games/${GAME_ID}/play/index.html`);
+  expect(iframe?.getAttribute('src')).toContain('p=5000');
+
+  // User closes the Artifact Viewer pane manually.
+  const closeBtn = viewer.querySelector('button[aria-label="Close viewer"]') as HTMLButtonElement;
+  expect(closeBtn).toBeTruthy();
+  await act(async () => closeBtn.click());
+  await flush();
+  expect(document.querySelector('.om-sa-viewer')).toBeNull();
+
+  // Passive revision update mid-turn (presentedAt unchanged) must NOT unexpectedly reopen the closed viewer.
+  await emitChat({
+    ...presentedOnce,
+    state: 'running',
+    updatedAt: 6000,
+    artifacts: [
+      {
+        ...presentedOnce.artifacts[0],
+        revision: 'rev-2',
+        updatedAt: 6000,
+      },
+    ],
+  });
+  expect(document.querySelector('.om-sa-viewer')).toBeNull();
+
+  // Explicit presentation / turn-end completion advances presentedAt -> automatically re-opens the side pane and reloads iframe.
+  await emitChat({
+    ...presentedOnce,
+    state: 'idle',
+    updatedAt: 7000,
+    artifacts: [
+      {
+        ...presentedOnce.artifacts[0],
+        revision: 'rev-2',
+        updatedAt: 7000,
+        presentedAt: 7000,
+      },
+    ],
+  });
+  viewer = document.querySelector('.om-sa-viewer')!;
+  expect(viewer).toBeTruthy();
+  iframe = viewer.querySelector('iframe');
+  expect(iframe?.getAttribute('src')).toContain('p=7000');
 });

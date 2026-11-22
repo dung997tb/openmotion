@@ -103,6 +103,8 @@ export type SuperAgentArtifact = {
   mimeType?: string;
   createdAt: number;
   updatedAt: number;
+  /** Monotonic timestamp bumped when an artifact is explicitly presented/opened in the Artifact Viewer. */
+  presentedAt?: number;
 };
 
 export type SuperAgentToolCategory =

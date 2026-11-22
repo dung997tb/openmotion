@@ -112,6 +112,9 @@ interface ActiveSuperAgentChat {
   runtimeId?: string;
   bin?: string;
   devServerUrls?: Set<string>;
+  touchedGameIds?: Set<string>;
+  writtenGameCodeIds?: Set<string>;
+  presentedArtifactIds?: Set<string>;
 }
 
 const SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
@@ -443,6 +446,14 @@ function isReplay(chat: SuperAgentChat, requestId: string, inputHash: string) {
   return true;
 }
 
+function isRunnableGameFilePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+  if (!normalized) return false;
+  if (normalized === 'game.json' || normalized.startsWith('design/')) return false;
+  if (/\.(md|markdown|txt|csv)$/i.test(normalized)) return false;
+  return true;
+}
+
 function upsertChatArtifact(
   chat: SuperAgentChat,
   artifact: SuperAgentArtifact,
@@ -451,11 +462,16 @@ function upsertChatArtifact(
   const existingIndex = chat.artifacts.findIndex(item => item.id === artifact.id);
   let stored: SuperAgentArtifact;
   if (existingIndex >= 0) {
+    const existing = chat.artifacts[existingIndex];
+    const nextPresentedAt = artifact.presentedAt !== undefined
+      ? Math.max(existing.presentedAt ?? 0, artifact.presentedAt)
+      : existing.presentedAt;
     stored = {
-      ...chat.artifacts[existingIndex],
+      ...existing,
       ...artifact,
-      createdAt: chat.artifacts[existingIndex].createdAt,
-      updatedAt: Date.now(),
+      createdAt: existing.createdAt,
+      updatedAt: artifact.updatedAt ?? Date.now(),
+      ...(nextPresentedAt !== undefined ? { presentedAt: nextPresentedAt } : {}),
     };
     chat.artifacts[existingIndex] = stored;
   } else {
@@ -825,19 +841,48 @@ export class SuperAgentConversations {
     return readFile(filePath);
   }
 
-  private async maybeAutoPresentDevServer(active: ActiveSuperAgentChat, text: string, ownOrigin?: string): Promise<string | undefined> {
-    if (!text) return undefined;
+  private presentChatArtifactSync(
+    active: ActiveSuperAgentChat,
+    artifact: SuperAgentArtifact,
+  ): SuperAgentArtifact {
+    const existing = active.chat.artifacts.find(item => item.id === artifact.id);
+    const prevPresentedAt = existing?.presentedAt ?? 0;
+    const presentedAt = Math.max(Date.now(), prevPresentedAt + 1);
+    const stored = upsertChatArtifact(active.chat, {
+      ...artifact,
+      presentedAt,
+      updatedAt: presentedAt,
+    }, true);
+    active.presentedArtifactIds ??= new Set();
+    active.presentedArtifactIds.add(stored.id);
+    return stored;
+  }
+
+  private async presentChatArtifact(
+    active: ActiveSuperAgentChat,
+    artifact: SuperAgentArtifact,
+    persist = true,
+  ): Promise<SuperAgentArtifact> {
+    const stored = this.presentChatArtifactSync(active, artifact);
+    if (persist) {
+      await this.persist(active, true);
+    }
+    return stored;
+  }
+
+  private autoPresentDevServerSync(active: ActiveSuperAgentChat, text: string, ownOrigin?: string): { id?: string; changed: boolean } {
+    if (!text) return { changed: false };
     const url = extractLocalDevServerUrl(text, ownOrigin);
-    if (!url) return undefined;
+    if (!url) return { changed: false };
     active.devServerUrls ??= new Set();
     const existing = active.chat.artifacts.find(a => a.kind === 'web' && a.url === url);
     if (active.devServerUrls.has(url) || existing) {
       active.devServerUrls.add(url);
-      return existing?.id;
+      return { id: existing?.id, changed: false };
     }
     active.devServerUrls.add(url);
     const now = Date.now();
-    const stored = upsertChatArtifact(active.chat, {
+    const stored = this.presentChatArtifactSync(active, {
       id: `web-${assetHash(url).slice(0, 12)}`,
       kind: 'web',
       title: new URL(url).host,
@@ -845,9 +890,16 @@ export class SuperAgentConversations {
       url,
       createdAt: now,
       updatedAt: now,
-    }, true);
-    await this.persist(active, true);
-    return stored.id;
+    });
+    return { id: stored.id, changed: true };
+  }
+
+  private async maybeAutoPresentDevServer(active: ActiveSuperAgentChat, text: string, ownOrigin?: string): Promise<string | undefined> {
+    const result = this.autoPresentDevServerSync(active, text, ownOrigin);
+    if (result.changed) {
+      await this.persist(active, true);
+    }
+    return result.id;
   }
 
   async subscribe(id: string, res: ServerResponse): Promise<void> {
@@ -2525,7 +2577,7 @@ export class SuperAgentConversations {
         const out = item.aggregatedOutput ?? item.stdout ?? item.stderr ?? streamedOut ?? '';
         const command = typeof item.command === 'string' ? item.command : prev?.event.command;
         const devArtifactId = ok && out
-          ? await this.maybeAutoPresentDevServer(active, out, runtime.origin).catch(() => undefined)
+          ? this.autoPresentDevServerSync(active, out, runtime.origin).id
           : undefined;
         const ev: SuperAgentToolEvent = {
           callId: itemId,
@@ -2710,8 +2762,7 @@ export class SuperAgentConversations {
     if (toolName === presentArtifactTool.name) {
       validateInput(presentArtifactTool.inputSchema, rawArgs);
       const artifact = await this.resolvePresentedArtifact(rawArgs);
-      const stored = upsertChatArtifact(active.chat, artifact, true);
-      await this.persist(active, true);
+      const stored = await this.presentChatArtifact(active, artifact);
       return { presented: true, artifact: stored };
     }
 
@@ -2919,7 +2970,7 @@ export class SuperAgentConversations {
       if (action === 'open' && value.projectId) {
         const detail = await designProjectsFor(this.store.directory).get(value.projectId).catch(() => null);
         const entry = detail?.entry ?? 'index.html';
-        const stored = upsertChatArtifact(active.chat, {
+        return this.presentChatArtifact(active, {
           id: `design:${value.projectId}`,
           kind: 'design-project',
           title: detail?.title || value.title || 'Design Project',
@@ -2931,9 +2982,7 @@ export class SuperAgentConversations {
           url: `${designRoutes.raw(value.projectId, entry)}?rev=${encodeURIComponent(detail?.revision || value.revision || '')}`,
           createdAt: now,
           updatedAt: now,
-        }, true);
-        await this.persist(active, true);
-        return stored;
+        });
       }
       if (action === 'import' && Array.isArray(value.projects) && value.projects[0]?.id) {
         const p = value.projects[0];
@@ -2997,7 +3046,7 @@ export class SuperAgentConversations {
       const catalog = this.store.projectCatalog();
       const projectMeta = catalog.projects.find(item => item.id === value.projectId);
       const session = catalog.sessions?.find(item => item.artifacts.some(a => a.projectId === value.projectId));
-      const stored = upsertChatArtifact(active.chat, {
+      const artifactDraft: SuperAgentArtifact = {
         id: `motion:${value.projectId}`,
         kind: 'motion-project',
         title: value.project?.title || projectMeta?.title || 'Motion Project',
@@ -3007,7 +3056,11 @@ export class SuperAgentConversations {
         revision: value.revision,
         createdAt: now,
         updatedAt: now,
-      }, true);
+      };
+      if (name === 'openmotion_open_preview') {
+        return this.presentChatArtifact(active, artifactDraft);
+      }
+      const stored = upsertChatArtifact(active.chat, artifactDraft, true);
       await this.persist(active, true);
       return stored;
     }
@@ -3136,32 +3189,81 @@ export class SuperAgentConversations {
         gameCard = await gameProjectsFor(this.store.directory).get(args.id.trim()).catch(() => null);
       }
       if (gameCard?.id) {
+        const gameId = String(gameCard.id);
+        active.touchedGameIds ??= new Set();
+        active.touchedGameIds.add(gameId);
+        active.chat.intent = 'game';
+
+        let wroteRunnableCode = false;
+        if (name === 'openmotion_game_write_files') {
+          const argFiles = Array.isArray(args.files)
+            ? args.files
+              .map(entry => (entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string'
+                ? (entry as { path: string }).path
+                : ''))
+              .filter(Boolean)
+            : [];
+          const writtenFiles = Array.isArray(value.written)
+            ? value.written.filter((entry: unknown): entry is string => typeof entry === 'string' && Boolean(entry))
+            : [];
+          const candidatePaths = argFiles.length > 0 ? argFiles : writtenFiles;
+          wroteRunnableCode = candidatePaths.some(isRunnableGameFilePath);
+          if (wroteRunnableCode) {
+            active.writtenGameCodeIds ??= new Set();
+            active.writtenGameCodeIds.add(gameId);
+          }
+        }
+
         const rawPlayUrl = typeof gameCard.playUrl === 'string' && gameCard.playUrl.startsWith('/')
           ? gameCard.playUrl
-          : `/api/games/${encodeURIComponent(gameCard.id)}/play/index.html`;
+          : `/api/games/${encodeURIComponent(gameId)}/play/index.html`;
         const playUrl = rawPlayUrl.replace(/^\/api\//, '/motion-api/');
-        const activate =
-          ['openmotion_game_write_files', 'openmotion_game_update_meta', 'openmotion_game_publish'].includes(name)
-          || ((name === 'openmotion_game_create' || name === 'openmotion_game_get') && (gameCard.status === 'ready' || gameCard.status === 'published'));
         const gameTitle = typeof gameCard.title === 'string' && gameCard.title.trim() ? gameCard.title.trim() : 'Game Project';
-        const stored = upsertChatArtifact(active.chat, {
-          id: `game:${gameCard.id}`,
+        const titleUpdated = name === 'openmotion_game_update_meta' && !active.chat.titleCustomized && gameTitle !== 'Game Project';
+        if (titleUpdated) {
+          active.chat.title = normalizeSuperAgentTitle(gameTitle);
+        }
+
+        const artifactId = `game:${gameId}`;
+        const existing = active.chat.artifacts.find(item => item.id === artifactId);
+        const alreadyInChat = Boolean(existing);
+        const isReady = gameCard.status === 'ready' || gameCard.status === 'published';
+        const revision = String(gameCard.updatedAt || now);
+        const artifactDraft: SuperAgentArtifact = {
+          id: artifactId,
           kind: 'game-project',
           title: gameTitle,
           subtitle: `${gameCard.genre || 'game'} · ${gameCard.multiplayer ? 'Multiplayer' : 'Game Studio'}`,
-          projectId: gameCard.id,
+          projectId: gameId,
           scenario: gameCard.orientation === 'portrait' ? 'portrait' : 'landscape',
-          revision: String(gameCard.updatedAt || now),
+          revision,
           url: playUrl,
           createdAt: now,
           updatedAt: now,
-        }, activate);
-        active.chat.intent = 'game';
-        if (name === 'openmotion_game_update_meta' && !active.chat.titleCustomized && gameTitle !== 'Game Project') {
-          active.chat.title = normalizeSuperAgentTitle(gameTitle);
+        };
+
+        const shouldPresentNow =
+          name === 'openmotion_game_publish'
+          || (name === 'openmotion_game_set_status' && isReady)
+          || ((name === 'openmotion_game_create' || name === 'openmotion_game_get') && isReady && !alreadyInChat);
+
+        if (shouldPresentNow) {
+          if (active.presentedArtifactIds?.has(artifactId) && existing?.revision === revision) {
+            return existing;
+          }
+          return this.presentChatArtifact(active, artifactDraft);
         }
-        await this.persist(active, true);
-        return stored;
+
+        if (alreadyInChat && (name === 'openmotion_game_update_meta' || wroteRunnableCode)) {
+          const stored = upsertChatArtifact(active.chat, artifactDraft, false);
+          await this.persist(active, true);
+          return stored;
+        }
+
+        if (titleUpdated) {
+          await this.persist(active, true);
+        }
+        return undefined;
       }
     }
 
@@ -3207,6 +3309,28 @@ export class SuperAgentConversations {
     active.chat.state = error ? 'failed' : state;
     active.chat.error = error?.slice(0, 1000);
     active.chat.approvals = [];
+    if (!error && state === 'idle' && !active.deleted) {
+      const candidateGameIds = new Set<string>([
+        ...(active.writtenGameCodeIds ?? []),
+        ...(active.touchedGameIds ?? []),
+      ]);
+      for (const gameId of candidateGameIds) {
+        const artifactId = `game:${gameId}`;
+        const existing = active.chat.artifacts.find(item => item.id === artifactId);
+        const wroteRunnable = Boolean(active.writtenGameCodeIds?.has(gameId));
+        const alreadyPresentedThisTurn = Boolean(active.presentedArtifactIds?.has(artifactId));
+        if (!wroteRunnable && existing) continue;
+        const game = await gameProjectsFor(this.store.directory).get(gameId).catch(() => null);
+        if (!game) continue;
+        const isReady = game.status === 'ready' || game.status === 'published';
+        if (!wroteRunnable && !isReady) continue;
+        if (alreadyPresentedThisTurn && existing?.revision === String(game.updatedAt || '')) continue;
+        const artifact = await this.resolvePresentedArtifact({ kind: 'game-project', projectId: gameId }).catch(() => null);
+        if (artifact) {
+          this.presentChatArtifactSync(active, artifact);
+        }
+      }
+    }
     active.chat.intent = inferSuperAgentIntent(active.chat);
     if (!error && !active.chat.titleCustomized) {
       const firstUserText =

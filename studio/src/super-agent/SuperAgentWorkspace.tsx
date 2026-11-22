@@ -297,9 +297,17 @@ export function SuperAgentWorkspace({
   const rootRef = useRef<HTMLDivElement>(null);
   const sidebarDockedRef = useRef(true);
   const dragStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const lastArtifactStateRef = useRef<{ chatId: string | null; activeId?: string; sig: string }>({
+  const lastArtifactStateRef = useRef<{
+    chatId: string | null;
+    activeId?: string;
+    sig: string;
+    artifactIds: string[];
+    presentedById: Record<string, number>;
+  }>({
     chatId: null,
     sig: '',
+    artifactIds: [],
+    presentedById: {},
   });
   const prevBusyRef = useRef(false);
 
@@ -446,29 +454,61 @@ export function SuperAgentWorkspace({
       });
     }
 
-    const sig = next.artifacts.map(item => `${item.id}:${item.revision ?? item.updatedAt}`).join('|');
+    const allIds = next.artifacts.map(item => item.id);
+    const presentedById: Record<string, number> = {};
+    for (const item of next.artifacts) {
+      if (typeof item.presentedAt === 'number') {
+        presentedById[item.id] = item.presentedAt;
+      }
+    }
+    const sig = next.artifacts
+      .map(item => `${item.id}:${item.revision ?? ''}:${item.presentedAt ?? item.updatedAt}`)
+      .join('|');
     const prev = lastArtifactStateRef.current;
     const chatSwitched = prev.chatId !== next.id;
 
     if (chatSwitched) {
-      lastArtifactStateRef.current = { chatId: next.id, activeId: next.activeArtifactId, sig };
-      const ids = next.artifacts.map(item => item.id);
-      setOpenTabIds(ids);
-      const initialActive = next.activeArtifactId && ids.includes(next.activeArtifactId)
+      lastArtifactStateRef.current = {
+        chatId: next.id,
+        activeId: next.activeArtifactId,
+        sig,
+        artifactIds: allIds,
+        presentedById,
+      };
+      setOpenTabIds(allIds);
+      const initialActive = next.activeArtifactId && allIds.includes(next.activeArtifactId)
         ? next.activeArtifactId
-        : ids.at(-1) ?? NEW_VIEWER_TAB_ID;
+        : allIds.at(-1) ?? NEW_VIEWER_TAB_ID;
       setActiveTabId(initialActive);
     } else if (sig !== prev.sig || next.activeArtifactId !== prev.activeId) {
-      lastArtifactStateRef.current = { chatId: next.id, activeId: next.activeArtifactId, sig };
-      const allIds = next.artifacts.map(item => item.id);
+      const newIds = allIds.filter(id => !prev.artifactIds.includes(id));
+      const activePresentedAt = next.activeArtifactId ? presentedById[next.activeArtifactId] : undefined;
+      const prevActivePresentedAt = next.activeArtifactId ? (prev.presentedById[next.activeArtifactId] ?? 0) : 0;
+      const activeRePresented = activePresentedAt !== undefined && activePresentedAt > prevActivePresentedAt;
+      const activeChanged = Boolean(next.activeArtifactId && next.activeArtifactId !== prev.activeId);
+      const shouldPresent = Boolean(next.activeArtifactId) && (
+        activeRePresented
+        || activeChanged
+        || (next.activeArtifactId ? newIds.includes(next.activeArtifactId) : false)
+      );
+      lastArtifactStateRef.current = {
+        chatId: next.id,
+        activeId: next.activeArtifactId,
+        sig,
+        artifactIds: allIds,
+        presentedById,
+      };
       setOpenTabIds(current => {
         const merged = current.filter(id => allIds.includes(id));
-        for (const id of allIds) {
+        for (const id of newIds) {
           if (!merged.includes(id)) merged.push(id);
+        }
+        if (shouldPresent && next.activeArtifactId && allIds.includes(next.activeArtifactId) && !merged.includes(next.activeArtifactId)) {
+          merged.push(next.activeArtifactId);
         }
         return merged;
       });
-      if (next.activeArtifactId) {
+      if (shouldPresent && next.activeArtifactId) {
         setActiveTabId(next.activeArtifactId);
         setViewerOpen(true);
       }
@@ -490,7 +530,7 @@ export function SuperAgentWorkspace({
       setLoadFailed(false);
       setOpenTabIds([]);
       setActiveTabId(NEW_VIEWER_TAB_ID);
-      lastArtifactStateRef.current = { chatId: null, sig: '' };
+      lastArtifactStateRef.current = { chatId: null, sig: '', artifactIds: [], presentedById: {} };
       return;
     }
 

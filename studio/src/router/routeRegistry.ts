@@ -202,6 +202,7 @@ export function resolveNavTrackingPage(
 export function isWorkspacePageOpen(page: WorkspacePage, templatesPage: boolean): boolean {
   return templatesPage
     || page.motion
+    || page.superAgent
     || Boolean(page.cinemaLanding)
     || Boolean(page.designScene)
     || Boolean(page.modelOverview)
