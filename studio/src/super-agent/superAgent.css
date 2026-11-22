@@ -6022,3 +6022,30 @@
     transform: none;
   }
 }
+
+.om-sa-popover-label {
+  display: block;
+  font-size: var(--motion-text-xs);
+  font-weight: var(--motion-weight-medium);
+  color: var(--motion-muted);
+}
+
+.om-sa-settings-trigger,
+.om-sa-starter-card-more,
+.om-sa-game-showcase-card,
+.om-sa-approval,
+.om-sa-thinking {
+  min-width: 0;
+}
+
+.om-sa-showcase-skeleton,
+.om-sa-resource-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-8);
+  min-width: 0;
+}
+
+.om-sa-web-skeleton-enter {
+  opacity: 1;
+}

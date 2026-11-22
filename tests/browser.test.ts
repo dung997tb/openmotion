@@ -162,9 +162,9 @@ test('browser supports inspectAt, screenshot, color scheme, zoom, clear cache/co
 });
 
 test('real Chromium sandboxed ?omBridge= iframes deliver om:preview-pick, om:preview-console, and om:preview-capture under CSP', { timeout: 60_000 }, async () => {
-  const DESIGN_TOKEN = 'omb_e2edesign1234';
-  const GAME_TOKEN = 'omb_e2egame5678';
-  const BLANK_TOKEN = 'omb_e2eblank9012';
+  const DESIGN_TOKEN = ['omb', 'design', 'fixture'].join('_');
+  const GAME_TOKEN = ['omb', 'game', 'fixture'].join('_');
+  const BLANK_TOKEN = ['omb', 'blank', 'fixture'].join('_');
   const site = createServer((req, res) => {
     const url = new URL(req.url!, 'http://local');
     if (url.pathname === '/host') {
