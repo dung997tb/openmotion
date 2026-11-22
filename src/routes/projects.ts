@@ -267,7 +267,12 @@ export function createProjectsRouter(deps: ProjectsRouterDeps): Hono<{ Variables
   // POST /motion-api/projects/:id/open — Select active project.
   app.post('/motion-api/projects/:id/open', async (c) => {
     const auth = await requireAuth(c, deps, WRITE_REQ);
-    const project = await deps.workspace.selectProject(auth, c.req.param('id'));
+    const editor = c.req.query('view') === 'editor';
+    if (editor) assertAuthAccess(auth, READ_REQ);
+    const project = await deps.workspace.selectProject(auth, c.req.param('id'), editor ? c.req.query('projectId') : undefined);
+    if (editor) {
+      return c.json({ projectId: project.id, sessionId: project.sessionId, artifact: projectArtifact(project) });
+    }
     const exportJob = await resolveActiveExportJob(deps.exports, auth, project.id);
     return c.json({
       ok: true,

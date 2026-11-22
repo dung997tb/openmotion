@@ -2862,7 +2862,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
         ? `<meta name="openmotion-preview-origin" content="${previewOriginUrl.origin}">`
         : '';
       const studioHtml = renderedHtml.replace('</head>',
-        `<meta name="openmotion-runtime" content="cloud-diskless">${previewOriginMeta}</head>`);
+        `<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">${previewOriginMeta}</head>`);
       const bytes = Buffer.from(studioHtml, 'utf8');
       return new Response(headOnly ? null : bytes, {
         status: 200,

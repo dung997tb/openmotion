@@ -1,3 +1,4 @@
+import type { WorkspaceRoute } from './workspaceRouting';
 import { IconButton } from 'open-design-ui/icon-button';
 import { Button } from 'open-design-ui/button';
 import type { SkillCategory } from './skillCategories';
@@ -62,7 +63,7 @@ export { useWorkspaceChrome, useOptionalWorkspaceChrome, type EditorGuard } from
 const ModelHub = lazy(() => import('./ModelHub').then(module => ({ default: module.ModelHub })));
 
 export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: {
-  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: () => void;
+  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: (opened?: WorkspaceRoute) => void;
 }) {
   const { t, locale } = useI18n();
   const [page, setPage] = useState(() => readWorkspacePage(location.search, location.hash));
@@ -106,11 +107,11 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     if (guard.current?.blocked) throw new Error(guard.current.message || t('Working…'));
     await (guard.current?.waitForSaves ?? waitForSaves)();
   }, [waitForSaves, t]);
-  const navigate = useCallback((url: string, replace = false) => {
+  const navigate = useCallback((url: string, replace = false, opened?: WorkspaceRoute) => {
     if (!onNavigate) { navigateWorkspace(url, replace); return; }
     const target = preservePresentation(url, location.search);
     writeWorkspaceHistory(target, replace);
-    onNavigate();
+    onNavigate(opened);
   }, [onNavigate]);
   const workspace = useWorkspace(beforeViewChange, projectId, sessionId, navigate);
   const navigationToast = useToast();

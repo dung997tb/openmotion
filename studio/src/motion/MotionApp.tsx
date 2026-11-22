@@ -2,9 +2,8 @@ import { Button } from 'open-design-ui/button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { WorkspaceFrame, WorkspaceMenuButton, useWorkspaceChrome } from './WorkspaceFrame';
-import { requestedProject, validWorkspaceProject } from './workspaceRouting';
+import { requestedProject, validWorkspaceProject, type WorkspaceRoute } from './workspaceRouting';
 import { resolveWorkspaceRoute } from './resolveWorkspaceRoute';
-import type { SessionArtifact } from '../../../shared/session';
 import { preloadMotionProjectEditor } from './MotionProjectEditor';
 import { ArtifactViewer } from './ArtifactViewer';
 import { EditorLoading, readEditorLoadingLayout, type EditorLoadingLayout } from './EditorLoading';
@@ -27,15 +26,15 @@ export function MotionApp() {
     return () => window.removeEventListener(WORKSPACE_LOCATION_CHANGED, sync);
   }, []);
   const [libraryOnly, setLibraryOnly] = useState(() => new URLSearchParams(location.search).get('templates') === '1' && projectId === null && !sessionId);
-  const [ready, setReady] = useState<{ sessionId: string; artifact?: SessionArtifact } | null>(null);
+  const [ready, setReady] = useState<WorkspaceRoute | null>(null);
   const [error, setError] = useState('');
   const [attempt, retry] = useState(0);
   const surface = useRef<HTMLDivElement>(null);
   const [loadingLayout, setLoadingLayout] = useState<EditorLoadingLayout | null>(null);
-  const onNavigate = useCallback(() => {
+  const onNavigate = useCallback((opened?: WorkspaceRoute) => {
     const layout = readEditorLoadingLayout(surface.current);
     if (layout) setLoadingLayout(layout);
-    setReady(null);
+    setReady(opened ?? null);
     setError('');
     setLibraryOnly(new URLSearchParams(location.search).get('templates') === '1');
     setRoute({ projectId: requestedProject(location.search, location.hash), sessionId: new URLSearchParams(location.search).get('session') });

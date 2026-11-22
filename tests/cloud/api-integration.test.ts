@@ -876,6 +876,14 @@ describe('Cloud API Entrypoint — Auth Isolation & First-Access Welcome Bootstr
       authMode: 'oidc',
       authMethod: 'session_cookie',
     };
+    const writeOnly = await createPat(authStore, ownerAuth, { name: 'Write only', scopes: ['projects:write'] });
+    for (const resource of ['projects', 'sessions']) {
+      const restricted = await app.request(`/motion-api/${resource}/${randomUUID()}/open?view=editor`, {
+        method: 'POST', headers: { Authorization: `Bearer ${writeOnly.token}` },
+      });
+      assert.equal(restricted.status, 403);
+      assert.equal((await restricted.json()).code, 'INSUFFICIENT_SCOPE');
+    }
     const createdPat = await createPat(authStore, ownerAuth, {
       name: 'Integration Test PAT',
       scopes: [...DEFAULT_PAT_SCOPES],
@@ -1421,6 +1429,56 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
 // ---------------------------------------------------------------------------
 
 describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, WorkspaceStatus, /phase1/call, /generations, /tracking/preferences)', () => {
+  it('switches editor routes without loading messages, export jobs or a second copy of the target', async t => {
+    const { app, services, pgClient, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = (path: string, body?: Record<string, string>) => app.request('/motion-api/' + path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}),
+    });
+    const source = await (await post('projects', { title: 'Source' })).json();
+    const target = await (await post('projects', { title: 'Target' })).json();
+    const empty = await (await post('sessions', { title: 'Draft' })).json();
+    const detailRead = t.mock.method(services.workspace, 'getSession');
+    const projectRead = t.mock.method(services.workspace, 'getProject');
+    const exportsRead = t.mock.method(services.exports, 'listProjectExports');
+    const editorView = '?view=editor&projectId=' + source.projectId;
+    const expected = {
+      projectId: target.projectId, sessionId: target.sessionId,
+      artifact: { id: target.artifactId, kind: 'motion-project', projectId: target.projectId, title: 'Target' },
+    };
+
+    for (const [path, body] of [
+      [`projects/${target.projectId}/open`, undefined],
+      [`sessions/${target.sessionId}/open`, { projectId: target.projectId }],
+      [`sessions/${target.sessionId}/open`, undefined],
+    ] as const) {
+      const res = await post(path + editorView, body);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), expected);
+    }
+    const draft = await post(`sessions/${empty.sessionId}/open` + editorView);
+    assert.equal(draft.status, 200);
+    assert.deepEqual(await draft.json(), { projectId: '', sessionId: empty.sessionId, artifact: null });
+    assert.equal(detailRead.mock.callCount(), 0);
+    assert.equal(projectRead.mock.callCount(), 0);
+    assert.equal(exportsRead.mock.callCount(), 0);
+
+    const activeSession = () => pgClient.rows('workspaces').find(row => row.id === config.DEV_WORKSPACE_ID)?.active_session_id;
+    assert.equal(activeSession(), empty.sessionId);
+    const crossSession = await post(`sessions/${target.sessionId}/open` + editorView, { projectId: source.projectId });
+    assert.equal(crossSession.status, 404);
+    for (const path of [`projects/${target.projectId}/open`, `sessions/${target.sessionId}/open`]) {
+      assert.equal((await post(path + '?view=editor&projectId=' + randomUUID())).status, 404);
+    }
+    assert.equal(activeSession(), empty.sessionId);
+    await post(`projects/${target.projectId}/trash`);
+    assert.equal((await post(`projects/${target.projectId}/open` + editorView)).status, 400);
+    assert.equal((await post(`sessions/${target.sessionId}/open` + editorView, { projectId: target.projectId })).status, 404);
+    // A project trashed in another tab must still allow leaving for an accessible target.
+    for (const path of [`projects/${source.projectId}/open`, `sessions/${source.sessionId}/open`]) {
+      assert.equal((await post(path + '?view=editor&projectId=' + target.projectId)).status, 200);
+    }
+  });
+
   it('supports Studio project/session/template navigation, /motion-api/preview/open, /motion-api/phase1/call, /generations, and /tracking/preferences', async (t) => {
     const { app, pgClient, storage, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
 
@@ -2364,6 +2422,18 @@ describe('Cloud API Entrypoint — OAuth Agent Project Grants (Import Assets & M
       granted_at: new Date().toISOString(),
       revoked_at: null,
     });
+
+    const agent: AuthContext = {
+      authMode: 'oidc', authMethod: 'oauth_bearer', role: 'editor', scopes: DEFAULT_PAT_SCOPES,
+      clientId, userId, workspaceId,
+    };
+    const sessionA = pgClient.rows('projects').find(row => row.id === projectA)!.session_id as string;
+    const sessionB = pgClient.rows('projects').find(row => row.id === projectB)!.session_id as string;
+    const workspace = fixture.services.workspace;
+    await assert.rejects(workspace.selectProject(agent, projectA, projectB), { code: 'PROJECT_GRANT_REQUIRED' });
+    await assert.rejects(workspace.openSessionForEditor(agent, sessionA, projectA, projectB), { code: 'PROJECT_GRANT_REQUIRED' });
+    await assert.rejects(workspace.openSessionForEditor(agent, sessionB, projectB, projectA), { code: 'PROJECT_GRANT_REQUIRED' });
+    assert.equal((await workspace.openSessionForEditor(agent, sessionA, projectA, projectA)).projectId, projectA);
 
     // Initialize an MCP session authenticated as `oauth_bearer`
     const mcpHeaders = {

@@ -43,6 +43,7 @@ import {
 } from '../../shared/session.ts';
 import { getMimeType, sha256Hex } from '../studio/etag.ts';
 import {
+  assertAgentProjectAccess,
   assertValidUuid,
   canonicalInputHash,
   loadProjectOrThrow,
@@ -731,13 +732,16 @@ export class WorkspaceService {
   }
 
   /** Set a non-trashed project as active in the workspace and session. */
-  async selectProject(ctx: AuthContext, projectId: string): Promise<ProjectSummaryDetail> {
+  async selectProject(ctx: AuthContext, projectId: string, sourceProjectId?: string): Promise<ProjectSummaryDetail> {
     const updated = await this.db.transaction(async (tx) => {
       const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: false,
         forUpdate: true,
         auth: ctx,
       });
+      if (sourceProjectId !== undefined && sourceProjectId !== project.id) {
+        await loadProjectOrThrow(tx, ctx.workspaceId, sourceProjectId, { auth: ctx, allowTrashed: true });
+      }
       const now = new Date();
       const [row] = await tx
         .update(projects)
@@ -1503,10 +1507,21 @@ export class WorkspaceService {
   }
 
   async openSession(ctx: AuthContext, sessionId: string, projectId?: string): Promise<SessionDetail> {
+    await this.activateSession(ctx, sessionId, projectId);
+    return this.getSession(ctx, sessionId);
+  }
+
+  async openSessionForEditor(ctx: AuthContext, sessionId: string, projectId?: string, sourceProjectId?: string) {
+    const selected = await this.activateSession(ctx, sessionId, projectId, { sourceProjectId });
+    return { projectId: selected?.id ?? '', sessionId, artifact: selected ? projectArtifact(selected) : null };
+  }
+
+  private async activateSession(ctx: AuthContext, sessionId: string, projectId?: string, editor?: { sourceProjectId?: string }) {
+    if (editor && projectId !== undefined) assertValidUuid(projectId, 'projectId');
     assertValidUuid(ctx.workspaceId, 'workspaceId');
     assertValidUuid(sessionId, 'sessionId');
 
-    await this.db.transaction(async (tx) => {
+    return this.db.transaction(async (tx) => {
       const [sess] = await tx
         .select()
         .from(sessions)
@@ -1527,6 +1542,7 @@ export class WorkspaceService {
             eq(projects.workspaceId, ctx.workspaceId),
             eq(projects.sessionId, sess.id),
             eq(projects.trashed, false),
+            editor && projectId ? eq(projects.id, projectId) : undefined,
           ),
         )
         .orderBy(desc(projects.openedAt));
@@ -1536,6 +1552,15 @@ export class WorkspaceService {
         projRows.find((p) => p.artifactId === sess.activeArtifactId) ??
         projRows[0] ??
         null;
+      if (editor) {
+        if (projectId !== undefined && activeProj?.id !== projectId) {
+          throw new CloudError('PROJECT_NOT_FOUND', 'Project is unavailable in this session.', { status: 404, applied: false });
+        }
+        if (activeProj) await assertAgentProjectAccess(tx, ctx, activeProj);
+        if (editor.sourceProjectId !== undefined && editor.sourceProjectId !== activeProj?.id) {
+          await loadProjectOrThrow(tx, ctx.workspaceId, editor.sourceProjectId, { auth: ctx, allowTrashed: true });
+        }
+      }
       const now = new Date();
 
       await tx
@@ -1559,9 +1584,8 @@ export class WorkspaceService {
           }),
         )
         .where(eq(workspaces.id, ctx.workspaceId));
+      return activeProj;
     });
-
-    return this.getSession(ctx, sessionId);
   }
 
   async listProjectConversation(ctx: AuthContext, projectId: string): Promise<{ projectId: string; messages: SessionMessage[] }> {

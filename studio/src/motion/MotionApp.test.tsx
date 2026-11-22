@@ -297,3 +297,50 @@ it('keeps chrome, sidebar search and geometry mounted while replacing only the p
     act(() => root.unmount()); container.remove(); assign.mockRestore(); history.replaceState(null, '', '/');
   }
 });
+
+it('uses the authorized sidebar activation to mount its target without another preview open', async () => {
+  const other = '22222222-2222-2222-2222-222222222222';
+  const session = '33333333-3333-3333-3333-333333333333';
+  const meta = document.createElement('meta');
+  meta.name = 'openmotion-runtime';
+  meta.content = 'cloud-diskless';
+  meta.dataset.editorOpen = '1';
+  document.head.append(meta);
+  setCachedCloudDisklessMode(true);
+  history.replaceState(null, '', '/?project=' + id);
+  const projects = [{ id, title: 'First' }, { id: other, title: 'Target' }];
+  const result = (projectId: string) => ({
+    projectId, sessionId: session,
+    artifact: { id: projectId, projectId, kind: 'motion-project', title: projectId === id ? 'First' : 'Target' },
+  });
+  const fetcher = vi.fn(async (url: string) => {
+    const { pathname, searchParams } = new URL(url, location.origin);
+    if (pathname === '/motion-api/projects') return Response.json({ activeId: id, projects });
+    if (pathname === '/motion-api/preview/open') return Response.json(result(id));
+    if (pathname === '/motion-api/projects/' + other + '/open') return Response.json(result(other));
+    return Response.json({ projectId: searchParams.get('projectId'), revision: 'revision' });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const el = document.createElement('div');
+  document.body.append(el);
+  const root = createRoot(el);
+  try {
+    await act(async () => root.render(<I18nProvider><MotionApp /></I18nProvider>));
+    expect(el.querySelector('[data-viewer-project]')?.getAttribute('data-viewer-project')).toBe(id);
+    fetcher.mockClear();
+    const button = el.querySelector<HTMLButtonElement>('button.motion-session[aria-label="Target"]');
+    expect(button).toBeTruthy();
+    await act(async () => button!.click());
+    expect(el.querySelector('[data-viewer-project]')?.getAttribute('data-viewer-project')).toBe(other);
+    const urls = fetcher.mock.calls.map(([url]) => url);
+    expect(urls).toContain('/motion-api/projects/' + other + '/open?view=editor&projectId=' + id);
+    expect(urls.some(url => url.includes('/preview/open') || url.includes('/project/status?view=summary&projectId=' + id))).toBe(false);
+    expect(urls.filter(url => url === '/motion-api/projects')).toHaveLength(1);
+  } finally {
+    act(() => root.unmount());
+    el.remove();
+    meta.remove();
+    history.replaceState(null, '', '/');
+    setCachedCloudDisklessMode(null);
+  }
+});

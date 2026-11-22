@@ -1,3 +1,4 @@
+import { artifactViewers, type SessionArtifact } from '../../../shared/session';
 import { parseProjectIdFromHash } from '../utils/projectRouting';
 import { sessionPath } from '../../../shared/workspace-url';
 
@@ -9,4 +10,20 @@ export const validWorkspaceProject = (id: string) => /^(?:project|[a-f0-9]{8}-[a
 export function requestedProject(search: string, hash: string): string | null {
   const query = new URLSearchParams(search).get('project');
   return query ?? parseProjectIdFromHash(hash) ?? (hash.startsWith('#project/') ? '' : null);
+}
+
+export type OpenedPreview = { projectId?: string; sessionId?: string; artifact?: SessionArtifact | null };
+export type WorkspaceRoute = { sessionId: string; artifact?: SessionArtifact };
+
+export function confirmedRoute(opened: OpenedPreview, projectId: string, sessionId: string | null): WorkspaceRoute | null {
+  if (sessionId && opened.sessionId && sessionId !== opened.sessionId) throw new Error('该产物不属于此会话');
+  // Earlier cloud versions acknowledged the scoped open without returning a viewer artifact.
+  if (opened.artifact === undefined) return null;
+  const artifact = opened.artifact;
+  if (!artifact || !validWorkspaceProject(projectId) || opened.projectId !== projectId || artifact.projectId !== projectId ||
+    !opened.sessionId || !validWorkspaceProject(opened.sessionId) || !Object.hasOwn(artifactViewers, artifact.kind) ||
+    typeof artifact.id !== 'string' || !artifact.id || typeof artifact.title !== 'string') {
+    throw new Error('项目状态与当前页面不匹配，请重新打开对应项目。');
+  }
+  return { sessionId: opened.sessionId, artifact };
 }
