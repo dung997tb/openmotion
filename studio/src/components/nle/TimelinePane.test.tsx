@@ -26,11 +26,12 @@ it("keeps the current project's timeline controls and empty drop zone inert unti
     act(() => root.render(<TimelinePane timelineToolbar={<button>Edit</button>} />));
     const pane = host.querySelector("[data-studio-timeline]")!;
     const controls = host.querySelector("button")!;
-    const tracks = host.querySelector("[data-tracks]")!;
+    expect(host.querySelector("[data-tracks]")).toBeNull();
     expect(pane.getAttribute("aria-busy")).toBe("true");
     expect(controls.closest("[inert]")).not.toBeNull();
-    expect(tracks.closest("[inert]")).not.toBeNull();
     act(() => store.beginTimelineSession("current"));
+    const tracks = host.querySelector("[data-tracks]")!;
+    expect(tracks.closest("[inert]")).not.toBeNull();
     expect(host.querySelector('[role="status"]')).not.toBeNull();
     act(() => store.setTimelineReady(true));
     expect(controls.closest("[inert]")).toBeNull();

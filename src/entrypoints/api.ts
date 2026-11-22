@@ -2839,7 +2839,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     const studioBuildDir = path.join(runtimeRoot, 'studio/build');
 
     // Attempt exact static file under studio/build first (e.g. /assets/*, /manifest.json).
-    if (pathname !== '/' && path.extname(pathname)) {
+    if (pathname !== '/' && pathname !== '/index.html' && path.extname(pathname)) {
       if (!allowSourcemaps && pathname.toLowerCase().endsWith('.map')) {
         return c.notFound();
       }
@@ -2858,9 +2858,11 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     try {
       const rawHtml = await readFile(path.join(studioBuildDir, 'index.html'), 'utf8');
       const renderedHtml = injectRuntimeConfigIntoHtml(rawHtml, browserObservabilityConfig);
-      const studioHtml = previewHostIsolationEnabled && previewOriginUrl
-        ? renderedHtml.replace('</head>', `<meta name="openmotion-preview-origin" content="${previewOriginUrl.origin}"></head>`)
-        : renderedHtml;
+      const previewOriginMeta = previewHostIsolationEnabled && previewOriginUrl
+        ? `<meta name="openmotion-preview-origin" content="${previewOriginUrl.origin}">`
+        : '';
+      const studioHtml = renderedHtml.replace('</head>',
+        `<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">${previewOriginMeta}</head>`);
       const bytes = Buffer.from(studioHtml, 'utf8');
       return new Response(headOnly ? null : bytes, {
         status: 200,

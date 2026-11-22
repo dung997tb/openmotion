@@ -1,4 +1,5 @@
 import { Button } from 'open-design-ui/button';
+import { FileListLoading } from "./FileListLoading";
 import { AssetImportMenu } from '../../motion/AssetLibraryImport';
 import { useFileManagerContextOptional } from '../../contexts/FileManagerContext';
 import { ManualImportResults } from './ManualImportResults';
@@ -35,6 +36,7 @@ import type { FileTreeRefreshOptions } from '../../hooks/useFileTree';
 interface AssetsTabProps {
   projectId: string;
   assets: string[];
+  loading?: boolean;
   assetNames?: Record<string, string>;
   onImport?: (files: FileList, entryPoint?: "assets_button" | "assets_drop") => void | Promise<void>;
   onLibraryImport?: (options: FileTreeRefreshOptions) => Promise<void>;
@@ -130,6 +132,7 @@ function EmptyState({
 export const AssetsTab = memo(function AssetsTab({
   projectId,
   assets,
+  loading,
   assetNames,
   onImport,
   onLibraryImport,
@@ -352,7 +355,7 @@ export const AssetsTab = memo(function AssetsTab({
             setLatestImport({ projectId, path });
           } : undefined}
         />}
-        {mediaAssets.length === 0 ? (
+        {loading && !assets.length ? <FileListLoading /> : mediaAssets.length === 0 ? (
           <EmptyState searchQuery={searchQuery} onClearSearch={() => setSearchQuery("")} />
         ) : (
           visibleCategories.map((cat) => (

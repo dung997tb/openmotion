@@ -4,7 +4,7 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { motionStudio, sceneDestination, studioScenes, type StudioDestination, type StudioScene } from './creativeStudios';
 import { sceneExamples } from './sceneShowcase';
-import { findModelHub } from './modelHubs';
+import { gemini4Spotlight as geminiHub } from './gemini4Spotlight';
 import { motionSkills } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
@@ -26,7 +26,6 @@ interface FeaturedSlide {
   /** Opens a model hub page instead of a studio. */
   hub?: string;
 }
-const geminiHub = findModelHub('gemini-4')!;
 const slides: FeaturedSlide[] = [{
   id: motionStudio.id, title: motionStudio.title, subtitle: 'Motion design', icon: motionStudio.icon,
   hint: 'Animate type and shapes, then edit their timing on the timeline.', poster: motionPoster, clip: motionClip,

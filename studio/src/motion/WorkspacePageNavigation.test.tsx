@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { StudioCreation } from './CreativeWorkspace';
 import { MotionApp } from './MotionApp';
+import { preloadMotionProjectEditor } from './MotionProjectEditor';
 import { I18nProvider } from '../i18n/I18n';
 import { useWorkspaceChrome } from './WorkspaceFrame';
 import { readWorkspacePage, settingsSections } from './workspacePageRouting';
@@ -15,6 +16,7 @@ import { workspaceHistoryIndex, writeWorkspaceHistory } from '../utils/workspace
 
 const editor = vi.hoisted(() => ({ mounts: 0, fail: false, wait: async () => {} }));
 vi.mock('./AssetsPage', () => ({ AssetsPage: ({ studio }: { studio?: StudioCreation }) => <input aria-label="Asset draft" defaultValue={studio?.initialDraft?.prompt ?? 'Asset prompt'} /> }));
+vi.mock('./MotionProjectEditor', () => ({ preloadMotionProjectEditor: vi.fn() }));
 vi.mock('./tracking', () => ({ trackMotion: vi.fn() }));
 vi.mock('./ArtifactViewer', () => ({ ArtifactViewer: ({ artifact }: { artifact: { projectId: string } }) => {
   const { registerEditor } = useWorkspaceChrome();
@@ -55,6 +57,7 @@ const traverse = async (delta: number) => { await act(async () => { history.go(d
 async function mount(key = 0) { await act(async () => root.render(<I18nProvider initialLocale="en"><MotionApp key={key} /></I18nProvider>)); }
 beforeEach(() => {
   localStorage.clear(); history.replaceState(null, '', firstUrl);
+  vi.mocked(preloadMotionProjectEditor).mockClear();
   editor.mounts = 0; editor.fail = false; editor.wait = async () => {};
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   fetcher = vi.fn(async (input: string, init?: RequestInit) => {
@@ -79,6 +82,7 @@ it.each(settingsSections)('restores a copied %s page on a fresh mount', async se
   history.replaceState(null, '', firstUrl.replace('#', `&${query}#`));
   for (const key of [0, 1]) {
     await mount(key);
+    expect(preloadMotionProjectEditor).not.toHaveBeenCalled();
     expect(page().settings).toBe(section);
     expect(container.querySelector<HTMLElement>('.motion-workspace-content')?.hidden).toBe(true);
     if (section === 'mcp') {
@@ -696,6 +700,7 @@ it('opens the Gemini 4 hub from the third Explore slide and returns with browser
   expect(page()).toMatchObject({ explore: false, modelHub: 'gemini-4' });
   expect(location.search).toContain('page=model-hub');
   expect(location.search).toContain('hub=gemini-4');
+  await act(() => vi.dynamicImportSettled());
   expect(container.querySelector('.om-model-hub-hero h1')?.textContent).toBe('Gemini 4 Neon');
   const wall = () => [...container.querySelectorAll<HTMLButtonElement>('.om-hub-video .om-gallery-cover')];
   expect(wall()).toHaveLength(gemini4Videos.length);

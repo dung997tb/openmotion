@@ -46,8 +46,7 @@ try {
   });
   page.on('pageerror', error => console.log('Page error:', error.message));
   await page.goto(`${origin}/?project=${store.projectId}#project/${store.projectId}`);
-  await page.waitForSelector('[data-studio-timeline]', { timeout: 60000 });
-  await page.waitForFunction(() => !document.querySelector('[data-testid="timeline-loading-disabled-overlay"]'));
+  await page.waitForSelector('[data-studio-timeline]:not([aria-disabled="true"])', { timeout: 60000 });
   const openCatalog = await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll('.hf-dock-side-rail button')).find(button => /catalog/i.test(`${button.getAttribute('title')} ${button.getAttribute('aria-label')} ${button.textContent}`));
     if (!button) return Array.from(document.querySelectorAll('.hf-dock-side-rail button')).map(button => ({ title: button.title, label: button.getAttribute('aria-label') }));

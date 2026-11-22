@@ -42,5 +42,12 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: resolveStudioSourcemapOption(process.env),
     chunkSizeWarningLimit: 4500,
+    rollupOptions: {
+      treeshake: {
+        // HyperFrames 0.9.7 emits unused imports of these CJS parser entry points.
+        // Their APIs stay available to consumers that actually invoke the parsers.
+        moduleSideEffects: id => !/\/node_modules\/(?:@babel\/parser\/lib\/index|recast\/main)\.js(?:\?|$)/.test(id),
+      },
+    },
   },
 });

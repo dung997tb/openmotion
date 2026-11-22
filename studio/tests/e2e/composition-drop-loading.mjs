@@ -42,9 +42,8 @@ try {
   await page.evaluateOnNewDocument(() => localStorage.setItem('motion.studio.locale', 'en'));
   page.on('pageerror', error => console.log('Page error:', error.message));
   await page.goto(`${origin}/?project=${store.projectId}#project/${store.projectId}`);
-  await page.waitForSelector('[data-studio-timeline]', { timeout: 60000 });
   await page.waitForSelector('[data-timeline-scroll-viewport] [data-clip="true"]', { timeout: 60000 });
-  await page.waitForFunction(() => !document.querySelector('[data-testid="timeline-loading-disabled-overlay"]'));
+  await page.waitForSelector('[data-studio-timeline]:not([aria-disabled="true"])', { timeout: 60000 });
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll('.hf-dock-side-rail button')).find(button => /compositions/i.test(`${button.title} ${button.getAttribute('aria-label')}`));
     if (!button) throw new Error('Composition rail button missing');

@@ -1,3 +1,4 @@
+import type { WorkspaceRoute } from './workspaceRouting';
 import { IconButton } from 'open-design-ui/icon-button';
 import { Button } from 'open-design-ui/button';
 import type { SkillCategory } from './skillCategories';
@@ -14,7 +15,7 @@ import { DesignScenePage } from '../design/scenes/DesignScenePage';
 import type { Modality } from '../../../shared/gateway';
 import { motionStudio, scenesForStudio, studioDestination, studioDraftKey, type StudioDestination } from './creativeStudios';
 import { ModelOverview } from './ModelOverview';
-import { ModelHub } from './ModelHub';
+import { StudioErrorBoundary } from '../components/StudioErrorBoundary';
 import { CreativeWorkspace } from './CreativeWorkspace';
 import { AssetsPage } from './AssetsPage';
 import type { AssetDraft } from './AssetComposer';
@@ -22,7 +23,7 @@ import type { SkillParameters } from './skillCatalog';
 import { MotionStudioPage } from './MotionStudioPage';
 import { SkillsPage } from './SkillsPage';
 import { reportBlackFridayEntry } from './templateLibraryTracking';
-import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { ConnectionDialog } from './ConnectionDialog';
 import { MotionIcon } from './icons';
@@ -59,8 +60,10 @@ import { reportCreativePageView, type CreativePage } from './exploreTracking';
 import { WorkspaceChromeContext, useWorkspaceChrome, type WorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 export { useWorkspaceChrome, useOptionalWorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 
+const ModelHub = lazy(() => import('./ModelHub').then(module => ({ default: module.ModelHub })));
+
 export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: {
-  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: () => void;
+  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: (opened?: WorkspaceRoute) => void;
 }) {
   const { t, locale } = useI18n();
   const [page, setPage] = useState(() => readWorkspacePage(location.search, location.hash));
@@ -104,11 +107,11 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
     if (guard.current?.blocked) throw new Error(guard.current.message || t('Working…'));
     await (guard.current?.waitForSaves ?? waitForSaves)();
   }, [waitForSaves, t]);
-  const navigate = useCallback((url: string, replace = false) => {
+  const navigate = useCallback((url: string, replace = false, opened?: WorkspaceRoute) => {
     if (!onNavigate) { navigateWorkspace(url, replace); return; }
     const target = preservePresentation(url, location.search);
     writeWorkspaceHistory(target, replace);
-    onNavigate();
+    onNavigate(opened);
   }, [onNavigate]);
   const workspace = useWorkspace(beforeViewChange, projectId, sessionId, navigate);
   const navigationToast = useToast();
@@ -363,9 +366,13 @@ export function WorkspaceFrame({ children, waitForSaves, projectId, sessionId, b
         }} onCreators={trigger => { libraryTrigger.current = trigger; navigatePage({ templates: true, creators: true, creator: null, template: null }); }} onBrandKit={() => openSettings('brand-kit')} onMcp={(client, example) => openPage('mcp', client, example)} onSelectDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })} onOpenDesignProject={id => navigatePage({ designScene: 'projects', designProject: id, templates: false, ...lastExplore.current })} filters={lastExplore.current} onChooseStudio={chooseStudio} active={page.explore && !connectionsOpen} onNavigate={openStudio} onSkill={openSkill} />
       </div>}
       {motionTemplatesOpen && <div className="om-explore-host"><MotionStudioPage active={!connectionsOpen} /></div>}
-      {page.modelHub && !templatesPage && <div className="om-explore-host"><ModelHub id={page.modelHub} hasProject={Boolean(projectId)} onExplore={returnToExplore} onModel={openModel} onSettings={openSettings}
-        onProvider={provider => navigatePage({ settings: 'providers', provider, templates: false })}
-        onUse={() => chooseStudio(motionStudio)} /></div>}
+      {page.modelHub && !templatesPage && <div className="om-explore-host">
+        <StudioErrorBoundary><Suspense fallback={<div role="status" aria-label={t('Loading…')}><Skeleton className="om-featured-template-skeleton" /></div>}>
+          <ModelHub id={page.modelHub} hasProject={Boolean(projectId)} onExplore={returnToExplore} onModel={openModel} onSettings={openSettings}
+            onProvider={provider => navigatePage({ settings: 'providers', provider, templates: false })}
+            onUse={() => chooseStudio(motionStudio)} />
+        </Suspense></StudioErrorBoundary>
+      </div>}
       {page.modelOverview && !templatesPage && <div className="om-explore-host"><ModelOverview id={page.modelOverview} onExplore={returnToExplore}
         onProvider={provider => navigatePage({ settings: 'providers', provider: provider ?? null, templates: false })} onScene={openStudio} /></div>}
       <div className="om-workspace-layer" hidden={templatesPage} inert={templatesPage}><CreativeWorkspace onOpenBrandKit={hostChrome ? () => openSettings('brand-kit') : undefined} onSelectDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })} skill={page.skill} onCollection={specialty => navigatePage({ specialty, templates: false })} onExplore={returnToExplore} drafts={studioDrafts} active={!connectionsOpen} destination={page.studio} visit={studioVisit} hasProject={Boolean(projectId)} onNavigate={studio => navigatePage({ studio, templates: false })} /></div>

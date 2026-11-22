@@ -108,3 +108,17 @@ it("keeps other compositions available when the root is empty", async () => {
   expect(host.querySelector('[aria-label="Open composition index"]')).toBeNull();
   expect(host.querySelector('[aria-label="Open composition scene"]')).not.toBeNull();
 });
+
+it("shows clip names as soon as the file listing arrives", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  const render = (paths: string[]) => act(() => root?.render(
+    <CompositionsPanel projectId="demo" compositions={paths} loading={!paths.length} onSelect={vi.fn()} />
+  ));
+  render([]);
+  expect(host.querySelector('[role="status"]')).not.toBeNull();
+  render(["opening.html"]);
+  expect(host.querySelector('[aria-label="Open composition opening"]')).not.toBeNull();
+  expect(usePlayerStore.getState().previewBooted).toBe(false);
+});

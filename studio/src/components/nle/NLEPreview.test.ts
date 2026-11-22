@@ -5,15 +5,14 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTimelinePlayer } from "../../player/hooks/useTimelinePlayer";
 import { NLEPreview, getPreviewPlayerKey } from "./NLEPreview";
-import { LivePreviewReadyContext, StudioHostContext } from "../../motion/StudioHost";
+import { StudioHostContext } from "../../motion/StudioHost";
 import { resolvePreviewStageSize } from "./previewStage";
 import { readPreviewComplexity } from "../../player/hooks/usePreviewFirstFrameTelemetry";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const playerMounts: string[] = [];
-const onLivePreviewReady = vi.fn();
-let livePlayerProps: { onReadyToShowChange?: (ready: boolean) => void } = {};
+let livePlayerProps: { showInitialLoading?: boolean; onReadyToShowChange?: (ready: boolean) => void } = {};
 
 const measured = vi.hoisted(() => ({ size: null as { width: number; height: number } | null }));
 vi.mock("../../utils/previewCompositionSize", async (original) => ({
@@ -108,7 +107,6 @@ function renderPreview(
   const render = (directUrl?: string, projectId = "timeline-edit-playground", presentationMode = false) =>
     act(() => {
       root.render(
-        React.createElement(LivePreviewReadyContext.Provider, { value: onLivePreviewReady },
           React.createElement(StudioHostContext.Provider, { value: { mvpEditor: mvp } }, React.createElement(NLEPreview, {
             projectId,
             directUrl,
@@ -124,7 +122,7 @@ function renderPreview(
             presentationMode,
             zoomControlsTarget,
             compositionSizeHint,
-          }))),
+          })),
       );
     });
   render();
@@ -547,12 +545,10 @@ describe("NLEPreview", () => {
     );
     expect(poster()?.style.zIndex).toBe("2");
 
-    onLivePreviewReady.mockClear();
+    expect(livePlayerProps.showInitialLoading).toBe(true);
     act(() => livePlayerProps.onReadyToShowChange?.(false));
-    expect(onLivePreviewReady).not.toHaveBeenCalled();
     expect(poster()?.hidden).toBe(false);
     act(() => livePlayerProps.onReadyToShowChange?.(true));
-    expect(onLivePreviewReady).toHaveBeenCalledWith("timeline-edit-playground");
     expect(poster()?.hidden).toBe(true);
     act(() => poster()?.dispatchEvent(new Event("load")));
     expect(poster()).toBeNull();

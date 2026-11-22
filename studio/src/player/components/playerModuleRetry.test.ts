@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 
 // The module-scope kick in Player.tsx consumes the first attempt at import time,
@@ -12,11 +14,30 @@ vi.mock("@hyperframes/player", () => {
   return {};
 });
 
-import { loadPlayerModule } from "./Player";
+import { loadPlayerModule, Player } from "./Player";
 
 describe("loadPlayerModule", () => {
   it("kicks the import at module scope, before any mount", () => {
     expect(state.attempts).toBe(1);
+  });
+
+  it("replaces a failed player download with the editor reload action", async () => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    const reload = vi.spyOn(window.location, "reload").mockImplementation(() => {});
+    try {
+      await act(async () => root.render(createElement(Player, {
+        projectId: "project", showInitialLoading: true, onLoad: vi.fn(),
+      })));
+      await vi.waitFor(() => expect(host.textContent).toContain("Reload editor"));
+      expect(host.querySelector('[data-testid="composition-loading-overlay"]')).toBeNull();
+      act(() => host.querySelector("button")!.click());
+      expect(reload).toHaveBeenCalledOnce();
+    } finally {
+      act(() => root.unmount());
+      reload.mockRestore();
+    }
   });
 
   it("does not hand a later mount the promise a failed load already rejected", async () => {

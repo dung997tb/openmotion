@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { observeStudioSavedAt } from '../utils/studioSaveState';
 import { useWorkspace } from './useWorkspace';
+import { notifyProjectActivity } from './workspaceRefresh';
 import { I18nProvider, useI18n } from '../i18n/I18n';
 import { languages, translate } from '../i18n/messages';
 
@@ -277,19 +278,25 @@ const countReads = () => ({
 });
 const advance = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
 
-it('bounds idle reads and coalesces save notifications into one scoped status read', async () => {
+it('discovers external projects within one minute without polling idle editor status', async () => {
   vi.useFakeTimers();
   try {
     await mount(async () => {}, first);
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => url.endsWith('/projects')
+      ? Response.json({ projects: [{ id: first, title: 'First' }, { id: second, title: 'Created via MCP' }] })
+      : original(url, init));
     await advance(60_000);
-    expect(countReads()).toEqual({ status: 3, catalog: 2 });
+    expect(workspace.projects.map(project => project.id)).toEqual([first, second]);
+    await advance(5000);
+    expect(countReads()).toEqual({ status: 1, catalog: 2 });
     act(() => {
       observeStudioSavedAt(second, Date.now());
       observeStudioSavedAt(first, Date.now());
       observeStudioSavedAt(first, Date.now() + 1);
     });
     await advance(1800);
-    expect(countReads()).toEqual({ status: 4, catalog: 2 });
+    expect(countReads()).toEqual({ status: 2, catalog: 2 });
   } finally { vi.useRealTimers(); }
 });
 
@@ -364,5 +371,57 @@ it('backs off only the failing endpoint and restores its idle cadence after reco
     expect(workspace.connectionError).toBe('');
     await advance(7200);
     expect(countReads()).toEqual({ status: 3, catalog: 1 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('reconciles matching render events and catches up both reads after project stream reconnection', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    notifyProjectActivity(second, 'render-updated');
+    await advance(1800);
+    expect(countReads()).toEqual({ status: 1, catalog: 1 });
+    notifyProjectActivity(first, 'render-updated');
+    notifyProjectActivity(first, 'render-updated');
+    await advance(1800);
+    expect(countReads()).toEqual({ status: 2, catalog: 1 });
+    notifyProjectActivity(first, 'reconnected');
+    await advance(0);
+    expect(countReads()).toEqual({ status: 3, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('reconciles idle status even without a project stream and pauses reads while offline', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    await advance(120_000);
+    expect(countReads()).toEqual({ status: 2, catalog: 3 });
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    await advance(120_000);
+    expect(countReads()).toEqual({ status: 2, catalog: 3 });
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    await advance(0);
+    expect(countReads()).toEqual({ status: 3, catalog: 4 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps finding artifacts for a long-idle empty conversation at a bounded slower cadence', async () => {
+  vi.useFakeTimers();
+  try {
+    history.replaceState(null, '', '/?session=conversation');
+    let artifacts: { id: string; projectId: string }[] = [];
+    fetcher.mockImplementation(async (url: string) => Response.json(url.endsWith('/projects')
+      ? { projects: [], sessions: [{ id: 'conversation', artifacts }] } : status));
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    await mount(async () => {}, undefined, 'conversation');
+    await advance(31_000);
+    const reads = countReads().catalog;
+    await advance(14_000);
+    expect(countReads().catalog).toBe(reads);
+    artifacts = [{ id: 'artifact', projectId: first }];
+    await advance(1000);
+    expect(replace).toHaveBeenCalledWith(`/?session=conversation&project=${first}&openArtifact=1#project/${first}`);
   } finally { vi.useRealTimers(); }
 });

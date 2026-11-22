@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isolatedPreviewOrigin } from "../player/lib/previewLease";
 import { studioApiFetch } from "./studioApiFetch";
 
 let cachedCloudMode: boolean | null = null;
@@ -15,7 +16,7 @@ function notify(cloud: boolean): void {
   }
 }
 
-/** Synchronous cached value; returns `false` until `/__hyperframes_config` confirms `cloud-diskless`. */
+/** Synchronous result of shell detection or the legacy config probe. */
 export function getCachedCloudDisklessMode(): boolean {
   return cachedCloudMode === true;
 }
@@ -27,9 +28,14 @@ export function setCachedCloudDisklessMode(value: boolean | null): void {
   if (value !== null) notify(value);
 }
 
-/** Fetch `/__hyperframes_config` once and cache whether this Studio runs in `cloud-diskless` mode. */
+/** Prefer the cloud shell declaration. Older and native shells use the config probe. */
 export function ensureCloudDisklessMode(): Promise<boolean> {
   if (cachedCloudMode !== null) return Promise.resolve(cachedCloudMode);
+  if (typeof document !== "undefined" && (isolatedPreviewOrigin() ||
+      document.head.querySelector('meta[name="openmotion-runtime"][content="cloud-diskless"]'))) {
+    setCachedCloudDisklessMode(true);
+    return Promise.resolve(true);
+  }
   if (inflightDetection) return inflightDetection;
   if (typeof window === "undefined" || typeof fetch !== "function") {
     cachedCloudMode = false;

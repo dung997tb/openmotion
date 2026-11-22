@@ -60,8 +60,8 @@ try {
       await page.screenshot({ path: path.join(output, `${theme}-${width}-project-skeleton.png`) });
     }
     await page.waitForSelector('[data-el-id="index.html#first"]', { timeout: 60000 });
-    await page.waitForSelector('[data-editor-initializing="false"]', { timeout: 60000 });
-    await page.waitForFunction(() => !document.querySelector('[data-testid="timeline-loading-disabled-overlay"]'));
+    await page.waitForSelector('.motion-project-editor', { timeout: 60000 });
+    await page.waitForSelector('[data-studio-timeline]:not([aria-disabled="true"])');
     const firstSource = await readFile(path.join(store.projectDirectoryFor(first), 'index.html'), 'utf8');
     if (width < 1000) {
       await page.click('.om-app-rail [aria-label="Home"]');
@@ -82,11 +82,9 @@ try {
           loading: document.querySelectorAll('.motion-loading').length,
           listSkeletons: document.querySelectorAll('[data-testid="project-list-skeleton"]').length,
           listNotices: document.querySelectorAll('.motion-session-empty').length,
-          initializing: document.querySelector('[data-editor-initializing]')?.getAttribute('data-editor-initializing'),
           placeholder: document.querySelector('.motion-editor-placeholder')?.getAttribute('style'),
-          presentedProject: document.querySelector('[data-editor-initializing="false"] .motion-project-name-input')?.value,
+          presentedProject: document.querySelector('.motion-project-editor')?.dataset.projectId,
           timeline: (() => { const box = document.querySelector('[data-studio-timeline]')?.getBoundingClientRect(); return box ? [box.x, box.y, box.width, box.height] : null; })(),
-          controls: [...document.querySelectorAll('.motion-timeline-toolbar button[aria-label="Zoom in"], .motion-timeline-toolbar button[aria-label="Fit timeline to width"]')].map(button => ({ disabled: button.disabled, color: getComputedStyle(button).color })),
           mark: mark ? [mark.x, mark.y] : null,
         });
         window.__switchFrame = requestAnimationFrame(sample);
@@ -97,7 +95,7 @@ try {
     await page.waitForSelector('.motion-workspace-content .motion-loading', { timeout: 10000 });
     await page.screenshot({ path: path.join(output, `${theme}-${width}-loading.png`) });
     await page.waitForSelector('[data-el-id="index.html#second"]', { timeout: 60000 });
-    await page.waitForSelector('[data-editor-initializing="false"]', { timeout: 60000 });
+    await page.waitForSelector('.motion-project-editor', { timeout: 60000 });
     await new Promise(resolve => setTimeout(resolve, 400));
     const samples = await page.evaluate(() => { cancelAnimationFrame(window.__switchFrame); return window.__switchSamples; });
     await writeFile(path.join(output, `${theme}-${width}-samples.json`), JSON.stringify(samples));
@@ -106,10 +104,10 @@ try {
     assert.ok(samples.every(sample => JSON.stringify(sample.boxes) === JSON.stringify(samples[0].boxes)), 'Shell geometry must remain fixed');
     assert.ok(samples.every(sample => sample.loading <= 1), 'Only one workspace loading indicator');
     assert.ok(samples.every(sample => sample.listSkeletons === 0 && sample.listNotices === 0), 'Cached project rows must never be displaced by loading content');
-    const presented = samples.filter(sample => sample.presentedProject === 'Second project');
+    const presented = samples.filter(sample => sample.presentedProject === second && sample.timeline);
     assert.ok(presented.length > 2);
     assert.ok(presented.every(sample => JSON.stringify(sample.timeline) === JSON.stringify(presented[0].timeline)), 'Target timeline geometry must settle before presentation');
-    assert.ok(presented.every(sample => JSON.stringify(sample.controls) === JSON.stringify(presented[0].controls)), 'Initialization must not animate controls after presentation');
+    assert.ok(presented.every(sample => sample.loading === 0), 'A mounted target workspace must be accessible while its preview loads');
     const placeholders = samples.filter(sample => sample.placeholder).map(sample => sample.placeholder);
     assert.ok(placeholders.length > 0);
     assert.ok(placeholders.every(style => style === placeholders[0]), 'Retain the previous editor geometry throughout initialization');
@@ -119,6 +117,7 @@ try {
     assert.equal(documents, 1, 'Switching must not navigate the top-level document');
     await page.screenshot({ path: path.join(output, `${theme}-${width}-ready.png`) });
     if (theme === 'light' && width === 1440) {
+      await page.waitForSelector('[data-studio-timeline]:not([aria-disabled="true"])');
       await page.click('[data-el-id="index.html#second"]');
       await page.waitForSelector('button[aria-label="Zoom to selected clips"]:not([disabled])');
       await page.keyboard.press('Delete');

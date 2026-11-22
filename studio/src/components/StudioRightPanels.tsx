@@ -201,6 +201,8 @@ export const StudioRightPanels = memo(function StudioRightPanels({
       writeProjectFile={writeProjectFile}
       recordEdit={recordEdit}
       reloadPreview={reloadPreview}
+      sdkSession={sdkSession}
+      publishSdkSession={publishSdkSession}
       forceReloadSharedSdkSession={forceReloadSdkSession}
     >
       <PropertyPanel

@@ -396,6 +396,8 @@ describe('Cloud infra config & API runtime injection + production sourcemap guar
     const plainRes = await disabledApi.app.request('/');
     assert.equal(plainRes.status, 200);
     const plainHtml = await plainRes.text();
+    assert.ok(plainHtml.includes('<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">'));
+    assert.equal(await (await disabledApi.app.request('/index.html')).text(), plainHtml);
     assert.ok(!plainHtml.includes(RUNTIME_CONFIG_GLOBAL_KEY));
     assert.ok(!plainHtml.includes(RUNTIME_CONFIG_PLACEHOLDER));
 

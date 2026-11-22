@@ -100,3 +100,13 @@ it('searches the readable project name while keeping the original media path', a
   expect(container.querySelector('[data-assets-list]')?.textContent).toContain('Dia wallpaper');
   expect(container.querySelector('img')?.src).toContain(path);
 });
+
+it("keeps asset search available while the listing loads and displays rows before their media", async () => {
+  await act(async () => root.render(<AssetsTab projectId="p" assets={[]} loading />));
+  const search = container.querySelector('input[aria-label="Search assets"]');
+  expect(search).not.toBeNull();
+  expect(container.querySelector('[data-assets-list] [role="status"]')).not.toBeNull();
+  await act(async () => root.render(<AssetsTab projectId="p" assets={["assets/picture.svg"]} />));
+  expect(container.querySelector('input[aria-label="Search assets"]')).toBe(search);
+  expect(container.querySelector('[data-assets-list]')?.textContent).toContain("picture.svg");
+});

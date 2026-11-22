@@ -11,6 +11,7 @@ import type { ExternalConflictSnapshot } from "../utils/externalConflictStorage"
 import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { consumeStudioWriteToken } from "../utils/studioFileVersion";
 import { logReload } from "../utils/reloadDebug";
+import { notifyProjectActivity } from "../motion/workspaceRefresh";
 import {
   emitMediaDerived,
   emitMediaIngestStatus,
@@ -141,6 +142,10 @@ export function sseFileChangeChannel(
   const eventSource = new EventSource(studioProjectUrl('/api/events'));
   eventSource.addEventListener("file-change", onDelivery);
   eventSource.addEventListener("history-changed", onHistoryChanged);
+  eventSource.addEventListener("render-updated", (event) => {
+    const projectId = readFileChangeField(decodeFileChange(event), "projectId");
+    if (projectId) notifyProjectActivity(projectId, "render-updated");
+  });
   // Derived media (sprite/waveform/thumbnail/proxy/metadata) notifications update
   // timeline & sidebar caches without reloading the preview iframe.
   eventSource.addEventListener("media-derived-ready", (event) => {
@@ -533,6 +538,7 @@ export function useExternalFileChangeCoordinator({
       };
     }
     const catchUp = () => {
+      if (projectId) notifyProjectActivity(projectId, "reconnected");
       processChangeRef.current({ path: "." });
       processHistoryChangeRef.current({ projectId });
     };

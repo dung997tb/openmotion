@@ -2,6 +2,20 @@
 // interval after success and allows at most one request in flight per endpoint.
 export const activeWorkspaceInterval = 1800;
 
+// The editor already owns the project SSE connection. Unscoped views and older
+// servers still reconcile through bounded reads.
+type ProjectActivity = (projectId: string, event: 'render-updated' | 'reconnected') => void;
+const activityListeners = new Set<ProjectActivity>();
+
+export const notifyProjectActivity: ProjectActivity = (projectId, event) => {
+  for (const listener of activityListeners) listener(projectId, event);
+};
+
+export function subscribeProjectActivity(listener: ProjectActivity) {
+  activityListeners.add(listener);
+  return () => { activityListeners.delete(listener); };
+}
+
 export function watchWorkspaceRead(
   signal: AbortSignal,
   read: () => Promise<number>,
@@ -12,16 +26,18 @@ export function watchWorkspaceRead(
   let running = false;
   let retry = activeWorkspaceInterval;
 
+  const canRead = () => !signal.aborted && !document.hidden && navigator.onLine !== false;
+
   function schedule(delay: number) {
     due = Math.min(due, Date.now() + delay);
     clearTimeout(timer);
-    if (!running && !signal.aborted && !document.hidden && Number.isFinite(due)) {
+    if (!running && canRead() && Number.isFinite(due)) {
       timer = setTimeout(run, Math.max(0, due - Date.now()));
     }
   }
 
   async function run() {
-    if (signal.aborted || document.hidden) return;
+    if (!canRead()) return;
     due = Infinity;
     running = true;
     let delay: number;

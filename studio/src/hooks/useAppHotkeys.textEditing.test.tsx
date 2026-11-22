@@ -71,6 +71,7 @@ function Harness() {
   const clearSelectionRef = useRef<() => void>(() => undefined);
 
   useAppHotkeys({
+    projectId: "current",
     handleTimelineElementsDelete: timelineDeleteMany,
     handleTimelineElementSplit: vi.fn(async () => undefined),
     handleDomEditElementDelete: domDelete,
@@ -144,6 +145,8 @@ beforeEach(() => {
   keyframeDelete.mockClear();
   textCommits.mockClear();
   usePlayerStore.getState().reset();
+  usePlayerStore.getState().beginTimelineSession("current");
+  usePlayerStore.getState().setTimelineReady(true);
   usePlayerStore.getState().setElements([
     {
       id: "selected-card",

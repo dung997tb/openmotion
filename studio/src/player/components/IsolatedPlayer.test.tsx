@@ -18,7 +18,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function mountPlayer() {
+function mountPlayer(showInitialLoading = true) {
   const origin = "https://preview.test";
   let grant = 0;
   const retry = vi.fn<() => Promise<void>>();
@@ -32,7 +32,7 @@ function mountPlayer() {
   const root = createRoot(host);
   const ready = vi.fn();
   const error = vi.fn();
-  act(() => root.render(<IsolatedPlayer projectId="p" origin={origin} onLoad={ready} onPreviewError={error} />));
+  act(() => root.render(<IsolatedPlayer projectId="p" origin={origin} onLoad={ready} onPreviewError={error} showInitialLoading={showInitialLoading} />));
   const frame = host.querySelector("iframe")!;
   Object.defineProperty(frame, "contentWindow", { value: window });
   const notify = (type: string, token = "grant-" + grant) => act(() => {
@@ -86,4 +86,23 @@ it("caps repeated overload, gives manual retry a fresh budget and cancels on unm
   } finally { player.unmount(); }
   advance(20_000);
   expect(player.retry).toHaveBeenCalledTimes(5);
+});
+
+
+it("keeps loading local through a timeout and manual retry, then uncovers the first valid frame", () => {
+  const player = mountPlayer();
+  const loading = () => player.host.querySelector('[data-testid="composition-loading-overlay"]');
+  try {
+    expect(loading()?.textContent).toContain("Loading composition");
+    player.notify("timeline-state", "wrong-grant");
+    expect(loading()).not.toBeNull();
+    advance(15_001);
+    expect(loading()).toBeNull();
+    expect(player.host.textContent).toContain("Retry preview");
+    act(() => player.host.querySelector("button")!.click());
+    expect(loading()).not.toBeNull();
+    player.notify("timeline-state");
+    advance(40);
+    expect(loading()).toBeNull();
+  } finally { player.unmount(); }
 });

@@ -136,6 +136,10 @@ export function createSessionsRouter(deps: SessionsRouterDeps): Hono<{ Variables
   app.post('/motion-api/sessions/:id/open', async (c) => {
     const auth = await requireAuth(c, deps, WRITE_REQ);
     const body = (await c.req.json().catch(() => ({}))) as { projectId?: string };
+    if (c.req.query('view') === 'editor') {
+      assertAuthAccess(auth, READ_REQ);
+      return c.json(await deps.workspace.openSessionForEditor(auth, c.req.param('id'), body.projectId, c.req.query('projectId')));
+    }
     const opened = await deps.workspace.openSession(auth, c.req.param('id'), body.projectId);
     const activeArtifact =
       (body.projectId ? opened.artifacts.find((item) => item.projectId === body.projectId) : undefined) ??

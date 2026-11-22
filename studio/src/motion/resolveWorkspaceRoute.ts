@@ -1,11 +1,8 @@
-import { artifactViewers, type CreativeSession, type SessionArtifact } from '../../../shared/session';
+import type { CreativeSession } from '../../../shared/session';
 import { getCachedCloudDisklessMode, ensureCloudDisklessMode } from '../utils/cloudRuntime';
 import { isolatedPreviewOrigin } from '../player/lib/previewLease';
 import { motionApi, type ProjectCatalog } from './useWorkspace';
-import { validWorkspaceProject } from './workspaceRouting';
-
-type OpenedPreview = { projectId?: string; sessionId?: string; artifact?: SessionArtifact };
-type WorkspaceRoute = { sessionId: string; artifact?: SessionArtifact };
+import { confirmedRoute, validWorkspaceProject, type OpenedPreview, type WorkspaceRoute } from './workspaceRouting';
 
 function checkCatalogProject(catalog: ProjectCatalog, projectId: string) {
   if (!catalog.projects.some(project => project.id === projectId && !project.trashedAt)) {
@@ -18,19 +15,6 @@ async function openPreview(projectId: string, signal: AbortSignal) {
   signal.throwIfAborted();
   if (opened.projectId !== undefined && opened.projectId !== projectId) throw new Error('项目状态与当前页面不匹配，请重新打开对应项目。');
   return opened;
-}
-
-function confirmedRoute(opened: OpenedPreview, projectId: string, sessionId: string | null): WorkspaceRoute | null {
-  if (sessionId && opened.sessionId && sessionId !== opened.sessionId) throw new Error('该产物不属于此会话');
-  // Earlier cloud versions acknowledged the scoped open without returning a viewer artifact.
-  if (opened.artifact === undefined) return null;
-  const artifact = opened.artifact;
-  if (!artifact || opened.projectId !== projectId || artifact.projectId !== projectId ||
-    !opened.sessionId || !validWorkspaceProject(opened.sessionId) || !Object.hasOwn(artifactViewers, artifact.kind) ||
-    typeof artifact.id !== 'string' || !artifact.id || typeof artifact.title !== 'string') {
-    throw new Error('项目状态与当前页面不匹配，请重新打开对应项目。');
-  }
-  return { sessionId: opened.sessionId, artifact };
 }
 
 /** Native hosts use their catalog as the existence guard before opening a preview. */
