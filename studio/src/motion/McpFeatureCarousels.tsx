@@ -1,33 +1,19 @@
-import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { mcpGalleryPreview } from './mcpGallery';
-import { formatMcpAgentPrompt, mcpShowcaseModules, type McpCaseTarget, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
-
-type PreviewState = {
-  title: string;
-  image: string;
-  video?: string;
-  showcaseIframe?: string;
-  target: McpCaseTarget;
-  prompt: string;
-  id: string;
-};
+import { formatMcpAgentPrompt, mcpShowcaseModules, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
 
 function FeatureModuleCarousel({
   module,
   moduleIndex,
   enabled,
   onCopy,
-  onOpenPreview,
 }: {
   module: McpShowcaseModule;
   moduleIndex: number;
   enabled: boolean;
   onCopy: (slideId: string, prompt: string) => Promise<boolean>;
-  onOpenPreview: (state: PreviewState, trigger: HTMLElement) => void;
 }) {
   const { t, locale } = useI18n();
   const lang = locale === 'zh-CN' ? 'zh-CN' : 'en';
@@ -159,22 +145,6 @@ function FeatureModuleCarousel({
                     <RemixIcon name="file-copy-line" size={15} />
                     <span>{t(copiedId === current.id ? 'Copied' : 'Copy instruction')}</span>
                   </Button>
-                  <Button
-                    variant="plain"
-                    className="om-mcp-carousel-secondary"
-                    onClick={event => onOpenPreview({
-                      id: current.id,
-                      title: `${currentText.title} · ${t('Studio editable project preview')}`,
-                      image: current.image,
-                      video: current.video,
-                      showcaseIframe: current.showcaseIframe,
-                      target: current.target,
-                      prompt: formatMcpAgentPrompt(currentText.prompt, current.target),
-                    }, event.currentTarget)}
-                  >
-                    <span>{t('Try in Studio')}</span>
-                    <RemixIcon name="arrow-right-up-line" size={15} />
-                  </Button>
                 </div>
                 <div className="om-mcp-model-pills">
                   {module.models.map(model => (
@@ -214,35 +184,11 @@ function FeatureModuleCarousel({
 export function McpFeatureCarousels({
   enabled,
   onCopy,
-  onOpenTarget,
 }: {
   enabled: boolean;
   onCopy: (slideId: string, prompt: string) => Promise<boolean>;
-  onOpenTarget: (target: McpCaseTarget, trigger?: HTMLElement) => void;
 }) {
-  const { t, locale } = useI18n();
-  const [preview, setPreview] = useState<PreviewState | null>(null);
-  const [modalCopied, setModalCopied] = useState(false);
-  const [modalVideoFailed, setModalVideoFailed] = useState(false);
-  const triggerRef = useRef<HTMLElement>(null);
-  const previewContent = mcpGalleryPreview[locale === 'zh-CN' ? 'zh-CN' : 'en'];
-
-  useEffect(() => {
-    if (!enabled) setPreview(null);
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!modalCopied) return;
-    const timer = window.setTimeout(() => setModalCopied(false), 1600);
-    return () => window.clearTimeout(timer);
-  }, [modalCopied]);
-
-  const targetActionLabel = (target: McpCaseTarget) => {
-    if (target.kind === 'skill') return t('Open Skill');
-    if (target.kind === 'brand-kit') return t('Open Brand Kits');
-    return t('Open template');
-  };
-
+  const { t } = useI18n();
   return (
     <section className="om-mcp-section" id="showcase" aria-label={t('Featured MCP capabilities')}>
       <div className="om-mcp-carousel-modules">
@@ -253,88 +199,9 @@ export function McpFeatureCarousels({
             moduleIndex={idx}
             enabled={enabled}
             onCopy={onCopy}
-            onOpenPreview={(state, trigger) => {
-              triggerRef.current = trigger;
-              setModalCopied(false);
-              setModalVideoFailed(false);
-              setPreview(state);
-            }}
           />
         ))}
       </div>
-
-      <Dialog.Root open={enabled && preview !== null} onOpenChange={open => { if (!open) setPreview(null); }}>
-        <Dialog.Portal>
-          <Dialog.Backdrop forceRender className="hf-overlay-backdrop om-settings-backdrop" />
-          <Dialog.Popup data-feedback-modal className="om-dialog om-mcp-demo-dialog" finalFocus={triggerRef} onKeyDown={event => event.stopPropagation()}>
-            {preview && (
-              <>
-                <header>
-                  <Dialog.Title>{preview.title}</Dialog.Title>
-                  <Dialog.Close render={<Button variant="plain" className="om-mcp-demo-dismiss" />} aria-label={t('Close')}>
-                    <RemixIcon name="close-line" size={18} />
-                  </Dialog.Close>
-                </header>
-                <div className="om-mcp-demo-preview">
-                  {preview.showcaseIframe ? (
-                    <iframe
-                      src={preview.showcaseIframe}
-                      title={preview.title}
-                      sandbox="allow-scripts"
-                    />
-                  ) : preview.video && !modalVideoFailed ? (
-                    <video
-                      src={preview.video}
-                      poster={preview.image}
-                      controls
-                      autoPlay
-                      muted
-                      loop
-                      playsInline
-                      onError={() => setModalVideoFailed(true)}
-                    />
-                  ) : (
-                    <img src={preview.image} alt="" />
-                  )}
-                </div>
-                <div className="om-mcp-demo-timeline" role="img" aria-label={t('Studio timeline example')}>
-                  {previewContent.tracks.map(([track, ...clips], trackIndex) => (
-                    <div key={track} data-track={trackIndex}>
-                      <span>{track}</span>
-                      <div>{clips.map(clip => <span key={clip}>{clip}</span>)}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="om-mcp-demo-prompt">
-                  <div><span>{t('Copy for Agent')}</span><span>{previewContent.pasteHint}</span></div>
-                  <Dialog.Description>{preview.prompt}</Dialog.Description>
-                </div>
-                <footer>
-                  <Button
-                    variant="plain"
-                    className="om-mcp-demo-copy"
-                    onClick={event => {
-                      const target = preview.target;
-                      setPreview(null);
-                      onOpenTarget(target, event.currentTarget);
-                    }}
-                  >
-                    {targetActionLabel(preview.target)}
-                  </Button>
-                  <Button
-                    variant="plain"
-                    className="om-mcp-demo-copy om-mcp-demo-confirm"
-                    data-copied={modalCopied || undefined}
-                    onClick={() => void onCopy(preview.id, preview.prompt).then(ok => { if (ok) setModalCopied(true); })}
-                  >
-                    {t(modalCopied ? 'Copied' : 'Copy instruction')}
-                  </Button>
-                </footer>
-              </>
-            )}
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
     </section>
   );
 }

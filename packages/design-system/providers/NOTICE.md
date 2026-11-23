@@ -31,3 +31,6 @@ colors come from Lobe Icons static SVG package 1.102.0 under the included MIT
 license. The corresponding badge for each glyph is listed in `sources.json`.
 
 Local Agent artwork additions (Kimi, Cursor, Kiro, Kilo, Hermes, Devin, Antigravity, Amp, CodeBuddy, Qoder, Trae, Cline and Pi) come from the MIT-licensed [Lobe Icons static SVG collection](https://github.com/lobehub/lobe-icons/tree/master/packages/static-svg/icons), retrieved 2026-11-15. The existing Lobe Icons license applies. Agents without published artwork use a neutral letter mark rather than a different brand.
+
+`claude-color.svg` is the Claude mark from the MIT-licensed Lobe Icons static
+SVG package 1.102.0. It identifies Claude Desktop separately from Claude Code.

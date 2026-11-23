@@ -20,7 +20,7 @@
   background: var(--motion-brand);
   box-shadow: 0 0 8px var(--motion-brand);
 }
-[data-motion-studio] :is(.om-mcp-entitlement-cta, .om-mcp-entitlement-byok) {
+[data-motion-studio] .om-mcp-entitlement-cta {
   background: transparent;
   padding: 0;
   height: auto;
@@ -31,12 +31,6 @@
   font-size: 12.5px;
   font-weight: var(--motion-weight-semibold);
 }
-.om-mcp-entitlement-cta-label {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-[data-motion-studio] .om-mcp-entitlement-byok { color: var(--motion-muted); font-size: 12px; }
-[data-motion-studio] .om-mcp-entitlement-byok:hover { color: var(--motion-strong); }
 
 /* Ambient matrix Hero backdrop + borderless floating 5-tab client dock */
 .om-mcp-ambient-canvas {
@@ -104,7 +98,9 @@
   box-shadow: var(--motion-shadow-sm);
 }
 [data-motion-studio] .om-mcp-btn-primary:hover { background: var(--motion-action-hover); transform: translateY(-1px); }
-[data-motion-studio] .om-mcp-btn-primary[data-copied] { background: var(--motion-brand); color: var(--motion-mcp-stage-on-action); }
+[data-motion-studio] .om-mcp-btn-primary[aria-expanded='true'] svg { transform: rotate(180deg); }
+[data-motion-studio] .om-mcp-btn-primary[data-copied] { background: var(--motion-mcp-dock-active); color: var(--motion-strong); }
+[data-motion-studio] .om-mcp-btn-primary[data-copied]:hover { background: var(--motion-mcp-dock-hover); }
 [data-motion-studio] .om-mcp-btn-secondary {
   border-radius: var(--motion-radius-full);
   border: 1px solid var(--motion-mcp-gallery-border);
@@ -119,41 +115,6 @@
   background: var(--motion-mcp-dock-hover);
 }
 
-/* Zero-jump Claude sub-switcher */
-.om-mcp-claude-subbar {
-  border-radius: var(--motion-radius-full);
-  background: var(--motion-mcp-dock-bg);
-  border: 1px solid var(--motion-mcp-gallery-border);
-}
-[data-motion-studio] .om-mcp-claude-sub-btn {
-  border-radius: var(--motion-radius-full);
-  background: transparent;
-  color: var(--motion-muted);
-  font-size: var(--motion-text-xs);
-  font-weight: var(--motion-weight-medium);
-}
-[data-motion-studio] .om-mcp-claude-sub-btn:hover { color: var(--motion-strong); }
-[data-motion-studio] .om-mcp-claude-sub-btn[data-active] {
-  background: var(--motion-mcp-dock-active);
-  color: var(--motion-strong);
-  font-weight: var(--motion-weight-semibold);
-}
-
-/* Post-copy activation bubble + manual setup popover */
-.om-mcp-next-step {
-  border-radius: var(--motion-radius-full);
-  background: var(--motion-accent-soft);
-  border: 1px solid var(--motion-mcp-banner-border);
-  font-size: var(--motion-text-md);
-  color: var(--motion-strong);
-}
-[data-motion-studio] .om-mcp-next-step-go {
-  border-radius: var(--motion-radius-full);
-  background: var(--motion-brand);
-  color: var(--motion-mcp-stage-on-action);
-  font-size: 12.5px;
-  font-weight: var(--motion-weight-bold);
-}
 .om-mcp-manual-pop {
   border-radius: var(--motion-radius-xl);
   background: var(--motion-mcp-gallery-panel);
@@ -271,19 +232,6 @@
 }
 [data-motion-studio] .om-mcp-carousel-primary:hover { background: var(--motion-mcp-stage-action-hover); transform: translateY(-1px); }
 [data-motion-studio] .om-mcp-carousel-primary[data-copied] { background: var(--motion-brand); color: var(--motion-mcp-stage-on-action); }
-[data-motion-studio] .om-mcp-carousel-secondary {
-  border-radius: 12px;
-  border: 1px solid var(--motion-mcp-stage-pill-border);
-  background: var(--motion-mcp-stage-pill-bg);
-  backdrop-filter: blur(14px);
-  color: var(--motion-mcp-stage-ink);
-  font-size: 13.5px;
-  font-weight: var(--motion-weight-medium);
-}
-[data-motion-studio] .om-mcp-carousel-secondary:hover {
-  background: var(--motion-mcp-stage-pill-hover);
-  border-color: var(--motion-mcp-stage-pill-border-hover);
-}
 [data-motion-studio] .om-mcp-carousel-nav {
   border-radius: var(--motion-radius-full);
   border: 1px solid var(--motion-mcp-stage-pill-border);
@@ -429,6 +377,7 @@
 .om-mcp-page :is(summary, .om-mcp-table-wrap):focus-visible { outline: 2px solid var(--motion-accent); outline-offset: 2px; }
 .om-mcp-page button:disabled { color: var(--motion-control-disabled); cursor: not-allowed; }
 .om-mcp-contact .om-text-link { display: inline-flex; }
+[data-motion-studio] .om-mcp-contact .om-text-link[data-quiet] { color: var(--motion-muted); }
 
 @media (prefers-reduced-motion: no-preference) {
   .om-mcp-stage-slide { transition: opacity .7s ease; }

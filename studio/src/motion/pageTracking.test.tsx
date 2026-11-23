@@ -147,9 +147,9 @@ it('reports the MCP page entry, client and setup choices, and each copy result w
   const openLibrary = vi.fn(), openProviders = vi.fn();
   await act(async () => root.render(<I18nProvider initialLocale="en"><McpConnectionPage entry="home_composer" hasProject openLibrary={openLibrary} openProviders={openProviders} /></I18nProvider>));
   expect(of('page_view')[0].properties).toMatchObject({ page_name: 'mcp', entry_from: 'home_composer', mcp_client: 'codex', has_project: true, embedded: false });
-  await act(async () => roleTab('Claude').click());
+  await act(async () => roleTab('Claude Code').click());
   expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_client', element: 'client_tab', mcp_client: 'claude' });
-  await act(async () => button('Install OpenDesign in Claude Code').click());
+  await act(async () => button('Copy setup instructions for Claude Code').click());
   expect(of('mcp_copy_result').at(-1)?.properties).toMatchObject({ copy_kind: 'connection_instruction', copy_status: 'clipboard_written', setup_method: 'agent' });
   await act(async () => button('Manual setup').click());
   expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_setup', element: 'setup_method', setup_method: 'manual' });
@@ -161,9 +161,6 @@ it('reports the MCP page entry, client and setup choices, and each copy result w
   await act(async () => button('All 30+ templates').click());
   expect(openLibrary).toHaveBeenCalled();
   expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_templates', element: 'open_library' });
-  await act(async () => button('Already have an API key? Connect directly').click());
-  expect(openProviders).toHaveBeenCalledWith('opendesign');
-  expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_resources', element: 'manage_providers' });
   expectAdmitted();
   expect(JSON.stringify(sent)).not.toMatch(/PRIVATE_DATA_DIR|mcp\.ts/);
 });

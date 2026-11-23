@@ -191,14 +191,14 @@ it('navigates settings, MCP tabs and history without remounting or flushing the 
   await click('Appearance'); expect(page().settings).toBe('appearance');
   await openMcp(); expect(page().settings).toBe('mcp');
   expect(breadcrumb()).toBeNull();
-  await click('Claude'); await click('Manual setup');
+  await click('Claude Code'); await click('Manual setup');
   expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
   await click('Cursor');
   expect(page()).toMatchObject({ client: 'cursor', setup: 'agent' });
   await traverse(-1);
   expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
   await traverse(-1); expect(page().setup).toBe('agent');
-  expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Claude');
+  expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Claude Code');
   await traverse(-1); expect(page().client).toBe('codex');
   await traverse(-1); expect(page().settings).toBe('appearance');
   await traverse(1); expect(page().settings).toBe('mcp');
@@ -270,14 +270,12 @@ it('uses browser history across settings, reloads and new navigation branches', 
   await accountAction('Help'); await traverse(1); expect(page().settings).toBe('help');
 });
 
-it('routes MCP account claims and API key setup to different settings', async () => {
+it('offers one MCP entitlement action that opens account settings', async () => {
   await mount();
   await openMcp();
+  expect(container.querySelectorAll('.om-mcp-entitlement-strip button')).toHaveLength(1);
   await click('Claim now');
   expect(page()).toMatchObject({ settings: 'account', provider: null });
-  await traverse(-1);
-  await click('Already have an API key? Connect directly');
-  expect(page()).toMatchObject({ settings: 'providers', provider: 'opendesign' });
 });
 
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
@@ -297,7 +295,7 @@ it('uses browser history between the template gallery, its preview and the origi
 });
 
 it('restores template details from a copied link and closes back to the originating MCP page', async () => {
-  await mount(); await openMcp(); await click('Claude'); await click('All 30+ templates');
+  await mount(); await openMcp(); await click('Claude Code'); await click('All 30+ templates');
   expect(page()).toMatchObject({ templates: true, settings: 'mcp' });
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(page().template).toBe('product-promo');
@@ -312,7 +310,7 @@ it('restores template details from a copied link and closes back to the originat
 });
 
 it('keeps an MCP showcase selection in the URL through history and reloads', async () => {
-  await mount(); await openMcp(); await click('Claude');
+  await mount(); await openMcp(); await click('Claude Code');
   const draft = container.querySelector<HTMLInputElement>('[aria-label="Editor draft"]');
   await click('All 30+ templates');
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
@@ -1581,7 +1579,7 @@ it('returns from MCP client and setup tabs to Explore, and clears the source on 
   await click('MCP · Connect Agent');
   expect(page().settings).toBe('mcp');
   expect(button('Close settings')).toBeUndefined();
-  await click('Claude'); await click('Manual setup');
+  await click('Claude Code'); await click('Manual setup');
   expect(breadcrumb()?.href).toBe(exploreUrl);
   expect(container.querySelector('.om-mcp-page > .om-workspace-breadcrumb')).not.toBeNull();
   await mount(1);
@@ -1617,7 +1615,7 @@ it('returns from the settings header to the exact source after changing sections
   await accountAction('Settings');
   const generalUrl = location.href;
   await click('Set up connection');
-  await click('Claude'); await click('Manual setup');
+  await click('Claude Code'); await click('Manual setup');
   await mount(1);
   expect(breadcrumb()?.href).toBe(generalUrl);
   await leaveSettings();
@@ -1638,7 +1636,7 @@ it('keeps the settings sidebar mounted across MCP, agent and provider sections',
   expect(settingsBack()).not.toBeNull();
   expect(button('Close settings')).toBeUndefined();
   expect(breadcrumb()).toBeNull();
-  await click('Claude'); await click('Manual setup');
+  await click('Claude Code'); await click('Manual setup');
   const setupUrl = location.href;
   expect(new URL(setupUrl).pathname).toBe('/settings/mcp');
   const providers = [...sidebar!.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Model providers')!;

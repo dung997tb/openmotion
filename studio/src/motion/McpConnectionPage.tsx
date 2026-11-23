@@ -32,15 +32,7 @@ import { readWorkspacePage, type WorkspacePage } from './workspacePageRouting';
 import type { WorkspaceChrome } from './WorkspaceChromeContext';
 import './McpConnectionPage.css';
 
-type PrimaryTabId = 'codex' | 'claude' | 'cursor' | 'deepseek' | 'mcp';
-
-const PRIMARY_TABS: readonly { id: PrimaryTabId; labelKey: string; clientId: McpClient }[] = [
-  { id: 'codex', labelKey: 'Codex', clientId: 'codex' },
-  { id: 'claude', labelKey: 'Claude', clientId: 'claude' },
-  { id: 'cursor', labelKey: 'Cursor', clientId: 'cursor' },
-  { id: 'deepseek', labelKey: 'DeepSeek Harness', clientId: 'deepseek' },
-  { id: 'mcp', labelKey: 'Other MCP clients', clientId: 'mcp' },
-];
+const primaryClients = clients.filter(supportsLocalConnection);
 
 const DSH_PLUGIN_URL = 'https://github.com/nexu-io/openmotion/tree/main/integrations/dsh';
 
@@ -91,9 +83,11 @@ export function McpConnectionPage({
   const { info, failed, retry } = useIntegrationInfo();
   const [manualScenario, setManualScenario] = useState<{ id: string; text: string } | null>(null);
   const [localRoute, setLocalRoute] = useState(() => readWorkspacePage(location.search, location.hash, location.pathname));
-  const [nextStepVisible, setNextStepVisible] = useState(false);
-  const [nextStepMessage, setNextStepMessage] = useState('');
-  const [setupCopied, setSetupCopied] = useState(false);
+  const [setupResult, setSetupResult] = useState<{
+    clientId: McpClient;
+    fallbackPrompt?: string;
+    copied?: boolean;
+  } | null>(null);
 
   const { client: clientId, setup: setupMode } = route ?? localRoute;
   const changeRoute = (patch: Partial<WorkspacePage>) => {
@@ -103,18 +97,22 @@ export function McpConnectionPage({
   const setClientId = (nextClient: McpClient) => changeRoute({ client: nextClient, setup: 'agent' });
   const client = clients.find(item => item.id === clientId) ?? clients[0];
   const clientKey = client.id as tracking.McpClient;
-  const isClaudeGroup = client.id === 'claude' || client.id === 'desktop';
-  const activePrimaryTab: PrimaryTabId | 'chatgpt' = client.id === 'desktop' ? 'claude' : client.id;
   const manualOpen = setupMode === 'manual';
+  const desktop = client.id === 'desktop';
+  const agent = t(client.name);
+  const feedback = setupResult?.clientId === client.id ? setupResult : null;
+  const setupCopied = feedback?.copied;
 
   // One page view per opening, with the control that opened it and the client tab it opened on.
   useEffect(() => { tracking.reportMcpPageView(entry, clientKey, hasProject); }, []);
 
   useEffect(() => {
-    if (!setupCopied) return;
-    const timer = window.setTimeout(() => setSetupCopied(false), 1800);
+    if (!setupResult?.copied) return;
+    const timer = window.setTimeout(() => {
+      setSetupResult(current => current === setupResult ? { ...setupResult, copied: false } : current);
+    }, 1800);
     return () => window.clearTimeout(timer);
-  }, [setupCopied]);
+  }, [setupResult]);
 
   const click = (
     area: Parameters<typeof tracking.reportMcpClick>[0],
@@ -126,7 +124,8 @@ export function McpConnectionPage({
     click(area, template ? 'open_detail' : 'open_library', template ? { template: template.id } : {});
     openLibraryRaw(trigger, template);
   };
-  const openCaseTarget = (area: 'mcp_start' | 'mcp_templates') => (target: McpCaseTarget, trigger?: HTMLElement) => {
+  const openCaseTarget = (target: McpCaseTarget, trigger?: HTMLElement) => {
+    const area = 'mcp_templates';
     if (target.kind === 'template') {
       openLibrary(area)(trigger, {
         id: target.templateId,
@@ -144,9 +143,9 @@ export function McpConnectionPage({
     click(area, 'open_detail', { capability: target.brandKitId });
     changeRoute({ settings: 'brand-kit', brandKit: 'official', templates: false, template: null });
   };
-  const openProviders = (area: 'mcp_resources' | 'mcp_footer', provider?: string) => () => {
+  const openProviders = (area: 'mcp_resources' | 'mcp_footer') => () => {
     click(area, 'manage_providers');
-    openProvidersRaw(provider);
+    openProvidersRaw();
   };
   const docLink = (area: 'mcp_resources' | 'mcp_footer', doc: 'mcp_tools' | 'skills' | 'agent_adapters' | 'docs_home' | 'repository') => () =>
     click(area, 'view_documentation', { doc_id: doc });
@@ -188,11 +187,11 @@ export function McpConnectionPage({
     includesSetup?: boolean;
   };
 
-  async function copy(text: string, report: CopyReport) {
+  async function copy(text: string, report: CopyReport, successMessage = t('Copied to clipboard')) {
     const extra = { setup: setupMode, capability: report.capability, template: report.template, includesSetup: report.includesSetup };
     try {
       await navigator.clipboard.writeText(text);
-      toast.showToast(t('Copied to clipboard'), 'info', 'feedback');
+      toast.showToast(successMessage, 'info', 'feedback');
       tracking.reportMcpCopyResult(report.kind, 'clipboard_written', clientKey, extra);
       return true;
     } catch {
@@ -252,28 +251,20 @@ export function McpConnectionPage({
   };
 
   function handleSelectPrimaryTab(value: string) {
-    const target = PRIMARY_TABS.find(item => item.id === value);
-    if (!target) return;
-    const nextId: McpClient = target.id === 'claude'
-      ? (client.id === 'desktop' ? 'desktop' : 'claude')
-      : target.clientId;
+    const nextId = primaryClients.find(item => item.id === value)?.id;
+    if (!nextId) return;
     if (client.id === nextId) return;
     setClientId(nextId);
-    setNextStepVisible(false);
-    setSetupCopied(false);
+    setSetupResult(null);
     click('mcp_client', 'client_tab', { mcp_client: nextId });
   }
 
-  function handleSelectClaudeMode(nextId: 'claude' | 'desktop') {
-    if (client.id === nextId) return;
-    setClientId(nextId);
-    setNextStepVisible(false);
-    setSetupCopied(false);
-    click('mcp_client', 'client_tab', { mcp_client: nextId });
-  }
-
-  async function handlePrimaryInstall() {
+  async function handlePrimarySetup() {
     if (!supported) return;
+    if (desktop) {
+      handleToggleManual();
+      return;
+    }
     if (cursorDeeplink) {
       const link = document.createElement('a');
       link.href = cursorDeeplink;
@@ -281,18 +272,12 @@ export function McpConnectionPage({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      await copy(prompt, { kind: 'connection_instruction' });
-      setSetupCopied(true);
-      setNextStepMessage(t('Cursor install prompt triggered. If Cursor did not open, click Manual setup to copy the JSON.'));
-      setNextStepVisible(true);
+      toast.showToast(t('Cursor install prompt triggered. If Cursor did not open, click Manual setup to copy the JSON.'), 'info', 'feedback');
       return;
     }
-    const ok = await copy(prompt, { kind: 'connection_instruction' });
-    if (ok) {
-      setSetupCopied(true);
-      setNextStepMessage(t('Paste into {agent} to finish setup, then try the first showcase prompt below.', { agent: client.id === 'mcp' ? t('your Agent') : t(client.name) }));
-      setNextStepVisible(true);
-    }
+    const copyMessage = t('Copied. Paste into {agent} to finish setup.', { agent: client.id === 'mcp' ? t('your Agent') : agent });
+    const copied = await copy(prompt, { kind: 'connection_instruction' }, copyMessage);
+    setSetupResult({ clientId: client.id, copied, fallbackPrompt: copied ? undefined : prompt });
   }
 
   function handleToggleManual() {
@@ -301,15 +286,15 @@ export function McpConnectionPage({
     changeRoute({ setup: nextSetup });
   }
 
-  const heroClientDisplay = isClaudeGroup
-    ? 'Claude'
-    : client.id === 'mcp'
-      ? t('MCP client')
-      : t(client.name);
-
-  const primaryCtaLabel = client.id === 'mcp'
-    ? t('Copy Agent setup instruction')
-    : t('Install OpenDesign in {agent}', { agent: t(client.name) });
+  const heroClientDisplay = client.id === 'mcp' ? t('MCP client') : agent;
+  const primaryCtaLabel = desktop
+    ? t('Configure {agent}', { agent })
+    : cursorDeeplink
+      ? t('Install OpenDesign in {agent}', { agent })
+      : client.id === 'mcp'
+        ? t('Copy Agent setup instruction')
+        : t('Copy setup instructions for {agent}', { agent });
+  const primaryCtaIcon = desktop ? 'arrow-down-s-line' : cursorDeeplink ? 'arrow-right-up-line' : 'file-copy-line';
 
   const galleryClientLabel = (client.id === 'mcp' || t(client.name).length > 11) ? t('Agent') : t(client.name);
   const [heroLine1Before, heroLine1After = ''] = t('In {agent}', { agent: '__AGENT__' }).split('__AGENT__');
@@ -319,7 +304,7 @@ export function McpConnectionPage({
 
   return (
     <Tabs
-      value={activePrimaryTab}
+      value={client.id}
       onValueChange={handleSelectPrimaryTab}
       render={
         <Container
@@ -341,11 +326,8 @@ export function McpConnectionPage({
             click('mcp_resources', 'sign_in');
             changeRoute({ settings: 'account', assets: false, skills: false, templates: false });
           }}>
-            <span className="om-mcp-entitlement-cta-label">{t('Claim now')}</span>
+            {t('Claim now')}
             <RemixIcon name="arrow-right-s-line" size={15} aria-hidden="true" />
-          </Button>
-          <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources', 'opendesign')}>
-            {t('Already have an API key? Connect directly')}
           </Button>
         </div>
       )}
@@ -355,23 +337,20 @@ export function McpConnectionPage({
         <McpHeroAmbientCanvas clientId={clientId} />
 
         <div className="om-mcp-client-subbar">
-          <HorizontalRail label="Agent client" viewportClassName="om-mcp-client-viewport" selection={activePrimaryTab} plainArrows>
+          <HorizontalRail label="Agent client" viewportClassName="om-mcp-client-viewport" selection={client.id} plainArrows>
             <TabsList className="om-mcp-client-dock" aria-label={t('Agent client')}>
-              {PRIMARY_TABS.map(item => {
-                const avatarClient = clients.find(entryClient => entryClient.id === item.clientId)!;
-                return (
-                  <Tab value={item.id} key={item.id} className="om-mcp-client-tab">
-                    <span className="om-mcp-client-ico"><McpClientAvatar client={avatarClient} inDock /></span>
-                    <span>{t(item.labelKey)}</span>
-                  </Tab>
-                );
-              })}
+              {primaryClients.map(item => (
+                <Tab value={item.id} key={item.id} className="om-mcp-client-tab">
+                  <span className="om-mcp-client-ico"><McpClientAvatar client={item} inDock /></span>
+                  <span>{t(item.name)}</span>
+                </Tab>
+              ))}
             </TabsList>
           </HorizontalRail>
         </div>
 
         <div className="om-mcp-content om-mcp-hero-inner">
-          <section className="om-mcp-hero-top" data-claude-sub={isClaudeGroup || undefined} aria-label={t('Agent setup')}>
+          <section className="om-mcp-hero-top" aria-label={t('Agent setup')}>
             <h1 id="mcp-title" ref={heading} tabIndex={-1} className="om-mcp-hero-h1">
               <span className="om-mcp-h1-line">
                 {heroLine1Before.trim() ? <span>{heroLine1Before.trim()}</span> : null}
@@ -413,55 +392,35 @@ export function McpConnectionPage({
                     variant="plain"
                     className="om-mcp-btn-primary"
                     aria-label={primaryCtaLabel}
+                    aria-expanded={desktop ? manualOpen : undefined}
                     data-copied={setupCopied || undefined}
-                    onClick={() => void handlePrimaryInstall()}
+                    onClick={() => void handlePrimarySetup()}
                   >
                     <span>{setupCopied ? t('Copied to clipboard') : primaryCtaLabel}</span>
-                    {!setupCopied && client.id !== 'mcp' && <RemixIcon name="arrow-right-up-line" size={16} />}
+                    {!setupCopied && <RemixIcon name={primaryCtaIcon} size={16} />}
                   </Button>
-                  <Button
-                    variant="plain"
-                    className="om-mcp-btn-secondary"
-                    aria-expanded={manualOpen}
-                    onClick={handleToggleManual}
-                  >
-                    {t('Manual setup')}
-                  </Button>
+                  {!desktop && (
+                    <Button
+                      variant="plain"
+                      className="om-mcp-btn-secondary"
+                      aria-expanded={manualOpen}
+                      onClick={handleToggleManual}
+                    >
+                      {t('Manual setup')}
+                    </Button>
+                  )}
                 </div>
 
-                {isClaudeGroup && (
-                  <div className="om-mcp-claude-subbar" role="group" aria-label={t('Choose Claude client')}>
-                    <Button
-                      variant="plain"
-                      className="om-mcp-claude-sub-btn"
-                      data-active={client.id === 'claude' || undefined}
-                      aria-pressed={client.id === 'claude'}
-                      onClick={() => handleSelectClaudeMode('claude')}
-                    >
-                      {t('Claude Code (Recommended · Full)')}
-                    </Button>
-                    <Button
-                      variant="plain"
-                      className="om-mcp-claude-sub-btn"
-                      data-active={client.id === 'desktop' || undefined}
-                      aria-pressed={client.id === 'desktop'}
-                      onClick={() => handleSelectClaudeMode('desktop')}
-                    >
-                      {t('Claude Desktop')}
-                    </Button>
-                  </div>
-                )}
-
-                {nextStepVisible && (
-                  <div className="om-mcp-next-step">
-                    <span>{nextStepMessage}</span>
-                    <Button
-                      variant="plain"
-                      className="om-mcp-next-step-go"
-                      onClick={() => scrollTo('band-ecom')}
-                    >
-                      {t('View example prompts ↓')}
-                    </Button>
+                {feedback?.fallbackPrompt && (
+                  <div className="om-mcp-manual-pop">
+                    <textarea
+                      className="om-field w-full"
+                      aria-label={t('Connection instruction')}
+                      rows={5}
+                      readOnly
+                      value={feedback.fallbackPrompt}
+                      onFocus={event => event.currentTarget.select()}
+                    />
                   </div>
                 )}
 
@@ -533,7 +492,6 @@ export function McpConnectionPage({
         {/* 3 Higgsfield-Style Centered Cinematic Feature Carousels */}
         <McpFeatureCarousels
           enabled={previewsEnabled}
-          onOpenTarget={openCaseTarget('mcp_start')}
           onCopy={(slideId, text) => copy(text, { kind: 'capability_example', capability: slideId, includesSetup: false })}
         />
 
@@ -543,7 +501,7 @@ export function McpConnectionPage({
           enabled={previewsEnabled}
           canTry={supported}
           openLibrary={openLibrary('mcp_templates')}
-          onOpenTarget={openCaseTarget('mcp_templates')}
+          onOpenTarget={openCaseTarget}
           onCategory={value => click('mcp_templates', 'category_select', { option: value })}
           onPreview={id => click('mcp_templates', 'open_detail', { capability: id })}
           onCopy={async (id, examplePrompt, includeSetup) => {
@@ -577,9 +535,9 @@ export function McpConnectionPage({
               <div className="om-mcp-contact">
                 <a className="om-text-link" href={community.href} target="_blank" rel="noopener noreferrer" onClick={() => click('mcp_faq', 'community')}>
                   {community.label}
-                  <RemixIcon name="arrow-right-line" size={15} />
+                  <RemixIcon name="arrow-right-up-line" size={14} />
                 </a>
-                <a className="om-text-link" href={`https://github.com/nexu-io/openmotion/issues/new/choose`} target="_blank" rel="noreferrer" onClick={() => click('mcp_faq', 'report_issue')}>
+                <a className="om-text-link" data-quiet href={`https://github.com/nexu-io/openmotion/issues/new/choose`} target="_blank" rel="noreferrer" onClick={() => click('mcp_faq', 'report_issue')}>
                   {t('Report an issue')}
                   <RemixIcon name="arrow-right-up-line" size={14} />
                 </a>

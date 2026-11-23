@@ -41,7 +41,6 @@
 
 /* Spacious Hero Centerpiece */
 .om-mcp-hero-top { padding: 120px 0 116px; text-align: center; max-width: 920px; margin-inline: auto; }
-.om-mcp-hero-top[data-claude-sub] { padding-bottom: 66px; }
 .om-mcp-hero-h1 { margin: 0 0 32px; display: flex; flex-direction: column; align-items: center; }
 .om-application[data-has-bf-banner="true"] .om-mcp-hero-h1 {
   position: relative;
@@ -60,13 +59,8 @@
 .om-mcp-btn-primary { height: 48px; padding-inline: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
 .om-mcp-btn-secondary { height: 48px; padding-inline: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
 
-/* Zero-jump Claude sub-switcher (18 + 32 + 66 = 116px) */
-.om-mcp-claude-subbar { display: inline-flex; align-items: center; justify-content: center; gap: 2px; height: 32px; margin: 18px auto 0; padding: 3px; }
-.om-mcp-claude-sub-btn { height: 24px; padding-inline: 12px; white-space: nowrap; }
 
 /* Post-copy bubble & manual config popover */
-.om-mcp-next-step { display: inline-flex; align-items: center; justify-content: space-between; gap: 14px; margin: 18px auto 0; max-width: 640px; padding: 10px 16px; flex-wrap: wrap; }
-.om-mcp-next-step-go { height: 28px; padding-inline: 14px; flex: none; white-space: nowrap; }
 .om-mcp-manual-pop { margin: 18px auto 0; max-width: 680px; text-align: left; padding: 16px; }
 .om-mcp-manual-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .om-mcp-manual-copy { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-inline: 14px; min-height: var(--motion-control-sm); }
@@ -138,7 +132,6 @@
 .om-mcp-carousel-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .om-mcp-carousel-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .om-mcp-carousel-primary { height: 42px; padding-inline: 20px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.om-mcp-carousel-secondary { height: 38px; padding-inline: 16px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .om-mcp-carousel-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 10; width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; }
 .om-mcp-carousel-nav-prev { inset-inline-start: -60px; }
 .om-mcp-carousel-nav-next { inset-inline-end: -60px; }
@@ -248,7 +241,6 @@
   .om-mcp-client-subbar { padding: 22px 12px 0; }
   [data-motion-studio] .om-mcp-page .om-mcp-client-tab { padding-inline: 10px; gap: 6px; font-size: 12.5px; }
   .om-mcp-hero-top { padding: 18px 0 26px; }
-  .om-mcp-hero-top[data-claude-sub] { padding-bottom: 32px; }
   .om-mcp-page .om-mcp-hero-h1 { font-size: 32px; }
   .om-application[data-has-bf-banner="true"] .om-mcp-hero-h1 { inset-block-start: calc(-1 * var(--motion-space-8)); }
   .om-mcp-stage-layout { grid-template-columns: 235px minmax(0, 1fr); gap: 14px; }
