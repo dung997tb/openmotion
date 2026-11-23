@@ -1128,6 +1128,30 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal((await read()).animations[0].properties.x, 55);
   });
 
+  it('persists an isolated welcome headline drag without rewriting the runtime letter animation', async () => {
+    const env = createStudioTestEnv();
+    const scene = 'compositions/intro.html';
+    const source = await readFile(new URL('../../template-library/openmotion-welcome/compositions/intro.html', import.meta.url), 'utf8');
+    const {projectId} = await env.workspace.createProject(env.auth, {
+      title: 'Welcome canvas drag', initialFiles: [{path: scene, content: source}, {path: 'index.html', content: '<html></html>'}],
+    });
+    const read = async () => (await env.files.loadVirtualProject(env.auth, projectId)).readText(scene)!;
+    const before = await read();
+    const response = await env.studioApp.request(`/api/projects/${projectId}/file-mutations/patch-element-batches`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({batches: [{sourceFile: scene, ifMatch: fileContentVersion(before), geometry: {
+        target: {id: 'intro-headline', hfId: 'hf-933r'}, box: {left: 110, top: 455, makeRelative: false},
+        position: {time: 0.967, delta: {x: 10, y: 10}},
+      }}]}),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.durable, true);
+    const saved = await read();
+    assert.match(saved, /<div[^>]*style="[^"]*left:\s*110px[^"]*"[^>]*id="intro-headline"/);
+    assert.equal(saved.match(/<script>[\s\S]*?<\/script>/)?.[0], before.match(/<script>[\s\S]*?<\/script>/)?.[0]);
+  });
+
   it('saves a canvas drag against the displayed source and rolls back unmatched batches', async () => {
     const env = createStudioTestEnv();
     const { projectId } = await env.workspace.createProject(env.auth, {

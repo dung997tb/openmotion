@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { applyCanvasCommand } from "../../packages/edit-core/canvas-commands.ts";
 import { parseGsapAnimationsFromHtml } from "../../packages/edit-core/gsap-mutations.ts";
 
@@ -62,6 +63,18 @@ test("same drag edits an owned tween at composition time and refuses an ambiguou
     () => applyCanvasCommand(animation("#a,#b"), move),
     /multiple elements/,
   );
+});
+
+test("moving the welcome headline preserves its runtime letter animation", () => {
+  const intro = readFileSync(new URL("../../template-library/openmotion-welcome/compositions/intro.html", import.meta.url), "utf8");
+  const result = applyCanvasCommand(intro, {
+    ...move,
+    target: { id: "intro-headline", hfId: "hf-933r", selector: '[data-hf-id="hf-933r"]' },
+    time: 0.967,
+  });
+  const headline = result.match(/<div\b[^>]*\bid="intro-headline"[^>]*>/)?.[0] ?? "";
+  assert.match(headline, /translate:\s*20px 30px/);
+  assert.equal(result.match(/<script>[\s\S]*?<\/script>/)?.[0], intro.match(/<script>[\s\S]*?<\/script>/)?.[0]);
 });
 
 test("duplicate, group and ungroup use the same source transforms as Studio", () => {
