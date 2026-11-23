@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { shareCompositionPosterRead, type KnownCompositionSource, MAX_POSTER_SOURCE_LENGTH } from "../player/lib/compositionPosterSource";
 import { beginPeerTimelineUpdate } from "../player/lib/peerTimeline";
-import { hasPeerTimingDocument, tryApplyPeerTiming } from "../player/peerTimingPreview";
+import { hasPeerTimingDocument, tryApplyPeerChanges } from "../player/peerTimingPreview";
 import { isPreviewChanging } from "../player/previewReloading";
 import { announcePreviewScenesSwapped, notePeerPreviewChange, previewSourceRevision } from "../player/sceneSwap";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -36,7 +36,7 @@ export function syncPeerComposition(
     usePlayerStore.getState().timelineProjectId === projectId && !isPreviewChanging() && !isStudioEditSaving();
   return timeline.then(async ({ content, version, missing }) => {
     if (missing || !version || typeof content !== "string" || content.length > MAX_POSTER_SOURCE_LENGTH || !isCurrent()) return false;
-    const applied = await tryApplyPeerTiming(frame, { path, previous, current: { content, version } }, isCurrent);
+    const applied = await tryApplyPeerChanges(frame, { path, previous, current: { content, version } }, isCurrent);
     if (applied && isCurrent()) {
       announcePreviewScenesSwapped(frame);
       return true;

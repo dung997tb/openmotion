@@ -2,7 +2,7 @@ import { isolatedSourceVersion } from "../components/editor/isolatedSourceTarget
 import { observedSourceVersion } from "../utils/confirmedTextSources";
 import { isolatedEditVersion } from "../utils/isolatedEditVersions";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
-import { submitStudioCommands } from "../utils/projectEditBatch";
+import { submitIsolatedCanvasEdit } from "./submitIsolatedCanvasEdit";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -161,14 +161,14 @@ export function useDomEditPersist({
         const result = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
           if (projectIdRef.current !== expectedProjectId) throw new Error("Active project changed before the edit could be saved");
           if (options?.shouldSave && !options.shouldSave()) return null;
-          return submitStudioCommands(pid, [command], versions, writeHistory);
+          return submitIsolatedCanvasEdit(pid, [command], versions, writeHistory, previewIframeRef, options?.coalesceKey);
         });
         if (!result) return;
         const changed = result.changedPaths.includes(targetPath);
         if (changed) await editHistory.recordEdit({ ...history, files: {} });
         if (changed && !result.divergent.length) {
           forceReloadSdkSession?.();
-          reloadPreview(targetPath);
+          if (!result.previewApplied) reloadPreview(targetPath);
         }
         return { sourceFile: targetPath, version: result.versions[targetPath], changed };
       }

@@ -104,7 +104,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(!message || message.source!==PARENT || message.version!==VERSION || message.projectId!==projectId || message.token!==token) return;
     var requestId=message.requestId;
     try {
-      if(message.type==='peer-timing'){
+      if(message.type==='peer-timing' || message.type==='peer-presentation'){
         if (!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
         respond(requestId,applyPeerTiming(message)); return;
       }
