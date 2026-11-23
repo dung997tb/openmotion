@@ -1,4 +1,4 @@
-import { normalizeToZones } from "../components/timelineZones";
+import { displayAuthoredTimelineLanes } from "../components/timelineZones";
 import { usePlayerStore } from "../store/playerStore";
 import { getTimelineElementIdentity, parseTimelineFromDOM, readTimelineDurationFromDocument } from "./timelineDOM";
 import { collectSubCompositionDomChildren, collectSubCompositionHostState } from "../hooks/timelineSyncHydration";
@@ -26,7 +26,7 @@ export function syncRestoredTimelineFromPreview(doc: Document | null | undefined
       return { ...element, ...Object.fromEntries(TIMING_FIELDS.map(key => [key, restored[key]])), authoredTrack };
     });
     return {
-      ...(changed ? { elements: normalizeToZones(elements.map(element => ({ ...element, track: element.authoredTrack ?? element.track }))) } : {}),
+      ...(changed ? { elements: displayAuthoredTimelineLanes(elements) } : {}),
       ...(duration > 0 && duration !== state.duration && { duration }),
     };
   });

@@ -157,3 +157,12 @@ export function normalizeToZones(elements: TimelineElement[]): TimelineElement[]
   });
   return changed ? remapped : elements;
 }
+
+/** Rebuild display lanes from the same authored tracks discovery will see after a write. */
+export function displayAuthoredTimelineLanes(elements: TimelineElement[]): TimelineElement[] {
+  return normalizeToZones(elements.map(element =>
+    element.authoredTrack == null || element.authoredTrack === element.track
+      ? element
+      : { ...element, track: element.authoredTrack },
+  ));
+}
