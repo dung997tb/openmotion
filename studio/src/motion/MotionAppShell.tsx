@@ -11,12 +11,15 @@ installEditorTracking(trackMotion);
 
 const shellHost: StudioHost = {
   feedback: false,
+  lazyEditorHost: true,
 };
 
 /**
- * Registers OpenMotion WebMCP tools on non-editor pages ONLY when the browser
+ * Registers OpenMotion WebMCP tools once for the app lifetime when the browser
  * natively exposes `document.modelContext`, avoiding the 340 KB `@mcp-b/global`
- * polyfill download on `/explore` and other shell routes.
+ * polyfill download on `/explore` and other shell routes. `MotionEditorHost`
+ * passes `polyfillOnly` to `OpenMotionAgentTools` so native browsers never
+ * double-register when entering the editor.
  */
 function NativeWebMcpRegistrar() {
   useEffect(() => {

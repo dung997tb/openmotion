@@ -1,28 +1,11 @@
-import { createElement, lazy, type FunctionComponent } from 'react';
-import type { StudioAppProps } from '../App';
+import { lazy } from 'react';
 
-type Editor = FunctionComponent<StudioAppProps>;
+type Editor = typeof import('../App').StudioApp;
 let loadedEditor: Editor | undefined;
-let thumbnailLifecycleBound = false;
 
-const loadEditor = () => Promise.all([
-  import('../App'),
-  import('./MotionStudioHost'),
-  import('../player/lib/thumbnailPageLifecycle'),
-]).then(([{ StudioApp }, { MotionEditorHost }, { bindThumbnailPageLifecycle }]) => {
-  if (!thumbnailLifecycleBound && typeof window !== 'undefined' && typeof document !== 'undefined') {
-    thumbnailLifecycleBound = true;
-    const unbind = bindThumbnailPageLifecycle(window, document);
-    import.meta.hot?.dispose(() => {
-      thumbnailLifecycleBound = false;
-      unbind();
-    });
-  }
-  const EditorComponent: Editor = StudioApp;
-  const HostedStudioApp: Editor = (props) =>
-    createElement(MotionEditorHost, null, createElement(EditorComponent, props));
-  loadedEditor = HostedStudioApp;
-  return { default: HostedStudioApp };
+const loadEditor = () => import('../App').then(({ StudioApp }) => {
+  loadedEditor = StudioApp;
+  return { default: StudioApp };
 });
 let preloaded: Promise<Awaited<ReturnType<typeof loadEditor>> | undefined> | undefined;
 

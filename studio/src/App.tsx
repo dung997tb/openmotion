@@ -72,6 +72,7 @@ import { readStudioUrlStateFromWindow, resolveMasterCompositionPath } from "./ut
 import { useActiveComposition } from "./hooks/useActiveComposition";
 import { requestPreviewReload } from "./player/previewReloading";
 import { useStudioHost } from "./motion/StudioHost";
+import { MotionEditorHost } from "./motion/MotionStudioHost";
 import { preloadFontLists } from "./components/editor/propertyPanelFont";
 const getTimelineSelectionSet = () => usePlayerStore.getState().selectedElementIds;
 
@@ -84,8 +85,20 @@ export interface StudioAppProps {
   readOnlyPreviewReason?: string;
 }
 
+export function StudioApp(props: StudioAppProps = {}) {
+  const host = useStudioHost();
+  if (host?.lazyEditorHost) {
+    return (
+      <MotionEditorHost>
+        <StudioAppInner {...props} />
+      </MotionEditorHost>
+    );
+  }
+  return <StudioAppInner {...props} />;
+}
+
 // fallow-ignore-next-line complexity
-export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, resolvedProjectId }: StudioAppProps = {}) {
+function StudioAppInner({ readOnlyPreview = false, readOnlyPreviewReason, resolvedProjectId }: StudioAppProps) {
   const mvpEditor = useStudioHost()?.mvpEditor ?? false;
   const AppFrame = useStudioHost()?.AppFrame ?? Fragment;
   const EditorFrame = useStudioHost()?.EditorFrame ?? Fragment;

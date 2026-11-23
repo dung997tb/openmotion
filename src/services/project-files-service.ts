@@ -683,18 +683,6 @@ export class ProjectFilesService {
     };
   }
 
-  /** Generate a short-lived tenant-scoped Presigned GET URL for a project file. */
-  async presignFileGet(
-    ctx: AuthContext,
-    projectId: string,
-    filePath: string,
-    options: PresignGetOptions = {},
-  ): Promise<{ file: VirtualFileRecord; url: string; etag: string } | null> {
-    const file = await this.getFile(ctx, projectId, filePath);
-    if (!file) return null;
-    return this.presignResolvedFileGet(ctx.workspaceId, file, options);
-  }
-
   /**
    * Load an immutable in-memory snapshot (`InMemoryVirtualProject`) of a project's files and
    * text contents for `bundlePreviewInMemory`, `lintProjectInMemory`, `infoInMemory`, and `timelineInMemory`.

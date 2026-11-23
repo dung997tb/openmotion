@@ -21,6 +21,8 @@ export interface StudioHost {
   desktopLink?: boolean;
   feedback?: boolean;
   themeToggle?: boolean;
+  /** True on the lightweight app shell; StudioApp mounts MotionEditorHost when this is set. */
+  lazyEditorHost?: boolean;
 }
 
 export const StudioHostContext = createContext<StudioHost | null>(null);

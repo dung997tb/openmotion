@@ -23,6 +23,7 @@ import {
 import { trackMotion } from './tracking';
 import { installEditorTracking, openTemplateFields, projectFields, projectScaleFields, setProjectTemplate } from './editorTracking';
 import { OpenMotionAgentTools } from './OpenMotionAgentTools';
+import { bindThumbnailPageLifecycle } from '../player/lib/thumbnailPageLifecycle';
 
 installEditorTracking(trackMotion);
 
@@ -118,7 +119,11 @@ const host: StudioHost = {
 };
 
 export function MotionEditorHost({ children }: { children: ReactNode }) {
-  return <MotionHistoryProvider><StudioHostContext.Provider value={host}><OpenMotionAgentTools />{children}</StudioHostContext.Provider></MotionHistoryProvider>;
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    return bindThumbnailPageLifecycle(window, document);
+  }, []);
+  return <MotionHistoryProvider><StudioHostContext.Provider value={host}><OpenMotionAgentTools polyfillOnly />{children}</StudioHostContext.Provider></MotionHistoryProvider>;
 }
 
 export function MotionStudioHost({ children }: { children: ReactNode }) {
