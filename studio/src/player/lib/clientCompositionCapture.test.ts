@@ -34,6 +34,21 @@ describe("clientCompositionCapture", () => {
     expect(captureSampleTimes(20, { ...clip, selector: undefined })).toEqual([5, 15]);
   });
 
+  it("invalidates selector captures across moves and trims while retaining composition covers", () => {
+    const input = { projectId: "windows", previewUrl: "/preview", contentRevision: 1, sessionEpoch: 0,
+      frameCount: 2, selector: "#card", seekTime: 5, duration: 2 };
+    const cached = seedClientCompositionCaptureForTest(input, [new Blob(["old"])]);
+    const key = createClientCompositionCaptureRequest(input).key;
+    for (const changed of [{ ...input, seekTime: 6 }, { ...input, duration: 1 }]) {
+      expect(createClientCompositionCaptureRequest(changed).key).not.toBe(key);
+      expect(peekCachedCompositionCapture(changed)).toBeNull();
+    }
+    expect(peekCachedCompositionCapture(input)).toBe(cached);
+    const whole = { ...input, selector: undefined };
+    expect(createClientCompositionCaptureRequest(whole).key)
+      .toBe(createClientCompositionCaptureRequest({ ...whole, duration: 3 }).key);
+  });
+
   it("clamps partially visible, zero-length and sub-frame selection windows", () => {
     const clip = { selector: "#card", seekTime: 19, duration: 4, frameCount: 4 };
     const times = captureSampleTimes(20, clip);

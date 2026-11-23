@@ -996,8 +996,16 @@ async function captureIsolatedOrigin(
   }
 }
 
+type StripCacheInput = Pick<ClientCaptureInput,
+  "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex" | "seekTime" | "duration">;
+
+export function selectorCaptureWindowKey({ selector, seekTime, duration }: Pick<ClientCaptureInput, "selector" | "seekTime" | "duration">) {
+  if (!selector) return undefined;
+  return `clip-window-v1:${Number.isFinite(seekTime) ? seekTime : 0}:${Number.isFinite(duration) ? duration : "full"}`;
+}
+
 function coverCacheKey(
-  input: Pick<ClientCaptureInput, "projectId" | "previewUrl" | "contentRevision" | "selector" | "selectorIndex">,
+  input: StripCacheInput,
   projectRev: string,
 ): string {
   return createThumbnailKey({
@@ -1007,7 +1015,7 @@ function coverCacheKey(
     rev: input.contentRevision,
     sel: input.selector,
     idx: input.selectorIndex,
-    samples: input.selector ? "clip-window-v1" : undefined,
+    samples: selectorCaptureWindowKey(input),
   });
 }
 
@@ -1016,10 +1024,7 @@ function compPathCacheTag(projectId: string, compPath: string, projectRev: strin
 }
 
 function stripMemoryCacheKey(
-  input: Pick<
-    ClientCaptureInput,
-    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
-  >,
+  input: StripCacheInput,
 ): { idbKey: string; baseCoverKey: string; compPathKey: string } {
   const projectRev = projectRevisionByProjectId.get(input.projectId) ?? "";
   const baseCoverKey = coverCacheKey(input, projectRev);
@@ -1113,10 +1118,7 @@ function memoryEntryToThumbnailResult(entry: MemoryStripEntry): ThumbnailLoadedR
 }
 
 function peekMemoryEntry(
-  input: Pick<
-    ClientCaptureInput,
-    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
-  >,
+  input: StripCacheInput,
 ): { entry: MemoryStripEntry; value: ThumbnailValue } | null {
   const { idbKey, baseCoverKey, compPathKey } = stripMemoryCacheKey(input);
   const exact = memoryStripCache.get(idbKey);
@@ -1159,20 +1161,14 @@ function peekMemoryEntry(
  * `retainCachedCompositionCapture(value)` so LRU eviction never revokes active URLs.
  */
 export function peekCachedCompositionCapture(
-  input: Pick<
-    ClientCaptureInput,
-    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
-  >,
+  input: StripCacheInput,
 ): ThumbnailValue | null {
   return peekMemoryEntry(input)?.value ?? null;
 }
 
 /** Seed an in-memory cached capture strip in unit tests to exercise LRU/ownership semantics. */
 export function seedClientCompositionCaptureForTest(
-  input: Pick<
-    ClientCaptureInput,
-    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
-  >,
+  input: StripCacheInput,
   blobs: readonly Blob[],
   dims: { aspect?: number; width?: number; height?: number } = {},
 ): ThumbnailValue {
@@ -1205,10 +1201,7 @@ export function hasAnyCachedCompositionCapture(
  * Returns a retained lease that the caller must release when unmounting or changing keys.
  */
 export function acquireCachedCompositionCaptureFromIdb(
-  input: Pick<
-    ClientCaptureInput,
-    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
-  >,
+  input: StripCacheInput,
 ): Promise<{ value: ThumbnailValue; release: () => void } | null> {
   const syncHit = peekMemoryEntry(input);
   if (syncHit) {
@@ -1374,6 +1367,7 @@ export function createClientCompositionCaptureRequest(input: ClientCaptureInput)
       frames: input.frameCount,
       selector: input.selector,
       selectorIndex: input.selectorIndex,
+      samples: selectorCaptureWindowKey(input),
     }),
     projectId: input.projectId,
     sessionEpoch: input.sessionEpoch,
