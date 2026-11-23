@@ -27,6 +27,7 @@ export type McpHeroBeat = {
   image: string;
   video?: string;
   loop?: boolean;
+  fit?: 'contain';
   target?: McpCaseTarget;
   content: LocalizedPair<{ title: string; desc: string; prompt: string; alt: string }>;
 };
@@ -121,7 +122,7 @@ const TEMPLATE_MEDIA = {
   },
 } as const;
 
-const motionmaxxingMedia = skillMedia('motionmaxxing');
+const productShowcaseMedia = skillMedia('higgsfield-product-photoshoot');
 const facelessMedia = skillMedia('higgsfield-faceless-video', facelessExplainerPoster);
 const splashMedia = skillMedia('openmotion-juicy-splash-poster');
 const inkRibbonMedia = skillMedia('openmotion-ink-ribbon');
@@ -182,23 +183,25 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
     },
   },
   {
-    id: 'variety',
+    id: 'product-shots',
     num: '03',
-    image: motionmaxxingMedia.poster,
-    video: motionmaxxingMedia.video,
-    target: { kind: 'skill', skillId: 'motionmaxxing' },
+    image: productShowcaseMedia.poster,
+    video: productShowcaseMedia.video,
+    loop: false,
+    fit: 'contain',
+    target: { kind: 'skill', skillId: 'higgsfield-product-photoshoot' },
     content: {
       en: {
-        title: 'Polish the cut with a Skill',
-        desc: 'Refine typography, easing and pacing in the rough cut.',
-        prompt: 'Use OpenMotion Skill "Remove the AI look from motion" (motionmaxxing) to upgrade our promo cut: strip generic slide cards and fake glow, tighten kinetic typography and export MP4.',
-        alt: 'Remove the AI look from motion before-and-after showcase',
+        title: 'Add product shots with a Skill',
+        desc: 'Add a studio shot, a lifestyle shot and a hero shot to the cut.',
+        prompt: 'Use the "Product showcase reel" Skill with my product images to create a studio shot, a lifestyle shot and a hero shot. Keep the packaging and lettering consistent, then add the shots to my current OpenMotion project.',
+        alt: 'BIOJUSS product showcase reel',
       },
       'zh-CN': {
-        title: '用 Skill 精修粗剪',
-        desc: '调整文字排版、缓动曲线和剪辑节奏。',
-        prompt: '调用 OpenMotion Skill「去掉动效的 AI 味」（motionmaxxing）重制这条宣传片：去掉模板文字卡和廉价发光，换成设计师级动态排版与节奏后导出 MP4。',
-        alt: '去掉动效的 AI 味前后质感对比',
+        title: '用 Skill 补产品镜头',
+        desc: '给粗剪补上棚拍、使用场景和主视觉镜头。',
+        prompt: '用「产品展示短片」Skill，根据我提供的产品图做棚拍、使用场景和主视觉镜头。保持包装和字样一致，再把镜头加进我当前的 OpenMotion 工程。',
+        alt: 'BIOJUSS 产品展示短片',
       },
     },
   },

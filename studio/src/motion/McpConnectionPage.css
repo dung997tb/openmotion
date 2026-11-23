@@ -91,6 +91,7 @@
 .om-mcp-stage-slide[data-active] { opacity: 1; }
 .om-mcp-stage-slide img, .om-mcp-stage-slide video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .om-mcp-stage-slide[data-active] img { transform: scale(1.06); }
+.om-mcp-stage-slide[data-fit="contain"] :is(img, video) { object-fit: contain; transform: none; }
 .om-mcp-stage-vignette { position: absolute; inset: 0; pointer-events: none; }
 .om-mcp-stage-dots { position: absolute; inset-inline: 0; inset-block-end: 16px; z-index: 3; display: flex; justify-content: center; gap: 7px; }
 .om-mcp-beat-dot { width: 26px; height: 4px; min-height: 4px; }

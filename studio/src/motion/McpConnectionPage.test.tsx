@@ -341,6 +341,31 @@ it('uses a different case for every workflow step and feature slide', () => {
   expect(new Set(media).size).toBe(cases.length);
 });
 
+it('plays the product and Studio clips through, then resumes rotation after manual selection', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
+  vi.useFakeTimers();
+  try {
+    await mount();
+    const steps = document.querySelectorAll<HTMLButtonElement>('.om-mcp-stage-step');
+    const video = () => document.querySelector<HTMLVideoElement>('.om-mcp-stage-slide[data-active] video')!;
+    await act(async () => steps[2].click());
+    expect(video().getAttribute('aria-label')).toBe('BIOJUSS product showcase reel');
+
+    await act(async () => { vi.advanceTimersByTime(6000); });
+    expect(steps[2].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { video().dispatchEvent(new Event('ended')); });
+    expect(steps[3].getAttribute('aria-pressed')).toBe('true');
+    expect(video().loop).toBe(false);
+
+    await act(async () => { video().dispatchEvent(new Event('ended')); });
+    expect(steps[0].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { vi.advanceTimersByTime(5500); });
+    expect(steps[1].getAttribute('aria-pressed')).toBe('true');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ and collapsed developer drawer', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
