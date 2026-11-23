@@ -121,7 +121,11 @@ test('SPA route allowlist serves Studio HTML while reserved backend and unknown 
   assert.equal(ensureCalls, 0);
 
   // Reserved backend / cloud MCP / unknown paths must never return SPA HTML.
-  for (const route of ['/mcp', '/mcp/stream', '/unknown-page', '/workspace.ts']) {
+  // GET /mcp opens a long-lived Streamable HTTP SSE stream; DELETE without a session returns 404 JSON.
+  const mcpDelete = await request('/mcp', { method: 'DELETE' });
+  assert.equal(mcpDelete.status, 404, 'expected 404 JSON for /mcp without session');
+  assert.doesNotMatch(await mcpDelete.text(), /data-motion-studio/);
+  for (const route of ['/mcp/stream', '/unknown-page', '/workspace.ts']) {
     const response = await request(route);
     assert.equal(response.status, 404, `expected 404 for ${route}`);
   }
