@@ -20,6 +20,7 @@ import { DiagnosticExport } from './DiagnosticExport';
 import { discord, feishu } from './CommunityLink';
 import { GITHUB_REPOSITORY, repositorySupportLinks } from './githubRepository';
 import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
+import { getDesktopHostBridge, isDesktopApp, useDesktopUpdateState } from '../utils/platformHost';
 
 import type { SettingsSection } from './workspacePageRouting';
 export type { SettingsSection } from './workspacePageRouting';
@@ -205,10 +206,17 @@ function GeneralSettings({ openConnections }: { openConnections: () => void }) {
 
 function ResourceSettings({ about, openConnections }: { about: boolean; openConnections: () => void }) {
   const { t, locale } = useI18n();
+  const desktopApp = isDesktopApp();
+  const updater = useDesktopUpdateState();
   const communityLinks = locale === 'zh-CN' ? [feishu, discord] : [discord, feishu];
   const [version, setVersion] = useState<string>();
   useEffect(() => {
     let active = true;
+    if (desktopApp) {
+      void getDesktopHostBridge()?.info()
+        .then(info => { if (active && info?.shellVersion) setVersion(info.shellVersion); })
+        .catch(() => {});
+    }
     void fetch('/api/health')
       .then(async res => {
         if (!res.ok) throw new Error('unavailable');
@@ -218,12 +226,28 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
       .then(data => { if (active && data?.version) setVersion(current => current || data.version); })
       .catch(() => {});
     return () => { active = false; };
-  }, []);
+  }, [desktopApp]);
   const links = [
     { label: 'Documentation', href: `${GITHUB_REPOSITORY}/tree/main/docs`, icon: 'file-text-line' },
     ...repositorySupportLinks,
     { label: 'View source code', href: GITHUB_REPOSITORY, icon: 'code-s-slash-line' },
   ];
+  const updateStatusLabel =
+    updater.state?.status === 'available'
+      ? t('Update available: {version}', { version: updater.state.availableVersion || '' })
+      : updater.state?.status === 'downloading'
+        ? t('Downloading update… {progress}%', { progress: String(updater.state.progress ?? 0) })
+        : updater.state?.status === 'downloaded'
+          ? t('Update ready to install: {version}', { version: updater.state.availableVersion || '' })
+          : updater.state?.status === 'up-to-date'
+            ? t('You are on the latest version')
+            : updater.state?.status === 'checking'
+              ? t('Checking for updates…')
+              : updater.state?.status === 'unsupported'
+                ? t('Auto-update applies to packaged desktop releases.')
+                : updater.state?.status === 'error'
+                  ? updater.state.message || t('Update check failed')
+                  : t('Desktop updates keep OpenDesign current.');
   return (
     <div className="om-settings-page">
       <h1 className="om-title">{t(about ? 'About OpenMotion' : 'Help')}</h1>
@@ -232,6 +256,27 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
           <h2 className="om-product-brand" aria-label="OpenMotion" />
           <p className="om-muted">{t('An editable cloud workspace for AI video and motion.')}</p>
           <span className="om-badge">{version ? `${t('Version')} ${version}` : t('Version unavailable')}</span>
+        </section>
+      )}
+      {about && desktopApp && (
+        <section className="om-card om-card-stack">
+          <h2 className="om-subtitle">{t('Desktop updates')}</h2>
+          <p className="om-muted">{updateStatusLabel}</p>
+          <div className="om-mcp-actions">
+            {updater.state?.status === 'downloaded' ? (
+              <Button variant="primary" className="om-button h-auto" disabled={updater.busy} onClick={() => void updater.installUpdateNow()}>
+                {t('Restart and install update')}
+              </Button>
+            ) : updater.state?.status === 'available' ? (
+              <Button variant="primary" className="om-button h-auto" disabled={updater.busy} onClick={() => void updater.downloadUpdate()}>
+                {t('Download update')}
+              </Button>
+            ) : (
+              <Button variant="ghost" className="om-button h-auto" disabled={updater.busy} onClick={() => void updater.checkForUpdates()}>
+                {t('Check for updates')}
+              </Button>
+            )}
+          </div>
         </section>
       )}
       <div className="om-card om-resource-links">

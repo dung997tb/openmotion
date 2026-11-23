@@ -7,7 +7,7 @@ import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { canvasPresets } from '../../../shared/composition-canvas';
 import { PlatformIcon } from '../../../packages/design-system/react/PlatformIcon';
 import { platformExportTargets } from '../../../shared/platform-export';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { brand, designSystemAsset } from '../../../packages/design-system/index.js';
 import { BrandLogo } from '../../../packages/design-system/react/BrandLogo';
 import {
@@ -36,9 +36,40 @@ import { studioSkillDefaults, skillShotPrompt, localizedSkillPrompt, motionSkill
 import { mcpCapabilities, mcpScenarios, searchRecoveryExample, platformExportExample, mcpBenefits, mcpReviewGuide, mcpFaq, mcpWorkflowComparison, mcpClientComparison } from './mcpCapabilities';
 import { mcpClients as clients, supportsConnection } from './mcpClients';
 import { readWorkspacePage, type WorkspacePage } from './workspacePageRouting';
-import { DesktopConnectPanel } from './DesktopConnectPanel';
+import { DesktopConnectPanel, type DesktopConnectAgentId } from './DesktopConnectPanel';
 import * as tracking from './pageTracking';
 import './McpConnectionPage.css';
+
+type ConnectedAppEvidence = {
+  clientName?: string;
+  workspaceId?: string;
+  activeTokenCount?: number;
+  lastUsedAt?: string | null;
+};
+
+type AuthorizedAgentsState = Record<DesktopConnectAgentId, boolean>;
+
+const EMPTY_AUTHORIZED_AGENTS: AuthorizedAgentsState = { codex: false, claude: false };
+
+function deriveAuthorizedAgents(
+  connections: readonly ConnectedAppEvidence[] | undefined,
+  workspaceId?: string,
+): AuthorizedAgentsState {
+  const result: AuthorizedAgentsState = { codex: false, claude: false };
+  if (!Array.isArray(connections)) return result;
+  for (const item of connections) {
+    if (!item || typeof item !== 'object') continue;
+    if (workspaceId && item.workspaceId && item.workspaceId !== workspaceId) continue;
+    const hasActiveEvidence =
+      (typeof item.activeTokenCount === 'number' && item.activeTokenCount > 0) ||
+      (typeof item.lastUsedAt === 'string' && item.lastUsedAt.trim().length > 0);
+    if (!hasActiveEvidence) continue;
+    const name = typeof item.clientName === 'string' ? item.clientName.toLowerCase() : '';
+    if (name.includes('codex')) result.codex = true;
+    if (name.includes('claude')) result.claude = true;
+  }
+  return result;
+}
 
 export function McpConnectionPage({
   openLibrary: openLibraryRaw,
@@ -100,6 +131,52 @@ export function McpConnectionPage({
   const scrollTo = (id: string) => { click('mcp_footer', 'scroll_to_section', { section_id: id }); page.current?.querySelector<HTMLElement>(`#${id}`)?.scrollIntoView({ block: 'start' }); };
 
   const isHttp = isStreamableHttpTransport(info?.transport);
+  const workspaceId = info?.workspaceId;
+  const [authorizedAgents, setAuthorizedAgents] = useState<AuthorizedAgentsState>(EMPTY_AUTHORIZED_AGENTS);
+  const authCheckController = useRef<AbortController | null>(null);
+
+  const refreshAuthorizedAgents = useCallback(async () => {
+    authCheckController.current?.abort();
+    if (!isHttp) {
+      setAuthorizedAgents(EMPTY_AUTHORIZED_AGENTS);
+      return;
+    }
+    const controller = new AbortController();
+    authCheckController.current = controller;
+    try {
+      const response = await fetch('/motion-api/connections', {
+        credentials: 'same-origin',
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (!response.ok) {
+        setAuthorizedAgents(EMPTY_AUTHORIZED_AGENTS);
+        return;
+      }
+      const data = (await response.json().catch(() => null)) as {
+        connections?: ConnectedAppEvidence[];
+      } | null;
+      if (controller.signal.aborted) return;
+      setAuthorizedAgents(deriveAuthorizedAgents(data?.connections, workspaceId));
+    } catch {
+      if (!controller.signal.aborted) {
+        setAuthorizedAgents(EMPTY_AUTHORIZED_AGENTS);
+      }
+    } finally {
+      if (authCheckController.current === controller) {
+        authCheckController.current = null;
+      }
+    }
+  }, [isHttp, workspaceId]);
+
+  useEffect(() => {
+    void refreshAuthorizedAgents();
+    return () => {
+      authCheckController.current?.abort();
+      authCheckController.current = null;
+    };
+  }, [refreshAuthorizedAgents]);
+
   const supported = supportsConnection(client, info);
   const language = locale === 'zh-CN' ? 'zh-CN' : 'en';
   const prompt = setupPrompt(info, client.host, language).replace('MCP / CLI', client.name);
@@ -180,7 +257,11 @@ export function McpConnectionPage({
           </div>
         )}
         {info && isStreamableHttpTransport(info.transport) && (client.host === 'codex' || client.host === 'claude') && (
-          <DesktopConnectPanel mcpUrl={info.transport.url} />
+          <DesktopConnectPanel
+            mcpUrl={info.transport.url}
+            hasAuthorizedConnection={authorizedAgents}
+            onCheckAuthorization={refreshAuthorizedAgents}
+          />
         )}
           {clients.map(item => <TabPanel value={item.id} key={item.id}>
             <div className="om-mcp-setup-tray">

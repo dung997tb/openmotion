@@ -344,3 +344,102 @@ it.each(['en', 'zh-CN'] as const)('copies the Black Friday campaign workflow han
   await act(async () => card.querySelector('button')!.click());
   expect(card.querySelector('textarea')?.value).toBe(instruction);
 });
+
+it('wires real /motion-api/connections OAuth evidence and Check sign-in refresh to DesktopConnectPanel', async () => {
+  const { buildCloudIntegrationInfo } = await import('../../../shared/integration');
+  const { HOST_CAPABILITIES, hostErr, hostOk } = await import('../../../shared/desktop-contract');
+  const cloud = buildCloudIntegrationInfo({
+    publicOrigin: 'https://motion.open-design.ai',
+    version: '1.2.3',
+    workspaceId: 'ws-prod',
+    authMode: 'oidc',
+    oauth2Enabled: true,
+    patEnabled: true,
+    tools: info.tools,
+  });
+
+  let connectionsResponse: () => Response = () => new Response('', { status: 401 });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.includes('template-catalog')) return Response.json({ items: [] });
+      if (url.includes('/motion-api/connections')) return connectionsResponse();
+      return Response.json(cloud);
+    }),
+  );
+
+  window.__OPENMOTION_HOST__ = {
+    info: vi.fn(async () => ({
+      hostKind: 'desktop' as const,
+      shellVersion: '1.0.0',
+      contractVersion: '1.0.0',
+      platform: 'darwin' as const,
+      arch: 'arm64',
+      releaseChannel: 'stable' as const,
+      isPackaged: true,
+    })),
+    capabilities: vi.fn(async () => [
+      { name: HOST_CAPABILITIES.ATOM_DETECT, version: '1.0.0', status: 'available' as const, methods: ['run'] },
+      { name: HOST_CAPABILITIES.ATOM_EXEC, version: '1.0.0', status: 'available' as const, methods: ['run'] },
+    ]),
+    invoke: vi.fn(async capability => {
+      if (capability === HOST_CAPABILITIES.ATOM_DETECT) {
+        return hostOk({
+          platform: 'darwin',
+          arch: 'arm64',
+          agents: [
+            { agentId: 'codex', installed: true, version: 'v0.30.0', mcpConfigured: true },
+            { agentId: 'claude', installed: true, version: 'v1.5.0', mcpConfigured: true },
+          ],
+          engine: { installed: false, running: false, port: 0, providerKind: 'none' },
+          detectedAt: '2026-01-01T00:00:00Z',
+        });
+      }
+      return hostErr('UNSUPPORTED', 'Unsupported');
+    }) as NonNullable<Window['__OPENMOTION_HOST__']>['invoke'],
+    subscribe: () => () => {},
+  };
+
+  try {
+    await mount();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const codexRow = document.querySelector('[data-agent-id="codex"]')!;
+    const claudeRow = document.querySelector('[data-agent-id="claude"]')!;
+    // Unauthenticated / 401 fails silently and never claims Authorized & ready.
+    expect(codexRow.getAttribute('data-connection-state')).toBe('configured');
+    expect(claudeRow.getAttribute('data-connection-state')).toBe('configured');
+    expect(codexRow.textContent).toContain('Config written');
+    expect(codexRow.textContent).not.toContain('Authorized & ready');
+
+    // Return active OAuth evidence for Codex in this workspace, plus an inactive Claude entry.
+    connectionsResponse = () =>
+      Response.json({
+        connections: [
+          { clientName: 'Codex CLI', workspaceId: 'ws-prod', activeTokenCount: 1, lastUsedAt: null },
+          { clientName: 'Claude Code', workspaceId: 'ws-prod', activeTokenCount: 0, lastUsedAt: null },
+          { clientName: 'Claude Code', workspaceId: 'ws-other', activeTokenCount: 2, lastUsedAt: '2026-01-01T00:00:00Z' },
+        ],
+      });
+
+    const checkSignIn = [...codexRow.querySelectorAll<HTMLButtonElement>('button')].find(
+      node => node.textContent?.trim() === 'Check sign-in',
+    )!;
+    expect(checkSignIn).toBeDefined();
+    await act(async () => checkSignIn.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(codexRow.getAttribute('data-connection-state')).toBe('authorized');
+    expect(codexRow.textContent).toContain('Authorized & ready');
+    expect(claudeRow.getAttribute('data-connection-state')).toBe('configured');
+    expect(claudeRow.textContent).not.toContain('Authorized & ready');
+  } finally {
+    delete window.__OPENMOTION_HOST__;
+  }
+});
