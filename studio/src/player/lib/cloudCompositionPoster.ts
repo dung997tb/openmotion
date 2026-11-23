@@ -1,4 +1,5 @@
 import { usePlayerStore } from "../store/playerStore";
+import { compositionPosterSource, MAX_POSTER_SOURCE_LENGTH } from "./compositionPosterSource";
 import { createThumbnailKey } from "./thumbnailScheduler";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 import { buildProjectApiPath, optionalProjectSourceUrl } from "../../utils/projectRouting";
@@ -93,12 +94,15 @@ export async function loadCloudCompositionPoster(
   let media = known?.src ? projectMediaUrl(known.src, projectId, path) : null;
   let label = path.split("/").pop() || "";
   if (!media) {
-    const response = await studioApiFetch(optionalProjectSourceUrl(projectId, path),
-      { signal, priority: "low" });
-    if (!response.ok) throw new Error(`Composition source unavailable (${response.status})`);
-    const { content } = await response.json();
+    const revision = Number(url.searchParams.get("revision") ?? 0);
+    let content: unknown = compositionPosterSource(state, projectId, sessionEpoch, path, revision);
+    if (content === undefined) {
+      const response = await studioApiFetch(optionalProjectSourceUrl(projectId, path), { signal, priority: "low" });
+      if (!response.ok) throw new Error(`Composition source unavailable (${response.status})`);
+      content = (await response.json()).content;
+    }
     signal.throwIfAborted();
-    const scope = typeof content === "string" && content.length <= 1024 * 1024
+    const scope = typeof content === "string" && content.length <= MAX_POSTER_SOURCE_LENGTH
       ? selectContent(content, selector, index) : null;
     const candidate = scope && (findIn(scope, "video[poster]") ?? findIn(scope, "img[src]") ??
       findIn(scope, "video[src],video source[src]"));

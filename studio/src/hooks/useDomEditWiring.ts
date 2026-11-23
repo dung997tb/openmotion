@@ -1,13 +1,13 @@
 /**
  * Wiring layer for DOM edit sessions: click-to-source navigation,
- * DOM selection to timeline sync, GSAP cache invalidation on refresh,
+ * DOM selection to timeline sync,
  * GSAP cache population, animation resolution for the selected element,
  * and preview sync side-effects.
  *
  * Extracted from useDomEditSession to isolate orchestration wiring from
  * the GSAP-aware geometry intercept logic.
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player";
 import { useDomEditPreviewSync } from "./useDomEditPreviewSync";
@@ -30,9 +30,8 @@ export interface UseDomEditWiringParams {
   previewIframeRef: React.RefObject<HTMLIFrameElement | null>;
   previewIframe: HTMLIFrameElement | null;
   captionEditMode: boolean;
-  refreshKey: number;
+  gsapChangedPath?: string;
   gsapCacheVersion: number;
-  bumpGsapCache: () => void;
   showToast: (message: string, tone?: "error" | "info") => void;
   refreshPreviewDocumentVersion: () => void;
   syncPreviewHotkeys: (iframe: HTMLIFrameElement | null) => void;
@@ -118,9 +117,8 @@ export function useDomEditWiring(params: UseDomEditWiringParams) {
     previewIframeRef,
     previewIframe,
     captionEditMode,
-    refreshKey,
+    gsapChangedPath,
     gsapCacheVersion,
-    bumpGsapCache,
     showToast,
     refreshPreviewDocumentVersion,
     syncPreviewHotkeys,
@@ -175,18 +173,6 @@ export function useDomEditWiring(params: UseDomEditWiringParams) {
 
   // ── GSAP cache sync ──
 
-  // Bump GSAP cache when refreshKey changes (code-tab edits trigger iframe
-  // reload via refreshKey but don't go through commitMutation, so the cache
-  // would otherwise retain stale keyframe entries).
-  const prevRefreshKeyRef = useRef(refreshKey);
-  // eslint-disable-next-line no-restricted-syntax
-  useEffect(() => {
-    if (refreshKey !== prevRefreshKeyRef.current) {
-      prevRefreshKeyRef.current = refreshKey;
-      bumpGsapCache();
-    }
-  }, [refreshKey, bumpGsapCache]);
-
   const gsapSourceFile = domEditSelection?.sourceFile || activeCompPath || "index.html";
 
   usePopulateKeyframeCacheForFile(
@@ -194,6 +180,7 @@ export function useDomEditWiring(params: UseDomEditWiringParams) {
     gsapSourceFile,
     gsapCacheVersion,
     previewIframeRef,
+    gsapChangedPath,
   );
 
   const {

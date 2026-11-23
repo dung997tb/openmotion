@@ -226,10 +226,14 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
   const [pageKeyScope] = useState(generateId);
   const claimKey = useCallback((key: string) => `${pageKeyScope}:${key}`, [pageKeyScope]);
 
+  const historyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const readSequence = useRef(0);
   const refresh = useCallback(async () => {
+    if (!projectId || projectIdRef.current !== projectId) return;
+    // This read covers events already received. An event arriving during the read
+    // still schedules its own refresh, so a concurrent remote edit cannot be lost.
+    clearTimeout(historyTimer.current);
     const sequence = ++readSequence.current;
-    if (!projectId) return;
     const seen = own.changes();
     const response = await studioApiFetch(historyUrl(projectId)).catch(() => null);
     const next = response?.ok
@@ -264,7 +268,6 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
   }, [own]);
 
   // A single cloud commit can deliver both a file event and a history event.
-  const historyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(historyTimer.current), [projectId]);
   const refreshAfterEvent = useCallback(() => {
     clearTimeout(historyTimer.current);

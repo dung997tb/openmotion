@@ -76,6 +76,24 @@ async function studio({ withHistory = true, initialFiles = {} as Record<string, 
   return { dir, history, hook: () => hook, file, save, readFile, host };
 }
 
+it("uses an explicit history read for pending notifications and still refreshes on later notifications", async () => {
+  const { hook } = await studio();
+  const fetch = vi.fn(globalThis.fetch);
+  vi.stubGlobal("fetch", fetch);
+  vi.useFakeTimers();
+  try {
+    hook().refreshAfterEvent();
+    await act(() => hook().refresh());
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    hook().refreshAfterEvent();
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("uses the files actually restored by cloud history in both directions", async () => {
   const { hook, save, readFile } = await studio();
   let seq = 2;

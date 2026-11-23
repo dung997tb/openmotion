@@ -449,8 +449,8 @@ export type SingleClipGsapEdit =
  */
 export function finishClipTimingFallback(input: {
   iframe: HTMLIFrameElement | null;
-  reloadPreview: () => void;
-  invalidateGsapCache?: () => void;
+  reloadPreview: (path?: string) => void;
+  invalidateGsapCache?: (path?: string) => void;
   projectId: string | null;
   targetPath: string;
   domId: string | undefined;
@@ -483,8 +483,8 @@ export function finishClipTimingFallback(input: {
   return finishTimelineTimingFallback({
     iframe: input.iframe,
     projectId,
-    reloadPreview: input.reloadPreview,
-    invalidateGsapCache: input.invalidateGsapCache,
+    reloadPreview: () => input.reloadPreview(targetPath),
+    invalidateGsapCache: () => input.invalidateGsapCache?.(targetPath),
     gsapMutation: sdkGsap
       ? () => Promise.resolve(sdkGsap)
       : timingChanged && domId && projectId

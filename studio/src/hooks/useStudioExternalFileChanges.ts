@@ -36,7 +36,7 @@ interface UseStudioExternalFileChangesOptions {
   fileManager: FileManager;
   previewPersistence: PreviewPersistence;
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
-  reloadPreview: () => void;
+  reloadPreview: (path?: string) => void;
   onOutsideChange?: () => void;
   onHistoryChanged?: () => void | Promise<void>;
 }
