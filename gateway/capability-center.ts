@@ -187,7 +187,7 @@ function selectCompatibleModels(
   const matches = models.filter(model => {
     if (!availableProviders.has(model.provider)) return false;
     if (!capabilitySupportsModel(capability, model)) return false;
-    if (referenceCount >= 2 && model.modality === 'image' && modelReferenceLimit(model) < referenceCount) return false;
+    if (referenceCount >= 1 && (model.modality === 'image' || model.modality === 'video') && modelReferenceLimit(model) < referenceCount) return false;
     return true;
   });
   return matches.sort((a, b) => {
@@ -403,6 +403,81 @@ export async function capabilityDiscover(
   }
 
   throw new ToolInputError('unsupported capability discover action', 'action', 'invalid_enum');
+}
+
+export async function preflightAssetCapabilityGenerate(
+  store: WorkspaceStore,
+  args: {
+    capabilityId: string;
+    capabilityOptions?: Record<string, unknown>;
+    model: string;
+    modality?: string;
+    prompt?: string;
+    references?: AssetReference[];
+  },
+  tracking?: OmTracking,
+  channel: 'gui' | 'mcp' = 'gui',
+): Promise<{ capability: CapabilityDefinition; options: Record<string, unknown>; model: Model }> {
+  const catalog = await loadCapabilityCatalog(store);
+  const cap = findCapability(args.capabilityId, catalog);
+  if (!cap) throw new Error(`CAPABILITY_NOT_FOUND: Unknown capability ${args.capabilityId}`);
+  if (cap.status === 'coming_soon') {
+    throw new Error(`CAPABILITY_COMING_SOON: ${cap.title} (${cap.id}) is coming soon and cannot be executed yet`);
+  }
+  if (cap.status === 'deprecated' || cap.status === 'hidden') {
+    throw new Error(
+      `CAPABILITY_DEPRECATED: ${cap.id} is no longer active${cap.replacementCapabilityId ? `; use ${cap.replacementCapabilityId} instead` : ''}`,
+    );
+  }
+  if (!cap.channels[channel]) {
+    throw new Error(`CAPABILITY_CHANNEL_DISABLED: ${cap.id} is not enabled on channel ${channel}`);
+  }
+  if (cap.modality === '3d' || (args.modality && args.modality !== cap.modality)) {
+    throw new Error(`CAPABILITY_UNAVAILABLE: Capability ${cap.id} (${cap.modality}) cannot execute for modality ${args.modality ?? 'unknown'}`);
+  }
+  if (cap.executor.kind === 'script' || cap.executor.kind === 'service') {
+    throw new Error(
+      `CAPABILITY_EXECUTOR_UNSUPPORTED: ${cap.id} uses the ${cap.executor.kind} executor; run it through openmotion_capability_run or /motion-api/capabilities/run`,
+    );
+  }
+
+  const options = validateCapabilityOptions(cap, args.capabilityOptions);
+  const rawPrompt = typeof args.prompt === 'string' ? args.prompt : '';
+  if (cap.input.promptRequired && !rawPrompt.trim()) {
+    throw new ToolInputError(`prompt is required for capability ${cap.id}`, 'prompt', 'missing');
+  }
+  const references: AssetReference[] = Array.isArray(args.references) ? args.references : [];
+  if (references.length < cap.input.minReferences || references.length > cap.input.maxReferences) {
+    throw new ToolInputError(
+      `capability ${cap.id} requires ${cap.input.minReferences}..${cap.input.maxReferences} reference assets`,
+      'references',
+      'out_of_range',
+    );
+  }
+
+  const gateway = gatewayFor(store, tracking);
+  const [status, models] = await Promise.all([gateway.status(), gateway.models()]);
+  const availableProviders = new Set(
+    status.providers
+      .filter(p => p.available && !(p.id === 'account' && p.mediaEntitlement === 'not-included'))
+      .map(p => p.id),
+  );
+  const compatible = selectCompatibleModels(cap, models, availableProviders, references.length);
+  const chosen = compatible.find(m => m.id === args.model);
+  if (!chosen) {
+    const catalogModel = models.find(m => m.id === args.model);
+    if (catalogModel && capabilitySupportsModel(cap, catalogModel)) {
+      if (!availableProviders.has(catalogModel.provider)) {
+        throw new Error(`CAPABILITY_UNAVAILABLE: Provider ${catalogModel.provider} is not ready for model ${args.model}`);
+      }
+      if (references.length >= 1 && (catalogModel.modality === 'image' || catalogModel.modality === 'video') && modelReferenceLimit(catalogModel) < references.length) {
+        throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Model ${args.model} accepts at most ${modelReferenceLimit(catalogModel)} reference image(s)`);
+      }
+    }
+    throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Model ${args.model} does not support capability ${cap.id}`);
+  }
+
+  return { capability: cap, options, model: chosen };
 }
 
 export async function capabilityRun(
@@ -638,7 +713,7 @@ export async function capabilityRun(
           if (!availableProviders.has(catalogModel.provider)) {
             throw new Error(`CAPABILITY_UNAVAILABLE: Provider ${catalogModel.provider} is not ready for model ${args.model}`);
           }
-          if (references.length >= 2 && catalogModel.modality === 'image' && modelReferenceLimit(catalogModel) < references.length) {
+          if (references.length >= 1 && (catalogModel.modality === 'image' || catalogModel.modality === 'video') && modelReferenceLimit(catalogModel) < references.length) {
             throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Model ${args.model} accepts at most ${modelReferenceLimit(catalogModel)} reference image(s)`);
           }
         }

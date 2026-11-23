@@ -1,4 +1,4 @@
-import { findCapability } from '../../../shared/capability-registry';
+import { capabilitySupportsModel, findCapability, type CapabilityDefinition } from '../../../shared/capability-registry';
 import { modelReferenceLimit, type Modality, type Model } from '../../../shared/gateway';
 import { imageFeatures } from '../../../shared/image-features';
 import { videoFeatures } from '../../../shared/video-features';
@@ -27,12 +27,17 @@ export function creationModels(
   templateModelId?: string,
 ) {
   const providers = gateway?.status.providers ?? [];
+  const feature = scene && sceneFeature(scene);
+  const videoFeature = scene && sceneVideoFeature(scene);
+  const activeCap = scene ? findCapability(feature ?? videoFeature ?? scene.id, gateway?.capabilities) : undefined;
+  const strictCapabilityFilter = Boolean(activeCap && (activeCap.executor.kind === 'dedicated-model' || (scene && 'capabilityId' in scene)));
   const featureScene = isFeatureScene(scene);
   const restrictToOpenDesign = openDesignOnly || featureScene;
   // Non-feature Studio scenes follow the navigation menu model set; feature scenes accept any capability-matched OpenDesign model.
   const listed = (gateway ? (scene ? withOpenDesignModels(gateway.models, providers) : gateway.models).filter(model => model.modality === modality
-    && (!scene || featureScene || menuRank(model) >= 0 || model.id === modelId)
+    && (!scene || featureScene || strictCapabilityFilter || menuRank(model) >= 0 || model.id === modelId)
     && (!scene || supportsScene(model, scene))
+    && (!strictCapabilityFilter || !activeCap || capabilitySupportsModel(activeCap, model))
     && (!restrictToOpenDesign || isOpenDesignProvider(model.provider))) : [])
     .sort((a, b) => providerRank(a.provider) - providerRank(b.provider) || (scene ? studioSortRank(a) - studioSortRank(b) : 0));
   // When nothing takes every reference, keep the list so the page can explain the limit instead of offering setup.
@@ -40,9 +45,6 @@ export function creationModels(
   const compatible = fitting.length ? fitting : listed;
   const available = compatible.filter(model => providerReady(providers, model.provider));
   const pinned = modelId ? compatible.find(model => model.id === modelId) : undefined;
-  const feature = scene && sceneFeature(scene);
-  const videoFeature = scene && sceneVideoFeature(scene);
-  const activeCap = scene ? findCapability(feature ?? videoFeature ?? scene.id, gateway?.capabilities) : undefined;
   const capRecommended = activeCap && (activeCap.executor.kind === 'prompt-preset' || activeCap.executor.kind === 'dedicated-model')
     ? activeCap.executor.recommendedModel
     : undefined;
@@ -61,18 +63,26 @@ export function creationModels(
  * Maximum number of reference images the user can attach in a Studio scene.
  * Feature scenes (e.g. Character reference, up to 5) auto-switch away from 1-ref models once >= 2
  * references are attached, so attaching stays open up to the best available (or compatible) model's
- * cap clamped by the feature rule — even while a 1-ref model is selected or before provider setup.
+ * cap clamped by the feature/capability rule — even while a 1-ref model is selected or before provider setup.
  */
 export function attachableReferenceLimit(
   resolved: ReturnType<typeof creationModels>,
   scene?: StudioScene,
+  capabilities?: readonly CapabilityDefinition[],
 ): number {
   const feature = scene && sceneFeature(scene);
+  const videoFeature = scene && sceneVideoFeature(scene);
+  const activeCap = scene ? findCapability(feature ?? videoFeature ?? scene.id, capabilities) : undefined;
   const featureMax = feature ? imageFeatures[feature].maxReferences : undefined;
-  const ceiling = featureMax ?? (scene?.modality === 'video' ? 1 : Infinity);
+  const capMax = activeCap?.input.maxReferences;
+  const ceiling = Math.min(
+    featureMax ?? Infinity,
+    capMax ?? Infinity,
+    scene?.modality === 'video' ? 1 : Infinity,
+  );
   if (isFeatureScene(scene)) {
     const pool = resolved.available.length ? resolved.available : resolved.compatible;
-    if (!pool.length) return featureMax ?? 1;
+    if (!pool.length) return Number.isFinite(ceiling) ? ceiling : 1;
     const best = pool.reduce((max, model) => Math.max(max, modelReferenceLimit(model)), 0);
     return Math.min(best, ceiling);
   }

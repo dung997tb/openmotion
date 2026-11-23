@@ -1,3 +1,4 @@
+import type { CapabilityDefinition } from '../../../shared/capability-registry';
 import { modelReferenceLimit, type Model, type Modality } from '../../../shared/gateway';
 import { imageFeatureSupported, type ImageFeatureId } from '../../../shared/image-features';
 import { videoFeatureCapable, type VideoFeatureId } from '../../../shared/video-features';
@@ -25,10 +26,15 @@ export function scenesForStudio(studio: GeneratingStudio) {
   return studio.scenes.map(id => studioScenes.find(scene => scene.id === id)!);
 }
 
-export function studioDestination(studio: GeneratingStudio, sceneId?: string | null, model: string | null = null): StudioDestination {
+export function studioDestination(
+  studio: GeneratingStudio,
+  sceneId?: string | null,
+  model: string | null = null,
+  capabilities?: readonly CapabilityDefinition[],
+): StudioDestination {
   const scenes = scenesForStudio(studio);
   const direct = scenes.find(scene => scene.id === sceneId);
-  const dynamic = !direct && sceneId && studio.surface === 'media' ? findLandingScene(sceneId) : undefined;
+  const dynamic = !direct && sceneId && studio.surface === 'media' ? findLandingScene(sceneId, capabilities) : undefined;
   const resolved = direct ?? (dynamic && studio.surface === 'media' && dynamic.modality === studio.primaryModality ? dynamic : undefined) ?? scenes[0];
   return { studio, scene: resolved, model };
 }

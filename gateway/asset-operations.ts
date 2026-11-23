@@ -2,6 +2,7 @@ import type { OmTracking } from '../shared/tracking.ts';
 import path from 'node:path';
 import type { WorkspaceStore } from '../workspace.ts';
 import { AssetLibrary } from './asset-library.ts';
+import { preflightAssetCapabilityGenerate } from './capability-center.ts';
 import { gatewayFor } from './service.ts';
 import { requireNativeRuntime } from '../scripts/npm-runtime.mjs';
 import { pluginRoot } from '../hyperframes.ts';
@@ -22,6 +23,9 @@ export async function assetOperation(store: WorkspaceStore, args: any, importPro
   }
   if (args.action === 'generate') {
     if (!args.requestId || !args.model) throw new Error('Choose a model and supply a stable requestId');
+    if (typeof args.capabilityId === 'string' && args.capabilityId.trim()) {
+      await preflightAssetCapabilityGenerate(store, args, tracking);
+    }
     await requireNativeRuntime(pluginRoot, 'media');
     const job = await gateway.submit({ modality: args.modality, prompt: args.prompt, model: args.model, mode: args.mode,
       idempotencyKey: args.requestId, parameters: args.parameters,

@@ -1,3 +1,4 @@
+import type { CapabilityDefinition } from '../../../shared/capability-registry';
 import { findTemplateCollection, type TemplateCollection } from './templateCollections';
 import { skillCategories, type SkillCategory } from './skillCategories';
 import { blackFridaySkillIds } from '../../../shared/black-friday-collection';
@@ -36,7 +37,16 @@ export function changesWorkspaceDestination(patch: Partial<WorkspacePage>): bool
   return ['explore', 'motion', 'superAgent', 'cinemaLanding', 'designScene', 'scenario', 'scenarioHub', 'studio', 'modelOverview', 'modelHub', 'specialty', 'assets', 'skills', 'settings'].some(key => key in patch);
 }
 
-export function readWorkspacePage(search: string, hash = '', pathname = ''): WorkspacePage {
+export function unresolvedCreateSceneId(search: string, hash = '', pathname = ''): string | null {
+  const effectiveSearch = pathname && pathname !== '/' ? spaPathnameToSearch(pathname, search) : search;
+  const query = new URLSearchParams(effectiveSearch);
+  if (workspacePageName(query, hash) !== 'create') return null;
+  const sceneId = query.get('scene');
+  if (!sceneId || findLandingScene(sceneId)) return null;
+  return sceneId;
+}
+
+export function readWorkspacePage(search: string, hash = '', pathname = '', capabilities?: readonly CapabilityDefinition[]): WorkspacePage {
   const effectiveSearch = pathname && pathname !== '/' ? spaPathnameToSearch(pathname, search) : search;
   const query = new URLSearchParams(effectiveSearch), page = workspacePageName(query, hash), section = query.get('section');
   const settings = page === 'brand-kit' ? 'brand-kit' : page === 'mcp' ? 'mcp' : page === 'settings'
@@ -70,10 +80,10 @@ export function readWorkspacePage(search: string, hash = '', pathname = ''): Wor
   const legacyDesignImage = page === 'design' && !isDesignHtmlScene
     ? findMediaStudio('design')!.scenes.map(id => findLandingScene(id)!).find(scene => scene.id === sceneId) ?? findLandingScene('text-to-image')
     : undefined;
-  const landing = page === 'create' ? findLandingScene(sceneId) : legacyDesignImage;
+  const landing = page === 'create' ? findLandingScene(sceneId, capabilities) : legacyDesignImage;
   const home = Boolean(!landing && !isAudioTab && studioKind && hasStudioHome(studioKind) && query.get('home') === '1');
   const studio = landing ? sceneDestination(landing, null, model)
-    : studioKind ? { ...studioDestination(studioKind, extendedSoundTab?.backingScene ?? sceneId, model), ...(home ? { home: true as const } : {}), ...(isAudioTab ? { mediaTab: true as const } : {}) } : null;
+    : studioKind ? { ...studioDestination(studioKind, extendedSoundTab?.backingScene ?? sceneId, model, capabilities), ...(home ? { home: true as const } : {}), ...(isAudioTab ? { mediaTab: true as const } : {}) } : null;
   const specialty = studio ? null : collection ?? null;
   const gameId = specialty?.id === 'game' ? query.get('game') || null : null;
   const community = exploreCommunities.find(item => item.id === query.get('community'))?.id ?? null;

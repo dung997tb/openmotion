@@ -21,10 +21,10 @@ import { useWorkspaceChrome } from './WorkspaceFrame';
 import { useMediaCatalog } from './useMediaCatalog';
 import type { StudioCreation } from './CreativeWorkspace';
 import { studioExamples } from './sceneShowcase';
-import { buildCapabilityParameters, buildCapabilityPrompt, defaultCapabilities, findCapability } from '../../../shared/capability-registry';
+import { buildCapabilityParameters, buildCapabilityPrompt, defaultCapabilities, defaultCapabilityControlChoice, findCapability } from '../../../shared/capability-registry';
 import { isFeatureScene, needsImage, sceneFeature, sceneVideoFeature } from './creativeStudios';
 import { imageFeaturePrompt, imageFeatures, relightControls, type RelightChoices } from '../../../shared/image-features';
-import { defaultVideoFeatureChoice, videoFeatureParameters, videoFeaturePrompt, videoFeatures } from '../../../shared/video-features';
+import { videoFeatureParameters, videoFeaturePrompt, videoFeatures } from '../../../shared/video-features';
 import { FieldTextarea } from '../components/ui/FormField';
 import { Select } from '../components/ui/Select';
 import { attachableReferenceLimit, creationModels } from './creationModels';
@@ -86,8 +86,11 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const unconfiguredPreferred = Boolean(studio && gateway && preferred && !selected && preferredProvider && !preferredProvider.available);
   const providerLabel = preferredProvider?.label ?? (preferred && registeredProvider(preferred.provider)?.label) ?? preferred?.provider ?? '';
   const accountNotIncluded = selected?.provider === 'account' && preferredProvider?.mediaEntitlement === 'not-included';
-  const maximumReferences = selected ? Math.min(modelReferenceLimit(selected), featureRule?.maxReferences ?? Infinity) : 0;
-  const attachableReferences = scene ? attachableReferenceLimit(resolvedModels, scene) : maximumReferences;
+  const capabilityMaxReferences = activeCapability?.input.maxReferences;
+  const maximumReferences = selected
+    ? Math.min(modelReferenceLimit(selected), featureRule?.maxReferences ?? Infinity, capabilityMaxReferences ?? Infinity)
+    : 0;
+  const attachableReferences = scene ? attachableReferenceLimit(resolvedModels, scene, runtimeCapabilities) : maximumReferences;
   const showReferenceSection = Boolean(scene && (needsImage(scene) || ((scene.modality === 'image' || Boolean(videoFeature)) && maximumReferences > 0)));
   const gridReferences = Boolean(imageWorkspace && attachableReferences > 1);
   useEffect(() => {
@@ -204,7 +207,10 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
     catch (error) { onError((error as Error).message); }
     finally { if (mounted.current) setSyncing(false); }
   };
-  const invalidReferences = draft.references.length > maximumReferences || Boolean(scene && needsImage(scene) && !draft.references.length);
+  const capabilityBlocked = Boolean(activeCapability && (activeCapability.status !== 'live' || !activeCapability.channels.gui));
+  const invalidReferences = draft.references.length > maximumReferences
+    || draft.references.length < (activeCapability?.input.minReferences ?? 0)
+    || Boolean(scene && needsImage(scene) && !draft.references.length);
   const shotPreferences = draft.shotPreferences ?? (studio?.destination.studio.id === 'shorts' ? { aspect: '9:16' } : undefined);
   const parameterModel = selected;
   const parameterKey = parameterModel ? `${scene?.id ?? 'direct'}:${parameterModel.id}` : '';
@@ -230,13 +236,14 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const promptOptional = Boolean(featureRule?.promptOptional || (activeCapability && !activeCapability.input.promptRequired));
   const promptReady = Boolean(draft.prompt.trim() || promptOptional);
   const submit = async () => {
-    if (!selected || !promptReady || busy || uploadingReferences || invalidReferences) return; setBusy(true);
+    if (!selected || !promptReady || busy || uploadingReferences || invalidReferences || capabilityBlocked) return; setBusy(true);
     const studioContext = studio ? { studio: studio.destination.studio.id, scene: studio.destination.scene.id, model: selected.id } : undefined;
     try {
       const parsed = requestParameters(parameters, selected, draft.references.length > 0, studioDefaultValues(selected));
-      const prompt = feature ? imageFeaturePrompt(feature, draft.prompt, draft.relight)
+      const prompt = activeCapability
+        ? buildCapabilityPrompt(activeCapability.id, draft.prompt, mergedCapabilityOptions, runtimeCapabilities)
+        : feature ? imageFeaturePrompt(feature, draft.prompt, draft.relight)
         : videoFeature ? videoFeaturePrompt(videoFeature, draft.prompt, draft.videoChoices)
-        : activeCapability ? buildCapabilityPrompt(activeCapability.id, draft.prompt, mergedCapabilityOptions, runtimeCapabilities)
         : draft.prompt;
       const submittedParameters = activeCapability
         ? buildCapabilityParameters(activeCapability, mergedCapabilityOptions, { ...parsed, ...featureRule?.parameters })
@@ -344,7 +351,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const generate = !imageWorkspace && setupProvider ? <Button variant="plain" className="om-button om-creation-submit-button" data-primary onClick={() => configureProvider(setupProvider)}>
     <RemixIcon name="plug-line" size={19} />{t('Set up to generate')}<RemixIcon name="arrow-right-line" size={18} />
   </Button> : <Button variant="plain" className="om-button om-creation-submit-button" data-primary
-    disabled={busy || uploadingReferences || !selected || !promptReady || invalidReferences} onClick={() => void submit()}>
+    disabled={busy || uploadingReferences || !selected || !promptReady || invalidReferences || capabilityBlocked} onClick={() => void submit()}>
     <RemixIcon name="sparkling-fill" size={19} />{t(busy ? 'Submitting your idea…' : featureRule?.actionLabel ?? kind.action)}
     <RemixIcon name="arrow-right-line" size={18} />
   </Button>;
@@ -409,7 +416,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
       {feature === 'relight' && <section className="om-relight-controls" aria-label={t('Lighting')}>
         {(capabilityControls.length ? capabilityControls : relightControls).map(control => <div className="om-relight-field" key={control.key}>
           <span className="om-eyebrow">{t(control.label)}</span>
-          <Select appearance="boxed" popupClassName={imagePopupClass} label={t(control.label)} value={mergedCapabilityOptions[control.key] ?? control.choices[0].value}
+          <Select appearance="boxed" popupClassName={imagePopupClass} label={t(control.label)} value={mergedCapabilityOptions[control.key] ?? defaultCapabilityControlChoice(control).value}
             options={control.choices.map(choice => ({ value: choice.value, label: t(choice.label) }))}
             onCommit={value => setDraft(current => ({
               ...current,
@@ -419,9 +426,9 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
         </div>)}
       </section>}
       {videoFeatureRule && <section className="om-relight-controls" aria-label={t(scene!.label)}>
-        {videoFeatureRule.controls.map(control => <div className="om-relight-field" key={control.key}>
+        {(capabilityControls.length ? capabilityControls : videoFeatureRule.controls).map(control => <div className="om-relight-field" key={control.key}>
           <span className="om-eyebrow">{t(control.label)}</span>
-          <Select label={t(control.label)} value={draft.videoChoices?.[control.key] ?? defaultVideoFeatureChoice(control).value}
+          <Select label={t(control.label)} value={mergedCapabilityOptions[control.key] ?? defaultCapabilityControlChoice(control).value}
             options={control.choices.map(choice => ({ value: choice.value, label: t(choice.label) }))}
             onCommit={value => setDraft(current => ({
               ...current,
@@ -433,7 +440,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
       {!feature && !videoFeatureRule && capabilityControls.length > 0 && <section className="om-relight-controls" aria-label={t(activeCapability?.title ?? scene?.label ?? 'Options')}>
         {capabilityControls.map(control => <div className="om-relight-field" key={control.key}>
           <span className="om-eyebrow">{t(control.label)}</span>
-          <Select appearance={imageWorkspace ? 'boxed' : undefined} popupClassName={imagePopupClass} label={t(control.label)} value={mergedCapabilityOptions[control.key] ?? control.choices[0].value}
+          <Select appearance={imageWorkspace ? 'boxed' : undefined} popupClassName={imagePopupClass} label={t(control.label)} value={mergedCapabilityOptions[control.key] ?? defaultCapabilityControlChoice(control).value}
             options={control.choices.map(choice => ({ value: choice.value, label: t(choice.label) }))}
             onCommit={value => setDraft(current => ({ ...current, capabilityOptions: { ...current.capabilityOptions, [control.key]: value } }))} />
         </div>)}

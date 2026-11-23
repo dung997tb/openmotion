@@ -19,8 +19,14 @@ export type CapabilityChoice = {
 export type CapabilityControl = {
   key: string;
   label: string;
+  defaultValue?: string;
   choices: readonly [CapabilityChoice, ...CapabilityChoice[]];
 };
+
+export function defaultCapabilityControlChoice(control: CapabilityControl): CapabilityChoice {
+  return (control.defaultValue ? control.choices.find(choice => choice.value === control.defaultValue) : undefined)
+    ?? control.choices[0];
+}
 
 export type CapabilityExecutor =
   | {
@@ -147,6 +153,7 @@ export const multiShotCapabilityControls: readonly CapabilityControl[] = [
   {
     key: 'shots',
     label: 'Shot count',
+    defaultValue: '3',
     choices: [
       { value: '2', label: '2 shots', prompt: 'a cohesive 2-shot sequence' },
       { value: '3', label: '3 shots', prompt: 'a cohesive 3-shot narrative sequence' },
@@ -245,13 +252,13 @@ export const defaultCapabilities: readonly CapabilityDefinition[] = [
     channels: { gui: true, mcp: true },
     costTier: 'low',
     requiresExplicitApproval: false,
-    input: { promptRequired: true, minReferences: 0, maxReferences: 0 },
+    input: { promptRequired: true, minReferences: 0, maxReferences: 20 },
     executor: { kind: 'model', mode: 'text-to-image' },
   },
   {
     id: 'image-edit',
     title: 'Edit image',
-    summary: 'Edit or fuse 1 to 5 pinned reference images with a text instruction.',
+    summary: 'Edit or fuse pinned reference images with a text instruction.',
     modality: 'image',
     category: 'atomic-edit',
     icon: 'edit-line',
@@ -259,7 +266,7 @@ export const defaultCapabilities: readonly CapabilityDefinition[] = [
     channels: { gui: true, mcp: true },
     costTier: 'low',
     requiresExplicitApproval: false,
-    input: { promptRequired: true, minReferences: 1, maxReferences: 5 },
+    input: { promptRequired: true, minReferences: 1, maxReferences: 20 },
     executor: { kind: 'model', mode: 'text-to-image' },
   },
   {
@@ -852,7 +859,7 @@ export function capabilityControlSchema(capability: CapabilityDefinition): Recor
       type: 'string',
       description: control.label,
       enum: control.choices.map(choice => choice.value),
-      default: control.choices[0].value,
+      default: defaultCapabilityControlChoice(control).value,
     };
   }
   return {
@@ -877,7 +884,7 @@ export function buildCapabilityPrompt(
   if (capabilityId === 'relight') {
     const controls = capability?.input.controls ?? relightCapabilityControls;
     const light = controls
-      .map(control => (control.choices.find(choice => choice.value === options[control.key]) ?? control.choices[0]).prompt)
+      .map(control => (control.choices.find(choice => choice.value === options[control.key]) ?? defaultCapabilityControlChoice(control)).prompt)
       .join(', ');
     return 'Relight this image. Keep the subject, composition, pose and every detail unchanged; change only the lighting, shadows and reflections. '
       + `Lighting: ${light}.` + (note ? ' ' + note : '');
@@ -889,7 +896,7 @@ export function buildCapabilityPrompt(
   if (capabilityId === 'camera-control' || capabilityId === 'multi-shot' || capabilityId === 'native-audio') {
     if (!note) return '';
     const controls = capability?.input.controls ?? [];
-    const parts = controls.map(control => (control.choices.find(choice => choice.value === options[control.key]) ?? control.choices[0]).prompt);
+    const parts = controls.map(control => (control.choices.find(choice => choice.value === options[control.key]) ?? defaultCapabilityControlChoice(control)).prompt);
     if (capabilityId === 'camera-control') return `Camera direction: ${parts.join(', ')}. Scene: ${note}`;
     if (capabilityId === 'multi-shot') return `Multi-shot direction: ${parts.join(', ')}. Story: ${note}`;
     return `Audio direction: ${parts.join(', ')}. Scene: ${note}`;

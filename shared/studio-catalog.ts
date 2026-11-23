@@ -60,7 +60,7 @@ export function findLandingScene(id: string | null, capabilities: readonly Capab
   const builtin = studioScenes.find(scene => scene.id === resolved && scene.entry === 'landing');
   if (builtin) return builtin;
   const cap = findCapability(resolved, capabilities);
-  if (cap && cap.status !== 'deprecated' && cap.status !== 'hidden' && cap.channels.gui && (cap.modality === 'image' || cap.modality === 'video')) {
+  if (cap && cap.status === 'live' && cap.channels.gui && (cap.modality === 'image' || cap.modality === 'video')) {
     return capabilityScene(cap);
   }
   return undefined;

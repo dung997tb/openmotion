@@ -15,7 +15,14 @@ import {
   syncCapabilityRemoteConfig,
   unregisterCapabilityScriptExecutor,
 } from '../gateway/capability-center.ts';
-import { defaultCapabilities, findCapability } from '../shared/capability-registry.ts';
+import {
+  buildCapabilityPrompt,
+  capabilityControlSchema,
+  defaultCapabilities,
+  findCapability,
+  resolveCapabilityCatalog,
+} from '../shared/capability-registry.ts';
+import { findLandingScene } from '../shared/studio-catalog.ts';
 import { imageFeatures, imageFeaturePrompt } from '../shared/image-features.ts';
 import { videoFeatures, videoFeaturePrompt } from '../shared/video-features.ts';
 
@@ -453,5 +460,137 @@ test('dryRun blocks paid submission across raw model, unavailable explicit model
       );
     } finally {
       registerCapabilityQuoteEstimator(undefined);
+    }
+  }, false));
+
+test('Studio assetOperation(generate) enforces capability preflight, findLandingScene excludes coming_soon, and multi-shot defaults to 3 shots', () =>
+  fixture(async store => {
+    // 1. multi-shot preserves defaultValue: '3' in schema and prompt builder
+    const multiShot = findCapability('multi-shot')!;
+    const schema = capabilityControlSchema(multiShot) as { properties: Record<string, { default?: string }> };
+    assert.equal(schema.properties.shots.default, '3');
+    assert.match(buildCapabilityPrompt('multi-shot', 'A lunar rover', {}), /a cohesive 3-shot narrative sequence/);
+
+    // 2. findLandingScene excludes coming_soon capabilities by default and admits live overrides
+    assert.equal(findLandingScene('inpainting'), undefined);
+    assert.equal(findLandingScene('upscale-4k'), undefined);
+    const withLiveUpscale = resolveCapabilityCatalog([
+      { id: 'upscale-4k', status: 'live', channels: { gui: true, mcp: true } },
+    ]);
+    const liveScene = findLandingScene('upscale-4k', withLiveUpscale);
+    assert.equal(liveScene?.id, 'upscale-4k');
+    assert.equal(liveScene?.modality, 'image');
+
+    // 3. openmotion_assets_use(action="generate") executes full capability preflight before gateway.submit
+    const gateway = gatewayFor(store);
+    let submitCalls = 0;
+    const origSubmit = gateway.submit.bind(gateway);
+    gateway.submit = (async (...args: Parameters<typeof gateway.submit>) => {
+      submitCalls += 1;
+      return origSubmit(...args);
+    }) as typeof gateway.submit;
+
+    (gateway as any).options.detect = async () => [
+      { id: 'codex', label: 'Codex', installed: true, authenticated: true, imageGeneration: true, available: true, reason: 'fixture' },
+    ];
+    (gateway as any).models = async () => [
+      { id: 'codex:image-generation', provider: 'codex', modelId: 'image-generation', label: 'Codex Image', modality: 'image', source: 'builtin', mode: 'text-to-image', supportsImageReference: true, maxInputImages: 5 },
+      { id: 'opendesign:gpt-image-2.6-sunburst', provider: 'opendesign', modelId: 'gpt-image-2.6-sunburst', label: 'Sunburst', modality: 'image', source: 'live', mode: 'text-to-image', supportsImageReference: true, maxInputImages: 16, generationOptions: { delivery: 'provider', fields: [{ key: 'background', label: 'Background', kind: 'choice', choices: [{ value: 'transparent', label: 'Transparent' }] }] } },
+    ];
+
+    const api = service(store);
+    const ref1 = { assetId: '00000000-0000-4000-8000-000000000001', versionId: '00000000-0000-4000-8000-000000000002' };
+    const ref2 = { assetId: '00000000-0000-4000-8000-000000000003', versionId: '00000000-0000-4000-8000-000000000004' };
+
+    try {
+      // 3a. coming_soon capability rejected before submit
+      await assert.rejects(
+        api.call('openmotion_assets_use', {
+          action: 'generate',
+          requestId: 'preflight-soon',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'Inpaint sky',
+          capabilityId: 'inpainting',
+          references: [ref1],
+        }),
+        /CAPABILITY_COMING_SOON/,
+      );
+
+      // 3b. GUI-disabled capability rejected before submit
+      await assert.rejects(
+        api.call('openmotion_assets_use', {
+          action: 'generate',
+          requestId: 'preflight-channel',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'First frame',
+          capabilityId: 'shot-image',
+        }),
+        /CAPABILITY_CHANNEL_DISABLED/,
+      );
+
+      // 3c. Live script override rejected with CAPABILITY_EXECUTOR_UNSUPPORTED instead of running generic model
+      await saveCapabilityOverrides(store, [
+        { id: 'remove-background', status: 'live', channels: { gui: true, mcp: true }, executor: { kind: 'script', scriptId: 'local-rmbg' } },
+        { id: 'upscale-4k', status: 'live', channels: { gui: true, mcp: true }, executor: { kind: 'dedicated-model', providers: ['codex'], models: ['real-esrgan-4k'], recommendedModel: 'real-esrgan-4k', mode: 'text-to-image' } },
+      ]);
+      await assert.rejects(
+        api.call('openmotion_assets_use', {
+          action: 'generate',
+          requestId: 'preflight-script',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'Cut out subject',
+          capabilityId: 'remove-background',
+          references: [ref1],
+        }),
+        /CAPABILITY_EXECUTOR_UNSUPPORTED/,
+      );
+
+      // 3d. Live dedicated-model override rejects incompatible generic model and out-of-range references
+      await assert.rejects(
+        api.call('openmotion_assets_use', {
+          action: 'generate',
+          requestId: 'preflight-refs',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'Upscale',
+          capabilityId: 'upscale-4k',
+          references: [ref1, ref2],
+        }),
+        /references|out_of_range|0\.\.|1\.\.1/i,
+      );
+      await assert.rejects(
+        api.call('openmotion_assets_use', {
+          action: 'generate',
+          requestId: 'preflight-model',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'Upscale',
+          capabilityId: 'upscale-4k',
+          references: [ref1],
+        }),
+        /CAPABILITY_MODEL_INCOMPATIBLE/,
+      );
+
+      // 3e. Invalid capabilityOptions rejected before submit
+      await assert.rejects(
+        api.call('openmotion_assets_use', {
+          action: 'generate',
+          requestId: 'preflight-opt',
+          modality: 'image',
+          model: 'codex:image-generation',
+          prompt: 'Relight',
+          capabilityId: 'relight',
+          capabilityOptions: { direction: 'nonexistent-angle' },
+          references: [ref1],
+        }),
+        /invalid choice|invalid_enum/i,
+      );
+
+      assert.equal(submitCalls, 0, 'gateway.submit must never be invoked when capability preflight fails');
+    } finally {
+      gateway.submit = origSubmit;
     }
   }, false));
