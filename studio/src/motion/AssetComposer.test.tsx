@@ -1248,3 +1248,85 @@ it('shows reference quota counter, compact thumbnail grid, drag/paste upload, st
   />));
   expect(onInfo).not.toHaveBeenCalled();
 });
+
+it('focuses and pulses the prompt field when promptAppliedToken increments in video and image workspaces', async () => {
+  vi.useFakeTimers();
+  try {
+    const { mediaEditorDestination } = await import('./creativeStudios');
+    const videoStudio = {
+      catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(),
+      remember: vi.fn(),
+      destination: mediaEditorDestination('text-to-video'),
+    };
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'video', prompt: '', references: [] }} promptAppliedToken={0} studio={videoStudio} />,
+    ));
+    const videoPromptBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const videoTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).not.toBe(videoTextarea);
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    const appliedPrompt = 'Film a slow-motion close-up of an orange soda bottle.';
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'video', prompt: appliedPrompt, references: [] }} promptAppliedToken={1} studio={videoStudio} />,
+    ));
+    expect(document.activeElement).toBe(videoTextarea);
+    expect(videoTextarea.selectionStart).toBe(appliedPrompt.length);
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBe('a');
+
+    // Repeat click toggles pulse key and re-focuses even when prompt text is unchanged.
+    videoTextarea.blur();
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'video', prompt: appliedPrompt, references: [] }} promptAppliedToken={2} studio={videoStudio} />,
+    ));
+    expect(document.activeElement).toBe(videoTextarea);
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBe('b');
+
+    await act(async () => { vi.advanceTimersByTime(950); });
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    // Image workspace highlights the intrinsic field shell and focuses the embedded textarea.
+    const imageStudio = {
+      catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(),
+      remember: vi.fn(),
+      destination: mediaEditorDestination('text-to-image'),
+    };
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: 'Amber glass bottle', references: [] }} promptAppliedToken={3} studio={imageStudio} />,
+    ));
+    const imageField = container.querySelector<HTMLElement>('.om-field[data-form-field="intrinsic"]')!;
+    const imageTextarea = container.querySelector<HTMLTextAreaElement>('.om-image-prompt')!;
+    expect(document.activeElement).toBe(imageTextarea);
+    expect(imageField.getAttribute('data-prompt-applied')).toBe('a');
+
+    // Freshly mounting a closed standalone library composer with a pending token consumes it immediately.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    const reusedPrompt = 'Neon alley rain scene';
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: reusedPrompt, references: [] }} promptAppliedToken={1} />,
+    ));
+    const libraryPromptBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const libraryTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).toBe(libraryTextarea);
+    expect(libraryTextarea.selectionStart).toBe(reusedPrompt.length);
+    expect(libraryPromptBox.getAttribute('data-prompt-applied')).toBe('a');
+    await act(async () => { vi.advanceTimersByTime(950); });
+    expect(libraryPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    // A later task remount with token reset to 0 does not replay focus or highlight.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: reusedPrompt, references: [] }} promptAppliedToken={0} />,
+    ));
+    const remountedBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const remountedTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).not.toBe(remountedTextarea);
+    expect(remountedBox.getAttribute('data-prompt-applied')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
