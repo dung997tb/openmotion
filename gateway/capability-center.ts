@@ -4,8 +4,8 @@ import { ToolInputError } from '../shared/tool-input-error.ts';
 import type { OmTracking } from '../shared/tracking.ts';
 import type { WorkspaceStore } from '../workspace.ts';
 import type { AssetReference } from '../shared/asset-library.ts';
-import { modelReferenceLimit, type Modality, type Model } from '../shared/gateway.ts';
-import { generationOptions } from '../shared/generation-options.ts';
+import { mediaProviders, modelReferenceLimit, type Modality, type Model } from '../shared/gateway.ts';
+import { generationOptions, resolveGenerationParameters, validateGenerationOptions } from '../shared/generation-options.ts';
 import {
   buildCapabilityParameters,
   buildCapabilityPrompt,
@@ -79,7 +79,8 @@ export type CapabilityQuote = {
 
 export type CapabilityQuoteContext = {
   store: WorkspaceStore;
-  capability: CapabilityDefinition;
+  capability?: CapabilityDefinition;
+  modality?: Modality;
   model?: Model;
   options: Record<string, unknown>;
   parameters: Record<string, unknown>;
@@ -100,10 +101,13 @@ export function registerCapabilityQuoteEstimator(estimator: CapabilityQuoteEstim
 
 async function estimateCapabilityQuote(ctx: CapabilityQuoteContext): Promise<CapabilityQuote> {
   if (customQuoteEstimator) return customQuoteEstimator(ctx);
+  const modality = ctx.capability?.modality ?? ctx.modality ?? ctx.model?.modality;
+  const costTier: CapabilityCostTier = ctx.capability?.costTier ?? (modality === 'video' ? 'medium' : 'low');
+  const requiresExplicitApproval = ctx.capability?.requiresExplicitApproval ?? modality === 'video';
   return {
-    capabilityId: ctx.capability.id,
-    costTier: ctx.capability.costTier,
-    requiresExplicitApproval: ctx.capability.requiresExplicitApproval,
+    capabilityId: ctx.capability?.id ?? 'raw-model',
+    costTier,
+    requiresExplicitApproval,
     estimatedCredits: null,
     currency: null,
     quoteSource: 'static-policy',
@@ -321,18 +325,29 @@ export async function capabilityDiscover(
   };
 
   if (args.action === 'list') {
+    if (args.offset !== undefined && (!Number.isInteger(args.offset) || args.offset < 0)) {
+      throw new ToolInputError('offset must be a non-negative integer', 'offset', 'out_of_range');
+    }
+    if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)) {
+      throw new ToolInputError('limit must be an integer between 1 and 100', 'limit', 'out_of_range');
+    }
     const entries = listCapabilitiesForChannel(catalog, channel, {
       modality: args.modality,
       includeComingSoon: args.includeComingSoon,
     }).map(summarize);
+    const offset = args.offset ?? 0;
+    const sliced = args.limit === undefined ? entries.slice(offset) : entries.slice(offset, offset + args.limit);
     const inspected = (await mediaUse(store, { action: 'inspect' }, tracking)) as {
       providers: unknown;
       defaults: unknown;
       settingsHandoff: unknown;
     };
     return {
-      capabilities: entries,
+      capabilities: sliced,
       total: entries.length,
+      offset,
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      hasMore: offset + sliced.length < entries.length,
       providers: inspected.providers,
       defaults: inspected.defaults,
       settingsHandoff: inspected.settingsHandoff,
@@ -563,6 +578,14 @@ export async function capabilityRun(
         throw new ToolInputError('sourcePath or 1 audio/video asset reference is required for asr-transcribe', 'sourcePath', 'missing');
       }
       if (args.dryRun === true) {
+        if (args.language !== undefined && (typeof args.language !== 'string' || !/^(auto|[a-z]{2,3})$/.test(args.language))) {
+          throw new Error('Choose an ISO language code or auto');
+        }
+        const asrCatalog = await transcriptsFor(store).models();
+        const asrModel = asrCatalog.models.find(item => item.id === (args.model ?? asrCatalog.defaultModel));
+        if (!asrModel) {
+          throw new Error('CAPABILITY_UNAVAILABLE: Configure an enabled transcription model in Settings > Model providers');
+        }
         const quote = await estimateCapabilityQuote({
           store,
           capability: cap,
@@ -570,7 +593,13 @@ export async function capabilityRun(
           parameters: args.parameters ?? {},
           referenceCount: references.length,
         });
-        return { dryRun: true, capabilityId: cap.id, executorKind: 'service' as const, quote };
+        return {
+          dryRun: true,
+          capabilityId: cap.id,
+          executorKind: 'service' as const,
+          selectedModel: asrModel.id,
+          quote: { ...quote, selectedModel: quote.selectedModel ?? asrModel.id },
+        };
       }
       const submitted = await transcriptOperation(store, {
         command: 'submit',
@@ -602,8 +631,17 @@ export async function capabilityRun(
     const compatible = selectCompatibleModels(cap, models, availableProviders, references.length);
     let chosen: Model | undefined;
     if (args.model) {
-      chosen = compatible.find(m => m.id === args.model) ?? models.find(m => m.id === args.model && capabilitySupportsModel(cap, m));
+      chosen = compatible.find(m => m.id === args.model);
       if (!chosen) {
+        const catalogModel = models.find(m => m.id === args.model);
+        if (catalogModel && capabilitySupportsModel(cap, catalogModel)) {
+          if (!availableProviders.has(catalogModel.provider)) {
+            throw new Error(`CAPABILITY_UNAVAILABLE: Provider ${catalogModel.provider} is not ready for model ${args.model}`);
+          }
+          if (references.length >= 2 && catalogModel.modality === 'image' && modelReferenceLimit(catalogModel) < references.length) {
+            throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Model ${args.model} accepts at most ${modelReferenceLimit(catalogModel)} reference image(s)`);
+          }
+        }
         throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Model ${args.model} does not support capability ${cap.id}`);
       }
     } else {
@@ -686,13 +724,97 @@ export async function capabilityRun(
 
   // Raw model fallback when no dedicated capabilityId is specified
   if (!args.model) throw new ToolInputError('capabilityId or model is required', 'capabilityId', 'missing');
-  if (!args.modality) throw new ToolInputError('modality is required when calling by raw model', 'modality', 'missing');
+  if (args.modality !== 'image' && args.modality !== 'video' && args.modality !== 'audio') {
+    throw new ToolInputError('modality must be image, video, or audio when calling by raw model', 'modality', args.modality ? 'invalid_enum' : 'missing');
+  }
+  const rawModality = args.modality as Modality;
   if (typeof args.prompt !== 'string' || !args.prompt.trim()) {
     throw new ToolInputError('prompt is required when calling by raw model', 'prompt', 'missing');
   }
+  if (args.mode !== undefined) {
+    if (!['text-to-image', 'text-to-video', 'text-to-audio', 'text-to-speech'].includes(args.mode)) {
+      throw new ToolInputError('Unsupported generation mode', 'mode', 'invalid_enum');
+    }
+    if (args.mode !== `text-to-${rawModality}` && !(rawModality === 'audio' && args.mode === 'text-to-speech')) {
+      throw new ToolInputError('Generation mode does not match modality', 'mode', 'invalid_enum');
+    }
+  }
+  if (args.dryRun === true) {
+    const [status, models] = await Promise.all([gateway.status(), gateway.models()]);
+    const availableProviders = new Set(
+      status.providers
+        .filter(p => p.available && !(p.id === 'account' && p.mediaEntitlement === 'not-included'))
+        .map(p => p.id),
+    );
+    let chosen = models.find(m => m.id === args.model && m.modality === rawModality);
+    if (!chosen && models.some(m => m.id === args.model)) {
+      throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Model ${args.model} does not match modality ${rawModality}`);
+    }
+    if (!chosen && typeof args.model === 'string') {
+      const colon = args.model.indexOf(':');
+      const provider = colon > 0 ? mediaProviders.find(id => id === args.model.slice(0, colon)) : undefined;
+      const modelId = colon > 0 ? args.model.slice(colon + 1) : '';
+      if (provider && /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,140}$/.test(modelId)) {
+        chosen = {
+          id: args.model,
+          provider,
+          modelId,
+          label: modelId,
+          modality: rawModality,
+          mode: args.mode ?? `text-to-${rawModality}`,
+          source: 'custom',
+        };
+      }
+    }
+    if (!chosen || !availableProviders.has(chosen.provider)) {
+      throw new Error(`CAPABILITY_UNAVAILABLE: Selected model ${args.model} is unavailable; configure an available provider or choose a different model`);
+    }
+    if (['account', 'opendesign'].includes(chosen.provider) && args.mode && args.mode !== chosen.mode) {
+      throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Generation mode ${args.mode} does not match the selected ${chosen.provider === 'account' ? 'account' : 'Cloud'} model`);
+    }
+    const resolvedModel: Model = args.mode ? { ...chosen, mode: args.mode } : chosen;
+    const rawRefs: AssetReference[] = Array.isArray(args.references) ? args.references : [];
+    const rawParams = args.parameters && typeof args.parameters === 'object' && !Array.isArray(args.parameters)
+      ? args.parameters as Record<string, unknown>
+      : {};
+    const resolvedParameters = resolveGenerationParameters(resolvedModel, rawParams, rawRefs.length > 0);
+    validateGenerationOptions(resolvedModel, resolvedParameters, rawRefs.length > 0);
+    const referenceLimit = modelReferenceLimit(resolvedModel);
+    if (rawRefs.length && resolvedModel.provider === 'opendesign' && resolvedModel.modality === 'image' && resolvedModel.supportsImageReference === undefined) {
+      throw new Error('Image editing capability is unknown. Sync Cloud models before using references.');
+    }
+    if (rawRefs.length && !referenceLimit) {
+      throw new Error(rawModality === 'video'
+        ? 'This video model does not accept an input image. Choose a video model with maxInputImages, or remove the reference.'
+        : 'This model does not support asset references. Choose an image model that supports editing, or remove the reference.');
+    }
+    if (rawRefs.length > referenceLimit) {
+      throw new Error(`This model accepts at most ${referenceLimit} input image${referenceLimit === 1 ? '' : 's'}`);
+    }
+    if (resolvedModel.provider === 'opendesign' && rawRefs.length && resolvedParameters.images !== undefined) {
+      throw new Error('Choose pinned references or parameters.images for Cloud input');
+    }
+    const quote = await estimateCapabilityQuote({
+      store,
+      modality: rawModality,
+      model: resolvedModel,
+      options: {},
+      parameters: resolvedParameters,
+      referenceCount: rawRefs.length,
+    });
+    return {
+      dryRun: true,
+      executorKind: 'model' as const,
+      selectedModel: resolvedModel.id,
+      modality: rawModality,
+      mode: resolvedModel.mode,
+      effectiveParameters: resolvedParameters,
+      quote,
+    };
+  }
   await requireNativeRuntime(pluginRoot, 'media');
   const job = await gateway.submit({
-    modality: args.modality as Modality,
+    modality: rawModality,
     prompt: args.prompt,
     model: args.model,
     mode: args.mode,

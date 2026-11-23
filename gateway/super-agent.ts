@@ -435,13 +435,25 @@ function previewJson(value: unknown, max = 3600): string {
   }
 }
 
+function normalizeOpenMotionToolName(toolName: string): string {
+  return toolName.replace(/^mcp_+openmotion_+/, '');
+}
+
+function isAssetReadTool(toolName: string, args: Record<string, unknown>): boolean {
+  const name = normalizeOpenMotionToolName(toolName);
+  return (name === 'openmotion_assets_use' || name === 'openmotion_asset_manage') && args.action === 'read';
+}
+
 function summarizeToolResult(tool: string, value: any, ok: boolean): string | undefined {
   if (!ok) return typeof value?.error === 'string' ? value.error : value?.error?.message || 'Tool failed';
-  const name = tool.replace(/^mcp_+openmotion_+/, '');
+  const name = normalizeOpenMotionToolName(tool);
   if (name === 'openmotion_workspace_resources' && Array.isArray(value?.items)) return `${value.items.length} resource(s)`;
+  if (name === 'openmotion_capability_discover' && Array.isArray(value?.capabilities)) return `${value.capabilities.length} capability(s)`;
+  if (value?.dryRun === true) return value?.selectedModel ? `Dry run · ${value.selectedModel}` : 'Dry run complete';
   if (value?.project?.title) return value.project.title;
   if (value?.title && value?.projectId) return String(value.title);
   if (value?.job?.state) return `Job ${value.job.state}`;
+  if (value?.asset?.name) return String(value.asset.name);
   if (value?.kit?.name) return value.kit.name;
   if (value?.artifact?.title) return value.artifact.title;
   return undefined;
@@ -1967,7 +1979,7 @@ export class SuperAgentConversations {
         return { success: false, storedValue: value, contentItems: [] as { type: string; text?: string; imageUrl?: string }[] };
       }
 
-      const media = success && toolName === 'openmotion_assets_use' && toolArgs.action === 'read'
+      const media = success && isAssetReadTool(toolName, toolArgs)
         ? assetReadToolResult(value as AssetReadResult)
         : undefined;
       const storedValue = media?.structuredContent ?? value;
@@ -2213,7 +2225,7 @@ export class SuperAgentConversations {
             if (active.stopped || active.deleted) {
               return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: 'Conversation stopped' }) }] };
             }
-            const media = toolName === 'openmotion_assets_use' && toolArgs.action === 'read'
+            const media = isAssetReadTool(toolName, toolArgs)
               ? assetReadToolResult(value as AssetReadResult)
               : undefined;
             const storedValue = media?.structuredContent ?? value;
@@ -2859,24 +2871,32 @@ export class SuperAgentConversations {
       return { presented: true, artifact: stored };
     }
 
-    const phase1Def = exposedPhase1Tools.find(tool => tool.name === toolName);
+    const normalizedTool = normalizeOpenMotionToolName(toolName);
+    const phase1Def = exposedPhase1Tools.find(tool => tool.name === normalizedTool);
     if (!phase1Def) throw new Error(`Unknown tool: ${toolName}`);
     const args = { ...rawArgs };
-    if ((toolName === 'openmotion_assets_use' || toolName === 'openmotion_media_use') && args.action === 'generate') {
+    const isLegacyGenerate = (normalizedTool === 'openmotion_assets_use' || normalizedTool === 'openmotion_media_use') && args.action === 'generate';
+    const isCapabilityRun = normalizedTool === 'openmotion_capability_run'
+      && (args.action === undefined || args.action === 'run')
+      && args.dryRun !== true;
+    if (isLegacyGenerate || isCapabilityRun) {
+      const approvalTitle = isCapabilityRun && typeof args.capabilityId === 'string' && args.capabilityId.trim()
+        ? `Run capability (${args.capabilityId.trim()})`
+        : 'Generate media asset';
       const approved = await this.approval(
         active,
         'generation',
-        'Generate media asset',
+        approvalTitle,
         JSON.stringify(args, null, 2),
       );
       if (!approved) throw new Error('Generation declined by the user');
       if (active.stopped) throw new Error('Conversation stopped');
-      if (toolName === 'openmotion_assets_use') {
+      if (normalizedTool === 'openmotion_assets_use' || normalizedTool === 'openmotion_capability_run') {
         args.conversationId = active.chat.id;
         args.requestId ??= `sa-${assetHash({ conversation: active.chat.id, callId }).slice(0, 48)}`;
       }
     }
-    return runtime.phase1().call(toolName, args);
+    return runtime.phase1().call(normalizedTool, args);
   }
 
   private async resolvePresentedArtifact(args: Record<string, unknown>): Promise<SuperAgentArtifact> {
@@ -3191,7 +3211,12 @@ export class SuperAgentConversations {
       return stored;
     }
 
-    if (name === 'openmotion_assets_use' || name === 'openmotion_assets') {
+    if (
+      name === 'openmotion_assets_use'
+      || name === 'openmotion_assets'
+      || name === 'openmotion_capability_run'
+      || name === 'openmotion_job_manage'
+    ) {
       if (value.job?.state === 'completed' && Array.isArray(value.job.libraryAssets) && value.job.libraryAssets.length) {
         const ref = value.job.libraryAssets[0];
         const asset = await new AssetLibrary(this.store).get(ref.assetId).catch(() => null);
@@ -3215,6 +3240,33 @@ export class SuperAgentConversations {
           return stored;
         }
       }
+    }
+
+    if (name === 'openmotion_capability_run' && value.dryRun !== true && value.asset?.id) {
+      const asset = value.asset;
+      const versionId = value.version?.id ?? asset.currentVersionId;
+      if (versionId) {
+        const version = value.version ?? assetVersion(asset, versionId);
+        const url = assetMediaUrl(asset.id, versionId);
+        const stored = upsertChatArtifact(active.chat, {
+          id: `asset:${asset.id}:${versionId}`,
+          kind: asset.modality === 'video' ? 'asset-video' : asset.modality === 'audio' ? 'asset-audio' : 'asset-image',
+          title: asset.name,
+          subtitle: version?.model || value.capabilityId || asset.modality,
+          assetId: asset.id,
+          versionId,
+          url,
+          downloadUrl: `${url}?download=1`,
+          mimeType: version?.mimeType,
+          createdAt: now,
+          updatedAt: now,
+        }, true);
+        await this.persist(active, true);
+        return stored;
+      }
+    }
+
+    if (name === 'openmotion_assets_use' || name === 'openmotion_assets' || name === 'openmotion_asset_manage') {
       if (args.action === 'import' && value.asset?.id) {
         const asset = value.asset;
         const versionId = asset.currentVersionId;

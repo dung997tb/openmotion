@@ -15,7 +15,7 @@ import {
   syncCapabilityRemoteConfig,
   unregisterCapabilityScriptExecutor,
 } from '../gateway/capability-center.ts';
-import { defaultCapabilities } from '../shared/capability-registry.ts';
+import { defaultCapabilities, findCapability } from '../shared/capability-registry.ts';
 import { imageFeatures, imageFeaturePrompt } from '../shared/image-features.ts';
 import { videoFeatures, videoFeaturePrompt } from '../shared/video-features.ts';
 
@@ -44,16 +44,22 @@ test('Unified Capability Registry drives shared image/video features and separat
   assert.deepEqual(imageFeatures['remove-background'].parameters, { background: 'transparent' });
   assert.equal(imageFeatures.relight.recommended, 'seedream-5.5');
   assert.equal(videoFeatures['multi-shot'].defaultDuration, 10);
-  assert.equal(videoFeatures['native-audio'].forceAudio, true);
+  const nativeAudio = findCapability('native-audio');
+  assert.ok(nativeAudio && nativeAudio.executor.kind === 'prompt-preset' && nativeAudio.executor.forceAudio === true);
+  assert.equal(nativeAudio.channels.gui, false);
+  assert.equal(nativeAudio.channels.mcp, true);
   assert.match(imageFeaturePrompt('relight', 'Sharp rim.', { direction: 'back', temperature: 'warm', mood: 'neon' }), /backlight.*3200K.*neon/i);
   assert.match(videoFeaturePrompt('camera-control', 'Mountain peak', { movement: 'orbit', pace: 'slow' }), /360-degree camera orbit.*Mountain peak/);
 
+  assert.equal(defaultCapabilities.length, 32);
   const liveIds = defaultCapabilities.filter(c => c.status === 'live').map(c => c.id);
+  assert.equal(liveIds.length, 14);
   for (const id of ['text-to-image', 'remove-background', 'relight', 'character', 'camera-control', 'multi-shot', 'native-audio', 'music', 'speech', 'asr-transcribe']) {
     assert.ok(liveIds.includes(id), `expected live capability ${id}`);
   }
   const soonIds = defaultCapabilities.filter(c => c.status === 'coming_soon').map(c => c.id);
-  for (const id of ['inpainting', 'upscale-4k', 'lipsync', 'voice-changer', 'dubbing', 'digital-human', '3d-asset']) {
+  assert.equal(soonIds.length, 18);
+  for (const id of ['inpainting', 'expand-image', 'upscale-4k', 'omni-reference', 'lipsync', 'voice-changer', 'dubbing', 'digital-human', '3d-asset']) {
     assert.ok(soonIds.includes(id), `expected coming_soon capability ${id}`);
   }
 });
@@ -267,11 +273,11 @@ test('extension hooks cover dedicated-model structured parameter mapping, remote
       await syncCapabilityRemoteConfig(store);
 
       // 2. Custom cloud quote estimator plugs into both `action=quote` and `dryRun=true`
-      registerCapabilityQuoteEstimator(async ({ capability, options, model }) => ({
-        capabilityId: capability.id,
-        costTier: capability.costTier,
-        requiresExplicitApproval: capability.requiresExplicitApproval,
-        estimatedCredits: options.scale === '4x' ? 12 : 6,
+      registerCapabilityQuoteEstimator(async ({ capability, modality, options, model }) => ({
+        capabilityId: capability?.id ?? 'raw-model',
+        costTier: capability?.costTier ?? (modality === 'video' ? 'medium' : 'low'),
+        requiresExplicitApproval: capability?.requiresExplicitApproval ?? modality === 'video',
+        estimatedCredits: capability ? (options.scale === '4x' ? 12 : 6) : 3,
         currency: 'credits',
         quoteSource: 'cloud-quote',
         selectedModel: model?.id ?? null,
@@ -322,5 +328,130 @@ test('extension hooks cover dedicated-model structured parameter mapping, remote
       assert.ok(rows.some(row => row.skillId === id), `missing library skill ${id}`);
       const detail = await api.call('openmotion_get_skill', { skillId: id });
       assert.match(detail.instructions, /openmotion_capability_discover/);
+    }
+  }, false));
+
+test('dryRun blocks paid submission across raw model, unavailable explicit model, and ASR service paths; discover list validates pagination', () =>
+  fixture(async store => {
+    const api = service(store);
+    const gateway = gatewayFor(store);
+    let codexInvocations = 0;
+    gateway.options.detect = async () => [
+      { id: 'codex', label: 'Codex', installed: true, authenticated: true, imageGeneration: true, available: true, reason: 'fixture' },
+    ];
+    gateway.options.codex = async () => {
+      codexInvocations += 1;
+      return readFile(await makePng(store.directory, 'should-not-run.png', 'red'));
+    };
+
+    try {
+      // 1. Raw model fallback dryRun (no capabilityId, no requestId) must NEVER submit a job
+      registerCapabilityQuoteEstimator(async ({ capability, modality, model }) => ({
+        capabilityId: capability?.id ?? 'raw-model',
+        costTier: modality === 'video' ? 'medium' : 'low',
+        requiresExplicitApproval: modality === 'video',
+        estimatedCredits: 4,
+        currency: 'credits',
+        quoteSource: 'cloud-quote',
+        selectedModel: model?.id ?? null,
+      }));
+
+      const rawDry = await api.call('openmotion_capability_run', {
+        model: 'codex:image-generation',
+        modality: 'image',
+        prompt: 'A quiet paper lantern at dusk',
+        dryRun: true,
+      });
+      assert.equal(rawDry.dryRun, true);
+      assert.equal(rawDry.executorKind, 'model');
+      assert.equal(rawDry.selectedModel, 'codex:image-generation');
+      assert.equal(rawDry.quote.quoteSource, 'cloud-quote');
+      assert.equal(rawDry.quote.estimatedCredits, 4);
+      assert.equal(codexInvocations, 0);
+      assert.equal((await gateway.listJobs()).length, 0);
+
+      // 2. Raw model fallback rejects mismatched modality and unavailable providers on dryRun
+      await assert.rejects(
+        api.call('openmotion_capability_run', {
+          model: 'codex:image-generation',
+          modality: 'video',
+          prompt: 'Mismatched modality',
+          dryRun: true,
+        }),
+        /CAPABILITY_MODEL_INCOMPATIBLE/,
+      );
+      await assert.rejects(
+        api.call('openmotion_capability_run', {
+          model: 'fal:flux-pro',
+          modality: 'image',
+          prompt: 'Unconfigured provider',
+          dryRun: true,
+        }),
+        /CAPABILITY_UNAVAILABLE/,
+      );
+
+      // 3. Explicit args.model for a capability cannot bypass provider availability on dryRun
+      await assert.rejects(
+        api.call('openmotion_capability_run', {
+          capabilityId: 'remove-background',
+          model: 'opendesign:gpt-image-2.6-sunburst',
+          references: [{ assetId: '00000000-0000-4000-8000-000000000001', versionId: '00000000-0000-4000-8000-000000000002' }],
+          dryRun: true,
+        }),
+        /CAPABILITY_UNAVAILABLE|CAPABILITY_MODEL_INCOMPATIBLE/,
+      );
+
+      // 4. Service executor (asr-transcribe) validates ASR availability and language format during dryRun
+      await assert.rejects(
+        api.call('openmotion_capability_run', {
+          capabilityId: 'asr-transcribe',
+          sourcePath: 'sample.wav',
+          language: 'not-a-code',
+          dryRun: true,
+        }),
+        /ISO language code/,
+      );
+      await assert.rejects(
+        api.call('openmotion_capability_run', {
+          capabilityId: 'asr-transcribe',
+          sourcePath: 'sample.wav',
+          language: 'en',
+          dryRun: true,
+        }),
+        /CAPABILITY_UNAVAILABLE/,
+      );
+
+      // 5. capabilityDiscover(action="list") supports offset/limit pagination and rejects invalid bounds
+      const full = await api.call('openmotion_capability_discover', { action: 'list' });
+      assert.equal(full.offset, 0);
+      assert.equal(full.hasMore, false);
+      assert.equal(full.capabilities.length, full.total);
+
+      const page = await api.call('openmotion_capability_discover', { action: 'list', offset: 2, limit: 3 });
+      assert.equal(page.total, full.total);
+      assert.equal(page.offset, 2);
+      assert.equal(page.limit, 3);
+      assert.equal(page.capabilities.length, 3);
+      assert.equal(page.hasMore, 2 + 3 < full.total);
+      assert.deepEqual(
+        page.capabilities.map((c: any) => c.id),
+        full.capabilities.slice(2, 5).map((c: any) => c.id),
+      );
+
+      const pastEnd = await api.call('openmotion_capability_discover', { action: 'list', offset: 99, limit: 5 });
+      assert.deepEqual(pastEnd.capabilities, []);
+      assert.equal(pastEnd.total, full.total);
+      assert.equal(pastEnd.hasMore, false);
+
+      await assert.rejects(
+        api.call('openmotion_capability_discover', { action: 'list', offset: -1 }),
+        /offset|minimum/i,
+      );
+      await assert.rejects(
+        api.call('openmotion_capability_discover', { action: 'list', limit: 0 }),
+        /limit|minimum/i,
+      );
+    } finally {
+      registerCapabilityQuoteEstimator(undefined);
     }
   }, false));

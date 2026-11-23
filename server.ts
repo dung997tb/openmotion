@@ -1122,6 +1122,10 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         const modality = url.searchParams.get('modality') ?? undefined;
         const includeComingSoon = url.searchParams.get('includeComingSoon') !== 'false';
         const refresh = url.searchParams.get('refresh') === 'true';
+        const offsetParam = url.searchParams.get('offset');
+        const limitParam = url.searchParams.get('limit');
+        const offset = offsetParam !== null ? Number(offsetParam) : undefined;
+        const limit = limitParam !== null ? Number(limitParam) : undefined;
         if (action === 'catalog') {
           if (refresh) await syncCapabilityRemoteConfig(store).catch(() => {});
           return json(res, 200, { capabilities: await loadCapabilityCatalog(store) });
@@ -1135,7 +1139,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
               ? { action: 'quote', capabilityId, model: url.searchParams.get('model') ?? undefined }
               : capabilityId
                 ? { action: 'describe', capabilityId, refresh }
-                : { action: 'list', modality, includeComingSoon, refresh },
+                : { action: 'list', modality, includeComingSoon, refresh, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) },
             context.tracking,
             'gui',
           ),
@@ -1147,8 +1151,9 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       }
       if (url.pathname === '/api/capabilities/run' && req.method === 'POST') {
         const body = await input(req);
-        if (!body?.dryRun && !context.studio?.alive()) return json(res, 503, { error: 'Open the Studio before generating media' });
-        return json(res, body?.dryRun ? 200 : 202, await capabilityRun(store, { action: 'run', ...body }, context.tracking, 'gui'));
+        const isDryRun = body?.dryRun === true;
+        if (!isDryRun && !context.studio?.alive()) return json(res, 503, { error: 'Open the Studio before generating media' });
+        return json(res, isDryRun ? 200 : 202, await capabilityRun(store, { action: 'run', ...body }, context.tracking, 'gui'));
       }
       return json(res, 404, { error: 'Unknown capability center operation' });
     }
