@@ -80,6 +80,12 @@ function createMockWebPublishAccount() {
         };
         const current = catalogByProject.get(projectId) ?? { schemaVersion: 1 as const, revision: 0, files: [] };
         const mutation = payload._commentFiles!;
+        if (mutation.files.some(file => current.files.some(previous =>
+          !file.retired && !previous.retired && file.sourceFilePath === previous.sourceFilePath
+          && file.sourceFileId !== previous.sourceFileId,
+        ))) {
+          throw new AccountRequestError('API request failed with status 409');
+        }
         catalogByProject.set(projectId, {
           schemaVersion: 1,
           revision: current.revision + 1,
@@ -818,14 +824,18 @@ test('OpenDesignAccount Vela JSON error envelope parsing and signed-out workspac
   }
 });
 
-test('WebPublish stops previous slug on new_link rotation and allows unpublish/status after local project deletion', () => fixture(async store => {
+test('WebPublish retries a new link without interrupting the old one and allows status and unpublish after local project deletion', () => fixture(async store => {
   const { webPublishOperation } = await import('../gateway/web-publish-ops.ts');
   const { designProjectsFor } = await import('../design-projects.ts');
   const { client } = createMockWebPublishAccount();
   const calls: Array<{ args: string[]; workspaceId?: string }> = [];
   const origRun = client.runWithEnv.bind(client);
+  let failSharePublish = false;
   client.runWithEnv = async (args, env) => {
     calls.push({ args, workspaceId: env?.VELA_WORKSPACE_ID });
+    if (failSharePublish && args[0] === 'share' && args[1] === 'publish') {
+      throw new AccountRequestError('API request failed with status 503');
+    }
     return origRun(args, env);
   };
   const service = new WebPublishService(store.directory, client);
@@ -852,19 +862,29 @@ test('WebPublish stops previous slug on new_link rotation and allows unpublish/s
   assert.equal(first.publication.status, 'published');
   const firstSlug = first.publication.slug;
 
-  // 2. Rotating with deployMode="new_link" while published must stop the previous slug first
-  const rotated = (await webPublishOperation(
-    store,
-    { command: 'publish', targetKind: 'design', targetId: created.id, deployMode: 'new_link' },
+  const rotate = () => webPublishOperation(
+    store, { command: 'publish', targetKind: 'design', targetId: created.id, deployMode: 'new_link' },
     'http://127.0.0.1:4173',
     service,
-  )) as any;
+  ) as Promise<{ publication: { status: string; slug: string; cloudProjectId: string } }>;
+  failSharePublish = true;
+  await assert.rejects(rotate, (error: unknown) => error instanceof AccountRequestError && error.status === 503);
+  const failedPublish = calls.at(-1)!.args;
+  assert.deepEqual(failedPublish.slice(0, 2), ['share', 'publish']);
+  assert.notEqual(failedPublish[failedPublish.indexOf('--project-id') + 1], first.publication.cloudProjectId);
+  assert.ok(!calls.some(c => c.args[0] === 'share' && c.args[1] === 'stop'));
+  const statusAfterFailure = await service.status({ kind: 'design', id: created.id, entryPath: 'index.html' });
+  assert.equal(statusAfterFailure.active?.slug, firstSlug);
+  assert.equal(statusAfterFailure.active?.status, 'published');
+
+  failSharePublish = false;
+  const rotated = await rotate();
   assert.equal(rotated.publication.status, 'published');
   assert.notEqual(rotated.publication.slug, firstSlug);
-  assert.ok(
-    calls.some(c => c.args[0] === 'share' && c.args[1] === 'stop' && c.args[2] === firstSlug),
-    'new_link rotation must stop the previous active slug before minting a replacement',
-  );
+  assert.equal(rotated.publication.slug, failedPublish[failedPublish.indexOf('--slug') + 1]);
+  assert.equal(rotated.publication.cloudProjectId, failedPublish[failedPublish.indexOf('--project-id') + 1]);
+  assert.deepEqual(calls.slice(-2).map(c => c.args.slice(0, 2)), [['share', 'publish'], ['share', 'stop']]);
+  assert.equal(calls.at(-1)?.args[2], firstSlug);
 
   // 3. Delete the local design project; status & unpublish must still succeed from persisted records
   await design.trash(created.id, 'wp-rot-del-trash');

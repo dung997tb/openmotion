@@ -47,9 +47,8 @@ export function GameStudio({
   const [genre, setGenre] = useState<GameGenre | null>('shooter');
   const [style, setStyle] = useState<GameStyle | null>(null);
   const [setting, setSetting] = useState<GameSetting | null>(null);
-  const [multiplayer, setMultiplayer] = useState(false);
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('landscape');
-  // Portrait games default to a playable ad; it is single-player, so it and Multiplayer switch each other off.
+  // Portrait games default to a playable ad.
   const [playableAd, setPlayableAd] = useState(true);
   const adBuild = orientation === 'portrait' && playableAd;
   const [prompt, setPrompt] = useState('');
@@ -137,7 +136,7 @@ export function GameStudio({
   }, []);
   const update = (card: GameCard) => setGames(list => list.map(game => game.id === card.id ? card : game));
 
-  const brief = composeBrief({ prompt, genre, style, setting, multiplayer });
+  const brief = composeBrief({ prompt, genre, style, setting, multiplayer: false });
   const failure = (error: unknown) => error instanceof TypeError || offline
     ? t('The local game service is not available. Update OpenMotion and try again.')
     : t('The game could not be created: {reason}', { reason: (error as Error).message });
@@ -164,7 +163,7 @@ export function GameStudio({
     setOpenId(created.game.id);
   };
   const continueInSuperAgent = (game: GameCard, instruction: string) => {
-    if (!chrome?.openInSuperAgent) return;
+    if (!chrome?.openInSuperAgent || game.multiplayer) return;
     const displayTitle = getGameTitle(game);
     setOpenIdState(null);
     const handoff = buildSuperAgentHandoff(toGameCapabilityRef(game, displayTitle), {
@@ -178,7 +177,7 @@ export function GameStudio({
     chrome.openInSuperAgent({ ...handoff, title: undefined });
   };
   const editInSuperAgent = (game: GameCard) => {
-    if (!chrome?.openInSuperAgent) return;
+    if (!chrome?.openInSuperAgent || game.multiplayer) return;
     const displayTitle = getGameTitle(game);
     setOpenIdState(null);
     chrome.openInSuperAgent({
@@ -195,14 +194,15 @@ export function GameStudio({
     if (!brief || submitting) return;
     setSubmitting(true);
     // Choosing options without typing is enough to start: the composed brief becomes the prompt.
-    try { started(await gameApi.create({ prompt: prompt.trim() || brief, genre, style, setting, multiplayer, orientation, playableAd: adBuild })); setPrompt(''); }
+    try { started(await gameApi.create({ prompt: prompt.trim() || brief, genre, style, setting, multiplayer: false, orientation, playableAd: adBuild })); setPrompt(''); }
     catch (error) { notify(failure(error), 'error'); }
     finally { setSubmitting(false); }
   };
   const remix = async (game: GameCard) => {
+    if (game.multiplayer) return;
     // Community games are not copied: a new original game is briefed from their genre, style and description.
     try { started(game.external
-      ? await gameApi.create({ prompt: communityRemixPrompt(game), genre: game.genre, style: game.style, setting: game.setting, multiplayer: game.multiplayer, orientation: game.orientation ?? 'landscape' })
+      ? await gameApi.create({ prompt: communityRemixPrompt(game), genre: game.genre, style: game.style, setting: game.setting, multiplayer: false, orientation: game.orientation ?? 'landscape' })
       : await gameApi.remix(game.id)); }
     catch (error) { notify(failure(error), 'error'); }
   };
@@ -260,11 +260,10 @@ export function GameStudio({
             <Button variant="plain" className="om-game-chip" aria-expanded={menu === 'setting'} data-active={Boolean(setting)} onClick={() => { setToggled(null); setMenu(menu === 'setting' ? 'genre' : 'setting'); }}>
               <RemixIcon name="landscape-line" size={15} />{setting ? t(settingLabels[setting]) : t('Setting')}</Button>
             <span className="om-game-ratio" role="radiogroup" aria-label={t('Aspect ratio')}>
-              {(['landscape', 'portrait'] as const).map(id => <Button key={id} variant="plain" role="radio" className="om-game-ratio-option" aria-checked={orientation === id} onClick={() => { if (id === 'portrait' && orientation !== 'portrait') { setPlayableAd(true); setMultiplayer(false); } setOrientation(id); }}>
+              {(['landscape', 'portrait'] as const).map(id => <Button key={id} variant="plain" role="radio" className="om-game-ratio-option" aria-checked={orientation === id} onClick={() => { if (id === 'portrait' && orientation !== 'portrait') setPlayableAd(true); setOrientation(id); }}>
                 <RemixIcon name={id === 'portrait' ? 'smartphone-line' : 'computer-line'} size={15} />{t(id === 'portrait' ? 'Portrait' : 'Landscape')}</Button>)}
             </span>
-            {orientation === 'portrait' && <label className="om-game-switch"><input type="checkbox" role="switch" checked={playableAd} onChange={event => { setPlayableAd(event.target.checked); if (event.target.checked) setMultiplayer(false); }} /><span aria-hidden="true" />{t('Playable ad')}</label>}
-            <label className="om-game-switch"><input type="checkbox" role="switch" checked={multiplayer && !adBuild} onChange={event => { setMultiplayer(event.target.checked); if (event.target.checked) setPlayableAd(false); }} /><span aria-hidden="true" />{t('Multiplayer')}</label>
+            {orientation === 'portrait' && <label className="om-game-switch"><input type="checkbox" role="switch" checked={playableAd} onChange={event => setPlayableAd(event.target.checked)} /><span aria-hidden="true" />{t('Playable ad')}</label>}
             <IconButton variant="ghost" className="om-game-send" aria-label={t('Start building')} disabled={!brief || submitting} onClick={() => void submit()}
               icon={<RemixIcon name={submitting ? 'loader-4-line' : 'arrow-up-line'} size={18} />} />
           </div>
@@ -452,7 +451,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
         {/* While the Agent works, the panel shows only status and facts; the instruction stays out of the way. */}
       </div>
       {game.external && <footer className="om-game-actions">
-        <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Remix')}</Button>
+        {!game.multiplayer && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Remix')}</Button>}
         <a className="om-button h-auto" href={game.external.postUrl} target="_blank" rel="noopener noreferrer"><RemixIcon name="external-link-line" size={15} />{t('Made by {author} · {model}', { author: game.external.author, model: game.external.model })}</a></footer>}
       {canTrailer && <div className="om-game-trailer">
         {trailerBusy ? <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" disabled><RemixIcon name="loader-4-line" size={16} />{t(trailerSteps[trailer!.status])}{typeof trailer!.progress === 'number' ? ` · ${Math.round(trailer!.progress * 100)}%` : ''}</Button>
@@ -466,14 +465,14 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
         {trailer?.status === 'failed' && <p className="om-game-trailer-error">{t('The trailer could not be made: {reason}', { reason: trailer.error ?? '' })}</p>}
       </div>}
       {playable && !game.external && !mine && <footer className="om-game-actions" role="toolbar" aria-label={t('Game actions')}>
-        <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Remix')}</Button>
+        {!game.multiplayer && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Remix')}</Button>}
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.favorite} aria-label={game.favorite ? t('Remove from favorites') : t('Add to favorites')} onClick={() => act(() => gameApi.favorite(game.id, !game.favorite))} icon={<RemixIcon name={game.favorite ? 'bookmark-fill' : 'bookmark-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.reaction === 1} aria-label={t('Like')} onClick={() => act(() => gameApi.react(game.id, game.reaction === 1 ? 0 : 1))} icon={<RemixIcon name={game.reaction === 1 ? 'thumb-up-fill' : 'thumb-up-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.reaction === -1} aria-label={t('Dislike')} onClick={() => act(() => gameApi.react(game.id, game.reaction === -1 ? 0 : -1))} icon={<RemixIcon name={game.reaction === -1 ? 'thumb-down-fill' : 'thumb-down-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Copy link')} onClick={() => void share()} icon={<RemixIcon name="share-forward-line" size={17} />} />
       </footer>}
       {playable && !game.external && mine && <footer className="om-game-actions" role="toolbar" aria-label={t('Game actions')}>
-        {onEditInSuperAgent && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onEditInSuperAgent}><RemixIcon name="gamepad-line" size={16} />{t('Edit in Agent')}</Button>}
+        {!game.multiplayer && onEditInSuperAgent && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onEditInSuperAgent}><RemixIcon name="gamepad-line" size={16} />{t('Edit in Agent')}</Button>}
         <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Copy link')} onClick={() => void share()} icon={<RemixIcon name="share-forward-line" size={17} />} />
       </footer>}
     </aside>
@@ -501,7 +500,8 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
         </span>
       </header>
       <div ref={stage} className="om-game-stage" data-orientation={game.orientation === 'portrait' && playable && view === 'preview' ? 'portrait' : undefined}>
-        {!playable && game.status !== 'building' ? <GameHandoff game={game} notify={notify} onContinueInSuperAgent={onContinueInSuperAgent} />
+        {!playable && game.multiplayer ? <div className="om-game-waiting"><strong>{t('Game generation only supports single-player games.')}</strong></div>
+          : !playable && game.status !== 'building' ? <GameHandoff game={game} notify={notify} onContinueInSuperAgent={onContinueInSuperAgent} />
           : !playable ? <div className="om-game-waiting"><RemixIcon name="loader-4-line" size={28} />
             <strong>{t('Agent is running…')}</strong>
             <span className="om-muted">{t('The game will load here when it is ready.')}</span></div>

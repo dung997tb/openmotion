@@ -1167,13 +1167,18 @@
   overflow-wrap: anywhere;
 }
 
-.om-sa-user-bubble-collapsible[data-collapsed] .om-sa-user-bubble-text {
+.om-sa-user-bubble-collapsible[data-collapsed] .om-sa-user-bubble-text,
+.om-sa-user-bubble-text[data-preview] {
   max-height: 6.8em;
   overflow: hidden;
+}
+
+.om-sa-user-bubble-collapsible[data-collapsed] .om-sa-user-bubble-text {
   cursor: pointer;
 }
 
-.om-sa-user-bubble-collapsible[data-collapsed] .om-sa-user-bubble-text::after {
+.om-sa-user-bubble-collapsible[data-collapsed] .om-sa-user-bubble-text::after,
+.om-sa-user-bubble-text[data-preview]::after {
   content: '';
   position: absolute;
   left: 0;
@@ -1184,9 +1189,14 @@
   pointer-events: none;
 }
 
-.om-sa-user-bubble-collapsible[data-expanded] .om-sa-user-bubble-text {
+.om-sa-user-bubble-collapsible[data-expanded] .om-sa-user-bubble-text,
+.om-sa-user-bubble-text[data-details] {
   max-height: min(420px, 52vh);
   overflow-y: auto;
+}
+
+.om-sa-user-bubble-text[data-details] {
+  border-top: 1px solid var(--motion-border-subtle);
 }
 
 .om-sa-user-bubble-toggle {
@@ -1202,6 +1212,10 @@
   color: var(--motion-muted);
   font-size: var(--motion-text-xs);
   transition: background var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.om-sa-user-bubble-collapsible[data-game-brief] .om-sa-user-bubble-toggle {
+  justify-content: flex-end;
 }
 
 .om-sa-user-bubble-toggle:hover {
@@ -3429,6 +3443,10 @@
   background: var(--motion-border-subtle);
 }
 
+.om-sa-browser-menu > [role="separator"]:last-child {
+  display: none;
+}
+
 .om-sa-browser-menu-row {
   display: flex;
   align-items: center;
@@ -4904,7 +4922,7 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-bottom: 2px;
+  padding-block: var(--motion-space-2);
 }
 
 .om-sa-showcase-tabs::-webkit-scrollbar {
@@ -4916,7 +4934,8 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  padding: 6px var(--motion-space-12);
+  height: var(--motion-control);
+  padding: 0 var(--motion-space-12);
   border-radius: 999px;
   font-size: var(--motion-text-sm);
   font-weight: var(--motion-weight-medium);
@@ -5021,10 +5040,12 @@
   align-items: center;
   flex-shrink: 0;
   gap: 4px;
-  padding: 5px var(--motion-space-10);
+  height: var(--motion-control);
+  padding: 0 var(--motion-space-10);
   border-radius: 999px;
   font-size: var(--motion-text-xs);
   color: var(--motion-muted);
+  white-space: nowrap;
 }
 
 .om-sa-showcase-more:hover {
@@ -5718,12 +5739,11 @@
   }
 
   .om-sa-showcase-bar {
-    gap: var(--motion-space-8);
-    flex-wrap: wrap;
+    gap: var(--motion-space-6);
   }
 
   .om-sa-showcase-tab {
-    padding: 5px var(--motion-space-10);
+    padding-inline: var(--motion-space-10);
     font-size: var(--motion-text-xs);
   }
 
@@ -5859,10 +5879,6 @@
   .om-sa-viewer-toolbar {
     gap: 4px;
     padding: 4px var(--motion-space-8) var(--motion-space-6);
-  }
-
-  .om-sa-toolbar-secondary-tool {
-    display: none;
   }
 
   .om-sa-newtab {
@@ -8034,21 +8050,11 @@
   flex-shrink: 0;
 }
 
-.om-sa-showcase-bar[data-game-bar] {
-  flex-wrap: wrap;
-  row-gap: var(--motion-space-8);
-}
-
-.om-sa-showcase-bar[data-game-bar] .om-sa-showcase-tabs {
-  flex: 1 1 320px;
-  min-width: 0;
-}
-
 .om-sa-game-bar-controls {
   display: inline-flex;
   align-items: center;
+  align-self: flex-end;
   gap: var(--motion-space-8);
-  flex: 0 1 auto;
   max-width: 100%;
   min-width: 0;
 }

@@ -300,6 +300,9 @@ test('SuperAgentConversations normalizes Codex reasoning, commandExecution, file
       if (method === 'turn/start') {
         queueMicrotask(() => {
           this.onNotification({ method: 'turn/started', params: {} });
+          this.onNotification({ method: 'item/started', params: { item: { id: 'empty-reasoning', type: 'reasoning' } } });
+          this.onNotification({ method: 'item/reasoning/summaryTextDelta', params: { itemId: 'empty-reasoning', delta: ' ' } });
+          this.onNotification({ method: 'item/completed', params: { item: { id: 'empty-reasoning', type: 'reasoning', summary: [], content: [] } } });
           this.onNotification({ method: 'item/started', params: { item: { id: 'r1', type: 'reasoning' } } });
           this.onNotification({ method: 'item/reasoning/summaryTextDelta', params: { itemId: 'r1', delta: 'Checking repository files' } });
           this.onNotification({ method: 'item/completed', params: { item: { id: 'r1', type: 'reasoning', summary: [{ text: 'Checking repository files' }] } } });
@@ -318,6 +321,16 @@ test('SuperAgentConversations normalizes Codex reasoning, commandExecution, file
             },
           });
           this.onNotification({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 } } } });
+          this.onNotification({
+            method: 'item/completed',
+            params: { item: {
+              id: 'validation', type: 'mcpToolCall', tool: 'openmotion_game_validate', status: 'completed',
+              result: {
+                content: [{ type: 'text', text: 'Validation details '.repeat(170) }],
+                structuredContent: { id: 'game-id', passed: false },
+              },
+            } },
+          });
           this.onNotification({ method: 'item/completed', params: { item: { id: 'a1', type: 'agentMessage', text: 'Updated `README.md`.' } } });
           this.onNotification({ method: 'turn/completed', params: { turn: { id: 't1', status: 'completed' } } });
         });
@@ -348,7 +361,10 @@ test('SuperAgentConversations normalizes Codex reasoning, commandExecution, file
 
     assert.equal(done.state, 'idle');
     assert.equal(done.lastTurnUsage?.totalTokens, 100);
-    assert.ok(done.messages.some(m => m.role === 'reasoning' && m.text.includes('Checking repository files')));
+    assert.deepEqual(
+      done.messages.filter(m => m.role === 'reasoning').map(m => ({ text: m.text, status: m.status })),
+      [{ text: 'Checking repository files', status: 'completed' }],
+    );
     const cmdMsg = done.messages.find(m => m.role === 'tool' && m.toolEvent?.category === 'command');
     assert.equal(cmdMsg?.toolEvent?.command, 'echo ok');
     assert.equal(cmdMsg?.toolEvent?.exitCode, 0);
@@ -356,6 +372,10 @@ test('SuperAgentConversations normalizes Codex reasoning, commandExecution, file
     assert.equal(fileMsg?.toolEvent?.fileOp?.path, 'README.md');
     assert.equal(fileMsg?.toolEvent?.fileOp?.addedLines, 2);
     assert.equal(fileMsg?.toolEvent?.fileOp?.removedLines, 1);
+    const validation = done.messages.find(m => m.toolEvent?.tool === 'openmotion_game_validate')?.toolEvent;
+    assert.equal(validation?.status, 'completed');
+    assert.equal(validation?.validationPassed, false);
+    assert(validation?.outputPreview?.endsWith('…'));
   } finally {
     await service.close();
   }

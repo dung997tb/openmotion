@@ -129,12 +129,7 @@ export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
     placeholder: 'Describe the game you want to make',
     defaultPrompt: 'Build a playable retro neon arcade space-shooter game in HTML5 Canvas with keyboard and mouse controls, score & wave HUD, particle explosions, and a restart button. Preview it in the Artifact Viewer.',
     pickerCategory: 'projects',
-    quickIdeas: [
-      { title: 'Co-op 3D crystal defense', prompt: 'Defend a glowing arena crystal through 5 waves with 1–4 co-op players, dash/nova skills, and an instant invite link.' },
-      { title: 'Retro pixel platformer', prompt: 'Build a crisp pixel-art platformer with tight jump physics, hidden coins, hazards, and a dramatic boss arena.' },
-      { title: 'Portrait one-tap arcade', prompt: 'Create an addictive 9:16 portrait one-tap arcade game playable with one thumb, instant restarts, and combo multipliers.' },
-      { title: 'Cyberpunk drift racer', prompt: 'Build a neon night-time 3D street racing game with smooth drifting, nitro boost pads, and lap time records.' },
-    ],
+    quickIdeas: GAME_STUDIO_QUICK_IDEAS,
   },
   {
     id: 'image',
@@ -539,6 +534,7 @@ export function ModeResourceShowcase({
   const [gameQuery, setGameQuery] = useState('');
   const [gameSort, setGameSort] = useState<GameSort>('relevance');
   const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
+  const showcaseRef = useRef<HTMLElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const publishedGameTemplates = useMemo(
@@ -859,6 +855,7 @@ export function ModeResourceShowcase({
     markTemplateApplied();
   };
   const selectGameForAgent = (game: GameCard) => {
+    if (game.multiplayer) return;
     const title = localizedGameTitle(game, locale);
     if (game.source === 'mine') {
       const att = toGameResourceAttachment(game, title);
@@ -877,7 +874,6 @@ export function ModeResourceShowcase({
             gameStyle: game.style,
             gameSetting: game.setting,
             gameOrientation: game.orientation ?? 'landscape',
-            gameMultiplayer: game.multiplayer,
             gamePlayableAd: Boolean(game.playableAd),
           }
         : {}),
@@ -917,13 +913,18 @@ export function ModeResourceShowcase({
                     variant="plain"
                     type="button"
                     className="om-sa-game-fan-card"
-                    data-composer-source={isCenter || undefined}
-                    aria-pressed={isCenter ? isSelected : undefined}
-                    aria-label={isCenter ? `${t('Remix')}: ${title}` : title}
-                    onClick={isCenter ? () => selectGameForAgent(game) : bringToFront}
+                    data-composer-source={isCenter && !game.multiplayer || undefined}
+                    aria-pressed={isCenter && !game.multiplayer ? isSelected : undefined}
+                    aria-label={isCenter
+                      ? game.multiplayer ? t('Play {title}', { title }) : `${t('Remix')}: ${title}`
+                      : title}
+                    disabled={isCenter && game.multiplayer && !onPlayGame}
+                    onClick={!isCenter
+                      ? bringToFront
+                      : game.multiplayer ? () => onPlayGame?.(game) : () => selectGameForAgent(game)}
                   >
                     {cover && <img src={cover} alt="" />}
-                    {isCenter && (
+                    {isCenter && !game.multiplayer && (
                       <span
                         className="om-sa-game-select-cue"
                         data-selected={isSelected || undefined}
@@ -1043,7 +1044,6 @@ export function ModeResourceShowcase({
                     gameStyle: idea.style,
                     gameSetting: idea.setting,
                     gameOrientation: idea.orientation,
-                    gameMultiplayer: idea.multiplayer,
                     gamePlayableAd: Boolean(idea.playableAd),
                     gameTemplate: null,
                   });
@@ -1051,7 +1051,7 @@ export function ModeResourceShowcase({
                 }}
               >
                 <span className="om-sa-tone-icon" data-tone={mode.tone} aria-hidden="true">
-                  <RemixIcon name={idea.multiplayer ? 'group-line' : 'sparkling-line'} size={12} />
+                  <RemixIcon name="sparkling-line" size={12} />
                 </span>
                 <span>{t(idea.title)}</span>
               </Button>
@@ -1076,7 +1076,7 @@ export function ModeResourceShowcase({
       </div>
 
       {mode.id !== 'coding' && (
-      <section className="om-sa-showcase-panel" aria-labelledby={templateHeadingId}>
+      <section ref={showcaseRef} className="om-sa-showcase-panel" aria-labelledby={templateHeadingId}>
         <h3 id={templateHeadingId} className="om-sa-showcase-heading">{t('Discover templates')}</h3>
         <div className="om-sa-showcase-bar" data-game-bar={showGameCards || undefined}>
           <div className="om-sa-showcase-tabs" role="tablist" aria-label={t('Template filters')}>
@@ -1096,58 +1096,64 @@ export function ModeResourceShowcase({
               </Button>
             ))}
           </div>
-          {showGameCards ? (
-            <div className="om-sa-game-bar-controls">
-              <span className="om-field om-sa-game-search">
-                <RemixIcon name="search-line" size={14} />
-                <input
-                  value={gameQuery}
-                  placeholder={t('Search')}
-                  aria-label={t('Search games')}
-                  onChange={event => setGameQuery(event.target.value)}
-                />
-                {gameQuery && (
-                  <IconButton
-                    variant="plain"
-                    className="om-sa-game-search-clear"
-                    aria-label={t('Clear')}
-                    onClick={() => setGameQuery('')}
-                    icon={<RemixIcon name="close-line" size={12} />}
-                  />
-                )}
-              </span>
-              {activeFilter !== 'mine' && (
-                <div className="om-sa-game-sort">
-                  <Select
-                    label={t('Sort')}
-                    value={gameSort}
-                    onCommit={next => setGameSort(next as GameSort)}
-                    options={[
-                      { value: 'relevance', label: t('Default sort') },
-                      { value: 'plays', label: t('Most played') },
-                      { value: 'newest', label: t('Newest') },
-                    ]}
-                  />
-                </div>
-              )}
-            </div>
-          ) : (
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-showcase-more"
-              onClick={() => onOpenAllResources(
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-showcase-more"
+            onClick={() => {
+              if (showGameCards) {
+                setVisibleCount(totalCount);
+                showcaseRef.current?.scrollIntoView?.({ block: 'start', inline: 'nearest' });
+                return;
+              }
+              onOpenAllResources(
                 activeFilter === 'brand-kit' ? 'brand-kit'
                   : activeFilter === 'asset' ? 'asset'
                   : activeFilter === 'skills' || activeFilter === 'design-skill' ? 'skills'
                   : mode.pickerCategory,
-              )}
-            >
-              <span>{t('View all')}</span>
-              <RemixIcon name="arrow-right-up-line" size={13} />
-            </Button>
-          )}
+              );
+            }}
+          >
+            <span>{t('View all')}</span>
+            <RemixIcon name={showGameCards ? 'arrow-down-s-line' : 'arrow-right-up-line'} size={13} />
+          </Button>
         </div>
+        {showGameCards && (
+          <div className="om-sa-game-bar-controls">
+            <span className="om-field om-sa-game-search">
+              <RemixIcon name="search-line" size={14} />
+              <input
+                value={gameQuery}
+                placeholder={t('Search')}
+                aria-label={t('Search games')}
+                onChange={event => setGameQuery(event.target.value)}
+              />
+              {gameQuery && (
+                <IconButton
+                  variant="plain"
+                  className="om-sa-game-search-clear"
+                  aria-label={t('Clear')}
+                  onClick={() => setGameQuery('')}
+                  icon={<RemixIcon name="close-line" size={12} />}
+                />
+              )}
+            </span>
+            {activeFilter !== 'mine' && (
+              <div className="om-sa-game-sort">
+                <Select
+                  label={t('Sort')}
+                  value={gameSort}
+                  onCommit={next => setGameSort(next as GameSort)}
+                  options={[
+                    { value: 'relevance', label: t('Default sort') },
+                    { value: 'plays', label: t('Most played') },
+                    { value: 'newest', label: t('Newest') },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {mode.id === 'motion' && activeFilter === 'skills' && (
           <div className="om-sa-showcase-subtabs" role="tablist" aria-label={t('Skill categories')}>
@@ -1219,10 +1225,13 @@ export function ModeResourceShowcase({
                       variant="plain"
                       type="button"
                       className="om-sa-game-tile-cover"
-                      data-composer-source
-                      aria-pressed={isSelected}
-                      aria-label={isMine ? `${t('Attach')}: ${title}` : `${t('Remix')}: ${title}`}
-                      onClick={() => selectGameForAgent(game)}
+                      data-composer-source={!game.multiplayer || undefined}
+                      aria-pressed={game.multiplayer ? undefined : isSelected}
+                      aria-label={game.multiplayer
+                        ? t('Play {title}', { title })
+                        : `${t(isMine ? 'Attach' : 'Remix')}: ${title}`}
+                      disabled={game.multiplayer && !onPlayGame}
+                      onClick={() => game.multiplayer ? onPlayGame?.(game) : selectGameForAgent(game)}
                     >
                       {cover ? (
                         <img src={cover} alt="" loading="lazy" decoding="async" />
@@ -1232,14 +1241,16 @@ export function ModeResourceShowcase({
                           <span>{title}</span>
                         </div>
                       )}
-                      <span
-                        className="om-sa-game-select-cue"
-                        data-selected={isSelected || undefined}
-                        aria-hidden="true"
-                      >
-                        <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
-                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Remix')}</span>
-                      </span>
+                      {!game.multiplayer && (
+                        <span
+                          className="om-sa-game-select-cue"
+                          data-selected={isSelected || undefined}
+                          aria-hidden="true"
+                        >
+                          <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
+                          <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Remix')}</span>
+                        </span>
+                      )}
                       {status && (
                         <span className="om-sa-game-status" data-tone={game.status}>
                           {game.status === 'building' && <RemixIcon name="loader-4-line" size={12} />}

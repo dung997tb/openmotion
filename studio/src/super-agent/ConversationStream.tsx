@@ -301,6 +301,7 @@ export function ConversationStream({
     if (!gameTemplateSeed || appliedGameTemplateSeedRef.current === gameTemplateSeed.id) return;
     appliedGameTemplateSeedRef.current = gameTemplateSeed.id;
     const picked = gameTemplateSeed.game;
+    if (picked.multiplayer) return;
     if (!chat?.messages.length) {
       setActiveModeId('game');
       updateModeOptions({
@@ -309,7 +310,6 @@ export function ConversationStream({
         gameStyle: picked.style,
         gameSetting: picked.setting,
         gameOrientation: picked.orientation ?? 'landscape',
-        gameMultiplayer: picked.multiplayer,
         gamePlayableAd: Boolean(picked.playableAd),
       });
     } else {
@@ -370,7 +370,7 @@ export function ConversationStream({
         genre: modeOptions.gameGenre,
         style: modeOptions.gameStyle,
         setting: modeOptions.gameSetting,
-        multiplayer: modeOptions.gameMultiplayer,
+        multiplayer: false,
       })
     : '';
   const hasGameStudioBrief = activeMode?.id === 'game' && !hasAttachedGameProject && Boolean(modeOptions.gameTemplate || gameBrief);
@@ -513,7 +513,7 @@ export function ConversationStream({
   const handleSubmit = async () => {
     if (!canSubmit) return;
     if (activeMode?.id === 'game' && !chat?.messages.length && !attachments.some(att => att.kind === 'game-project')) {
-      const selectedTemplate = modeOptions.gameTemplate;
+      const selectedTemplate = modeOptions.gameTemplate?.multiplayer ? null : modeOptions.gameTemplate;
       setScaffoldingGame(true);
       try {
         const created = selectedTemplate && !selectedTemplate.external
@@ -525,7 +525,7 @@ export function ConversationStream({
                     genre: modeOptions.gameGenre ?? selectedTemplate.genre,
                     style: modeOptions.gameStyle ?? selectedTemplate.style,
                     setting: modeOptions.gameSetting ?? selectedTemplate.setting,
-                    multiplayer: modeOptions.gameMultiplayer,
+                    multiplayer: false,
                     orientation: modeOptions.gameOrientation,
                     playableAd: isPlayableAd(modeOptions),
                   }
@@ -534,7 +534,7 @@ export function ConversationStream({
                     genre: modeOptions.gameGenre,
                     style: modeOptions.gameStyle,
                     setting: modeOptions.gameSetting,
-                    multiplayer: modeOptions.gameMultiplayer,
+                    multiplayer: false,
                     orientation: modeOptions.gameOrientation,
                     playableAd: isPlayableAd(modeOptions),
                   },
