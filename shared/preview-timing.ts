@@ -3,7 +3,7 @@ export const TIMING_ATTRIBUTES = [
 ] as const;
 
 // Properties set directly by the inspector or by the positioning gesture.
-export const PRESENTATION_STYLES = ["left", "top", "width", "height", "font-size", "font-weight", "text-align", "color", "background-color", "opacity"] as const;
+export const PRESENTATION_STYLES = ["position", "left", "top", "width", "height", "font-size", "font-weight", "text-align", "color", "background-color", "opacity"] as const;
 export const PRESENTATION_TAGS = ["div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6"] as const;
 export const MAX_PREVIEW_TEXT_LENGTH = 4096;
 

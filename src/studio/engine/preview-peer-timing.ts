@@ -1,6 +1,6 @@
 import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH } from '../../../shared/preview-timing.ts';
 
-// Runs inside the token-scoped iframe. Source text and animation scripts never cross this channel.
+// Runs inside the token-scoped iframe. Each change targets a verified live node and file revision.
 export const PREVIEW_PEER_TIMING = `
   const timingAttributes = new Set(${JSON.stringify(TIMING_ATTRIBUTES)});
   const presentationTags = new Set(${JSON.stringify(PRESENTATION_TAGS)});

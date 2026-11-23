@@ -28,6 +28,14 @@ describe("peer timing classification", () => {
     expect(diffPreviewChanges('<script id="x">a()</script>', '<script id="x">b()</script>')).toBeNull();
   });
 
+  it("includes the containing-block change on the first drag of a static layer", () => {
+    const before = '<div id="title" style="color:red">Title</div>';
+    const after = '<div id="title" style="color:red;position:relative;left:30px;top:12px">Title</div>';
+    expect(diffPreviewChanges(before, after)?.[0]?.styles).toEqual([
+      ["position", "", "relative"], ["left", "", "30px"], ["top", "", "12px"],
+    ]);
+  });
+
   it("falls back for a changed tween, markup, source, label, style or expression in the same edit", () => {
     const trimmed = source.replace('data-start="2"', 'data-start="3"');
     for (const next of [trimmed.replace('run(1)', 'run(2)'), trimmed.replace('</audio>', '</audio><b></b>'),
