@@ -27,9 +27,9 @@ export async function readProjectFileContentWithVersion(projectId: string | null
     confirmedSource(projectId, path),
   );
   if (!response.ok) throw new Error(`Failed to read ${path}`);
-  const data = (await response.json()) as { content?: string; version?: string };
+  const data = (await response.json()) as { content?: string; version?: string; missing?: boolean };
   observeSourceRead(projectId, path, response, data);
-  return { content: data.content, version: data.version ?? response.headers.get("etag") };
+  return { content: data.content, version: data.version ?? response.headers.get("etag"), missing: data.missing };
 }
 
 // The etag-guarded project-file read/write pair every Studio save path

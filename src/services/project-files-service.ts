@@ -7,6 +7,7 @@ import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { ProjectEvent } from '../contracts/events.ts';
+import { htmlFileVersions } from './event-file-versions.ts';
 import type { BlobMetadata, BlobScope, PresignGetOptions, StoragePort } from '../contracts/storage.ts';
 import { applyWorkspaceBlobRefDeltas, withBlobGcRetry, type BlobRefDelta } from '../db/cas.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
@@ -35,6 +36,7 @@ import {
 import {
   computePreviewImpact,
   createWriteToken,
+  DELETED_VERSION,
   formatFileVersion,
   getMimeType,
   sha256Hex,
@@ -800,6 +802,8 @@ export class ProjectFilesService {
           revision: result.revision,
           versionId: result.versionId ?? undefined,
           paths: eventPaths,
+          fileVersions: htmlFileVersions(eventPaths, path => result.versionsByPath[path] ?? null),
+          ...(result.changedPaths.length === 0 && { version: DELETED_VERSION }),
           writeToken: result.writeToken,
           affectsPreview: result.affectsPreview,
           fileTreeChanged: result.fileTreeChanged,

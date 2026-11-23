@@ -126,13 +126,13 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     requestPreviewReload();
     setRefreshKeyState(next);
   }, []);
-  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string) => {
+  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string | readonly string[]) => {
     invalidateGsapCacheRef.current(path);
     refreshPreviewFrame(next);
   }, [refreshPreviewFrame]);
   const reloadHistoryPreview = useCallback(() => refreshPreviewFrame(k => k + 1), [refreshPreviewFrame]);
   const invalidateHistoryCompositions = useCallback((paths: readonly string[]) => invalidateGsapCacheRef.current(paths), []);
-  const reloadPreview = useCallback((path?: string) => setRefreshKey((k) => k + 1, path), [setRefreshKey]);
+  const reloadPreview = useCallback((path?: string | readonly string[]) => setRefreshKey((k) => k + 1, path), [setRefreshKey]);
   const fileManagerResult = useFileManager({
     projectId,
     showToast,
@@ -178,6 +178,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const previewPersistence = useStableHandlers(previewPersistenceResult, projectId);
   const externalFileChanges = useStudioExternalFileChanges({
     projectId,
+    previewIframeRef,
     activeCompPath,
     masterCompPath,
     fileManager,

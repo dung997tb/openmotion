@@ -6,6 +6,7 @@ import path from 'node:path';
 import { it } from 'node:test';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { AuthContext } from '../../src/contracts/auth.ts';
+import type { ProjectEvent } from '../../src/contracts/events.ts';
 import { isCloudError } from '../../src/contracts/errors.ts';
 import { applyWorkspaceBlobRefDeltas, finalizeBlobDeletion, type BlobRefDelta } from '../../src/db/cas.ts';
 import * as schema from '../../src/db/schema/index.ts';
@@ -58,13 +59,14 @@ async function fixture() {
   const auth: AuthContext = { workspaceId, userId, role: 'owner', authMode: 'dev', authMethod: 'dev_bypass', scopes: ['workspace:admin'] };
   const storage = new LocalBucket({ textRevisionDb: db, bucket: 'test', region: 'us-east-1', endpoint: 'http://localhost:9901',
     accessKeyId: 'fixture', secretAccessKey: 'fixture' });
-  const events: string[] = [];
+  const events: ProjectEvent[] = [];
+  const eventBus = { async publish(_channel: string, event: unknown) { events.push(event as ProjectEvent); return 1; } };
   const files = new ProjectFilesService({ db, storage, historyCoalesceWindowMs: 0, textPatchWrites: true,
-    eventBus: { async publish(_channel, event) { events.push((event as {type: string}).type); return 1; } },
+    eventBus,
   });
   const workspace = new WorkspaceService({ db, storage, files });
   const archive = new ProjectArchiveService({ db, storage, files, workspace });
-  const history = new VersionHistoryService({ db, storage, historyCoalesceWindowMs: 0 });
+  const history = new VersionHistoryService({ db, storage, historyCoalesceWindowMs: 0, eventBus });
   await pool.query('INSERT INTO users(id,oidc_sub,display_name) VALUES ($1,$2,$2)', [userId, userId]);
   await pool.query('INSERT INTO workspaces(id,slug,name,owner_user_id) VALUES ($1,$2,$2,$3)', [workspaceId, workspaceId, userId]);
   return { db, pool, events, storage, auth, workspaceId, files, workspace, archive, history,
@@ -75,6 +77,42 @@ async function fixture() {
     },
   };
 }
+
+it('publishes one exact file version and one history change for a patch, undo, redo and deletion', { skip: !connectionString }, async () => {
+  const { events, auth, workspace, files, history, cleanup } = await fixture();
+  try {
+    const path = 'intro.html';
+    const content = '<h1>Hello</h1>' + ' '.repeat(512);
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content }] });
+    const initial = (await files.readTextFile(auth, projectId, path))!.version;
+    events.length = 0;
+    async function expectDelivery(version: string | null, deleted = false) {
+      assert.equal(events.length, 2);
+      const [change, navigation] = events.splice(0);
+      assert.equal(change?.type, 'file-change');
+      assert.deepEqual(change.paths, [path]);
+      assert.deepEqual(change.fileVersions, { [path]: version });
+      if (deleted) assert.equal(change.version, '"deleted"');
+      assert.equal(navigation?.type, 'history-changed');
+      assert.equal(navigation.revision, change.revision);
+      assert.equal(navigation.versionId, change.versionId);
+      assert.equal((await files.readTextFile(auth, projectId, path))?.version ?? null, version);
+    }
+    const saved = await files.commitTextEdits(auth, projectId, { files: [{ path, baseVersion: initial, patch: [[4, 5, 'World']] }] },
+      { source: 'studio', requestId: randomUUID() });
+    const patch = saved.versionsByPath[path];
+    assert.match(patch, /^"patch:/);
+    await expectDelivery(patch);
+    await history.step(auth, projectId, 'back');
+    await expectDelivery(initial);
+    await history.step(auth, projectId, 'forward');
+    await expectDelivery(patch);
+    await files.commitChanges(auth, { projectId, ops: [{ op: 'delete', path }], source: 'agent', origin: 'mcp' });
+    await expectDelivery(null, true);
+    await history.step(auth, projectId, 'back');
+    await expectDelivery(patch);
+  } finally { await cleanup(); }
+});
 
 it('reads the same saved patch in preview, history, render, download, ZIP and an independent project copy', {
   skip: !connectionString,
@@ -372,7 +410,7 @@ it('serializes writes per file, preserves batch atomicity and retries, and avoid
     const receipts = await Promise.all([save(sameEdit, undefined, requestId), save(sameEdit, undefined, requestId)]);
     assert.equal(receipts.filter(r => r.replayed).length, 1);
     assert.equal(receipts[0].versionId, receipts[1].versionId);
-    assert.deepEqual(events.slice(beforeEvents).sort(), ['file-change', 'history-changed']);
+    assert.deepEqual(events.slice(beforeEvents).map(event => event.type).sort(), ['file-change', 'history-changed']);
     assert.equal(await versions(), 5);
     await assert.rejects(save([edit(paths[1], twoVersion, '!')], { [paths[0]]: oneVersion }), { status: 409 });
     await assert.rejects(save([{ path: paths[1], baseVersion: twoVersion, patch: [[1, 1, 'x']] }]), { status: 400 });

@@ -43,7 +43,7 @@ export interface UseDomEditPersistParams {
   writeProjectFile: ProjectFileWriter;
   editHistory: { recordEdit: (entry: RecordEditInput) => Promise<void> };
   projectIdRef: React.MutableRefObject<string | null>;
-  reloadPreview: () => void;
+  reloadPreview: (changedPaths?: string | readonly string[]) => void;
   forceReloadSdkSession?: () => void;
   onTrySdkPersist?: (
     selection: DomEditSelection,
@@ -168,7 +168,7 @@ export function useDomEditPersist({
         if (changed) await editHistory.recordEdit({ ...history, files: {} });
         if (changed && !result.divergent.length) {
           forceReloadSdkSession?.();
-          reloadPreview();
+          reloadPreview(targetPath);
         }
         return { sourceFile: targetPath, version: result.versions[targetPath], changed };
       }
@@ -280,18 +280,18 @@ export function useDomEditPersist({
       forceReloadSdkSession?.();
 
       if (selection.isolatedTarget) {
-        reloadPreview();
+        reloadPreview(targetPath);
       } else if (options?.syncTimingInPlace) {
         // Reuse the same attribute-only diff and runtime rebind as soft undo.
         // Keep the iframe, media decoder, thumbnails and ruler alive during a slider drag.
         const strategy = applyUndoRestoreToPreview(
           previewIframeRef.current, activeCompPath,
           { [targetPath]: { previous: originalContent, restored: finalContent } },
-          usePlayerStore.getState().currentTime, reloadPreview,
+          usePlayerStore.getState().currentTime, () => reloadPreview(targetPath),
         );
         if (strategy === "soft") syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument);
       } else if (!options?.skipRefresh) {
-        reloadPreview();
+        reloadPreview(targetPath);
       }
       const outcome = completePersistence(
         finalContent === patchedContent &&

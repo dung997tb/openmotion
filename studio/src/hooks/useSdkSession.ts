@@ -1,4 +1,5 @@
 import { observePendingSourceRead, observeSourceRead } from "../utils/confirmedTextSources";
+import type { RemoteFileRead } from "./remoteFileReads";
 import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { openComposition } from "@hyperframes/sdk";
@@ -7,6 +8,7 @@ import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import type { PublishSdkSession } from "../utils/sdkCutover";
 import { addExternalFileReloadListener } from "./externalFileReloadBus";
+import { beginTimelineSourceRead } from "../player/lib/peerTimeline";
 import { rememberCompositionPosterSource } from "../player/lib/compositionPosterSource";
 import { usePlayerStore, whenPreviewBooted } from "../player/store/playerStore";
 import { readVersionedSource, type SourceVersion } from "../utils/readVersionedSource";
@@ -157,8 +159,8 @@ async function httpReadFailureWhy(res: Response): Promise<string | undefined> {
 }
 
 interface ProjectFileBody {
-  version?: string;
   content?: string;
+  version?: string | null;
   /** Present only from a server that separates its shim from a real 0-byte file. */
   missing?: boolean;
 }
@@ -191,6 +193,7 @@ async function readProjectFileOptional(
   projectId: string,
   path: string,
   base?: SourceVersion,
+  sharedRead?: RemoteFileRead,
 ): Promise<ProjectFileReadResult> {
   // Reject traversal / NUL before building the request URL — `path` is a
   // user-influenced composition path (mirrors the guard in timelineEditingHelpers,
@@ -198,6 +201,23 @@ async function readProjectFileOptional(
   // already confines both values to single segments of this same-origin URL.
   if (path.includes("\0") || path.includes("..")) return { ok: false, reason: "unsafe_path" };
   const previewState = usePlayerStore.getState();
+  const rememberSource = beginTimelineSourceRead(projectId, path);
+  function publishRead(file: ProjectFileBody) {
+    const result = classifyProjectFileBody(file);
+    if (result.ok) {
+      rememberSource(result.content);
+      rememberCompositionPosterSource(previewState, projectId, path, result.content, result.version);
+    }
+    return result;
+  }
+  const shared = sharedRead?.(projectId, path);
+  if (shared) {
+    try {
+      return publishRead(await shared);
+    } catch {
+      // Retry through the diagnostic reader so a missing project or a network fault stays visible.
+    }
+  }
   let res: Response;
   const fetchStarted = performance.now();
   try {
@@ -224,9 +244,7 @@ async function readProjectFileOptional(
     };
   }
   observeSourceRead(projectId, path, res, data);
-  const read = classifyProjectFileBody(data);
-  if (read.ok) rememberCompositionPosterSource(previewState, projectId, path, read.content);
-  return read;
+  return publishRead({ ...data, version: data.version ?? res.headers?.get("etag") });
 }
 
 /**
@@ -380,6 +398,7 @@ export function useSdkSession(
   projectIdRef.current = projectId;
   const activeCompPathRef = useRef(activeCompPath);
   activeCompPathRef.current = activeCompPath;
+  const externalRead = useRef<RemoteFileRead | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
   const reloadTokenRef = useRef(reloadToken);
   reloadTokenRef.current = reloadToken;
@@ -416,9 +435,10 @@ export function useSdkSession(
 
   useEffect(
     () =>
-      addExternalFileReloadListener((changedPath) => {
+      addExternalFileReloadListener((changedPath, read) => {
         // "." is a project-wide change (a reconnect or a replaced folder): every session reloads.
         if (changedPath === "." || changedPath === activeCompPathRef.current) {
+          externalRead.current = read;
           setReloadToken((token) => token + 1);
         }
       }),
@@ -427,6 +447,8 @@ export function useSdkSession(
 
   // ── Open / re-open the session ──
   useEffect(() => {
+    const sharedRead = externalRead.current;
+    externalRead.current = undefined;
     const generation = ++generationRef.current;
     let cancelled = false;
 
@@ -458,7 +480,7 @@ export function useSdkSession(
     whenPreviewBooted(projectId)
       .then((booted) =>
         cancelled || !booted ? null : observePendingSourceRead(projectId, activeCompPath,
-          readProjectFileOptional(projectId, activeCompPath, confirmedSource.current ?? undefined)),
+          readProjectFileOptional(projectId, activeCompPath, confirmedSource.current ?? undefined, sharedRead)),
       )
       .then(async (read) => {
         if (!read || cancelled) return;

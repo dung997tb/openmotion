@@ -1,6 +1,6 @@
-import type { BlobScope } from '../contracts/storage.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import type { BlobScope } from '../contracts/storage.ts';
 export { computePreviewImpact, type PreviewImpact } from '../../shared/preview-impact.ts';
 
 /** Strong ETag sentinel used when a file has been deleted. */

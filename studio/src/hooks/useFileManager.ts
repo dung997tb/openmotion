@@ -1,3 +1,4 @@
+import type { RemoteFileRead } from "./remoteFileReads";
 import { motionApi } from '../motion/useWorkspace';
 import { useI18n } from "../i18n/I18n";
 import { importValidationMessage } from "../i18n/importMessages";
@@ -145,13 +146,14 @@ export function useFileManager({
   pendingSource.current = getPendingCandidate;
   acknowledgeSource.current = editorSave.acknowledgeSource;
   const sourceRefreshRef = useRef(0);
-  const refreshOpenSource = useCallback((changedPath: string) => {
+  const refreshOpenSource = useCallback((changedPath: string, read?: RemoteFileRead) => {
     const open = openFileRef.current;
     if (!open || open.content == null || (changedPath !== "." && changedPath !== open.path)) return;
     const pid = projectIdRef.current;
     if (!pid || getPendingCandidate()) return;
     const request = ++sourceRefreshRef.current;
-    void readProjectFileContentWithVersion(pid, open.path, "").then(({ content, version }) => {
+    const latest = read?.(pid, open.path) ?? readProjectFileContentWithVersion(pid, open.path, "");
+    void latest.then(({ content, version }) => {
       if (request !== sourceRefreshRef.current || projectIdRef.current !== pid ||
         openFileRef.current !== open || getPendingCandidate() || typeof content !== "string") return;
       fileVersions.set(open.path, version);

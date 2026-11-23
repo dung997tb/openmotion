@@ -2814,6 +2814,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     runtimeRoot,
     studioVersion: VERSION,
     previewOrigin: previewOriginUrl ? previewOriginUrl.origin : null,
+    studioOrigin: appOriginUrl.origin,
   };
   const studioApp = createDisklessStudioApp(studioDeps);
   app.route('/', studioApp);

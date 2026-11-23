@@ -192,7 +192,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
           : localBase;
         const options = {
           runtimeUrl: '/api/runtime.js', baseHref: templateBase, gsapBaseUrl, capture, variables,
-          bridgeOrigin: origin || undefined,
+          bridgeOrigin: origin || undefined, studioOrigin: deps.studioOrigin,
           cacheProjectScripts: !capture,
           fontCssCache: deps.hotTextCache?.getFontCss && deps.hotTextCache.setFontCss ? {
             getFontCss: deps.hotTextCache.getFontCss.bind(deps.hotTextCache),

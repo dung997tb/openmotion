@@ -283,6 +283,7 @@ it("submits the isolated frame's position intent with its displayed source versi
         patches: [{target, operations: [{ type: "inline-style", property: "top", value: "25px" }]}],
       }], { label: "Move title" });
     });
+    expect(rendered.reloadPreview).toHaveBeenCalledWith(["intro.html"]);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.url).toMatch(/\/edits$/);
     expect(new Headers(seen[0]?.init?.headers).get("Idempotency-Key")).toBeTruthy();
@@ -734,7 +735,7 @@ describe("useDomEditCommits z-index reorder persistence", () => {
         hasExplicitZIndex: true,
       });
       expect(rendered.recordEdit).not.toHaveBeenCalled();
-      expect(rendered.reloadPreview).toHaveBeenCalledTimes(1);
+      expect(rendered.reloadPreview).toHaveBeenCalledWith();
       expect(
         fetchMock.mock.calls.filter(([input]) =>
           requestUrl(input).endsWith("/file-mutations/patch-element-batches"),

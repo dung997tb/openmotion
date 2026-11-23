@@ -157,21 +157,24 @@ export type EventBusListener = (payload: unknown, channel: string) => void;
 export class RedisEventBus {
   private readonly pub: Redis;
   private readonly sub: Redis;
-  private readonly listeners = new Map<string, Set<EventBusListener>>();
+  private readonly channels = new Map<string, {
+    ready: Promise<unknown>;
+    listeners: Map<EventBusListener, number>;
+  }>();
 
   constructor(redisUrl: string) {
     this.pub = createRedisClient(redisUrl, 'command');
     this.sub = createRedisClient(redisUrl, 'pubsub');
     this.sub.on('message', (channel: string, rawMessage: string) => {
-      const bucket = this.listeners.get(channel);
-      if (!bucket || bucket.size === 0) return;
+      const bucket = this.channels.get(channel);
+      if (!bucket) return;
       let parsed: unknown = rawMessage;
       try {
         parsed = JSON.parse(rawMessage);
       } catch {
         // Deliver raw string if publisher emitted non-JSON.
       }
-      for (const listener of bucket) {
+      for (const listener of bucket.listeners.keys()) {
         try {
           listener(parsed, channel);
         } catch {
@@ -186,25 +189,31 @@ export class RedisEventBus {
   }
 
   async subscribe(channel: string, listener: EventBusListener): Promise<() => Promise<void>> {
-    let bucket = this.listeners.get(channel);
-    const isFirst = !bucket || bucket.size === 0;
+    let bucket = this.channels.get(channel);
     if (!bucket) {
-      bucket = new Set();
-      this.listeners.set(channel, bucket);
+      bucket = { ready: this.sub.subscribe(channel), listeners: new Map() };
+      this.channels.set(channel, bucket);
     }
-    bucket.add(listener);
-    if (isFirst) {
-      await this.sub.subscribe(channel);
+    const listeners = bucket.listeners;
+    listeners.set(listener, (listeners.get(listener) ?? 0) + 1);
+    try {
+      await bucket.ready;
+    } catch (error) {
+      if (this.channels.get(channel) === bucket) this.channels.delete(channel);
+      throw error;
     }
+
     let released = false;
     return async () => {
       if (released) return;
       released = true;
-      const current = this.listeners.get(channel);
-      if (!current) return;
-      current.delete(listener);
-      if (current.size === 0) {
-        this.listeners.delete(channel);
+      const remaining = listeners.get(listener)! - 1;
+      if (remaining) listeners.set(listener, remaining);
+      else listeners.delete(listener);
+      if (!listeners.size && this.channels.get(channel) === bucket) {
+        // Issue UNSUBSCRIBE before yielding so a new subscriber's SUBSCRIBE
+        // follows it on this same Redis connection and waits for its own ACK.
+        this.channels.delete(channel);
         await this.sub.unsubscribe(channel);
       }
     };
@@ -250,7 +259,7 @@ export class RedisEventBus {
   }
 
   async close(): Promise<void> {
-    this.listeners.clear();
+    this.channels.clear();
     await Promise.allSettled([this.sub.quit(), this.pub.quit()]);
   }
 }

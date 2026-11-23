@@ -22,6 +22,7 @@ import { projectChannel } from '../infra/redis.ts';
 import { workspaceBlobKey } from '../infra/storage.ts';
 import { computeProjectRevision, isSha256Hex, isTextProjectPath, isUuid } from '../../shared/project-validation.ts';
 import { computePreviewImpact, createWriteToken, formatFileVersion } from '../studio/etag.ts';
+import { htmlFileVersions } from './event-file-versions.ts';
 import {
   DEFAULT_HISTORY_COALESCE_WINDOW_MS,
   assertValidUuid,
@@ -641,7 +642,7 @@ export class VersionHistoryService {
         });
       }
 
-      const { appliedFiles, revision } = await this.applySnapshotToLiveFiles(
+      const changes = await this.applySnapshotToLiveFiles(
         tx,
         ctx.workspaceId,
         project.id,
@@ -652,7 +653,7 @@ export class VersionHistoryService {
         .update(projects)
         .set(
           asUpdate(projects, {
-            revision,
+            revision: changes.revision,
             currentVersionId: targetVersion.id,
             currentVersionNumber: targetVersion.versionNumber,
             currentHistorySeq: targetEntry.seq,
@@ -662,12 +663,11 @@ export class VersionHistoryService {
         .where(and(eq(projects.id, project.id), eq(projects.workspaceId, ctx.workspaceId)));
 
       return {
-        revision,
+        ...changes,
         versionId: targetVersion.id,
         versionNumber: targetVersion.versionNumber,
         seq: targetEntry.seq,
         stepLabel,
-        appliedFiles,
       };
     });
 
@@ -678,6 +678,7 @@ export class VersionHistoryService {
       txResult.versionId,
       txResult.seq,
       txResult.appliedFiles,
+      txResult.fileVersions,
       writeToken,
     );
 
@@ -844,7 +845,7 @@ export class VersionHistoryService {
         );
       }
 
-      const appliedFiles = computeChangedFilePaths(liveFiles, snapshotFiles);
+      const { appliedFiles, fileVersions } = compareSnapshotFiles(liveFiles, snapshotFiles);
       const nextRevision = computeProjectRevision(
         snapshotFiles.map((f) => ({ path: f.path, size: Number(f.sizeBytes), hash: f.sha256.trim() })),
       );
@@ -1002,7 +1003,7 @@ export class VersionHistoryService {
           });
       }
 
-      return { replayed: false, payload: resultPayload };
+      return { replayed: false, payload: resultPayload, fileVersions };
     });
 
     if (txResult.replayed) {
@@ -1016,6 +1017,7 @@ export class VersionHistoryService {
       txResult.payload.versionId,
       txResult.payload.seq,
       txResult.payload.appliedFiles,
+      txResult.fileVersions,
       writeToken,
     );
 
@@ -1037,27 +1039,27 @@ export class VersionHistoryService {
   ): Promise<{ ok: true; entryId: string; pinned: boolean }> {
     assertValidUuid(entryId, 'entryId');
 
-    return this.db.transaction(async (tx) => {
-      await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
+    const head = await this.db.transaction(async (tx) => {
+      const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
         auth: ctx,
       });
 
-      const rows = await tx
+      const entryFilter = and(
+        eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
+        eq(projectHistoryEntries.projectId, projectId),
+        eq(projectHistoryEntries.id, entryId),
+      );
+      const [updated] = await tx
         .update(projectHistoryEntries)
         .set(asUpdate(projectHistoryEntries, { pinned }))
-        .where(
-          and(
-            eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-            eq(projectHistoryEntries.projectId, projectId),
-            eq(projectHistoryEntries.id, entryId),
-          ),
-        )
-        .returning({ id: projectHistoryEntries.id, versionId: projectHistoryEntries.versionId });
+        .where(and(entryFilter, eq(projectHistoryEntries.pinned, !pinned)))
+        .returning({ versionId: projectHistoryEntries.versionId });
 
-      const updated = rows[0];
       if (!updated) {
+        const [existing] = await tx.select({ id: projectHistoryEntries.id }).from(projectHistoryEntries).where(entryFilter);
+        if (existing) return null;
         throw new CloudError('NOT_FOUND', `History entry ${entryId} not found.`, { status: 404, applied: false });
       }
 
@@ -1071,8 +1073,12 @@ export class VersionHistoryService {
           ),
         );
 
-      return { ok: true as const, entryId: updated.id, pinned };
+      return project;
     });
+    if (head) {
+      await this.publishHistoryChanged(ctx.workspaceId, projectId, head.revision.trim(), head.currentVersionId, head.currentHistorySeq);
+    }
+    return { ok: true, entryId, pinned };
   }
 
   /** Inspect files at a historical point (`versionId`, `entryId`, `seq`, or `'head'`). */
@@ -1353,7 +1359,7 @@ export class VersionHistoryService {
     workspaceId: string,
     projectId: string,
     versionId: string,
-  ): Promise<{ appliedFiles: string[]; revision: string }> {
+  ) {
     const liveFiles = await tx
       .select()
       .from(projectFiles)
@@ -1413,11 +1419,10 @@ export class VersionHistoryService {
       );
     }
 
-    const appliedFiles = computeChangedFilePaths(liveFiles, snapshotFiles);
     const revision = computeProjectRevision(
       snapshotFiles.map((f) => ({ path: f.path, size: Number(f.sizeBytes), hash: f.sha256.trim() })),
     );
-    return { appliedFiles, revision };
+    return { ...compareSnapshotFiles(liveFiles, snapshotFiles), revision };
   }
 
   private async publishHistoryChanged(
@@ -1449,6 +1454,7 @@ export class VersionHistoryService {
     versionId: string | null,
     historySeq: number,
     appliedFiles: readonly string[],
+    fileVersions: Record<string, string | null> | undefined,
     writeToken: string,
   ): Promise<void> {
     if (!this.eventBus) return;
@@ -1462,6 +1468,7 @@ export class VersionHistoryService {
         revision,
         versionId: versionId ?? undefined,
         paths: [...appliedFiles],
+        fileVersions,
         writeToken,
         affectsPreview: impact.affectsPreview,
         affectedCompositions: impact.affectedCompositions,
@@ -1473,17 +1480,23 @@ export class VersionHistoryService {
   }
 }
 
-function computeChangedFilePaths(
-  before: ReadonlyArray<{ path: string; sha256: string }>,
-  after: ReadonlyArray<{ path: string; sha256: string }>,
-): string[] {
-  const beforeMap = new Map(before.map((f) => [f.path, f.sha256.trim()]));
-  const afterMap = new Map(after.map((f) => [f.path, f.sha256.trim()]));
-  const changed: string[] = [];
+type SnapshotFile = { path: string; sha256: string; blobScope: BlobScope };
+
+function compareSnapshotFiles(before: readonly SnapshotFile[], after: readonly SnapshotFile[]) {
+  const beforeMap = new Map(before.map(f => [f.path, f]));
+  const afterMap = new Map(after.map(f => [f.path, f]));
+  const appliedFiles: string[] = [];
   for (const filePath of new Set([...beforeMap.keys(), ...afterMap.keys()])) {
-    if (beforeMap.get(filePath) !== afterMap.get(filePath)) {
-      changed.push(filePath);
+    const oldFile = beforeMap.get(filePath);
+    const newFile = afterMap.get(filePath);
+    if (oldFile?.sha256.trim() !== newFile?.sha256.trim()) {
+      appliedFiles.push(filePath);
     }
   }
-  return changed.sort((a, b) => a.localeCompare(b));
+  appliedFiles.sort((a, b) => a.localeCompare(b));
+  const fileVersions = htmlFileVersions(appliedFiles, path => {
+    const file = afterMap.get(path);
+    return file ? formatFileVersion(file.blobScope, file.sha256.trim()) : null;
+  });
+  return { appliedFiles, fileVersions };
 }

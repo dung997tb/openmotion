@@ -855,6 +855,36 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('acknowledges the project event stream after its subscriptions are ready', async () => {
+    const env = createStudioTestEnv();
+    const project = await env.workspace.createProject(env.auth, { title: 'History stream' });
+    const entered = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    const subscribe = env.eventBus.subscribe.bind(env.eventBus);
+    let channelCount = 0;
+    env.eventBus.subscribe = async (channel, listener) => {
+      entered.resolve();
+      await proceed.promise;
+      const stop = await subscribe(channel, listener);
+      channelCount++;
+      return stop;
+    };
+    const response = await env.studioApp.request(`/api/events?projectId=${project.projectId}`);
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    try {
+      const first = reader.read().then(({ value }) => ({ text: new TextDecoder().decode(value), channelCount }));
+      await entered.promise;
+      proceed.resolve();
+      const acknowledgement = await first;
+      assert.match(acknowledgement.text, /event: connected/);
+      assert.equal(acknowledgement.channelCount, 3);
+    } finally {
+      proceed.resolve();
+      await reader.cancel();
+    }
+  });
+
   it('lists the packaged registry and installs its project files atomically without replacing user changes', async t => {
     const env = createStudioTestEnv();
     const { projectId } = await env.workspace.createProject(env.auth);
@@ -1109,7 +1139,8 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(cssJson.writeToken, 'studio-write-77');
     assert.equal(cssJson.version, fileContentVersion('.box { opacity: 1; }'));
 
-    // DELETE emits DELETED_VERSION = '"deleted"'.
+    // A delete emits a single file-change carrying the legacy deletion hint.
+    const beforeDelete = env.published.length;
     const delRes = await env.studioApp.request(`/api/projects/${created.projectId}/files/extra.css`, {
       method: 'DELETE',
     });
@@ -1117,6 +1148,11 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     const delJson = (await delRes.json()) as { version: string };
     assert.equal(delJson.version, DELETED_VERSION);
     assert.equal(DELETED_VERSION, '"deleted"');
+    const deletions = env.published.slice(beforeDelete)
+      .map(e => e.payload as { type?: string; version?: string })
+      .filter(e => e.type === 'file-change');
+    assert.equal(deletions.length, 1);
+    assert.equal(deletions[0].version, DELETED_VERSION);
   });
 
   it('answers HEAD /preview/* and HEAD /render/:jobId/view DIRECTLY (never 302) while GET binary returns 302 with Cache-Control & Vary', async () => {

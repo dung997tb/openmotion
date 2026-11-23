@@ -7,7 +7,6 @@ import { bodyLimit } from 'hono/body-limit';
 import { CloudError, isCloudError } from '../../contracts/errors.ts';
 import { AUDIO_EXT, IMAGE_EXT, VIDEO_EXT } from '../../../shared/asset-names.ts';
 import { MAX_ASSET_BYTES } from '../../../shared/asset-limits.ts';
-import { projectChannel } from '../../infra/redis.ts';
 import {
   buildMediaProbeJobId,
   buildPreviewProxyJobId,
@@ -479,24 +478,6 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       projectId,
       toDelete.map((f) => f.path),
     );
-
-    // Emit explicit deleted-version hint on the project event bus for Studio open editors.
-    if (deps.eventBus) {
-      void deps.eventBus
-        .publish(projectChannel(auth.workspaceId, projectId), {
-          type: 'file-change',
-          workspaceId: auth.workspaceId,
-          projectId,
-          revision: committed.revision,
-          paths: toDelete.map((f) => f.path),
-          version: DELETED_VERSION,
-          writeToken: committed.writeToken,
-          affectsPreview: committed.affectsPreview,
-          affectedCompositions: committed.affectedCompositions,
-          ts: Date.now(),
-        })
-        .catch(() => {});
-    }
 
     return c.json({
       ok: true,

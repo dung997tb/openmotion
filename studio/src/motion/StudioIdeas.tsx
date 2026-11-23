@@ -89,7 +89,7 @@ function ExampleMedia({ example, enabled }: { example: SceneExample; enabled: bo
   </div>;
 }
 
-export function StudioIdeas({ destination, onPrompt, active = true, modelName }: { destination: StudioDestination; onPrompt: (prompt: string) => void; active?: boolean; modelName?: string }) {
+export function StudioIdeas({ destination, onPrompt, active = true, modelName, currentPrompt }: { destination: StudioDestination; onPrompt: (prompt: string) => void; active?: boolean; modelName?: string; currentPrompt?: string }) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(0);
   const { scene } = destination;
@@ -110,6 +110,9 @@ export function StudioIdeas({ destination, onPrompt, active = true, modelName }:
   const [heroBefore, heroAfter] = t('Start creating with {model}').split('{model}');
   const designImage = destination.studio.id === 'design';
   const canvas = sceneLayout(scene) === 'canvas';
+  const ideaPrompt = t(idea.prompt);
+  const applied = Boolean(currentPrompt && currentPrompt.trim() === ideaPrompt.trim());
+  const exampleActionLabel = t(applied ? 'Example applied' : 'Use this example');
   return canvas ? <section className="om-canvas-ideas">
     <div className="om-canvas-deck" role="group" aria-label={t('Try an idea')}>{options.map((item, index) =>
       <Button variant="plain" key={item.title} aria-label={t(item.title)} aria-pressed={index === selected} data-current={index === selected} onClick={() => { setSelected(index); if (!designImage) onPrompt(t(item.prompt)); }}>
@@ -117,21 +120,21 @@ export function StudioIdeas({ destination, onPrompt, active = true, modelName }:
       </Button>)}</div>
     <h2 className="om-title">{modelName ? <>{heroBefore}<strong>{modelName}</strong>{heroAfter}</> : t(scene.label)}</h2>
     <p className="om-muted">{t('Describe a scene, subject, mood, or style and bring it to life')}</p>
-    <Button variant="plain" className="om-canvas-pill om-canvas-idea-prompt" aria-label={designImage ? undefined : t('Use prompt')} title={t(idea.prompt)} onClick={() => onPrompt(t(idea.prompt))}>
-      <RemixIcon name="add-line" size={15} />{t(designImage ? 'Use this example' : idea.title)}
+    <Button variant="plain" className="om-canvas-pill om-canvas-idea-prompt" data-applied={applied || undefined} aria-label={designImage ? undefined : t('Use prompt')} title={ideaPrompt} onClick={() => onPrompt(ideaPrompt)}>
+      <RemixIcon name={applied ? 'check-line' : 'add-line'} size={15} />{designImage ? exampleActionLabel : t(idea.title)}
     </Button>
   </section> : <section className="om-scene-guide om-scene-hero">
     <div className="om-scene-hero-stage">
       {scene.id === 'speech'
-        ? <blockquote className="om-speech-script"><RemixIcon name="voiceprint-line" size={28} /><p>{t(idea.prompt)}</p></blockquote>
+        ? <blockquote className="om-speech-script"><RemixIcon name="voiceprint-line" size={28} /><p>{ideaPrompt}</p></blockquote>
         : <ExampleMedia key={idea.title} example={idea} enabled={active} />}
     </div>
     <div className="om-guide-heading">
       <h2 className="om-title">{t(idea.title)}</h2>
-      {scene.id !== 'speech' && <p className="om-muted">{t(idea.prompt)}</p>}
+      {scene.id !== 'speech' && <p className="om-muted">{ideaPrompt}</p>}
     </div>
-    <Button variant="plain" className="om-canvas-pill om-canvas-idea-prompt" title={t(idea.prompt)} onClick={() => onPrompt(t(idea.prompt))}>
-      <RemixIcon name="add-line" size={15} />{t('Use this example')}
+    <Button variant="plain" className="om-canvas-pill om-canvas-idea-prompt" data-applied={applied || undefined} title={ideaPrompt} onClick={() => onPrompt(ideaPrompt)}>
+      <RemixIcon name={applied ? 'check-line' : 'add-line'} size={15} />{exampleActionLabel}
     </Button>
   </section>;
 }

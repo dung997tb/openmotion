@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { AuthContext } from '../../src/contracts/auth.ts';
 import { isCloudError } from '../../src/contracts/errors.ts';
-import type { RenderWorkerHealth } from '../../src/contracts/events.ts';
+import type { ProjectEvent, RenderWorkerHealth } from '../../src/contracts/events.ts';
 import type {
   HeadObjectResult,
   ObjectStreamResult,
@@ -22,10 +22,11 @@ import {
   type HotTextCachePort,
 } from '../../src/services/project-files-service.ts';
 import { VersionHistoryService } from '../../src/services/version-history-service.ts';
+import { htmlFileVersions } from '../../src/services/event-file-versions.ts';
 import { WorkRoundsService } from '../../src/services/work-rounds-service.ts';
 import { WorkspaceService } from '../../src/services/workspace-service.ts';
 import type { StudioEventBusPort, StudioQueuesPort } from '../../src/studio/context.ts';
-import { sha256Hex } from '../../src/studio/etag.ts';
+import { fileContentVersion, formatFileVersion, sha256Hex } from '../../src/studio/etag.ts';
 import { computeProjectRevision } from '../../shared/project-validation.ts';
 
 // ---------------------------------------------------------------------------
@@ -830,6 +831,10 @@ class InMemoryHotTextCache implements HotTextCachePort {
 
 class InMemoryEventBus implements StudioEventBusPort {
   readonly published: Array<{ channel: string; payload: unknown }> = [];
+  fileChanges() {
+    return this.published.map(e => e.payload as ProjectEvent)
+      .filter((e): e is Extract<ProjectEvent, { paths: string[] }> => e.type === 'file-change' || e.type === 'files-changed');
+  }
   private readonly listeners = new Map<string, Set<(payload: unknown, channel: string) => void>>();
   workersHealth: RenderWorkerHealth[] = [];
 
@@ -1011,12 +1016,49 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const channel = `om:project:${h.authA.workspaceId}:${created.projectId}`;
     assert.equal(fileEvent?.channel, channel);
     assert.equal((fileEvent?.payload as { writeToken?: string }).writeToken, 'tok-abc-123');
+    assert.deepEqual(h.eventBus.fileChanges().at(-1)?.fileVersions, { 'index.html': fileContentVersion(updatedHtml) });
     assert.equal(historyEvent?.channel, channel);
     assert.deepEqual(historyEvent?.payload, {
       type: 'history-changed', workspaceId: h.authA.workspaceId, projectId: created.projectId,
       revision: committed.revision, versionId: committed.versionId, historySeq: committed.historySeq,
       ts: (historyEvent?.payload as { ts: number }).ts,
     });
+  });
+
+  it('publishes only touched HTML versions for an Agent batch and its undo, redo and restore', async () => {
+    const h = createHarness();
+    const { projectId, versionId } = await h.workspace.createProject(h.authA, {
+      title: 'Timeline events',
+      initialFiles: [
+        { path: 'index.html', content: '<p>Root</p>' },
+        { path: 'old.html', content: '<p>Old</p>' },
+      ],
+    });
+    const oldVersion = (await h.files.readTextFile(h.authA, projectId, 'old.html'))!.version;
+    const committed = await h.files.commitChanges(h.authA, {
+      projectId, source: 'agent',
+      ops: [
+        { op: 'upsert_text', path: 'new.html', content: '<p>New</p>' },
+        { op: 'upsert_text', path: 'extra.css', content: 'p {}' },
+        { op: 'delete', path: 'old.html' },
+      ],
+    });
+    const forward = { 'new.html': committed.versionsByPath['new.html'], 'old.html': null };
+    const back = { 'new.html': null, 'old.html': oldVersion };
+    await h.history.step(h.authA, projectId, 'back');
+    await h.history.step(h.authA, projectId, 'forward');
+    await h.history.restoreVersion(h.authA, projectId, { targetVersionId: versionId });
+    const events = h.eventBus.fileChanges();
+    assert.deepEqual(events.map(e => e.fileVersions), [forward, back, forward, back]);
+    assert.ok(events.every(e => e.paths.includes('extra.css')));
+    assert.ok(events.every(e => e.affectedCompositions?.includes('index.html')));
+  });
+
+  it('omits ETag hints for large changes and preserves opaque patch versions', () => {
+    const patchVersion = formatFileVersion('patch', 'a'.repeat(64));
+    assert.deepEqual(htmlFileVersions(['scene.HTM', 'scene.md'], () => patchVersion), { 'scene.HTM': patchVersion });
+    const many = Array.from({ length: 33 }, (_, i) => `clip${i}.html`);
+    assert.equal(htmlFileVersions(many, () => assert.fail('bulk imports use changed paths')), undefined);
   });
 
   it('throws VERSION_CONFLICT (409) on stale expectedRevision or expectedVersionId and rolls back tx', async () => {
@@ -1161,6 +1203,22 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const entry2 = histList.entries.find((e) => e.seq === 2)!;
     assert.equal(entry2.who.kind, 'person');
     await h.history.pinEntry(h.authA, created.projectId, entry2.id, true);
+
+    const pinEvent = h.eventBus.published.at(-1);
+    assert.equal(pinEvent?.channel, `om:project:${h.authA.workspaceId}:${created.projectId}`);
+    assert.deepEqual(pinEvent?.payload, {
+      type: 'history-changed', workspaceId: h.authA.workspaceId, projectId: created.projectId,
+      revision: c3.revision, versionId: c3.versionId, historySeq: c3.historySeq,
+      writeToken: undefined, ts: (pinEvent?.payload as { ts: number }).ts,
+    });
+    const countAfterPin = h.eventBus.published.length;
+    await h.history.pinEntry(h.authA, created.projectId, entry2.id, true);
+    await assert.rejects(() => h.history.pinEntry(h.authA, created.projectId, randomUUID(), true),
+      (err: unknown) => isCloudError(err) && err.code === 'NOT_FOUND');
+    assert.equal(h.eventBus.published.length, countAfterPin);
+    await h.history.pinEntry(h.authA, created.projectId, entry2.id, false);
+    assert.equal(h.eventBus.published.length, countAfterPin + 1);
+    assert.equal((h.eventBus.published.at(-1)?.payload as { type: string }).type, 'history-changed');
 
     const peek = await h.history.peekPoint(h.authA, created.projectId, entry2.versionId, 'index.html');
     assert.equal(peek.file?.content, v2Html);
@@ -1480,6 +1538,10 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     assert.equal(edit2.historySeq, 2);
     assert.equal(edit2.coalesced, true);
     assert.notEqual(edit2.revision, edit1.revision);
+    const recentEvents = h.eventBus.fileChanges().slice(-2);
+    assert.deepEqual(recentEvents.map(e => e.fileVersions), [edit1.versionsByPath, edit2.versionsByPath]);
+    assert.equal(recentEvents[0].versionId, recentEvents[1].versionId);
+    assert.notEqual(recentEvents[0].fileVersions?.['index.html'], recentEvents[1].fileVersions?.['index.html']);
 
     clockMs += 500;
     const edit3 = await h.files.commitChanges(h.authA, {

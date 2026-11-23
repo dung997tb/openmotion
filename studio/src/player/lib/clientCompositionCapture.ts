@@ -19,6 +19,7 @@ const CAPTURE_TARGET_WIDTH = 240;
 const CAPTURE_JPEG_QUALITY = 0.78;
 const CAPTURE_BOOT_TIMEOUT_MS = 12_000;
 const CAPTURE_MEDIA_TIMEOUT_MS = 4_000;
+const CAPTURE_RAF_FALLBACK_MS = 250;
 const CAPTURE_FRAME_YIELD_MS = 24;
 const CAPTURE_IDLE_TEARDOWN_MS = 1_500;
 const IDB_NAME = "openmotion-client-comp-thumbs-v1";
@@ -312,17 +313,30 @@ function nextTwoAnimationFrames(win: Window, signal: AbortSignal): Promise<void>
   return new Promise((resolve, reject) => {
     let raf1 = 0;
     let raf2 = 0;
-    const onAbort = () => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(fallbackTimer);
       win.cancelAnimationFrame?.(raf1);
       win.cancelAnimationFrame?.(raf2);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       reject(abortError());
     };
+    const fallbackTimer = setTimeout(finish, CAPTURE_RAF_FALLBACK_MS);
     signal.addEventListener("abort", onAbort, { once: true });
     raf1 = win.requestAnimationFrame(() => {
-      raf2 = win.requestAnimationFrame(() => {
-        signal.removeEventListener("abort", onAbort);
-        resolve();
-      });
+      if (settled) return;
+      raf2 = win.requestAnimationFrame(finish);
     });
   });
 }
@@ -479,14 +493,21 @@ function acquireOffscreenIframe(width = 1280, height = 720): HTMLIFrameElement {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
     iframe.setAttribute("data-openmotion-thumb-capture", "true");
+    iframe.setAttribute("inert", "");
     iframe.tabIndex = -1;
+    iframe.referrerPolicy = "no-referrer";
+    iframe.allow = "autoplay 'none'";
     iframe.sandbox.add("allow-scripts", "allow-same-origin");
+    // Keep the hidden capture frame intersecting the viewport (0 opacity, behind the app):
+    // positioning a cross-origin preview iframe offscreen (e.g. left: -10000px) causes Chromium
+    // to throttle/suspend requestAnimationFrame inside isolated preview captures.
     Object.assign(iframe.style, {
       position: "fixed",
-      left: "-10000px",
-      top: "-10000px",
+      left: "0px",
+      top: "0px",
       width: `${width}px`,
       height: `${height}px`,
+      opacity: "0",
       border: "0",
       pointerEvents: "none",
       zIndex: "-1",
@@ -498,6 +519,61 @@ function acquireOffscreenIframe(width = 1280, height = 720): HTMLIFrameElement {
     hostIframe.style.height = `${height}px`;
   }
   return hostIframe;
+}
+
+function resetCaptureIframe(iframe: HTMLIFrameElement): void {
+  try {
+    iframe.src = "about:blank";
+  } catch {
+    // ignore reset errors
+  }
+}
+
+/**
+ * SnapDOM defaults same-origin image/CSS fetches to `credentials: "include"`.
+ * In cloud mode, `/api/projects/:id/preview/*` 302-redirects to cross-origin presigned
+ * S3/R2/OSS URLs that do not emit `Access-Control-Allow-Credentials: true`, so `"include"`
+ * fails with a CORS error and renders placeholder boxes. Downgrading preview-asset requests
+ * to `"same-origin"` keeps cookies on the first hop and drops them across the 302 redirect.
+ */
+export async function withPreviewRedirectSafeFetch<T>(run: () => Promise<T>): Promise<T> {
+  const origFetch = globalThis.fetch;
+  if (typeof origFetch !== "function") return run();
+  const baseHref = typeof window !== "undefined" ? window.location.href : "";
+  const baseOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.credentials === "include" && baseOrigin) {
+      try {
+        const rawUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : typeof input?.url === "string"
+                ? input.url
+                : "";
+        if (rawUrl) {
+          const parsed = new URL(rawUrl, baseHref);
+          if (
+            parsed.origin === baseOrigin &&
+            /^\/api\/projects\/[^/]+\/preview\//.test(parsed.pathname)
+          ) {
+            return origFetch.call(globalThis, input, { ...init, credentials: "same-origin" });
+          }
+        }
+      } catch {
+        // ignore URL parse errors and fall through to original fetch
+      }
+    }
+    return origFetch.call(globalThis, input, init);
+  }) as typeof fetch;
+  try {
+    return await run();
+  } finally {
+    if (globalThis.fetch !== origFetch) {
+      globalThis.fetch = origFetch;
+    }
+  }
 }
 
 function pumpCaptureQueue(): void {
@@ -654,109 +730,116 @@ async function captureSameOrigin(
   const iframe = acquireOffscreenIframe(1280, 720);
   const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision);
 
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out loading offscreen composition for thumbnail capture"));
-    }, CAPTURE_BOOT_TIMEOUT_MS);
-    const onLoad = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error("Failed to load offscreen composition"));
-    };
-    const onAbort = () => {
-      cleanup();
-      reject(abortError());
-    };
-    function cleanup() {
-      clearTimeout(timeout);
-      iframe.removeEventListener("load", onLoad);
-      iframe.removeEventListener("error", onError);
-      signal.removeEventListener("abort", onAbort);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timed out loading offscreen composition for thumbnail capture"));
+      }, CAPTURE_BOOT_TIMEOUT_MS);
+      const onLoad = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Failed to load offscreen composition"));
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(abortError());
+      };
+      function cleanup() {
+        clearTimeout(timeout);
+        iframe.removeEventListener("load", onLoad);
+        iframe.removeEventListener("error", onError);
+        signal.removeEventListener("abort", onAbort);
+      }
+      iframe.addEventListener("load", onLoad, { once: true });
+      iframe.addEventListener("error", onError, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true });
+      iframe.src = captureUrl.href;
+    });
+
+    const win = iframe.contentWindow as CapturePreviewWindow | null;
+    const doc = iframe.contentDocument;
+    if (!win || !doc) throw new Error("Offscreen capture frame is inaccessible");
+
+    // Wait for HyperFrames player bootstrap inside the offscreen document.
+    const deadline = Date.now() + CAPTURE_BOOT_TIMEOUT_MS;
+    while (!signal.aborted) {
+      const dur = win.__player?.getDuration?.() ?? 0;
+      if (win.__player?.seek && Number.isFinite(dur) && dur > 0) break;
+      if (Date.now() >= deadline) throw new Error("Timed out waiting for composition player");
+      await sleepAbortable(40, signal);
     }
-    iframe.addEventListener("load", onLoad, { once: true });
-    iframe.addEventListener("error", onError, { once: true });
-    signal.addEventListener("abort", onAbort, { once: true });
-    iframe.src = captureUrl.href;
-  });
+    if (signal.aborted) throw abortError();
 
-  const win = iframe.contentWindow as CapturePreviewWindow | null;
-  const doc = iframe.contentDocument;
-  if (!win || !doc) throw new Error("Offscreen capture frame is inaccessible");
+    win.__player?.pause?.();
+    const root = (doc.querySelector("[data-composition-id]") ?? doc.body) as Element;
+    const stageW = Number(root.getAttribute("data-width")) || root.clientWidth || 1280;
+    const stageH = Number(root.getAttribute("data-height")) || root.clientHeight || 720;
+    iframe.style.width = `${stageW}px`;
+    iframe.style.height = `${stageH}px`;
 
-  // Wait for HyperFrames player bootstrap inside the offscreen document.
-  const deadline = Date.now() + CAPTURE_BOOT_TIMEOUT_MS;
-  while (!signal.aborted) {
-    const dur = win.__player?.getDuration?.() ?? 0;
-    if (win.__player?.seek && Number.isFinite(dur) && dur > 0) break;
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for composition player");
-    await sleepAbortable(40, signal);
-  }
-  if (signal.aborted) throw abortError();
+    await waitForDocumentMedia(doc, signal);
+    if (signal.aborted) throw abortError();
 
-  win.__player?.pause?.();
-  const root = (doc.querySelector("[data-composition-id]") ?? doc.body) as Element;
-  const stageW = Number(root.getAttribute("data-width")) || root.clientWidth || 1280;
-  const stageH = Number(root.getAttribute("data-height")) || root.clientHeight || 720;
-  iframe.style.width = `${stageW}px`;
-  iframe.style.height = `${stageH}px`;
-
-  await waitForDocumentMedia(doc, signal);
-  if (signal.aborted) throw abortError();
-
-  let target: Element = root;
-  if (input.selector) {
-    try {
-      const match = doc.querySelectorAll(input.selector)[input.selectorIndex ?? 0];
-      if (match) target = match;
-    } catch {
-      // invalid selector falls back to stage root
+    let target: Element = root;
+    if (input.selector) {
+      try {
+        const match = doc.querySelectorAll(input.selector)[input.selectorIndex ?? 0];
+        if (match) target = match;
+      } catch {
+        // invalid selector falls back to stage root
+      }
     }
-  }
-  let targetW = stageW;
-  let targetH = stageH;
-  if (target !== root) {
-    const rect = target.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      targetW = rect.width;
-      targetH = rect.height;
+    let targetW = stageW;
+    let targetH = stageH;
+    if (target !== root) {
+      const rect = target.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        targetW = rect.width;
+        targetH = rect.height;
+      }
     }
-  }
 
-  const outW = CAPTURE_TARGET_WIDTH;
-  const outH = Math.max(27, Math.round((outW * targetH) / Math.max(1, targetW)));
-  const scale = outW / Math.max(1, targetW);
-  const actualDuration = win.__player?.getDuration?.() || input.duration || 0;
-  const times = computeCompositionSampleTimes(actualDuration, input.frameCount, input.seekTime);
+    const outW = CAPTURE_TARGET_WIDTH;
+    const outH = Math.max(27, Math.round((outW * targetH) / Math.max(1, targetW)));
+    const scale = outW / Math.max(1, targetW);
+    const actualDuration = win.__player?.getDuration?.() || input.duration || 0;
+    const times = computeCompositionSampleTimes(actualDuration, input.frameCount, input.seekTime);
 
-  const blobs: Blob[] = [];
-  for (const t of times) {
-    await waitUntilInteractiveIdle(signal);
-    win.__player!.seek!(t);
-    await nextTwoAnimationFrames(win, signal);
+    const blobs: Blob[] = [];
+    for (const t of times) {
+      await waitUntilInteractiveIdle(signal);
+      win.__player!.seek!(t);
+      await nextTwoAnimationFrames(win, signal);
 
-    const pureCanvas = findPureCanvasTarget(target, targetW, targetH);
-    let blob: Blob;
-    if (pureCanvas) {
-      blob = await drawToJpegBlob(pureCanvas, outW, outH);
-    } else {
-      const snap = await snapdom(target, {
-        scale,
-        fast: true,
-        embedFonts: false,
-        exclude: "video",
-      });
-      const rendered = await snap.toCanvas();
-      blob = await drawToJpegBlob(rendered, outW, outH);
+      const pureCanvas = findPureCanvasTarget(target, targetW, targetH);
+      let blob: Blob;
+      if (pureCanvas) {
+        blob = await drawToJpegBlob(pureCanvas, outW, outH);
+      } else {
+        const rendered = await withPreviewRedirectSafeFetch(async () => {
+          const snap = await snapdom(target, {
+            scale,
+            fast: true,
+            embedFonts: false,
+            exclude: "video",
+          });
+          return snap.toCanvas();
+        });
+        blob = await drawToJpegBlob(rendered, outW, outH);
+      }
+      blobs.push(blob);
+      if (times.length > 1) await sleepAbortable(CAPTURE_FRAME_YIELD_MS, signal);
     }
-    blobs.push(blob);
-    if (times.length > 1) await sleepAbortable(CAPTURE_FRAME_YIELD_MS, signal);
-  }
 
-  return { blobs, aspect: targetW / Math.max(1, targetH), width: outW, height: outH };
+    return { blobs, aspect: targetW / Math.max(1, targetH), width: outW, height: outH };
+  } catch (error) {
+    resetCaptureIframe(iframe);
+    throw error;
+  }
 }
 
 async function captureIsolatedOrigin(
@@ -764,6 +847,7 @@ async function captureIsolatedOrigin(
   previewOrigin: string,
   signal: AbortSignal,
 ): Promise<{ blobs: Blob[]; aspect: number; width: number; height: number }> {
+  const expectedOrigin = new URL(previewOrigin).origin;
   const grantResponse = await studioApiFetch(
     `/api/projects/${encodeURIComponent(input.projectId)}/preview-token`,
     {
@@ -780,7 +864,7 @@ async function captureIsolatedOrigin(
   const token = grant.token;
 
   const source = new URL(input.previewUrl, window.location.origin);
-  const isolatedUrl = new URL(source.pathname, previewOrigin);
+  const isolatedUrl = new URL(source.pathname, expectedOrigin);
   isolatedUrl.search = source.search;
   isolatedUrl.searchParams.set("capture", "1");
   if (input.contentRevision > 0) isolatedUrl.searchParams.set("revision", String(input.contentRevision));
@@ -788,101 +872,111 @@ async function captureIsolatedOrigin(
 
   const iframe = acquireOffscreenIframe(1920, 1080);
 
-  const duration = await new Promise<number>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out waiting for isolated capture bridge"));
-    }, CAPTURE_BOOT_TIMEOUT_MS);
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== previewOrigin || event.source !== iframe.contentWindow) return;
-      const data = event.data;
-      if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
-      if (data.type === "timeline-state" && typeof data.duration === "number" && data.duration > 0) {
-        if (typeof data.width === "number" && data.width > 0 && typeof data.height === "number" && data.height > 0) {
-          iframe.style.width = `${data.width}px`;
-          iframe.style.height = `${data.height}px`;
-        }
+  try {
+    const duration = await new Promise<number>((resolve, reject) => {
+      const timeout = setTimeout(() => {
         cleanup();
-        resolve(data.duration);
-      }
-    };
-    const onAbort = () => {
-      cleanup();
-      reject(abortError());
-    };
-    function cleanup() {
-      clearTimeout(timeout);
-      window.removeEventListener("message", onMessage);
-      signal.removeEventListener("abort", onAbort);
-    }
-    window.addEventListener("message", onMessage);
-    signal.addEventListener("abort", onAbort, { once: true });
-    iframe.src = isolatedUrl.href;
-  });
-
-  const times = computeCompositionSampleTimes(duration || input.duration || 0, input.frameCount, input.seekTime);
-  const requestId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  const payload = await new Promise<{
-    frames: ArrayBuffer[];
-    mimeType?: string;
-    width?: number;
-    height?: number;
-    aspect?: number;
-  }>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out capturing frames from isolated preview"));
-    }, CAPTURE_BOOT_TIMEOUT_MS * 2);
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== previewOrigin || event.source !== iframe.contentWindow) return;
-      const data = event.data;
-      if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
-      if (data.type === "response" && data.requestId === requestId) {
-        cleanup();
-        if (data.ok && data.result && Array.isArray(data.result.frames)) {
-          resolve(data.result);
-        } else {
-          reject(new Error(String(data.error || "Isolated capture failed")));
+        reject(new Error("Timed out waiting for isolated capture bridge"));
+      }, CAPTURE_BOOT_TIMEOUT_MS);
+      const onMessage = (event: MessageEvent) => {
+        if (event.origin !== expectedOrigin || event.source !== iframe.contentWindow) return;
+        const data = event.data;
+        if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
+        if (data.type === "preview-build-busy") {
+          cleanup();
+          reject(new Error("Isolated preview builder is busy"));
+          return;
         }
+        if (data.type === "timeline-state" && typeof data.duration === "number" && data.duration > 0) {
+          if (typeof data.width === "number" && data.width > 0 && typeof data.height === "number" && data.height > 0) {
+            iframe.style.width = `${data.width}px`;
+            iframe.style.height = `${data.height}px`;
+          }
+          cleanup();
+          resolve(data.duration);
+        }
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(abortError());
+      };
+      function cleanup() {
+        clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        signal.removeEventListener("abort", onAbort);
       }
-    };
-    const onAbort = () => {
-      cleanup();
-      reject(abortError());
-    };
-    function cleanup() {
-      clearTimeout(timeout);
-      window.removeEventListener("message", onMessage);
-      signal.removeEventListener("abort", onAbort);
-    }
-    window.addEventListener("message", onMessage);
-    signal.addEventListener("abort", onAbort, { once: true });
-    iframe.contentWindow?.postMessage(
-      {
-        source: "openmotion-studio",
-        version: 1,
-        type: "capture-frames",
-        projectId: input.projectId,
-        token,
-        requestId,
-        times,
-        width: CAPTURE_TARGET_WIDTH,
-        selector: input.selector,
-        selectorIndex: input.selectorIndex,
-      },
-      previewOrigin,
-    );
-  });
+      window.addEventListener("message", onMessage);
+      signal.addEventListener("abort", onAbort, { once: true });
+      iframe.src = isolatedUrl.href;
+    });
 
-  const mimeType = payload.mimeType || "image/jpeg";
-  const blobs = payload.frames.map((buf) => new Blob([buf], { type: mimeType }));
-  return {
-    blobs,
-    aspect: payload.aspect && payload.aspect > 0 ? payload.aspect : 16 / 9,
-    width: payload.width || CAPTURE_TARGET_WIDTH,
-    height: payload.height || 135,
-  };
+    const times = computeCompositionSampleTimes(duration || input.duration || 0, input.frameCount, input.seekTime);
+    const requestId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const payload = await new Promise<{
+      frames: ArrayBuffer[];
+      mimeType?: string;
+      width?: number;
+      height?: number;
+      aspect?: number;
+    }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timed out capturing frames from isolated preview"));
+      }, CAPTURE_BOOT_TIMEOUT_MS * 2);
+      const onMessage = (event: MessageEvent) => {
+        if (event.origin !== expectedOrigin || event.source !== iframe.contentWindow) return;
+        const data = event.data;
+        if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
+        if (data.type === "response" && data.requestId === requestId) {
+          cleanup();
+          if (data.ok && data.result && Array.isArray(data.result.frames)) {
+            resolve(data.result);
+          } else {
+            reject(new Error(String(data.error || "Isolated capture failed")));
+          }
+        }
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(abortError());
+      };
+      function cleanup() {
+        clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        signal.removeEventListener("abort", onAbort);
+      }
+      window.addEventListener("message", onMessage);
+      signal.addEventListener("abort", onAbort, { once: true });
+      iframe.contentWindow?.postMessage(
+        {
+          source: "openmotion-studio",
+          version: 1,
+          type: "capture-frames",
+          projectId: input.projectId,
+          token,
+          requestId,
+          times,
+          width: CAPTURE_TARGET_WIDTH,
+          selector: input.selector,
+          selectorIndex: input.selectorIndex,
+        },
+        expectedOrigin,
+      );
+    });
+
+    const mimeType = payload.mimeType || "image/jpeg";
+    const blobs = payload.frames.map((buf) => new Blob([buf], { type: mimeType }));
+    return {
+      blobs,
+      aspect: payload.aspect && payload.aspect > 0 ? payload.aspect : 16 / 9,
+      width: payload.width || CAPTURE_TARGET_WIDTH,
+      height: payload.height || 135,
+    };
+  } catch (error) {
+    resetCaptureIframe(iframe);
+    throw error;
+  }
 }
 
 function coverCacheKey(
