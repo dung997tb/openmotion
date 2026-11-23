@@ -734,8 +734,11 @@ export function SuperAgentWorkspace({
     const link = readSuperAgentPromptLink(window.location.search);
     if (!link) return;
     window.history.replaceState(window.history.state, '', withoutSuperAgentPromptLink(window.location.href));
+    // A prompt link always starts a new chat: leave any routed conversation first
+    // so its in-flight load is cancelled and cannot reclaim the composer.
+    if (chatId) onChatIdChange(null, true);
     queueSuperAgentHandoff(link);
-  }, [active]);
+  }, [active, chatId, onChatIdChange]);
   useEffect(() => {
     applyPendingHandoff();
     return subscribeSuperAgentHandoff(applyPendingHandoff);
