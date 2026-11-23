@@ -38,7 +38,7 @@ attribution with the source.
 
 The distribution job reports the actual compressed default npm package and the
 largest file and directory changes. Growth of 1 MiB raises a warning. The default
-package has a 24 MiB budget. If a feature needs new offline media, list its
+package has a 26 MiB budget. If a feature needs new offline media, list its
 runtime purpose beside its path in `scripts/distribution.ts` and review any
 necessary budget change in the same PR.
 
