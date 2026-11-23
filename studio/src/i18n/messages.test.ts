@@ -245,3 +245,20 @@ it('keeps editor asset-loading messages complete and placeholder-safe across all
     }
   }
 });
+
+it('localizes Cloud P2 notices for Game Studio and Workflows in all non-English locales', () => {
+  const notices = [
+    'Game Studio is coming in Phase 2.',
+    'Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.',
+    'Workflows are coming in Phase 2.',
+    'Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.',
+  ];
+  for (const { locale } of languages) {
+    if (locale === 'en') continue;
+    for (const key of notices) {
+      const translated = translate(locale, key);
+      expect(translated.trim(), `${locale}: ${key}`).not.toBe('');
+      expect(translated, `${locale}: ${key}`).not.toBe(key);
+    }
+  }
+});

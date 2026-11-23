@@ -138,7 +138,9 @@
     "Agent instruction": "给 Agent 的指令",
     "Loading instruction…": "正在加载指令…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。",
-    "Playable ad": "广告游戏"
+    "Playable ad": "广告游戏",
+    "Game Studio is coming in Phase 2.": "游戏工作室将在第二阶段上线。",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "游戏工作室依赖本地游戏运行工具，计划在 OpenMotion Cloud 第二阶段提供。"
   },
   "ja": {
     "3D": "3D",
@@ -279,7 +281,9 @@
     "Agent instruction": "エージェントへの指示",
     "Loading instruction…": "指示を読み込み中…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。",
-    "Playable ad": "プレイアブル広告"
+    "Playable ad": "プレイアブル広告",
+    "Game Studio is coming in Phase 2.": "ゲームスタジオはフェーズ 2 で提供予定です。",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "ゲームスタジオはローカルのゲーム実行ツールを必要とするため、OpenMotion Cloud のフェーズ 2 で提供予定です。"
   },
   "ko": {
     "3D": "3D",
@@ -420,7 +424,9 @@
     "Agent instruction": "Agent 지시",
     "Loading instruction…": "지시를 불러오는 중…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다.",
-    "Playable ad": "플레이어블 광고"
+    "Playable ad": "플레이어블 광고",
+    "Game Studio is coming in Phase 2.": "게임 스튜디오는 Phase 2에서 제공될 예정입니다.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "게임 스튜디오는 로컬 게임 런타임 도구가 필요하며 OpenMotion Cloud의 Phase 2에 제공될 예정입니다."
   },
   "de": {
     "3D": "3D",
@@ -561,7 +567,9 @@
     "Agent instruction": "Anweisung für den Agent",
     "Loading instruction…": "Anweisung wird geladen…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst.",
-    "Playable ad": "Playable Ad"
+    "Playable ad": "Playable Ad",
+    "Game Studio is coming in Phase 2.": "Spielestudio folgt in Phase 2.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "Spielestudio erfordert lokale Spiel-Laufzeitwerkzeuge und ist für Phase 2 in OpenMotion Cloud geplant."
   },
   "fr": {
     "3D": "3D",
@@ -702,7 +710,9 @@
     "Agent instruction": "Instruction pour l’agent",
     "Loading instruction…": "Chargement de l’instruction…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même.",
-    "Playable ad": "Publicité jouable"
+    "Playable ad": "Publicité jouable",
+    "Game Studio is coming in Phase 2.": "Studio de jeux arrive en phase 2.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "Studio de jeux nécessite des outils d’exécution locaux et est prévu pour la phase 2 dans OpenMotion Cloud."
   },
   "ru": {
     "3D": "3D",
@@ -843,7 +853,9 @@
     "Agent instruction": "Инструкция для агента",
     "Loading instruction…": "Загрузка инструкции…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами.",
-    "Playable ad": "Играбельная реклама"
+    "Playable ad": "Играбельная реклама",
+    "Game Studio is coming in Phase 2.": "Игровая студия появится во 2-й фазе.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "Игровая студия требует локальных инструментов запуска игр и запланирована на 2-ю фазу в OpenMotion Cloud."
   },
   "es": {
     "3D": "3D",
@@ -984,7 +996,9 @@
     "Agent instruction": "Instrucción para el agente",
     "Loading instruction…": "Cargando instrucción…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú.",
-    "Playable ad": "Anuncio jugable"
+    "Playable ad": "Anuncio jugable",
+    "Game Studio is coming in Phase 2.": "Estudio de juegos llegará en la fase 2.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "Estudio de juegos requiere herramientas locales de ejecución de juegos y está previsto para la fase 2 en OpenMotion Cloud."
   },
   "pt-BR": {
     "3D": "3D",
@@ -1125,7 +1139,9 @@
     "Agent instruction": "Instrução para o agente",
     "Loading instruction…": "Carregando instrução…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo.",
-    "Playable ad": "Anúncio jogável"
+    "Playable ad": "Anúncio jogável",
+    "Game Studio is coming in Phase 2.": "O Estúdio de jogos chegará na Fase 2.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "O Estúdio de jogos requer ferramentas locais de execução de jogos e está previsto para a Fase 2 no OpenMotion Cloud."
   },
   "it": {
     "3D": "3D",
@@ -1266,7 +1282,9 @@
     "Agent instruction": "Istruzione per l’agente",
     "Loading instruction…": "Caricamento istruzione…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu.",
-    "Playable ad": "Annuncio giocabile"
+    "Playable ad": "Annuncio giocabile",
+    "Game Studio is coming in Phase 2.": "Studio giochi arriverà nella Fase 2.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "Studio giochi richiede strumenti locali di esecuzione dei giochi ed è previsto nella Fase 2 di OpenMotion Cloud."
   },
   "tr": {
     "3D": "3D",
@@ -1407,6 +1425,8 @@
     "Agent instruction": "Agent talimatı",
     "Loading instruction…": "Talimat yükleniyor…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın.",
-    "Playable ad": "Oynanabilir reklam"
+    "Playable ad": "Oynanabilir reklam",
+    "Game Studio is coming in Phase 2.": "Oyun Stüdyosu Faz 2’de gelecek.",
+    "Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.": "Oyun Stüdyosu yerel oyun çalıştırma araçları gerektirir ve OpenMotion Cloud’da Faz 2 için planlanmıştır."
   }
 }
