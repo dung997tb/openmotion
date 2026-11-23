@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { parseHTMLContent } from '@hyperframes/core/compiler';
 import { bundlePreviewInMemory } from '../../src/studio/engine/preview-bundler.ts';
+import { staticPreviewHtmlSources } from '../../src/studio/engine/preview-html-sources.ts';
 import { InMemoryVirtualProject } from '../../src/studio/virtual-project-store.ts';
 
 const scene = (body: string, id = 'main') =>
@@ -37,4 +38,24 @@ it('retains full refresh for dynamic or unknown inputs, including those inside a
     assert.equal(await htmlSources({ 'index.html': scene(mount('child.html', 'child')), 'child.html': child }), undefined);
   }
   assert.equal(await htmlSources({ 'index.html': scene(mount('missing.html', 'missing')) }), undefined);
+});
+
+it('tracks referenced HTML through static RGB and HSL color declarations', async () => {
+  const files = {
+    'index.html': scene('<style>.card{color:RGB(255, 0, 1);background:hsl(210 60% 40% / 50%)}</style>' + mount('child.html', 'child')),
+    'child.html': scene('<span style="color:rgba(2,3,4,.5);background:hsla(.5turn 30% 40% / 1)">Title</span>', 'child'),
+    'unused.html': scene('<p>Unused</p>'),
+  };
+  assert.deepEqual(await htmlSources(files), ['index.html', 'child.html']);
+});
+
+it('keeps full refresh for mixed and unrecognized CSS even when it also contains numeric colors', () => {
+  for (const value of [
+    'rgb(1 2 3) url("a.png")', 'image-set("a.png" 1x)', 'color-mix(in srgb,rgb(1 2 3),hsl(0 40% 50%))',
+    'rgb(var(--r) 2 3)', '--paint-rgb(1 2 3)', 'unknown\u00a0rgb(1 2 3)', 'rgb(1 2 3) /* hsl(0 40% 50%) */',
+    String.raw`u\72l(a.png)`, '"rgb(1 2 3)"', 'rgb(1 2 3);@import "theme.css"',
+  ]) {
+    const nested = parseHTMLContent(scene(`<template><span></span><style>.a{background:${value}}</style></template>`));
+    assert.equal(staticPreviewHtmlSources('index.html', nested, '/runtime.js').paths(), undefined, value);
+  }
 });
