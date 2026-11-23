@@ -17,7 +17,7 @@ import { flushStudioPendingEdits } from '../utils/studioPendingEdits';
 
 type WriteProjectFile = (path: string, content: string, expectedContent?: string) => Promise<void>;
 
-async function mountEditorSave(writeProjectFile: WriteProjectFile) {
+async function mountEditorSave(writeProjectFile: WriteProjectFile, recordEdit = vi.fn(async () => {})) {
   const captured: { handle: EditorSaveHandle | null } = { handle: null };
   const showToast = vi.fn();
 
@@ -27,7 +27,7 @@ async function mountEditorSave(writeProjectFile: WriteProjectFile) {
     captured.handle = useEditorSave({
       editingFileRef, projectIdRef,
       writeProjectFile,
-      recordEdit: vi.fn(async () => undefined),
+      recordEdit,
       setRefreshKey: vi.fn(),
       showToast,
     });
@@ -173,6 +173,36 @@ describe("useEditorSave pending work", () => {
       mounted.handle.handleContentChange("<p>Two</p>");
       await Promise.all([first, mounted.handle.flushPendingSave()]);
       expect(write.mock.calls.map(call => call[2])).toEqual(["before", "<p data-hf-id='title'>One</p>"]);
+    } finally { await mounted.unmount(); }
+  });
+
+  it.each([false, true])("keeps typing from the last persisted source after a failed history claim (rollback succeeds = %s)", async (rolledBack) => {
+    const first = "<p>One</p>";
+    const normalized = "<p data-hf-id='id'>One</p>";
+    const next = "<p>Two</p>";
+    let disk = "before";
+    let failClaim!: (reason: Error) => void;
+    const claim = vi.fn(async () => {}).mockImplementationOnce(() => new Promise<void>((_, reject) => { failClaim = reject; }));
+    const write = vi.fn<WriteProjectFile>().mockImplementation(async (path, submitted, expected) => {
+      if (expected !== disk) throw new Error("stale source");
+      disk = submitted;
+      if (!rolledBack && submitted === first) disk = normalized;
+      if (submitted === "before") disk = "canonical before";
+      mounted.handle.acknowledgeSource("project-a", path, submitted, disk);
+    });
+    const mounted = await mountEditorSave(write, claim);
+    try {
+      mounted.handle.handleContentChange(first);
+      const saving = mounted.handle.flushPendingSave();
+      await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
+      mounted.handle.handleContentChange(next);
+      const queued = mounted.handle.flushPendingSave();
+      failClaim(new Error("history unavailable"));
+      await saving;
+      await expect(queued).resolves.toEqual({ status: "clean" });
+      expect(write).toHaveBeenLastCalledWith("index.html", next, rolledBack ? "canonical before" : normalized);
+      expect(disk).toBe(next);
+      expect(claim).toHaveBeenCalledTimes(2);
     } finally { await mounted.unmount(); }
   });
 

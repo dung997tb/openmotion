@@ -36,7 +36,7 @@ export interface ChannelPromote {
   /** Declare a new variable (default = current value) and bind this channel to it. */
   promote: () => void;
   /** Update the bound variable's default value in place. */
-  setDefault: (value: string) => void;
+  setDefault: (value: string) => Promise<boolean>;
 }
 
 interface VariablePromoteContextValue {
@@ -134,12 +134,15 @@ export function useVariablePromoteChannel(channel: PromoteChannel): ChannelPromo
           applyBind(s, hfId, action, id),
         ).catch(onPersistError);
       },
-      setDefault: (raw: string) => {
-        if (!boundId || !declaration) return;
+      setDefault: async (raw: string) => {
+        if (!boundId || !declaration) return false;
         const next = declaration.type === "color" ? rgbToHex(raw) : raw;
-        void persist(`Set default for "${boundId}"`, (s) =>
-          s.setVariableValue(boundId, next),
-        ).catch(onPersistError);
+        try {
+          return await persist(`Set default for "${boundId}"`, (s) => s.setVariableValue(boundId, next));
+        } catch (error) {
+          onPersistError(error);
+          return false;
+        }
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

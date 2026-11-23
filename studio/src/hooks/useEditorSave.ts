@@ -124,8 +124,7 @@ export function useEditorSave({
     session.failure = undefined;
     // The closure owns the original file, project writer, and accepted baseline.
     session.queue.schedule(async () => {
-      const write = { submitted: content, accepted: content };
-      session.writing = write;
+      session.writing = { submitted: content, accepted: content };
       try {
         await saveProjectFilesWithHistory({
           projectId: pid, label: "Edit source", coalesceKey: `source:${open.path}`,
@@ -133,9 +132,13 @@ export function useEditorSave({
           files: { [open.path]: () => content },
           readFile: async () => session.baseline,
           writeFile: writeProjectFile,
+          onFileWritten: (_, submitted) => {
+            const write = session.writing;
+            session.baseline = write?.submitted === submitted ? write.accepted : submitted;
+          },
           recordEdit,
         });
-        session.baseline = write.accepted;
+        session.failure = undefined;
         if (sessions.current.get(key) === session && session.draft === candidate) sessions.current.delete(key);
         lastFailureReportRef.current = null;
         if (refreshRafRef.current != null) cancelAnimationFrame(refreshRafRef.current);
@@ -182,8 +185,8 @@ export function useEditorSave({
   }), [flushPendingSave, getPendingCandidate]);
 
   const acknowledgeSource = useCallback((pid: string, path: string, submitted: string, accepted: string) => {
-    const write = sessions.current.get(JSON.stringify([pid, path]))?.writing;
-    if (write?.submitted === submitted) write.accepted = accepted;
+    const session = sessions.current.get(JSON.stringify([pid, path]));
+    if (session?.writing) session.writing = { submitted, accepted };
   }, []);
 
   return { handleContentChange, acknowledgeSource, getPendingCandidate, flushPendingSave, discardPendingSave };

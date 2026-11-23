@@ -90,11 +90,13 @@ export function TextAreaField({
   const composing = useRef(false);
   const focusedRef = useRef(false);
   const lastInput = useRef(value);
+  // A completed request can leave an unsaved draft even though the queue is idle.
+  const failedDraft = useRef<string | null>(null);
   const accepted = useRef(value);
   accepted.current = value;
 
   useEffect(() => {
-    if (composing.current || queue.busy()) return;
+    if (composing.current || queue.busy() || failedDraft.current !== null) return;
     lastInput.current = value;
     setDraft(value);
   }, [value, queue]);
@@ -104,19 +106,30 @@ export function TextAreaField({
   }, [autoFocus]);
 
   const schedule = (text: string) => {
-    if (text === lastInput.current) return;
+    const retry = failedDraft.current === text;
+    if (!retry && text === lastInput.current) return;
+    failedDraft.current = null;
     lastInput.current = text;
-    if (text === accepted.current && !queue.writing()) {
+    if (!retry && text === accepted.current && !queue.writing()) {
       queue.cancel();
       return;
     }
     queue.schedule(async () => {
       track("text", label);
-      const result = await onCommit(text);
-      if (result && typeof result === "object" && "reason" in result && result.reason === "preview-stale") {
+      let result: unknown;
+      try {
+        result = await onCommit(text);
+      } catch {
+        result = false;
+      }
+      const outcome = typeof result === "object" ? result : null;
+      if (outcome && "reason" in outcome && outcome.reason === "preview-stale") {
         queue.cancel();
+        failedDraft.current = null;
         lastInput.current = accepted.current;
         setDraft(accepted.current);
+      } else if (result === false || result === null || (outcome && "ok" in outcome && outcome.ok === false)) {
+        if (lastInput.current === text) failedDraft.current = text;
       }
     });
   };
@@ -128,7 +141,9 @@ export function TextAreaField({
   };
   const handleBlur = () => {
     focusedRef.current = false;
-    if (!composing.current) void queue.flush();
+    if (composing.current) return;
+    if (failedDraft.current !== null) schedule(failedDraft.current);
+    void queue.flush();
   };
   const compositionHandlers = {
     onCompositionStart: () => { composing.current = true; },

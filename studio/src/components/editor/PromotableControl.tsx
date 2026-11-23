@@ -22,7 +22,7 @@ interface RenderArgs {
   /** When bound, the variable's default to display; otherwise undefined. */
   value?: string;
   /** When bound, routes commits to the variable default; otherwise undefined. */
-  onCommit?: (value: string) => void;
+  onCommit?: (value: string) => Promise<boolean>;
   bound: boolean;
 }
 

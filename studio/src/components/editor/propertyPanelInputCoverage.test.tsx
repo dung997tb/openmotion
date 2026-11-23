@@ -470,7 +470,46 @@ describe.each(["classic", "flat"] as const)("shared %s input telemetry", (ui) =>
     await act(async () => { release(); });
     expect(write.mock.calls.map(([value]) => value.length)).toEqual([20, 27]);
   });
+  it.each([
+    ["throws", () => { throw new Error("offline"); }],
+    ["rejects", () => Promise.reject(new Error("offline"))],
+    ["returns false", () => false],
+    ["returns null", () => Promise.resolve(null)],
+    ["declines persistence", () => ({ ok: false, reason: "persist-failed" })],
+  ])("retains the draft and retries once on blur when the commit %s", async (_, fail) => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockImplementationOnce(fail).mockResolvedValue(true);
+    const field = (value: string) => section(
+      <TextAreaField flat={ui === "flat"} label="Content" value={value} onCommit={write} />,
+    );
+    const host = render(field("before"));
+    const textarea = host.querySelector("textarea")!;
+    act(() => { textarea.focus(); changeTextarea(textarea, "my draft"); });
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    act(() => roots.at(-1)!.render(field("refreshed value")));
+    expect(textarea.value).toBe("my draft");
+    expect(write).toHaveBeenCalledOnce();
 
+    await act(async () => textarea.blur());
+    await act(async () => { textarea.focus(); textarea.blur(); });
+    expect(write.mock.calls).toEqual([["my draft"], ["my draft"]]);
+  });
+
+  it("does not transfer a failed draft to another selected element", async () => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockResolvedValue(false);
+    const field = (target: string) => section(
+      <TextAreaField key={target} flat={ui === "flat"} label="Content" value={target} onCommit={write} />,
+    );
+    const host = render(field("first"));
+    act(() => changeTextarea(host.querySelector("textarea")!, "unsaved"));
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    act(() => roots.at(-1)!.render(field("second")));
+    const next = host.querySelector("textarea")!;
+    expect(next.value).toBe("second");
+    await act(async () => { next.focus(); next.blur(); });
+    expect(write).toHaveBeenCalledExactlyOnceWith("unsaved");
+  });
 
   it("drops a queued stale inspector edit when another writer changed the selected target", async () => {
     vi.useFakeTimers();

@@ -67,6 +67,8 @@ interface SaveProjectFilesWithHistoryInput {
   commandForWrite?: (path: string) => ProjectEditCommand | undefined;
   readFile: (path: string) => Promise<string>;
   writeFile: ProjectFileWriter;
+  /** Observe successful file writes, including a compensating write after a history failure. */
+  onFileWritten?: (path: string, submitted: string) => void;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
   /**
    * What a path holds ON DISK right now, when that is not the same as the
@@ -148,6 +150,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   files,
   readFile,
   writeFile,
+  onFileWritten,
   recordEdit,
   diskContent,
   commandForWrite,
@@ -168,6 +171,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   if (changedPaths.length > 1 && !commandForWrite) {
     const sources = changedPaths.map(path => ({ path, before: diskContent?.[path] ?? snapshots[path].before, after: snapshots[path].after }));
     if (await tryStudioTextEdit(projectId, sources, history)) {
+      for (const path of changedPaths) onFileWritten?.(path, snapshots[path].after);
       await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
       return changedPaths;
     }
@@ -180,6 +184,7 @@ export async function writeProjectFilesWithHistoryInQueue({
     if (edits.length === changedPaths.length) {
       const { commitStudioEditBatch } = await import('./projectEditBatch');
       await commitStudioEditBatch(projectId, edits, history);
+      for (const edit of edits) onFileWritten?.(edit.path, edit.after);
       await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
       return changedPaths;
     }
@@ -194,6 +199,7 @@ export async function writeProjectFilesWithHistoryInQueue({
       else if (command) await writeFile(path, snapshots[path].after, expected, command);
       else await writeFile(path, snapshots[path].after, expected);
       writtenPaths.push(path);
+      onFileWritten?.(path, snapshots[path].after);
     }
 
     await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
@@ -201,6 +207,7 @@ export async function writeProjectFilesWithHistoryInQueue({
     try {
       for (const path of writtenPaths.reverse()) {
         await writeFile(path, snapshots[path].before, snapshots[path].after);
+        onFileWritten?.(path, snapshots[path].before);
       }
     } catch (rollbackError) {
       throw new AggregateError(
