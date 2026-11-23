@@ -165,7 +165,7 @@ export function applyContentCommand(
       desiredTrack: track,
       canvasPosition,
     });
-    if (!result.ok) throw new Error(result.error);
+    if (result.ok === false) throw new Error(result.error);
     return result.html;
   }
 

@@ -193,10 +193,10 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
     case "editAnimation": {
       for (const mutation of command.mutations) {
         const valid = validateGsapMutationPayload(mutation);
-        if (!valid.ok) throw new Error(valid.error);
+        if (valid.ok === false) throw new Error(valid.error);
       }
       const result = applyGsapMutationsInMemory(source, command.mutations);
-      if (!result.ok) throw new Error(result.error);
+      if (result.ok === false) throw new Error(result.error);
       return result.after;
     }
     case "deleteCanvasElements": {

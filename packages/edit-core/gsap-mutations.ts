@@ -351,7 +351,7 @@ export function applyGsapMutationsInMemory(
           !body.values || !Object.values(body.values).length || !Object.values(body.values).every(Number.isFinite))
         return {ok:false,status:400,error:'A playhead position and finite values are required.'};
       const plan = planAuthoredAnimatedValues(found.anim, at, body.values, body.samples);
-      if (!plan.ok) return {ok:false,status:400,error:'Cannot edit animated values: ' + plan.reason + '. Supply measured tween endpoints/ease when required.'};
+      if (plan.ok === false) return {ok:false,status:400,error:'Cannot edit animated values: ' + plan.reason + '. Supply measured tween endpoints/ease when required.'};
       body = plan.mutation;
     }
     const type = String(body.type ?? '');
