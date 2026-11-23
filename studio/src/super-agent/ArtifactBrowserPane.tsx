@@ -1,5 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
+import { menuClasses } from '../components/ui/menuStyle';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { brandCatalogFile, type BrandCatalogEntry } from '../../../shared/brand-catalog';
 import type { BrandKit } from '../../../shared/brand-kit';
@@ -2177,7 +2178,7 @@ export function ArtifactBrowserPane({
                 />
               }
             >
-              <div className="om-sa-browser-menu" role="menu" aria-label={t('Browser options')}>
+              <div className={`${menuClasses.panel} om-sa-browser-menu`} role="menu" aria-label={t('Browser options')}>
                 {activeArtifact.kind === 'web' && (
                   <Button
                     variant="plain"
