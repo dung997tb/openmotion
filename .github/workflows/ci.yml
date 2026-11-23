@@ -5,7 +5,7 @@ name: Motion standalone checks
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
     inputs:
       format:

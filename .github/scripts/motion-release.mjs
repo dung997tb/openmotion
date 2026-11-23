@@ -19,17 +19,24 @@ export const candidateWorkflow = '.github/workflows/motion-candidate.yml';
 export const publicationWorkflow = '.github/workflows/motion-publish-test.yml';
 export const recoveryWorkflow = '.github/workflows/motion-publication-recovery.yml';
 export const candidateJobName = 'Build immutable candidate';
+export const releaseBranches = ['main', 'next'];
+export const releaseRefs = releaseBranches.map(branch => `refs/heads/${branch}`);
 const candidateWorkflows = [candidateWorkflow, publicationWorkflow];
-const candidateRefs = ['refs/heads/main', 'refs/heads/feature/motion'];
+const candidateRefs = [...releaseRefs, 'refs/heads/feature/motion'];
 const exec = promisify(execFile), hashPattern = /^[a-f0-9]{64}$/;
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 const integrity = bytes => 'sha512-' + createHash('sha512').update(bytes).digest('base64');
 
+function releaseBranch(ref) {
+  assert(releaseRefs.includes(ref), 'Select main or next in Run workflow for Motion operations');
+  return ref.slice('refs/heads/'.length);
+}
+
 function manualEntry(env, workflows) {
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Wrong repository');
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'Manual invocation required');
-  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Select main in Run workflow for Motion operations');
-  assert(workflows.some(p => env.GITHUB_WORKFLOW_REF === `${repository}/${p}@refs/heads/main`), 'Require a trusted manual entry');
+  releaseBranch(env.GITHUB_REF);
+  assert(workflows.some(p => env.GITHUB_WORKFLOW_REF === `${repository}/${p}@${env.GITHUB_REF}`), 'Require a trusted manual entry');
 }
 
 export function releaseChannel(version) {
@@ -85,14 +92,15 @@ export async function resolveCandidate(control, requested, version, env = proces
       version = automaticVersion(published.split('-test.')[0]);
     }
   }
-  await validateSource(control, commit, version, run, channel);
+  await validateSource(control, commit, version, run, channel, env.GITHUB_REF);
   return { commit, version };
 }
 
-export async function validateSource(control, commit, version, run = runFile, channel = releaseChannel(version)) {
+export async function validateSource(control, commit, version, run = runFile, channel = releaseChannel(version), ref = 'refs/heads/main') {
   assert.match(commit || '', /^[a-f0-9]{40}$/, 'Use a full immutable source SHA');
   channelVersion(version, channel);
-  await run('git', ['merge-base', '--is-ancestor', commit, 'refs/remotes/origin/main'], { cwd: control });
+  const branch = releaseBranch(ref);
+  await run('git', ['merge-base', '--is-ancestor', commit, `refs/remotes/origin/${branch}`], { cwd: control });
 }
 
 export function candidateNoteIdentity(candidate) {
@@ -106,9 +114,12 @@ export async function sealCandidate(build, output, source, env = process.env) {
   channelVersion(manifest.version, env.MOTION_RELEASE_CHANNEL || 'test');
   assert.equal(manifest.templateEnvironment, releaseTemplateEnvironment(manifest.version), 'Template defaults must match the release channel');
   assert.match(env.GITHUB_SHA || '', /^[a-f0-9]{40}$/);
-  const workflowRef = 'refs/heads/main';
-  const producer = candidateWorkflows.find(file => env.GITHUB_WORKFLOW_REF === `${repository}/${file}@${workflowRef}`);
-  assert(producer, 'Build candidates only from main using a trusted workflow');
+  let workflowRef, producer;
+  for (const ref of releaseRefs) {
+    const match = candidateWorkflows.find(file => env.GITHUB_WORKFLOW_REF === `${repository}/${file}@${ref}`);
+    if (match) { workflowRef = ref; producer = match; break; }
+  }
+  assert(producer && workflowRef, 'Build candidates only from main or next using a trusted workflow');
   assert(/^[1-9]\d*$/.test(env.GITHUB_RUN_ID || '') && /^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT || ''));
   const filename = manifest.installer.url.replace(/^\.\//, '');
   assert.equal(filename, `openmotion-app-${manifest.version}.tgz`);
@@ -156,7 +167,7 @@ export function validateRun(run, artifact, version) {
   assert.equal(run.status, 'completed'); assert.equal(run.conclusion, 'success', 'Candidate build must finish successfully');
   const producer = run.path.split('@')[0];
   assert(candidateWorkflows.includes(producer), 'Candidate must come from a registered release workflow');
-  if (producer === publicationWorkflow) assert.equal(run.head_branch, 'main');
+  if (producer === publicationWorkflow) assert(releaseBranches.includes(run.head_branch), 'Untrusted publication branch');
   assert.equal(artifact.name, `motion-candidate-${version}`);
   assert.equal(artifact.workflow_run?.id, run.id); assert.equal(artifact.expired, false);
   assert.match(artifact.digest || '', /^sha256:[a-f0-9]{64}$/, 'Require the GitHub artifact digest');
@@ -184,7 +195,7 @@ export async function recordAuthorization(directory, inputs, fetcher = fetch, en
   assert.equal(authorized.action, inputs.action); assert.equal(authorized.version, inputs.version);
   const candidate = await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version);
   const run = await github(`/actions/runs/${env.GITHUB_RUN_ID}`, fetcher);
-  assert.equal(String(run.id), env.GITHUB_RUN_ID); assert.equal(run.head_branch, 'main'); assert.equal(run.event, 'workflow_dispatch');
+  assert.equal(String(run.id), env.GITHUB_RUN_ID); assert.equal(run.head_branch, releaseBranch(env.GITHUB_REF)); assert.equal(run.event, 'workflow_dispatch');
   assert.equal(run.head_repository?.full_name, repository); assert.equal(run.head_sha, env.GITHUB_SHA);
   assert.equal(run.path.split('@')[0], env.GITHUB_WORKFLOW_REF.slice(repository.length + 1).split('@')[0]);
   await writeJSON(path.join(directory, 'authorization.json'), authorizationReceipt(candidate, run, inputs.action));
@@ -216,7 +227,7 @@ export async function verifyCandidate(directory, expectedSHA256, run) {
   assert([repository, 'nexu-io/html-anything'].includes(receiptRepository), 'Untrusted candidate repository');
   const producer = run.path?.split('@')[0] || candidateWorkflow;
   assert(candidateWorkflows.includes(producer), 'Untrusted candidate workflow');
-  if (producer === publicationWorkflow) assert.equal(ref, 'refs/heads/main');
+  if (producer === publicationWorkflow) assert(releaseRefs.includes(ref), 'Untrusted publication branch');
   assert.deepEqual(candidate.workflow, { repository: receiptRepository, path: producer, ref, sha: run.head_sha, runId: run.id, attempt: run.run_attempt });
   const names = [candidate.tgz, 'release-npm.json', 'source-scan.json', 'package-scan.json', 'install.md', 'install-record.json', 'acceptance.md', 'candidate-install.md'];
   if (candidate.schemaVersion >= 3) names.push('release-notes.md');
@@ -254,7 +265,7 @@ export async function verifyCurrentCandidate(directory, inputs, env = process.en
   assert(/^[1-9]\d*$/.test(env.MOTION_CANDIDATE_ARTIFACT_ID || ''));
   assert(/^[1-9]\d*$/.test(env.MOTION_CANDIDATE_ATTEMPT || ''));
   const provenance = { runId: Number(env.GITHUB_RUN_ID), attempt: Number(env.MOTION_CANDIDATE_ATTEMPT), path: publicationWorkflow,
-    head_branch: 'main', head_sha: env.GITHUB_SHA, artifactId: Number(env.MOTION_CANDIDATE_ARTIFACT_ID) };
+    head_branch: releaseBranch(env.GITHUB_REF), head_sha: env.GITHUB_SHA, artifactId: Number(env.MOTION_CANDIDATE_ARTIFACT_ID) };
   const candidate = await verifyCandidate(directory, inputs.expectedSHA256, { path: provenance.path, head_branch: provenance.head_branch,
     head_sha: provenance.head_sha, id: provenance.runId, run_attempt: provenance.attempt });
   assert.equal(candidate.version, inputs.version);
@@ -270,7 +281,7 @@ export async function findCandidate(version, fetcher = fetch, candidateRunId) {
   const result = await github(`${scope}?name=${encodeURIComponent(name)}&per_page=100`, fetcher);
   assert(result.total_count <= 100, 'Too many matching artifacts; refusing an incomplete lookup');
   const matches = result.artifacts.filter(a => a.name === name && !a.expired);
-  assert.equal(matches.length, 1, `Expected one unexpired candidate for ${version}; found ${matches.length}. Use the exact version and run ID from a successful candidate. To create a new candidate, run Motion package and release on main in prepublish mode. Changing the version input cannot rename an existing candidate.`);
+  assert.equal(matches.length, 1, `Expected one unexpired candidate for ${version}; found ${matches.length}. Use the exact version and run ID from a successful candidate. To create a new candidate, run Motion package and release on main or next in prepublish mode. Changing the version input cannot rename an existing candidate.`);
   assert(Number.isSafeInteger(matches[0].workflow_run?.id) && matches[0].workflow_run.id > 0);
   if (candidateRunId) assert.equal(String(matches[0].workflow_run.id), candidateRunId, 'Artifact belongs to a different run');
   return matches[0];
@@ -508,7 +519,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else if (command === 'authorize') await recordAuthorization(directory, inputs);
     else if (command === 'rescan') {
       const c = await verifyDownloaded(directory, inputs.expectedSHA256);
-      await validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel);
+      const sourceRef = releaseRefs.includes(c.workflow?.ref) ? c.workflow.ref : process.env.GITHUB_REF;
+      await validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, sourceRef);
       const work = await mkdtemp(path.join(os.tmpdir(), 'motion-source-verify-'));
       try {
         await runFile('git', ['worktree', 'add', '--detach', work, c.sourceCommit], { cwd: extra });

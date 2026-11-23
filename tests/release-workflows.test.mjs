@@ -16,12 +16,17 @@ const valid = { GITHUB_REPOSITORY: repository, GITHUB_EVENT_NAME: 'workflow_disp
   GITHUB_WORKFLOW_REF: `${repository}/${publicationWorkflow}@refs/heads/main`, MOTION_VERSION: '0.6.4-test.99', MOTION_RELEASE_ACTION: 'publish-test', MOTION_EXPECTED_SHA256: 'a'.repeat(64) };
 const origin = { id: 123, run_attempt: 1, event: 'workflow_dispatch', head_branch: 'main', head_repository: { full_name: repository }, status: 'completed', conclusion: 'success', path: candidateWorkflow, head_sha: 'b'.repeat(40) };
 const artifact = { id: 456, name: 'motion-candidate-0.6.4-test.99', workflow_run: { id: 123 }, expired: false, size_in_bytes: 100, digest: 'sha256:' + 'a'.repeat(64) };
-test('renamed OpenMotion accepts manual releases from main and rejects retired identities', () => {
+test('renamed OpenMotion accepts manual releases from main or next and rejects retired identities', () => {
+  for (const branch of ['main', 'next']) {
+    const entry = { ...valid, GITHUB_REPOSITORY: 'nexu-io/openmotion', GITHUB_REF: `refs/heads/${branch}`,
+      GITHUB_WORKFLOW_REF: `nexu-io/openmotion/${publicationWorkflow}@refs/heads/${branch}` };
+    assert.equal(releaseInputs(entry).action, 'publish-test');
+  }
   const entry = { ...valid, GITHUB_REPOSITORY: 'nexu-io/openmotion', GITHUB_REF: 'refs/heads/main',
     GITHUB_WORKFLOW_REF: `nexu-io/openmotion/${publicationWorkflow}@refs/heads/main` };
-  assert.equal(releaseInputs(entry).action, 'publish-test');
   assert.throws(() => releaseInputs({ ...entry, GITHUB_REPOSITORY: 'nexu-io/html-anything' }));
   assert.throws(() => releaseInputs({ ...entry, GITHUB_REF: 'refs/heads/feature/motion' }));
+  assert.throws(() => releaseInputs({ ...entry, GITHUB_REF: 'refs/heads/next', GITHUB_WORKFLOW_REF: `nexu-io/openmotion/${publicationWorkflow}@refs/heads/main` }));
 });
 
 test('manual entry and source selection reject untrusted callers, mutable refs and non-test versions', async () => {
@@ -32,6 +37,9 @@ test('manual entry and source selection reject untrusted callers, mutable refs a
   assert.equal(releaseInputs({ ...recovery, MOTION_RELEASE_ACTION: 'archive-only' }).action, 'archive-only');
   let called = false;
   await validateSource('.', 'a'.repeat(40), '0.6.4-test.7', async (_, args) => { called = true; assert(args.includes('refs/remotes/origin/main')); }); assert(called);
+  let nextCalled = false;
+  await validateSource('.', 'a'.repeat(40), '0.6.4-test.7', async (_, args) => { nextCalled = true; assert(args.includes('refs/remotes/origin/next')); }, 'test', 'refs/heads/next'); assert(nextCalled);
+  await assert.rejects(validateSource('.', 'a'.repeat(40), '0.6.4-test.7', async () => { throw Error('must not run'); }, 'test', 'refs/heads/feature/motion'), /Select main or next/);
   for (const [sha, version] of [['main', '0.6.4-test.7'], ['a'.repeat(40), '0.6.4-test.0']]) await assert.rejects(validateSource('.', sha, version, async () => { throw Error('must not run'); }));
   await assert.rejects(validateSource('.', 'a'.repeat(40), '0.6.4-test.7', async () => { throw Error('not integrated'); }), /not integrated/);
   const buildEnv = { ...valid, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_REF: `${repository}/${candidateWorkflow}@refs/heads/main` };
@@ -102,7 +110,10 @@ test('automatic candidates follow the active release series and ignore historica
 
 test('only a completed successful registered candidate build can supply a version', () => {
   validateRun(origin, artifact, '0.6.4-test.99');
+  validateRun({ ...origin, head_branch: 'next' }, artifact, '0.6.4-test.99');
+  validateRun({ ...origin, head_branch: 'next', path: publicationWorkflow }, artifact, '0.6.4-test.99');
   validateRun({ ...origin, head_branch: 'feature/motion' }, artifact, '0.6.4-test.99'); // Historical producer runs survive the cutover.
+  assert.throws(() => validateRun({ ...origin, head_branch: 'feature/motion', path: publicationWorkflow }, artifact, '0.6.4-test.99'));
   for (const patch of [{ event: 'pull_request' }, { head_branch: 'codex/unreviewed' }, { head_branch: 'legacy' }, { path: '.github/workflows/other.yml' }, { head_repository: { full_name: 'fork/repo' } }, { status: 'in_progress' }, { conclusion: 'failure' }]) assert.throws(() => validateRun({ ...origin, ...patch }, artifact, '0.6.4-test.99'));
   for (const patch of [{ expired: true }, { name: 'motion-candidate-0.6.4-test.100' }, { digest: null }, { workflow_run: { id: 999 } }]) assert.throws(() => validateRun(origin, { ...artifact, ...patch }, '0.6.4-test.99'));
 });
@@ -205,7 +216,7 @@ test('the sealed candidate detects tgz, guide, identity and provenance tampering
 });
 
 for (const [branch, receiptRepository] of [
-  ['main', repository], ['feature/motion', repository], ['feature/motion', 'nexu-io/html-anything'],
+  ['main', repository], ['next', repository], ['feature/motion', repository], ['feature/motion', 'nexu-io/html-anything'],
 ]) test(`artifact download binds ${branch} / ${receiptRepository} provenance and does not forward credentials to signed URLs`, async t => {
   const f = await candidateFixture(t), zip = path.join(f.work, 'candidate.zip');
   // Simulate a frozen producer receipt; new candidate builds are main-only.
@@ -245,6 +256,27 @@ test('repository rename accepts historical receipts but rejects old live callers
   f.candidate.workflow.repository = 'fork/repo';
   await writeFile(path.join(f.directory, 'candidate.json'), JSON.stringify(f.candidate));
   await assert.rejects(verifyDownloaded(f.directory, f.candidate.tgzSHA256), /Untrusted candidate repository/);
+});
+
+test('next integration branch supports same-run sealing, verification and operator authorization', async t => {
+  const f = await candidateFixture(t, 'next');
+  assert.equal(f.candidate.workflow.ref, 'refs/heads/next');
+  const nextEnv = {
+    ...f.env,
+    GITHUB_RUN_ID: '123',
+    GITHUB_SHA: origin.head_sha,
+    MOTION_CANDIDATE_ARTIFACT_ID: '456',
+    MOTION_CANDIDATE_ATTEMPT: '1',
+  };
+  const sealed = await sealCandidate(f.build, f.directory, f.root, {
+    ...nextEnv, GITHUB_RUN_ATTEMPT: '1', MOTION_SOURCE_SHA: f.candidate.sourceCommit,
+  });
+  assert.equal(sealed.workflow.ref, 'refs/heads/next');
+  assert.equal(sealed.workflow.path, publicationWorkflow);
+  assert.deepEqual(await verifyCurrentCandidate(f.directory, f.inputs, nextEnv), sealed);
+  const run = { ...origin, head_branch: 'next', id: 800, path: publicationWorkflow, actor: { login: 'operator' } };
+  await recordAuthorization(f.directory, f.inputs, async () => Response.json(run), f.env);
+  await assert.rejects(recordAuthorization(f.directory, f.inputs, async () => Response.json({ ...run, head_branch: 'main' }), f.env));
 });
 
 test('old main receipts remain readable but unregistered candidate branches cannot seal artifacts', async t => {
@@ -385,7 +417,7 @@ test('one manual entry selects the new candidate or exact retained run, then def
   assert(build.includes('name: ' + candidateJobName) && build.includes('ref: ${{ steps.source.outputs.source_sha }}'));
   for (const entry of [build, workflow, recovery]) {
     assert(entry.includes('name: Require Motion integration branch'));
-    assert(entry.includes("Select main in Run workflow"));
+    assert(entry.includes("Select main or next in Run workflow"));
     const guard = entry.split('      - name: Require Motion integration branch\n')[1].split(/\n      - |\n  [a-z]/)[0];
     assert(guard.includes("exit 1"));
   }
@@ -419,15 +451,16 @@ test('one manual entry selects the new candidate or exact retained run, then def
   assert(recovery.includes('uses: ./.github/workflows/motion-publish-test.yml') && !recovery.includes('source_sha:'));
 });
 
-test('each manual entry accepts only main before checkout or publication', async () => {
+test('each manual entry accepts only main or next before checkout or publication', async () => {
   for (const name of ['motion-candidate', 'motion-publish-test', 'motion-publication-recovery']) {
     const workflow = await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
     const step = workflow.split('      - name: Require Motion integration branch\n')[1].split(/\n      - |\n  [a-z]/)[0];
     const script = step.split('        run: |\n')[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
     const run = ref => runFile('bash', ['-e', '-o', 'pipefail', '-c', script], { env: { ...process.env, GITHUB_REF: ref } });
     await run('refs/heads/main');
-    for (const ref of ['refs/heads/feature/motion', 'refs/heads/legacy', 'refs/heads/codex/unreviewed', 'refs/tags/main']) {
-      await assert.rejects(run(ref), /Select main/);
+    await run('refs/heads/next');
+    for (const ref of ['refs/heads/feature/motion', 'refs/heads/legacy', 'refs/heads/codex/unreviewed', 'refs/tags/main', 'refs/tags/next']) {
+      await assert.rejects(run(ref), /Select main or next/);
     }
   }
 });
