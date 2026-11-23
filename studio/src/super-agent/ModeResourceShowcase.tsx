@@ -5,6 +5,7 @@ import { blackFridayTemplates } from '../../../shared/black-friday-collection';
 import type { GalleryTemplate } from '../../../shared/catalog';
 import { gameGenres, type GameCard, type GameGenre } from '../../../shared/game-contract';
 import type { SuperAgentResourceAttachment } from '../../../shared/super-agent';
+import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ScaledPreviewThumb } from '../design/ScaledPreviewThumb';
 import { useI18n } from '../i18n/I18n';
@@ -12,17 +13,18 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { groupBrandSeries, rankDiscoverySeries } from '../motion/brandStoryData';
 import { cinemaTemplates } from '../motion/cinemaTemplates';
 import { gptImageStory, seedanceStory } from '../motion/exploreModelStories';
+import { GameMasonry, interleavePortrait } from '../motion/game/GameMasonry';
 import {
   bundledGames,
   communityGames,
   coverUrl,
+  formatPlays,
   gameApi,
   genreCovers,
   genreLabels,
 } from '../motion/game/gameCatalog';
 import {
   GAME_STUDIO_QUICK_IDEAS,
-  localizedGameDescription,
   localizedGameTitle,
   toGameResourceAttachment,
 } from '../motion/game/gameSuperAgent';
@@ -434,24 +436,38 @@ function ResourceShowcaseThumb({ item, active = true }: { item: SuperAgentResour
   );
 }
 
+type GameSort = 'relevance' | 'plays' | 'newest';
+
+const GAME_STATUS_LABELS: Partial<Record<GameCard['status'], string>> = {
+  draft: 'Waiting for your Agent',
+  building: 'Agent is running',
+  ready: 'Ready to publish',
+  failed: 'Not finished',
+};
+
 export function ModeResourceShowcase({
   active = true,
   mode,
   attachments,
   modeOptions,
+  playingGameId = null,
   onChangeModeOptions,
   onToggleAttachment,
+  onPlayGame,
+  onFocusComposer,
   onPickPrompt,
   onOpenAllResources,
-  onOpenGameStudio,
   onClose,
 }: {
   active?: boolean;
   mode: SuperAgentModeSpec;
   attachments: SuperAgentResourceAttachment[];
   modeOptions?: ModeComposerOptions;
+  playingGameId?: string | null;
   onChangeModeOptions?: (patch: Partial<ModeComposerOptions>) => void;
   onToggleAttachment: (item: SuperAgentResourceAttachment) => void;
+  onPlayGame?: (game: GameCard) => void;
+  onFocusComposer?: () => void;
   onPickPrompt: (prompt: string) => void;
   onOpenAllResources: (category: ResourceCategoryTab) => void;
   onOpenGameStudio?: () => void;
@@ -481,12 +497,18 @@ export function ModeResourceShowcase({
 
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [activeSkillCategory, setActiveSkillCategory] = useState<SkillCategory | 'all'>('all');
+  const [gameQuery, setGameQuery] = useState('');
+  const [gameSort, setGameSort] = useState<GameSort>('relevance');
   const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const publishedGameTemplates = useMemo(
     () => gameCatalog.filter(g => g.source !== 'mine' && g.status === 'published'),
     [gameCatalog],
+  );
+  const fannedGames = useMemo(
+    () => publishedGameTemplates.filter(g => Boolean(coverUrl(g))).slice(0, 5),
+    [publishedGameTemplates],
   );
   const myGames = useMemo(
     () => gameCatalog.filter(g => g.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
@@ -598,13 +620,15 @@ export function ModeResourceShowcase({
   useEffect(() => {
     setActiveFilter(filters[0]?.id ?? 'all');
     setActiveSkillCategory('all');
+    setGameQuery('');
+    setGameSort('relevance');
     setVisibleCount(PAGE_BATCH_SIZE);
   }, [mode.id]);
 
   // Reset visible scroll window when filter changes.
   useEffect(() => {
     setVisibleCount(PAGE_BATCH_SIZE);
-  }, [activeFilter, activeSkillCategory]);
+  }, [activeFilter, activeSkillCategory, gameQuery, gameSort]);
 
   // Eagerly fetch needed catalogs cleanly with full limits (no truncation).
   useEffect(() => {
@@ -730,14 +754,30 @@ export function ModeResourceShowcase({
 
   const filteredGames = useMemo<GameCard[]>(() => {
     if (!showGameCards) return [];
-    if (activeFilter === 'mine') return myGames;
-    if (activeFilter === 'portrait') return publishedGameTemplates.filter(g => g.orientation === 'portrait');
-    if (activeFilter.startsWith('genre:')) {
-      const genreId = activeFilter.slice(6) as GameGenre;
-      return publishedGameTemplates.filter(item => item.genre === genreId);
-    }
-    return publishedGameTemplates;
-  }, [showGameCards, activeFilter, publishedGameTemplates, myGames]);
+    const needle = gameQuery.trim().toLocaleLowerCase();
+    const base = activeFilter === 'mine'
+      ? myGames
+      : activeFilter === 'portrait'
+        ? publishedGameTemplates.filter(g => g.orientation === 'portrait')
+        : activeFilter.startsWith('genre:')
+          ? publishedGameTemplates.filter(item => item.genre === (activeFilter.slice(6) as GameGenre))
+          : publishedGameTemplates;
+    const matched = needle
+      ? base.filter(game =>
+          [
+            game.title,
+            game.description,
+            game.i18n?.[locale]?.title,
+            game.i18n?.[locale]?.description,
+            t(genreLabels[game.genre]),
+          ].some(text => text?.toLocaleLowerCase().includes(needle)),
+        )
+      : base;
+    if (activeFilter === 'mine') return matched;
+    if (gameSort === 'plays') return [...matched].sort((a, b) => b.plays - a.plays);
+    if (gameSort === 'newest') return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return interleavePortrait(matched);
+  }, [showGameCards, activeFilter, publishedGameTemplates, myGames, gameQuery, gameSort, locale, t]);
 
   const totalCount = showGameCards
     ? filteredGames.length
@@ -774,6 +814,30 @@ export function ModeResourceShowcase({
     );
 
   const selectedKeys = useMemo(() => new Set(attachments.map(resourceKey)), [attachments]);
+  const selectGameForAgent = (game: GameCard) => {
+    const title = localizedGameTitle(game, locale);
+    if (game.source === 'mine') {
+      const att = toGameResourceAttachment(game, title);
+      const alreadyAttached = selectedKeys.has(resourceKey(att));
+      onToggleAttachment(att);
+      if (!alreadyAttached) onFocusComposer?.();
+      return;
+    }
+    const isSelected = modeOptions?.gameTemplate?.id === game.id;
+    onChangeModeOptions?.({
+      gameTemplate: isSelected ? null : game,
+      ...(!isSelected
+        ? {
+            gameGenre: game.genre,
+            gameStyle: game.style,
+            gameSetting: game.setting,
+            gameOrientation: game.orientation ?? 'landscape',
+            gameMultiplayer: game.multiplayer,
+          }
+        : {}),
+    });
+    if (!isSelected) onFocusComposer?.();
+  };
   const visibleGames = showGameCards ? filteredGames.slice(0, visibleCount) : null;
   const visibleCurated = !showGameCards && curatedCards ? curatedCards.slice(0, visibleCount) : null;
   const visibleResources = !showGameCards && !curatedCards ? resourceItems.slice(0, visibleCount) : [];
@@ -790,9 +854,63 @@ export function ModeResourceShowcase({
             icon={<RemixIcon name="close-line" size={16} />}
           />
         </div>
-        <span className="om-creation-icon om-sa-mode-hero-icon" data-tone={mode.tone} aria-hidden="true">
-          <RemixIcon name={mode.icon} size={22} />
-        </span>
+        {mode.id === 'game' && fannedGames.length > 0 ? (
+          <div className="om-sa-game-fan" aria-label={t('Game Studio')}>
+            {fannedGames.map((game, index) => {
+              const title = localizedGameTitle(game, locale);
+              const cover = coverUrl(game);
+              const isSelected = modeOptions?.gameTemplate?.id === game.id;
+              const isPlaying = playingGameId === game.id;
+              return (
+                <div
+                  key={game.id}
+                  className="om-sa-game-fan-item"
+                  data-slot={index}
+                  data-selected={isSelected || undefined}
+                  data-playing={isPlaying || undefined}
+                >
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-game-fan-card"
+                    aria-label={t('Play {title}', { title })}
+                    onClick={() => {
+                      if (onPlayGame) {
+                        onPlayGame(game);
+                        return;
+                      }
+                      selectGameForAgent(game);
+                    }}
+                  >
+                    {cover && <img src={cover} alt="" />}
+                    <span className="om-sa-game-play-cue" aria-hidden="true">
+                      <RemixIcon name="play-fill" size={13} />
+                      <span>{t('Play')}</span>
+                    </span>
+                    <span className="om-sa-game-fan-label">{t(genreLabels[game.genre])}</span>
+                  </Button>
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-game-tile-remix om-sa-game-fan-remix"
+                    aria-pressed={isSelected}
+                    data-selected={isSelected || undefined}
+                    title={t('Make one like this')}
+                    aria-label={`${t('Make one like this')}: ${title}`}
+                    onClick={() => selectGameForAgent(game)}
+                  >
+                    <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={12} />
+                    <span>{isSelected ? t('Selected') : t('Make one like this')}</span>
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <span className="om-creation-icon om-sa-mode-hero-icon" data-tone={mode.tone} aria-hidden="true">
+            <RemixIcon name={mode.icon} size={22} />
+          </span>
+        )}
         <div className="om-sa-mode-hero-copy">
           <h2>{t(mode.title)}</h2>
           <p className="om-muted">{t(mode.subtitle)}</p>
@@ -870,7 +988,7 @@ export function ModeResourceShowcase({
 
       {mode.id !== 'coding' && (
       <section className="om-sa-showcase-panel">
-        <div className="om-sa-showcase-bar">
+        <div className="om-sa-showcase-bar" data-game-bar={showGameCards || undefined}>
           <div className="om-sa-showcase-tabs" role="tablist" aria-label={t('Template filters')}>
             {filters.map(f => (
               <Button
@@ -888,16 +1006,41 @@ export function ModeResourceShowcase({
               </Button>
             ))}
           </div>
-          {mode.id === 'game' && onOpenGameStudio ? (
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-showcase-more"
-              onClick={onOpenGameStudio}
-            >
-              <span>{t('Go to Game Studio')}</span>
-              <RemixIcon name="arrow-right-up-line" size={13} />
-            </Button>
+          {showGameCards ? (
+            <div className="om-sa-game-bar-controls">
+              <span className="om-field om-sa-game-search">
+                <RemixIcon name="search-line" size={14} />
+                <input
+                  value={gameQuery}
+                  placeholder={t('Search')}
+                  aria-label={t('Search games')}
+                  onChange={event => setGameQuery(event.target.value)}
+                />
+                {gameQuery && (
+                  <IconButton
+                    variant="plain"
+                    className="om-sa-game-search-clear"
+                    aria-label={t('Clear')}
+                    onClick={() => setGameQuery('')}
+                    icon={<RemixIcon name="close-line" size={12} />}
+                  />
+                )}
+              </span>
+              {activeFilter !== 'mine' && (
+                <div className="om-sa-game-sort">
+                  <Select
+                    label={t('Sort')}
+                    value={gameSort}
+                    onCommit={next => setGameSort(next as GameSort)}
+                    options={[
+                      { value: 'relevance', label: t('Relevance') },
+                      { value: 'plays', label: t('Most played') },
+                      { value: 'newest', label: t('Newest') },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
           ) : (
             <Button
               variant="plain"
@@ -951,89 +1094,127 @@ export function ModeResourceShowcase({
           </div>
         )}
 
-        <div className="om-sa-showcase-grid" aria-busy={isLoading}>
-          {visibleGames ? (
-            visibleGames.length === 0 ? (
-              <div className="om-sa-showcase-empty">
-                <p className="om-muted">{t('No matching games')}</p>
-                {onOpenGameStudio && (
-                  <Button
-                    variant="ghost"
-                    className="om-button h-auto"
-                    onClick={onOpenGameStudio}
-                  >
-                    {t('Go to Game Studio')}
-                  </Button>
-                )}
-              </div>
-            ) : (
-              visibleGames.map(game => {
+        {visibleGames ? (
+          visibleGames.length === 0 ? (
+            <div className="om-sa-showcase-empty">
+              <p className="om-muted">{t('No matching games')}</p>
+            </div>
+          ) : (
+            <GameMasonry
+              games={visibleGames}
+              minColumn={248}
+              gap={12}
+              className="om-sa-game-masonry"
+              columnClassName="om-sa-game-masonry-column"
+              render={game => {
                 const title = localizedGameTitle(game, locale);
-                const desc = localizedGameDescription(game, locale);
                 const cover = coverUrl(game) ?? (game.source === 'mine' ? genreCovers[game.genre] : null);
-                const isMine = activeFilter === 'mine';
+                const isMine = game.source === 'mine';
                 const mineAttachment = isMine ? toGameResourceAttachment(game, title) : null;
                 const isSelected = isMine
                   ? Boolean(mineAttachment && selectedKeys.has(resourceKey(mineAttachment)))
                   : modeOptions?.gameTemplate?.id === game.id;
+                const isPlaying = playingGameId === game.id;
+                const status = isMine ? GAME_STATUS_LABELS[game.status] : undefined;
 
                 return (
-                  <Button
+                  <article
                     key={game.id}
-                    variant="plain"
-                    type="button"
-                    className="om-sa-showcase-card om-sa-game-showcase-card"
-                    aria-pressed={isSelected}
+                    className="om-sa-game-tile om-sa-game-showcase-card"
+                    data-orientation={game.orientation === 'portrait' ? 'portrait' : undefined}
                     data-selected={isSelected || undefined}
-                    onClick={() => {
-                      if (isMine && mineAttachment) {
-                        onToggleAttachment(mineAttachment);
-                        return;
-                      }
-                      onChangeModeOptions?.({
-                        gameTemplate: isSelected ? null : game,
-                        ...(!isSelected
-                          ? {
-                              gameGenre: game.genre,
-                              gameStyle: game.style,
-                              gameSetting: game.setting,
-                              gameOrientation: game.orientation ?? 'landscape',
-                              gameMultiplayer: game.multiplayer,
-                            }
-                          : {}),
-                      });
-                    }}
+                    data-playing={isPlaying || undefined}
                   >
-                    <div className="om-sa-showcase-thumb" aria-hidden="true">
+                    <Button
+                      variant="plain"
+                      type="button"
+                      className="om-sa-game-tile-cover"
+                      aria-label={t('Play {title}', { title })}
+                      onClick={() => {
+                        if (onPlayGame) {
+                          onPlayGame(game);
+                        } else {
+                          selectGameForAgent(game);
+                        }
+                      }}
+                    >
                       {cover ? (
                         <img src={cover} alt="" loading="lazy" decoding="async" />
                       ) : (
-                        <div className="om-sa-showcase-icon-fallback" style={{ height: '100%' }}>
+                        <div className="om-sa-game-tile-placeholder">
                           <RemixIcon name="gamepad-line" size={24} />
+                          <span>{title}</span>
                         </div>
                       )}
-                      <div className="om-sa-game-card-badges">
-                        <span className="om-sa-game-card-badge">{t(genreLabels[game.genre])}</span>
-                        {game.multiplayer && (
-                          <span className="om-sa-game-card-badge">{t('Multiplayer')}</span>
-                        )}
-                        {game.orientation === 'portrait' && (
-                          <span className="om-sa-game-card-badge">{t('Portrait')}</span>
-                        )}
-                      </div>
-                    </div>
-                    <span className="om-sa-showcase-check" aria-hidden="true">
-                      <RemixIcon name={isSelected ? 'check-line' : 'add-line'} size={13} />
-                    </span>
-                    <div className="om-sa-showcase-meta">
+                      <span className="om-sa-game-play-cue" aria-hidden="true">
+                        <RemixIcon name="play-fill" size={14} />
+                        <span>{t('Play')}</span>
+                      </span>
+                      {status && (
+                        <span className="om-sa-game-status" data-tone={game.status}>
+                          {game.status === 'building' && <RemixIcon name="loader-4-line" size={12} />}
+                          {t(status)}
+                        </span>
+                      )}
+                      {game.external && !game.external.embeddable && (
+                        <span className="om-sa-game-status">
+                          <RemixIcon name="external-link-line" size={12} />
+                          {t('External link')}
+                        </span>
+                      )}
+                      {game.multiplayer && !status && (
+                        <span className="om-sa-game-status">
+                          <RemixIcon name="group-line" size={12} />
+                          {t('{count} players', { count: game.maxPlayers })}
+                        </span>
+                      )}
+                    </Button>
+
+                    <Button
+                      variant="plain"
+                      type="button"
+                      className="om-sa-game-tile-remix"
+                      aria-pressed={isSelected}
+                      data-selected={isSelected || undefined}
+                      title={isMine ? t('Attach to Chat') : t('Make one like this')}
+                      aria-label={isMine ? `${t('Attach to Chat')}: ${title}` : `${t('Make one like this')}: ${title}`}
+                      onClick={() => selectGameForAgent(game)}
+                    >
+                      <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={12} />
+                      <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Make one like this')}</span>
+                    </Button>
+
+                    <div className="om-sa-game-tile-meta">
+                      {cover && (
+                        <span className="om-sa-game-tile-icon" aria-hidden="true">
+                          <img src={cover} alt="" />
+                        </span>
+                      )}
                       <strong>{title}</strong>
-                      <small>{desc || `${t(genreLabels[game.genre])} · ${game.multiplayer ? t('Multiplayer') : t('Single player')}`}</small>
+                      {game.external ? (
+                        <a
+                          className="om-sa-game-tile-author"
+                          href={game.external.postUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {game.external.author}
+                        </a>
+                      ) : game.plays > 0 ? (
+                        <span className="om-sa-game-tile-plays">
+                          <RemixIcon name="play-circle-line" size={13} />
+                          {formatPlays(game.plays, locale)}
+                        </span>
+                      ) : null}
                     </div>
-                  </Button>
+                  </article>
                 );
-              })
-            )
-          ) : visibleCurated ? (
+              }}
+            />
+          )
+        ) : (
+        <div className="om-sa-showcase-grid" aria-busy={isLoading}>
+          {visibleCurated ? (
             visibleCurated.map(card => (
               <Button
                 key={card.id}
@@ -1103,6 +1284,7 @@ export function ModeResourceShowcase({
             })
           )}
         </div>
+        )}
 
         {hasMore && (
           <div ref={sentinelRef} className="om-sa-showcase-load-more">

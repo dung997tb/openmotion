@@ -2389,3 +2389,78 @@ it('renders persistent live progress dock, ticking step timers, and Continue rec
   await act(async () => errorContinueBtn.click());
   expect(onContinue).toHaveBeenCalledTimes(2);
 });
+
+it('auto-enters Game mode when opened from Game Studio, plays games in Artifact Viewer without creating empty chats, and supports remix selection', async () => {
+  let chatCreateCalls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || 'GET').toUpperCase();
+    if (url.includes('/motion-api/super-agent/chats') && method === 'POST') {
+      chatCreateCalls += 1;
+    }
+    if (url.includes('/motion-api/super-agent/chats')) return jsonResponse({ conversations: [] });
+    if (url.includes('/motion-api/super-agent/resources')) return jsonResponse({ items: [], counts: { assets: 0, designProjects: 0, motionProjects: 0, brandKits: 0, templates: 0, skills: 0, total: 0 } });
+    if (url.includes('/motion-api/settings/agents')) return jsonResponse({ agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }] });
+    if (url.includes('/motion-api/settings/agent-runtimes')) return jsonResponse({ localDirectAvailable: true, runtimes: [] });
+    if (url.includes('/motion-api/games')) return jsonResponse({ games: [] });
+    return jsonResponse({});
+  }));
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="game"
+          requestedGameId="community-little-prince"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  // Auto-switched into Game mode with fanned hero, search input, sort combobox, and masonry waterfall
+  expect(container.querySelector('.om-sa-stream')?.getAttribute('data-mode')).toBe('game');
+  expect(container.querySelectorAll('.om-sa-game-fan-card').length).toBeGreaterThan(0);
+  expect(container.querySelectorAll('.om-sa-game-fan-remix').length).toBeGreaterThan(0);
+  expect(container.querySelector('.om-sa-game-search input')).toBeTruthy();
+  expect(container.querySelector('.om-sa-game-sort [role="combobox"]')).toBeTruthy();
+  expect(container.querySelectorAll('.om-sa-game-tile').length).toBeGreaterThan(0);
+
+  // requestedGameId opens immediately in the right-hand Artifact Viewer without creating an empty chat
+  const viewer = container.querySelector('.om-sa-viewer');
+  expect(viewer).toBeTruthy();
+  expect(viewer?.textContent).toContain('The Little Prince: Star Journey');
+  expect(chatCreateCalls).toBe(0);
+
+  // Clicking "Make one like this" inside the Artifact Viewer selects the playing game into the Agent composer
+  const viewerUseBtn = viewer?.querySelector('.om-sa-game-use-btn') as HTMLButtonElement;
+  expect(viewerUseBtn).toBeTruthy();
+  expect(viewerUseBtn.textContent).toContain('Make one like this');
+  await act(async () => viewerUseBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('The Little Prince: Star Journey');
+
+  // Clicking Remix on a top fanned Hero card switches the Agent composer selection
+  const fanRemixBtn = container.querySelectorAll('.om-sa-game-fan-remix')[1] as HTMLButtonElement;
+  expect(fanRemixBtn).toBeTruthy();
+  await act(async () => fanRemixBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+
+  // Clicking Remix on a bottom masonry list card also selects into the composer
+  const listRemixBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-remix') as HTMLButtonElement;
+  expect(listRemixBtn).toBeTruthy();
+  await act(async () => listRemixBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+});

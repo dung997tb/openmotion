@@ -26,7 +26,6 @@ import {
   LazyDesignProjectEditor,
   LazyDesignScenePage,
   LazyExploreStudios,
-  LazyGameStudio,
   LazyMcpConnectionPage,
   LazyModelHub,
   LazyModelOverview,
@@ -148,12 +147,15 @@ export function RouteViewport({
   const { t } = useI18n();
   const { settings, assets: assetsOpen, skills: skillsOpen } = page;
   const activeRoute = resolveActiveWorkspaceRoute(page, { templatesPage, standaloneMcp });
-  const keepAliveVisited = useKeepAliveVisited(activeRoute.id, [
+  const keepAliveRouteId = activeRoute.id === 'game' ? 'agent' : activeRoute.id;
+  const keepAliveVisited = useKeepAliveVisited(keepAliveRouteId, [
     ...(page.explore ? (['explore'] as const) : []),
-    ...(page.superAgent ? (['agent'] as const) : []),
+    ...(page.superAgent || page.specialty?.id === 'game' ? (['agent'] as const) : []),
     ...(assetsOpen ? (['assets'] as const) : []),
   ]);
   const superAgentActive = page.superAgent && !templatesPage && !settings;
+  const gameStudioActive = page.specialty?.id === 'game' && !skillsOpen && !settings && !templatesPage;
+  const unifiedSuperAgentActive = superAgentActive || gameStudioActive;
   const mcpPage = settings === 'mcp' && (
     <LazyMcpConnectionPage
       entry={connectionEntry}
@@ -224,7 +226,7 @@ export function RouteViewport({
                 newChat: true,
                 autoSend: false,
               });
-              navigatePage({ superAgent: true, superAgentChat: null, templates: false });
+              navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: 'game', templates: false });
             }}
             filters={lastExplore}
             onChooseStudio={studio => chooseStudio(studio, undefined, true)}
@@ -489,21 +491,36 @@ export function RouteViewport({
 
       <KeepAliveSlot
         routeId="agent"
-        active={superAgentActive}
+        active={unifiedSuperAgentActive}
         visited={keepAliveVisited}
         className="om-super-agent-host"
       >
         <RouteSurface>
           <LazySuperAgentWorkspace
-            active={superAgentActive}
-            chatId={page.superAgentChat}
-            onChatIdChange={(chat, replace) => navigatePage({ superAgent: true, superAgentChat: chat, templates: false }, replace)}
+            active={unifiedSuperAgentActive}
+            chatId={gameStudioActive ? null : page.superAgentChat}
+            requestedMode={gameStudioActive ? 'game' : (page.superAgentMode ?? null)}
+            requestedGameId={gameStudioActive ? (page.gameId ?? null) : null}
+            onBack={gameStudioActive ? returnToExplore : undefined}
+            onExitRequestedMode={() => {
+              navigatePage(
+                { superAgent: true, superAgentChat: gameStudioActive ? null : page.superAgentChat, superAgentMode: null, templates: false },
+                !gameStudioActive,
+              );
+            }}
+            onChatIdChange={(chat, replace) =>
+              navigatePage(
+                {
+                  superAgent: true,
+                  superAgentChat: chat,
+                  superAgentMode: chat ? null : (gameStudioActive ? null : page.superAgentMode ?? null),
+                  templates: false,
+                },
+                replace,
+              )
+            }
             onOpenDesignProject={id => navigatePage({ designScene: 'projects', designProject: id, templates: false })}
             onOpenMotionProject={id => { void openMotionProject(id); }}
-            onOpenGameStudio={gameId => {
-              const gameStudio = creativeStudios.find((s): s is TechniqueStudio => s.surface === 'techniques' && s.id === 'game');
-              if (gameStudio) navigatePage({ specialty: gameStudio, gameId: gameId || null, skill: null, templates: false });
-            }}
             onOpenAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion: assetVersion ?? null, templates: false })}
             onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId && !kitId.startsWith('catalog:') ? kitId : null, templates: false })}
             onOpenAgentSettings={() => openSettings('local')}
@@ -512,14 +529,6 @@ export function RouteViewport({
           />
         </RouteSurface>
       </KeepAliveSlot>
-
-      {page.specialty?.id === 'game' && !skillsOpen && !settings && !templatesPage && (
-        <div className="om-skills-host">
-          <RouteSurface>
-            <LazyGameStudio onExplore={returnToExplore} onOpenMcp={() => openMcp(undefined, undefined, true)} initialGameId={page.gameId ?? null} />
-          </RouteSurface>
-        </div>
-      )}
 
       {(skillsOpen || page.specialty) &&
         !(page.specialty?.id === 'game' && !skillsOpen) &&

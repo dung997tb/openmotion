@@ -4,6 +4,7 @@ import { LOCAL_DIRECT_RUNTIME_ID, type AgentRuntimeInfo } from '../../../shared/
 import { assetMediaUrl } from '../../../shared/asset-library';
 import type { SuperAgentHandoffPayload } from '../../../shared/capability-hub';
 import { designRoutes } from '../../../shared/design-project';
+import type { GameCard } from '../../../shared/game-contract';
 import {
   NEW_VIEWER_TAB_ID,
   safeBrowserTabId,
@@ -20,6 +21,8 @@ import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RouteSurfaceFallback } from '../motion/RouteSurfaceFallback';
 import { consumeSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
+import { bundledGames, communityGames, gameApi } from '../motion/game/gameCatalog';
+import { localizedGameTitle, toGameArtifact, toGameResourceAttachment } from '../motion/game/gameSuperAgent';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
 import { useLocalAgents } from '../motion/useLocalAgents';
 import { preloadableLazyWithChunkReload } from '../utils/chunkReload';
@@ -207,6 +210,10 @@ function artifactToResourceAttachment(artifact: SuperAgentArtifact): SuperAgentR
 export function SuperAgentWorkspace({
   active,
   chatId,
+  requestedMode = null,
+  requestedGameId = null,
+  onBack,
+  onExitRequestedMode,
   onChatIdChange,
   onOpenDesignProject,
   onOpenMotionProject,
@@ -219,6 +226,10 @@ export function SuperAgentWorkspace({
 }: {
   active: boolean;
   chatId: string | null;
+  requestedMode?: SuperAgentCreationModeId | null;
+  requestedGameId?: string | null;
+  onBack?: () => void;
+  onExitRequestedMode?: () => void;
   onChatIdChange: (id: string | null, replace?: boolean) => void;
   onOpenDesignProject: (projectId: string) => void;
   onOpenMotionProject: (projectId: string) => void;
@@ -229,7 +240,7 @@ export function SuperAgentWorkspace({
   onOpenModelSettings?: () => void;
   onOpenMcp: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { toasts, showToast, dismissToast } = useToast();
   const { data: agentDir, refresh: refreshAgents } = useLocalAgents();
   const { data: runtimesDir, refresh: refreshRuntimes } = useAgentRuntimes();
@@ -270,6 +281,8 @@ export function SuperAgentWorkspace({
   const [resourcesCatalog, setResourcesCatalog] = useState<SuperAgentResourceCatalog | null>(null);
   const [attachments, setAttachments] = useState<SuperAgentResourceAttachment[]>([]);
   const [draftSeed, setDraftSeed] = useState<{ id: number; text: string; mode?: SuperAgentCreationModeId } | null>(null);
+  const [gameTemplateSeed, setGameTemplateSeed] = useState<{ id: number; game: GameCard } | null>(null);
+  const playedGamesRef = useRef<Map<string, GameCard>>(new Map());
   const handoffSeqRef = useRef(0);
   const [pendingAutoSend, setPendingAutoSend] = useState<{ id: number; payload: SuperAgentHandoffPayload } | null>(null);
   const dispatchedHandoffIdsRef = useRef<Set<number>>(new Set());
@@ -293,6 +306,8 @@ export function SuperAgentWorkspace({
   const [viewerWidth, setViewerWidth] = useState<number | null>(null);
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>(NEW_VIEWER_TAB_ID);
+  const [previewArtifacts, setPreviewArtifacts] = useState<SuperAgentArtifact[]>([]);
+  const handledRequestedGameRef = useRef<string | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const sidebarDockedRef = useRef(true);
@@ -402,7 +417,7 @@ export function SuperAgentWorkspace({
   const refreshConversations = useCallback(() => {
     setLoadingList(true);
     void listSuperAgentChats()
-      .then(result => setConversations(result.conversations))
+      .then(result => setConversations(Array.isArray(result?.conversations) ? result.conversations : []))
       .catch(() => { /* non-blocking sidebar refresh */ })
       .finally(() => setLoadingList(false));
   }, []);
@@ -442,6 +457,7 @@ export function SuperAgentWorkspace({
   // Apply chat snapshot and sync tabs / agent choices
   const applyChatSnapshot = useCallback((next: SuperAgentChat, isInitialLoad = false) => {
     setActiveChat(next);
+    setPreviewArtifacts([]);
     setConversations(prev => upsertSummary(prev, next));
     setPermissionMode(next.permissionMode);
 
@@ -528,9 +544,11 @@ export function SuperAgentWorkspace({
       setActiveChat(null);
       setLoadingChat(false);
       setLoadFailed(false);
-      setOpenTabIds([]);
-      setActiveTabId(NEW_VIEWER_TAB_ID);
-      lastArtifactStateRef.current = { chatId: null, sig: '', artifactIds: [], presentedById: {} };
+      if (lastArtifactStateRef.current.chatId !== null) {
+        setOpenTabIds([]);
+        setActiveTabId(NEW_VIEWER_TAB_ID);
+        lastArtifactStateRef.current = { chatId: null, sig: '', artifactIds: [], presentedById: {} };
+      }
       return;
     }
 
@@ -685,6 +703,7 @@ export function SuperAgentWorkspace({
 
   const handleCreateConversation = () => {
     setActiveChat(null);
+    setPreviewArtifacts([]);
     setLoadingChat(false);
     setLoadFailed(false);
     setAttachments([]);
@@ -694,7 +713,7 @@ export function SuperAgentWorkspace({
     setViewerExpanded(false);
     lastArtifactStateRef.current = { chatId: null, sig: '', artifactIds: [], presentedById: {} };
     setDraftSeed({ id: ++handoffSeqRef.current, text: '' });
-    if (chatId !== null) {
+    if (chatId !== null || requestedMode) {
       onChatIdChange(null);
     }
     if (sidebarAsDrawer) setSidebarOpen(false);
@@ -909,10 +928,129 @@ export function SuperAgentWorkspace({
     showToast(t('Attached annotation to prompt'), 'info', 'feedback');
   };
 
+  const handlePlayGame = useCallback(async (game: GameCard) => {
+    playedGamesRef.current.set(game.id, game);
+    const displayTitle = localizedGameTitle(game, locale);
+    const patch = toGameArtifact(game, displayTitle);
+    const artifactId = patch.id || `game:${game.id}`;
+    const now = Date.now();
+    const fullArtifact: SuperAgentArtifact = {
+      id: artifactId,
+      kind: 'game-project',
+      title: patch.title || displayTitle,
+      subtitle: patch.subtitle,
+      ...(patch.projectId ? { projectId: patch.projectId } : {}),
+      scenario: patch.scenario,
+      revision: patch.revision,
+      url: patch.url,
+      createdAt: now,
+      updatedAt: now,
+      presentedAt: now,
+    };
+
+    if (activeChat) {
+      try {
+        const res = await updateSuperAgentChat(activeChat.id, { addArtifact: patch });
+        applyChatSnapshot(res.conversation, false);
+        setViewerOpen(true);
+        return;
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : t('Could not preview resource'));
+        return;
+      }
+    }
+
+    setPreviewArtifacts(prev => {
+      const next = prev.filter(item => item.id !== fullArtifact.id);
+      next.push(fullArtifact);
+      return next;
+    });
+    setOpenTabIds(prev => (prev.includes(fullArtifact.id) ? prev : [...prev, fullArtifact.id]));
+    setActiveTabId(fullArtifact.id);
+    setViewerOpen(true);
+  }, [activeChat, applyChatSnapshot, locale, showToast, t]);
+
+  const handleUseGameInAgent = useCallback(async (artifact: SuperAgentArtifact) => {
+    const gameId = artifact.projectId || (artifact.id.startsWith('game:') ? artifact.id.slice('game:'.length) : '');
+    let game: GameCard | null =
+      (gameId ? playedGamesRef.current.get(gameId) ?? null : null)
+      ?? (gameId ? [...communityGames, ...bundledGames].find(item => item.id === gameId) ?? null : null);
+
+    if (!game && gameId) {
+      try {
+        const res = await gameApi.catalog();
+        game = res.games?.find(item => item.id === gameId) ?? null;
+        if (game) playedGamesRef.current.set(game.id, game);
+      } catch {
+        /* ignore offline catalog lookup */
+      }
+    }
+
+    if (game && game.source !== 'mine') {
+      const displayTitle = localizedGameTitle(game, locale);
+      setGameTemplateSeed({ id: ++handoffSeqRef.current, game });
+      showToast(t('Based on {title}', { title: displayTitle }), 'info', 'feedback');
+      return;
+    }
+
+    const att = game
+      ? toGameResourceAttachment(game, localizedGameTitle(game, locale))
+      : artifactToResourceAttachment(artifact);
+    if (!att) return;
+    setAttachments(prev =>
+      prev.some(existing => resourceKey(existing) === resourceKey(att))
+        ? prev
+        : [...prev, att].slice(0, 30),
+    );
+    showToast(t('Attached "{title}" to prompt', { title: att.title }), 'info', 'feedback');
+  }, [locale, showToast, t]);
+
+  useEffect(() => {
+    if (!active || !requestedGameId) {
+      if (!requestedGameId) handledRequestedGameRef.current = null;
+      return;
+    }
+    if (handledRequestedGameRef.current === requestedGameId) return;
+    handledRequestedGameRef.current = requestedGameId;
+
+    let cancelled = false;
+    const staticMatch = [...communityGames, ...bundledGames].find(item => item.id === requestedGameId);
+    if (staticMatch) {
+      void handlePlayGame(staticMatch);
+      return;
+    }
+
+    void gameApi.catalog()
+      .then(res => {
+        if (cancelled) return;
+        const found = res.games?.find(item => item.id === requestedGameId);
+        if (found) {
+          void handlePlayGame(found);
+        }
+      })
+      .catch(() => { /* ignore if game service is offline */ });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [active, requestedGameId, handlePlayGame]);
+
+  const viewerArtifacts = activeChat ? activeChat.artifacts : previewArtifacts;
+  const playingGameId = useMemo(() => {
+    if (!viewerOpen || activeTabId === NEW_VIEWER_TAB_ID) return null;
+    const current = viewerArtifacts.find(item => item.id === activeTabId);
+    if (!current || current.kind !== 'game-project') return null;
+    if (current.projectId) return current.projectId;
+    return current.id.startsWith('game:') ? current.id.slice('game:'.length) : null;
+  }, [viewerOpen, activeTabId, viewerArtifacts]);
+
   const handleCloseTab = (tabId: string) => {
-    const target = activeChat?.artifacts.find(item => item.id === tabId);
+    const target = viewerArtifacts.find(item => item.id === tabId);
     if (target?.kind === 'web' && activeChat?.id) {
       void closeSuperAgentBrowserTab(activeChat.id, safeBrowserTabId(tabId));
+    }
+    if (!activeChat) {
+      setPreviewArtifacts(prev => prev.filter(item => item.id !== tabId));
     }
     setOpenTabIds(prev => {
       const next = prev.filter(id => id !== tabId);
@@ -1206,6 +1344,8 @@ export function SuperAgentWorkspace({
           <ConversationStream
             active={active}
             chat={activeChat}
+            requestedMode={requestedMode}
+            playingGameId={playingGameId}
             loading={loadingChat}
             loadFailed={loadFailed}
             sending={sending}
@@ -1214,12 +1354,16 @@ export function SuperAgentWorkspace({
             counts={resourcesCatalog?.counts ?? null}
             attachments={attachments}
             draftSeed={draftSeed}
+            gameTemplateSeed={gameTemplateSeed}
             agents={agents}
             agentsLoaded={agentsLoaded}
             runtimes={availableRuntimes}
             localDirectAvailable={runtimesDir?.localDirectAvailable ?? true}
             selection={selection}
             permissionMode={permissionMode}
+            onBack={onBack}
+            onExitRequestedMode={onExitRequestedMode}
+            onPlayGame={game => void handlePlayGame(game)}
             onRetryLoad={() => setChatRetry(value => value + 1)}
             onOpenSidebar={() => setSidebarOpen(true)}
             onToggleViewer={() => {
@@ -1290,7 +1434,7 @@ export function SuperAgentWorkspace({
             <ArtifactBrowserPane
               active={active}
               chatId={activeChat?.id ?? null}
-              artifacts={activeChat?.artifacts ?? []}
+              artifacts={viewerArtifacts}
               openTabIds={openTabIds}
               activeTabId={activeTabId}
               expanded={viewerExpanded}
@@ -1307,6 +1451,7 @@ export function SuperAgentWorkspace({
                 setViewerOpen(false);
               }}
               onAttachArtifact={handleAttachArtifact}
+              onUseGameInAgent={artifact => void handleUseGameInAgent(artifact)}
               onAttachBrowserAnnotation={handleAttachBrowserAnnotation}
               onNotify={(msg, tone) => showToast(msg, tone === 'error' ? 'error' : 'info', 'feedback')}
               onOpenInDesignStudio={onOpenDesignProject}

@@ -2,6 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
+import type { GameCard } from '../../../shared/game-contract';
 import type { Model } from '../../../shared/gateway';
 import type { LocalAgent } from '../../../shared/local-agents';
 import {
@@ -38,6 +39,7 @@ import { gatewayRequest } from '../motion/gatewayClient';
 import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
+import { WorkspaceBack } from '../motion/WorkspaceBack';
 import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
@@ -90,6 +92,8 @@ export type AgentSelection = {
 export function ConversationStream({
   active = true,
   chat,
+  requestedMode = null,
+  playingGameId = null,
   loading,
   loadFailed,
   sending,
@@ -98,12 +102,16 @@ export function ConversationStream({
   counts,
   attachments,
   draftSeed = null,
+  gameTemplateSeed = null,
   agents,
   agentsLoaded = true,
   runtimes,
   localDirectAvailable = true,
   selection,
   permissionMode,
+  onBack,
+  onExitRequestedMode,
+  onPlayGame,
   onRetryLoad,
   onOpenSidebar,
   onToggleViewer,
@@ -128,6 +136,8 @@ export function ConversationStream({
 }: {
   active?: boolean;
   chat: SuperAgentChat | null;
+  requestedMode?: SuperAgentCreationModeId | null;
+  playingGameId?: string | null;
   loading: boolean;
   loadFailed: boolean;
   sending: boolean;
@@ -136,12 +146,16 @@ export function ConversationStream({
   counts: SuperAgentResourceCounts | null;
   attachments: SuperAgentResourceAttachment[];
   draftSeed?: { id: number; text: string; mode?: SuperAgentCreationModeId } | null;
+  gameTemplateSeed?: { id: number; game: GameCard } | null;
   agents: LocalAgent[];
   agentsLoaded?: boolean;
   runtimes?: AgentRuntimeInfo[];
   localDirectAvailable?: boolean;
   selection: AgentSelection;
   permissionMode: SuperAgentPermissionMode;
+  onBack?: () => void;
+  onExitRequestedMode?: () => void;
+  onPlayGame?: (game: GameCard) => void;
   onRetryLoad: () => void;
   onOpenSidebar: () => void;
   onToggleViewer: () => void;
@@ -187,7 +201,7 @@ export function ConversationStream({
   const [browsingEngine, setBrowsingEngine] = useState<SuperAgentEngine>(selection.engine);
   const [inspectingEngine, setInspectingEngine] = useState<SuperAgentEngine | null>(null);
   const inspectedEnginesRef = useRef<Set<SuperAgentEngine>>(new Set());
-  const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(null);
+  const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(() => requestedMode ?? null);
   const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(DEFAULT_MODE_COMPOSER_OPTIONS);
   const [scaffoldingGame, setScaffoldingGame] = useState(false);
   const [previewingChipKey, setPreviewingChipKey] = useState<string | null>(null);
@@ -220,6 +234,29 @@ export function ConversationStream({
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [draftSeed, chat?.messages.length]);
+
+  const appliedGameTemplateSeedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!gameTemplateSeed || appliedGameTemplateSeedRef.current === gameTemplateSeed.id) return;
+    appliedGameTemplateSeedRef.current = gameTemplateSeed.id;
+    const picked = gameTemplateSeed.game;
+    if (!chat?.messages.length) {
+      setActiveModeId('game');
+      setModeOptions(prev => ({
+        ...prev,
+        gameTemplate: picked,
+        gameGenre: picked.genre,
+        gameStyle: picked.style,
+        gameSetting: picked.setting,
+        gameOrientation: picked.orientation ?? 'landscape',
+        gameMultiplayer: picked.multiplayer,
+      }));
+    } else {
+      const displayTitle = localizedGameTitle(picked, locale);
+      setText(prev => (prev.trim() ? prev : t('Based on {title}', { title: displayTitle })));
+    }
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [gameTemplateSeed, chat?.messages.length, locale, t]);
 
   useEffect(() => {
     if (!active) {
@@ -260,6 +297,7 @@ export function ConversationStream({
   const reasoningEfforts = selectedModelMeta?.reasoning ?? [];
   const busy = chat?.state === 'running' || chat?.state === 'waiting';
   const hasBrowserAnnotation = attachments.some(att => att.kind === 'browser-annotation');
+  const hasAttachedGameProject = attachments.some(att => att.kind === 'game-project');
   const gameBrief = activeMode?.id === 'game'
     ? composeBrief({
         prompt: text,
@@ -269,7 +307,7 @@ export function ConversationStream({
         multiplayer: modeOptions.gameMultiplayer,
       })
     : '';
-  const hasGameStudioBrief = activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate || gameBrief);
+  const hasGameStudioBrief = activeMode?.id === 'game' && !hasAttachedGameProject && Boolean(modeOptions.gameTemplate || gameBrief);
   const canSubmit = (Boolean(text.trim()) || hasBrowserAnnotation || hasGameStudioBrief) && !sending && !scaffoldingGame && !busy && !loading && runnableEngines.length > 0;
 
   const engineChoices = useMemo(() => {
@@ -336,8 +374,16 @@ export function ConversationStream({
       : t('Default');
 
   useEffect(() => {
+    if (requestedMode && !chat?.messages.length) {
+      setActiveModeId(requestedMode);
+    }
+  }, [requestedMode, chat?.id, chat?.messages.length]);
+
+  useEffect(() => {
     setRenaming(false);
-    if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
+    if (requestedMode && !chat?.messages.length) {
+      setActiveModeId(requestedMode);
+    } else if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
       setActiveModeId(null);
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
@@ -355,10 +401,23 @@ export function ConversationStream({
   };
 
   useEffect(() => {
-    if (followRef.current && listRef.current) {
+    const hasTimeline = Boolean(chat?.messages.length || chat?.approvals.length);
+    if (hasTimeline && followRef.current && listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
   }, [chat?.updatedAt, chat?.messages.length, chat?.approvals.length]);
+
+  useEffect(() => {
+    if (!chat?.messages.length && listRef.current) {
+      listRef.current.scrollTop = 0;
+    }
+  }, [activeModeId, chat?.id, chat?.messages.length]);
+
+  const exitActiveMode = useCallback(() => {
+    setActiveModeId(null);
+    updateModeOptions({ gameTemplate: null });
+    if (requestedMode) onExitRequestedMode?.();
+  }, [requestedMode, onExitRequestedMode, updateModeOptions]);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -506,6 +565,7 @@ export function ConversationStream({
 
       <header className="om-sa-stream-head">
         <div className="om-sa-stream-head-left">
+          {onBack && <WorkspaceBack inline fallback={onBack} />}
           {!sidebarOpen && (
             <Tooltip label={t('Open sidebar')}>
               <IconButton
@@ -641,8 +701,11 @@ export function ConversationStream({
               mode={activeMode}
               attachments={attachments}
               modeOptions={modeOptions}
+              playingGameId={playingGameId}
               onChangeModeOptions={updateModeOptions}
               onToggleAttachment={toggleResourceAttachment}
+              onPlayGame={onPlayGame}
+              onFocusComposer={() => composerRef.current?.focus()}
               onPickPrompt={prompt => {
                 setText(prompt);
                 composerRef.current?.focus();
@@ -652,10 +715,7 @@ export function ConversationStream({
                 setResourceMenuOpen(true);
               }}
               onOpenGameStudio={onOpenGameStudio}
-              onClose={() => {
-                setActiveModeId(null);
-                updateModeOptions({ gameTemplate: null });
-              }}
+              onClose={exitActiveMode}
             />
           ) : (
           <div className="om-sa-home">
@@ -1051,10 +1111,7 @@ export function ConversationStream({
                     variant="plain"
                     className="om-sa-chip-remove"
                     aria-label={t('Clear mode')}
-                    onClick={() => {
-                      setActiveModeId(null);
-                      updateModeOptions({ gameTemplate: null });
-                    }}
+                    onClick={exitActiveMode}
                     icon={<RemixIcon name="close-line" size={12} />}
                   />
                 </span>

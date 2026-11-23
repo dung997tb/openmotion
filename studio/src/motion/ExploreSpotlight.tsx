@@ -35,10 +35,6 @@ interface FeaturedSlide {
 }
 const geminiHub = findModelHub('gemini-4')!;
 const slides: FeaturedSlide[] = [{
-  id: motionStudio.id, title: motionStudio.title, subtitle: 'Motion design', icon: motionStudio.icon,
-  hint: 'Animate type and shapes, then edit their timing on the timeline.', poster: motionStudioCover?.poster ?? '', clip: motionStudioCover?.video,
-  scenario: 'motion-full-chain',
-}, {
   id: 'game',
   title: 'Game Studio',
   subtitle: 'Playable web games',
@@ -47,6 +43,10 @@ const slides: FeaturedSlide[] = [{
   poster: lanternfallPoster,
   credit: '@loktar00',
   game: true,
+}, {
+  id: motionStudio.id, title: motionStudio.title, subtitle: 'Motion design', icon: motionStudio.icon,
+  hint: 'Animate type and shapes, then edit their timing on the timeline.', poster: motionStudioCover?.poster ?? '', clip: motionStudioCover?.video,
+  scenario: 'motion-full-chain',
 }, {
   id: 'black-friday', title: 'Black Friday collection', subtitle: 'Template library', icon: 'film-line',
   hint: 'Browse Black Friday video references and Skills for your sale.', poster: blackFridayPoster,

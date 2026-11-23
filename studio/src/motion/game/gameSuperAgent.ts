@@ -28,15 +28,18 @@ export function toGameCapabilityRef(game: GameCard, displayTitle: string): Capab
 }
 
 export function toGameArtifact(game: GameCard, displayTitle: string): Partial<SuperAgentArtifact> {
+  const isExternal = Boolean(game.external);
   return {
     id: `game:${game.id}`,
     kind: 'game-project',
     title: displayTitle,
-    subtitle: `${game.genre} · ${game.multiplayer ? 'Multiplayer' : 'Game Studio'}`,
-    projectId: game.id,
+    subtitle: game.external
+      ? `${game.external.author} · ${game.external.model}`
+      : `${game.genre} · ${game.multiplayer ? 'Multiplayer' : 'Game Studio'}`,
+    ...(isExternal ? {} : { projectId: game.id }),
     scenario: game.orientation === 'portrait' ? 'portrait' : 'landscape',
     revision: game.updatedAt,
-    url: gamePlayPath(game.id),
+    url: game.external ? game.external.url : gamePlayPath(game.id),
   };
 }
 

@@ -4,6 +4,7 @@ import { menuClasses } from '../components/ui/menuStyle';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { brandCatalogFile, type BrandCatalogEntry } from '../../../shared/brand-catalog';
 import type { BrandKit } from '../../../shared/brand-kit';
+import type { GameCard } from '../../../shared/game-contract';
 import type {
   BrowserColorScheme,
   BrowserConsoleEntry,
@@ -34,6 +35,15 @@ import { designClient } from '../design/designClient';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import type { WebBrowserHandle } from '../motion/WebBrowser';
+import {
+  bundledGames,
+  communityGames,
+  coverUrl,
+  gameApi,
+  playableUrl,
+  rememberInstruction,
+  storedInstruction,
+} from '../motion/game/gameCatalog';
 import { lazyWithChunkReload, preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import {
@@ -949,10 +959,11 @@ function GameProjectArtifactView({
   onSubmitAnnotation,
   onCloseAnnotate,
   onNotify,
+  onGameMeta,
 }: {
   artifact: SuperAgentArtifact;
   chatId: string | null;
-  mode: 'preview' | 'code';
+  mode: 'preview' | 'code' | 'trailer';
   viewport: DesignViewportId;
   reloadKey: number;
   annotateActive: boolean;
@@ -963,24 +974,110 @@ function GameProjectArtifactView({
   onSubmitAnnotation: (payload: BrowserAnnotationSubmitPayload, sendImmediately: boolean) => Promise<void>;
   onCloseAnnotate: () => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
+  onGameMeta?: (meta: { trailerUrl: string | null; source: GameCard['source'] | null }) => void;
 }) {
   const { t } = useI18n();
   const projectId = artifact.projectId || '';
+  const artifactGameId = projectId || (artifact.id.startsWith('game:') ? artifact.id.slice('game:'.length) : '');
   const presentedKey = artifact.presentedAt ?? '';
   const revisionKey = `${artifact.revision ?? ''}:${presentedKey}:${reloadKey}`;
 
+  const communityMatch = useMemo<GameCard | null>(
+    () => (!projectId && artifactGameId ? communityGames.find(item => item.id === artifactGameId) ?? null : null),
+    [projectId, artifactGameId],
+  );
+  const bundledMatch = useMemo<GameCard | null>(
+    () => (projectId ? bundledGames.find(item => item.id === projectId) ?? null : null),
+    [projectId],
+  );
+  const [gameMeta, setGameMeta] = useState<GameCard | null>(null);
+  const [bundledBlobUrl, setBundledBlobUrl] = useState<string | null>(null);
+  const [handoffText, setHandoffText] = useState<string | null>(() => (projectId ? storedInstruction(projectId) : null));
+  const [copiedHandoff, setCopiedHandoff] = useState(false);
+
+  useEffect(() => {
+    setGameMeta(null);
+    setBundledBlobUrl(null);
+    setCopiedHandoff(false);
+    setHandoffText(projectId ? storedInstruction(projectId) : null);
+    if (!projectId) {
+      onGameMeta?.({ trailerUrl: null, source: communityMatch ? 'community' : null });
+      return;
+    }
+    let cancelled = false;
+    let revoked: string | null = null;
+    void gameApi.catalog()
+      .then(res => {
+        if (cancelled) return;
+        const found = res.games?.find(item => item.id === projectId) ?? null;
+        setGameMeta(found);
+        const trailerUrl = found?.trailer?.status === 'ready' && found.trailer.videoUrl
+          ? found.trailer.videoUrl.replace(/^\/api\//, '/motion-api/')
+          : null;
+        onGameMeta?.({ trailerUrl, source: found?.source ?? (bundledMatch ? 'template' : 'mine') });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        onGameMeta?.({ trailerUrl: null, source: bundledMatch ? 'template' : 'mine' });
+        if (bundledMatch) {
+          void playableUrl(bundledMatch).then(next => {
+            if (cancelled) {
+              if (next.startsWith('blob:')) URL.revokeObjectURL(next);
+              return;
+            }
+            if (next.startsWith('blob:')) revoked = next;
+            setBundledBlobUrl(next);
+          }).catch(() => {});
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [projectId, revisionKey, bundledMatch]);
+
+  const isDraftOrFailed = Boolean(
+    projectId
+    && gameMeta?.source === 'mine'
+    && (gameMeta.status === 'draft' || gameMeta.status === 'failed'),
+  );
+  const isBuilding = Boolean(projectId && gameMeta?.source === 'mine' && gameMeta.status === 'building');
+
+  useEffect(() => {
+    if (!projectId || !isDraftOrFailed) return;
+    let cancelled = false;
+    void gameApi.handoff(projectId)
+      .then(res => {
+        if (cancelled) return;
+        setHandoffText(res.agentInstruction);
+        rememberInstruction(projectId, res.agentInstruction);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, isDraftOrFailed]);
+
+  const trailerUrl = gameMeta?.trailer?.status === 'ready' && gameMeta.trailer.videoUrl
+    ? gameMeta.trailer.videoUrl.replace(/^\/api\//, '/motion-api/')
+    : null;
+
+  const isExternalGame = !projectId && Boolean(artifact.url && /^https?:\/\//i.test(artifact.url));
+  const nonEmbeddableExternal = Boolean(communityMatch?.external && !communityMatch.external.embeddable);
+
   const previewUrl = useMemo(() => {
+    if (bundledBlobUrl) return bundledBlobUrl;
     if (projectId) {
       const presentedParam = artifact.presentedAt ? `&p=${artifact.presentedAt}` : '';
       return `/motion-api/games/${encodeURIComponent(projectId)}/play/index.html?rev=${encodeURIComponent(artifact.revision || String(reloadKey))}${presentedParam}&r=${reloadKey}`;
     }
     return artifact.url || '';
-  }, [projectId, artifact.url, artifact.revision, artifact.presentedAt, reloadKey]);
+  }, [bundledBlobUrl, projectId, artifact.url, artifact.revision, artifact.presentedAt, reloadKey]);
 
-  const effectiveMode = projectId ? mode : 'preview';
+  const effectiveMode: 'preview' | 'code' = projectId && mode === 'code' ? 'code' : 'preview';
   const bridge = useIframePreviewBridge({
-    enabled: effectiveMode === 'preview' && Boolean(previewUrl),
-    pickEnabled: annotateActive && effectiveMode === 'preview' && annotTool === 'select',
+    enabled: Boolean(projectId) && !bundledBlobUrl && !isDraftOrFailed && !isBuilding && mode === 'preview' && Boolean(previewUrl),
+    pickEnabled: annotateActive && Boolean(projectId) && mode === 'preview' && annotTool === 'select',
     rawPreviewPath: previewUrl,
     chatId,
     pageTitle: artifact.title,
@@ -989,7 +1086,7 @@ function GameProjectArtifactView({
   });
 
   const code = useInspectableCodeFiles({
-    enabled: mode === 'code',
+    enabled: Boolean(projectId) && mode === 'code',
     sourceKey: projectId,
     defaultPath: 'index.html',
     revisionKey,
@@ -1013,12 +1110,89 @@ function GameProjectArtifactView({
     },
   });
 
+  if (mode === 'trailer' && trailerUrl) {
+    return (
+      <div className="om-sa-media-stage" data-kind="video">
+        <ManagedMediaElement kind="video" src={trailerUrl} />
+      </div>
+    );
+  }
+
+  if (nonEmbeddableExternal && communityMatch?.external) {
+    const cover = coverUrl(communityMatch);
+    return (
+      <div className="om-sa-game-external">
+        {cover && <img src={cover} alt="" />}
+        <div className="om-sa-game-external-card">
+          <strong>{t('This game only runs on the creator’s site.')}</strong>
+          <Button
+            variant="ghost"
+            className="om-button h-auto"
+            data-primary
+            onClick={() => window.open(communityMatch.external!.url, '_blank', 'noopener,noreferrer')}
+          >
+            <RemixIcon name="external-link-line" size={15} />
+            <span>{t('Play on the creator’s page')}</span>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isBuilding && mode === 'preview') {
+    return (
+      <div className="om-sa-game-draft-stage">
+        <span className="om-sa-head-spinner" aria-hidden="true">
+          <RemixIcon name="loader-4-line" size={24} />
+        </span>
+        <strong>{t('Agent is running…')}</strong>
+        <p className="om-muted">{t('The game will load here when it is ready.')}</p>
+      </div>
+    );
+  }
+
+  if (isDraftOrFailed && mode === 'preview') {
+    const stopped = gameMeta?.status === 'failed';
+    const copyInstruction = async () => {
+      if (!handoffText) return;
+      try {
+        await navigator.clipboard.writeText(handoffText);
+        setCopiedHandoff(true);
+        onNotify?.(t('Instruction copied'), 'info');
+      } catch {
+        onNotify?.(t('Could not copy to clipboard'), 'error');
+      }
+    };
+    return (
+      <div className="om-sa-game-draft-stage" data-tone={gameMeta?.status}>
+        <RemixIcon name={stopped ? 'error-warning-line' : 'robot-line'} size={24} />
+        <strong>{stopped ? t('The Agent stopped before finishing this game.') : t('Waiting for your Agent')}</strong>
+        <p className="om-muted">{t('Send a prompt in Super Agent or copy the MCP instruction into Codex or Claude Code.')}</p>
+        <div className="om-sa-game-draft-actions">
+          <Button
+            variant="ghost"
+            className="om-button h-auto"
+            disabled={!handoffText}
+            onClick={() => void copyInstruction()}
+          >
+            <RemixIcon name={copiedHandoff ? 'check-line' : 'file-copy-line'} size={14} />
+            <span>{copiedHandoff ? t('Instruction copied') : t('Copy instruction')}</span>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ProjectPreviewCodeView
       frameKey={`${projectId || artifact.id}:${artifact.revision ?? ''}:${presentedKey}:${reloadKey}`}
       title={artifact.title}
-      previewUrl={bridge.bridgedPreviewUrl || previewUrl}
-      sandbox="allow-scripts allow-pointer-lock allow-popups allow-modals"
+      previewUrl={isExternalGame || bundledBlobUrl ? previewUrl : (bridge.bridgedPreviewUrl || previewUrl)}
+      sandbox={
+        isExternalGame
+          ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups'
+          : 'allow-scripts allow-pointer-lock allow-popups allow-modals'
+      }
       allow="fullscreen; gamepad; autoplay; clipboard-write"
       mode={effectiveMode}
       viewport={viewport}
@@ -1031,8 +1205,8 @@ function GameProjectArtifactView({
       onNotify={onNotify}
       frameRef={bridge.frameRef}
       iframeRef={bridge.iframeRef}
-      onIframeLoad={bridge.syncPickMode}
-      overlay={annotateActive && effectiveMode === 'preview' ? (
+      onIframeLoad={isExternalGame || bundledBlobUrl ? undefined : bridge.syncPickMode}
+      overlay={annotateActive && Boolean(projectId) && effectiveMode === 'preview' ? (
         <BrowserAnnotationOverlay
           mode="game-iframe"
           pageUrl={previewUrl}
@@ -1277,6 +1451,7 @@ export function ArtifactBrowserPane({
   onToggleExpand,
   onClosePane,
   onAttachArtifact,
+  onUseGameInAgent,
   onAttachBrowserAnnotation,
   onNotify,
   onOpenInDesignStudio,
@@ -1301,6 +1476,7 @@ export function ArtifactBrowserPane({
   onToggleExpand: () => void;
   onClosePane: () => void;
   onAttachArtifact: (artifact: SuperAgentArtifact) => void;
+  onUseGameInAgent?: (artifact: SuperAgentArtifact) => void;
   onAttachBrowserAnnotation?: (attachment: SuperAgentResourceAttachment, sendImmediately?: boolean) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
   onOpenInDesignStudio: (projectId: string) => void;
@@ -1310,7 +1486,9 @@ export function ArtifactBrowserPane({
   onOpenInBrandKit: (kitId?: string) => void;
 }) {
   const { t } = useI18n();
-  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const [viewMode, setViewMode] = useState<'preview' | 'code' | 'trailer'>('preview');
+  const [gameTrailerUrl, setGameTrailerUrl] = useState<string | null>(null);
+  const [gameSourceKind, setGameSourceKind] = useState<GameCard['source'] | null>(null);
   const [viewport, setViewport] = useState<DesignViewportId>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
   const [webState, setWebState] = useState<WebPageState | null>(null);
@@ -1358,6 +1536,8 @@ export function ArtifactBrowserPane({
     setBrowserMenuOpen(false);
     setConsoleEntries([]);
     setConsoleFilter('all');
+    setGameTrailerUrl(null);
+    setGameSourceKind(null);
     if (!activeArtifact) {
       setAddressDraft('');
       setConsoleOpen(false);
@@ -1387,7 +1567,7 @@ export function ArtifactBrowserPane({
   }, [active]);
 
   useEffect(() => {
-    if (viewMode === 'code') {
+    if (viewMode !== 'preview') {
       setAnnotateActive(false);
       setDeviceMenuOpen(false);
     }
@@ -1970,6 +2150,19 @@ export function ArtifactBrowserPane({
                       <RemixIcon name="code-s-slash-line" size={13} />
                       <span>{t('Code')}</span>
                     </Button>
+                    {activeArtifact?.kind === 'game-project' && gameTrailerUrl && (
+                      <Button
+                        variant="plain"
+                        type="button"
+                        aria-label={t('Trailer')}
+                        title={t('Trailer')}
+                        data-active={viewMode === 'trailer' || undefined}
+                        onClick={() => setViewMode('trailer')}
+                      >
+                        <RemixIcon name="film-line" size={13} />
+                        <span>{t('Trailer')}</span>
+                      </Button>
+                    )}
                   </div>
                 )}
 
@@ -2140,7 +2333,27 @@ export function ArtifactBrowserPane({
                   </div>
                 )}
 
-                {canCloudShare && (hasModeSwitch || supportsAnnotate) && (
+                {!showNewTab && activeArtifact?.kind === 'game-project' && onUseGameInAgent && (
+                  <>
+                    {(hasModeSwitch || supportsAnnotate) && (
+                      <span className="om-sa-toolbar-divider" aria-hidden="true" />
+                    )}
+                    <Tooltip label={gameSourceKind === 'mine' ? t('Attach to Chat') : t('Make one like this')}>
+                      <Button
+                        variant="plain"
+                        type="button"
+                        className="om-sa-toolbar-btn om-sa-game-use-btn"
+                        aria-label={gameSourceKind === 'mine' ? t('Attach to Chat') : t('Make one like this')}
+                        onClick={() => onUseGameInAgent(activeArtifact)}
+                      >
+                        <RemixIcon name="sparkling-line" size={14} />
+                        <span>{gameSourceKind === 'mine' ? t('Attach to Chat') : t('Make one like this')}</span>
+                      </Button>
+                    </Tooltip>
+                  </>
+                )}
+
+                {canCloudShare && (hasModeSwitch || supportsAnnotate || (activeArtifact?.kind === 'game-project' && Boolean(onUseGameInAgent))) && (
                   <span className="om-sa-toolbar-divider" aria-hidden="true" />
                 )}
 
@@ -2276,11 +2489,15 @@ export function ArtifactBrowserPane({
                         className="om-sa-browser-menu-item"
                         onClick={() => {
                           setBrowserMenuOpen(false);
-                          onAttachArtifact(activeArtifact);
+                          if (activeArtifact.kind === 'game-project' && onUseGameInAgent) {
+                            onUseGameInAgent(activeArtifact);
+                          } else {
+                            onAttachArtifact(activeArtifact);
+                          }
                         }}
                       >
-                        <RemixIcon name="add-line" size={14} />
-                        <span>{t('Attach to Chat')}</span>
+                        <RemixIcon name={activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? 'sparkling-line' : 'add-line'} size={14} />
+                        <span>{activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? t('Make one like this') : t('Attach to Chat')}</span>
                       </Button>
                     )}
 
@@ -2610,7 +2827,7 @@ export function ArtifactBrowserPane({
           <DesignProjectArtifactView
             artifact={activeArtifact}
             chatId={chatId}
-            mode={viewMode}
+            mode={viewMode === 'code' ? 'code' : 'preview'}
             viewport={viewport}
             reloadKey={reloadKey}
             annotateActive={annotateActive}
@@ -2667,6 +2884,10 @@ export function ArtifactBrowserPane({
             onSubmitAnnotation={handleSubmitBrowserAnnotation}
             onCloseAnnotate={() => setAnnotateActive(false)}
             onNotify={onNotify}
+            onGameMeta={meta => {
+              setGameTrailerUrl(meta.trailerUrl);
+              setGameSourceKind(meta.source);
+            }}
           />
         ) : activeArtifact.kind === 'web' && activeArtifact.url && chatId ? (
           <div className="om-sa-web-stage">

@@ -16,6 +16,7 @@ import { useOptionalWorkspaceChrome } from '../WorkspaceChromeContext';
 import { MotionIcon } from '../icons';
 import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
+import { GameMasonry, interleavePortrait } from './GameMasonry';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
 import { buildDirectGamePrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import './gameStudio.css';
@@ -293,7 +294,7 @@ export function GameStudio({
         {offline && <p className="om-muted om-game-note">{t('Showing the built-in games. Your games appear once the local game service is running.')}</p>}
         {rows.filter(row => row.games.length || row.id === 'all').map(row => <section key={row.id} className="om-game-row" aria-label={row.title}>
           {row.id !== 'featured' && <header><h2 className="om-subtitle"><RemixIcon name={row.icon} size={16} />{row.title}</h2></header>}
-          {row.games.length ? <GameMasonry games={row.games} render={game => <GameTile key={game.id} game={game} locale={locale} onOpen={() => open(game)} />} />
+          {row.games.length ? <GameMasonry games={row.games} minColumn={280} render={game => <GameTile key={game.id} game={game} locale={locale} onOpen={() => open(game)} />} />
             : <div className="om-discovery-empty"><span>{t('No games match these filters.')}</span></div>}
         </section>)}
       </section>
@@ -509,41 +510,6 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
       </div>
     </section>
   </div>;
-}
-
-/** Spreads portrait games through the list (one after every two landscape games) so the waterfall mixes both shapes. */
-function interleavePortrait(list: GameCard[]) {
-  const portrait = list.filter(game => game.orientation === 'portrait'), others = list.filter(game => game.orientation !== 'portrait');
-  if (!portrait.length || !others.length) return list;
-  const mixed: GameCard[] = [];
-  others.forEach((game, index) => { mixed.push(game); if (index % 2 === 1 && portrait.length) mixed.push(portrait.shift()!); });
-  return [...mixed, ...portrait];
-}
-
-// Titles sit on the cover, so a card's height is just its cover.
-const masonryGap = 12, masonryMinColumn = 280, tileMetaHeight = 0;
-
-/** Waterfall layout: landscape (16:9) and portrait (9:16) cards keep their shapes; each card goes to the shortest column, in list order. */
-function GameMasonry({ games, render }: { games: GameCard[]; render: (game: GameCard) => React.ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const element = box.current; if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    observer.observe(element); return () => observer.disconnect();
-  }, []);
-  const count = Math.max(1, Math.floor((width + masonryGap) / (masonryMinColumn + masonryGap)));
-  const columns = useMemo(() => {
-    const column = width ? (width - masonryGap * (count - 1)) / count : masonryMinColumn;
-    const lists: GameCard[][] = Array.from({ length: count }, () => []), heights = Array(count).fill(0) as number[];
-    for (const game of games) {
-      const shortest = heights.indexOf(Math.min(...heights));
-      lists[shortest].push(game);
-      heights[shortest] += column * (game.orientation === 'portrait' ? 16 / 9 : 9 / 16) + tileMetaHeight + masonryGap;
-    }
-    return lists;
-  }, [games, count, width]);
-  return <div ref={box} className="om-game-masonry">{columns.map((list, index) => <div key={index} className="om-game-masonry-column">{list.map(render)}</div>)}</div>;
 }
 
 /** The user's games, like the project list in the Motion editor: what the Agent is still making, then finished games. */

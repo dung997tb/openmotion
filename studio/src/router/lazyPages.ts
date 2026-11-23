@@ -84,7 +84,7 @@ export function preloadStudioRoute(target: string): void {
   if (target === 'design') { preloadWorkspacePage('design'); return; }
   if (target === 'motion') { preloadWorkspacePage('motion'); return; }
   if (target === 'cinema') { preloadWorkspacePage('cinema'); return; }
-  if (target === 'game') { preloadWorkspacePage('game'); return; }
+  if (target === 'game') { preloadWorkspacePage('agent'); return; }
   if (target === 'workflows') { preloadWorkspacePage('scenarioHub'); preloadWorkspacePage('scenario'); return; }
   if (target === 'mcp') { preloadWorkspacePage('mcp'); return; }
   if (target === 'assets') { preloadWorkspacePage('assets'); return; }

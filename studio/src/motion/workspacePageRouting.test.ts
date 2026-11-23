@@ -437,3 +437,25 @@ it('round-trips ?game=<id> on /studios/game and clears it when navigating away',
   const leftGame = workspacePageHref('http://localhost/studios/game?game=game-123', { superAgent: true, superAgentChat: null });
   expect(leftGame).toBe('/agent');
 });
+
+it('round-trips ?mode=game on /agent and clears it when opening a chat or leaving Super Agent', () => {
+  const parsed = readWorkspacePage('?mode=game', '', '/agent');
+  expect(parsed.superAgent).toBe(true);
+  expect(parsed.superAgentMode).toBe('game');
+
+  const invalid = readWorkspacePage('?mode=unknown', '', '/agent');
+  expect(invalid.superAgentMode).toBeUndefined();
+
+  const href = workspacePageHref('http://localhost/explore', {
+    superAgent: true,
+    superAgentChat: null,
+    superAgentMode: 'game',
+  });
+  expect(href).toBe('/agent?mode=game');
+
+  const cleared = workspacePageHref('http://localhost/agent?mode=game', { superAgentMode: null });
+  expect(cleared).toBe('/agent');
+
+  const left = workspacePageHref('http://localhost/agent?mode=game', { explore: true });
+  expect(left).toBe('/explore');
+});
