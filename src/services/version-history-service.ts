@@ -1036,27 +1036,27 @@ export class VersionHistoryService {
   ): Promise<{ ok: true; entryId: string; pinned: boolean }> {
     assertValidUuid(entryId, 'entryId');
 
-    return this.db.transaction(async (tx) => {
-      await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
+    const head = await this.db.transaction(async (tx) => {
+      const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
         auth: ctx,
       });
 
-      const rows = await tx
+      const entryFilter = and(
+        eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
+        eq(projectHistoryEntries.projectId, projectId),
+        eq(projectHistoryEntries.id, entryId),
+      );
+      const [updated] = await tx
         .update(projectHistoryEntries)
         .set(asUpdate(projectHistoryEntries, { pinned }))
-        .where(
-          and(
-            eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-            eq(projectHistoryEntries.projectId, projectId),
-            eq(projectHistoryEntries.id, entryId),
-          ),
-        )
-        .returning({ id: projectHistoryEntries.id, versionId: projectHistoryEntries.versionId });
+        .where(and(entryFilter, eq(projectHistoryEntries.pinned, !pinned)))
+        .returning({ versionId: projectHistoryEntries.versionId });
 
-      const updated = rows[0];
       if (!updated) {
+        const [existing] = await tx.select({ id: projectHistoryEntries.id }).from(projectHistoryEntries).where(entryFilter);
+        if (existing) return null;
         throw new CloudError('NOT_FOUND', `History entry ${entryId} not found.`, { status: 404, applied: false });
       }
 
@@ -1070,8 +1070,12 @@ export class VersionHistoryService {
           ),
         );
 
-      return { ok: true as const, entryId: updated.id, pinned };
+      return project;
     });
+    if (head) {
+      await this.publishHistoryChanged(ctx.workspaceId, projectId, head.revision.trim(), head.currentVersionId, head.currentHistorySeq);
+    }
+    return { ok: true, entryId, pinned };
   }
 
   /** Inspect files at a historical point (`versionId`, `entryId`, `seq`, or `'head'`). */
