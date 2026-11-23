@@ -117,7 +117,7 @@ export function useTimelineDeleteOps({
             ...step,
             writeFile: writeProjectFile,
             recordEdit,
-            rewrite: async (originalContent) => {
+            rewrite: async (originalContent, history) => {
               // One request removes every selected element and rewrites the file once, so a
               // large selection is a single round trip and a single history entry.
               const patchTargets = sameFile.map((target) => {
@@ -135,7 +135,7 @@ export function useTimelineDeleteOps({
                 ),
                 {
                   method: "POST",
-                  headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+                  headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
                   body: JSON.stringify({ targets: patchTargets }),
                 },
               );

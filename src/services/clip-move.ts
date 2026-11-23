@@ -5,7 +5,7 @@ import { fileContentVersion, sha256Hex } from '../studio/etag.ts';
 import { normalizeSafeProjectPath, type ProjectFilesService } from './project-files-service.ts';
 
 type Guard =
-  | { source: 'studio'; ifMatch: string; writeToken: string }
+  | { source: 'studio'; ifMatch: string; writeToken: string; windowId?: string }
   | { source: 'agent'; expectedRevision: string; expectedVersionId: string };
 
 export async function commitClipMove(files: ProjectFilesService, auth: AuthContext, projectId: string,
@@ -43,7 +43,7 @@ export async function commitClipMove(files: ProjectFilesService, auth: AuthConte
     ops: [{ op: 'upsert_text', path: compositionPath, content, stampHfIds: true }],
     filePreconditions: [{ path: compositionPath, ifMatch: version }],
     source: guard.source, summary: 'Move timeline clip',
-    ...(guard.source === 'studio' ? { writeToken: guard.writeToken } :
+    ...(guard.source === 'studio' ? { writeToken: guard.writeToken, windowId: guard.windowId } :
       { actorKind: 'agent', expectedRevision: guard.expectedRevision, expectedVersionId: guard.expectedVersionId }),
   });
 }

@@ -19,6 +19,7 @@ import {
   type ProjectFileOp,
 } from '../../services/project-files-service.ts';
 import {
+  studioWriteHistory,
   extractWildcardPath,
   getAuthContext,
   type DisklessStudioDeps,
@@ -216,7 +217,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
           },
         ],
         source: 'studio',
-        summary: `Saved ${safePath}`,
+        ...studioWriteHistory(c.req.raw.headers),
         writeToken,
       });
 
@@ -246,7 +247,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     try {
       const commit = await commitClipMove(deps.files, auth, c.req.param('id'), path, body,
-        c.req.header('idempotency-key') ?? '', { source: 'studio', ifMatch: c.req.header('if-match') ?? '', writeToken });
+        c.req.header('idempotency-key') ?? '', { source: 'studio', ifMatch: c.req.header('if-match') ?? '', writeToken, windowId: c.req.header('x-openmotion-edit-window') });
       return c.json({ version: commit.versionsByPath[path] ?? c.req.header('if-match'), revision: commit.revision, writeToken: commit.writeToken });
     } catch (error) {
       if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {

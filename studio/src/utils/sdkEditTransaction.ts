@@ -1,5 +1,6 @@
 import type { MoveClip } from "../../../packages/edit-core";
-import type { EditContextTarget } from "./studioFileHistory";
+import { studioHistoryForWrite, type StudioWriteHistory, type EditContextTarget } from "./studioFileHistory";
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import { openComposition, type Composition } from "@hyperframes/sdk";
 import { hashContent, markSelfWrite } from "../hooks/sdkSelfWriteRegistry";
 import { trackStudioEvent } from "./studioTelemetry";
@@ -43,7 +44,7 @@ export interface CutoverDeps {
    * Must be bound to one project. Its identity plus path scopes the shared
    * mutation queue used by every whole-file writer in that project.
    */
-  writeProjectFile: (path: string, content: string, expectedContent?: string, command?: MoveClip) => Promise<void>;
+  writeProjectFile: (path: string, content: string, expectedContent?: string, command?: MoveClip, history?: StudioWriteHistory) => Promise<void>;
   reloadPreview: () => void;
   refresh?: (after: string) => void;
   compositionPath?: string | null;
@@ -255,7 +256,11 @@ async function writeAndRecord(
 ): Promise<Error | null> {
   markSelfWrite(targetPath, after);
   try {
-    if (options?.command) await deps.writeProjectFile(targetPath, after, originalContent, options.command);
+    if (getCachedCloudDisklessMode()) {
+      const { label, coalesceKey, coalesceMs } = historyEntryOptions(options);
+      const history = studioHistoryForWrite(deps.writeProjectFile, label, coalesceKey, coalesceMs);
+      await deps.writeProjectFile(targetPath, after, originalContent, options?.command, history);
+    } else if (options?.command) await deps.writeProjectFile(targetPath, after, originalContent, options.command);
     else await deps.writeProjectFile(targetPath, after, originalContent);
   } catch (error) {
     return asCutoverError(error);

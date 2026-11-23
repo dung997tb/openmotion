@@ -21,7 +21,8 @@ import { countStudioManualEditSave } from "../components/editor/manualEditsDom";
 import type { CutoverResult } from "../utils/sdkCutover";
 import { reseekPreviewRuntime } from "./timelineTrackVisibility";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
-import { readProjectFileContent } from "../utils/studioFileHistory";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { readProjectFileContent, studioHistoryForWrite, type ProjectFileWriter } from "../utils/studioFileHistory";
 import { applyUndoRestoreToPreview } from "../utils/gsapUndoRestore";
 import { syncRestoredTimelineFromPreview } from "../player/lib/timelineRestoreSync";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -34,7 +35,7 @@ export interface UseDomEditPersistParams {
   previewIframeRef: React.MutableRefObject<HTMLIFrameElement | null>;
   showToast: (message: string, tone?: "error" | "info") => void;
   queueDomEditSave: <T>(save: () => Promise<T>) => Promise<T>;
-  writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
+  writeProjectFile: ProjectFileWriter;
   editHistory: { recordEdit: (entry: RecordEditInput) => Promise<void> };
   projectIdRef: React.MutableRefObject<string | null>;
   reloadPreview: () => void;
@@ -139,6 +140,10 @@ export function useDomEditPersist({
         coalesceKey: options?.coalesceKey,
         coalesceMs: options?.coalesceMs,
       };
+      const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs) : undefined;
+      const writeEdit = writeHistory
+        ? (path: string, content: string, expected?: string) => writeProjectFile(path, content, expected, undefined, writeHistory)
+        : writeProjectFile;
       const prepare = options?.prepareContent;
       let preparedWriteFailed = false;
       // Read, server patch, follow-up write and history hold the file's queue, so no save lands between them.
@@ -160,11 +165,11 @@ export function useDomEditPersist({
             ? operations.reduce((html, op) => applyPatchByTarget(html, target, op), originalContent)
             : originalContent;
           const changed = content !== originalContent;
-          if (changed) await writeProjectFile(targetPath, content, originalContent);
+          if (changed) await writeEdit(targetPath, content, originalContent);
           patchData = { matched, changed, content, path: targetPath };
         } else {
           patchData = await postPatchElement(pid, targetPath, patchBody, showToast,
-            selection.isolatedTarget && '"sha256:' + selection.isolatedTarget.sha256 + '"');
+            selection.isolatedTarget && '"sha256:' + selection.isolatedTarget.sha256 + '"', writeHistory);
         }
         if (!patchData.changed) return { patchData, originalContent, patchedContent: null, finalContent: null };
 
@@ -175,7 +180,7 @@ export function useDomEditPersist({
               targetPath,
               patchedContent,
               prepare,
-              writeProjectFile,
+              writeEdit,
               showToast,
             )
           : { content: patchedContent, failed: false };

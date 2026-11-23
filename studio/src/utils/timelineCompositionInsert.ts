@@ -1,6 +1,6 @@
 import { createStudioSaveHttpError } from "./studioSaveDiagnostics";
 import { serializeStudioFileMutation } from "./studioFileMutationCoordinator";
-import type { RecordEditInput } from "./studioFileHistory";
+import { cloudHistoryForWrite, type RecordEditInput, type StudioWriteHistory } from "./studioFileHistory";
 import { buildProjectApiPath } from "./projectRouting";
 import { studioWriteHeaders } from "./studioFileVersion";
 import { deriveTimelineStoreKeyForDomId } from "../player/lib/timelineElementHelpers";
@@ -24,7 +24,7 @@ async function insertTimelineComposition(input: {
   start: number;
   track: number;
   canvasPosition?: { left: number; top: number };
-}): Promise<TimelineCompositionInsertionResult> {
+}, history?: StudioWriteHistory): Promise<TimelineCompositionInsertionResult> {
   const current = await studioApiFetch(
     buildProjectApiPath(input.projectId, `/files/${encodeURIComponent(input.targetPath)}`),
   );
@@ -41,7 +41,7 @@ async function insertTimelineComposition(input: {
     ),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+      headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
       body: JSON.stringify({
         sourcePath: input.sourcePath,
         start: input.start,
@@ -74,11 +74,12 @@ export async function commitTimelineCompositionInsertion(input: {
 }): Promise<TimelineElement | undefined> {
   return serializeStudioFileMutation(input.writeFile, input.targetPath, async () => {
     if (input.isActive?.() === false) return;
-    const result = await insertTimelineComposition(input);
+    const label = "Add composition to timeline";
+    const result = await insertTimelineComposition(input, cloudHistoryForWrite(input.writeFile, { label }));
     input.observeVersion?.(input.targetPath, result.version);
     try {
       await input.recordEdit({
-        label: "Add composition to timeline",
+        label,
         files: { [input.targetPath]: { before: result.before, after: result.after } },
       });
     } catch (error) {

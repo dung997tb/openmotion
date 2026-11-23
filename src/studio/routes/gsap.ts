@@ -4,6 +4,7 @@ import { normalizeSafeProjectPath } from '../../services/project-files-service.t
 import {
   extractWildcardPath,
   getAuthContext,
+  studioWriteHistory,
   type DisklessStudioDeps,
   type StudioVariables,
 } from '../context.ts';
@@ -119,7 +120,7 @@ export function createStudioGsapRoutes(deps: DisklessStudioDeps): Hono<{ Variabl
           ops: [{ op: 'upsert_text', path: filePath, content: res.after, stampHfIds: true }],
           filePreconditions: [{ path: filePath, ifMatch }],
           source: 'studio',
-          summary: `Updated GSAP timeline in ${filePath}`,
+          ...studioWriteHistory(c.req.raw.headers, `Updated GSAP timeline in ${filePath}`),
           writeToken,
         });
         version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(res.after));
@@ -184,7 +185,7 @@ export function createStudioGsapRoutes(deps: DisklessStudioDeps): Hono<{ Variabl
         ops: [{ op: 'upsert_text', path: filePath, content: body.restore }],
         filePreconditions: [{ path: filePath, ifMatch: expectedEtag }],
         source: 'studio',
-        summary: `Rolled back GSAP edit in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Rolled back GSAP edit in ${filePath}`),
         writeToken,
       });
       const version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(body.restore));

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryListItem, HistoryResult } from "@hyperframes/studio-server";
 import { studioFileContentVersion, studioWriteHeaders } from "../utils/studioFileVersion";
 import type { RestoreFiles } from "../utils/gsapUndoRestore";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { studioApiFetch } from "../utils/studioApiFetch";
 import { setStudioPendingEditClaimClock } from "../utils/studioPendingEdits";
 import type { RecordEditInput } from "../utils/studioFileHistory";
@@ -209,9 +210,10 @@ function redoneAt(view: HistoryView): number | null {
   return original ? timestamp(original.endedAt) : null;
 }
 
-/** Studio's undo over the server's project history: an edit claims what it wrote; Cmd+Z steps the person's. */
+/** Cloud history steps the project head. Legacy file histories can target a claimed local edit. */
 export function usePersistentEditHistory({ projectId }: UsePersistentEditHistoryOptions) {
   const [view, setView] = useState<HistoryView>(EMPTY);
+  const projectWide = view.currentSeq !== undefined || getCachedCloudDisklessMode();
   const [loaded, setLoaded] = useState(false);
   const [blocked, setBlocked] = useState<BlockedSteps>({});
   // Update synchronously too: a repeated shortcut may arrive before React renders.
@@ -265,6 +267,13 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
     return () => setStudioPendingEditClaimClock(null);
   }, [own]);
 
+  // A single cloud commit can deliver both a file event and a history event.
+  useEffect(() => () => clearTimeout(historyTimer.current), [projectId]);
+  const refreshAfterEvent = useCallback(() => {
+    clearTimeout(historyTimer.current);
+    historyTimer.current = setTimeout(() => void refresh(), 75);
+  }, [refresh]);
+
   const recordEdit = useCallback(
     async ({ label, coalesceKey, coalesceMs, files, targets, created = [] }: RecordEditInput) => {
       if (!projectId) return;
@@ -274,6 +283,11 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       const agentPhase = studioEditLifecycle.getSnapshot().phase;
       const agent = agentPhase === "dispatching" || agentPhase === "dispatched";
       own.overtake();
+      if (projectWide) {
+        reportManualEdit({ projectId, label, entryId: null, coalesceKey, coalesceMs, agent });
+        refreshAfterEvent();
+        return;
+      }
       const reply = await post(historyUrl(projectId, "/claim"), {
         label,
         paths,
@@ -294,14 +308,14 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       heldClaimRef.current = claimed && coalesceKey ? { paths, at: Date.now() } : null;
       await refresh();
     },
-    [projectId, refresh, own, claimKey],
+    [projectId, projectWide, refresh, refreshAfterEvent, own, claimKey],
   );
 
   const step = useCallback(
     async (direction: "undo" | "redo", callbacks: ApplyCallbacks): Promise<ApplyResult> => {
       if (!projectId) return { ok: false, reason: "empty" };
       const candidate =
-        direction === "undo" && callbacks.claimedAfter !== undefined
+        !projectWide && direction === "undo" && callbacks.claimedAfter !== undefined
           ? own.claimedAfter(callbacks.claimedAfter)
           : null;
       const next = direction === "undo" ? view.back : view.forward;
@@ -324,12 +338,12 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
         // 404: this app keeps no history, so there is nothing to step.
         if (!posted.ok && posted.status === 404) return { ok: false, reason: "empty" };
         if (!posted.ok) return { ok: false, reason: "failed", message: posted.error };
-        const reply = posted.body as HistoryResult | { ok: true; entry?: { label: string } | null; appliedFiles: string[] };
+        const reply = posted.body as HistoryResult | { ok: true; entry?: { label: string } | null; stepLabel?: string; appliedFiles: string[] };
         if ("appliedFiles" in reply) {
           // Snapshot history returns the destination entry. Its own diff can describe a different edit.
           return {
             ok: true,
-            label: next?.label ?? reply.entry?.label,
+            label: reply.stepLabel ?? next?.label ?? reply.entry?.label,
             paths: reply.appliedFiles,
             files: await restoredFiles(reply.appliedFiles, previous, callbacks.readFile),
           };
@@ -366,15 +380,9 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       };
       return callbacks.serialize ? callbacks.serialize(paths, run) : run();
     },
-    [projectId, view, refresh, own],
+    [projectId, projectWide, view, refresh, own],
   );
 
-  // A single cloud commit can deliver both a file event and a history event.
-  useEffect(() => () => clearTimeout(historyTimer.current), [projectId]);
-  const refreshAfterEvent = useCallback(() => {
-    clearTimeout(historyTimer.current);
-    historyTimer.current = setTimeout(() => void refresh(), 75);
-  }, [refresh]);
   const noteOutsideChange = useCallback(() => {
     own.overtake();
     refreshAfterEvent();
@@ -394,6 +402,7 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
 
   return {
     loaded,
+    projectWide,
     canUndo: Boolean(view.back) && !sameStep(blocked.undo, view.back),
     canRedo: Boolean(view.forward) && !sameStep(blocked.redo, view.forward),
     undoLabel: view.back?.label,
@@ -409,7 +418,7 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
     predict: (direction: "undo" | "redo") =>
       // Snapshot steps reuse version IDs in both directions. The local inverse-entry cache
       // is only valid for servers that append a distinct undo entry.
-      view.currentSeq !== undefined || sameStep(blockedRef.current[direction], direction === "undo" ? view.back : view.forward)
+      projectWide || sameStep(blockedRef.current[direction], direction === "undo" ? view.back : view.forward)
         ? null : own.predict(direction),
     claims: own.claimCount,
     noteOutsideChange,

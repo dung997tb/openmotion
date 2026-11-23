@@ -1,4 +1,5 @@
 import type { ParsedGsap } from "@hyperframes/core/gsap-parser";
+import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import type { Composition } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import type { PublishSdkSession } from "../utils/sdkCutover";
@@ -25,6 +26,8 @@ export interface MutationResult {
 }
 
 export interface CommitMutationOptions {
+  /** When a preceding write belongs to this same gesture. */
+  history?: StudioWriteHistory;
   label: string;
   keyframeTelemetry?: boolean;
   keyframeAction?: KeyframeUsageAction;
