@@ -94,7 +94,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
     if ((current.find(item => item.id === chat.id)?.updatedAt ?? -1) > chat.updatedAt) return current;
     return [chat, ...current.filter(item => item.id !== chat.id)];
   }), []);
-  const referenceUpload = useRef<HTMLInputElement>(null), upload = useRef<HTMLInputElement>(null), replace = useRef<HTMLInputElement>(null), knownJobs = useRef<GenerationJob[]>(initialHistory?.jobs ?? []);
+  const referenceUpload = useRef<HTMLInputElement>(null), soundReferenceUpload = useRef<HTMLInputElement>(null), upload = useRef<HTMLInputElement>(null), replace = useRef<HTMLInputElement>(null), knownJobs = useRef<GenerationJob[]>(initialHistory?.jobs ?? []);
   const mountedRef = useRef(true);
   const uploadingRef = useRef(false);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -620,6 +620,8 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
         mobileView={mobileView}
         setMobileView={setMobileView}
         onUploadClick={() => { tracking.reportAssetsClick('assets_library', 'upload'); upload.current?.click(); }}
+        onPickReference={() => { tracking.reportAssetsClick('asset_create', 'add_reference', { task_mode: 'direct' }); setPickerMulti(false); setPicking(true); }}
+        onUploadReference={!uploading ? () => soundReferenceUpload.current?.click() : undefined}
         onDropFiles={files => { void importFiles(files, false, 'library_drop'); }}
         onOpenAsset={asset => { tracking.reportAssetsClick('assets_library', 'open_asset', { modality: asset.modality }); open(asset); }}
         onTrashAsset={assetId => update(assetId, { trashed: true })}
@@ -679,12 +681,20 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
       const picked = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
       void uploadReferenceFiles(picked, 'library_button');
     }} />
+    <input ref={soundReferenceUpload} type="file" accept="audio/*,video/*" hidden onChange={event => {
+      const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
+      if (!file) return;
+      void importFiles([file], false, 'library_button', asset => {
+        const item = { reference: { assetId: asset.id, versionId: asset.currentVersionId }, name: asset.name };
+        setDraft(current => ({ ...current, references: [...current.references.filter(r => r.reference.assetId !== item.reference.assetId), item] }));
+      });
+    }} />
     <input ref={replace} type="file" accept={`${selected?.modality ?? 'image'}/*`} hidden onChange={e => { void importFiles(Array.from(e.target.files ?? []), true); e.target.value = ''; }} />
     {active && picking && (() => {
       const remainingSlots = studioForm ? Math.max(0, studioAttachableReferences - draft.references.length) : Infinity;
       const multiPickReferences = Boolean(pickerMulti && studioForm && mode === 'direct');
       return <AssetPicker
-        imageOnly={mode === 'direct' || Boolean(studioForm)}
+        imageOnly={!soundWorkbench && (mode === 'direct' || Boolean(studioForm))}
         multiple={multiPickReferences}
         maxSelect={multiPickReferences ? remainingSlots : undefined}
         attachedVersionKeys={studioForm && mode === 'direct' ? attachedReferenceVersionKeys : undefined}
