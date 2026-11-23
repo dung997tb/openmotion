@@ -124,7 +124,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
             rememberPreviewHtmlSources(iframe!, event.data.projectId, event.data.htmlSources);
             receivedHtmlSources = true;
           }
-          rememberPeerTimingDocument(iframe!, bridge.token, event.data.timingDocumentId);
+          rememberPeerTimingDocument(iframe!, bridge.token, event.data.timingDocumentId, event.data.styleDocumentId);
           return;
         }
         if (event.data.type === "asset-readiness") {

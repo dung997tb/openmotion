@@ -5,7 +5,8 @@ export const PREVIEW_PEER_TIMING = `
   const timingAttributes = new Set(${JSON.stringify(TIMING_ATTRIBUTES)});
   const presentationTags = new Set(${JSON.stringify(PRESENTATION_TAGS)});
   const presentationStyles = new Set(${JSON.stringify(PRESENTATION_STYLES)});
-  const timingDocumentId = settings.canRebindTiming === true ? globalThis.crypto?.randomUUID?.() : undefined;
+  const styleDocumentId = globalThis.crypto?.randomUUID?.();
+  const timingDocumentId = settings.canRebindTiming === true ? styleDocumentId : undefined;
   function timingVersion(tag) {
     if (typeof tag !== 'string') return null;
     const match = /^"(sha256|patch):([a-f0-9]{64})"$/.exec(tag);
@@ -41,10 +42,12 @@ export const PREVIEW_PEER_TIMING = `
   }
   function applyPeerTiming(m) {
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
-    const local = m.type === 'peer-presentation' && m.localSave === true;
+    const temporary = m.type === 'peer-presentation' && m.temporary === true;
+    const local = !temporary && m.type === 'peer-presentation' && m.localSave === true;
     const pending = local && pendingDrags.get(m.gestureId);
     const base = pending && pending.selection.sourceFile === m.path ? pending.sha256 : sourceVersions[m.path];
-    if (!timingDocumentId || m.documentId !== timingDocumentId || m.path !== compositionPath ||
+    const target = temporary ? styleDocumentId : timingDocumentId;
+    if (!target || m.documentId !== target || (temporary ? !!timingDocumentId : m.path !== compositionPath) ||
         !before || !after || before !== base ||
         !Number.isFinite(m.expiresAt) || Date.now() >= m.expiresAt ||
         drag || pendingDrags.size > (pending ? 1 : 0) ||
@@ -55,6 +58,7 @@ export const PREVIEW_PEER_TIMING = `
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
           (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > timingAttributes.size) return false;
+      if (temporary && (!change.styles || change.text || change.attributes.length)) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
       const matches = Array.from(document.querySelectorAll(selector)).filter(node =>
@@ -89,7 +93,8 @@ export const PREVIEW_PEER_TIMING = `
     const run = cb => window.__hfSuppressSceneMutations ? window.__hfSuppressSceneMutations(cb) : cb();
     try { run(() => update('to')); }
     catch (_) { try { run(() => update('old')); } catch (_) {} return false; }
-    sourceVersions[m.path] = after;
+    // Only a complete rebind advances the revision used for future edits and selections.
+    if (!temporary) sourceVersions[m.path] = after;
     return true;
   }
 `;

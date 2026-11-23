@@ -4,15 +4,20 @@ import { TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_
 type FileSnapshot = { content: string; version: string };
 
 // A WindowProxy survives navigation. Bind a request to the document that acknowledged the handshake.
-const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string }>();
-export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, id: unknown): void {
-  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id });
+const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean }>();
+export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown): void {
+  const id = timingId ?? styleId;
+  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id, canRebind: id === timingId });
   else documents.delete(frame);
 }
 
 /** A scripted or older document can start rebuilding in parallel with the source read. */
 export function hasPeerTimingDocument(frame: HTMLIFrameElement): boolean {
-  return documents.has(frame);
+  return documents.get(frame)?.canRebind === true;
+}
+
+export function hasScriptedStylePreview(frame: HTMLIFrameElement) {
+  return documents.get(frame)?.canRebind === false;
 }
 
 export interface PeerTimingUpdate {
@@ -107,21 +112,25 @@ export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
   isCurrent: () => boolean,
-  localSave?: { gestureId?: string },
+  options?: "temporary" | { gestureId?: string },
 ): Promise<boolean> {
   if (!frame || !isCurrent()) return false;
   const adapter = createPreviewAdapter({ iframe: frame });
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
+  const temporary = options === "temporary";
+  if (temporary ? document.canRebind : !document.canRebind) return false;
+  const localSave = typeof options === "object" ? options : undefined;
   const changes = diffPreviewChanges(update.previous.content, update.current.content);
   if (!changes || !isCurrent()) return false;
+  if (temporary && changes.some(change => !change.styles || change.attributes.length || change.text)) return false;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;
   try {
     const applied = await adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
-      changes, ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
+      changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
     return applied === true && document.id === documents.get(frame)?.id && isCurrent();
   } catch { return false; }

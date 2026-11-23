@@ -1,12 +1,13 @@
 import type { RefObject } from "react";
 import { shareCompositionPosterRead, type KnownCompositionSource, MAX_POSTER_SOURCE_LENGTH } from "../player/lib/compositionPosterSource";
 import { beginPeerTimelineUpdate } from "../player/lib/peerTimeline";
-import { hasPeerTimingDocument, tryApplyPeerChanges } from "../player/peerTimingPreview";
+import { hasPeerTimingDocument, hasScriptedStylePreview, tryApplyPeerChanges } from "../player/peerTimingPreview";
 import { isPreviewChanging } from "../player/previewReloading";
 import { announcePreviewScenesSwapped, notePeerPreviewChange, previewSourceRevision } from "../player/sceneSwap";
 import { usePlayerStore } from "../player/store/playerStore";
 import { isStudioEditSaving } from "../utils/studioPendingEdits";
 import type { RemoteFileRead } from "./remoteFileReads";
+import { confirmedSource } from "../utils/confirmedTextSources";
 
 /** Project the latest source immediately. Only a verified in-place preview can waive a refresh. */
 export function syncPeerComposition(
@@ -16,10 +17,22 @@ export function syncPeerComposition(
 ): Promise<boolean> | undefined {
   const frame = frameRef.current;
   const apply = path && (!paths || paths.includes(path)) && beginPeerTimelineUpdate(projectId, path, frame);
-  if (!path || !apply) {
-    notePeerPreviewChange();
-    return;
+  if (!apply) notePeerPreviewChange();
+  const changedPath = paths?.length === 1 ? paths[0] : undefined;
+  if (frame && hasScriptedStylePreview(frame) && changedPath?.endsWith(".html")) {
+    const base = confirmedSource(projectId, changedPath) ?? (changedPath === path ? previous : null);
+    if (base) {
+      const revision = previewSourceRevision();
+      const isCurrent = () => frame === frameRef.current && revision === previewSourceRevision() &&
+        usePlayerStore.getState().timelineProjectId === projectId && !isStudioEditSaving();
+      // The old document stays visible while the normal script rebuild starts independently.
+      void read(projectId, changedPath)?.then(({ content, version }) => {
+        if (typeof content === "string" && version && isCurrent())
+          return tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "temporary");
+      }).catch(() => {});
+    }
   }
+  if (!path || !apply) return;
   const file = read(projectId, path);
   if (!file) return;
   shareCompositionPosterRead(usePlayerStore.getState(), projectId, path, file);
