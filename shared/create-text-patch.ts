@@ -1,10 +1,28 @@
-import { diffChars } from 'diff';
+import { diffChars, diffLines } from 'diff';
 import { MAX_PATCH_BYTES, type TextPatch } from './text-patch.ts';
 
 const encoder = new TextEncoder();
 // Tokenizing huge strings on the UI thread can cost more than a full-source submission.
 // Limit the changed window before invoking jsdiff, including when its timeout would not yet run.
-const MAX_DIFF_WINDOW = 128 * 1024;
+const MAX_CHAR_WINDOW = 128 * 1024;
+const MAX_LINE_WINDOW = 4 * 1024 * 1024;
+const MAX_LINE_TOKENS = 16_384;
+
+function diffWindow(before: string, after: string) {
+  const length = before.length + after.length;
+  if (length <= MAX_CHAR_WINDOW) return diffChars(before, after, { maxEditLength: 512, timeout: 20 });
+  if (length > MAX_LINE_WINDOW) return;
+
+  // jsdiff tokenizes before starting its timeout. Bound the number of lines as well
+  // as the input size so a newline-heavy document cannot create a giant token array.
+  let lines = 2;
+  for (const text of [before, after]) {
+    for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) {
+      if (++lines > MAX_LINE_TOKENS) return;
+    }
+  }
+  return diffLines(before, after, { maxEditLength: 64, timeout: 20 });
+}
 
 export function createTextPatch(before: string, after: string): TextPatch | null {
   if (before === after) return [];
@@ -19,13 +37,13 @@ export function createTextPatch(before: string, after: string): TextPatch | null
   if (suffix && lowSurrogate(before.charCodeAt(before.length - suffix))) suffix--;
   const oldWindow = before.slice(start, before.length - suffix);
   const newWindow = after.slice(start, after.length - suffix);
-  if (oldWindow.length + newWindow.length > MAX_DIFF_WINDOW) return null;
-  const changes = diffChars(oldWindow, newWindow, { maxEditLength: 512, timeout: 20 });
+  const changes = diffWindow(oldWindow, newWindow);
   if (!changes) return null;
 
   const patch: [number, number, string][] = [];
   let offset = encoder.encode(before.slice(0, start)).length;
   let replacement: [number, number, string] | undefined;
+  let insertedLength = 0;
   for (const change of changes) {
     if (!change.added && !change.removed) {
       offset += encoder.encode(change.value).length;
@@ -37,6 +55,8 @@ export function createTextPatch(before: string, after: string): TextPatch | null
       patch.push(replacement);
     }
     if (change.added) {
+      insertedLength += change.value.length;
+      if (insertedLength > MAX_PATCH_BYTES) return null;
       replacement[2] += change.value;
     } else {
       const removed = encoder.encode(change.value).length;

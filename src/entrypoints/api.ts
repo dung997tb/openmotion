@@ -1115,7 +1115,7 @@ function createMcpDomainPorts(deps: {
           };
         }
 
-        const project = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+        let project = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
         if (typeof args.expectedRevision === 'string' && project.revision !== args.expectedRevision) {
           throw new CloudError('VERSION_CONFLICT', 'Project revision does not match expectedRevision', {
             status: 409,
@@ -1140,11 +1140,6 @@ function createMcpDomainPorts(deps: {
             ...await inspectComposition(file.content, path, query.offset, query.limit) };
         }
 
-        const projectState = {
-          projectId, sessionId: project.sessionId, project, revision: project.revision,
-          currentVersionId: project.currentVersionId,
-          version: { versionId: project.currentVersionId, versionNumber: project.currentVersionNumber },
-        };
         const query = args.file as ProjectFileQuery | undefined;
         const fileContent = query ? await readMcpProjectFile({
           db: deps.db, files: deps.files, storage: deps.storage, expiresInSec: deps.config.S3_PRESIGN_GET_TTL_SEC,
@@ -1152,10 +1147,16 @@ function createMcpDomainPorts(deps: {
         // Capture edit guards from the same point in time as a live file read.
         if (query && !query.atProjectVersion && !query.atFileVersion) {
           const head = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
-          if (head.revision !== project.revision || head.currentVersionId !== project.currentVersionId) {
+          if (head.revision !== project.revision) {
             throw new CloudError('VERSION_CONFLICT', 'Project changed during the read; retry to capture the latest file.', { status: 409 });
           }
+          project = head; // A retained export or pagination snapshot can advance the version ID with identical bytes.
         }
+        const projectState = {
+          projectId, sessionId: project.sessionId, project, revision: project.revision,
+          currentVersionId: project.currentVersionId,
+          version: { versionId: project.currentVersionId, versionNumber: project.currentVersionNumber },
+        };
         let exportJob: Record<string, unknown> | undefined;
         if (typeof args.exportJobId === 'string') {
           const job = await deps.exports.getExport(auth, args.exportJobId);

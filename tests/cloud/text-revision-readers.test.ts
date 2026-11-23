@@ -20,6 +20,7 @@ import { applyTextPatch, TEXT_PATCH_BASE_HEADER } from '../../shared/text-patch.
 import { readMcpProjectFile, type ProjectFileQuery } from '../../src/mcp/project-file-read.ts';
 import { AssetNamesService } from '../../src/services/asset-names-service.ts';
 import { createStudioFilesRoutes } from '../../src/studio/routes/files.ts';
+import { createStudioGsapRoutes } from '../../src/studio/routes/gsap.ts';
 
 // Only the object bucket is replaced. Logical references still use the production storage adapter,
 // database, manifest, authoring services, signing, archive writer and renderer hydration.
@@ -105,6 +106,8 @@ it('reads the same saved patch in preview, history, render, download, ZIP and an
     const zipContent = readProjectZip(storage.objects.get(archiveKey(workspaceId, zip.archiveId))!).get(`${exported.folder}/index.html`)!.toString();
     assert.equal(zipContent, expected);
 
+    const point = await workspace.getProject(auth, source.projectId);
+    const undoEntries = await history.listHistory(auth, source.projectId);
     const mcpFile = (query: Omit<ProjectFileQuery, 'path'>) => readMcpProjectFile(
       { db, storage, files, expiresInSec: 60 }, auth, source.projectId, { ...query, path: 'index.html', atProjectVersion: versionId! });
     const text = await mcpFile({ mode: 'read' });
@@ -129,6 +132,11 @@ it('reads the same saved patch in preview, history, render, download, ZIP and an
     const link = await mcpFile({ mode: 'download', atFileVersion: token });
     assert.ok('downloadUrl' in link && new URL(link.downloadUrl).pathname.endsWith('/' + cas));
     assert.equal(link.fileVersion, token);
+    const partial = await mcpFile({ mode: 'read', length: 5 });
+    assert.ok('nextOffset' in partial);
+    await mcpFile({ mode: 'read', offset: partial.nextOffset, atFileVersion: token });
+    assert.deepEqual(await workspace.getProject(auth, source.projectId), point);
+    assert.deepEqual(await history.listHistory(auth, source.projectId), undoEntries);
     await history.step(auth, source.projectId, 'back');
     assert.equal((await files.readTextFile(auth, source.projectId, 'index.html'))?.content, initial);
     const historical = (await history.peekPoint(auth, source.projectId, versionId!, 'index.html')).file!;
@@ -146,6 +154,134 @@ it('reads the same saved patch in preview, history, render, download, ZIP and an
     assert.equal((await files.getFile(auth, copy.projectId, 'index.html'))?.blobScope, 'workspace');
   } finally {
     await rm(dir, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
+it('checks GSAP ETags before fetching either a full blob or a patch, and parses the authorized version on a miss', {
+  skip: !connectionString,
+}, async () => {
+  const { db, auth, storage, files, workspace, history, cleanup } = await fixture();
+  try {
+    const path = 'scene.html';
+    const content = '<html><script>const tl = gsap.timeline(); tl.to("#first", { opacity: 1, duration: 1 }, 0);</script></html>';
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content }] });
+    const app = createStudioGsapRoutes({
+      db, files, storage, workspace, history, assetNames: new AssetNamesService({ db, files }), resolveAuth: () => auth,
+    });
+    const read = (etag?: string) => app.request(`/api/projects/${projectId}/gsap-animations/${path}`,
+      { headers: etag ? { 'If-None-Match': etag } : {} });
+    const getFile = files.getFile.bind(files);
+    const base = `"sha256:${sha256Hex(content)}"`;
+    let metaReads = 0;
+    let committedVersion: string | undefined;
+    let saveAfterLookup = false;
+    files.getFile = async (...args) => {
+      metaReads++;
+      const ref = await getFile(...args);
+      if (saveAfterLookup) {
+        saveAfterLookup = false;
+        const saved = await files.commitTextEdits(auth, projectId, { files: [
+          { path, baseVersion: base, patch: [[content.indexOf('#first'), 6, '#second']] },
+        ] }, { source: 'studio', requestId: randomUUID() });
+        committedVersion = saved.versionsByPath[path];
+      }
+      return ref;
+    };
+
+    const first = await read();
+    const baseEtag = first.headers.get('etag')!;
+    assert.equal((await first.json()).version, base);
+    storage.reads = 0;
+    assert.equal((await read(baseEtag)).status, 304);
+    assert.equal(storage.reads, 0);
+
+    saveAfterLookup = true;
+    metaReads = 0;
+    const captured = await read();
+    const older = await captured.json();
+    assert.equal(metaReads, 1);
+    assert.equal(storage.reads, 1);
+    assert.equal(captured.headers.get('etag'), baseEtag);
+    assert.equal(older.version, base);
+    assert.equal(older.animations[0].targetSelector, '#first');
+
+    const patched = await read(baseEtag);
+    const patchEtag = patched.headers.get('etag')!;
+    const latest = await patched.json();
+    assert.equal(patched.status, 200);
+    assert.match(patchEtag, /^"patch:/);
+    assert.equal(latest.version, committedVersion);
+    assert.equal(latest.animations[0].targetSelector, '#second');
+    assert.equal(storage.reads, 2);
+    storage.reads = metaReads = 0;
+    assert.equal((await read(patchEtag)).status, 304);
+    assert.equal(storage.reads, 0);
+    assert.equal(metaReads, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+it('retains only promised MCP pages and download bytes through coalesced Studio writes', { skip: !connectionString }, async () => {
+  const { db, storage, workspace, auth, pool, cleanup } = await fixture();
+  try {
+    const path = 'notes.txt';
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content: 'initial' }] });
+    const files = new ProjectFilesService({ db, storage, historyCoalesceWindowMs: 60_000 });
+    const windowId = randomUUID();
+    const save = (content: string, skipVersion = false) => files.commitChanges(auth, {
+      projectId, windowId, skipVersion, source: 'studio', ops: [{ op: 'upsert_text', path, content }],
+    });
+    const read = (query: Omit<ProjectFileQuery, 'path'> = {}) => readMcpProjectFile(
+      { db, storage, files, expiresInSec: 60 }, auth, projectId, { path, ...query });
+
+    const first = await save('first generation');
+    await read();
+    const second = await save('second generation');
+    assert.equal(second.coalesced, true);
+    assert.equal(first.versionId, second.versionId);
+
+    const point = await workspace.getProject(auth, projectId);
+    const ledger = () => pool.query('SELECT id, seq, version_id, pinned, undone FROM project_history_entries WHERE project_id=$1 ORDER BY seq', [projectId]);
+    const undo = (await ledger()).rows;
+    const page = await read({ length: 6 });
+    await read({ mode: 'download', atFileVersion: page.fileVersion });
+    assert.deepEqual(await workspace.getProject(auth, projectId), point);
+    assert.deepEqual((await ledger()).rows, undo);
+    const third = await save('third generation');
+    assert.notEqual(third.versionId, second.versionId);
+    const tail = await read({ offset: 6, atProjectVersion: second.versionId!, atFileVersion: page.fileVersion });
+    assert.ok('content' in page && 'content' in tail);
+    assert.equal(page.content + tail.content, 'second generation');
+
+    const link = await read({ mode: 'download' });
+    await save('fourth generation');
+    const renewed = await read({ mode: 'download', atFileVersion: link.fileVersion });
+    assert.ok('downloadUrl' in link && 'downloadUrl' in renewed);
+    assert.equal(new URL(renewed.downloadUrl).pathname, new URL(link.downloadUrl).pathname);
+    const pinned = await pool.query('SELECT count(*) FROM project_history_entries WHERE project_id=$1 AND pinned', [projectId]);
+    assert.equal(Number(pinned.rows[0].count), 0);
+
+    // If the editor wins while the first page is in flight, no invalid continuation is published.
+    const readTextBlob = files.readTextBlob.bind(files);
+    files.readTextBlob = async (...args) => {
+      files.readTextBlob = readTextBlob;
+      await save('racing writer');
+      return readTextBlob(...args);
+    };
+    await assert.rejects(read({ length: 2 }), { code: 'VERSION_CONFLICT' });
+    const retried = await read({ length: 2 });
+    assert.ok('content' in retried && retried.content === 'ra');
+
+    // A live metadata file can be newer than every saved manifest. Retaining it
+    // creates one immutable manifest, without inventing a user action or reading any blob.
+    await save('unversioned metadata', true);
+    const unversioned = await read({ mode: 'download' });
+    await save('later metadata', true);
+    const frozen = await read({ atFileVersion: unversioned.fileVersion });
+    assert.ok('content' in frozen && frozen.content === 'unversioned metadata');
+  } finally {
     await cleanup();
   }
 });

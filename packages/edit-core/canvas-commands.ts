@@ -1,10 +1,12 @@
 import { deleteCanvasSelection } from "./element-deletion.ts";
 import { planArcDrag } from "./arc-drag.ts";
-import { applyPatchByTarget } from "./source-patcher.ts";
+import { applyPatchByTarget, readTagAttribute, readTagSnippetByTarget, replaceTagStyle, uniqueAuthoredHfTag } from "./source-patcher.ts";
+import { parseHTMLContent } from "@hyperframes/core/compiler/html-document";
 import { resolveTweenStart, resolveTweenDuration } from "./playhead-edit.ts";
 import { canvasBoxOperations } from "./canvas-box.ts";
 import {
   findTargetElement,
+  isHTMLElement,
   parseSourceDocument,
   patchElementInHtml,
 } from "@hyperframes/studio-server/source-mutation";
@@ -26,6 +28,26 @@ import { writePlainMove } from "./canvas-position.ts";
 import type { CanvasCommand, CanvasElementPatch } from "./canvas-schema.ts";
 export type { CanvasCommand } from "./canvas-schema.ts";
 
+// A direct style change affects one opening tag. Have the same SDK apply it to
+// that tag, preserving author formatting (including unrelated SVG and scripts).
+function patchAuthoredStyle(source: string, patch: CanvasElementPatch) {
+  const hfId = patch.target.hfId;
+  if (!hfId || !patch.operations.every(op => op.type === "inline-style" && op.childSelector === undefined)) return;
+  const opening = uniqueAuthoredHfTag(source, hfId);
+  if (!opening || opening.tag.endsWith("/") || opening.tag.includes("&")) return;
+  const element = findTargetElement(parseHTMLContent(source), patch.target);
+  if (!element || !isHTMLElement(element) || element.getAttribute("data-hf-id") !== hfId) return;
+  const fragment = opening.tag + ">";
+  const result = patchElementInHtml(fragment, { hfId }, patch.operations);
+  if (!result.matched) return;
+  if (result.html === fragment) return { ...result, html: source };
+  const tag = readTagSnippetByTarget(result.html, { hfId });
+  const style = tag && readTagAttribute(tag, "style");
+  if (style === undefined) return;
+  // All project writers stamp new IDs at commit. This operation only replaces the style attribute.
+  return { ...result, html: replaceTagStyle(source, opening, style) };
+}
+
 export function patchCanvasElement(
   source: string,
   patch: CanvasElementPatch,
@@ -33,7 +55,7 @@ export function patchCanvasElement(
 ) {
   checkCanvasTargets(source, [patch.target], { operations: patch.operations });
   if (findUnsafeDomPatchValues(patch.operations).length) throw new Error("Invalid layout value.");
-  const result = patchElementInHtml(source, patch.target, patch.operations, takenIds);
+  const result = patchAuthoredStyle(source, patch) ?? patchElementInHtml(source, patch.target, patch.operations, takenIds);
   // The SDK DOM patcher accepts HTML nodes. SVG presentation styles use the same authored-tag writer as Studio.
   if (
     !result.matched &&

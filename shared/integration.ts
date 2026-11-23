@@ -1,3 +1,4 @@
+import { projectFileExample, projectFileInstruction } from './project-file-guide.ts';
 import { clipMoveExample, clipMoveInstruction, clipMoveLimits, projectEditExample, projectEditInstruction } from './clip-move-guide.ts';
 import { reviewCommentsPrompt } from './review-comments.ts';
 import { formatTemplatePrompt } from './template-prompts.ts';
@@ -414,6 +415,12 @@ ${apiDiscoveryCommand(info)}
 ## Tools
 
 ${info.tools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
+
+## Read one project file
+
+${projectFileInstruction}
+
+${projectFileExample()}
 
 ## Move a timeline clip
 

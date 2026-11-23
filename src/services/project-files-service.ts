@@ -1137,7 +1137,7 @@ export class ProjectFilesService {
       const now = this.nowFn();
       const actor = actorDefaults(ctx, input.actorKind, input.actorName);
       // A completed semantic command is a distinct undo step, including against a subsequent raw save.
-      const safeWindowId = input.commandReceipt ? randomUUID() : input.windowId && isUuid(input.windowId) ? input.windowId : null;
+      const safeWindowId = !input.commandReceipt && input.windowId && isUuid(input.windowId) ? input.windowId : null;
       const effectiveSource: ProjectVersionSource = input.source ?? 'studio';
       const summary = (
         input.summary?.trim() ||

@@ -28,3 +28,21 @@ it('rejects overlapping, out-of-range and split Unicode operations', () => {
     assert.throws(() => applyTextPatch('中a', invalid), RangeError);
   }
 });
+
+it('keeps two distant edits in large multiline HTML in one small patch', () => {
+  const middle = Array.from({ length: 3500 }, (_, i) => `<div data-hf-id="hf-${i}">第 ${i} 段</div>\r\n`).join('');
+  const before = '\uFEFF<h1>片头🌙</h1>\r\n' + middle + '<footer>旧片尾</footer>\n';
+  const after = before.replace('🌙', '🎄圣诞').replace('旧片尾', '新片尾');
+  assert.ok(Buffer.byteLength(middle) > 128 * 1024);
+  const patch = createTextPatch(before, after);
+  assert.equal(patch?.length, 2);
+  assert.ok(Buffer.byteLength(JSON.stringify(patch)) < 160);
+  assert.equal(applyTextPatch(before, patch), after);
+});
+
+it('falls back for wholesale rewrites and very dense line tokenization', () => {
+  const lines = Array.from({ length: 3200 }, (_, i) => `<div class="row" data-long-name="heading-${i}">abc</div>\n`).join('');
+  assert.equal(createTextPatch(lines, lines.replaceAll('abc', 'xyz')), null);
+  const dense = '<i/>\n'.repeat(30000);
+  assert.equal(createTextPatch('a\n' + dense + 'b', 'c\n' + dense + 'd'), null);
+});

@@ -176,6 +176,17 @@ openmotion_edit_project and openmotion_restore_version accept the same optional 
 
 有 projectId：返回工程原生目录、入口源码/文件清单、需求/来源、assets、revision、当前版本、所属 sessionId、导出及审阅记录。读取会 flush 已保存原生历史的 metadata，不修改源文件。file={path,offset?,length?} 分段读文本；expectedRevision 可固定读取快照；exportJobId 查指定历史导出。导出结果包含真实状态/阶段、错误和校验；完成后才有 path/downloadUrl。错误项目、版本冲突或不属于该项目的任务明确失败。
 
+**Read a single cloud file.** In Studio, open **MCP · Connect Agent → Read one project file → Copy an example**. A reader needs access to the project. Omit `file.atFileVersion` to start at the current file, or supply `file.atProjectVersion` to select a saved project version. Reuse the exact returned version token, including its quotes, on later pages. Here the first page has 4,096 UTF-16 code units when truncated. Use the returned `file.nextOffset` on each subsequent call.
+
+```text
+openmotion_get_project({"projectId":"<projectId>","file":{"path":"index.html","mode":"read","length":4096}})
+openmotion_get_project({"projectId":"<projectId>","file":{"path":"index.html","mode":"read","atFileVersion":"<first page fileVersion>","offset":4096,"length":4096}})
+openmotion_get_project({"projectId":"<projectId>","file":{"path":"index.html","mode":"sync","fromFileVersion":"<local fileVersion>"}})
+openmotion_get_project({"projectId":"<projectId>","file":{"path":"index.html","mode":"download","atFileVersion":"<target fileVersion>"}})
+```
+
+For sync, use the complete local bytes of the same path and version. When `file.baseline` is present, start from its downloaded bytes. Apply `file.patches` in order, matching each `from` and `to` token. An empty patch list with a baseline means the baseline already contains the target version. To renew an expired download, request `mode=download` for the same project, path and target `atFileVersion`. This also retrieves the full target if a baseline link expires mid-sync. Use download for binary files.
+
 ### openmotion_edit_project
 
 所有写入都需要 projectId、requestId、expectedRevision 和 expectedVersionId。批量保存文本时传 files=[{path,content}]，可附 requirements 和 summary。只保存宿主已生成的文本，不启动第二个创作 Agent。requirements 存在工程受版本管理的元数据中，与文件一起提交。
@@ -379,7 +390,7 @@ An Agent follows this sequence:
 
 1. Discover the actual public tools in the host. Call `openmotion_get_project({})`, compare `dataDirectory` with the copied workspace, and reconnect on mismatch. Follow `nextCursor` if project selection needs more pages. Read `openmotion_get_project({projectId})` for the latest `revision`, `currentVersionId` and `project.files`.
 2. Read `openmotion_manage_project({action: "comments", operation: "list", projectId})`. The `comments` array contains full records and vectors; `project.reviews` is a different playback-review record. Reconcile selected IDs against current text, status and revisions. Do not recreate missing records or silently expand the selection.
-3. Read `anchor.compositionPath`, `anchor.element.sourceFile` and relevant CSS/JS dependencies with `openmotion_get_project({projectId, expectedRevision: latestProject.revision, file: {path, offset: 0, length: 65536}})`. Concatenate `file.content`, advancing with `file.nextOffset` until null. Offsets are UTF-8 bytes. Never overwrite a file with a partial read or mistake the short element text snapshot for its HTML source.
+3. Read `anchor.compositionPath`, `anchor.element.sourceFile` and relevant CSS/JS dependencies with `openmotion_get_project({projectId, expectedRevision: latestProject.revision, file: {path, offset: 0, length: 65536}})`. Append each page’s `file.content`. While `file.truncated` is true, request the next page using the first page’s `file.fileVersion` as `atFileVersion` and `file.nextOffset` as the offset. Offsets count UTF-16 code units. Never overwrite a file with a partial read or mistake the short element text snapshot for its HTML source.
 4. Resolve the saved element identity in its owning source. Interpret `anchor.time` in the local composition, not the full-video timeline. Convert normalized marks to original pixels with `x * annotation.width` and `y * annotation.height`. The handoff includes vectors, not a captured frame or historical source snapshot. Recheck stale layouts before applying feedback.
 5. Save complete changed files using `openmotion_edit_project` with the latest project revision/version and a stable request ID. Follow its preview handoff and verify the affected composition/time before resolving the corresponding comments. Explicit comment-only requests update text/status or delete records through the comment service without editing source. Re-read each comment immediately before writing and use its current `revision` as `expectedCommentRevision`.
 6. Re-read on `VERSION_CONFLICT` or `COMMENT_CONFLICT`; a changed payload or revision requires a new request ID. An exact retry keeps its original ID. Leave unverifiable edits open, report missing targets, and return a per-comment summary of changes, verification and final status. Never modify the workspace metadata JSON directly.

@@ -86,3 +86,16 @@ it('keeps its confirmed source when revalidation returns 304', async () => {
   expect(fetch.mock.calls[0][1].headers['If-None-Match']).toBe(base.version);
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+it('changes only the title style in an authored composition with large, unrelated SVG', async () => {
+  const { applyProjectEdit } = await import('../../../packages/edit-core/commands');
+  const { createTextPatch } = await import('../../../shared/create-text-patch');
+  const { stampHfIdsInPlace } = await import('@hyperframes/parsers/hf-ids');
+  const svg = '<svg>' + '<path d="M0 0 L20 40"></path>'.repeat(6000) + '</svg>';
+  const before = stampHfIdsInPlace("<template><h1 data-hf-id='title' title='Keep quoted'>Hi</h1><template id='drawing'>" + svg + '</template></template>');
+  const edit = { kind: 'editElements' as const, compositionPath: 'intro.html', patches: [{ target: {hfId: 'title', id: 'other', selector: '#unrelated'},
+    operations: [{type: 'inline-style' as const, property: 'color', value: '#204060'}] }] };
+  const {content} = await applyProjectEdit(before, edit, new Map());
+  expect(content).toBe(before.replace("title='Keep quoted'>", "title='Keep quoted' style=\"color: #204060\">"));
+  expect(createTextPatch(before, content)).toHaveLength(1);
+});

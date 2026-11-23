@@ -4,6 +4,7 @@ import { studioFileContentVersion } from "./studioFileVersion";
 // Keep recent active compositions only. An eviction always has an authoritative read fallback.
 export interface ConfirmedSource { content: string; version: string }
 const sources = new Map<string, ConfirmedSource>();
+const capableProjects = new Set<string>();
 let codeUnits = 0;
 const key = (projectId: string, path: string) => JSON.stringify([projectId, path]);
 
@@ -12,8 +13,7 @@ export function confirmedSource(projectId: string, path: string) {
 }
 
 export function supportsProjectTextEdits(projectId: string) {
-  const prefix = '[' + JSON.stringify(projectId) + ',';
-  return Array.from(sources.keys()).some(id => id.startsWith(prefix));
+  return capableProjects.has(projectId);
 }
 
 export async function observedSourceVersion(projectId: string, path: string, content: string) {
@@ -45,9 +45,12 @@ export function rememberSource(projectId: string, path: string, source: Confirme
 
 export function observeSourceRead(projectId: string, path: string, response: Response, data: { content?: string; version?: string | null }) {
   const version = data.version ?? response.headers?.get('etag');
-  if (response.headers?.get('X-OpenMotion-Text-Edits') === '1' && typeof data.content === 'string' && version) {
-    rememberSource(projectId, path, { content: data.content, version });
-  } else {
-    forgetSource(projectId, path);
+  const capable = response.headers?.get('X-OpenMotion-Text-Edits') === '1';
+  capableProjects.delete(projectId);
+  if (capable) {
+    capableProjects.add(projectId);
+    if (capableProjects.size > 128) capableProjects.delete(capableProjects.values().next().value!);
   }
+  if (capable && typeof data.content === 'string' && version) rememberSource(projectId, path, {content: data.content, version});
+  else forgetSource(projectId, path);
 }
