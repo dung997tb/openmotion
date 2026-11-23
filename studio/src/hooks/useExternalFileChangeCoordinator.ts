@@ -12,6 +12,7 @@ import type { ExternalConflictSnapshot } from "../utils/externalConflictStorage"
 import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { onRebasedFileEdit } from "../utils/rebasedFileEdit";
 import { consumeStudioWriteToken } from "../utils/studioFileVersion";
+import { useCloudDisklessMode } from "../utils/cloudRuntime";
 import { logReload } from "../utils/reloadDebug";
 import { notifyProjectActivity } from "../motion/workspaceRefresh";
 import {
@@ -232,6 +233,9 @@ export function useExternalFileChangeCoordinator({
   refreshFileTree,
   onHistoryChanged,
 }: ExternalFileChangeCoordinatorOptions): ExternalFileChangeCoordinatorHandle {
+  const cloud = useCloudDisklessMode();
+  // Vite can serve a cloud project through its development proxy. That backend publishes SSE.
+  const useHotChannel = !cloud && Boolean(import.meta.hot || testHotAdapter());
   const [blocked, setBlockedState] = useState<ExternalFileChangeBlockedState | null>(null);
   const generationRef = useRef(0);
   const mountedRef = useRef(true);
@@ -558,12 +562,12 @@ export function useExternalFileChangeCoordinator({
     // One decoder for all three transports; the rungs only choose the channel.
     const handler = (delivery?: unknown) => processChangeRef.current(decodeFileChange(delivery));
     const historyHandler = (delivery?: unknown) => processHistoryChangeRef.current(delivery);
-    const adapter = testHotAdapter();
+    const adapter = useHotChannel && testHotAdapter();
     if (adapter) {
       adapter.on("hf:file-change", handler);
       return () => adapter.off("hf:file-change", handler);
     }
-    if (import.meta.hot) {
+    if (useHotChannel && import.meta.hot) {
       import.meta.hot.on("hf:file-change", handler);
       import.meta.hot.on("hf:history-changed", historyHandler);
       return () => {
@@ -577,7 +581,7 @@ export function useExternalFileChangeCoordinator({
       processHistoryChangeRef.current({ projectId }, false);
     };
     return sseFileChangeChannel(handler, catchUp, historyHandler);
-  }, [projectId]);
+  }, [projectId, useHotChannel]);
 
   const retry = useCallback(async () => {
     const current = blockedRef.current;

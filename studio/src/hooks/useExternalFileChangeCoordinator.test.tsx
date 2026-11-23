@@ -10,6 +10,7 @@ import { acceptFileEditReceipt } from "../utils/rebasedFileEdit";
 import { markStudioWriteToken, resetStudioWriteTokens, studioFileContentVersion } from "../utils/studioFileVersion";
 import { markSelfWrite, resetSelfWriteRegistry } from "./sdkSelfWriteRegistry";
 import { subscribeProjectActivity } from "../motion/workspaceRefresh";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import {
   useExternalFileChangeCoordinator,
   type ExternalFileChangeCoordinatorHandle,
@@ -69,6 +70,7 @@ describe("external file change coordinator", () => {
 
   afterEach(async () => {
     while (roots.length > 0) await act(async () => roots.pop()?.unmount());
+    setCachedCloudDisklessMode(null);
     vi.unstubAllGlobals();
   });
 
@@ -118,6 +120,26 @@ describe("external file change coordinator", () => {
       act(async () => {
         source.dispatchEvent(new MessageEvent("file-change", { data: JSON.stringify(payload) }));
       });
+
+    it("switches a Vite development session from hot events to one cloud project stream", async () => {
+      const hot = { on: vi.fn(), off: vi.fn() };
+      vi.stubGlobal("__HF_STUDIO_HOT_TEST_ADAPTER__", hot);
+      const connect = vi.fn(() => ({ addEventListener: source.addEventListener.bind(source), close }));
+      vi.stubGlobal("EventSource", class { constructor() { return connect(); } });
+      const onHistoryChanged = vi.fn();
+      const { rerender } = await mountCoordinator({ onHistoryChanged });
+      expect(hot.on).toHaveBeenCalledOnce();
+      expect(connect).not.toHaveBeenCalled();
+      await act(async () => setCachedCloudDisklessMode(true));
+      expect(hot.off).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledOnce();
+      await rerender({ activeCompPath: "intro.html" });
+      await act(async () => {
+        source.dispatchEvent(new MessageEvent("history-changed", { data: JSON.stringify({ projectId: "project-a" }) }));
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      expect(onHistoryChanged).toHaveBeenCalledOnce();
+    });
 
     it("forwards this project's history events, including our own writes, to the history panel", async () => {
       const onHistoryChanged = vi.fn();
