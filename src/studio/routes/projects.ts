@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { FONT_EXT } from '../../../shared/asset-names.ts';
@@ -13,6 +14,45 @@ import { infoInMemory } from '../engine/inspect.ts';
 import { formatVersionFromSha256 } from '../etag.ts';
 import { listVirtualCompositions } from '../virtual-project-store.ts';
 import { classifyPreviewProxyTarget } from '../../workers/media-ingest.ts';
+
+/**
+ * Compute per-composition cache revisions so editing one sub-composition does not
+ * invalidate thumbnail caches for untouched sibling scenes, while edits to shared
+ * assets or `index.html`'s `<head>` still invalidate all dependent compositions.
+ */
+export function computeCompositionRevisions(
+  fileList: ReadonlyArray<{ readonly path: string; readonly sha256: string }>,
+  compositions: readonly string[],
+  indexHtml: string | null,
+  projectRevision: string,
+): Record<string, string> {
+  const indexHead = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml ?? '')?.[1] ?? '';
+  const indexHeadHash = createHash('sha256').update(indexHead).digest('hex').slice(0, 12);
+  const compSet = new Set(compositions);
+  const byPath = new Map<string, string>();
+  const sharedHash = createHash('sha256');
+  const sorted = [...fileList].sort((a, b) => a.path.localeCompare(b.path));
+  for (const file of sorted) {
+    byPath.set(file.path, file.sha256);
+    if (file.path !== 'index.html' && !compSet.has(file.path)) {
+      sharedHash.update(file.path);
+      sharedHash.update(':');
+      sharedHash.update(file.sha256);
+      sharedHash.update('\n');
+    }
+  }
+  const sharedTag = sharedHash.digest('hex').slice(0, 12);
+  const revisions: Record<string, string> = {};
+  for (const comp of compositions) {
+    if (comp === 'index.html') {
+      revisions[comp] = projectRevision;
+      continue;
+    }
+    const sha = byPath.get(comp);
+    revisions[comp] = sha ? `${sha.slice(0, 16)}:${indexHeadHash}:${sharedTag}` : projectRevision;
+  }
+  return revisions;
+}
 
 export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Variables: StudioVariables }> {
   const app = new Hono<{ Variables: StudioVariables }>();
@@ -44,6 +84,12 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
     const fileList = virtual.listFiles();
     const filePaths = fileList.map((f) => f.path);
     const compositions = listVirtualCompositions(fileList);
+    const compositionRevisions = computeCompositionRevisions(
+      fileList,
+      compositions,
+      virtual.readText('index.html'),
+      detail.revision,
+    );
     const info = infoInMemory(virtual);
 
     const projectFonts: Array<FontMetadataEntry & { postscriptName?: string }> = [];
@@ -240,6 +286,7 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
       title: detail.title,
       dir: `/virtual/${detail.id}`,
       revision: detail.revision,
+      compositionRevisions,
       versionId: detail.currentVersionId,
       versionNumber: detail.currentVersionNumber,
       historySeq: detail.currentHistorySeq,

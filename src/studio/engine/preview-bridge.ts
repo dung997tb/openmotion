@@ -17,10 +17,12 @@ function scopedScript(configuration: string, body: string): string {
   var parentWindow=window.parent;
   var parentOrigin='*';
   try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
-  function post(type,payload,requestId){
+  function post(type,payload,requestId,transfer){
     var message=Object.assign({source:SOURCE,version:VERSION,type:type,projectId:projectId,token:token},payload||{});
     if(requestId) message.requestId=requestId;
-    parentWindow.postMessage(message,parentOrigin==='null'?'*':parentOrigin);
+    var targetOrigin=parentOrigin==='null'?'*':parentOrigin;
+    if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
+    else parentWindow.postMessage(message,targetOrigin);
   }
   ${body}
 })();`;
@@ -40,10 +42,14 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   var settings=JSON.parse(document.currentScript.getAttribute('data-openmotion-preview'));
   var projectId=settings.projectId, compositionPath=settings.compositionPath, sourceVersions=settings.sourceVersions;`, `
   var pickMode=false, picked=null;
+  var isCaptureMode=new URL(location.href).searchParams.get('capture')==='1';
+  var durationBootAnnounced=false;
+  var bootPoll=null;
   function player(){ return window.__player || null; }
   ${PREVIEW_FIRST_FRAME}
   ${PREVIEW_ASSET_READINESS}
   function assetState(duration){
+    if(isCaptureMode) return {status:'ready',completed:0,total:0,failed:[]};
     if(!(duration>0)) return {status:'loading',completed:0,total:0,failed:[]};
     return ensureAssetTracker(function(snapshot){ post('asset-readiness',snapshot); }).snapshot();
   }
@@ -51,7 +57,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     var p=player();
     var currentTime=p&&typeof p.getTime==='function'?Number(p.getTime())||0:0;
     var duration=p&&typeof p.getDuration==='function'?Number(p.getDuration())||0:0;
-    return {currentTime:currentTime,duration:duration,firstFrame:duration>0?visualFrameStatus(currentTime):'loading',
+    return {currentTime:currentTime,duration:duration,firstFrame:isCaptureMode?'ready':(duration>0?visualFrameStatus(currentTime):'loading'),
       assets:assetState(duration),
       isPlaying:p&&typeof p.isPlaying==='function'?p.isPlaying()===true:false,
       width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
@@ -87,7 +93,26 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
-  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
+  function ready(){
+    post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']});
+    var state=timeline(true);
+    if(state.duration>0){
+      durationBootAnnounced=true;
+      if(bootPoll){ clearInterval(bootPoll); bootPoll=null; }
+    }
+    post('timeline-state',state);
+  }
+  function announceDurationIfReady(){
+    if(durationBootAnnounced) return true;
+    if(document.readyState==='loading') return false;
+    var p=player();
+    var d=p&&typeof p.getDuration==='function'?Number(p.getDuration())||0:0;
+    if(!(d>0)) return false;
+    durationBootAnnounced=true;
+    if(bootPoll){ clearInterval(bootPoll); bootPoll=null; }
+    post('timeline-state',timeline(true));
+    return true;
+  }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
@@ -105,8 +130,11 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         return;
       }
       if(message.type==='capture-frames'){
-        capturePreviewFrames(message).then(function(result){
-          respond(requestId,result,null,result&&Array.isArray(result.frames)?result.frames:undefined);
+        var onFrame=message.progressive===true?function(frameEvent,buf){
+          post('capture-frame',frameEvent,requestId,buf?[buf]:undefined);
+        }:null;
+        capturePreviewFrames(message,onFrame).then(function(result){
+          respond(requestId,result,null,result&&Array.isArray(result.frames)&&result.frames.length?result.frames:undefined);
         },function(error){
           respond(requestId,null,error);
         });
@@ -178,7 +206,18 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   window.addEventListener('error',function(event){ post('runtime-error',{message:String(event.message||'Preview runtime error'),filename:event.filename||null,line:event.lineno||null}); });
   window.addEventListener('unhandledrejection',function(event){ post('runtime-error',{message:String(event.reason&&event.reason.message||event.reason||'Unhandled preview rejection')}); });
   window.addEventListener('load',ready);
-  setInterval(function(){ if(document.visibilityState!=='hidden') post('timeline-state',timeline()); },500);
+  document.addEventListener('DOMContentLoaded',announceDurationIfReady);
+  if(isCaptureMode) loadSnapdom().catch(function(){});
+  if(!announceDurationIfReady()){
+    var bootPollTicks=0;
+    bootPoll=setInterval(function(){
+      if(announceDurationIfReady() || ++bootPollTicks>=160){
+        clearInterval(bootPoll);
+        bootPoll=null;
+      }
+    },25);
+  }
+  setInterval(function(){ if(document.visibilityState!=='hidden' && !(isCaptureMode && durationBootAnnounced)) post('timeline-state',timeline()); },500);
 `);
 
 export const PREVIEW_BRIDGE_PATH = '/api/preview-bridge.js';

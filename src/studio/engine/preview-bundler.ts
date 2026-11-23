@@ -170,19 +170,22 @@ function shouldInjectPreviewMediaCrossOrigin(el: Element): boolean {
  * Web Audio `createMediaElementSource()` permanently outputs silence even though
  * `el.currentSrc` looks same-origin pre-redirect.
  */
-function ensurePreviewMediaCrossOrigin(root: ParentNode): boolean {
+function ensurePreviewMediaCrossOrigin(root: ParentNode, includeImages = false): boolean {
   let changed = false;
-  for (const el of Array.from(root.querySelectorAll('audio, video'))) {
+  const selector = includeImages ? 'audio, video, img' : 'audio, video';
+  for (const el of Array.from(root.querySelectorAll(selector))) {
+    if (el.tagName === 'IMG' && el.hasAttribute('srcset')) continue;
     if (shouldInjectPreviewMediaCrossOrigin(el)) {
       el.setAttribute('crossorigin', 'anonymous');
       changed = true;
     }
   }
+  const tplPattern = includeImages ? /<(?:audio|video|img)\b/i : /<(?:audio|video)\b/i;
   for (const tpl of Array.from(root.querySelectorAll('template'))) {
     const raw = tpl.innerHTML;
-    if (!/<(?:audio|video)\b/i.test(raw)) continue;
+    if (!tplPattern.test(raw)) continue;
     const tplDoc = parseHTMLContent(`<!DOCTYPE html><html><head></head><body>${raw}</body></html>`);
-    if (ensurePreviewMediaCrossOrigin(tplDoc.body)) {
+    if (ensurePreviewMediaCrossOrigin(tplDoc.body, includeImages)) {
       tpl.innerHTML = tplDoc.body.innerHTML;
       changed = true;
     }
@@ -567,7 +570,10 @@ function applyStudioPreviewAugmentations(
     const versions = Object.fromEntries(project.listFiles().filter(file => /\.html?$/i.test(file.path))
       .map(file => [file.path, file.sha256]));
     const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions);
-    out = injectTagsAtHeadStart(out, tags.preload);
+    const snapdomPreload = options.capture
+      ? `<link rel="preload" as="script" href="${new URL('/api/vendor/snapdom.js', options.bridgeOrigin).href}">`
+      : '';
+    out = injectTagsAtHeadStart(out, `${tags.preload}${snapdomPreload}`);
     out = insertBeforeCloseTag(out, 'body', tags.script) ?? out + tags.script;
   }
 
@@ -852,7 +858,7 @@ export async function bundlePreviewInMemory(
 
   // Assign deterministic media render IDs and opt project-local media into CORS for S3 302 redirects
   assignMediaRenderIds(document);
-  ensurePreviewMediaCrossOrigin(document);
+  ensurePreviewMediaCrossOrigin(document, Boolean(options.capture));
 
   let html = document.toString();
   html = withPreviewBase(html, baseHref);
@@ -934,7 +940,7 @@ export async function buildSubCompositionHtmlInMemory(
   rewrittenContent = stripEmbeddedRuntimeScripts(rewrittenContent);
   const scriptsDoc = parseHTMLContent(`<!DOCTYPE html><html><head></head><body>${rewrittenContent}</body></html>`);
   deferScriptsUntilFonts(scriptsDoc);
-  ensurePreviewMediaCrossOrigin(scriptsDoc.body);
+  ensurePreviewMediaCrossOrigin(scriptsDoc.body, Boolean(options.capture));
   const rootComp = scriptsDoc.body.querySelector('[data-composition-id]');
   if (rootComp && !rootComp.getAttribute('data-composition-file')) {
     rootComp.setAttribute('data-composition-file', compPath);

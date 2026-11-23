@@ -1,6 +1,10 @@
-import { studioApiFetch } from "../../utils/studioApiFetch";
 import { usePlayerStore } from "../store/playerStore";
-import { isolatedPreviewOrigin } from "./previewLease";
+import {
+  acquireSharedPreviewGrant,
+  clearSharedPreviewGrantsForTest,
+  invalidateSharedPreviewGrant,
+  isolatedPreviewOrigin,
+} from "./previewLease";
 import {
   createThumbnailKey,
   type ThumbnailLoadedResult,
@@ -18,10 +22,12 @@ export const TIMELINE_PREVIEW_GATE_TIMEOUT_MS = 4_500;
 const CAPTURE_TARGET_WIDTH = 240;
 const CAPTURE_JPEG_QUALITY = 0.78;
 const CAPTURE_BOOT_TIMEOUT_MS = 12_000;
-const CAPTURE_MEDIA_TIMEOUT_MS = 4_000;
+const CAPTURE_MEDIA_TIMEOUT_MS = 2_000;
 const CAPTURE_RAF_FALLBACK_MS = 250;
 const CAPTURE_FRAME_YIELD_MS = 24;
 const CAPTURE_IDLE_TEARDOWN_MS = 1_500;
+const MAX_CONCURRENT_ISOLATED_CAPTURES = 3;
+const MAX_CONCURRENT_SAME_ORIGIN_CAPTURES = 2;
 const IDB_NAME = "openmotion-client-comp-thumbs-v1";
 const IDB_STORE = "strips";
 const IDB_MAX_ENTRIES = 120;
@@ -79,9 +85,17 @@ export interface ClientCaptureInput {
 
 type SnapdomModuleFn = typeof import("@zumer/snapdom").snapdom;
 
+type ProgressiveFrameCallback = (
+  index: number,
+  total: number,
+  blob: Blob,
+  dims: { aspect: number; width: number; height: number },
+) => void;
+
 let testCapabilityOverride: boolean | null = null;
 let snapdomLoader: Promise<SnapdomModuleFn | null> | null = null;
 const projectRevisionByProjectId = new Map<string, string>();
+const compositionRevisionsByProjectId = new Map<string, Map<string, string>>();
 // In-memory cover cache keyed by composition identity (ignoring frameCount) so sidebar 1-frame
 // cards immediately reuse frames already captured for a timeline strip without booting a 2nd run.
 const sharedCoverCache = new Map<string, { blob: Blob; aspect: number; width: number; height: number }>();
@@ -91,6 +105,26 @@ const memoryStripCache = new Map<string, MemoryStripEntry>();
 // Maps any ThumbnailValue handed out from memoryStripCache back to its entry for owner ref-counting.
 const entryByValue = new WeakMap<ThumbnailValue, MemoryStripEntry>();
 const inFlightIdbReads = new Map<string, Promise<MemoryStripEntry | null>>();
+// Live progressive frame values emitted mid-capture so clips display frame 1 immediately
+// while remaining filmstrip frames stream in the background.
+const progressiveStrips = new Map<string, ThumbnailValue>();
+const progressiveListeners = new Map<string, Set<() => void>>();
+
+function notifyProgressiveListeners(idbKey: string): void {
+  const listeners = progressiveListeners.get(idbKey);
+  if (!listeners) return;
+  for (const listener of new Set(listeners)) listener();
+}
+
+function setProgressiveEntry(idbKey: string, value: ThumbnailValue): void {
+  progressiveStrips.set(idbKey, value);
+  notifyProgressiveListeners(idbKey);
+}
+
+function clearProgressiveEntry(idbKey: string): void {
+  if (!progressiveStrips.delete(idbKey)) return;
+  notifyProgressiveListeners(idbKey);
+}
 
 function putSharedCoverCache(
   baseCoverKey: string,
@@ -143,6 +177,16 @@ export function retainCachedCompositionCapture(
 
 /** Reset in-memory capture caches between unit tests. */
 export function clearClientCompositionCaptureCacheForTest(): void {
+  cancelIdleTeardown();
+  for (const slot of captureIframePool) {
+    try {
+      slot.iframe.src = "about:blank";
+      slot.iframe.remove();
+    } catch {
+      // ignore teardown errors
+    }
+  }
+  captureIframePool.length = 0;
   for (const entry of memoryStripCache.values()) {
     entry.inCache = false;
     if (!entry.revoked) {
@@ -159,7 +203,11 @@ export function clearClientCompositionCaptureCacheForTest(): void {
   memoryStripCache.clear();
   sharedCoverCache.clear();
   projectRevisionByProjectId.clear();
+  compositionRevisionsByProjectId.clear();
   inFlightIdbReads.clear();
+  progressiveStrips.clear();
+  progressiveListeners.clear();
+  clearSharedPreviewGrantsForTest();
 }
 
 function normalizeCompositionPathForGate(raw: string): string {
@@ -226,11 +274,38 @@ export function setClientCompositionCaptureCapabilityForTest(enabled: boolean | 
   testCapabilityOverride = enabled;
 }
 
-export function setCachedProjectRevision(projectId: string, revision: string | null | undefined): void {
+export function setCachedProjectRevision(
+  projectId: string,
+  revision: string | null | undefined,
+  compositionRevisions?: Readonly<Record<string, string>> | null,
+): void {
   if (!projectId) return;
   if (typeof revision === "string" && revision.trim()) {
     projectRevisionByProjectId.set(projectId, revision.trim());
   }
+  if (compositionRevisions && typeof compositionRevisions === "object") {
+    const normalized = new Map<string, string>();
+    for (const [rawPath, compRev] of Object.entries(compositionRevisions)) {
+      if (typeof compRev !== "string" || !compRev.trim()) continue;
+      const key = normalizeCompositionPathForGate(rawPath);
+      if (key) normalized.set(key, compRev.trim());
+    }
+    if (normalized.size > 0) {
+      compositionRevisionsByProjectId.set(projectId, normalized);
+      return;
+    }
+  }
+  compositionRevisionsByProjectId.delete(projectId);
+}
+
+function resolveCompositionRevision(projectId: string, compPathOrUrl: string): string {
+  const perComp = compositionRevisionsByProjectId.get(projectId);
+  if (perComp) {
+    const normalized = normalizeCompositionPathForGate(compPathOrUrl);
+    const exact = perComp.get(normalized);
+    if (exact) return exact;
+  }
+  return projectRevisionByProjectId.get(projectId) ?? "";
 }
 
 export function canCaptureCompositionInBrowser(): boolean {
@@ -436,7 +511,7 @@ async function writeCachedStrip(record: CachedStripRecord): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Serialized Single Offscreen Capture Iframe Host (steady-state 0 RAM)
+// Bounded Concurrent Offscreen Capture Iframe Pool (steady-state 0 RAM)
 // ---------------------------------------------------------------------------
 
 type CaptureQueuePriority = "overscan" | "visible" | "gate" | "interaction";
@@ -448,6 +523,11 @@ const CAPTURE_PRIORITY_RANK: Readonly<Record<CaptureQueuePriority, number>> = {
   interaction: 3,
 };
 
+interface CaptureIframeSlot {
+  iframe: HTMLIFrameElement;
+  busy: boolean;
+}
+
 interface QueuedCaptureJob {
   priority: CaptureQueuePriority;
   seq: number;
@@ -458,11 +538,17 @@ interface QueuedCaptureJob {
   onAbort: () => void;
 }
 
-let hostIframe: HTMLIFrameElement | null = null;
+const captureIframePool: CaptureIframeSlot[] = [];
 let teardownTimer: ReturnType<typeof setTimeout> | null = null;
-let activeCaptureRunning = false;
+let activeCaptureCount = 0;
 let captureJobSeq = 0;
 const pendingCaptureJobs: QueuedCaptureJob[] = [];
+
+function maxConcurrentCaptures(): number {
+  return isolatedPreviewOrigin()
+    ? MAX_CONCURRENT_ISOLATED_CAPTURES
+    : MAX_CONCURRENT_SAME_ORIGIN_CAPTURES;
+}
 
 function cancelIdleTeardown(): void {
   if (teardownTimer !== null) {
@@ -473,52 +559,75 @@ function cancelIdleTeardown(): void {
 
 function scheduleIdleTeardown(): void {
   cancelIdleTeardown();
-  if (activeCaptureRunning || pendingCaptureJobs.length > 0) return;
+  if (activeCaptureCount > 0 || pendingCaptureJobs.length > 0) return;
   teardownTimer = setTimeout(() => {
     teardownTimer = null;
-    if (activeCaptureRunning || pendingCaptureJobs.length > 0 || !hostIframe) return;
-    try {
-      hostIframe.src = "about:blank";
-      hostIframe.remove();
-    } catch {
-      // ignore teardown errors
+    if (activeCaptureCount > 0 || pendingCaptureJobs.length > 0 || captureIframePool.length === 0) return;
+    for (const slot of captureIframePool) {
+      try {
+        slot.iframe.src = "about:blank";
+        slot.iframe.remove();
+      } catch {
+        // ignore teardown errors
+      }
     }
-    hostIframe = null;
+    captureIframePool.length = 0;
   }, CAPTURE_IDLE_TEARDOWN_MS);
 }
 
-function acquireOffscreenIframe(width = 1280, height = 720): HTMLIFrameElement {
+function createCaptureIframe(width: number, height: number): HTMLIFrameElement {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.setAttribute("data-openmotion-thumb-capture", "true");
+  iframe.setAttribute("inert", "");
+  iframe.tabIndex = -1;
+  iframe.referrerPolicy = "no-referrer";
+  iframe.allow = "autoplay 'none'";
+  iframe.sandbox.add("allow-scripts", "allow-same-origin");
+  // Keep hidden capture frames intersecting the viewport (0 opacity, behind the app):
+  // positioning a cross-origin preview iframe offscreen (e.g. left: -10000px) causes Chromium
+  // to throttle/suspend requestAnimationFrame inside isolated preview captures.
+  Object.assign(iframe.style, {
+    position: "fixed",
+    left: "0px",
+    top: "0px",
+    width: `${width}px`,
+    height: `${height}px`,
+    opacity: "0",
+    border: "0",
+    pointerEvents: "none",
+    zIndex: "-1",
+  });
+  document.body.appendChild(iframe);
+  return iframe;
+}
+
+function acquireCaptureSlot(width = 1280, height = 720): CaptureIframeSlot {
   cancelIdleTeardown();
-  if (!hostIframe || !hostIframe.isConnected) {
-    const iframe = document.createElement("iframe");
-    iframe.setAttribute("aria-hidden", "true");
-    iframe.setAttribute("data-openmotion-thumb-capture", "true");
-    iframe.setAttribute("inert", "");
-    iframe.tabIndex = -1;
-    iframe.referrerPolicy = "no-referrer";
-    iframe.allow = "autoplay 'none'";
-    iframe.sandbox.add("allow-scripts", "allow-same-origin");
-    // Keep the hidden capture frame intersecting the viewport (0 opacity, behind the app):
-    // positioning a cross-origin preview iframe offscreen (e.g. left: -10000px) causes Chromium
-    // to throttle/suspend requestAnimationFrame inside isolated preview captures.
-    Object.assign(iframe.style, {
-      position: "fixed",
-      left: "0px",
-      top: "0px",
-      width: `${width}px`,
-      height: `${height}px`,
-      opacity: "0",
-      border: "0",
-      pointerEvents: "none",
-      zIndex: "-1",
-    });
-    document.body.appendChild(iframe);
-    hostIframe = iframe;
-  } else {
-    hostIframe.style.width = `${width}px`;
-    hostIframe.style.height = `${height}px`;
+  for (let i = captureIframePool.length - 1; i >= 0; i--) {
+    const slot = captureIframePool[i]!;
+    if (!slot.iframe.isConnected) {
+      if (!slot.busy) captureIframePool.splice(i, 1);
+      continue;
+    }
+    if (!slot.busy) {
+      slot.busy = true;
+      slot.iframe.style.width = `${width}px`;
+      slot.iframe.style.height = `${height}px`;
+      return slot;
+    }
   }
-  return hostIframe;
+  const slot: CaptureIframeSlot = {
+    iframe: createCaptureIframe(width, height),
+    busy: true,
+  };
+  captureIframePool.push(slot);
+  return slot;
+}
+
+function releaseCaptureSlot(slot: CaptureIframeSlot, reset: boolean): void {
+  if (reset) resetCaptureIframe(slot.iframe);
+  slot.busy = false;
 }
 
 function resetCaptureIframe(iframe: HTMLIFrameElement): void {
@@ -577,8 +686,8 @@ export async function withPreviewRedirectSafeFetch<T>(run: () => Promise<T>): Pr
 }
 
 function pumpCaptureQueue(): void {
-  if (activeCaptureRunning) return;
-  while (pendingCaptureJobs.length > 0) {
+  const limit = maxConcurrentCaptures();
+  while (activeCaptureCount < limit && pendingCaptureJobs.length > 0) {
     let bestIdx = 0;
     for (let i = 1; i < pendingCaptureJobs.length; i++) {
       const cand = pendingCaptureJobs[i]!;
@@ -595,22 +704,23 @@ function pumpCaptureQueue(): void {
       job.reject(abortError());
       continue;
     }
-    activeCaptureRunning = true;
+    activeCaptureCount += 1;
     cancelIdleTeardown();
     Promise.resolve()
       .then(job.task)
       .then(job.resolve, job.reject)
       .finally(() => {
-        activeCaptureRunning = false;
+        activeCaptureCount = Math.max(0, activeCaptureCount - 1);
         if (pendingCaptureJobs.length > 0) {
           pumpCaptureQueue();
         } else {
           scheduleIdleTeardown();
         }
       });
-    return;
   }
-  scheduleIdleTeardown();
+  if (activeCaptureCount === 0 && pendingCaptureJobs.length === 0) {
+    scheduleIdleTeardown();
+  }
 }
 
 function resolveQueuePriority(input: Pick<ClientCaptureInput, "priority" | "gatePriority">): CaptureQueuePriority {
@@ -693,6 +803,8 @@ async function waitForDocumentMedia(doc: Document, signal: AbortSignal): Promise
   if (doc.fonts?.ready) tasks.push(doc.fonts.ready.catch(() => undefined));
   for (const img of Array.from(doc.querySelectorAll("img"))) {
     if (img.complete) continue;
+    if (!img.getAttribute("src") && !img.getAttribute("srcset")) continue;
+    if (img.loading === "lazy") img.loading = "eager";
     tasks.push(
       new Promise<void>((resolve) => {
         const done = () => {
@@ -722,13 +834,16 @@ function buildCaptureUrl(previewUrl: string, contentRevision: number): URL {
 async function captureSameOrigin(
   input: ClientCaptureInput,
   signal: AbortSignal,
+  onFrame?: ProgressiveFrameCallback,
 ): Promise<{ blobs: Blob[]; aspect: number; width: number; height: number }> {
   const snapdom = await loadLocalSnapdom();
   if (!snapdom) throw new Error("SnapDOM unavailable");
   if (signal.aborted) throw abortError();
 
-  const iframe = acquireOffscreenIframe(1280, 720);
+  const slot = acquireCaptureSlot(1280, 720);
+  const iframe = slot.iframe;
   const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision);
+  let resetSlot = false;
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -770,7 +885,7 @@ async function captureSameOrigin(
       const dur = win.__player?.getDuration?.() ?? 0;
       if (win.__player?.seek && Number.isFinite(dur) && dur > 0) break;
       if (Date.now() >= deadline) throw new Error("Timed out waiting for composition player");
-      await sleepAbortable(40, signal);
+      await sleepAbortable(30, signal);
     }
     if (signal.aborted) throw abortError();
 
@@ -806,11 +921,23 @@ async function captureSameOrigin(
     const outW = CAPTURE_TARGET_WIDTH;
     const outH = Math.max(27, Math.round((outW * targetH) / Math.max(1, targetW)));
     const scale = outW / Math.max(1, targetW);
+    const aspect = targetW / Math.max(1, targetH);
     const actualDuration = win.__player?.getDuration?.() || input.duration || 0;
     const times = computeCompositionSampleTimes(actualDuration, input.frameCount, input.seekTime);
+    const order: number[] = [];
+    if (onFrame && times.length >= 3) {
+      const coverIdx = Math.floor(times.length / 2);
+      order.push(coverIdx);
+      for (let i = 0; i < times.length; i++) {
+        if (i !== coverIdx) order.push(i);
+      }
+    } else {
+      for (let i = 0; i < times.length; i++) order.push(i);
+    }
 
-    const blobs: Blob[] = [];
-    for (const t of times) {
+    const blobs: Array<Blob | undefined> = new Array(times.length);
+    for (const frameIdx of order) {
+      const t = times[frameIdx]!;
       await waitUntilInteractiveIdle(signal);
       win.__player!.seek!(t);
       await nextTwoAnimationFrames(win, signal);
@@ -831,14 +958,22 @@ async function captureSameOrigin(
         });
         blob = await drawToJpegBlob(rendered, outW, outH);
       }
-      blobs.push(blob);
+      blobs[frameIdx] = blob;
+      onFrame?.(frameIdx, times.length, blob, { aspect, width: outW, height: outH });
       if (times.length > 1) await sleepAbortable(CAPTURE_FRAME_YIELD_MS, signal);
     }
 
-    return { blobs, aspect: targetW / Math.max(1, targetH), width: outW, height: outH };
+    return {
+      blobs: blobs.filter((b): b is Blob => Boolean(b)),
+      aspect,
+      width: outW,
+      height: outH,
+    };
   } catch (error) {
-    resetCaptureIframe(iframe);
+    resetSlot = true;
     throw error;
+  } finally {
+    releaseCaptureSlot(slot, resetSlot);
   }
 }
 
@@ -846,21 +981,10 @@ async function captureIsolatedOrigin(
   input: ClientCaptureInput,
   previewOrigin: string,
   signal: AbortSignal,
+  onFrame?: ProgressiveFrameCallback,
 ): Promise<{ blobs: Blob[]; aspect: number; width: number; height: number }> {
   const expectedOrigin = new URL(previewOrigin).origin;
-  const grantResponse = await studioApiFetch(
-    `/api/projects/${encodeURIComponent(input.projectId)}/preview-token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assetLease: true }),
-      cache: "no-store",
-      signal,
-    },
-  );
-  if (!grantResponse.ok) throw new Error(`Preview token failed (${grantResponse.status})`);
-  const grant = (await grantResponse.json()) as { token?: string; previewOrigin?: string };
-  if (!grant.token) throw new Error("Missing preview capture token");
+  const grant = await acquireSharedPreviewGrant(input.projectId, expectedOrigin, signal);
   const token = grant.token;
 
   const source = new URL(input.previewUrl, window.location.origin);
@@ -870,12 +994,17 @@ async function captureIsolatedOrigin(
   if (input.contentRevision > 0) isolatedUrl.searchParams.set("revision", String(input.contentRevision));
   isolatedUrl.searchParams.set("pt", token);
 
-  const iframe = acquireOffscreenIframe(1920, 1080);
+  const slot = acquireCaptureSlot(1920, 1080);
+  const iframe = slot.iframe;
+  let resetSlot = false;
 
   try {
     const duration = await new Promise<number>((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
+        if (grant.expiresAt <= Date.now()) {
+          invalidateSharedPreviewGrant(input.projectId, token);
+        }
         reject(new Error("Timed out waiting for isolated capture bridge"));
       }, CAPTURE_BOOT_TIMEOUT_MS);
       const onMessage = (event: MessageEvent) => {
@@ -912,9 +1041,13 @@ async function captureIsolatedOrigin(
 
     const times = computeCompositionSampleTimes(duration || input.duration || 0, input.frameCount, input.seekTime);
     const requestId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const streamedBlobs: Array<Blob | undefined> = new Array(times.length);
+    let streamedCount = 0;
 
     const payload = await new Promise<{
-      frames: ArrayBuffer[];
+      frames?: ArrayBuffer[];
+      streamed?: boolean;
+      frameCount?: number;
       mimeType?: string;
       width?: number;
       height?: number;
@@ -928,9 +1061,24 @@ async function captureIsolatedOrigin(
         if (event.origin !== expectedOrigin || event.source !== iframe.contentWindow) return;
         const data = event.data;
         if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
+        if (data.type === "capture-frame" && data.requestId === requestId) {
+          const idx = typeof data.index === "number" ? data.index : -1;
+          if (idx >= 0 && idx < times.length && data.frame instanceof ArrayBuffer) {
+            const mime = typeof data.mimeType === "string" && data.mimeType ? data.mimeType : "image/jpeg";
+            const blob = new Blob([data.frame], { type: mime });
+            if (!streamedBlobs[idx]) streamedCount += 1;
+            streamedBlobs[idx] = blob;
+            onFrame?.(idx, Number(data.total) || times.length, blob, {
+              aspect: typeof data.aspect === "number" && data.aspect > 0 ? data.aspect : 16 / 9,
+              width: typeof data.width === "number" && data.width > 0 ? data.width : CAPTURE_TARGET_WIDTH,
+              height: typeof data.height === "number" && data.height > 0 ? data.height : 135,
+            });
+          }
+          return;
+        }
         if (data.type === "response" && data.requestId === requestId) {
           cleanup();
-          if (data.ok && data.result && Array.isArray(data.result.frames)) {
+          if (data.ok && data.result && (Array.isArray(data.result.frames) || data.result.streamed)) {
             resolve(data.result);
           } else {
             reject(new Error(String(data.error || "Isolated capture failed")));
@@ -960,13 +1108,17 @@ async function captureIsolatedOrigin(
           width: CAPTURE_TARGET_WIDTH,
           selector: input.selector,
           selectorIndex: input.selectorIndex,
+          progressive: Boolean(onFrame),
         },
         expectedOrigin,
       );
     });
 
     const mimeType = payload.mimeType || "image/jpeg";
-    const blobs = payload.frames.map((buf) => new Blob([buf], { type: mimeType }));
+    const blobs =
+      streamedCount > 0
+        ? streamedBlobs.filter((b): b is Blob => Boolean(b))
+        : (payload.frames ?? []).map((buf) => new Blob([buf], { type: mimeType }));
     return {
       blobs,
       aspect: payload.aspect && payload.aspect > 0 ? payload.aspect : 16 / 9,
@@ -974,8 +1126,10 @@ async function captureIsolatedOrigin(
       height: payload.height || 135,
     };
   } catch (error) {
-    resetCaptureIframe(iframe);
+    resetSlot = true;
     throw error;
+  } finally {
+    releaseCaptureSlot(slot, resetSlot);
   }
 }
 
@@ -1003,12 +1157,12 @@ function stripMemoryCacheKey(
     "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
   >,
 ): { idbKey: string; baseCoverKey: string; compPathKey: string } {
-  const projectRev = projectRevisionByProjectId.get(input.projectId) ?? "";
-  const baseCoverKey = coverCacheKey(input, projectRev);
+  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const baseCoverKey = coverCacheKey(input, compRev);
   return {
     idbKey: `${baseCoverKey}&frames=${input.frameCount}`,
     baseCoverKey,
-    compPathKey: compPathCacheTag(input.projectId, input.previewUrl, projectRev, input.contentRevision),
+    compPathKey: compPathCacheTag(input.projectId, input.previewUrl, compRev, input.contentRevision),
   };
 }
 
@@ -1020,14 +1174,25 @@ function putMemoryStripCache(
   aspect: number,
   width: number,
   height: number,
+  precreatedUrls?: ReadonlyArray<string | undefined>,
 ): MemoryStripEntry {
   const existing = memoryStripCache.get(idbKey);
   if (existing) {
+    if (precreatedUrls) {
+      for (const url of precreatedUrls) {
+        if (!url) continue;
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }
+    }
     memoryStripCache.delete(idbKey);
     memoryStripCache.set(idbKey, existing);
     return existing;
   }
-  const urls = blobs.map((blob) => URL.createObjectURL(blob));
+  const urls = blobs.map((blob, idx) => precreatedUrls?.[idx] ?? URL.createObjectURL(blob));
   const weight = Math.max(1, urls.length) * width * height * 4;
   const value: ThumbnailValue =
     urls.length === 1
@@ -1173,12 +1338,46 @@ export function hasAnyCachedCompositionCapture(
   compPath: string,
   contentRevision = 0,
 ): boolean {
-  const projectRev = projectRevisionByProjectId.get(projectId) ?? "";
-  const target = compPathCacheTag(projectId, compPath, projectRev, contentRevision);
+  const compRev = resolveCompositionRevision(projectId, compPath);
+  const target = compPathCacheTag(projectId, compPath, compRev, contentRevision);
   for (const entry of memoryStripCache.values()) {
     if (entry.compPathKey === target) return true;
   }
   return false;
+}
+
+/** Subscribe to mid-capture progressive frame updates for a composition strip. */
+export function subscribeProgressiveCompositionCapture(
+  input: Pick<
+    ClientCaptureInput,
+    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
+  >,
+  listener: () => void,
+): () => void {
+  const { idbKey } = stripMemoryCacheKey(input);
+  let listeners = progressiveListeners.get(idbKey);
+  if (!listeners) {
+    listeners = new Set();
+    progressiveListeners.set(idbKey, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = progressiveListeners.get(idbKey);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) progressiveListeners.delete(idbKey);
+  };
+}
+
+/** Read the current progressive mid-capture thumbnail value (referentially stable). */
+export function getProgressiveCompositionCapture(
+  input: Pick<
+    ClientCaptureInput,
+    "projectId" | "previewUrl" | "contentRevision" | "frameCount" | "selector" | "selectorIndex"
+  >,
+): ThumbnailValue | null {
+  const { idbKey } = stripMemoryCacheKey(input);
+  return progressiveStrips.get(idbKey) ?? null;
 }
 
 /**
@@ -1301,57 +1500,137 @@ async function runClientCompositionCapture(
     return memoryEntryToThumbnailResult(entry);
   }
 
-  // 3. Priority-queued serialized offscreen browser capture (max 1 hidden iframe, paused during playback).
+  // 3. Priority-queued bounded-pool offscreen browser capture (paused during playback).
   const queuePriority = resolveQueuePriority(input);
-  const result = await enqueueSerializedCapture(queuePriority, signal, async () => {
-    await waitUntilInteractiveIdle(signal);
+  const precreatedUrls: Array<string | undefined> = [];
+  const receivedBlobs: Array<Blob | undefined> = [];
+  let receivedCount = 0;
+  let committed = false;
+
+  const fillNearestUrls = (total: number): string[] => {
+    const dense: string[] = [];
+    for (let i = 0; i < total; i++) {
+      let bestUrl = precreatedUrls[i];
+      if (!bestUrl) {
+        let bestDist = Infinity;
+        for (let j = 0; j < precreatedUrls.length; j++) {
+          const cand = precreatedUrls[j];
+          if (!cand) continue;
+          const dist = Math.abs(i - j);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestUrl = cand;
+          }
+        }
+      }
+      if (bestUrl) dense.push(bestUrl);
+    }
+    return dense;
+  };
+
+  const onProgressiveFrame: ProgressiveFrameCallback = (index, total, blob, dims) => {
+    if (signal.aborted) return;
+    if (!receivedBlobs[index]) receivedCount += 1;
+    receivedBlobs[index] = blob;
+    const isFirst = receivedCount === 1;
+    const isMidpoint = total >= 4 && receivedCount === Math.ceil(total / 2);
+    if (!isFirst && !isMidpoint) return;
+
+    if (isFirst) {
+      putSharedCoverCache(baseCoverKey, {
+        blob,
+        aspect: dims.aspect,
+        width: dims.width,
+        height: dims.height,
+      });
+      const firstUrl = precreatedUrls[index] ?? URL.createObjectURL(blob);
+      precreatedUrls[index] = firstUrl;
+      setProgressiveEntry(
+        idbKey,
+        input.frameCount === 1
+          ? { kind: "image", url: firstUrl, aspect: dims.aspect, representative: "render" }
+          : { kind: "filmstrip", urls: [firstUrl], aspect: dims.aspect },
+      );
+      return;
+    }
+
+    for (let i = 0; i < receivedBlobs.length; i++) {
+      if (receivedBlobs[i] && !precreatedUrls[i]) {
+        precreatedUrls[i] = URL.createObjectURL(receivedBlobs[i]!);
+      }
+    }
+    const denseUrls = fillNearestUrls(total);
+    if (denseUrls.length > 0) {
+      setProgressiveEntry(idbKey, { kind: "filmstrip", urls: denseUrls, aspect: dims.aspect });
+    }
+  };
+
+  try {
+    const result = await enqueueSerializedCapture(queuePriority, signal, async () => {
+      await waitUntilInteractiveIdle(signal);
+      if (signal.aborted) throw abortError();
+      const previewOrigin = isolatedPreviewOrigin();
+      return previewOrigin
+        ? captureIsolatedOrigin(input, previewOrigin, signal, onProgressiveFrame)
+        : captureSameOrigin(input, signal, onProgressiveFrame);
+    });
+
     if (signal.aborted) throw abortError();
-    const previewOrigin = isolatedPreviewOrigin();
-    return previewOrigin
-      ? captureIsolatedOrigin(input, previewOrigin, signal)
-      : captureSameOrigin(input, signal);
-  });
+    if (result.blobs.length === 0) throw new Error("Client composition capture returned no frames");
 
-  if (signal.aborted) throw abortError();
-  if (result.blobs.length === 0) throw new Error("Client composition capture returned no frames");
+    const coverBlob = result.blobs[Math.min(result.blobs.length - 1, Math.floor(result.blobs.length / 2))]!;
+    putSharedCoverCache(baseCoverKey, {
+      blob: coverBlob,
+      aspect: result.aspect,
+      width: result.width,
+      height: result.height,
+    });
 
-  const coverBlob = result.blobs[Math.min(result.blobs.length - 1, Math.floor(result.blobs.length / 2))]!;
-  putSharedCoverCache(baseCoverKey, {
-    blob: coverBlob,
-    aspect: result.aspect,
-    width: result.width,
-    height: result.height,
-  });
+    void writeCachedStrip({
+      key: idbKey,
+      aspect: result.aspect,
+      width: result.width,
+      height: result.height,
+      blobs: result.blobs,
+      updatedAt: Date.now(),
+    });
 
-  void writeCachedStrip({
-    key: idbKey,
-    aspect: result.aspect,
-    width: result.width,
-    height: result.height,
-    blobs: result.blobs,
-    updatedAt: Date.now(),
-  });
-
-  const entry = putMemoryStripCache(
-    idbKey,
-    baseCoverKey,
-    compPathKey,
-    result.blobs,
-    result.aspect,
-    result.width,
-    result.height,
-  );
-  return memoryEntryToThumbnailResult(entry);
+    const entry = putMemoryStripCache(
+      idbKey,
+      baseCoverKey,
+      compPathKey,
+      result.blobs,
+      result.aspect,
+      result.width,
+      result.height,
+      precreatedUrls,
+    );
+    committed = true;
+    clearProgressiveEntry(idbKey);
+    return memoryEntryToThumbnailResult(entry);
+  } finally {
+    clearProgressiveEntry(idbKey);
+    if (!committed) {
+      for (const url of precreatedUrls) {
+        if (!url) continue;
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
 }
 
 /** Build a scheduler-managed request that captures real composition frames in the browser. */
 export function createClientCompositionCaptureRequest(input: ClientCaptureInput): ThumbnailRequest {
-  const projectRev = projectRevisionByProjectId.get(input.projectId) ?? "";
+  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
   return {
     key: createThumbnailKey({
       kind: "client-comp-capture",
       previewUrl: input.previewUrl,
-      projectRev,
+      projectRev: compRev,
       revision: input.contentRevision,
       frames: input.frameCount,
       selector: input.selector,
@@ -1360,6 +1639,7 @@ export function createClientCompositionCaptureRequest(input: ClientCaptureInput)
     projectId: input.projectId,
     sessionEpoch: input.sessionEpoch,
     kind: "composition",
+    concurrencyBucket: "client-capture",
     priority: input.priority ?? "visible",
     rich: input.rich ?? true,
     load: (signal) => runClientCompositionCapture(input, signal),

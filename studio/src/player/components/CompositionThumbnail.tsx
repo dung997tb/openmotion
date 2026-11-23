@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { useThumbnailLease } from "../../hooks/useThumbnailLease";
 import { useThumbnailStripSize } from "../../hooks/useThumbnailStripSize";
 import {
@@ -24,10 +24,12 @@ import {
   acquireCachedCompositionCaptureFromIdb,
   canCaptureCompositionInBrowser,
   createClientCompositionCaptureRequest,
+  getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
   quantizeCompositionFrameCount,
   retainCachedCompositionCapture,
   selectInitialGateCompositionPaths,
+  subscribeProgressiveCompositionCapture,
 } from "../lib/clientCompositionCapture";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 import { Skeleton } from "../../components/ui/Skeleton";
@@ -325,7 +327,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
   );
   const posterSnapshot = useThumbnailLease(request);
 
-  // Tier 2: serialized priority-queued offscreen browser capture (cold misses only).
+  // Tier 2: priority-queued offscreen browser capture (cold misses only).
   const captureRequest = useMemo(
     () =>
       captureEnabled && captureMeasured && !cachedValue && !idbPending
@@ -339,7 +341,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
             seekTime,
             selector,
             selectorIndex,
-            priority,
+            priority: participatesInInitialGate ? "interaction" : priority,
             gatePriority: participatesInInitialGate,
             rich: true,
           })
@@ -363,12 +365,49 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     ],
   );
   const captureSnapshot = useThumbnailLease(captureRequest);
+  const progressiveTarget = useMemo(
+    () =>
+      captureEnabled && captureMeasured && !cachedValue && !idbPending && captureSnapshot.status !== "ready"
+        ? {
+            previewUrl,
+            projectId,
+            contentRevision,
+            frameCount: desiredCaptureFrames,
+            selector,
+            selectorIndex,
+          }
+        : null,
+    [
+      cachedValue,
+      captureEnabled,
+      captureMeasured,
+      captureSnapshot.status,
+      contentRevision,
+      desiredCaptureFrames,
+      idbPending,
+      previewUrl,
+      projectId,
+      selector,
+      selectorIndex,
+    ],
+  );
+  const subscribeProgressive = useCallback(
+    (listener: () => void) =>
+      progressiveTarget ? subscribeProgressiveCompositionCapture(progressiveTarget, listener) : () => {},
+    [progressiveTarget],
+  );
+  const getProgressiveSnapshot = useCallback(
+    () => (progressiveTarget ? getProgressiveCompositionCapture(progressiveTarget) : null),
+    [progressiveTarget],
+  );
+  const progressiveValue = useSyncExternalStore(subscribeProgressive, getProgressiveSnapshot, () => null);
   const gateTaskId = useMemo(
     () => (participatesInInitialGate ? `${projectId}:${previewUrl}:${contentRevision}` : null),
     [contentRevision, participatesInInitialGate, previewUrl, projectId],
   );
   const captureSettled =
     Boolean(cachedValue) ||
+    Boolean(progressiveValue) ||
     captureSnapshot.status === "ready" ||
     captureSnapshot.status === "error";
 
@@ -389,9 +428,16 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
   const snapshot = captureSnapshot.status === "ready" ? captureSnapshot : posterSnapshot;
   const resolvedValue =
     cachedValue ??
-    (snapshot.status === "ready" &&
-    (snapshot.value.kind === "image" || snapshot.value.kind === "filmstrip")
-      ? snapshot.value
+    (captureSnapshot.status === "ready" &&
+    (captureSnapshot.value.kind === "image" || captureSnapshot.value.kind === "filmstrip")
+      ? captureSnapshot.value
+      : null) ??
+    (progressiveValue && (progressiveValue.kind === "image" || progressiveValue.kind === "filmstrip")
+      ? progressiveValue
+      : null) ??
+    (posterSnapshot.status === "ready" &&
+    (posterSnapshot.value.kind === "image" || posterSnapshot.value.kind === "filmstrip")
+      ? posterSnapshot.value
       : null);
   const value =
     resolvedValue && (resolvedValue.kind === "image" || resolvedValue.kind === "filmstrip")
