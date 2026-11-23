@@ -513,8 +513,11 @@ export function ConversationStream({
       .filter(Boolean)
       .join('\n')
       || (hasBrowserAnnotation ? t('Update the page based on the attached browser preview annotations.') : '');
-    const rawBody = text.trim() || annotationSummary;
-    const hiddenInstructions = [prefix, pendingHiddenInstructionsRef.current].filter(Boolean).join('\n\n') || undefined;
+    const rawBody = text.trim() || annotationSummary || prefix;
+    const hiddenInstructions = [
+      rawBody === prefix ? '' : prefix,
+      pendingHiddenInstructionsRef.current,
+    ].filter(Boolean).join('\n\n') || undefined;
     const ok = await onSend(rawBody, {
       ...(hiddenInstructions ? { hiddenInstructions } : {}),
       ...(activeMode ? { mode: activeMode.id } : {}),

@@ -3392,7 +3392,8 @@
   color: var(--motion-text);
 }
 
-.om-sa-device-trigger {
+.om-sa-device-trigger,
+.om-sa-view-mode-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;

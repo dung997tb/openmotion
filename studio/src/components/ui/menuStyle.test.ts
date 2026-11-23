@@ -13,6 +13,7 @@ const NOT_ROW_MENUS = new Set([
   "components/editor/EaseCurveSection.tsx",
   "player/components/SpeedMenu.tsx",
   "super-agent/ArtifactBrowserPane.tsx",
+  "super-agent/ArtifactDeliverableCard.tsx",
 ]);
 
 function sources(dir: string): string[] {
