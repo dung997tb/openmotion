@@ -1,3 +1,4 @@
+import { gameAssetInstructions } from '../shared/game-contract.ts';
 import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -35,10 +36,12 @@ import {
   isSuperAgentId,
   modeToSuperAgentIntent,
   normalizeSuperAgentTitle,
+  summarizeSuperAgentChat,
   type SuperAgentApproval,
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
+  type SuperAgentContextTag,
   type SuperAgentEngine,
   type SuperAgentFileOperation,
   type SuperAgentIntent,
@@ -72,6 +75,16 @@ import {
   type ProviderAdapterCallbacks,
 } from './super-agent-adapters.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from './super-agent-resources.ts';
+import {
+  captureWorkspaceSnapshot,
+  collectTaskProjectRoots,
+  collectToolChangedFiles,
+  diffWorkspaceSnapshots,
+  hydrateLegacyTurnChangedFiles,
+  mergeTurnChangedFiles,
+  resolveTaskProjectDir,
+  type WorkspaceSnapshot,
+} from './super-agent-workspace.ts';
 
 export interface SuperAgentRuntimeContext {
   origin: string;
@@ -114,11 +127,15 @@ interface ActiveSuperAgentChat {
   bin?: string;
   devServerUrls?: Set<string>;
   touchedGameIds?: Set<string>;
+  touchedDesignIds?: Set<string>;
+  touchedMotionIds?: Set<string>;
   writtenGameCodeIds?: Set<string>;
   presentedArtifactIds?: Set<string>;
+  turnUserMessageId?: string;
+  beforeSnapshot?: WorkspaceSnapshot;
 }
 
-const SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
+export const SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
 You have access to every capability across OpenMotion:
 1. Interactive HTML Websites, Prototypes, Slide Decks, Documents, Live Dashboards & WebGL Scenes (Design Studio):
    - Discover scenarios/templates/skills/design-systems with openmotion_design_catalog.
@@ -128,7 +145,8 @@ You have access to every capability across OpenMotion:
 2. Playable Single-Player & Multiplayer Games (Game Studio):
    - When the user asks to build, remix, update, validate, playtest, or publish a Game Studio game (or passes a Game Studio game id), read openmotion://workflow/game/start (via openmotion_read_workflow(workflow="game", section="start") or MCP resource) and inspect the draft/project with openmotion_game_get(id=...).
    - If the user brief already provides the game idea, genre/style/setting, orientation, or multiplayer choice, do not stall with extra questions — proceed directly to implementation.
-   - Set status to building via openmotion_game_set_status(id=..., status="building"), implement/edit game files with openmotion_game_write_files, optionally generate visual sprites, backdrops, music, or SFX via openmotion_assets_use(action="generate") (embedding /motion-api/assets/<assetId>/versions/<versionId>/media URLs directly), update metadata via openmotion_game_update_meta, capture a cover via openmotion_game_capture_cover, validate with openmotion_game_validate (and simulate/playtest for multiplayer), set status="ready" (or call openmotion_game_publish when appropriate), and call openmotion_present_artifact(kind="game-project", projectId=...) so the playable game opens and reloads live inside the Browser Artifact Viewer.
+   - Set status to building via openmotion_game_set_status(id=..., status="building"), implement/edit game files with openmotion_game_write_files, update metadata via openmotion_game_update_meta, capture a cover via openmotion_game_capture_cover, validate with openmotion_game_validate (and simulate/playtest for multiplayer), set status="ready" (or call openmotion_game_publish when appropriate), and call openmotion_present_artifact(kind="game-project", projectId=...) so the playable game opens and reloads live inside the Browser Artifact Viewer.
+   - ${gameAssetInstructions}
    - Only when the user explicitly asks to deploy or share an HTML game or design project online (and their OpenDesign account is signed in), call openmotion_assets_use(action="web_publish", webPublish={command:"publish", targetKind:"game"|"design", targetId=...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects).
    - For lightweight interactive Canvas/WebGL demos requested outside Game Studio, you can also use openmotion_design_project(scenario="prototype"|"webgl").
 3. Editable Motion Videos (HyperFrames / Motion Studio):
@@ -156,7 +174,7 @@ Rules:
 - Keep all user-facing communication concise and effortless to scan. When you need user confirmation or a decision mid-task, ask in 1–2 short plain-language sentences with clear numbered options instead of dumping technical jargon or raw JSON.
 - Reply in the user's language. When you create or modify files, code, or artifacts, end with a clear, concise summary covering what was created/changed and how it was verified (never fabricate unexecuted checks). For plain Q&A without edits, answer concisely and directly.`;
 
-const CLAUDE_SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
+export const CLAUDE_SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
 Use the registered OpenMotion MCP tools (mcp__openmotion__*) and injected <openmotion-workspace-context> entries to inspect workspace resources and build deliverables across all studios:
 1. Interactive HTML Websites, Apps, Slide Decks, Documents & WebGL (Design Studio):
    - Discover scenarios/templates/skills/design-systems with openmotion_design_catalog.
@@ -164,7 +182,8 @@ Use the registered OpenMotion MCP tools (mcp__openmotion__*) and injected <openm
    - Open completed projects with openmotion_design_project(action="open", projectId=...) so the Artifact Viewer displays the live result.
    - Publish any HTML-expressed deliverable (Design page, Game, Motion HTML bundle, or standalone HTML file/folder) to a live Open Design Cloud share link via openmotion_assets_use(action="web_publish", webPublish={command:"publish"|"status"|"unpublish"|"list", targetKind:"design"|"game"|"html"|"motion", ...}) or openmotion_design_project(action="deploy", projectId=...) (requires OpenDesign sign-in).
 2. Playable HTML Games (Game Studio):
-   - For Game Studio projects, read openmotion://workflow/game/start and inspect with openmotion_game_get(id=...). When the prompt already specifies the game concept or options, proceed directly without blocking on extra questions: call openmotion_game_set_status(id, "building"), write files via openmotion_game_write_files, optionally generate visual/audio assets via openmotion_assets_use(action="generate") (referencing /motion-api/assets/<assetId>/versions/<versionId>/media), update metadata (openmotion_game_update_meta), capture cover (openmotion_game_capture_cover), validate (openmotion_game_validate), set ready/publish, and open via openmotion_present_artifact(kind="game-project", projectId=...). Only when the user explicitly requests online cloud deployment/sharing (and OpenDesign account is signed in), call openmotion_assets_use(action="web_publish", webPublish={command:"publish", targetKind:"game"|"design", targetId=...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects).
+   - For Game Studio projects, call openmotion_read_workflow(workflow="game", section="start") and inspect with openmotion_game_get(id=...). When the prompt already specifies the game concept or options, proceed directly without blocking on extra questions: call openmotion_game_set_status(id, "building"), write files via openmotion_game_write_files, update metadata (openmotion_game_update_meta), capture cover (openmotion_game_capture_cover), validate (openmotion_game_validate), set ready/publish, and open via openmotion_present_artifact(kind="game-project", projectId=...). Only when the user explicitly requests online cloud deployment/sharing (and OpenDesign account is signed in), call openmotion_assets_use(action="web_publish", webPublish={command:"publish", targetKind:"game"|"design", targetId=...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects).
+   - ${gameAssetInstructions}
 3. Editable Motion Videos (HyperFrames / Motion Studio):
    - Read workflow guides via MCP resources (openmotion://workflow/production/start or specialist guides) and browse templates/skills via openmotion_list_templates / openmotion_list_skills / openmotion_get_skill.
    - Create editable film projects with openmotion_create_project, edit HTML/CSS/GSAP timelines with openmotion_edit_project, open preview with openmotion_open_preview, manage versions/archives, and optionally queue MP4 exports with openmotion_export_request.
@@ -201,6 +220,33 @@ const ALLOWED_ARTIFACT_KINDS = new Set<SuperAgentArtifact['kind']>([
   'game-project',
   'web',
 ]);
+
+function sanitizeContextTags(raw: unknown): SuperAgentContextTag[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const allowedKinds = new Set<SuperAgentContextTag['kind']>(['mode', 'param', 'skill']);
+  const allowedTones = new Set<NonNullable<SuperAgentContextTag['tone']>>(['coding', 'agent', 'image', 'video', 'audio']);
+  const out: SuperAgentContextTag[] = [];
+  for (const item of raw.slice(0, 16)) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const kind = typeof obj.kind === 'string' && allowedKinds.has(obj.kind as SuperAgentContextTag['kind'])
+      ? (obj.kind as SuperAgentContextTag['kind'])
+      : 'param';
+    const label = typeof obj.label === 'string' ? obj.label.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    if (!label) continue;
+    const icon = typeof obj.icon === 'string' && /^[a-z0-9-]{1,40}$/.test(obj.icon) ? obj.icon : undefined;
+    const tone = typeof obj.tone === 'string' && allowedTones.has(obj.tone as NonNullable<SuperAgentContextTag['tone']>)
+      ? (obj.tone as NonNullable<SuperAgentContextTag['tone']>)
+      : undefined;
+    out.push({
+      kind,
+      label,
+      ...(icon ? { icon } : {}),
+      ...(tone ? { tone } : {}),
+    });
+  }
+  return out.length ? out : undefined;
+}
 
 function sameOriginRelativeUrl(raw: unknown): string | undefined {
   if (raw === undefined) return undefined;
@@ -435,13 +481,25 @@ function previewJson(value: unknown, max = 3600): string {
   }
 }
 
+function normalizeOpenMotionToolName(toolName: string): string {
+  return toolName.replace(/^mcp_+openmotion_+/, '');
+}
+
+function isAssetReadTool(toolName: string, args: Record<string, unknown>): boolean {
+  const name = normalizeOpenMotionToolName(toolName);
+  return (name === 'openmotion_assets_use' || name === 'openmotion_asset_manage') && args.action === 'read';
+}
+
 function summarizeToolResult(tool: string, value: any, ok: boolean): string | undefined {
   if (!ok) return typeof value?.error === 'string' ? value.error : value?.error?.message || 'Tool failed';
-  const name = tool.replace(/^mcp_+openmotion_+/, '');
+  const name = normalizeOpenMotionToolName(tool);
   if (name === 'openmotion_workspace_resources' && Array.isArray(value?.items)) return `${value.items.length} resource(s)`;
+  if (name === 'openmotion_capability_discover' && Array.isArray(value?.capabilities)) return `${value.capabilities.length} capability(s)`;
+  if (value?.dryRun === true) return value?.selectedModel ? `Dry run · ${value.selectedModel}` : 'Dry run complete';
   if (value?.project?.title) return value.project.title;
   if (value?.title && value?.projectId) return String(value.title);
   if (value?.job?.state) return `Job ${value.job.state}`;
+  if (value?.asset?.name) return String(value.asset.name);
   if (value?.kit?.name) return value.kit.name;
   if (value?.artifact?.title) return value.artifact.title;
   return undefined;
@@ -631,10 +689,17 @@ export class SuperAgentConversations {
     return this.store.safePath(`chats/${id}.json`, this.root);
   }
 
-  async get(id: string): Promise<SuperAgentChat> {
+  private syncProjectDir(chat: SuperAgentChat) {
+    const resolved = resolveTaskProjectDir(this.store.directory, chat);
+    chat.projectDir = resolved.projectDir;
+    chat.projectKind = resolved.projectKind;
+  }
+
+  private async readChat(id: string, hydrateFiles: boolean): Promise<SuperAgentChat> {
     const live = this.active.get(id)?.chat;
     if (live) {
       live.intent = inferSuperAgentIntent(live);
+      this.syncProjectDir(live);
       return structuredClone(live);
     }
     let raw: string;
@@ -651,7 +716,16 @@ export class SuperAgentConversations {
       chat.approvals = [];
     }
     chat.intent = inferSuperAgentIntent(chat);
+    this.syncProjectDir(chat);
+    if (hydrateFiles) {
+      const hydrated = await hydrateLegacyTurnChangedFiles(this.store.directory, chat).catch(() => undefined);
+      if (hydrated) chat.turnChangedFiles = hydrated;
+    }
     return chat;
+  }
+
+  async get(id: string): Promise<SuperAgentChat> {
+    return this.readChat(id, true);
   }
 
   async list(): Promise<SuperAgentChatSummary[]> {
@@ -663,24 +737,12 @@ export class SuperAgentConversations {
     const chats = await Promise.all(
       names
         .filter(name => name.endsWith('.json') && isSuperAgentId(name.slice(0, -5)))
-        .map(name => this.get(name.slice(0, -5))),
+        .map(name => this.readChat(name.slice(0, -5), false)),
     );
     return chats
       .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
       .slice(0, 200)
-      .map(chat => ({
-        id: chat.id,
-        title: chat.title,
-        intent: inferSuperAgentIntent(chat),
-        ...(chat.pinned ? { pinned: true } : {}),
-        ...(chat.runtimeId ? { runtimeId: chat.runtimeId } : {}),
-        engine: chat.engine,
-        state: chat.state,
-        artifactCount: chat.artifacts.length,
-        messageCount: chat.messages.filter(m => m.role !== 'tool' && m.role !== 'reasoning').length,
-        updatedAt: chat.updatedAt,
-        createdAt: chat.createdAt,
-      }));
+      .map(summarizeSuperAgentChat);
   }
 
   async create(input: {
@@ -736,6 +798,11 @@ export class SuperAgentConversations {
       const artIntent = artifactToSuperAgentIntent(stored);
       if (artIntent && !chat.intent) chat.intent = artIntent;
     }
+    if (!workingDir) {
+      const workDir = await this.store.safePath(`work/${chat.id}`, this.root).catch(() => null);
+      if (workDir) await mkdir(workDir, { recursive: true, mode: 0o700 });
+    }
+    this.syncProjectDir(chat);
     await atomicAssetJson(await this.file(chat.id), chat);
     return chat;
   }
@@ -789,6 +856,7 @@ export class SuperAgentConversations {
           : chat.activeArtifactId;
     }
     chat.updatedAt = Date.now();
+    this.syncProjectDir(chat);
     if (live) {
       await this.persist(live, true);
       return structuredClone(live.chat);
@@ -870,6 +938,7 @@ export class SuperAgentConversations {
     }, true);
     active.presentedArtifactIds ??= new Set();
     active.presentedArtifactIds.add(stored.id);
+    this.syncProjectDir(active.chat);
     return stored;
   }
 
@@ -1238,12 +1307,19 @@ export class SuperAgentConversations {
           currentTitle: chat.title,
         });
       }
+      const sanitizedContextTags = sanitizeContextTags(input.contextTags);
+      const userMessageId = randomUUID();
+      active.turnUserMessageId = userMessageId;
+      active.touchedDesignIds = new Set();
+      active.touchedMotionIds = new Set();
+      this.syncProjectDir(chat);
       this.pushMessage(active, {
-        id: randomUUID(),
+        id: userMessageId,
         role: 'user',
         text: input.text,
         createdAt: Date.now(),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+        ...(sanitizedContextTags?.length ? { contextTags: sanitizedContextTags } : {}),
       }, true);
       await this.persist(active, true);
 
@@ -1587,10 +1663,33 @@ export class SuperAgentConversations {
       const st = await stat(active.chat.workingDir).catch(() => null);
       if (st?.isDirectory()) cwd = active.chat.workingDir;
     }
+    this.syncProjectDir(active.chat);
+    active.beforeSnapshot = await captureWorkspaceSnapshot(
+      collectTaskProjectRoots(this.store.directory, active.chat),
+    ).catch(() => undefined);
 
     const blocks: string[] = [input.text];
+    const sanitizedTags = sanitizeContextTags(input.contextTags);
+    const taskDirectiveParts: string[] = [];
+    const paramLabels = (sanitizedTags ?? [])
+      .filter(tag => tag.kind !== 'mode')
+      .map(tag => tag.label);
+    if (!isCoding && (input.mode || paramLabels.length)) {
+      const modeLine = input.mode ? `Mode/Skill: ${input.mode}` : '';
+      const paramLine = paramLabels.length ? `Selected parameters: ${paramLabels.join(' · ')}` : '';
+      const header = [modeLine, paramLine].filter(Boolean).join(' | ');
+      if (header) taskDirectiveParts.push(header);
+    } else if (isCoding && paramLabels.length) {
+      taskDirectiveParts.push(`Selected parameters: ${paramLabels.join(' · ')}`);
+    }
+    if (!isCoding && cwd && (!active.runtimeId || active.runtimeId === LOCAL_DIRECT_RUNTIME_ID)) {
+      taskDirectiveParts.push(`Task project directory: ${cwd}`);
+    }
     if (input.hiddenInstructions?.trim()) {
-      blocks.push(`<openmotion-task-instructions>\n${input.hiddenInstructions.trim()}\n</openmotion-task-instructions>`);
+      taskDirectiveParts.push(input.hiddenInstructions.trim());
+    }
+    if (taskDirectiveParts.length > 0) {
+      blocks.push(`<openmotion-task-instructions>\n${taskDirectiveParts.join('\n\n')}\n</openmotion-task-instructions>`);
     }
     if (!isCoding || hasNonBrowserAttachments) {
       blocks.push(await buildResourceContextManifest(this.store, input.attachments ?? []));
@@ -1967,7 +2066,7 @@ export class SuperAgentConversations {
         return { success: false, storedValue: value, contentItems: [] as { type: string; text?: string; imageUrl?: string }[] };
       }
 
-      const media = success && toolName === 'openmotion_assets_use' && toolArgs.action === 'read'
+      const media = success && isAssetReadTool(toolName, toolArgs)
         ? assetReadToolResult(value as AssetReadResult)
         : undefined;
       const storedValue = media?.structuredContent ?? value;
@@ -2213,7 +2312,7 @@ export class SuperAgentConversations {
             if (active.stopped || active.deleted) {
               return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: 'Conversation stopped' }) }] };
             }
-            const media = toolName === 'openmotion_assets_use' && toolArgs.action === 'read'
+            const media = isAssetReadTool(toolName, toolArgs)
               ? assetReadToolResult(value as AssetReadResult)
               : undefined;
             const storedValue = media?.structuredContent ?? value;
@@ -2859,24 +2958,32 @@ export class SuperAgentConversations {
       return { presented: true, artifact: stored };
     }
 
-    const phase1Def = exposedPhase1Tools.find(tool => tool.name === toolName);
+    const normalizedTool = normalizeOpenMotionToolName(toolName);
+    const phase1Def = exposedPhase1Tools.find(tool => tool.name === normalizedTool);
     if (!phase1Def) throw new Error(`Unknown tool: ${toolName}`);
     const args = { ...rawArgs };
-    if ((toolName === 'openmotion_assets_use' || toolName === 'openmotion_media_use') && args.action === 'generate') {
+    const isLegacyGenerate = (normalizedTool === 'openmotion_assets_use' || normalizedTool === 'openmotion_media_use') && args.action === 'generate';
+    const isCapabilityRun = normalizedTool === 'openmotion_capability_run'
+      && (args.action === undefined || args.action === 'run')
+      && args.dryRun !== true;
+    if (isLegacyGenerate || isCapabilityRun) {
+      const approvalTitle = isCapabilityRun && typeof args.capabilityId === 'string' && args.capabilityId.trim()
+        ? `Run capability (${args.capabilityId.trim()})`
+        : 'Generate media asset';
       const approved = await this.approval(
         active,
         'generation',
-        'Generate media asset',
+        approvalTitle,
         JSON.stringify(args, null, 2),
       );
       if (!approved) throw new Error('Generation declined by the user');
       if (active.stopped) throw new Error('Conversation stopped');
-      if (toolName === 'openmotion_assets_use') {
+      if (normalizedTool === 'openmotion_assets_use' || normalizedTool === 'openmotion_capability_run') {
         args.conversationId = active.chat.id;
         args.requestId ??= `sa-${assetHash({ conversation: active.chat.id, callId }).slice(0, 48)}`;
       }
     }
-    return runtime.phase1().call(toolName, args);
+    return runtime.phase1().call(normalizedTool, args);
   }
 
   private async resolvePresentedArtifact(args: Record<string, unknown>): Promise<SuperAgentArtifact> {
@@ -3058,6 +3165,8 @@ export class SuperAgentConversations {
       }
       if (value.project?.id) {
         const p = value.project;
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(p.id);
         const activate = ['create', 'duplicate', 'restore'].includes(action);
         const stored = upsertChatArtifact(active.chat, {
           id: `design:${p.id}`,
@@ -3072,10 +3181,13 @@ export class SuperAgentConversations {
           createdAt: now,
           updatedAt: now,
         }, activate);
+        this.syncProjectDir(active.chat);
         await this.persist(active, true);
         return stored;
       }
       if (action === 'open' && value.projectId) {
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(value.projectId);
         const detail = await designProjectsFor(this.store.directory).get(value.projectId).catch(() => null);
         const entry = detail?.entry ?? 'index.html';
         return this.presentChatArtifact(active, {
@@ -3094,6 +3206,8 @@ export class SuperAgentConversations {
       }
       if (action === 'import' && Array.isArray(value.projects) && value.projects[0]?.id) {
         const p = value.projects[0];
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(p.id);
         const stored = upsertChatArtifact(active.chat, {
           id: `design:${p.id}`,
           kind: 'design-project',
@@ -3107,31 +3221,42 @@ export class SuperAgentConversations {
           createdAt: now,
           updatedAt: now,
         }, true);
+        this.syncProjectDir(active.chat);
         await this.persist(active, true);
         return stored;
       }
     }
 
-    if (name === 'openmotion_design_edit' && value.project?.id) {
-      const p = value.project;
-      const stored = upsertChatArtifact(active.chat, {
-        id: `design:${p.id}`,
-        kind: 'design-project',
-        title: p.title,
-        subtitle: p.scenario,
-        projectId: p.id,
-        scenario: p.scenario,
-        entry: p.entry,
-        revision: p.revision,
-        url: `${designRoutes.raw(p.id, p.entry)}?rev=${encodeURIComponent(p.revision || '')}`,
-        createdAt: now,
-        updatedAt: now,
-      }, true);
-      await this.persist(active, true);
-      return stored;
+    if (name === 'openmotion_design_edit') {
+      const pid = value.project?.id || (typeof args.projectId === 'string' ? args.projectId.trim() : '');
+      if (pid) {
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(pid);
+      }
+      if (value.project?.id) {
+        const p = value.project;
+        const stored = upsertChatArtifact(active.chat, {
+          id: `design:${p.id}`,
+          kind: 'design-project',
+          title: p.title,
+          subtitle: p.scenario,
+          projectId: p.id,
+          scenario: p.scenario,
+          entry: p.entry,
+          revision: p.revision,
+          url: `${designRoutes.raw(p.id, p.entry)}?rev=${encodeURIComponent(p.revision || '')}`,
+          createdAt: now,
+          updatedAt: now,
+        }, true);
+        this.syncProjectDir(active.chat);
+        await this.persist(active, true);
+        return stored;
+      }
     }
 
     if (name === 'openmotion_create_project' && value.projectId) {
+      active.touchedMotionIds ??= new Set();
+      active.touchedMotionIds.add(value.projectId);
       const stored = upsertChatArtifact(active.chat, {
         id: `motion:${value.projectId}`,
         kind: 'motion-project',
@@ -3143,6 +3268,7 @@ export class SuperAgentConversations {
         createdAt: now,
         updatedAt: now,
       }, true);
+      this.syncProjectDir(active.chat);
       await this.persist(active, true);
       return stored;
     }
@@ -3151,6 +3277,8 @@ export class SuperAgentConversations {
       if (name === 'openmotion_open_preview' && (args.target === 'templates' || args.target === 'providers' || args.action === 'begin' || args.action === 'complete_generation')) {
         return undefined;
       }
+      active.touchedMotionIds ??= new Set();
+      active.touchedMotionIds.add(value.projectId);
       const catalog = this.store.projectCatalog();
       const projectMeta = catalog.projects.find(item => item.id === value.projectId);
       const session = catalog.sessions?.find(item => item.artifacts.some(a => a.projectId === value.projectId));
@@ -3169,6 +3297,7 @@ export class SuperAgentConversations {
         return this.presentChatArtifact(active, artifactDraft);
       }
       const stored = upsertChatArtifact(active.chat, artifactDraft, true);
+      this.syncProjectDir(active.chat);
       await this.persist(active, true);
       return stored;
     }
@@ -3191,7 +3320,12 @@ export class SuperAgentConversations {
       return stored;
     }
 
-    if (name === 'openmotion_assets_use' || name === 'openmotion_assets') {
+    if (
+      name === 'openmotion_assets_use'
+      || name === 'openmotion_assets'
+      || name === 'openmotion_capability_run'
+      || name === 'openmotion_job_manage'
+    ) {
       if (value.job?.state === 'completed' && Array.isArray(value.job.libraryAssets) && value.job.libraryAssets.length) {
         const ref = value.job.libraryAssets[0];
         const asset = await new AssetLibrary(this.store).get(ref.assetId).catch(() => null);
@@ -3215,6 +3349,33 @@ export class SuperAgentConversations {
           return stored;
         }
       }
+    }
+
+    if (name === 'openmotion_capability_run' && value.dryRun !== true && value.asset?.id) {
+      const asset = value.asset;
+      const versionId = value.version?.id ?? asset.currentVersionId;
+      if (versionId) {
+        const version = value.version ?? assetVersion(asset, versionId);
+        const url = assetMediaUrl(asset.id, versionId);
+        const stored = upsertChatArtifact(active.chat, {
+          id: `asset:${asset.id}:${versionId}`,
+          kind: asset.modality === 'video' ? 'asset-video' : asset.modality === 'audio' ? 'asset-audio' : 'asset-image',
+          title: asset.name,
+          subtitle: version?.model || value.capabilityId || asset.modality,
+          assetId: asset.id,
+          versionId,
+          url,
+          downloadUrl: `${url}?download=1`,
+          mimeType: version?.mimeType,
+          createdAt: now,
+          updatedAt: now,
+        }, true);
+        await this.persist(active, true);
+        return stored;
+      }
+    }
+
+    if (name === 'openmotion_assets_use' || name === 'openmotion_assets' || name === 'openmotion_asset_manage') {
       if (args.action === 'import' && value.asset?.id) {
         const asset = value.asset;
         const versionId = asset.currentVersionId;
@@ -3265,6 +3426,8 @@ export class SuperAgentConversations {
       if (args.action === 'scenario') {
         if (value.project?.id && value.project?.scenario) {
           const p = value.project;
+          active.touchedDesignIds ??= new Set();
+          active.touchedDesignIds.add(p.id);
           const entry = p.entry || 'index.html';
           const stored = upsertChatArtifact(active.chat, {
             id: `design:${p.id}`,
@@ -3279,11 +3442,14 @@ export class SuperAgentConversations {
             createdAt: now,
             updatedAt: now,
           }, true);
+          this.syncProjectDir(active.chat);
           await this.persist(active, true);
           return stored;
         }
         if (value.project?.projectId) {
           const proj = value.project;
+          active.touchedMotionIds ??= new Set();
+          active.touchedMotionIds.add(proj.projectId);
           const stored = upsertChatArtifact(active.chat, {
             id: `motion:${proj.projectId}`,
             kind: 'motion-project',
@@ -3295,6 +3461,7 @@ export class SuperAgentConversations {
             createdAt: now,
             updatedAt: now,
           }, true);
+          this.syncProjectDir(active.chat);
           await this.persist(active, true);
           return stored;
         }
@@ -3378,10 +3545,12 @@ export class SuperAgentConversations {
 
         if (alreadyInChat && (name === 'openmotion_game_update_meta' || wroteRunnableCode)) {
           const stored = upsertChatArtifact(active.chat, artifactDraft, false);
+          this.syncProjectDir(active.chat);
           await this.persist(active, true);
           return stored;
         }
 
+        this.syncProjectDir(active.chat);
         if (titleUpdated) {
           await this.persist(active, true);
         }
@@ -3454,6 +3623,35 @@ export class SuperAgentConversations {
     active.chat.error = error?.slice(0, 1000);
     active.chat.approvals = [];
     active.chat.intent = inferSuperAgentIntent(active.chat);
+    this.syncProjectDir(active.chat);
+    if (!active.deleted && active.turnUserMessageId) {
+      const postRoots = collectTaskProjectRoots(this.store.directory, active.chat, {
+        gameIds: active.touchedGameIds,
+        designIds: active.touchedDesignIds,
+        motionIds: active.touchedMotionIds,
+      });
+      const afterSnapshot = await captureWorkspaceSnapshot(postRoots).catch(() => undefined);
+      const snapshotFiles = afterSnapshot ? diffWorkspaceSnapshots(active.beforeSnapshot, afterSnapshot) : [];
+      const turnStartIdx = active.chat.messages.findIndex(m => m.id === active.turnUserMessageId);
+      const turnMessages = turnStartIdx >= 0
+        ? active.chat.messages.slice(turnStartIdx + 1)
+        : active.chat.messages;
+      const toolFiles = collectToolChangedFiles(turnMessages);
+      const merged = mergeTurnChangedFiles(snapshotFiles, toolFiles);
+      if (merged.length > 0) {
+        const nextMap: Record<string, SuperAgentFileOperation[]> = {
+          ...(active.chat.turnChangedFiles ?? {}),
+          [active.turnUserMessageId]: merged,
+        };
+        const keys = Object.keys(nextMap);
+        if (keys.length > 30) {
+          for (const oldKey of keys.slice(0, keys.length - 30)) {
+            delete nextMap[oldKey];
+          }
+        }
+        active.chat.turnChangedFiles = nextMap;
+      }
+    }
     if (!error && !active.chat.titleCustomized) {
       const firstUserText =
         active.chat.messages.find(m => m.role === 'user' && !isGenericSuperAgentTitle(generateSuperAgentTitle({ prompt: m.text })))?.text

@@ -65,6 +65,7 @@ function baseProps(overrides: Partial<CreativeNavigationProps> = {}): CreativeNa
     onNavigate: vi.fn(),
     currentPage: 'explore',
     onOpenPage: vi.fn(),
+    onOpenAgentStart: vi.fn(),
     trackingPage: 'explore',
     scenarioActive: null,
     onOpenScenario: vi.fn(),
@@ -86,6 +87,32 @@ async function renderNav(overrides: Partial<CreativeNavigationProps> = {}) {
   });
   return props;
 }
+
+it('opens Super Agent creation modes and returns home from the navigation spotlight', async () => {
+  const props = await renderNav();
+  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Super Agent · Features"]')!;
+  await act(async () => trigger.click());
+  const menu = document.querySelector('.om-creative-menu-agent')!;
+  const cards = [...menu.querySelectorAll<HTMLButtonElement>('.om-scene-tile')];
+  const more = [...menu.querySelectorAll<HTMLButtonElement>('.om-agent-nav-list button')];
+  expect(cards.map(card => card.querySelector('strong')?.textContent)).toEqual(['Build a game', 'Generate image', 'Generate video', 'Create audio']);
+  expect(cards[0].querySelector('[data-nav-badge="New"]')?.textContent).toBe('New');
+  expect(more.map(row => row.textContent)).toEqual(['Coding', 'Cinema Video', 'Create slides', 'Build a website']);
+  await act(async () => cards[2].click());
+  expect(props.onOpenAgentStart).toHaveBeenLastCalledWith('motion');
+
+  await act(async () => trigger.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.om-agent-nav-list button')!.click());
+  expect(props.onOpenAgentStart).toHaveBeenLastCalledWith('coding');
+
+  await act(async () => trigger.click());
+  const spotlight = document.querySelector<HTMLButtonElement>('.om-creative-menu-agent .om-audio-menu-spotlight')!;
+  expect(spotlight.querySelector('[data-nav-badge="New"]')?.textContent).toBe('New');
+  expect(spotlight.querySelector('strong')?.textContent).toBe('Build a minigame in minutes');
+  await act(async () => spotlight.click());
+  expect(props.onOpenAgentStart).toHaveBeenLastCalledWith(null);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+});
 
 it('places Workflows with a New badge directly after Explore, opens a 3-column mega menu with all 5 scenarios and recent runs', async () => {
   const props = await renderNav();

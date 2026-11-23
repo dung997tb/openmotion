@@ -1,5 +1,5 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { LOCAL_DIRECT_RUNTIME_ID, type AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { assetMediaUrl } from '../../../shared/asset-library';
 import type { SuperAgentHandoffPayload } from '../../../shared/capability-hub';
@@ -8,9 +8,12 @@ import type { GameCard } from '../../../shared/game-contract';
 import {
   NEW_VIEWER_TAB_ID,
   safeBrowserTabId,
+  summarizeSuperAgentChat,
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
+  type SuperAgentContextTag,
+  type SuperAgentFileOperation,
   type SuperAgentIntent,
   type SuperAgentPermissionMode,
   type SuperAgentResourceAttachment,
@@ -20,13 +23,15 @@ import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RouteSurfaceFallback } from '../motion/RouteSurfaceFallback';
-import { consumeSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
+import { consumeSuperAgentHandoff, queueSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
+import { readSuperAgentPromptLink, withoutSuperAgentPromptLink } from './superAgentPromptLink';
 import { bundledGames, communityGames, gameApi } from '../motion/game/gameCatalog';
 import { localizedGameTitle, toGameArtifact, toGameResourceAttachment } from '../motion/game/gameSuperAgent';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
 import { useLocalAgents } from '../motion/useLocalAgents';
 import { preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { ConversationSidebar } from './ConversationSidebar';
+import { useReadTaskResults } from './useReadTaskResults';
 import { ConversationStream, type AgentSelection } from './ConversationStream';
 import type { SuperAgentCreationModeId } from './ModeResourceShowcase';
 import { resourceKey } from './ResourcePickerDialog';
@@ -81,26 +86,15 @@ export function clampSuperAgentViewerWidth(
   return Math.max(MIN_VIEWER_WIDTH, Math.min(maxViewer, desired));
 }
 
-function upsertSummary(
-  list: SuperAgentChatSummary[],
-  chat: SuperAgentChat,
-): SuperAgentChatSummary[] {
-  const summary: SuperAgentChatSummary = {
-    id: chat.id,
-    title: chat.title,
-    intent: chat.intent,
-    ...(chat.pinned ? { pinned: true } : {}),
-    engine: chat.engine,
-    state: chat.state,
-    artifactCount: chat.artifacts.length,
-    messageCount: chat.messages.filter(m => m.role !== 'tool' && m.role !== 'reasoning').length,
-    updatedAt: chat.updatedAt,
-    createdAt: chat.createdAt,
-  };
+function upsertSummary(list: SuperAgentChatSummary[], chat: SuperAgentChat): SuperAgentChatSummary[] {
   const next = list.filter(item => item.id !== chat.id);
-  next.push(summary);
+  next.push(summarizeSuperAgentChat(chat));
   next.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   return next;
+}
+
+function isTaskInProgress({ state }: SuperAgentChatSummary): boolean {
+  return state === 'running' || state === 'waiting';
 }
 
 function resourceToArtifactPatch(
@@ -218,7 +212,7 @@ export function SuperAgentWorkspace({
   requestedMode = null,
   requestedGameId = null,
   onBack,
-  onExitRequestedMode,
+  onChangeRequestedMode,
   onChatIdChange,
   onOpenDesignProject,
   onOpenMotionProject,
@@ -235,7 +229,7 @@ export function SuperAgentWorkspace({
   requestedMode?: SuperAgentCreationModeId | null;
   requestedGameId?: string | null;
   onBack?: () => void;
-  onExitRequestedMode?: () => void;
+  onChangeRequestedMode?: (mode: SuperAgentCreationModeId | null) => void;
   onChatIdChange: (id: string | null, replace?: boolean) => void;
   onOpenDesignProject: (projectId: string) => void;
   onOpenMotionProject: (projectId: string) => void;
@@ -297,6 +291,7 @@ export function SuperAgentWorkspace({
     id: number;
     text: string;
     hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
     mode?: SuperAgentCreationModeId;
   } | null>(null);
   const [gameTemplateSeed, setGameTemplateSeed] = useState<{ id: number; game: GameCard } | null>(null);
@@ -326,6 +321,7 @@ export function SuperAgentWorkspace({
   const [activeTabId, setActiveTabId] = useState<string>(NEW_VIEWER_TAB_ID);
   const [previewArtifacts, setPreviewArtifacts] = useState<SuperAgentArtifact[]>([]);
   const [pendingDeployArtifactId, setPendingDeployArtifactId] = useState<string | null>(null);
+  const [pendingCodeFile, setPendingCodeFile] = useState<{ artifactId: string; filePath: string; seq: number } | null>(null);
   const handledRequestedGameRef = useRef<string | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -452,6 +448,43 @@ export function SuperAgentWorkspace({
       .catch(() => { /* non-blocking sidebar refresh */ })
       .finally(() => setLoadingList(false));
   }, []);
+
+  const backgroundTasks = conversations.filter(item => item.id !== chatId && isTaskInProgress(item));
+  const hasBackgroundTask = backgroundTasks.length > 0;
+  const getBackgroundTaskIds = useEffectEvent(() => backgroundTasks.map(item => item.id));
+
+  useEffect(() => {
+    if (!active || !hasBackgroundTask) return;
+    let cancelled = false;
+    let timer = window.setTimeout(refreshBackgroundTasks, 2000);
+
+    async function refreshBackgroundTasks() {
+      const outcomes = await Promise.allSettled(getBackgroundTaskIds().map(id => getSuperAgentChat(id, { fresh: true })));
+      if (cancelled) return;
+      const latestById = new Map<string, SuperAgentChat>();
+      for (const outcome of outcomes) {
+        if (outcome.status === 'fulfilled' && outcome.value?.conversation) {
+          const chat = outcome.value.conversation;
+          latestById.set(chat.id, chat);
+        }
+      }
+      setConversations(previous => {
+        const next = previous.map(item => {
+          const latest = latestById.get(item.id);
+          return isTaskInProgress(item) && latest && latest.updatedAt >= item.updatedAt && latest.state !== item.state
+            ? summarizeSuperAgentChat(latest)
+            : item;
+        });
+        return next.some((item, index) => item !== previous[index]) ? next : previous;
+      });
+      timer = window.setTimeout(refreshBackgroundTasks, 2000);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [active, chatId, hasBackgroundTask]);
 
   useEffect(() => {
     if (!runtimesDir) return;
@@ -700,6 +733,7 @@ export function SuperAgentWorkspace({
       id: seq,
       text: payload.prompt,
       ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
+      ...(payload.contextTags?.length ? { contextTags: payload.contextTags } : {}),
       mode: payload.mode,
     });
 
@@ -721,11 +755,23 @@ export function SuperAgentWorkspace({
         .catch(() => { /* composer still holds draft + attachments */ });
     }
 
-    if (payload.prompt.trim() || mergedAttachments.length > 0 || payload.initialArtifact) {
+    if (payload.prompt.trim() || payload.mode || mergedAttachments.length > 0 || payload.initialArtifact) {
       showToast(t('Loaded into Super Agent'), 'info', 'feedback');
     }
   }, [active, attachments, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange, showToast, t]);
 
+  // `/agent?prompt=…` (from an external Agent or a share page): queue it as a
+  // new-chat handoff, prefilled but not sent, and drop it from the address bar.
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return;
+    const link = readSuperAgentPromptLink(window.location.search);
+    if (!link) return;
+    window.history.replaceState(window.history.state, '', withoutSuperAgentPromptLink(window.location.href));
+    // A prompt link always starts a new chat: leave any routed conversation first
+    // so its in-flight load is cancelled and cannot reclaim the composer.
+    if (chatId) onChatIdChange(null, true);
+    queueSuperAgentHandoff(link);
+  }, [active, chatId, onChatIdChange]);
   useEffect(() => {
     applyPendingHandoff();
     return subscribeSuperAgentHandoff(applyPendingHandoff);
@@ -825,6 +871,7 @@ export function SuperAgentWorkspace({
     text: string,
     meta?: {
       hiddenInstructions?: string;
+      contextTags?: SuperAgentContextTag[];
       mode?: SuperAgentCreationModeId;
       workingDir?: string;
       overrideAttachments?: SuperAgentResourceAttachment[];
@@ -849,6 +896,7 @@ export function SuperAgentWorkspace({
         requestId,
         text,
         ...(meta?.hiddenInstructions?.trim() ? { hiddenInstructions: meta.hiddenInstructions.trim() } : {}),
+        ...(meta?.contextTags?.length ? { contextTags: meta.contextTags } : {}),
         ...(meta?.mode ? { mode: meta.mode } : {}),
         ...(meta?.workingDir ? { workingDir: meta.workingDir } : {}),
         ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
@@ -909,6 +957,22 @@ export function SuperAgentWorkspace({
         })
         .catch(() => { /* local tab already focused */ });
     }
+  };
+
+  const handleOpenChangedFile = (file: SuperAgentFileOperation) => {
+    const inspectable = activeChat?.artifacts.filter(
+      a => a.kind === 'game-project' || a.kind === 'design-project',
+    ) ?? [];
+    const targetId =
+      (file.artifactId && inspectable.some(a => a.id === file.artifactId) ? file.artifactId : undefined)
+      ?? inspectable.find(a => a.id === activeChat?.activeArtifactId)?.id
+      ?? inspectable.at(-1)?.id;
+    if (!targetId) {
+      void handleCopyText(file.path);
+      return;
+    }
+    setPendingCodeFile({ artifactId: targetId, filePath: file.path, seq: Date.now() });
+    void handleOpenArtifactId(targetId);
   };
 
   const handleOpenWebUrl = async (url: string) => {
@@ -1053,7 +1117,7 @@ export function SuperAgentWorkspace({
     if (game && game.source !== 'mine') {
       const displayTitle = localizedGameTitle(game, locale);
       setGameTemplateSeed({ id: ++handoffSeqRef.current, game });
-      showToast(t('Based on {title}', { title: displayTitle }), 'info', 'feedback');
+      showToast(t('Remix · {title}', { title: displayTitle }), 'info', 'feedback');
       return;
     }
 
@@ -1270,6 +1334,7 @@ export function SuperAgentWorkspace({
           requestId,
           text: payload.prompt,
           ...(payload.hiddenInstructions?.trim() ? { hiddenInstructions: payload.hiddenInstructions.trim() } : {}),
+          ...(payload.contextTags?.length ? { contextTags: payload.contextTags } : {}),
           ...(payload.mode ? { mode: payload.mode } : {}),
           ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
           engine: selection.engine,
@@ -1287,6 +1352,7 @@ export function SuperAgentWorkspace({
           id: ++handoffSeqRef.current,
           text: payload.prompt,
           ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
+          ...(payload.contextTags?.length ? { contextTags: payload.contextTags } : {}),
           mode: payload.mode,
         });
         showToast(error instanceof Error ? error.message : t('Could not start Super Agent'));
@@ -1364,9 +1430,16 @@ export function SuperAgentWorkspace({
     }
   }, [conversations]);
 
+  const taskResultRead = useReadTaskResults(
+    active && !loadingChat && !loadFailed && activeChat?.id === chatId
+      ? activeChat
+      : null,
+  );
+
   const sidebarNode = (
     <ConversationSidebar
       conversations={conversations}
+      taskResultRead={taskResultRead}
       activeId={chatId}
       loading={loadingList}
       agentStatus={agentStatus}
@@ -1439,7 +1512,7 @@ export function SuperAgentWorkspace({
             selection={selection}
             permissionMode={permissionMode}
             onBack={onBack}
-            onExitRequestedMode={onExitRequestedMode}
+            onChangeRequestedMode={onChangeRequestedMode}
             onPlayGame={game => void handlePlayGame(game)}
             onDeployGame={game => void handleDeployGame(game)}
             onRetryLoad={() => setChatRetry(value => value + 1)}
@@ -1460,6 +1533,7 @@ export function SuperAgentWorkspace({
             onResourcesUploaded={refreshResources}
             onAttachmentsChange={setAttachments}
             onOpenArtifactId={artifactId => void handleOpenArtifactId(artifactId)}
+            onOpenChangedFile={handleOpenChangedFile}
             onPreviewAttachment={att => void handleOpenResource(att)}
             onOpenWebUrl={url => void handleOpenWebUrl(url)}
             onCopyText={code => void handleCopyText(code)}
@@ -1539,6 +1613,8 @@ export function SuperAgentWorkspace({
               onUseGameInAgent={artifact => void handleUseGameInAgent(artifact)}
               pendingDeployArtifactId={pendingDeployArtifactId}
               onConsumeDeployRequest={() => setPendingDeployArtifactId(null)}
+              pendingCodeFile={pendingCodeFile}
+              onConsumePendingCodeFile={() => setPendingCodeFile(null)}
               onOpenAccountSettings={onOpenAccountSettings}
               onAttachBrowserAnnotation={handleAttachBrowserAnnotation}
               onNotify={(msg, tone) => showToast(msg, tone === 'error' ? 'error' : 'info', 'feedback')}

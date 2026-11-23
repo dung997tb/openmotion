@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { designHttp, designProjectsFor } from '../design-projects.ts';
 import { gameHttp, gameProjectsFor } from '../game-projects.ts';
@@ -7,15 +8,31 @@ import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from '../shared/pr
 import { Phase1Service } from '../phase1.ts';
 import { pluginRoot } from '../hyperframes.ts';
 import {
+  CLAUDE_SUPER_AGENT_INSTRUCTIONS,
+  SUPER_AGENT_INSTRUCTIONS,
   SuperAgentConversations,
   extractLocalDevServerUrl,
   formatBrowserAnnotationsContext,
   superAgentConversations,
 } from '../gateway/super-agent.ts';
+import {
+  captureWorkspaceSnapshot,
+  collectTaskProjectRoots,
+  diffWorkspaceSnapshots,
+  resolveTaskProjectDir,
+} from '../gateway/super-agent-workspace.ts';
+import { gameAssetInstructions } from '../shared/game-contract.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
+import {
+  registerCapabilityScriptExecutor,
+  saveCapabilityOverrides,
+  unregisterCapabilityScriptExecutor,
+} from '../gateway/capability-center.ts';
+import { classifySuperAgentTool, describeSuperAgentApproval, formatSuperAgentToolLabel } from '../shared/super-agent.ts';
+import { execute } from '../hyperframes.ts';
+import { verificationBinaries } from '../scripts/verify-export.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
 import { buildSuperAgentHandoff } from '../shared/capability-hub.ts';
-import { describeSuperAgentApproval } from '../shared/super-agent.ts';
 import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
 
@@ -76,7 +93,12 @@ test('SuperAgentConversations persists CRUD state, recovers interrupted runs, an
   // Persist running state on disk directly to verify restart interruption recovery.
   const file = await service.file(created.id);
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(file, JSON.stringify({ ...updated, state: 'running', approvals: [{ id: 'a1', kind: 'tool', title: 'Pending', detail: '{}' }] }));
+  await writeFile(file, JSON.stringify({
+    ...updated,
+    state: 'running',
+    approvals: [{ id: 'a1', kind: 'tool', title: 'Pending', detail: '{}' }],
+    requestReceipts: [{ requestId: 'req-new-turn', inputHash: 'fixture-hash' }],
+  }));
   const reloaded = new SuperAgentConversations(store);
   const recovered = await reloaded.get(created.id);
   assert.equal(recovered.state, 'failed');
@@ -87,6 +109,7 @@ test('SuperAgentConversations persists CRUD state, recovers interrupted runs, an
   assert.equal(list.length, 1);
   assert.equal(list[0].id, created.id);
   assert.equal(list[0].pinned, true);
+  assert.equal(list[0].lastTurnId, 'req-new-turn');
 
   await reloaded.remove(created.id);
   await assert.rejects(() => reloaded.get(created.id), /CONVERSATION_NOT_FOUND/);
@@ -1432,6 +1455,12 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
       text: '我想做一个2024小游戏',
       hiddenInstructions: 'Use the openmotion-game Skill. Read openmotion://workflow/game/start.',
       mode: 'game',
+      contextTags: [
+        { kind: 'mode', label: 'Game', icon: 'gamepad-line', tone: 'agent' },
+        { kind: 'param', label: 'Casual' },
+        { kind: 'param', label: '9:16' },
+        { kind: 'param', label: 'Single player' },
+      ],
     },
     { origin: 'http://127.0.0.1:4173', phase1: () => phase1 },
   );
@@ -1445,7 +1474,9 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
   assert.equal(waitingSnap.approvals[0].target, 'bgm.wav');
   assert.equal(waitingSnap.messages[0].text, '我想做一个2024小游戏');
   assert.equal(waitingSnap.messages[0].text.includes('openmotion-game'), false);
+  assert.deepEqual(waitingSnap.messages[0].contextTags?.map(tag => tag.label), ['Game', 'Casual', '9:16', 'Single player']);
   assert.ok(receivedAgentPrompt.includes('<openmotion-task-instructions>'));
+  assert.ok(receivedAgentPrompt.includes('Mode/Skill: game | Selected parameters: Casual · 9:16 · Single player'));
   assert.ok(receivedAgentPrompt.includes('openmotion://workflow/game/start'));
 
   // Approve with alwaysAllow=true -> switches chat.permissionMode to 'auto' and auto-approves req #42
@@ -1460,3 +1491,389 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
   assert.deepEqual(decisions, ['accept', 'accept']);
   await service.close();
 }));
+
+test('SuperAgentConversations gates openmotion_capability_run approvals, skips approval on dryRun, wraps asset_manage read media, and isolates artifact extraction', () => fixture(async store => {
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_discover', { action: 'list' }), 'Browsed capability catalog');
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_run', { dryRun: true }), 'Previewed capability execution');
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_run', { capabilityId: 'remove-background' }), 'Ran media capability');
+  assert.equal(formatSuperAgentToolLabel('openmotion_job_manage', { action: 'status' }), 'Checked generation job status');
+  assert.equal(formatSuperAgentToolLabel('openmotion_asset_manage', { action: 'read' }), 'Inspected media asset');
+  assert.equal(
+    classifySuperAgentTool('openmotion_capability_run', { capabilityId: 'remove-background' }).summary,
+    'remove-background',
+  );
+
+  const phase1 = new Phase1Service(store, pluginRoot, {
+    origin: () => 'http://127.0.0.1:4173',
+    nativeUrl: () => undefined,
+    openProject: async () => {},
+    mutation: async fn => fn(),
+    cancel: async () => ({ id: 'x', state: 'cancelled' } as any),
+  });
+
+  const makePng = async (filename: string, color: string) => {
+    const file = path.join(store.directory, filename);
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', `color=c=${color}:s=32x24`, '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  };
+
+  const rawPng = await makePng('sa-source.png', 'blue');
+  const imported = await phase1.call('openmotion_asset_manage', {
+    action: 'import',
+    requestId: 'sa-import-1',
+    sourcePath: rawPng,
+    name: 'Source Subject',
+  });
+  const sourceRef = { assetId: imported.asset.id, versionId: imported.asset.currentVersionId };
+
+  const scriptId = 'sa-test-cutout';
+  let scriptRuns = 0;
+  registerCapabilityScriptExecutor(scriptId, async () => {
+    scriptRuns += 1;
+    return { sourcePath: await makePng('sa-cutout.png', 'white'), name: 'Cutout Subject' };
+  });
+
+  await saveCapabilityOverrides(store, [
+    { id: 'remove-background', executor: { kind: 'script', scriptId } },
+  ]);
+
+  let producedAssetId = '';
+  let producedVersionId = '';
+  const responses = new Map<number, any>();
+
+  class CapabilityRpc {
+    onNotification: (msg: any) => void;
+    closed = false;
+
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, _onError: (err: Error) => void) {
+      this.onNotification = onNotification;
+    }
+
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-cap-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          // 1. dryRun: true must NOT require approval or run script
+          this.onNotification({
+            id: 201,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-dry',
+              tool: 'openmotion_capability_run',
+              arguments: { capabilityId: 'remove-background', references: [sourceRef], dryRun: true },
+            },
+          });
+        });
+        return { turn: { id: 'turn-cap-1' } };
+      }
+      return {};
+    }
+
+    send(payload: any) {
+      responses.set(payload.id, payload);
+      if (payload.id === 201) {
+        queueMicrotask(() => {
+          // 2. Real capability_run (no requestId passed) must trigger generation approval & inject requestId
+          this.onNotification({
+            id: 202,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-real',
+              tool: 'openmotion_capability_run',
+              arguments: { capabilityId: 'remove-background', references: [sourceRef] },
+            },
+          });
+        });
+      }
+      if (payload.id === 202) {
+        const textItem = payload.result?.contentItems?.find((i: any) => i.type === 'inputText')?.text;
+        const parsed = textItem ? JSON.parse(textItem) : {};
+        producedAssetId = parsed.asset?.id ?? '';
+        producedVersionId = parsed.version?.id ?? '';
+        queueMicrotask(() => {
+          // 3. asset_manage action=get must NOT add an extra artifact
+          this.onNotification({
+            id: 203,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-get',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'get', assetId: imported.asset.id, versionId: imported.asset.currentVersionId },
+            },
+          });
+        });
+      }
+      if (payload.id === 203) {
+        queueMicrotask(() => {
+          // 4. asset_manage action=update (trash) must NOT add an extra artifact
+          this.onNotification({
+            id: 204,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-update',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'update', assetId: imported.asset.id, changes: { trashed: true } },
+            },
+          });
+        });
+      }
+      if (payload.id === 204) {
+        queueMicrotask(() => {
+          // 5. asset_manage action=read must return wrapped image media content
+          this.onNotification({
+            id: 205,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-read',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'read', assetId: producedAssetId, versionId: producedVersionId },
+            },
+          });
+        });
+      }
+      if (payload.id === 205) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-cap-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: CapabilityRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  try {
+    const chat = await service.create({ engine: 'codex', permissionMode: 'on-request' });
+    await service.start(chat.id, { requestId: 'req-cap-turn-1', text: 'Remove background from subject' }, {
+      origin: 'http://127.0.0.1:4173',
+      phase1: () => phase1,
+    });
+
+    // Wait for the approval triggered ONLY by call 202 (NOT call 201 dryRun)
+    let waiting = await service.get(chat.id);
+    for (let i = 0; i < 80 && waiting.approvals.length === 0; i++) {
+      await new Promise(r => setTimeout(r, 15));
+      waiting = await service.get(chat.id);
+    }
+    assert.equal(responses.has(201), true, 'dryRun should finish without waiting for approval');
+    assert.equal(scriptRuns, 0, 'script must not execute before generation approval');
+    assert.equal(waiting.approvals.length, 1);
+    assert.equal(waiting.approvals[0].kind, 'generation');
+    assert.match(waiting.approvals[0].title, /remove-background/);
+
+    await service.answer(chat.id, waiting.approvals[0].id, true);
+
+    let done = await service.get(chat.id);
+    for (let i = 0; i < 100 && done.state !== 'idle'; i++) {
+      await new Promise(r => setTimeout(r, 15));
+      done = await service.get(chat.id);
+    }
+
+    assert.equal(done.state, 'idle');
+    assert.equal(scriptRuns, 1);
+    assert.ok(producedAssetId && producedVersionId);
+
+    // Only the generated cutout asset should be extracted into chat artifacts (NOT get/update/trash on source)
+    assert.equal(done.artifacts.length, 1);
+    assert.equal(done.artifacts[0].assetId, producedAssetId);
+    assert.equal(done.artifacts[0].versionId, producedVersionId);
+
+    // asset_manage(action="read") must wrap image preview into Codex inputImage content item
+    const readResp = responses.get(205);
+    assert.equal(readResp?.result?.success, true);
+    assert.ok(
+      readResp?.result?.contentItems?.some((item: any) => item.type === 'inputImage' && typeof item.imageUrl === 'string'),
+      'expected wrapped imageUrl content item from openmotion_asset_manage(action="read")',
+    );
+  } finally {
+    unregisterCapabilityScriptExecutor(scriptId);
+    await service.close();
+  }
+}));
+
+test('classifySuperAgentTool extracts every file in multi-file Game, Design, and Motion batches plus capture_cover', () => {
+  const gameBatch = classifySuperAgentTool('mcp__openmotion__openmotion_game_write_files', {
+    id: 'g-1',
+    files: [
+      { path: 'assets/icon.svg', content: '<svg></svg>' },
+      { path: 'index.html', content: '<!doctype html>\n<html></html>' },
+      { path: 'style.css', content: 'body { margin: 0; }\ncanvas { display: block; }' },
+      { path: 'logic.js', content: 'export const meta = {};' },
+      { path: 'client.js', content: 'console.log("ok");' },
+    ],
+  });
+  assert.equal(gameBatch.category, 'file_edit');
+  assert.equal(gameBatch.summary, '5 files');
+  assert.deepEqual(gameBatch.files?.map(f => f.path), [
+    'assets/icon.svg',
+    'index.html',
+    'style.css',
+    'logic.js',
+    'client.js',
+  ]);
+  assert.equal(gameBatch.files?.[1].addedLines, 2);
+  assert.ok(gameBatch.files?.[1].diffPreview?.includes('+<!doctype html>'));
+
+  const designWrite = classifySuperAgentTool('openmotion_design_edit', {
+    action: 'write',
+    files: [
+      { path: 'index.html', content: '<h1>Hi</h1>' },
+      { path: 'app.js', content: 'const a = 1;' },
+    ],
+  });
+  assert.deepEqual(designWrite.files?.map(f => f.path), ['index.html', 'app.js']);
+
+  const designDelete = classifySuperAgentTool('openmotion_design_edit', {
+    action: 'delete',
+    files: [{ path: 'old.css' }],
+  });
+  assert.equal(designDelete.category, 'file_delete');
+  assert.deepEqual(designDelete.files?.map(f => ({ path: f.path, action: f.action })), [
+    { path: 'old.css', action: 'delete' },
+  ]);
+
+  const cover = classifySuperAgentTool('openmotion_game_capture_cover', { id: 'g-1' });
+  assert.equal(cover.category, 'file_write');
+  assert.deepEqual(cover.files, [{ action: 'create', path: 'assets/cover.png', binary: true }]);
+});
+
+test('per-task projectDir, checkpoint diffing, and legacy hydration track all deliverable files accurately', () => fixture(async store => {
+  const service = new SuperAgentConversations(store);
+  const created = await service.create({ intent: 'coding', engine: 'claude' });
+  assert.equal(created.projectKind, 'workspace');
+  assert.equal(created.projectDir, path.join(store.directory, 'super-agent', 'work', created.id));
+  const workDirStat = await stat(created.projectDir!);
+  assert.ok(workDirStat.isDirectory());
+
+  const resolvedCustom = resolveTaskProjectDir(store.directory, {
+    id: created.id,
+    workingDir: '/tmp/custom-repo',
+    artifacts: [{
+      id: 'game:g1',
+      kind: 'game-project',
+      title: 'G1',
+      projectId: 'g1',
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  });
+  assert.deepEqual(resolvedCustom, { projectDir: '/tmp/custom-repo', projectKind: 'custom' });
+
+  // Create a game project with all 9 real deliverable files plus internal scratch/metadata noise
+  const { game } = await gameProjectsFor(store.directory).create({
+    prompt: 'Action game',
+    genre: 'casual',
+    multiplayer: true,
+  });
+  await gameProjectsFor(store.directory).write(game.id, [
+    { path: 'index.html', content: '<!doctype html>\n<title>Action</title>' },
+    { path: 'style.css', content: 'body { color: white; }' },
+    { path: 'logic.js', content: 'export const meta = { minPlayers: 1, maxPlayers: 2, tickRate: 20 };' },
+    { path: 'client.js', content: 'console.log("ready");' },
+    { path: 'assets/icon.svg', content: '<svg></svg>' },
+    { path: 'design/plan.md', content: '# Plan' },
+    { path: 'design/assets.csv', content: 'name,type\ncover,png' },
+    { path: 'design/verification.md', content: '# Verification' },
+  ]);
+  const gameDir = path.join(store.directory, 'games', game.id);
+  await mkdir(path.join(gameDir, 'assets'), { recursive: true });
+  await writeFile(
+    path.join(gameDir, 'assets', 'cover.png'),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  );
+  await mkdir(path.join(gameDir, 'assets', 'playtests'), { recursive: true });
+  await writeFile(path.join(gameDir, 'assets', 'playtests', 'ephemeral.png'), Buffer.from([1, 2, 3]));
+  await mkdir(path.join(gameDir, 'trailer'), { recursive: true });
+  await writeFile(path.join(gameDir, 'trailer', 'clip.mp4'), Buffer.from([4, 5, 6]));
+
+  // Snapshot captures exact 9 deliverable files and excludes internal game metadata/noise
+  const chatWithGame = await service.create({
+    engine: 'claude',
+    initialArtifact: {
+      id: `game:${game.id}`,
+      kind: 'game-project',
+      title: game.title,
+      projectId: game.id,
+      url: `/motion-api/games/${game.id}/play/index.html`,
+    },
+  });
+  assert.equal(chatWithGame.projectKind, 'game');
+  assert.equal(chatWithGame.projectDir, gameDir);
+
+  const roots = collectTaskProjectRoots(store.directory, chatWithGame);
+  const snap = await captureWorkspaceSnapshot(roots);
+  const diffOps = diffWorkspaceSnapshots(undefined, snap);
+  assert.deepEqual(diffOps.map(op => op.path), [
+    'assets/cover.png',
+    'assets/icon.svg',
+    'client.js',
+    'design/assets.csv',
+    'design/plan.md',
+    'design/verification.md',
+    'index.html',
+    'logic.js',
+    'style.css',
+  ]);
+  const coverOp = diffOps.find(op => op.path === 'assets/cover.png');
+  assert.equal(coverOp?.binary, true);
+  assert.equal(coverOp?.previewUrl, `/motion-api/games/${encodeURIComponent(game.id)}/play/assets/cover.png`);
+  assert.equal(coverOp?.artifactId, `game:${game.id}`);
+
+  // Legacy chat persisted without turnChangedFiles is hydrated on get()
+  const chatFile = await service.file(chatWithGame.id);
+  const parsed = JSON.parse(await (await import('node:fs/promises')).readFile(chatFile, 'utf8'));
+  parsed.messages = [{ id: 'turn-u1', role: 'user', text: 'Build game', createdAt: 100 }];
+  delete parsed.turnChangedFiles;
+  await writeFile(chatFile, JSON.stringify(parsed));
+
+  const loaded = await service.get(chatWithGame.id);
+  assert.equal(loaded.turnChangedFiles?.['turn-u1']?.length, 9);
+  assert.ok(loaded.turnChangedFiles?.['turn-u1']?.some(op => op.path === 'index.html'));
+
+  // Run + stop with custom mock agent persists turnChangedFiles in work/<chatId>
+  const runChat = await service.create({ intent: 'coding', engine: 'claude' });
+  const runService = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/fake/claude',
+    runClaude: async ({ cwd, onEvent }) => {
+      await writeFile(path.join(cwd, 'notes.md'), '# Task Notes\nReady\n');
+      await onEvent({ type: 'result', subtype: 'success', result: 'Created notes.' });
+    },
+  });
+  await runService.start(
+    runChat.id,
+    { requestId: 'req-turn-snap-1', text: 'Write notes.md' },
+    { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) },
+  );
+  const finished = await runService.waitForChat(runChat.id);
+  const firstUserMsg = finished.messages.find(m => m.role === 'user');
+  assert.ok(firstUserMsg);
+  assert.equal(finished.turnChangedFiles?.[firstUserMsg!.id]?.[0]?.path, 'notes.md');
+  assert.equal(finished.turnChangedFiles?.[firstUserMsg!.id]?.[0]?.action, 'create');
+
+  await runService.close();
+  await service.close();
+}));
+
+test('Codex and Claude Super Agent prompts share unified gameAssetInstructions without stale optional-generate guidance', () => {
+  for (const prompt of [SUPER_AGENT_INSTRUCTIONS, CLAUDE_SUPER_AGENT_INSTRUCTIONS]) {
+    assert.ok(prompt.includes(gameAssetInstructions), 'Super Agent prompt must embed gameAssetInstructions');
+    assert.doesNotMatch(prompt, /optionally generate visual/i);
+    assert.doesNotMatch(prompt, /openmotion_generate_asset/);
+  }
+});

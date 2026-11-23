@@ -20,6 +20,7 @@ import { MCP_HTTP_PATH } from './shared/mcp-http.ts';
 import { superAgentConversations } from './gateway/super-agent.ts';
 import { collectWorkspaceResources } from './gateway/super-agent-resources.ts';
 import { assetHttp } from './gateway/asset-http.ts';
+import { capabilityDiscover, capabilityRun, loadCapabilityCatalog, syncCapabilityRemoteConfig } from './gateway/capability-center.ts';
 import { getWorkflow } from './shared/workflow.ts';
 import { attachmentDisposition } from './shared/http-header.ts';
 import { isMain } from './shared/entry.ts';
@@ -55,6 +56,7 @@ import { phase1McpCapabilities } from './shared/phase1-tools.ts';
 import { recoverProjectTransactions } from './phase1-versions.ts';
 import { verifyExport } from './scripts/verify-export.ts';
 import { createAppTracking, closeTracking, saveTrackingPreference, trackingPreference, trackingLockReason, type OmTracking } from './shared/tracking.ts';
+import { flushCodexSessionTracking, syncActiveCodexThreads } from './shared/codex-session-tracking.ts';
 import { studioEvents } from './tracking/events.ts';
 import { configureNativeEnvironment, nativeRuntimeStatus, startNativePreparation, requireNativeRuntime } from './scripts/npm-runtime.mjs';
 import { nativeRouteCapability } from './shared/native-runtime.ts';
@@ -79,8 +81,13 @@ const runningExports = new Map<string, AbortController>();
 const workerInstanceId = crypto.randomUUID();
 const collectorId = crypto.randomUUID();
 let lastQueueTelemetry = 0;
+let lastCodexSessionSync = 0;
 
 async function emitQueueTelemetry(store: WorkspaceStore, tracking?: OmTracking) {
+  if (Date.now() - lastCodexSessionSync >= 60_000) {
+    lastCodexSessionSync = Date.now();
+    void syncActiveCodexThreads(store.directory).catch(() => {});
+  }
   if (!tracking) return;
   if (Date.now() - lastQueueTelemetry < 60_000) return;
   lastQueueTelemetry = Date.now();
@@ -278,13 +285,15 @@ async function invokePhase1WithTracking(
   store: WorkspaceStore,
   context: Service,
   originUrl: string,
-  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string },
+  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string; channel?: unknown },
 ) {
   if (!context.runtimeRoot) throw new Error('RUNTIME_NOT_READY');
   const phase1 = ensurePhase1(store, context, originUrl);
   const host = validHostContext(data.trackingHost) ? data.trackingHost : unknownHost;
+  const channel: 'gui' | 'mcp' = data.channel === 'gui' ? 'gui' : 'mcp';
   let result = await phase1.call(data.name, data.arguments ?? {}, host, {
     attributeEntry: Object.hasOwn(data, 'trackingHost'),
+    channel,
   });
   if (host.host_agent !== 'unknown' && context.tracking?.enabled() && (result.previewUrl || result.previewHandoff)) {
     const hosts = context.trackingHosts ??= new Map();
@@ -464,7 +473,11 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       if (projectHeader !== undefined && projectHeader !== id) return json(res, 400, { error: 'PROJECT_SCOPE_MISMATCH' });
       store = store.forProject(id);
     }
-    if (context.ensureStudio && !isStandaloneSpaPath(url.pathname, url.search) && (isSpaRoutePath(url.pathname) || url.pathname.startsWith('/sessions/'))) {
+    const needsRuntimeCaps = url.pathname.startsWith('/create/') || url.searchParams.get('page') === 'create';
+    const routeCapabilities = needsRuntimeCaps
+      ? await loadCapabilityCatalog(store.workspaceStore ?? store).catch(() => undefined)
+      : undefined;
+    if (context.ensureStudio && !isStandaloneSpaPath(url.pathname, url.search, '', routeCapabilities) && (isSpaRoutePath(url.pathname) || url.pathname.startsWith('/sessions/'))) {
       const projectId = editorProjectIdFromPath(url.pathname) ?? url.searchParams.get('project');
       const sessionId = url.searchParams.get('session');
       if (projectId !== null) {
@@ -1114,6 +1127,48 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       if (url.pathname === '/api/settings/account/subscription' && req.method === 'POST') return json(res, 200, await gateway.account.openSubscription());
       return json(res, 404, { error: 'Settings endpoint not found' });
     }
+    if (motionRequest && url.pathname.startsWith('/api/capabilities')) {
+      if (url.pathname === '/api/capabilities' && req.method === 'GET') {
+        const action = url.searchParams.get('action') ?? undefined;
+        const capabilityId = url.searchParams.get('capabilityId') ?? undefined;
+        const modality = url.searchParams.get('modality') ?? undefined;
+        const includeComingSoon = url.searchParams.get('includeComingSoon') !== 'false';
+        const refresh = url.searchParams.get('refresh') === 'true';
+        const offsetParam = url.searchParams.get('offset');
+        const limitParam = url.searchParams.get('limit');
+        const offset = offsetParam !== null ? Number(offsetParam) : undefined;
+        const limit = limitParam !== null ? Number(limitParam) : undefined;
+        if (action === 'catalog') {
+          if (refresh) await syncCapabilityRemoteConfig(store).catch(() => {});
+          return json(res, 200, { capabilities: await loadCapabilityCatalog(store) });
+        }
+        return json(
+          res,
+          200,
+          await capabilityDiscover(
+            store,
+            action === 'quote' && capabilityId
+              ? { action: 'quote', capabilityId, model: url.searchParams.get('model') ?? undefined }
+              : capabilityId
+                ? { action: 'describe', capabilityId, refresh }
+                : { action: 'list', modality, includeComingSoon, refresh, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) },
+            context.tracking,
+            'gui',
+          ),
+        );
+      }
+      if (url.pathname === '/api/capabilities/sync' && req.method === 'POST') {
+        const synced = await syncCapabilityRemoteConfig(store);
+        return json(res, 200, { total: synced.length });
+      }
+      if (url.pathname === '/api/capabilities/run' && req.method === 'POST') {
+        const body = await input(req);
+        const isDryRun = body?.dryRun === true;
+        if (!isDryRun && !context.studio?.alive()) return json(res, 503, { error: 'Open the Studio before generating media' });
+        return json(res, isDryRun ? 200 : 202, await capabilityRun(store, { action: 'run', ...body }, context.tracking, 'gui'));
+      }
+      return json(res, 404, { error: 'Unknown capability center operation' });
+    }
     if (motionRequest && (url.pathname.startsWith('/api/models') || url.pathname.startsWith('/api/generations'))) {
       const gateway = gatewayFor(store, context.tracking);
       if (url.pathname === '/api/models/capabilities' && req.method === 'GET') return json(res, 200, await gateway.status(url.searchParams.get('refresh') === 'true'));
@@ -1505,7 +1560,7 @@ export async function startServer(store = sharedStore, port = Number(process.env
       server.closeAllConnections();
       server.close();
       await context.studio?.close();
-      await closeTracking(context.tracking);
+      await Promise.allSettled([closeTracking(context.tracking), flushCodexSessionTracking(store.directory)]);
     },
   };
 }

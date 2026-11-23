@@ -1,4 +1,4 @@
-import type { SuperAgentArtifact, SuperAgentResourceAttachment } from './super-agent.ts';
+import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentResourceAttachment } from './super-agent.ts';
 
 export type CapabilityDomainId =
   | 'motion'
@@ -81,6 +81,10 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
     title: 'Media Models & Generation',
     description: 'Discover configured providers and models to generate or edit images, videos, music, SFX, and speech.',
     tools: [
+      'openmotion_capability_discover',
+      'openmotion_capability_run',
+      'openmotion_job_manage',
+      'openmotion_asset_manage',
       'openmotion_media_use',
       'openmotion_assets_use',
     ],
@@ -92,6 +96,7 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
     title: 'Brand Kits',
     description: 'Extract and reuse brand styles, palettes, typography, logos, and visual rules across every workflow.',
     tools: [
+      'openmotion_asset_manage',
       'openmotion_assets_use',
       'openmotion_design_catalog',
     ],
@@ -230,6 +235,8 @@ export type SuperAgentHandoffPayload = {
   /** Optional Skill/workflow execution context passed to the Agent behind the scenes without cluttering the user's visible message. */
   hiddenInstructions?: string;
   attachments?: SuperAgentResourceAttachment[];
+  /** Concise mode/skill and parameter tags displayed above the user message bubble. */
+  contextTags?: SuperAgentContextTag[];
   initialArtifact?: Partial<SuperAgentArtifact>;
   mode?: 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
   title?: string;
@@ -486,6 +493,7 @@ export function buildSuperAgentHandoff(
   options: {
     prompt?: string;
     hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
     locale?: string;
     autoSend?: boolean;
     newChat?: boolean;
@@ -569,6 +577,7 @@ export function buildSuperAgentHandoff(
     prompt,
     ...(hiddenInstructions ? { hiddenInstructions } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(options.contextTags?.length ? { contextTags: options.contextTags } : {}),
     ...(options.initialArtifact ? { initialArtifact: options.initialArtifact } : {}),
     mode: defaultModeForRef(ref),
     title: ref.title,

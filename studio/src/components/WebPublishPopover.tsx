@@ -319,10 +319,6 @@ export function WebPublishPopover({
       <div className="om-web-publish-head">
         <div className="om-web-publish-head-title">
           <strong>{t('Share')}</strong>
-          <span className="om-web-publish-tag">
-            <RemixIcon name="cloud-line" size={12} />
-            <span>{t('Cloud deploy')}</span>
-          </span>
           {isPublished && status?.freshness === 'outdated' && (
             <span className="om-web-publish-freshness" data-state="outdated">
               {t('Changes pending')}

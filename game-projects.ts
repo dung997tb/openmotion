@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { mkdtemp } from 'node:fs/promises';
 import { browserExecutable, browserAutomation } from './browser.ts';
 import type { Page, Browser, KeyInput } from 'puppeteer-core';
+import { assetHttp } from './gateway/asset-http.ts';
 import { WorkspaceStore } from './workspace.ts';
 import { execute, pluginRoot, HYPERFRAMES_VERSION } from './hyperframes.ts';
 import { verificationBinaries } from './scripts/verify-export.ts';
@@ -18,7 +19,7 @@ import type { Duplex } from 'node:stream';
 import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/preview-bridge.ts';
 import { attachmentDisposition } from './shared/http-header.ts';
 import { zip } from './scripts/zip.mjs';
-import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
+import { gameAssetInstructions, gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
 
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
 const kitsRoot = fileURLToPath(new URL('./templates/game-kits/', import.meta.url));
@@ -85,7 +86,7 @@ function briefInput(raw: any): GameBrief {
 }
 function instruction(game: GameCard, brief: GameBrief, remix = false) {
   const summary = [brief.style && `${brief.style} style`, brief.multiplayer && 'with multiplayer', brief.genre, brief.setting && `${brief.setting} setting`].filter(Boolean).join(', ');
-  return `Use the openmotion-game Skill to ${remix ? 'remix' : 'build'} game ${game.id} in this workspace. Read openmotion://workflow/game/start and openmotion_game_get with id=${game.id}. Brief: ${summary ? summary + '. ' : ''}${brief.prompt}\nAsk at most two short questions (multiplayer mode and local-market publication), only when missing. Propose a visual direction and a 60–90 word style formula. Obtain approval for any priced generated assets through openmotion_generate_asset. Set building with openmotion_game_set_status; author only this game's files through openmotion_game_write_files. For multiplayer implement the six logic.js exports in shared/game-contract.ts, use the room socket, and self-test through openmotion_game_playtest using headless clients. Never operate the user's browser or desktop. Use openmotion_game_update_meta to set a concise title, description, keyboard/mouse and touch controls, zh-CN i18n, and a cover captured by openmotion_game_capture_cover (game-only headless screenshot). Write design/plan.md, design/assets.csv and design/verification.md. Before publication run openmotion_game_simulate for reference and idle: reference must win and idle must lose. Run openmotion_game_validate, fix diagnostics, set ready, and call openmotion_game_publish only when publication is authorized. Report the actual playUrl, validation and play-test evidence; local publication is not internet deployment.`;
+  return `Use the openmotion-game Skill to ${remix ? 'remix' : 'build'} game ${game.id} in this workspace. Read openmotion://workflow/game/start (or use your host's workflow reader if provided) and openmotion_game_get with id=${game.id}. Brief: ${summary ? summary + '. ' : ''}${brief.prompt}\nAsk at most two short questions (multiplayer mode and local-market publication), only when missing, plus one batched spend-consent question when priced generation is planned. Propose a visual direction and a 60–90 word style formula. ${gameAssetInstructions} Set building with openmotion_game_set_status; author only this game's files through openmotion_game_write_files. For multiplayer implement the six logic.js exports in shared/game-contract.ts, use the room socket, and self-test through openmotion_game_playtest using headless clients. Never operate the user's browser or desktop. Use openmotion_game_update_meta to set a concise title, description, keyboard/mouse and touch controls, zh-CN i18n, and a cover captured by openmotion_game_capture_cover (game-only headless screenshot). Write design/plan.md, design/assets.csv and design/verification.md. Before publication run openmotion_game_simulate for reference and idle: reference must win and idle must lose. Run openmotion_game_validate, fix diagnostics, set ready, and call openmotion_game_publish only when publication is authorized. Report the actual playUrl, validation and play-test evidence; local publication is not internet deployment.`;
 }
 export const starterLogic = `export const meta = { minPlayers: 1, maxPlayers: 4, tickRate: 20, serverTick: true };
 export function setup(ctx, players) { return { scores: Object.fromEntries(players.map(id => [id, 0])) }; }
@@ -568,6 +569,8 @@ export class GameProjects {
       const source = (await this.read(id, relative)).content;
       if(game.multiplayer)for(const message of gameRoomEntryErrors(source))diagnostics.push({path:relative,message});
       for (const match of source.matchAll(/(?:[a-z][a-z0-9+.-]*:\/\/|(?<=["'`(=])\/\/)[^\s"'<>`\\)]+/gi)) {
+        if ((match[0] === 'http://www.w3.org/2000/svg' || match[0] === 'http://www.w3.org/1999/xlink')
+          && /(?:\sxmlns(?::xlink)?\s*=\s*["']|\bcreate(?:Element|Attribute)NS\s*\(\s*["'])$/.test(source.slice(0, match.index))) continue;
         const host = new URL(match[0].startsWith('//') ? 'https:' + match[0] : match[0]).hostname;
         // A playable ad may name its app-store pages: they are only opened on the CTA tap, never loaded by the page.
         const stores = game.playableAd ? ['apps.apple.com','itunes.apple.com','play.google.com'] : [];
@@ -826,8 +829,29 @@ export class GameProjects {
     if(this.browserBusy)throw new GameError('A headless game run is already active; wait for it to finish',409);
     this.browserBusy=true;
     let browser:Browser|undefined,profile:string|undefined;
+    const store = new WorkspaceStore(path.dirname(this.root));
     const server=createServer((req,res)=>{
       const url=new URL(req.url??'/','http://localhost');
+      if (/^\/motion-api\/assets\/[^/]+\/versions\/[^/]+\/(?:media|file)$/.test(url.pathname)) {
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Allow-Headers': 'Range' });
+          res.end();
+          return;
+        }
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          url.pathname = url.pathname.replace(/^\/motion-api\//, '/api/');
+          void assetHttp(req, res, url, store).catch((error: any) => {
+            if (res.headersSent) res.destroy();
+            else {
+              const msg = String(error?.message ?? '');
+              const notFound = error?.code === 'ENOENT' || /ASSET_VERSION_UNAVAILABLE|not found/i.test(msg);
+              res.writeHead(notFound ? 404 : 500, { 'Access-Control-Allow-Origin': '*' });
+              res.end();
+            }
+          });
+          return;
+        }
+      }
       if(req.method==='GET'&&url.pathname==='/favicon.ico'){res.writeHead(204);res.end();return;}
       if(req.method!=='GET'||!url.pathname.startsWith(`/api/games/${id}/play/`)){res.writeHead(404);res.end();return;}
       void gameHttp(req,res,url,path.dirname(this.root),async()=>({})).catch(()=>{res.writeHead(500);res.end();});
