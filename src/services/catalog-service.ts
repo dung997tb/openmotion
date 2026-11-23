@@ -52,6 +52,7 @@ import {
   upgradeTemplateGuidePage,
 } from '../../shared/template-guide.ts';
 import { catalogLocale } from '../../shared/template-locale.ts';
+import { RuntimeTemplateAssets } from './runtime-template-assets.ts';
 
 export {
   BUILTIN_TEMPLATES, GSAP_CDN_URL, NATIVE_PROJECT_CONFIG, WELCOME_PROJECT_TITLE,
@@ -242,41 +243,45 @@ export interface CloneTemplateResult {
   files: ClonedProjectFile[];
 }
 
-/** Reserve the request before cloning so concurrent retries wait for the same commit. */
-async function cloneOnce(
-  tx: DbExecutor,
-  ctx: AuthContext,
-  options: CloneTemplateOptions,
-  requestId: string,
-  clone: (tx: DbExecutor) => Promise<CloneTemplateResult>,
-): Promise<CloneTemplateResult> {
+function cloneReceipt(ctx: AuthContext, options: CloneTemplateOptions, requestId: string) {
   const key = { workspaceId: ctx.workspaceId, scope: 'template:clone', requestId };
   const inputHash = createHash('sha256').update(JSON.stringify([
     ctx.userId, options.templateId.trim(), options.sessionId, options.title?.trim(), options.titleKey,
     options.requirements, options.namingLanguage, options.locale, Boolean(options.activateWorkspace),
   ])).digest('hex');
-  await tx.insert(receipts).values(asInsert(receipts, { ...key, inputHash, state: 'pending' }))
-    .onConflictDoNothing({ target: [receipts.workspaceId, receipts.scope, receipts.requestId] });
   const where = and(eq(receipts.workspaceId, key.workspaceId), eq(receipts.scope, key.scope), eq(receipts.requestId, requestId));
-  const [prior] = await tx.select().from(receipts).where(where).for('update');
-  if (prior?.inputHash !== inputHash) {
+  return { key, inputHash, where };
+}
+
+async function replayClone(db: DbExecutor, { key, inputHash, where }: ReturnType<typeof cloneReceipt>): Promise<CloneTemplateResult | null> {
+  const [prior] = await db.select().from(receipts).where(where);
+  if (!prior) return null;
+  if (prior.inputHash !== inputHash) {
     throw new CloudError('REQUEST_ID_CONFLICT', 'This request already belongs to a different template clone', { status: 409, applied: false });
   }
-  if (prior.responsePayload) {
-    const result = prior.responsePayload as unknown as Omit<CloneTemplateResult, 'files'>;
-    // The immutable baseline already holds the file list. Avoid storing a second manifest per clone.
-    const files = await tx.select({
-      path: projectVersionFiles.path, sha256: projectVersionFiles.sha256,
-      sizeBytes: projectVersionFiles.sizeBytes, mimeType: projectVersionFiles.mimeType,
-    }).from(projectVersionFiles).where(and(eq(projectVersionFiles.workspaceId, ctx.workspaceId),
-      eq(projectVersionFiles.versionId, result.versionId))).orderBy(asc(projectVersionFiles.path));
-    return { ...result, replayed: true, files: files.map(file => ({ ...file, blobScope: 'catalog', isText: isTextProjectPath(file.path) })) };
-  }
+  if (!prior.responsePayload) return null;
+  const result = prior.responsePayload as unknown as Omit<CloneTemplateResult, 'files'>;
+  const files = await db.select({
+    path: projectVersionFiles.path, sha256: projectVersionFiles.sha256,
+    sizeBytes: projectVersionFiles.sizeBytes, mimeType: projectVersionFiles.mimeType,
+  }).from(projectVersionFiles).where(and(eq(projectVersionFiles.workspaceId, key.workspaceId),
+    eq(projectVersionFiles.versionId, result.versionId))).orderBy(asc(projectVersionFiles.path));
+  return { ...result, replayed: true, files: files.map(file => ({ ...file, blobScope: 'catalog', isText: isTextProjectPath(file.path) })) };
+}
+
+/** The unique insert waits for a competing transaction before the receipt is read. */
+async function cloneOnce(
+  tx: DbExecutor, request: ReturnType<typeof cloneReceipt>, clone: (tx: DbExecutor) => Promise<CloneTemplateResult>,
+): Promise<CloneTemplateResult> {
+  await tx.insert(receipts).values(asInsert(receipts, { ...request.key, inputHash: request.inputHash, state: 'pending' }))
+    .onConflictDoNothing({ target: [receipts.workspaceId, receipts.scope, receipts.requestId] });
+  const replayed = await replayClone(tx, request);
+  if (replayed) return replayed;
   const result = await clone(tx);
   const { files: _files, ...responsePayload } = result;
   await tx.update(receipts).set(asUpdate(receipts, {
     state: 'completed', resourceId: result.projectId, responsePayload, updatedAt: new Date(),
-  })).where(where);
+  })).where(request.where);
   return result;
 }
 
@@ -523,9 +528,11 @@ export class CatalogService implements CatalogPort {
 
   private readonly publishedCards = new WeakMap<readonly PreparedCatalogTemplate[], Map<string, GalleryTemplate[]>>();
   private readonly prismCatalog?: Pick<PrismMotionCatalog, 'getTemplates'>;
+  private readonly runtimeAssets: RuntimeTemplateAssets;
 
   constructor(deps: CatalogServiceDeps) {
     this.prismCatalog = deps.prismCatalog;
+    this.runtimeAssets = new RuntimeTemplateAssets(deps.storage);
     this.db = deps.db;
     this.storage = deps.storage;
     this.textCache = deps.textCache;
@@ -960,7 +967,8 @@ export class CatalogService implements CatalogPort {
    * initial `project_versions` (v1 baseline), `project_version_files` (`blob_scope = 'catalog'`),
    * and `project_history_entries` (seq 1).
    *
-   * NEVER copies bytes in S3 and NEVER reads/writes `workspace_blobs` refcounts.
+   * Published source files are prepared in catalog CAS before the project transaction.
+   * Each project references those immutable bytes directly, including its initial history snapshot.
    */
   async cloneTemplateToProject(
     ctx: AuthContext,
@@ -1019,29 +1027,34 @@ export class CatalogService implements CatalogPort {
       }
     }
 
-    const executeClone = async (tx: DbExecutor): Promise<CloneTemplateResult> => {
-      const templateRows = await tx
-        .select()
-        .from(catalogTemplates)
-        .where(eq(catalogTemplates.id, templateId));
-      const templateRow = templateRows[0];
-      if (!templateRow) {
-        throw new CloudError('NOT_FOUND', `Template '${templateId}' not found`, {
-          status: 404,
-          applied: false,
+    const request = validatedRequestId ? cloneReceipt(ctx, options, validatedRequestId) : null;
+    const prepareSource = async () => {
+      const template = await this.getPreparedTemplateForClone(templateId);
+      await this.runtimeAssets.ensure(template);
+      // Only immutable bytes were touched so far. A withdrawal or a newer publication
+      // seen while they were loading must not silently produce the older project.
+      if ((await this.getPreparedTemplateForClone(templateId)).catalogVersion !== template.catalogVersion) {
+        throw new CloudError('REVISION_CONFLICT', 'The selected template was republished. Retry to open its current version.', {
+          status: 409, applied: false,
         });
       }
-
-      const fileRows = await tx
-        .select()
-        .from(catalogTemplateFiles)
-        .where(
-          and(
-            eq(catalogTemplateFiles.templateId, templateId),
-            eq(catalogTemplateFiles.isProjectFile, true),
-          ),
-        )
-        .orderBy(asc(catalogTemplateFiles.path));
+      return template;
+    };
+    if (this.prismCatalog && request) {
+      // Retrying an acknowledged clone must work even if its source has since been withdrawn.
+      const replay = await replayClone(options.tx ?? this.db, request);
+      if (replay) return replay;
+    }
+    const source = this.prismCatalog ? await prepareSource() : null;
+    const executeClone = async (tx: DbExecutor): Promise<CloneTemplateResult> => {
+      const templateRow = source ?? (await tx.select().from(catalogTemplates).where(eq(catalogTemplates.id, templateId)))[0];
+      if (!templateRow) {
+        throw new CloudError('NOT_FOUND', `Template '${templateId}' not found`, { status: 404, applied: false });
+      }
+      const fileRows = source ? source.files.filter(file => file.isProjectFile).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+        : await tx.select().from(catalogTemplateFiles).where(and(
+          eq(catalogTemplateFiles.templateId, templateId), eq(catalogTemplateFiles.isProjectFile, true),
+        )).orderBy(asc(catalogTemplateFiles.path));
 
       if (fileRows.length === 0 || !fileRows.some((file) => file.path === 'index.html')) {
         throw new CloudError(
@@ -1051,7 +1064,7 @@ export class CatalogService implements CatalogPort {
         );
       }
 
-      const unavailable = fileRows.filter((file) => !file.isAvailable);
+      const unavailable = source ? [] : fileRows.filter(file => !file.isAvailable);
       if (unavailable.length > 0) {
         throw new CloudError(
           'TEMPLATE_MEDIA_UNAVAILABLE',
@@ -1308,7 +1321,7 @@ export class CatalogService implements CatalogPort {
       };
     };
 
-    const run = (tx: DbExecutor) => validatedRequestId ? cloneOnce(tx, ctx, options, validatedRequestId, executeClone) : executeClone(tx);
+    const run = (tx: DbExecutor) => request ? cloneOnce(tx, request, executeClone) : executeClone(tx);
     const result = options.tx ? await run(options.tx) : await this.db.transaction(run);
     this.logger?.info('Cloned catalog template zero-copy into workspace', {
       workspaceId: ctx.workspaceId,

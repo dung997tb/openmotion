@@ -41,6 +41,8 @@ import {
   parseSyncCatalogArgs,
   syncCatalogCas,
 } from '../../scripts/sync-catalog-cas.ts';
+import { RuntimeTemplateAssets } from '../../src/services/runtime-template-assets.ts';
+import type { PreparedCatalogTemplate } from '../../src/services/prism-motion-catalog.ts';
 import { computeProjectRevision } from '../../shared/project-validation.ts';
 
 const WID_A = '11111111-1111-4111-8111-111111111111';
@@ -1167,6 +1169,86 @@ describe('Idempotent Catalog CAS Sync (syncCatalogCas)', () => {
 // ---------------------------------------------------------------------------
 // 3. CatalogService: Listing, Search, Detail, Zero-Copy Clone & Guards
 // ---------------------------------------------------------------------------
+
+function publishedTemplate(id: string, html: string, catalogVersion = 'prism:test:v1'): PreparedCatalogTemplate {
+  const bytes = Buffer.from(html);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  return { id, kind: 'prism', catalogVersion, sortOrder: 1, featuredOrder: null, hasHtmlProject: true,
+    instructionsMd: null, motionMd: null, metadata: { entry: { templateId: id, original: { templateName: id } } },
+    files: [{ path: 'index.html', bytes: null, sizeBytes: bytes.length, sha256, mimeType: 'text/html',
+      remoteUrl: `https://r.open-design.ai/files/${sha256}`, metadata: null, isProjectFile: true, isAvailable: false }] };
+}
+
+describe('Runtime template clones', () => {
+  const ctx = makeAuthContext({ workspaceId: WID_A, userId: USER_A });
+  function fixture(getTemplates: () => Promise<PreparedCatalogTemplate[]>) {
+    const pg = new MockPgHarness();
+    pg.seedWorkspace(WID_A, USER_A);
+    const storage = new MockStorage();
+    return { pg, storage, catalog: new CatalogService({ db: pg.db, storage, prismCatalog: { getTemplates } }) };
+  }
+
+  it('materializes only the selected files, keeps projects independent across publications and replays after withdrawal', async t => {
+    const first = publishedTemplate('chosen', 'first source');
+    const later = publishedTemplate('chosen', 'later source', 'prism:test:v2');
+    let published = [first, publishedTemplate('unused', 'unused source')];
+    const fetchAsset = t.mock.method(globalThis, 'fetch', async (url: string) => {
+      const content = url === first.files[0]!.remoteUrl ? 'first source' : 'later source';
+      return new Response(content);
+    });
+    const { catalog, pg, storage } = fixture(async () => published);
+    const options = { templateId: 'chosen', requestId: 'clone-current' };
+    const before = await catalog.cloneTemplateToProject(ctx, options);
+    assert.deepEqual(fetchAsset.mock.calls.map(call => call.arguments[0]), [first.files[0]!.remoteUrl]);
+    published = [later];
+    const after = await catalog.cloneTemplateToProject(ctx, { templateId: 'chosen' });
+    assert.notEqual(before.revision, after.revision);
+    assert.equal(storage.objects.size, 2);
+    assert.equal(pg.tables.catalog_templates.length, 0);
+    assert.equal(pg.tables.catalog_template_files.length, 0);
+    assert.equal(pg.tables.project_version_files.find(row => row.version_id === before.versionId)?.sha256, first.files[0]!.sha256);
+    assert.equal(pg.tables.project_version_files.find(row => row.version_id === after.versionId)?.sha256, later.files[0]!.sha256);
+    published = [];
+    await assert.rejects(() => catalog.cloneTemplateToProject(ctx, { templateId: 'chosen' }), { code: 'NOT_FOUND' });
+    assert.equal((await catalog.cloneTemplateToProject(ctx, options)).projectId, before.projectId);
+    assert.equal(pg.tables.projects.length, 2);
+  });
+
+  it('rejects references, corrupt bytes, unavailable files and a publication replaced during download', async t => {
+    let selected = publishedTemplate('chosen', 'source');
+    const edition = selected;
+    let result = () => new Response('broken'); // same length as the real source
+    t.mock.method(globalThis, 'fetch', () => result());
+    const { catalog, pg, storage } = fixture(async () => [selected, { ...edition, id: 'reference', hasHtmlProject: false, files: [] }]);
+    const clone = () => catalog.cloneTemplateToProject(ctx, { templateId: 'chosen' });
+    await assert.rejects(() => catalog.cloneTemplateToProject(ctx, { templateId: 'reference' }), { code: 'TEMPLATE_NOT_COPYABLE' });
+    await assert.rejects(clone, { code: 'TEMPLATE_MEDIA_UNAVAILABLE' });
+    result = () => new Response('gone', { status: 404 });
+    await assert.rejects(clone, { code: 'TEMPLATE_MEDIA_UNAVAILABLE' });
+    assert.equal(storage.objects.size, 0);
+    result = () => {
+      selected = publishedTemplate('chosen', 'second', 'prism:test:v2');
+      return new Response('source');
+    };
+    await assert.rejects(clone, { code: 'REVISION_CONFLICT' });
+    assert.equal(pg.tables.projects.length, 0);
+    result = () => new Response('second');
+    assert.equal((await clone()).files[0]!.sha256, selected.files[0]!.sha256);
+  });
+
+  it('shares a fetch across different templates using the same SHA, and skips network if storage already has it', async () => {
+    const first = publishedTemplate('one', 'overlap'), other = publishedTemplate('two', 'overlap');
+    const storage = new MockStorage();
+    let count = 0;
+    const assets = new RuntimeTemplateAssets(storage, async () => { count++; return new Response('overlap'); });
+    await Promise.all([assets.ensure(first), assets.ensure(first), assets.ensure(other)]);
+    assert.equal(count, 1);
+    assert.equal(storage.putCalls, 1);
+    const coldInstance = new RuntimeTemplateAssets(storage, async () => { throw new Error('No download expected'); });
+    await coldInstance.ensure(other);
+    assert.equal(storage.putCalls, 1);
+  });
+});
 
 describe('CatalogService Zero-Copy Cloning & Tenant Isolation', () => {
   it('lists, searches, localizes, and clones templates O(1) with blob_scope=catalog and 0 workspace_blobs writes', async () => {
