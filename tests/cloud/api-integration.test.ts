@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
@@ -1546,7 +1546,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
   });
 
   it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
-    const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const { app, config, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
       app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const { projectId } = await (await post('/motion-api/projects', { title: 'Clip move parity' })).json();
@@ -1593,6 +1593,28 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal(replay.replayed, true);
     assert.deepEqual(replay.version, moved.structuredContent.version);
     assert.equal((await tool('openmotion_edit_project', { ...args, requestId: 'stale-agent' })).isError, undefined);
+
+    // Template imports can preserve the raw HTML, while the preview stamps the
+    // headline as hf-933r. Another MCP write moves the project base only.
+    const introPath = 'compositions/intro.html';
+    const intro = readFileSync(new URL('../../template-library/openmotion-welcome/compositions/intro.html', import.meta.url), 'utf8');
+    assert.doesNotMatch(intro, /data-hf-id="hf-933r"/);
+    const auth: AuthContext = { workspaceId: config.DEV_WORKSPACE_ID, userId: config.DEV_USER_ID, role: 'owner',
+      scopes: [...DEFAULT_PAT_SCOPES], authMode: 'dev', authMethod: 'dev_bypass' };
+    const imported = await services.files.commitChanges(auth, { projectId, source: 'studio',
+      ops: [{ op: 'upsert_text', path: introPath, content: intro }] });
+    const observedBase = { projectId, expectedRevision: imported.revision, expectedVersionId: imported.versionId };
+    const note = await tool('openmotion_edit_project', { ...observedBase, requestId: 'separate-note',
+      files: [{ path: 'qa-note.txt', content: 'Another editor wrote here' }] });
+    assert.equal(note.isError, undefined);
+    const headline = await tool('openmotion_edit_project', { ...observedBase, requestId: 'welcome-headline',
+      edit: { kind: 'editElements', compositionPath: introPath, patches: [
+        { target: { id: 'intro-headline', hfId: 'hf-933r' }, operations: [{ type: 'inline-style', property: 'color', value: 'red' }] },
+      ] } });
+    assert.equal(headline.isError, undefined, JSON.stringify(headline));
+    assert.equal(headline.structuredContent.rebased, true);
+    const updated = (await (await app.request(file(introPath))).json()).content;
+    assert.match(updated.match(/<div[^>]*id="intro-headline"[^>]*>/)?.[0] ?? '', /color:\s*red/);
   });
 
   it('reapplies a competing audio trim to the current file and replays the original acknowledgements', async () => {
@@ -1603,7 +1625,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     const base = '/api/projects/' + projectId;
     const path = 'scene.html';
     const file = base + '/files/' + path;
-    const html = '<html><body><main data-composition-id="scene" data-duration="10"><span id="other"></span><audio id="singer" data-hf-id="song" src="music.mp3" data-start="0" data-duration="10"></audio></main></body></html>';
+    const html = '<html><body><main data-composition-id="scene" data-duration="10"><span id="other"></span><span id="other"></span><audio id="singer" data-hf-id="song" src="music.mp3" data-start="0" data-duration="10"></audio></main></body></html>';
     assert.equal((await app.request(file, { method: 'PUT', headers: { 'If-None-Match': '*' }, body: html })).status, 200);
     const etag = (await app.request(file)).headers.get('etag')!;
     const edit = (requestId: string, command: unknown) => post(base + '/edits/' + path, command,
@@ -1646,6 +1668,13 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
       operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
     }] });
     assert.equal(oldSelector.status, 409);
+    const oldRanks = await edit('stale-ranks', { kind: 'moveClips', changes: [{ hfId: 'song', start: 0 }],
+      stacking: { ranks: [{ hfId: 'song', zIndex: 3 }] } });
+    assert.equal(oldRanks.status, 409);
+    const ambiguous = await edit('ambiguous-id', { kind: 'editElements', patches: [{
+      target: { id: 'other' }, operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
+    }] });
+    assert.equal(ambiguous.status, 409);
     const previousId = await edit('reused-id', { kind: 'editElements', patches: [{
       target: { hfId: 'song', id: 'other' },
       operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],

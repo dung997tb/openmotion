@@ -54,6 +54,7 @@ function targetsStillMatch(source: string, targets: SourceMutationTarget[]): boo
     ...(target.id ? ['id:' + target.id] : []),
   ]);
   const matches = new Map<string, Element | null | undefined>(identities.flat().map(key => [key, undefined]));
+  // The preview and source parser mint identical hfIds for unstamped templates.
   const { document } = parseSourceDocument(source);
   walkCompositionDescendants(document, element => {
     const record = (key: string) => {
@@ -72,8 +73,10 @@ const snapshotAttributes = new Set(['style', 'class', 'id', 'data-hf-id', 'data-
 
 function onNewBase(command: CompositionEdit): CompositionEdit | undefined {
   switch (command.kind) {
-    case 'moveClip':
     case 'moveClips':
+      // Absolute paint ranks describe the entire observed order.
+      return command.stacking && 'ranks' in command.stacking ? undefined : command;
+    case 'moveClip':
     case 'trimClips':
     case 'setClipState':
       return command;
