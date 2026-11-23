@@ -21,6 +21,7 @@ export type PreviewBridgeMessageType =
   | "canvas-framing"
   | "layer-family"
   | "inspect-element"
+  | "inspector-styles"
   | "edit-element"
   | "timeline-state"
   | "playback-control"
