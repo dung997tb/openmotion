@@ -235,8 +235,11 @@ export function gamePlaytestAssertions(input: {before:any;after:any;clients:numb
     ...(input.autoJoin?[{name:'autoJoin',passed:input.autoJoin.joined&&input.autoJoin.elapsedMs!==null&&input.autoJoin.elapsedMs<=5000,expected:'joined within 5000ms without clicks or typing',actual:input.autoJoin,reason:input.autoJoin.joined?undefined:'No joined socket message or authoritative self player before inputs'}]:[]),
     {name:'playerCount',passed:count===input.clients,expected:input.clients,actual:count,reason:state?undefined:'Missing authoritative __omGame state'},
     {name:'phase',passed:input.expectedPhase?phase===input.expectedPhase:['breather','combat','playing','win','loss','over'].includes(phase),expected,actual:phase??null},
-    // movementThreshold 0 marks a game with no moving player (tap puzzles, pull-the-pin): movement is not asserted.
-    {name:'scriptedMovement',passed:input.movementThreshold===0||(scripted&&distance!==null&&distance>(input.movementThreshold??.5)),expected:`net displacement > ${input.movementThreshold??.5} world units`,actual:distance,reason:scripted?(distance===null?'Missing selfId or authoritative coordinates':undefined):'No directional key input was scripted'},
+    // movementThreshold 0 marks a game with no moving player (tap puzzles, pull-the-pin). Movement is then not asserted, and the
+    // record says so; authoritative state is still required, so a missing hook or selfId fails instead of passing silently.
+    input.movementThreshold===0
+      ?{name:'scriptedMovement',passed:Boolean(state&&self),skipped:true,expected:'movement not asserted (threshold 0)',actual:distance,reason:state&&self?undefined:'Missing authoritative __omGame state or selfId'}
+      :{name:'scriptedMovement',passed:scripted&&distance!==null&&distance>(input.movementThreshold??.5),expected:`net displacement > ${input.movementThreshold??.5} world units`,actual:distance,reason:scripted?(distance===null?'Missing selfId or authoritative coordinates':undefined):'No directional key input was scripted'},
     {name:'mobileHorizontalOverflow',passed:input.mobile.width===390&&input.mobile.height===844&&input.mobile.scrollWidth<=391&&!(input.mobile.overflowElements?.length),expected:'390x844 viewport without horizontal overflow',actual:input.mobile},
   ];
 }
@@ -408,9 +411,10 @@ export class GameProjects {
     return this.populate(target, async () => {
     for (const file of await inventory(dir)) { const dest = path.join(target, file.path); await mkdir(path.dirname(dest), { recursive: true }); await writeFile(dest, await readFile(await safeFile(dir, file.path))); }
     const originalMeta = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
-    const game = { ...original, kit: originalMeta.kit, cover: originalMeta.cover ?? null, id: newId, title: `${original.title.slice(0,72)} remix`, source: 'mine' as const, status: 'draft' as const, plays: 0, likes: 0, dislikes: 0, reaction: 0 as const, favorite: false, remixOf: id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    // A remix keeps the original brief (and its playable-ad format line) so the Agent follows the same recipe.
+    const game = { ...original, kit: originalMeta.kit, cover: originalMeta.cover ?? null, ...(originalMeta.rawPrompt ? { rawPrompt: originalMeta.rawPrompt } : {}), id: newId, title: `${original.title.slice(0,72)} remix`, source: 'mine' as const, status: 'draft' as const, plays: 0, likes: 0, dislikes: 0, reaction: 0 as const, favorite: false, remixOf: id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     await this.save(newId, game);
-    return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: original.description, genre: original.genre, style: original.style, setting: original.setting, multiplayer: original.multiplayer }, true) };
+    return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: originalMeta.rawPrompt ?? original.description, genre: original.genre, style: original.style, setting: original.setting, multiplayer: original.multiplayer, orientation: original.orientation, playableAd: original.playableAd }, true) };
     });
   }); }
   /** The complete Agent handoff for a workspace draft: game id, brief and execution steps, available at any time (not only right after creation). */
