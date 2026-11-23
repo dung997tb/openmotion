@@ -175,6 +175,7 @@ interface RunAtomicCutInput {
   recordEdit: (input: RecordEditInput) => Promise<void>;
   observeProjectFileVersion?: (path: string, version: string | null) => void;
   synchronize: () => void;
+  projectPending?: (files: RecordEditInput["files"]) => (() => void) | undefined;
 }
 
 /** One coordinator owns request, history registration, safe rollback, and resync. */
@@ -187,10 +188,17 @@ export function runAtomicCutTransaction(input: RunAtomicCutInput): Promise<Atomi
       return { kind: "splitClips", hfIds: measured.map(cut => cut.hfId), at: intent.targets[0]!.splitTime, measured };
     }}));
     const skipped = new Set<string>();
-    return saveCloudTimeline(input.projectId, edits, input.writeProjectFile, input.recordEdit, input.label, undefined, selectors => selectors.forEach(selector => skipped.add(selector))).then(() => {
+    return saveCloudTimeline(input.projectId, edits, input.writeProjectFile, input.recordEdit, input.label, undefined, {
+      onSkippedSelectors: selectors => selectors.forEach(selector => skipped.add(selector)),
+      projectPending: input.projectPending,
+    }).then(() => {
       let syncFailed = false;
       try { input.synchronize(); } catch { syncFailed = true; }
       return { splitCount: input.intents.reduce((sum, edit) => sum + edit.targets.length, 0), skippedSelectors: [...skipped], syncFailed };
+    }, error => {
+      // An uncertain response or failed history read still needs the authoritative file and preview.
+      try { input.synchronize(); } catch { /* Preserve the original save diagnostic. */ }
+      throw error;
     });
   }
   const paths = input.intents.map((intent) => intent.path);

@@ -7,6 +7,7 @@ import type { TimelineCommand } from '../../../packages/edit-core/timeline-schem
 import type { ProjectFileWriter, RecordEditInput } from './studioFileHistory';
 import { readProjectFileContent } from './studioFileHistory';
 import { serializeStudioFileMutations } from './studioFileMutationCoordinator';
+import { confirmedSource } from './confirmedTextSources';
 import { commitStudioEditBatch } from './projectEditBatch';
 
 type ClipLocator = { hfId?: string; domId?: string; selector?: string; selectorIndex?: number };
@@ -85,7 +86,10 @@ export async function saveCloudTimeline(
   recordEdit: (entry: RecordEditInput) => Promise<void>,
   label: string,
   onSaved?: (files: RecordEditInput['files']) => Promise<void>,
-  onSkippedSelectors?: (selectors: string[]) => void,
+  options: {
+    onSkippedSelectors?: (selectors: string[]) => void;
+    projectPending?: (files: RecordEditInput['files']) => (() => void) | undefined;
+  } = {},
 ): Promise<string[]> {
   return serializeStudioFileMutations(
     write,
@@ -96,7 +100,9 @@ export async function saveCloudTimeline(
         await import('@hyperframes/studio-server/source-mutation');
       const pending = await Promise.all(
         edits.map(async (edit) => {
-          const before = await readProjectFileContent(projectId, edit.path);
+          // A cached source has an exact write precondition, checked by the same transaction as the edit.
+          const before = (options.projectPending ? confirmedSource(projectId, edit.path)?.content : undefined)
+            ?? await readProjectFileContent(projectId, edit.path);
           let doc: Document | undefined;
           const resolve: ResolveClip = (locator) => {
             if (locator.hfId) return locator.hfId;
@@ -132,18 +138,25 @@ export async function saveCloudTimeline(
             after:
               command.kind === 'moveClip'
                 ? await applyLegacyClipMove(before, command)
-                : applyTimelineCommand(before, command, onSkippedSelectors),
+                : applyTimelineCommand(before, command, options.onSkippedSelectors),
           };
         }),
       );
       const changes = pending.filter((file) => file.before !== file.after);
       if (!changes.length) return [];
-      const [only] = changes;
-      const needsRefresh = changes.length === 1 && only
-        ? Boolean(await write(only.path, only.after, only.before, only.command))
-        : (await commitStudioEditBatch(projectId, changes)).length > 0;
-
       const files = Object.fromEntries(changes.map(({ path, before, after }) => [path, { before, after }]));
+      const rollback = options.projectPending?.(files);
+      const [only] = changes;
+      let needsRefresh: boolean;
+      try {
+        needsRefresh = changes.length === 1 && only
+          ? Boolean(await write(only.path, only.after, only.before, only.command))
+          : (await commitStudioEditBatch(projectId, changes)).length > 0;
+      } catch (error) {
+        rollback?.();
+        throw error;
+      }
+      if (needsRefresh) rollback?.();
       await recordEdit({ label, files });
       if (onSaved && !needsRefresh) await onSaved(files);
       return Object.keys(files);

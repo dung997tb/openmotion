@@ -57,6 +57,31 @@ export function beginTimelineSourceRead(
   };
 }
 
+/** Display edit-core's structural result while its conditional write is in flight.
+ * A newer confirmed projection takes ownership if another writer wins the race. */
+export function projectLocalTimelineEdit(
+  projectId: string, path: string, file: { before: string; after: string }, frame: HTMLIFrameElement | null,
+): (() => void) | undefined {
+  const scope = timelineFor(projectId, path);
+  if (!scope) return;
+  const duration = usePlayerStore.getState().duration;
+  const before = parseAuthoredTimeline(file.before, path, projectId, duration);
+  const after = parseAuthoredTimeline(file.after, path, projectId, duration);
+  if (!before || !after || !applyAuthoredTimeline(before, after)) return;
+
+  const generation = ++scope.generation;
+  const projected = { rows: after, generation, writeRevision: studioFileRevision() };
+  scope.baseline = projected;
+  const release = holdHistoryTimelineUntilPreviewReplaced(frame);
+  return () => {
+    if (timelineFor(projectId, path) === scope && scope.baseline === projected) {
+      applyAuthoredTimeline(after, before);
+      scope.baseline = { rows: before, generation: ++scope.generation, writeRevision: studioFileRevision() };
+    }
+    release?.();
+  };
+}
+
 /** Capture the current view before fetching its latest source. A newer notification,
  * a switch or a local save invalidates this read; the normal preview refresh still runs. */
 export function beginPeerTimelineUpdate(projectId: string, path: string, oldFrame?: HTMLIFrameElement | null) {
