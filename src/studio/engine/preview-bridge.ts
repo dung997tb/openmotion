@@ -97,7 +97,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
-  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
+  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
@@ -198,10 +198,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
 export const PREVIEW_BRIDGE_PATH = '/api/preview-bridge.js';
 export const PREVIEW_BRIDGE_VERSION = createHash('sha256').update(PREVIEW_BRIDGE_SCRIPT).digest('hex');
 
-export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean) {
+export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[]) {
   const src = new URL(PREVIEW_BRIDGE_PATH, origin);
   src.searchParams.set('v', PREVIEW_BRIDGE_VERSION);
-  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, ...(canRebindTiming && { canRebindTiming }) })
+  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, ...(canRebindTiming && { canRebindTiming }) })
     .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return {
     preload: `<link rel="preload" as="script" href="${src.href}">`,
