@@ -90,7 +90,6 @@ export function McpConnectionPage({
   const { info, failed, retry } = useIntegrationInfo();
   const [manualScenario, setManualScenario] = useState<{ id: string; text: string } | null>(null);
   const [localRoute, setLocalRoute] = useState(() => readWorkspacePage(location.search, location.hash, location.pathname));
-  const [pulseTrigger, setPulseTrigger] = useState(0);
   const [nextStepVisible, setNextStepVisible] = useState(false);
   const [nextStepMessage, setNextStepMessage] = useState('');
   const [setupCopied, setSetupCopied] = useState(false);
@@ -268,7 +267,6 @@ export function McpConnectionPage({
     setNextStepVisible(false);
     setSetupCopied(false);
     setManualCopied(false);
-    setPulseTrigger(n => n + 1);
     click('mcp_client', 'client_tab', { mcp_client: nextId });
   }
 
@@ -278,7 +276,6 @@ export function McpConnectionPage({
     setNextStepVisible(false);
     setSetupCopied(false);
     setManualCopied(false);
-    setPulseTrigger(n => n + 1);
     click('mcp_client', 'client_tab', { mcp_client: nextId });
   }
 
@@ -324,6 +321,7 @@ export function McpConnectionPage({
   const galleryClientLabel = (client.id === 'mcp' || t(client.name).length > 11) ? t('Agent') : t(client.name);
   const [heroLine1Before, heroLine1After = ''] = t('In {agent}', { agent: '__AGENT__' }).split('__AGENT__');
   const [heroLine2Before, heroLine2After = ''] = t('Create editable videos with {brand}', { brand: '__BRAND__' }).split('__BRAND__');
+  const [entitlementBefore, entitlementAfter] = t('Sign in with OpenDesign to view {details}.', { details: '__DETAILS__' }).split('__DETAILS__');
   const Container = inSettings ? 'section' : 'main';
 
   return (
@@ -345,17 +343,22 @@ export function McpConnectionPage({
       {!inSettings && (
         <div className="om-mcp-entitlement-strip">
           <span className="om-mcp-entitlement-dot" aria-hidden="true" />
-          <span>{t('Sign in with your OpenDesign account for built-in models, or bring your own BYOK provider keys.')}</span>
-          <Button variant="plain" className="om-mcp-entitlement-cta" onClick={openProviders('mcp_resources')}>
-            {t('Manage providers')}
-            <RemixIcon name="arrow-right-line" size={14} />
+          <span>{entitlementBefore}<strong>{t('available models and usage')}</strong>{entitlementAfter}</span>
+          <Button variant="plain" className="om-mcp-entitlement-cta" onClick={() => {
+            click('mcp_resources', 'sign_in');
+            changeRoute({ settings: 'account', assets: false, skills: false, templates: false });
+          }}>
+            {t('Sign in now')} <span aria-hidden="true">→</span>
+          </Button>
+          <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources')}>
+            {t('Already have an API key? Use BYOK')}
           </Button>
         </div>
       )}
 
       {/* Full-bleed Hero Ambient Matrix Zone: 5-Tab Client Dock + Spacious H1 + Dual Equal-Height CTA */}
       <div className="om-mcp-ambient-wrap">
-        <McpHeroAmbientCanvas pulseTrigger={pulseTrigger} />
+        <McpHeroAmbientCanvas clientId={clientId} />
 
         <div className="om-mcp-client-subbar">
           <HorizontalRail label="Agent client" viewportClassName="om-mcp-client-viewport" selection={activePrimaryTab} plainArrows>

@@ -160,7 +160,8 @@
   --motion-mcp-dock-bg: rgba(18, 19, 22, 0.04);
   --motion-mcp-dock-active: rgba(18, 19, 22, 0.09);
   --motion-mcp-dock-hover: rgba(18, 19, 22, 0.06);
-  --motion-mcp-banner-bg: linear-gradient(90deg, rgba(0, 113, 6, 0.08), rgba(0, 113, 6, 0.03) 45%, rgba(0, 113, 6, 0.07));
+  --motion-mcp-page-bg: var(--motion-workspace);
+  --motion-mcp-banner-bg: rgb(0 113 6 / 4%);
   --motion-mcp-banner-border: rgba(0, 113, 6, 0.20);
   --motion-mcp-hero-badge-bg: #ffffff;
   --motion-mcp-hero-badge-ink: #111214;
@@ -168,8 +169,9 @@
   --motion-mcp-peek-fade-prev: linear-gradient(90deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.14) 100%);
   --motion-mcp-peek-fade-next: linear-gradient(270deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.14) 100%);
   --motion-mcp-footer-bg: #f4f5f7;
-  --motion-mcp-matrix-glyph: rgba(18, 19, 22, 0.10);
-  --motion-mcp-matrix-pulse: #007106;
+  --motion-mcp-matrix-glyph: 18 19 22;
+  --motion-mcp-matrix-pulse: 0 113 6;
+  --motion-mcp-matrix-glow: 0 113 6;
   --motion-raised: #ffffff;
   --motion-hover: #ededed;
   --motion-border: #dbdbdb;
@@ -297,7 +299,8 @@
   --motion-mcp-dock-bg: rgba(255, 255, 255, 0.03);
   --motion-mcp-dock-active: rgba(255, 255, 255, 0.11);
   --motion-mcp-dock-hover: rgba(255, 255, 255, 0.055);
-  --motion-mcp-banner-bg: linear-gradient(90deg, rgba(0, 255, 8, 0.09), rgba(0, 255, 8, 0.03) 45%, rgba(0, 255, 8, 0.07));
+  --motion-mcp-page-bg: #111214;
+  --motion-mcp-banner-bg: rgb(0 255 8 / 4%);
   --motion-mcp-banner-border: rgba(0, 255, 8, 0.22);
   --motion-mcp-hero-badge-bg: #f4f5f7;
   --motion-mcp-hero-badge-ink: #111214;
@@ -305,8 +308,9 @@
   --motion-mcp-peek-fade-prev: linear-gradient(90deg, rgba(17, 18, 20, 0.68) 0%, rgba(17, 18, 20, 0.12) 100%);
   --motion-mcp-peek-fade-next: linear-gradient(270deg, rgba(17, 18, 20, 0.68) 0%, rgba(17, 18, 20, 0.12) 100%);
   --motion-mcp-footer-bg: #17181b;
-  --motion-mcp-matrix-glyph: rgba(235, 240, 246, 0.08);
-  --motion-mcp-matrix-pulse: #00ff08;
+  --motion-mcp-matrix-glyph: 255 255 255;
+  --motion-mcp-matrix-pulse: 0 255 8;
+  --motion-mcp-matrix-glow: 117 255 119;
   --motion-raised: #292b2c;
   --motion-hover: #36383a;
   --motion-border: #484b4d;
@@ -435,7 +439,8 @@
     --motion-mcp-dock-bg: rgba(255, 255, 255, 0.03);
     --motion-mcp-dock-active: rgba(255, 255, 255, 0.11);
     --motion-mcp-dock-hover: rgba(255, 255, 255, 0.055);
-    --motion-mcp-banner-bg: linear-gradient(90deg, rgba(0, 255, 8, 0.09), rgba(0, 255, 8, 0.03) 45%, rgba(0, 255, 8, 0.07));
+    --motion-mcp-page-bg: #111214;
+    --motion-mcp-banner-bg: rgb(0 255 8 / 4%);
     --motion-mcp-banner-border: rgba(0, 255, 8, 0.22);
     --motion-mcp-hero-badge-bg: #f4f5f7;
     --motion-mcp-hero-badge-ink: #111214;
@@ -443,8 +448,9 @@
     --motion-mcp-peek-fade-prev: linear-gradient(90deg, rgba(17, 18, 20, 0.68) 0%, rgba(17, 18, 20, 0.12) 100%);
     --motion-mcp-peek-fade-next: linear-gradient(270deg, rgba(17, 18, 20, 0.68) 0%, rgba(17, 18, 20, 0.12) 100%);
     --motion-mcp-footer-bg: #17181b;
-    --motion-mcp-matrix-glyph: rgba(235, 240, 246, 0.08);
-    --motion-mcp-matrix-pulse: #00ff08;
+    --motion-mcp-matrix-glyph: 255 255 255;
+    --motion-mcp-matrix-pulse: 0 255 8;
+    --motion-mcp-matrix-glow: 117 255 119;
     --motion-raised: #292b2c;
     --motion-hover: #36383a;
     --motion-border: #484b4d;

@@ -13,10 +13,10 @@
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 10px 14px;
-  padding: 9px 24px;
+  gap: 12px;
+  padding: 8px 20px;
 }
-.om-mcp-entitlement-dot { width: 7px; height: 7px; flex: none; }
+.om-mcp-entitlement-dot { width: 6px; height: 6px; flex: none; }
 .om-mcp-entitlement-cta { display: inline-flex; align-items: center; gap: 4px; }
 
 /* Full-bleed Ambient Hero Zone */

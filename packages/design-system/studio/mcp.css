@@ -1,5 +1,5 @@
 /* MCP onboarding shares Studio surfaces, type, controls and brand artwork. */
-[data-motion-studio] .om-mcp-page { background: var(--motion-workspace); color: var(--motion-strong); }
+[data-motion-studio] .om-mcp-page { background: var(--motion-mcp-page-bg); color: var(--motion-strong); }
 .om-mcp-content { font-size: var(--motion-text-body); line-height: var(--motion-leading-body); }
 .om-mcp-content h2, .om-mcp-content h3 { margin: 0; color: var(--motion-strong); font-weight: var(--motion-weight-semibold); }
 .om-mcp-content h2 { font-size: clamp(26px, 2.7cqi, 34px); line-height: 1.22; letter-spacing: -.02em; font-weight: var(--motion-weight-bold); }
@@ -11,29 +11,38 @@
 /* Top entitlement / providers banner */
 .om-mcp-entitlement-strip {
   background: var(--motion-mcp-banner-bg);
-  border-bottom: 1px solid var(--motion-mcp-banner-border);
   color: var(--motion-text);
-  font-size: var(--motion-text-md);
+  font-size: 12.5px;
+  line-height: 1.65;
 }
 .om-mcp-entitlement-dot {
   border-radius: var(--motion-radius-full);
   background: var(--motion-brand);
-  box-shadow: var(--motion-mcp-hero-od-shadow);
+  box-shadow: 0 0 8px var(--motion-brand);
 }
-[data-motion-studio] .om-mcp-entitlement-cta {
-  color: var(--motion-accent);
-  font-size: var(--motion-text-md);
-  font-weight: var(--motion-weight-semibold);
+[data-motion-studio] :is(.om-mcp-entitlement-cta, .om-mcp-entitlement-byok) {
+  background: transparent;
   padding: 0;
   height: auto;
   border-radius: var(--motion-radius-xs);
 }
+[data-motion-studio] .om-mcp-entitlement-cta {
+  color: var(--motion-accent);
+  font-size: 12.5px;
+  font-weight: var(--motion-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 [data-motion-studio] .om-mcp-entitlement-cta:hover { color: var(--motion-accent-hover); }
+[data-motion-studio] .om-mcp-entitlement-byok { color: var(--motion-muted); font-size: 12px; }
+[data-motion-studio] .om-mcp-entitlement-byok:hover { color: var(--motion-strong); }
 
 /* Ambient matrix Hero backdrop + borderless floating 5-tab client dock */
 .om-mcp-ambient-canvas {
-  mask-image: radial-gradient(ellipse 84% 88% at 50% 42%, var(--motion-strong) 40%, transparent 100%);
-  -webkit-mask-image: radial-gradient(ellipse 84% 88% at 50% 42%, var(--motion-strong) 40%, transparent 100%);
+  mask-image: radial-gradient(ellipse 70% 74% at 50% 48%,
+    color-mix(in srgb, var(--motion-strong) 95%, transparent),
+    color-mix(in srgb, var(--motion-strong) 50%, transparent) 56%,
+    transparent 96%);
 }
 [data-motion-studio] .om-mcp-client-dock {
   background: var(--motion-mcp-dock-bg);

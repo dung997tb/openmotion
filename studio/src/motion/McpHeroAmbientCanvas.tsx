@@ -1,257 +1,239 @@
 import { useEffect, useRef } from 'react';
 
-type MatrixCell = {
-  kind: number;
-  baseAlpha: number;
+const GRID_STEP = 38;
+
+type GridCell = {
+  col: number;
+  row: number;
+  kind: 'dot' | 'cross' | 'anchor' | 'handle';
   phase: number;
-  speed: number;
 };
 
-type MatrixPulse = {
-  horiz: boolean;
-  idx: number;
-  pos: number;
-  dir: number;
+type GuidePulse = {
+  horizontal: boolean;
+  lane: number;
+  position: number;
+  direction: number;
   speed: number;
-  len: number;
-  alpha: number;
+  length: number;
 };
 
-/**
- * OpenDesign vector-canvas ambient backdrop for the MCP Hero:
- * subtle 1px alignment dots, crosshairs, vector anchor squares, Bézier handle circles,
- * and gliding accent smart-guide pulses. Reads colors from Studio CSS tokens so it adapts
- * to both dark and light themes and respects prefers-reduced-motion.
- */
-export function McpHeroAmbientCanvas({ pulseTrigger }: { pulseTrigger: number }) {
+type MatrixColors = { glyph: string; pulse: string; glow: string };
+
+function createGrid(cols: number, rows: number): GridCell[] {
+  const cells: GridCell[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      // The demo's seeded grid keeps each coordinate's shape and phase stable across resizes.
+      const shape = Math.abs(Math.sin((col + 1) * 12.9898 + (row + 1) * 78.233) * 43758.5453) % 1;
+      const phase = Math.abs(Math.sin((col + 7) * 39.346 + (row + 3) * 11.135) * 24634.6345) % 1;
+      const kind = shape > 0.94 ? 'handle' : shape > 0.86 ? 'anchor' : shape > 0.74 ? 'cross' : 'dot';
+      cells.push({ col, row, kind, phase: phase * Math.PI * 2 });
+    }
+  }
+  return cells;
+}
+
+function createPulse(cols: number, rows: number, centerBias = false): GuidePulse {
+  const horizontal = Math.random() < 0.72;
+  const laneCount = horizontal ? rows : cols;
+  const alongCount = horizontal ? cols : rows;
+  const sample = Math.random();
+  const centeredLane = horizontal ? 0.25 + sample * 0.5 : 0.2 + sample * 0.6;
+  const lane = Math.floor(laneCount * (centerBias ? centeredLane : sample));
+  const direction = Math.random() < 0.5 ? 1 : -1;
+  const speed = horizontal ? 0.042 + Math.random() * 0.032 : 0.036 + Math.random() * 0.028;
+  const length = horizontal ? 5 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 3);
+  return { horizontal, lane, position: direction > 0 ? -3 : alongCount + 3, direction, speed, length };
+}
+
+const centeredCoordinate = (index: number) => index * GRID_STEP + GRID_STEP * 0.5;
+const alignedCoordinate = (index: number) => Math.round(centeredCoordinate(index)) + 0.5;
+const colorAt = (channels: string, opacity: number) => `rgb(${channels} / ${opacity})`;
+
+function drawPulse(ctx: CanvasRenderingContext2D, pulse: GuidePulse, colors: MatrixColors) {
+  const lane = alignedCoordinate(pulse.lane);
+  const tail = centeredCoordinate(pulse.position - pulse.direction * pulse.length);
+  const head = centeredCoordinate(pulse.position);
+  const [startX, startY, endX, endY] = pulse.horizontal ? [tail, lane, head, lane] : [lane, tail, lane, head];
+  const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+  gradient.addColorStop(0, colorAt(colors.pulse, 0));
+  gradient.addColorStop(0.72, colorAt(colors.pulse, pulse.horizontal ? 0.22 : 0.20));
+  gradient.addColorStop(1, colorAt(colors.glow, 0.04));
+  ctx.strokeStyle = gradient;
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+  ctx.fillStyle = colorAt(colors.glow, pulse.horizontal ? 0.42 : 0.38);
+  ctx.beginPath();
+  ctx.arc(endX, endY, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawCell(ctx: CanvasRenderingContext2D, cell: GridCell, pulses: GuidePulse[], elapsed: number, colors: MatrixColors) {
+  const x = alignedCoordinate(cell.col), y = alignedCoordinate(cell.row);
+  let glow = 0;
+  for (const pulse of pulses) {
+    if (pulse.lane !== (pulse.horizontal ? cell.row : cell.col)) continue;
+    const distance = (pulse.position - (pulse.horizontal ? cell.col : cell.row)) * pulse.direction;
+    if (distance >= 0 && distance < pulse.length) glow = Math.max(glow, 1 - distance / pulse.length);
+  }
+  const wave = 0.5 + 0.5 * Math.sin(elapsed * 0.00075 + cell.col * 0.34 + cell.row * 0.26 + cell.phase);
+  const ink = glow > 0.05 ? colorAt(colors.glow, 0.16 + glow * 0.42) : colorAt(colors.glyph, 0.075 + wave * 0.075);
+  ctx.fillStyle = ctx.strokeStyle = ink;
+
+  switch (cell.kind) {
+    case 'dot':
+      ctx.beginPath();
+      ctx.arc(x, y, glow > 0.15 ? 1.5 : 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'cross':
+      ctx.beginPath();
+      ctx.moveTo(x - 3, y);
+      ctx.lineTo(x + 3, y);
+      ctx.moveTo(x, y - 3);
+      ctx.lineTo(x, y + 3);
+      ctx.stroke();
+      break;
+    case 'anchor':
+      ctx.strokeRect(x - 2.5, y - 2.5, 5, 5);
+      if (glow > 0.25) {
+        ctx.fillStyle = colorAt(colors.pulse, glow * 0.45);
+        ctx.fillRect(x - 1, y - 1, 2, 2);
+      }
+      break;
+    case 'handle':
+      ctx.beginPath();
+      ctx.arc(x, y, 2.7, 0, Math.PI * 2);
+      ctx.stroke();
+      if (glow > 0.25) {
+        ctx.fillStyle = colorAt(colors.pulse, glow * 0.45);
+        ctx.beginPath();
+        ctx.arc(x, y, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+  }
+}
+
+/** The demo's vector grid and frame-by-frame smart guide motion. */
+export function McpHeroAmbientCanvas({ clientId }: { clientId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pulseFnRef = useRef<(() => void) | null>(null);
+  const previousClient = useRef(clientId);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const host = canvas?.parentElement;
-    if (!canvas || !host) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !host || !ctx) return;
 
-    const CELL = 26;
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    let w = 0;
-    let h = 0;
-    let cols = 0;
-    let rows = 0;
-    let cells: MatrixCell[] = [];
-    let pulses: MatrixPulse[] = [];
-    let rafId = 0;
-    let running = false;
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let width = 0, height = 0, dpr = 0, cols = 0, rows = 0;
+    let cells: GridCell[] = [], pulses: GuidePulse[] = [];
+    let rafId: number | null = null;
+    let frameTime = 0;
     let inView = true;
 
     const resolveColors = () => {
       const style = getComputedStyle(host);
-      const glyph = style.getPropertyValue('--motion-mcp-matrix-glyph').trim() || style.color || 'currentColor';
-      const accent = style.getPropertyValue('--motion-mcp-matrix-pulse').trim() || style.getPropertyValue('--brand').trim() || style.color || 'currentColor';
-      return { glyph, accent };
-    };
-
-    const spawnPulse = (boost = false): MatrixPulse => {
-      const horiz = Math.random() < 0.7;
-      const dir = Math.random() < 0.5 ? 1 : -1;
       return {
-        horiz,
-        idx: horiz ? Math.floor(Math.random() * Math.max(1, rows)) : Math.floor(Math.random() * Math.max(1, cols)),
-        pos: dir > 0 ? -Math.random() * 12 : (horiz ? cols : rows) + Math.random() * 12,
-        dir,
-        speed: (boost ? 0.14 : 0.065) + Math.random() * 0.055,
-        len: 4 + Math.floor(Math.random() * 5),
-        alpha: boost ? 0.58 : 0.34,
+        glyph: style.getPropertyValue('--motion-mcp-matrix-glyph').trim(),
+        pulse: style.getPropertyValue('--motion-mcp-matrix-pulse').trim(),
+        glow: style.getPropertyValue('--motion-mcp-matrix-glow').trim(),
       };
     };
+    let colors = resolveColors();
 
-    const drawGlyph = (kind: number, cx: number, cy: number) => {
-      if (kind === 0) {
-        ctx.fillRect(cx - 0.75, cy - 0.75, 1.5, 1.5);
-      } else if (kind === 1) {
-        ctx.beginPath();
-        ctx.moveTo(cx - 3.2, cy);
-        ctx.lineTo(cx + 3.2, cy);
-        ctx.moveTo(cx, cy - 3.2);
-        ctx.lineTo(cx, cy + 3.2);
-        ctx.stroke();
-      } else if (kind === 2) {
-        ctx.strokeRect(cx - 2.3, cy - 2.3, 4.6, 4.6);
-      } else {
-        ctx.beginPath();
-        ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+    const draw = () => {
+      ctx.clearRect(0, 0, width, height);
+      ctx.lineWidth = 1;
+      for (const pulse of pulses) drawPulse(ctx, pulse, colors);
+      for (const cell of cells) drawCell(ctx, cell, pulses, frameTime, colors);
     };
 
-    const renderFrame = (ts: number) => {
-      const { glyph, accent } = resolveColors();
-      ctx.clearRect(0, 0, w, h);
-      const t = ts * 0.001;
-      const pulseCells = new Map<number, number>();
-      const activeNodes: Array<{ r: number; c: number; x: number; y: number; a: number; horiz: boolean }> = [];
-
-      if (!reduced) {
-        for (let i = 0; i < pulses.length; i++) {
-          const p = pulses[i];
-          p.pos += p.dir * p.speed;
-          const limit = p.horiz ? cols : rows;
-          if ((p.dir > 0 && p.pos - p.len > limit + 4) || (p.dir < 0 && p.pos + p.len < -4)) {
-            pulses[i] = spawnPulse(false);
-            continue;
-          }
-          const head = Math.round(p.pos);
-          if (p.horiz && p.idx >= 0 && p.idx < rows && head >= 0 && head < cols) {
-            activeNodes.push({ r: p.idx, c: head, x: head * CELL + CELL * 0.5, y: p.idx * CELL + CELL * 0.5, a: p.alpha, horiz: true });
-          } else if (!p.horiz && p.idx >= 0 && p.idx < cols && head >= 0 && head < rows) {
-            activeNodes.push({ r: head, c: p.idx, x: p.idx * CELL + CELL * 0.5, y: head * CELL + CELL * 0.5, a: p.alpha, horiz: false });
-          }
-          for (let s = 0; s < p.len; s++) {
-            const k = Math.round(p.pos - p.dir * s);
-            const r = p.horiz ? p.idx : k;
-            const c = p.horiz ? k : p.idx;
-            if (r >= 0 && r < rows && c >= 0 && c < cols) {
-              const fade = (1 - s / p.len) * p.alpha;
-              const key = r * cols + c;
-              if (fade > (pulseCells.get(key) || 0)) pulseCells.set(key, fade);
-            }
-          }
-        }
+    const tick = (now: number) => {
+      frameTime = now;
+      for (let i = 0; i < pulses.length; i++) {
+        const pulse = pulses[i];
+        pulse.position += pulse.direction * pulse.speed;
+        const limit = (pulse.horizontal ? cols : rows) + 6;
+        if (pulse.position < -6 || pulse.position > limit) pulses[i] = createPulse(cols, rows);
       }
-
-      ctx.lineWidth = 1;
-      for (let i = 0; i < activeNodes.length; i++) {
-        const n = activeNodes[i];
-        const span = 3.2 * CELL;
-        const x1 = n.horiz ? n.x - span : n.x;
-        const y1 = n.horiz ? n.y : n.y - span;
-        const x2 = n.horiz ? n.x + span : n.x;
-        const y2 = n.horiz ? n.y : n.y + span;
-        ctx.save();
-        ctx.globalAlpha = n.a * 0.28;
-        ctx.strokeStyle = accent;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      ctx.lineWidth = 1;
-      for (let r = 0; r < rows; r++) {
-        const cy = r * CELL + CELL * 0.5;
-        for (let c = 0; c < cols; c++) {
-          const idx = r * cols + c;
-          const cell = cells[idx];
-          const cx = c * CELL + CELL * 0.5;
-          const pulse = pulseCells.get(idx) || 0;
-          if (pulse > 0.02) {
-            ctx.save();
-            ctx.globalAlpha = Math.min(0.85, pulse * 1.15);
-            ctx.strokeStyle = accent;
-            ctx.fillStyle = accent;
-            drawGlyph(cell.kind === 0 && pulse > 0.22 ? 2 : cell.kind, cx, cy);
-            ctx.restore();
-          } else {
-            const wave = reduced ? 1 : 0.72 + 0.28 * Math.sin(t * cell.speed + cell.phase);
-            ctx.save();
-            ctx.globalAlpha = cell.baseAlpha * wave;
-            ctx.strokeStyle = glyph;
-            ctx.fillStyle = glyph;
-            drawGlyph(cell.kind, cx, cy);
-            ctx.restore();
-          }
-        }
-      }
-    };
-
-    const tick = (ts: number) => {
-      if (!running) return;
-      renderFrame(ts);
+      draw();
       rafId = requestAnimationFrame(tick);
     };
 
     const resize = () => {
-      const rect = host.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      w = Math.max(1, Math.ceil(rect.width));
-      h = Math.max(1, Math.ceil(rect.height));
-      canvas.width = Math.ceil(w * dpr);
-      canvas.height = Math.ceil(h * dpr);
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
+      const nextWidth = host.clientWidth, nextHeight = host.clientHeight;
+      const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (!nextWidth || !nextHeight || (width === nextWidth && height === nextHeight && dpr === nextDpr)) return;
+      width = nextWidth;
+      height = nextHeight;
+      dpr = nextDpr;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      cols = Math.ceil(w / CELL) + 1;
-      rows = Math.ceil(h / CELL) + 1;
-      cells = [];
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const roll = Math.random();
-          const kind = roll < 0.74 ? 0 : roll < 0.85 ? 1 : roll < 0.93 ? 2 : 3;
-          cells.push({
-            kind,
-            baseAlpha: kind === 0 ? 0.55 + Math.random() * 0.35 : 0.65 + Math.random() * 0.35,
-            phase: Math.random() * Math.PI * 2,
-            speed: 0.45 + Math.random() * 0.65,
-          });
-        }
-      }
-      pulses = [spawnPulse(false), spawnPulse(false), spawnPulse(false), spawnPulse(false), spawnPulse(false)];
-      renderFrame(0);
+      cols = Math.ceil(width / GRID_STEP) + 1;
+      rows = Math.ceil(height / GRID_STEP) + 1;
+      cells = createGrid(cols, rows);
+      pulses = Array.from({ length: 4 }, () => {
+        const pulse = createPulse(cols, rows, true);
+        pulse.position = Math.random() * (pulse.horizontal ? cols : rows);
+        return pulse;
+      });
+      draw();
     };
 
     const syncLoop = () => {
-      if (reduced || !inView || document.hidden) {
-        running = false;
-        cancelAnimationFrame(rafId);
-      } else if (!running) {
-        running = true;
+      if (motion.matches || !inView || document.hidden) {
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = null;
+      } else if (rafId === null) {
         rafId = requestAnimationFrame(tick);
       }
     };
 
     pulseFnRef.current = () => {
-      if (reduced || !cols || !rows) return;
-      pulses.push(spawnPulse(true), spawnPulse(true));
-      if (pulses.length > 9) pulses.splice(0, pulses.length - 9);
+      if (!motion.matches && cols && rows && pulses.length < 7) {
+        pulses.push(createPulse(cols, rows, true), createPulse(cols, rows, true));
+      }
     };
 
     resize();
     syncLoop();
-
-    let resizeTimer = 0;
-    const onResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(resize, 120);
-    };
-    window.addEventListener('resize', onResize);
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
+    resizeObserver?.observe(host);
+    const visibilityObserver = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(([entry]) => {
+      inView = entry.isIntersecting;
+      syncLoop();
+    }) : null;
+    visibilityObserver?.observe(host);
+    const themeObserver = new MutationObserver(() => { colors = resolveColors(); draw(); });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    window.addEventListener('resize', resize);
     document.addEventListener('visibilitychange', syncLoop);
-
-    let observer: IntersectionObserver | null = null;
-    if (typeof IntersectionObserver !== 'undefined') {
-      observer = new IntersectionObserver(entries => {
-        inView = entries[0]?.isIntersecting ?? true;
-        syncLoop();
-      }, { threshold: 0.02 });
-      observer.observe(host);
-    }
+    motion.addEventListener('change', syncLoop);
 
     return () => {
-      running = false;
-      cancelAnimationFrame(rafId);
-      clearTimeout(resizeTimer);
-      window.removeEventListener('resize', onResize);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
+      visibilityObserver?.disconnect();
+      themeObserver.disconnect();
+      window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', syncLoop);
-      observer?.disconnect();
+      motion.removeEventListener('change', syncLoop);
       pulseFnRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (pulseTrigger > 0) pulseFnRef.current?.();
-  }, [pulseTrigger]);
+    if (clientId === previousClient.current) return;
+    previousClient.current = clientId;
+    pulseFnRef.current?.();
+  }, [clientId]);
 
   return <canvas ref={canvasRef} className="om-mcp-ambient-canvas" aria-hidden="true" />;
 }
