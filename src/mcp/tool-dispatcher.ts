@@ -354,6 +354,10 @@ export class McpToolDispatcher {
           throw featureDeferredP2('transcript.submit');
         }
       }
+      if (isAssetsUseTool && argsObj.action === 'scenario') {
+        requireToolScopes(ctx.auth, ['assets:read']);
+        throw featureDeferredP2('scenario_workflows');
+      }
 
       // Legacy host sourcePath check for openmotion_import_assets BEFORE strict cloud schema validation
       // so callers get an explicit `LOCAL_PATH_UNSUPPORTED_IN_CLOUD` error with guidance.
@@ -725,6 +729,12 @@ export class McpToolDispatcher {
           cloudMode: 'p1_readonly',
         };
       }
+    }
+
+    // P2 explicit gating for Workflows / Scenario runs in Cloud P1.
+    if (action === 'scenario') {
+      requireToolScopes(auth, ['assets:read']);
+      throw featureDeferredP2('scenario_workflows');
     }
 
     // P2 explicit gating for cloud ASR transcription when OPENDESIGN_ASR_URL is unset.

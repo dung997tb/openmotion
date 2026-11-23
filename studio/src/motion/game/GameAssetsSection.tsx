@@ -8,6 +8,7 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { initializeWorkspaceHistory, workspaceHistoryIndex, writeWorkspaceHistory } from '../../utils/workspaceHistory';
 import { workspacePageHref } from '../workspacePageRouting';
 import { coverUrl, gameApi, genreCovers, genreLabels, settingLabels, styleLabels } from './gameCatalog';
+import { isDeferredP2Error } from '../p2Deferred';
 
 /**
  * Games the user made in Game Studio, shown in Assets. They are read from the game catalogue and merged into the
@@ -24,20 +25,31 @@ export function useMyGames(active: boolean): MyGames {
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!active) return;
-    let cancelled = false, pending = false;
+    let cancelled = false, pending = false, deferred = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
     const load = async () => {
-      if (pending || document.hidden) return; pending = true;
+      if (pending || deferred || document.hidden) return; pending = true;
       try {
         const { games: all } = await gameApi.catalog();
         if (cancelled) return;
         const mine = all.filter(game => game.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         setGames(current => JSON.stringify(current) === JSON.stringify(mine) ? current : mine);
         setError(false);
-      } catch { if (!cancelled) setError(true); } finally { pending = false; }
+      } catch (err) {
+        if (cancelled) return;
+        if (isDeferredP2Error(err)) {
+          deferred = true;
+          if (timer) { clearInterval(timer); timer = null; }
+          setGames([]);
+          setError(false);
+          return;
+        }
+        setError(true);
+      } finally { pending = false; }
     };
     void load();
-    const timer = setInterval(() => void load(), refreshMs);
-    return () => { cancelled = true; clearInterval(timer); };
+    timer = setInterval(() => void load(), refreshMs);
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [active, attempt]);
   return { games, error, retry: useCallback(() => { setError(false); setAttempt(value => value + 1); }, []) };
 }

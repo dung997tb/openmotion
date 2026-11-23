@@ -20,6 +20,7 @@ import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { BackToExploreButton } from '../motion/BackToExploreButton';
+import { isDeferredP2Error } from '../motion/p2Deferred';
 import { ScenarioCard } from './ScenarioCard';
 import { scenarioClient } from './scenarioClient';
 import { scenarioCover } from './scenarioCovers';
@@ -77,6 +78,7 @@ export function ScenarioHub({
   const [runsLoading, setRunsLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [deferred, setDeferred] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tidying, setTidying] = useState(false);
   const [scenarioFilter, setScenarioFilter] = useState<ScenarioId | 'all'>('all');
@@ -108,8 +110,15 @@ export function ScenarioHub({
           return [...prev, ...fetched.filter(item => !seen.has(item.id))];
         });
         setNextOffset(res.nextOffset ?? null);
+        setDeferred(false);
       } catch (err) {
-        setRunsError(err instanceof Error ? err.message : t('Could not load recent drafts'));
+        if (isDeferredP2Error(err)) {
+          setDeferred(true);
+          setRuns([]);
+          setRunsError(null);
+        } else {
+          setRunsError(err instanceof Error ? err.message : t('Could not load recent drafts'));
+        }
       } finally {
         setRunsLoading(false);
         setLoadingMore(false);
@@ -370,6 +379,14 @@ export function ScenarioHub({
               <Skeleton className="om-scenario-run-skeleton-row" />
               <Skeleton className="om-scenario-run-skeleton-row" />
               <Skeleton className="om-scenario-run-skeleton-row" />
+            </div>
+          ) : deferred ? (
+            <div className="om-scenario-runs-empty" role="status" data-deferred-p2="true">
+              <PanelEmptyState
+                icon="route-line"
+                message={t('Workflows are coming in Phase 2.')}
+                description={t('Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.')}
+              />
             </div>
           ) : runsError ? (
             <div className="om-scenario-runs-error" role="alert">

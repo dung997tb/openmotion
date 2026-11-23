@@ -12,6 +12,7 @@ import { WorkspaceBack } from '../WorkspaceBack';
 import { MotionIcon } from '../icons';
 import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
+import { isDeferredP2Error } from '../p2Deferred';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
 import './gameStudio.css';
 
@@ -41,6 +42,8 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
   const [submitting, setSubmitting] = useState(false);
   const [games, setGames] = useState<GameCard[]>(bundledGames);
   const [offline, setOffline] = useState(false);
+  const [deferred, setDeferred] = useState(false);
+  const deferredRef = useRef(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<GameGenre | 'all' | 'portrait'>('all');
   const [sort, setSort] = useState<Sort>('relevance');
@@ -87,16 +90,26 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
       }
       statuses.current.set(game.id, game.status);
     }
-    setGames(catalog.games); setOffline(false);
-  }).catch(() => { setGames(current => current.some(game => game.source === 'mine') ? current : bundledGames); setOffline(true); });
+    setGames(catalog.games); setOffline(false); setDeferred(false); deferredRef.current = false;
+  }).catch((error: unknown) => {
+    setGames(current => current.some(game => game.source === 'mine') ? current : bundledGames);
+    if (isDeferredP2Error(error)) {
+      deferredRef.current = true;
+      setDeferred(true);
+      setOffline(false);
+      return;
+    }
+    setOffline(true);
+  });
   useEffect(() => { void load(); }, []);
   // Poll every 4 s while the page is visible, so drafts an Agent starts from its chat show up and open on their own.
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') void load(); };
+    if (deferred) return;
+    const tick = () => { if (!deferredRef.current && document.visibilityState === 'visible') void load(); };
     const timer = setInterval(tick, 4000);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-  }, []);
+  }, [deferred]);
   useEffect(() => {
     const scroller = root.current;
     if (!scroller) return;
@@ -119,9 +132,11 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
   const update = (card: GameCard) => setGames(list => list.map(game => game.id === card.id ? card : game));
 
   const brief = composeBrief({ prompt, genre, style, setting, multiplayer });
-  const failure = (error: unknown) => error instanceof TypeError || offline
-    ? t('The local game service is not available. Update OpenMotion and try again.')
-    : t('The game could not be created: {reason}', { reason: (error as Error).message });
+  const failure = (error: unknown) => isDeferredP2Error(error) || deferred
+    ? t('Game Studio is coming in Phase 2.')
+    : error instanceof TypeError || offline
+      ? t('The local game service is not available. Update OpenMotion and try again.')
+      : t('The game could not be created: {reason}', { reason: (error as Error).message });
   const started = (created: GameCreated) => {
     rememberInstruction(created.game.id, created.agentInstruction);
     statuses.current.set(created.game.id, created.game.status);
@@ -130,18 +145,26 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
   };
   const submit = async () => {
     if (!brief || submitting) return;
+    if (deferred) { notify(t('Game Studio is coming in Phase 2.'), 'info'); return; }
     setSubmitting(true);
     // Choosing options without typing is enough to start: the composed brief becomes the prompt.
     try { started(await gameApi.create({ prompt: prompt.trim() || brief, genre, style, setting, multiplayer, orientation, playableAd: adBuild })); setPrompt(''); }
-    catch (error) { notify(failure(error), 'error'); }
+    catch (error) {
+      if (isDeferredP2Error(error)) { deferredRef.current = true; setDeferred(true); notify(t('Game Studio is coming in Phase 2.'), 'info'); }
+      else notify(failure(error), 'error');
+    }
     finally { setSubmitting(false); }
   };
   const remix = async (game: GameCard) => {
+    if (deferred) { notify(t('Game Studio is coming in Phase 2.'), 'info'); return; }
     // Community games are not copied: a new original game is briefed from their genre, style and description.
     try { started(game.external
       ? await gameApi.create({ prompt: communityRemixPrompt(game), genre: game.genre, style: game.style, setting: game.setting, multiplayer: game.multiplayer, orientation: game.orientation ?? 'landscape' })
       : await gameApi.remix(game.id)); }
-    catch (error) { notify(failure(error), 'error'); }
+    catch (error) {
+      if (isDeferredP2Error(error)) { deferredRef.current = true; setDeferred(true); notify(t('Game Studio is coming in Phase 2.'), 'info'); }
+      else notify(failure(error), 'error');
+    }
   };
   const open = (game: GameCard) => {
     // Sites that refuse to be embedded open in a new window; everything else plays in the project view.
@@ -221,7 +244,14 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
         </Button>)}</div>
         <h1 className="om-game-headline">{t('Create your own game in minutes')}</h1>
       </section>
-      <section ref={hero} className="om-game-hero" aria-label={t('Describe your game')}>{renderComposer('hero')}</section>
+      <section ref={hero} className="om-game-hero" aria-label={t('Describe your game')}>
+        {deferred ? (
+          <div className="om-card" role="status" data-deferred-p2="true" style={{ padding: 24, textAlign: 'center' }}>
+            <p className="om-subtitle">{t('Game Studio is coming in Phase 2.')}</p>
+            <p className="om-muted">{t('Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.')}</p>
+          </div>
+        ) : renderComposer('hero')}
+      </section>
       <section className="om-game-market" aria-label={t('Game market')}>
         <h2 className="om-title om-game-explore-title">{t('Explore templates')}</h2>
         <div className="om-game-filters">
@@ -247,11 +277,11 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
 
     </div>
     {/* Kept mounted so it can slide in and out; inert while the inline composer is on screen. */}
-    <div className="om-game-dock" data-visible={!heroVisible} data-expanded={expanded} inert={heroVisible || undefined} aria-hidden={heroVisible || undefined}>{renderComposer('dock')}</div>
+    {!deferred && <div className="om-game-dock" data-visible={!heroVisible} data-expanded={expanded} inert={heroVisible || undefined} aria-hidden={heroVisible || undefined}>{renderComposer('dock')}</div>}
     </div>
 
     {/* The detail page covers the whole window, so it renders outside the workspace frame that clips fixed layers. */}
-    {opened && createPortal(<GameProject key={opened.id} game={opened} offline={offline} onClose={() => setOpenId(null)} onRemix={() => void remix(opened)} onChange={update} onOpenMcp={onOpenMcp} notify={notify} />, document.body)}
+    {opened && createPortal(<GameProject key={opened.id} game={opened} offline={offline || deferred} onClose={() => setOpenId(null)} onRemix={() => void remix(opened)} onChange={update} onOpenMcp={onOpenMcp} notify={notify} />, document.body)}
     <StudioToastViewport toasts={toast.toasts} dismissToast={toast.dismissToast} />
   </div>;
 }

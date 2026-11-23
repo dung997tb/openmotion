@@ -12,6 +12,7 @@ import type {
   ScenarioStepState,
 } from '../../../shared/scenario-runs';
 import { ScenarioApiError, scenarioClient, scenarioRequest } from './scenarioClient';
+import { isDeferredP2Error } from '../motion/p2Deferred';
 import type { BriefSaveRef, ScenarioRunApi } from './stepContract';
 import type { useToast } from '../hooks/useToast';
 
@@ -86,6 +87,7 @@ export type UseScenarioRunResult = ScenarioRunApi & {
   scenario: ScenarioDefinition;
   run: ScenarioRun | null;
   loading: boolean;
+  deferred: boolean;
   error: string | null;
   pendingJobs: number;
   startNewRun: () => Promise<ScenarioRun>;
@@ -119,6 +121,7 @@ export function useScenarioRun({
 
   const [run, setRunState] = useState<ScenarioRun | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deferred, setDeferred] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const [reloadToken, setReloadToken] = useState(0);
@@ -279,7 +282,14 @@ export function useScenarioRun({
         setLoading(false);
       } catch (err) {
         if (cancelled) return;
+        if (isDeferredP2Error(err)) {
+          setDeferred(true);
+          setError(null);
+          setLoading(false);
+          return;
+        }
         const message = err instanceof Error ? err.message : tRef.current('Could not load workflow');
+        setDeferred(false);
         setError(message);
         setLoading(false);
       }
@@ -502,6 +512,7 @@ export function useScenarioRun({
     scenario,
     run,
     loading,
+    deferred,
     error,
     pendingJobs,
     busy,

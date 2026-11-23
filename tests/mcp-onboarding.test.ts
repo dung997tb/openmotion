@@ -178,9 +178,12 @@ test('cloud Streamable HTTP and legacy connection guidance expose the maintained
     'openmotion_media_use',
     'openmotion_assets_use generate',
     'FEATURE_DEFERRED_P2',
+    'action=scenario',
+    '/motion-api/games/*',
   ]) {
     assert.ok(cloudGuide.includes(token), token);
   }
+  assert.doesNotMatch(cloudGuide, /openmotion_game_create|action=batch|action=trigger/);
 
   const stdioInfo: IntegrationInfo = {
     name: 'OpenMotion', version: '1.0.0', dataDirectory: '/fixture/data', previewUrl: 'http://127.0.0.1:4567', tools: phase1Tools,
@@ -190,6 +193,7 @@ test('cloud Streamable HTTP and legacy connection guidance expose the maintained
   assert.ok(guide.includes(reviewCommentsPrompt({ dataDirectory: stdioInfo.dataDirectory, previewUrl: stdioInfo.previewUrl })));
   for (const operation of ['openmotion_media_use', 'inspect', 'reference', 'models', 'schema', 'generate', 'status', 'cancel', 'requestId', 'jobId']) assert.ok(guide.includes(operation), operation);
   assert.doesNotMatch(guide, /不公开生成/);
+  assert.doesNotMatch(guide, /openmotion_game_create|action=batch|action=trigger/);
   assert.match(guide, /openmotion_assets_use generate/);
   for (const scenarioToken of ['action=scenario', 'add_pool', 'recordIteration=true', 'link_design', 'link_motion']) {
     assert.ok(guide.includes(scenarioToken), scenarioToken);

@@ -16,10 +16,12 @@ import type { ScenarioDefinition, ScenarioId, scenarioCategories, socialPlatform
 
 export class ScenarioApiError extends Error {
   readonly code: string;
+  readonly status?: number;
   readonly applied?: boolean | 'unknown';
-  constructor(code: string, message: string, applied?: boolean | 'unknown') {
+  constructor(code: string, message: string, applied?: boolean | 'unknown', status?: number) {
     super(message);
     this.code = code;
+    this.status = status;
     this.applied = applied;
   }
 }
@@ -55,7 +57,7 @@ export async function scenarioRequest<T>(command: ScenarioCommand, args: Record<
     const applied = payload?.applied === true || payload?.applied === false || payload?.applied === 'unknown'
       ? payload.applied
       : undefined;
-    throw new ScenarioApiError(code, parsed.message, applied);
+    throw new ScenarioApiError(code, parsed.message, applied, response.status);
   }
   return payload as T;
 }

@@ -605,6 +605,20 @@ describe('Streamable HTTP /mcp Multi-Replica Sessions, 22 Tools, Security & 10 M
           },
         },
       },
+      {
+        name: 'openmotion_assets_use',
+        arguments: {
+          action: 'scenario',
+          scenario: { command: 'catalog' },
+        },
+      },
+      {
+        name: 'openmotion_assets',
+        arguments: {
+          action: 'scenario',
+          scenario: { command: 'list' },
+        },
+      },
     ];
 
     for (const [idx, call] of p2Calls.entries()) {

@@ -5,6 +5,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../i18n/I18n';
 import { DesignProjectList } from '../design/DesignProjectList';
 import { BrandKitPage } from './BrandKitPage';
+import { GameStudio } from './game/GameStudio';
+import { ScenarioHub } from '../scenario/ScenarioHub';
 import { useReviewComments } from './useReviewComments';
 import { isDeferredP2Error, isDeferredP2Payload } from './p2Deferred';
 
@@ -91,4 +93,32 @@ it('marks useReviewComments as deferred and stops polling on 501 FEATURE_DEFERRE
   const callsAfterInitial = fetcher.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
   expect(fetcher.mock.calls.length).toBe(callsAfterInitial);
+});
+
+it('renders a graceful Phase 2 notice in GameStudio and stops polling on 501 FEATURE_DEFERRED_P2', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(async () => deferredResponse());
+  vi.stubGlobal('fetch', fetcher);
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<I18nProvider initialLocale="en"><GameStudio onExplore={vi.fn()} onOpenMcp={vi.fn()} /></I18nProvider>));
+  expect(host.querySelector('[data-deferred-p2="true"]')?.textContent).toContain('Game Studio is coming in Phase 2.');
+  const callsAfterInitial = fetcher.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+  expect(fetcher.mock.calls.length).toBe(callsAfterInitial);
+});
+
+it('renders a graceful Phase 2 notice in ScenarioHub without an error alert on 501 FEATURE_DEFERRED_P2', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => deferredResponse()));
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(
+    <I18nProvider initialLocale="en">
+      <ScenarioHub category={null} active onCategory={vi.fn()} onOpenScenario={vi.fn()} onExplore={vi.fn()} />
+    </I18nProvider>,
+  ));
+  expect(host.querySelector('[data-deferred-p2="true"]')?.textContent).toContain('Workflows are coming in Phase 2.');
+  expect(host.querySelector('[role="alert"]')).toBeNull();
 });

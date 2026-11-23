@@ -1642,6 +1642,10 @@ function createMcpDomainPorts(deps: {
       async handleAssetsUse(auth, args) {
         const action = String(args.action ?? '');
 
+        if (action === 'scenario') {
+          throw featureDeferredP2('scenario_workflows');
+        }
+
         if (action === 'transcript') {
           const transcript = (args.transcript ?? {}) as Record<string, unknown>;
           const command = String(transcript.command ?? '');
@@ -2610,6 +2614,10 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
 
   app.all('/motion-api/design', authMiddleware, sendDeferredP2('design_studio'));
   app.all('/motion-api/design/*', authMiddleware, sendDeferredP2('design_studio'));
+  app.all('/motion-api/games', authMiddleware, sendDeferredP2('game_studio'));
+  app.all('/motion-api/games/*', authMiddleware, sendDeferredP2('game_studio'));
+  app.all('/motion-api/scenarios', authMiddleware, sendDeferredP2('scenario_workflows'));
+  app.all('/motion-api/scenarios/*', authMiddleware, sendDeferredP2('scenario_workflows'));
 
   app.get('/motion-api/brand-kits/catalog', async (c) => {
     try {

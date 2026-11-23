@@ -1339,6 +1339,8 @@ describe('Cloud API Entrypoint — Models, Account, Catalog, Integration & P2 Ro
     // Explicit P2 501 FEATURE_DEFERRED_P2 HTTP routes
     for (const [method, url] of [
       ['GET', '/motion-api/design/projects'],
+      ['GET', '/motion-api/games'],
+      ['GET', '/motion-api/scenarios/bundles/test/file'],
       ['POST', '/motion-api/brand-kits'],
       ['GET', '/motion-api/transcripts'],
       ['GET', '/motion-api/review-comments'],

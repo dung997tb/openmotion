@@ -18,6 +18,9 @@ const actions = {type:'array',maxItems:100,items:action};
 const room = {type:'string',pattern:'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}$'};
 const simulationStep=object({fromTick:{type:'integer',minimum:1,maximum:10000},toTick:{type:'integer',minimum:1,maximum:10000},action:{type:'object',additionalProperties:true}},['fromTick','toTick','action']);
 const simulationRoute={oneOf:[{enum:['idle','reference']},{type:'array',maxItems:1000,items:simulationStep}]};
+// Retained for source parity with main. Intentionally not registered in
+// shared/phase1-tools.ts or shared/mcp-profiles.json in Cloud P1 (22 registered tools);
+// /motion-api/games* returns 501 FEATURE_DEFERRED_P2 until Cloud Game Studio lands.
 export const gameTools = [
   { name:'openmotion_game_create',title:'OpenMotion · Create Game', description:'Create a draft playable web game in the connected local workspace. Returns GameCreated and a complete Agent brief. Follow openmotion://workflow/game/start; Multiplayer shooter or 3d briefs scaffold the offline 1–4 player co-op kit with animated CC0 characters. This does not run an Agent or publish.', inputSchema:brief,annotations:writes },
   { name:'openmotion_game_get',title:'OpenMotion · Get Game',description:'Read a GameCard and its file inventory in this workspace. Templates are read-only; remix through the local market before editing.',inputSchema:object({id},['id']),annotations:reads },
