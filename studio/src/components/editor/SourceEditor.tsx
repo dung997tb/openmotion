@@ -58,18 +58,24 @@ function detectLanguage(filePath: string): string {
 
 interface SourceEditorProps {
   content: string;
+  submitted?: string;
   filePath?: string;
   language?: string;
   onChange?: (content: string) => void;
+  onFlush?: () => void;
+  hasPendingChange?: () => boolean;
   readOnly?: boolean;
   revealOffset?: number | null;
 }
 
 export const SourceEditor = memo(function SourceEditor({
   content,
+  submitted,
   filePath,
   language,
   onChange,
+  onFlush,
+  hasPendingChange,
   readOnly = false,
   revealOffset,
 }: SourceEditorProps) {
@@ -77,6 +83,8 @@ export const SourceEditor = memo(function SourceEditor({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onFlushRef = useRef(onFlush);
+  onFlushRef.current = onFlush;
 
   const contentRef = useRef(content);
   contentRef.current = content;
@@ -93,11 +101,34 @@ export const SourceEditor = memo(function SourceEditor({
 
       const lang = language ?? (filePath ? detectLanguage(filePath) : "html");
 
+      let composing = false;
+      let lastEmitted = contentRef.current;
+      function notify(text: string) {
+        if (lastEmitted === text) return;
+        lastEmitted = text;
+        onChangeRef.current?.(text);
+      }
+      const typingEvents = EditorView.domEventHandlers({
+        compositionstart() { composing = true; },
+        compositionend(_, view) {
+          composing = false;
+          // CodeMirror processes the native final input before this microtask.
+          queueMicrotask(() => {
+            if (editorRef.current !== view) return;
+            notify(view.state.doc.toString());
+            if (!view.hasFocus) onFlushRef.current?.();
+          });
+        },
+        blur() { if (!composing) onFlushRef.current?.(); },
+      });
       const updateListener = EditorView.updateListener.of((update) => {
         if (!update.docChanged || !onChangeRef.current) return;
         // Ignore programmatic external syncs — only real user edits should save.
-        if (update.transactions.some((tr) => tr.annotation(ExternalSync))) return;
-        onChangeRef.current(update.state.doc.toString());
+        if (update.transactions.some((tr) => tr.annotation(ExternalSync))) {
+          lastEmitted = update.state.doc.toString();
+          return;
+        }
+        if (!composing) notify(update.state.doc.toString());
       });
 
       const state = EditorState.create({
@@ -112,6 +143,8 @@ export const SourceEditor = memo(function SourceEditor({
           bracketMatching(),
           closeBrackets(),
           highlightSelectionMatches(),
+          typingEvents,
+          keymap.of([{ key: "Mod-s", run: () => { if (!composing) onFlushRef.current?.(); return true; } }]),
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap]),
           getLanguageExtension(lang),
           studioCodeTheme,
@@ -133,17 +166,14 @@ export const SourceEditor = memo(function SourceEditor({
     if (!view) return;
     const current = view.state.doc.toString();
     if (current === content) return;
-    // If the user is actively typing (editor focused), a programmatic replace
-    // would clobber their in-flight keystrokes — the ExternalSync annotation
-    // suppresses onChange, so those edits would be silently lost. Skip the
-    // external sync while focused; it re-runs on the next `content` change after
-    // they blur (or when a later commit lands with the editor unfocused).
-    if (view.hasFocus) return;
+    // An old receipt must never replace newer typing. Once that draft is
+    // discarded after a conflict, the authoritative content must also reach a focused editor.
+    if (view.hasFocus && current !== submitted && (hasPendingChange?.() ?? true)) return;
     view.dispatch({
       changes: { from: 0, to: current.length, insert: content },
       annotations: [ExternalSync.of(true)],
     });
-  }, [content]);
+  }, [content, submitted]);
 
   useEffect(() => {
     const view = editorRef.current;

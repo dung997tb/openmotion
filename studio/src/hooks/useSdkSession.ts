@@ -1,4 +1,4 @@
-import { observeSourceRead } from "../utils/confirmedTextSources";
+import { observePendingSourceRead, observeSourceRead } from "../utils/confirmedTextSources";
 import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { openComposition } from "@hyperframes/sdk";
@@ -457,7 +457,8 @@ export function useSdkSession(
     // the first frame and play do not need it, so it waits for the live preview to boot.
     whenPreviewBooted(projectId)
       .then((booted) =>
-        cancelled || !booted ? null : readProjectFileOptional(projectId, activeCompPath, confirmedSource.current ?? undefined),
+        cancelled || !booted ? null : observePendingSourceRead(projectId, activeCompPath,
+          readProjectFileOptional(projectId, activeCompPath, confirmedSource.current ?? undefined)),
       )
       .then(async (read) => {
         if (!read || cancelled) return;

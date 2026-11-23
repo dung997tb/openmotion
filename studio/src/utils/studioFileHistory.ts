@@ -31,7 +31,7 @@ export interface DomEditCommitBaseParams {
   clearDomSelection: () => void;
 }
 
-export type StudioWriteHistory = { label: string; windowId: string };
+export type StudioWriteHistory = { label: string; windowId: string; continuous?: boolean };
 export interface ProjectFileWriter {
   (path: string, content: string, expectedContent?: string): Promise<void>;
   (path: string, content: string, expectedContent: string | undefined, command: ProjectEditCommand | undefined, history?: StudioWriteHistory): Promise<void | RebasedFileEdit>;
@@ -40,25 +40,27 @@ export interface ProjectFileWriter {
 const lastWindow = new WeakMap<ProjectFileWriter, { key: string | undefined; id: string; startedAt: number }>();
 
 /** A writer belongs to one Studio project. A different gesture starts a new history entry. */
-export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, key?: string, coalesceMs = 4000): StudioWriteHistory {
+export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, key?: string, coalesceMs = 4000, continuous = false): StudioWriteHistory {
   const now = Date.now();
   const previous = lastWindow.get(writer);
-  if (key && previous?.key === key && now - previous.startedAt < coalesceMs) return { label, windowId: previous.id };
-  const id = crypto.randomUUID();
-  lastWindow.set(writer, { key, id, startedAt: now });
-  return { label, windowId: id };
+  const window = key && previous?.key === key && now - previous.startedAt < coalesceMs
+    ? previous : { key, id: crypto.randomUUID(), startedAt: now };
+  lastWindow.set(writer, window);
+  // Compound gestures already supply their own unique key and an unbounded time window.
+  return { label, windowId: window.id, ...((continuous || (key && coalesceMs === Infinity)) && { continuous: true }) };
 }
 
-type HistoryGesture = Pick<RecordEditInput, "label" | "coalesceKey" | "coalesceMs">;
+type HistoryGesture = Pick<RecordEditInput, "label" | "coalesceKey" | "coalesceMs"> & { continuous?: boolean };
 
 export function cloudHistoryForWrite(writer: ProjectFileWriter | undefined, gesture: HistoryGesture): StudioWriteHistory | undefined {
   if (!writer || !getCachedCloudDisklessMode()) return undefined;
-  return studioHistoryForWrite(writer, gesture.label, gesture.coalesceKey, gesture.coalesceMs);
+  return studioHistoryForWrite(writer, gesture.label, gesture.coalesceKey, gesture.coalesceMs, gesture.continuous);
 }
 
 interface SaveProjectFilesWithHistoryInput {
   projectId: string;
   label: string;
+  continuous?: boolean;
   coalesceKey?: string;
   coalesceMs?: number;
   files: Record<string, (contentInsideFileQueue: string) => string>;
@@ -142,6 +144,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   label,
   coalesceKey,
   coalesceMs,
+  continuous,
   files,
   readFile,
   writeFile,
@@ -161,7 +164,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   const changedPaths = Object.keys(snapshots);
   if (changedPaths.length === 0) return [];
 
-  const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs });
+  const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs, continuous });
   if (changedPaths.length > 1 && !commandForWrite) {
     const sources = changedPaths.map(path => ({ path, before: diskContent?.[path] ?? snapshots[path].before, after: snapshots[path].after }));
     if (await tryStudioTextEdit(projectId, sources, history)) {

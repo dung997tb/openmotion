@@ -8,6 +8,22 @@ const capableProjects = new Set<string>();
 let codeUnits = 0;
 const key = (projectId: string, path: string) => JSON.stringify([projectId, path]);
 
+// A save can already have the selected file on its way to the SDK. Wait for
+// that read, then check the exact required revision before using its content.
+const pendingReads = new Map<string, Promise<unknown>>();
+
+export function observePendingSourceRead<T>(projectId: string, path: string, read: Promise<T>) {
+  const id = key(projectId, path);
+  pendingReads.set(id, read);
+  return read.finally(() => {
+    if (pendingReads.get(id) === read) pendingReads.delete(id);
+  });
+}
+
+export function pendingSourceRead(projectId: string, path: string) {
+  return pendingReads.get(key(projectId, path));
+}
+
 export function confirmedSource(projectId: string, path: string) {
   return sources.get(key(projectId, path));
 }

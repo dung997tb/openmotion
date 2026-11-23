@@ -15,7 +15,7 @@ import { sha256Hex } from '../studio/etag.ts';
 import { normalizeSafeProjectPath, type ProjectFilesService } from './project-files-service.ts';
 
 export type EditGuard =
-  | { source: 'studio'; versions: Record<string, string | null>; writeToken: string; windowId?: string }
+  | { source: 'studio'; versions: Record<string, string | null>; writeToken: string; windowId?: string; undoGroup?: string }
   | { source: 'agent'; expectedRevision: string; expectedVersionId: string };
 
 function invalid(message: string) {
@@ -141,12 +141,14 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
   // Preserve receipts issued by the original move endpoint during rolling upgrades.
   const legacyMove = input.kind === 'moveClip';
   const scope = `project:${projectId}:${guard.source}:${legacyMove ? 'moveClip' : 'edit'}`;
-  const hash = legacyMove
+  const commandHash = legacyMove
     ? sha256Hex(JSON.stringify([input.compositionPath, input.hfId, input.start,
       guard.source === 'studio' ? guard.versions[input.compositionPath] : base]))
     : sha256Hex(JSON.stringify([input, base], (_key, value) =>
       value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value));
+  const undoGroup = guard.source === 'studio' && files.textPatchWrites ? guard.undoGroup : undefined;
+  const hash = undoGroup ? sha256Hex(JSON.stringify([commandHash, undoGroup])) : commandHash;
   // Persist with the exact input versions we evaluated. A racing commit may
   // invalidate them between read and write, even if the client base was fresh.
   async function applyCurrent() {
@@ -224,7 +226,7 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
       });
       // A no-op still guards its read set and obtains an idempotent receipt.
       if (edits.length) {
-        return files.commitTextEdits(auth, projectId, {files: edits, dependencies: Object.fromEntries(versions),
+        return files.commitTextEdits(auth, projectId, {files: edits, dependencies: Object.fromEntries(versions), undoGroup,
           label: labels.size === 1 ? [...labels][0] : 'Edit project'}, {source: guard.source, requestId,
           writeToken: guard.source === 'studio' ? guard.writeToken : undefined, command: {scope, hash, result: {rebased: false}}});
       }

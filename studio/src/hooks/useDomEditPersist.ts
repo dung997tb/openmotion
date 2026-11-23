@@ -154,7 +154,7 @@ export function useDomEditPersist({
         coalesceKey: options?.coalesceKey,
         coalesceMs: options?.coalesceMs,
       };
-      const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs) : undefined;
+      const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs, options?.continuous) : undefined;
       if (cloudCommand && selection.isolatedTarget && !options?.prepareContent && !options?.validateContent) {
         const command = { ...cloudCommand, compositionPath: targetPath };
         const versions = { [targetPath]: isolatedSourceVersion(selection.isolatedTarget) };

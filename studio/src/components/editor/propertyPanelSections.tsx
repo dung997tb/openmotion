@@ -4,7 +4,8 @@ import { FieldTextarea, NativeSelect } from "../ui/FormField";
 import { useI18n } from "../../i18n/I18n";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Plus, Type } from "../../icons/SystemIcons";
-import { isTextEditableSelection, type DomEditSelection } from "./domEditing";
+import { createTypingSave } from "../../utils/typingSave";
+import { getDomEditTargetKey, isTextEditableSelection, type DomEditSelection } from "./domEditing";
 import type { ImportedFontAsset, FontImportInput } from "./fontAssets";
 import { FIELD, LABEL, normalizeTextMetricValue, RESPONSIVE_GRID } from "./propertyPanelHelpers";
 import { MetricField, Section, SelectField } from "./propertyPanelPrimitives";
@@ -79,65 +80,63 @@ export function TextAreaField({
   autoFocus?: boolean;
   flat?: boolean;
   boxed?: boolean;
-  onCommit: (nextValue: string) => void;
+  onCommit: (nextValue: string) => unknown;
 }) {
   const { t } = useI18n();
   const track = useTrackDesignInput();
   const [draft, setDraft] = useState(value);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const interactionChangedRef = useRef(false);
+  const [queue] = useState(createTypingSave);
+  const composing = useRef(false);
   const focusedRef = useRef(false);
-  const valueRef = useRef(value);
-  valueRef.current = value;
+  const lastInput = useRef(value);
+  const accepted = useRef(value);
+  accepted.current = value;
 
   useEffect(() => {
-    if (focusedRef.current) return;
+    if (composing.current || queue.busy()) return;
+    lastInput.current = value;
     setDraft(value);
-  }, [value]);
-  useEffect(
-    () => () => {
-      if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
-    },
-    [],
-  );
+  }, [value, queue]);
+  useEffect(() => () => { void queue.flush(); }, [queue]);
   useEffect(() => {
-    if (!autoFocus) return;
-    textareaRef.current?.focus();
+    if (autoFocus) textareaRef.current?.focus();
   }, [autoFocus]);
 
-  const commitDraft = (d: string) => {
-    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
-    if (interactionChangedRef.current) {
-      interactionChangedRef.current = false;
-      track("text", label);
+  const schedule = (text: string) => {
+    if (text === lastInput.current) return;
+    lastInput.current = text;
+    if (text === accepted.current && !queue.writing()) {
+      queue.cancel();
+      return;
     }
-    if (d !== valueRef.current) onCommit(d);
-  };
-  const scheduleCommit = (d: string) => {
-    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
-    commitTimerRef.current = setTimeout(() => {
-      if (d !== valueRef.current) {
-        if (interactionChangedRef.current) {
-          interactionChangedRef.current = false;
-          track("text", label);
-        }
-        onCommit(d);
+    queue.schedule(async () => {
+      track("text", label);
+      const result = await onCommit(text);
+      if (result && typeof result === "object" && "reason" in result && result.reason === "preview-stale") {
+        queue.cancel();
+        lastInput.current = accepted.current;
+        setDraft(accepted.current);
       }
-    }, 120);
+    });
   };
-
-  const handleFocus = () => {
-    focusedRef.current = true;
-  };
-  const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setDraft(e.target.value);
-    interactionChangedRef.current = true;
-    scheduleCommit(e.target.value);
+  const handleFocus = () => { focusedRef.current = true; };
+  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const text = event.currentTarget.value;
+    setDraft(text);
+    if (!composing.current) schedule(text);
   };
   const handleBlur = () => {
     focusedRef.current = false;
-    commitDraft(draft);
+    if (!composing.current) void queue.flush();
+  };
+  const compositionHandlers = {
+    onCompositionStart: () => { composing.current = true; },
+    onCompositionEnd: (event: React.CompositionEvent<HTMLTextAreaElement>) => {
+      composing.current = false;
+      schedule(event.currentTarget.value);
+      if (!focusedRef.current) void queue.flush();
+    },
   };
 
   if (flat) {
@@ -153,6 +152,7 @@ export function TextAreaField({
           rows={2}
           aria-label={t(label)}
           style={boxed ? { outline: "none" } : undefined}
+          {...compositionHandlers}
           onFocus={handleFocus}
           onChange={handleChange}
           onBlur={handleBlur}
@@ -171,6 +171,7 @@ export function TextAreaField({
           value={draft}
           disabled={disabled}
           rows={4}
+          {...compositionHandlers}
           onFocus={handleFocus}
           onChange={handleChange}
           onBlur={handleBlur}
@@ -455,6 +456,7 @@ export function TextSection({
   if (textFields.length === 1) {
     const content = (
       <TextFieldEditor
+        key={JSON.stringify([getDomEditTargetKey(element), activeField.key])}
         field={activeField}
         styles={styles}
         fontAssets={fontAssets}
@@ -526,6 +528,7 @@ export function TextSection({
         </div>
       </div>
       <TextFieldEditor
+        key={JSON.stringify([getDomEditTargetKey(element), activeField.key])}
         field={activeField}
         styles={styles}
         fontAssets={fontAssets}

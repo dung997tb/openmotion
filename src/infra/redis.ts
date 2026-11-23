@@ -269,24 +269,29 @@ export interface RateLimitResult {
 
 const SLIDING_WINDOW_LUA = `
 local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local windowMs = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
+local windowMs = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local cost = tonumber(ARGV[3])
 local member = ARGV[4]
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
 
 redis.call('ZREMRANGEBYSCORE', key, '-inf', now - windowMs)
 local count = redis.call('ZCARD', key)
-if count >= limit then
-  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+local missing = count + cost - limit
+if missing > 0 then
   local resetAt = now + windowMs
-  if oldest[2] then
-    resetAt = tonumber(oldest[2]) + windowMs
+  if cost <= limit then
+    local release = redis.call('ZRANGE', key, missing - 1, missing - 1, 'WITHSCORES')
+    resetAt = tonumber(release[2]) + windowMs
   end
-  return {0, 0, resetAt}
+  return {0, limit - count, resetAt, math.ceil((resetAt - now) / 1000)}
 end
-redis.call('ZADD', key, now, member)
+for i = 1, cost do
+  redis.call('ZADD', key, now, member .. ':' .. i)
+end
 redis.call('PEXPIRE', key, windowMs)
-return {1, limit - count - 1, now + windowMs}
+return {1, limit - count - cost, now + windowMs, 0}
 `;
 
 export class RateLimiter {
@@ -298,24 +303,18 @@ export class RateLimiter {
     this.keyPrefix = keyPrefix;
   }
 
-  async consume(bucketKey: string, limit: number, windowMs: number): Promise<RateLimitResult> {
-    const now = Date.now();
+  async consume(bucketKey: string, limit: number, windowMs: number, cost = 1): Promise<RateLimitResult> {
+    if (!Number.isSafeInteger(cost) || cost < 1) throw new RangeError('Rate limit cost must be a positive integer');
     const key = `${this.keyPrefix}:${bucketKey}`;
-    const member = `${now}:${randomUUID()}`;
-    const reply = (await this.redis.eval(
+    const [allowed, remaining, resetAtMs, retryAfterSec] = (await this.redis.eval(
       SLIDING_WINDOW_LUA,
       1,
       key,
-      String(now),
       String(windowMs),
       String(limit),
-      member,
-    )) as [number, number, number];
-
-    const allowed = Number(reply[0]) === 1;
-    const remaining = Math.max(0, Number(reply[1]));
-    const resetAtMs = Number(reply[2]);
-    const retryAfterSec = allowed ? 0 : Math.max(1, Math.ceil((resetAtMs - now) / 1000));
-    return { allowed, remaining, limit, resetAtMs, retryAfterSec };
+      String(cost),
+      randomUUID(),
+    )) as [number, number, number, number];
+    return { allowed: allowed === 1, remaining: Math.max(0, remaining), limit, resetAtMs, retryAfterSec };
   }
 }

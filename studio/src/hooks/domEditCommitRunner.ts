@@ -1,3 +1,4 @@
+import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import type { DomEditPersistOutcome } from "./domEditCommitTypes";
 
 interface DomEditCommitRunnerConfig {
@@ -113,9 +114,14 @@ export async function runReportedDomEditCommit(
   config: DomEditCommitRunnerConfig,
 ): Promise<DomEditCommitOutcome> {
   let landed = false;
+  let stale = false;
   let persistence: DomEditPersistOutcome | undefined;
   await runDomEditCommit({
     ...config,
+    onError: error => {
+      stale = error instanceof StudioFileConflictError && error.syncLatest;
+      config.onError(error);
+    },
     persist: async () => {
       const result = await config.persist();
       if (isDomEditPersistOutcome(result)) persistence = result;
@@ -125,7 +131,7 @@ export async function runReportedDomEditCommit(
       config.onSettled?.(ok);
     },
   });
-  if (!landed) return domEditCommitDeclined("persist-failed");
+  if (!landed) return domEditCommitDeclined(stale ? "preview-stale" : "persist-failed");
   return persistence ? { ok: true, persistence } : { ok: true };
 }
 

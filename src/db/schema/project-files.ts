@@ -136,6 +136,7 @@ export const projectHistoryEntries = pgTable(
     actorName: varchar('actor_name', { length: 128 }).notNull(),
     label: varchar('label', { length: 256 }).notNull(),
     windowId: uuid('window_id'),
+    undoGroup: varchar('undo_group', { length: 73 }),
     pinned: boolean('pinned').notNull().default(false),
     undone: boolean('undone').notNull().default(false),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),

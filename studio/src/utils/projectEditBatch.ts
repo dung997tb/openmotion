@@ -35,6 +35,7 @@ export async function submitStudioCommands(projectId: string, commands: Composit
   const requestId = createStudioWriteToken();
   const body = JSON.stringify({
     versions, edit: { kind: "batch", commands },
+    ...(history?.continuous && { undoGroup: history.windowId }),
   });
   const headers = { "Content-Type": "application/json", "Idempotency-Key": requestId, ...studioWriteHeaders(history) };
   return trackStudioProjectSave(projectId, path, () => retryStudioSave(async () => {

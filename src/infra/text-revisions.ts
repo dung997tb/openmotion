@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { applyTextPatchBytes, type TextPatch } from '../../shared/text-patch.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { BlobScope, StoragePort } from '../contracts/storage.ts';
+import { withBlobGcRetry } from '../db/cas.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
 import { formatFileVersion } from '../studio/etag.ts';
 import { MAX_TEXT_BYTES, prepareFullBaseline } from './text-snapshot-boundaries.ts';
@@ -91,7 +92,9 @@ export class TextRevisionStorage {
 
   /** Lock this immutable revision only. Other projects and subsequent reads remain concurrent. */
   async checkpoint(workspace: string, id: string): Promise<string> {
-    return this.db.transaction(async tx => {
+    // This revision is immutable. Reuse its materialization if the collector still owns the CAS row.
+    let materialized: { bytes: Buffer; sha: string } | undefined;
+    return withBlobGcRetry(() => this.db.transaction(async tx => {
       const result = await tx.execute<{ project_id: string; checkpoint_sha: string | null; mime_type: string }>(sql`
         SELECT project_id, checkpoint_sha, mime_type FROM project_text_revisions
         WHERE workspace_id = ${workspace} AND id = ${id} FOR UPDATE
@@ -99,8 +102,11 @@ export class TextRevisionStorage {
       const row = result.rows[0];
       if (!row) throw missing();
       if (row.checkpoint_sha) return row.checkpoint_sha;
-      const bytes = await this.read(workspace, id, MAX_TEXT_BYTES, tx);
-      const sha = digest(bytes);
+      if (!materialized) {
+        const bytes = await this.read(workspace, id, MAX_TEXT_BYTES, tx);
+        materialized = { bytes, sha: digest(bytes) };
+      }
+      const { bytes, sha } = materialized;
       const key = workspaceBlobKey(workspace, sha);
       // Lock the content row before publishing the bytes. The GC claim must either precede
       // this transaction (retry) or observe the new checkpoint reference after it commits.
@@ -115,6 +121,6 @@ export class TextRevisionStorage {
       await this.blobs.putBlobIfAbsent(key, bytes, row.mime_type);
       await tx.execute(sql`UPDATE project_text_revisions SET checkpoint_sha = ${sha} WHERE workspace_id = ${workspace} AND id = ${id}`);
       return sha;
-    });
+    }));
   }
 }

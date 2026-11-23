@@ -1,6 +1,6 @@
 import type { CompositionEdit } from '../../../packages/edit-core/commands';
 import { isContentCommand } from '../../../packages/edit-core/content-schema';
-import { confirmedSource, forgetSource, observeSourceRead, rememberSource, supportsProjectTextEdits, type ConfirmedSource } from './confirmedTextSources';
+import { confirmedSource, forgetSource, observeSourceRead, pendingSourceRead, rememberSource, supportsProjectTextEdits, type ConfirmedSource } from './confirmedTextSources';
 import { acknowledgeFileEdit, isolatedEditVersion } from './isolatedEditVersions';
 import { reconcileFileEdit } from './rebasedFileEdit';
 import type { StudioWriteHistory } from './studioFileHistory';
@@ -22,6 +22,12 @@ export async function resolveEditSource(project: string, path: string, matches: 
   let source = confirmedSource(project, path);
   if (source && matches(source)) return source;
   if (!advertised) return;
+  const pending = pendingSourceRead(project, path);
+  if (pending) {
+    await pending.catch(() => undefined);
+    source = confirmedSource(project, path);
+    if (source && matches(source)) return source;
+  }
   const response = await studioApiFetch('/api/projects/' + encodeURIComponent(project) + '/files/' + encodeURIComponent(path));
   if (response.status === 404) {
     forgetSource(project, path);
@@ -94,7 +100,8 @@ async function commitTextEdits(project: string, edits: Prepared[], history?: Stu
   });
   if (!files.length) return { versions, changedPaths: [], divergent: [] };
   const dependencies = Object.fromEntries(edits.filter(file => file.before === file.after).map(file => [file.path, file.version]));
-  const body = JSON.stringify({ files, ...(Object.keys(dependencies).length && { dependencies }), label: history?.label ?? label });
+  const body = JSON.stringify({ files, ...(Object.keys(dependencies).length && { dependencies }), label: history?.label ?? label,
+    ...(history?.continuous && { undoGroup: history.windowId }) });
   const requestId = createStudioWriteToken();
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': requestId, ...studioWriteHeaders(history, requestId) };
   const commit = await trackStudioProjectSave(project, files[0].path, () => retryStudioSave(async () => {
@@ -105,7 +112,8 @@ async function commitTextEdits(project: string, edits: Prepared[], history?: Stu
       throw new StudioSaveNetworkError('Failed to save the project edit', { cause });
     }
     if (response.status === 409) {
-      const details = await response.json().catch(() => ({}));
+      const details = await response.clone().json().catch(() => null);
+      if (details?.code !== 'VERSION_CONFLICT') throw await createStudioSaveHttpError(response, 'Failed to save the project edit');
       const conflict = details.details ?? details;
       const path = typeof conflict.path === 'string' ? conflict.path : files[0].path;
       forgetSource(project, path);

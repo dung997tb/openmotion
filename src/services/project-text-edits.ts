@@ -26,6 +26,7 @@ const batchSchema = z.strictObject({
   ])).min(1).max(256),
   dependencies: z.record(z.string(), version.nullable()).optional(),
   label: z.string().trim().min(1).max(256).optional(),
+  undoGroup: z.uuid().optional(),
 });
 
 function invalid(message: string) {
@@ -59,6 +60,7 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
   const parsed = batchSchema.safeParse(body);
   if (!parsed.success || !identity.requestId || identity.requestId.length > 100) throw invalid('Supply a valid text edit and request ID');
   const input = parsed.data;
+  if (input.undoGroup && identity.source !== 'studio') throw invalid('Only continuous Studio edits can share an undo step');
   const targets = new Set<string>();
   const guards = new Map(Object.entries(input.dependencies ?? {}));
   for (const item of input.files) {
@@ -125,6 +127,7 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
     projectId, requestId: identity.requestId, idempotencyScope: scope, source: identity.source,
     commandReceipt: {inputHash: hash, result: identity.command?.result ?? {}},
     summary: input.label, writeToken: identity.writeToken, ops, textRevisions: revisions,
+    undoGroup: input.undoGroup && `${ctx.userId}:${input.undoGroup}`,
     filePreconditions: [...guards].map(([path, expected]) => expected === null ? {path, ifNoneMatch: '*'} : {path, ifMatch: expected}),
   });
 }

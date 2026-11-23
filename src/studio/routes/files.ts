@@ -1,4 +1,5 @@
 import { TEXT_PATCH_BASE_HEADER } from '../../../shared/text-patch.ts';
+import { isUuid } from '../../../shared/project-validation.ts';
 import { commitProjectEdit } from '../../services/project-edit.ts';
 import path from 'node:path';
 import { Hono, type Context } from 'hono';
@@ -279,14 +280,16 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     if (!body || typeof body !== 'object' || Array.isArray(body) ||
         (path && (body.kind === 'batch' || (body.compositionPath !== undefined && body.compositionPath !== path))) ||
-        (!path && (!body.versions || typeof body.versions !== 'object' || Array.isArray(body.versions)))) {
+        (!path && (!body.versions || typeof body.versions !== 'object' || Array.isArray(body.versions) ||
+          (body.undoGroup !== undefined && !isUuid(body.undoGroup))))) {
       return c.json({ error: 'Invalid editing command or base versions' }, 400);
     }
     const edit = path ? { ...body, compositionPath: path } : body.edit;
     const versions = path ? { [path]: c.req.header('if-match') ?? (c.req.header('if-none-match') === '*' ? null : '') } : body.versions;
     try {
       const commit = await commitProjectEdit(deps.files, auth, c.req.param('id')!, edit,
-        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window') });
+        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window'),
+          undoGroup: path ? undefined : body.undoGroup });
       return c.json({ ...(path && { version: commit.versionsByPath[path] ?? versions[path] }),
         versions: { ...versions, ...commit.versionsByPath }, changedPaths: commit.changedPaths, rebased: commit.commandResult?.rebased === true,
         revision: commit.revision, writeToken: commit.writeToken });

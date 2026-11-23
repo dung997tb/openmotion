@@ -5,10 +5,10 @@ import { isUtf8 } from 'node:buffer';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
-import { CloudError, isCloudError } from '../contracts/errors.ts';
+import { CloudError } from '../contracts/errors.ts';
 import type { ProjectEvent } from '../contracts/events.ts';
 import type { BlobMetadata, BlobScope, PresignGetOptions, StoragePort } from '../contracts/storage.ts';
-import { applyWorkspaceBlobRefDeltas, type BlobRefDelta } from '../db/cas.ts';
+import { applyWorkspaceBlobRefDeltas, withBlobGcRetry, type BlobRefDelta } from '../db/cas.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { catalogTemplateFiles, workspaceBlobs } from '../db/schema/blobs-assets.ts';
@@ -48,7 +48,6 @@ import {
 export const MAX_TEXT_FILE_BYTES = 16 * 1024 * 1024;
 export const MAX_BATCH_FILE_OPS = 256;
 export const DEFAULT_HISTORY_COALESCE_WINDOW_MS = 4000;
-const GC_RETRY_ATTEMPTS = 3;
 
 export interface HotTextCachePort {
   getText(sha256: string): Promise<string | null>;
@@ -126,6 +125,8 @@ export interface CommitProjectFilesInput {
   readonly actorKind?: HistoryActorKind;
   readonly actorName?: string;
   readonly windowId?: string | null;
+  /** Authenticated user's continuous Studio gesture. Its snapshots remain individually addressable. */
+  readonly undoGroup?: string;
   readonly writeToken?: string | null;
   readonly skipVersion?: boolean;
   readonly forceVersion?: boolean;
@@ -769,42 +770,13 @@ export class ProjectFilesService {
         })
       : null;
 
-    // Upload every new workspace blob to S3 CAS BEFORE opening the PostgreSQL transaction.
-    const uploadAllBlobs = async () => {
+    const result = await withBlobGcRetry(async () => {
+      // A previous GC claim may have removed the object. Re-publish before retrying the transaction.
       for (const upload of uploads.values()) {
         await this.storage.putBlobIfAbsent(upload.s3Key, upload.buffer, upload.mimeType);
       }
-    };
-    await uploadAllBlobs();
-
-    let result: CommitProjectFilesResult | null = null;
-    for (let attempt = 0; attempt < GC_RETRY_ATTEMPTS; attempt++) {
-      try {
-        result = await this.executeCommitTransaction(
-          ctx,
-          input,
-          preparedOps,
-          uploads,
-          writeToken,
-          scope,
-          inputHash,
-        );
-        break;
-      } catch (error) {
-        if (isCloudError(error) && error.code === 'BLOB_GC_IN_PROGRESS' && attempt + 1 < GC_RETRY_ATTEMPTS) {
-          await uploadAllBlobs();
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (!result) {
-      throw new CloudError('STORAGE_ERROR', 'Failed to commit project file changes.', {
-        status: 500,
-        applied: false,
-      });
-    }
+      return this.executeCommitTransaction(ctx, input, preparedOps, uploads, writeToken, scope, inputHash);
+    });
 
     // Post-commit ONLY: warm HotTextCache and publish to RedisEventBus.
     if (!result.replayed) {
@@ -1509,12 +1481,11 @@ export class ProjectFilesService {
             ),
           );
         const maxSeq = Number(maxSeqRow[0]?.maxSeq ?? project.currentHistorySeq);
-        nextHistorySeq = Math.max(project.currentHistorySeq, maxSeq) + 1;
-
         const parentRows =
           project.currentHistorySeq > 0
             ? await tx
-                .select({ id: projectHistoryEntries.id })
+                .select({ id: projectHistoryEntries.id, versionId: projectHistoryEntries.versionId, undoGroup: projectHistoryEntries.undoGroup,
+                  pinned: projectHistoryEntries.pinned, undone: projectHistoryEntries.undone })
                 .from(projectHistoryEntries)
                 .where(
                   and(
@@ -1524,7 +1495,10 @@ export class ProjectFilesService {
                   ),
                 )
             : [];
-        const parentEntryId = parentRows[0]?.id ?? null;
+        const parent = parentRows[0];
+        const continueGesture = Boolean(input.undoGroup && parent?.undoGroup === input.undoGroup &&
+          !parent.pinned && !parent.undone && parent.versionId === currentVersionId && maxSeq === project.currentHistorySeq);
+        nextHistorySeq = continueGesture ? project.currentHistorySeq : Math.max(project.currentHistorySeq, maxSeq) + 1;
 
         const insertedVersions = await tx
           .insert(projectVersions)
@@ -1564,36 +1538,38 @@ export class ProjectFilesService {
           await tx.insert(projectVersionFiles).values(snapshotValues);
         }
 
-        // Clear abandoned future redo entries so a new forward edit starts a clean linear stack
-        // without touching immutable project_versions / project_version_files snapshots or CAS refcounts.
-        await tx
-          .delete(projectHistoryEntries)
-          .where(
-            and(
+        if (continueGesture) {
+          await tx.update(projectHistoryEntries).set(asUpdate(projectHistoryEntries, {
+            versionId: createdVersion.id, endedAt: now,
+          })).where(eq(projectHistoryEntries.id, parent.id));
+          coalesced = true;
+        } else {
+          // Only the project undo stack changes here. Immutable version snapshots remain readable.
+          if (maxSeq > project.currentHistorySeq) {
+            await tx.delete(projectHistoryEntries).where(and(
               eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
               eq(projectHistoryEntries.projectId, project.id),
               eq(projectHistoryEntries.undone, true),
               gt(projectHistoryEntries.seq, project.currentHistorySeq),
-            ),
-          );
-
-        await tx.insert(projectHistoryEntries).values(
-          asInsert(projectHistoryEntries, {
+            ));
+          }
+          await tx.insert(projectHistoryEntries).values(asInsert(projectHistoryEntries, {
             workspaceId: ctx.workspaceId,
             projectId: project.id,
             seq: nextHistorySeq,
             versionId: createdVersion.id,
-            parentEntryId,
+            parentEntryId: parent?.id ?? null,
             actorKind: actor.actorKind,
             actorName: actor.actorName,
             label: summary,
             windowId: safeWindowId,
+            undoGroup: input.undoGroup ?? null,
             pinned: false,
             undone: false,
             startedAt: now,
             endedAt: now,
-          }),
-        );
+          }));
+        }
       }
 
       // 10. Update project header row.

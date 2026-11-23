@@ -17,7 +17,7 @@ import { trackStudioProjectSave } from "../utils/studioSaveState";
 
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
-  onSavedContent?: (projectId: string, path: string, content: string) => void;
+  onSavedContent?: (projectId: string, path: string, content: string, submitted?: string) => void;
 }
 
 export async function readProjectFileContentWithVersion(projectId: string | null, path: string, query: string) {
@@ -83,7 +83,9 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
         if (saved) {
           fileVersions.set(path, saved.versions[path]);
           if (saved.divergent.length) return saved.divergent[0];
-          onSavedContent?.(projectId, path, confirmedSource(projectId, path)?.content ?? content);
+          const accepted = confirmedSource(projectId, path)?.content ?? content;
+          if (accepted === content) onSavedContent?.(projectId, path, content);
+          else onSavedContent?.(projectId, path, accepted, content);
           return;
         }
       }

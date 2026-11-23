@@ -21,10 +21,11 @@ async function mountEditorSave(writeProjectFile: WriteProjectFile) {
   const captured: { handle: EditorSaveHandle | null } = { handle: null };
   const showToast = vi.fn();
 
+  const editingFileRef = { current: { path: "index.html", content: "before" } };
+  const projectIdRef = { current: "project-a" };
   function Probe() {
     captured.handle = useEditorSave({
-      editingFileRef: { current: { path: "index.html", content: "before" } },
-      projectIdRef: { current: "project-a" },
+      editingFileRef, projectIdRef,
       writeProjectFile,
       recordEdit: vi.fn(async () => undefined),
       setRefreshKey: vi.fn(),
@@ -40,6 +41,11 @@ async function mountEditorSave(writeProjectFile: WriteProjectFile) {
   return {
     handle: captured.handle,
     showToast,
+    switchFile: async (path: string, content: string) => {
+      editingFileRef.current = { path, content };
+      await act(async () => root.render(<Probe />));
+      return captured.handle!;
+    },
     unmount: () => act(async () => root.unmount()),
   };
 }
@@ -71,7 +77,7 @@ describe("useEditorSave pending work", () => {
     } finally { await mounted.unmount(); }
   });
 
-  it("exposes and flushes the latest rAF-buffered source candidate", async () => {
+  it("exposes and flushes the latest buffered source candidate", async () => {
     const writeProjectFile = vi.fn(async () => undefined);
     const mounted = await mountEditorSave(writeProjectFile);
     act(() => mounted.handle.handleContentChange("studio candidate"));
@@ -88,14 +94,6 @@ describe("useEditorSave pending work", () => {
   });
 
   it("joins an in-flight source save instead of writing the frozen candidate twice", async () => {
-    let frame: FrameRequestCallback | null = null;
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      vi.fn((callback: FrameRequestCallback) => {
-        frame = callback;
-        return 42;
-      }),
-    );
     let finishWrite!: () => void;
     const writeProjectFile = vi
       .fn()
@@ -108,7 +106,7 @@ describe("useEditorSave pending work", () => {
       .mockResolvedValue(undefined);
     const mounted = await mountEditorSave(writeProjectFile);
     act(() => mounted.handle.handleContentChange("candidate"));
-    act(() => frame?.(0));
+    void mounted.handle.flushPendingSave();
     await vi.waitFor(() => expect(writeProjectFile).toHaveBeenCalledOnce());
 
     const drained = mounted.handle.flushPendingSave();
@@ -137,6 +135,66 @@ describe("useEditorSave pending work", () => {
         ["index.html", "human edit", "before"],
         ["index.html", "continued human edit", "human edit"],
       ]);
+    } finally { await mounted.unmount(); }
+  });
+
+  it("flushes the original file on a switch and keeps only the latest text while a write is pending", async () => {
+    let release!: () => void;
+    const write = vi.fn<WriteProjectFile>().mockImplementationOnce(() => new Promise<void>(r => { release = r; }))
+      .mockResolvedValue(undefined);
+    const mounted = await mountEditorSave(write);
+    try {
+      mounted.handle.handleContentChange("first");
+      const nextFile = await mounted.switchFile("other.html", "other");
+      await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+      nextFile.handleContentChange("next");
+      await nextFile.flushPendingSave();
+      const previousFile = await mounted.switchFile("index.html", "before");
+      for (const text of ["second", "third", "last"]) {
+        previousFile.handleContentChange(text);
+        void previousFile.flushPendingSave();
+      }
+      expect(write.mock.calls).toEqual([["index.html", "first", "before"], ["other.html", "next", "other"]]);
+      release();
+      await previousFile.flushPendingSave();
+      expect(write.mock.calls.at(-1)).toEqual(["index.html", "last", "first"]);
+      expect(write).toHaveBeenCalledTimes(3);
+    } finally { await mounted.unmount(); }
+  });
+
+  it("uses the exact accepted source when a write added stable element IDs", async () => {
+    const write = vi.fn<WriteProjectFile>().mockImplementation(async (path, submitted) => {
+      mounted.handle.acknowledgeSource("project-a", path, submitted, submitted.replace("<p>", "<p data-hf-id='title'>"));
+    });
+    const mounted = await mountEditorSave(write);
+    try {
+      mounted.handle.handleContentChange("<p>One</p>");
+      const first = mounted.handle.flushPendingSave();
+      mounted.handle.handleContentChange("<p>Two</p>");
+      await Promise.all([first, mounted.handle.flushPendingSave()]);
+      expect(write.mock.calls.map(call => call[2])).toEqual(["before", "<p data-hf-id='title'>One</p>"]);
+    } finally { await mounted.unmount(); }
+  });
+
+  it("discards text queued behind a conflicting base, then accepts fresh input on the new revision", async () => {
+    let refuse!: (e: Error) => void;
+    const write = vi.fn<WriteProjectFile>().mockImplementationOnce(() => new Promise<void>((_,r) => { refuse = r; }))
+      .mockResolvedValue(undefined);
+    const mounted = await mountEditorSave(write);
+    try {
+      mounted.handle.handleContentChange("old draft");
+      const first = mounted.handle.flushPendingSave();
+      await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+      mounted.handle.handleContentChange("another stale edit");
+      const queued = mounted.handle.flushPendingSave();
+      refuse(new StudioFileConflictError({ syncLatest: true, filePath: "index.html", currentContent: "remote", currentVersion: "v2", attemptedContent: "old draft" }));
+      await Promise.all([first, queued]);
+      expect(mounted.handle.getPendingCandidate()).toBeNull();
+      expect(write).toHaveBeenCalledOnce();
+      const fresh = await mounted.switchFile("index.html", "remote");
+      fresh.handleContentChange("new edit");
+      await fresh.flushPendingSave();
+      expect(write).toHaveBeenLastCalledWith("index.html", "new edit", "remote");
     } finally { await mounted.unmount(); }
   });
 
@@ -225,7 +283,7 @@ describe("useEditorSave pending work", () => {
     await mounted.unmount();
   });
 
-  it("discards an rAF-buffered candidate without persisting it", async () => {
+  it("discards an buffered candidate without persisting it", async () => {
     const writeProjectFile = vi.fn(async () => undefined);
     const mounted = await mountEditorSave(writeProjectFile);
     act(() => mounted.handle.handleContentChange("discard me"));
@@ -234,7 +292,7 @@ describe("useEditorSave pending work", () => {
     expect(mounted.handle.getPendingCandidate()).toBeNull();
     await expect(mounted.handle.flushPendingSave()).resolves.toEqual({ status: "clean" });
     expect(writeProjectFile).not.toHaveBeenCalled();
-    expect(cancelAnimationFrame).toHaveBeenCalledWith(41);
+
 
     await mounted.unmount();
   });

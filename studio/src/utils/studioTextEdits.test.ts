@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest';
 import { applyTextPatch } from '../../../shared/text-patch';
-import { readProjectFileContent } from './studioFileHistory';
+import { readProjectFileContent, studioHistoryForWrite } from './studioFileHistory';
 import { submitStudioCommands } from './projectEditBatch';
 import { observedSourceVersion, confirmedSource } from './confirmedTextSources';
 import { tryStudioTextEdit } from './studioTextEdits';
@@ -12,6 +12,22 @@ const version = (n: number) => '"patch:' + n.toString(16).padStart(64, '0') + '"
 const sourceResponse = (content: string, n: number) => Response.json({ content, version: version(n) },
   { headers: { 'X-OpenMotion-Text-Edits': '1' } });
 const receipt = (paths: string[], n: number) => Response.json({ versions: Object.fromEntries(paths.map(path => [path, version(n)])), changedPaths: paths });
+
+it('marks ongoing typing on the wire and keeps an independently confirmed edit separate', async () => {
+  const project = 'continuous-input', path = 'titles.css';
+  const fetch = vi.fn().mockResolvedValueOnce(sourceResponse('0', 1))
+    .mockResolvedValueOnce(receipt([path], 2)).mockResolvedValueOnce(receipt([path], 3));
+  vi.stubGlobal('fetch', fetch);
+  await readProjectFileContent(project, path);
+  const writer = async () => {};
+  const typing = studioHistoryForWrite(writer, 'Typing', 'same-key', 4000, true);
+  const confirmed = studioHistoryForWrite(writer, 'Set title', 'same-key');
+  expect(confirmed.windowId).toBe(typing.windowId);
+  await tryStudioTextEdit(project, [{ path, before: '0', after: '1' }], typing);
+  await tryStudioTextEdit(project, [{ path, before: '1', after: '2' }], confirmed);
+  expect(JSON.parse(fetch.mock.calls[1][1].body).undoGroup).toBe(typing.windowId);
+  expect(JSON.parse(fetch.mock.calls[2][1].body).undoGroup).toBeUndefined();
+});
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -55,7 +71,7 @@ it('compiles a canvas edit across two files locally and submits one transaction'
 it('reconciles a 409 without trying a command or a full-file write', async () => {
   const project = 'patch-conflict', path = 'intro.css';
   const fetch = vi.fn().mockResolvedValueOnce(sourceResponse('a'.repeat(80), 1))
-    .mockResolvedValueOnce(Response.json({ path, currentVersion: version(2) }, { status: 409 }));
+    .mockResolvedValueOnce(Response.json({ code: 'VERSION_CONFLICT', path, currentVersion: version(2) }, { status: 409 }));
   vi.stubGlobal('fetch', fetch);
   const listener = vi.fn(), stop = onRebasedFileEdit(listener);
   try {
@@ -64,6 +80,27 @@ it('reconciles a 409 without trying a command or a full-file write', async () =>
     expect(listener).toHaveBeenCalledOnce();
     expect(confirmedSource(project,path)).toBeUndefined();
     expect(fetch).toHaveBeenCalledTimes(2);
+  } finally { stop(); }
+});
+
+it('keeps the confirmed source for unrelated 409s and retries temporary storage failures with the same edit', async () => {
+  const project = 'patch-busy', path = 'intro.css', before = 'a'.repeat(80);
+  const edit = [{ path, before, after: before + '!' }];
+  const fetch = vi.fn().mockResolvedValueOnce(sourceResponse(before, 1))
+    .mockResolvedValueOnce(Response.json({ code: 'REQUEST_ID_CONFLICT' }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json({ code: 'BLOB_GC_IN_PROGRESS', applied: false }, { status: 503 }))
+    .mockResolvedValueOnce(receipt([path], 2));
+  vi.stubGlobal('fetch', fetch);
+  const refresh = vi.fn(), stop = onRebasedFileEdit(refresh);
+  try {
+    await readProjectFileContent(project, path);
+    await expect(tryStudioTextEdit(project, edit)).rejects.toMatchObject({ name: 'StudioSaveHttpError', statusCode: 409 });
+    expect(confirmedSource(project, path)).toEqual({ content: before, version: version(1) });
+    await tryStudioTextEdit(project, edit);
+    expect(fetch.mock.calls[2][1].body).toBe(fetch.mock.calls[3][1].body);
+    expect(fetch.mock.calls[2][1].headers['Idempotency-Key']).toBe(fetch.mock.calls[3][1].headers['Idempotency-Key']);
+    expect(confirmedSource(project, path)).toEqual({ content: before + '!', version: version(2) });
+    expect(refresh).not.toHaveBeenCalled();
   } finally { stop(); }
 });
 
@@ -98,4 +135,37 @@ it('changes only the title style in an authored composition with large, unrelate
   const {content} = await applyProjectEdit(before, edit, new Map());
   expect(content).toBe(before.replace("title='Keep quoted'>", "title='Keep quoted' style=\"color: #204060\">"));
   expect(createTextPatch(before, content)).toHaveLength(1);
+});
+
+
+it('changes only the text of a plain authored heading and escapes markup through the SDK', async () => {
+  const { applyProjectEdit } = await import('../../../packages/edit-core/commands');
+  const source = "<template><h1 id='a' data-hf-id='title'>原文 🌿</h1><svg><path d='M0 0'></path></svg></template>";
+  const edit = { kind: 'editElements' as const, compositionPath: 'intro.html', patches: [{ target: { hfId: 'title' },
+    operations: [{ type: 'text-content' as const, property: 'textContent', value: '中 🎈 <em> & OK' }] }] };
+  const { content } = await applyProjectEdit(source, edit, new Map());
+  expect(content).toBe(source.replace('原文 🌿', '中 🎈 &lt;em&gt; &amp; OK'));
+  const nested = source.replace('原文 🌿', '<strong>旧文</strong>');
+  const after = await applyProjectEdit(nested, edit, new Map());
+  expect(after.content).toMatch(/<strong[^>]*>中 🎈 &lt;em&gt; &amp; OK<\/strong>/);
+});
+
+
+it('joins the selected file read already in flight, using it only on an exact version match', async () => {
+  const { observePendingSourceRead, rememberSource } = await import('./confirmedTextSources');
+  const { resolveEditSource } = await import('./studioTextEdits');
+  const project = 'reading-source', path = 'intro.html';
+  const fetch = vi.fn().mockResolvedValue(sourceResponse('remote', 3));
+  vi.stubGlobal('fetch', fetch);
+  let release!: () => void;
+  const read = new Promise<void>(resolve => { release = resolve; }).then(() =>
+    rememberSource(project, path, { content: 'known', version: version(2) }));
+  const seen = observePendingSourceRead(project, path, read);
+  const save = resolveEditSource(project, path, file => file.version === version(2), 'edit', true);
+  release();
+  await seen;
+  await expect(save).resolves.toEqual({ content: 'known', version: version(2) });
+  expect(fetch).not.toHaveBeenCalled();
+  await expect(resolveEditSource(project, path, file => file.version === version(1), 'stale', true)).rejects.toMatchObject({ syncLatest: true });
+  expect(fetch).toHaveBeenCalledOnce();
 });

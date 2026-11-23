@@ -264,14 +264,16 @@ export function useDomEditCommits({
     ],
   );
 
-  const persistBoundText = useCallback(async (selection: DomEditSelection, value: string) => {
+  const persistBoundText = useCallback(async (selection: DomEditSelection, value: string, typingKey?: string) => {
     const project = projectIdRef.current;
     if (!project || !selection.isolatedTarget?.binding) throw new Error("Missing bound text target");
     const plain = document.createElement("span");
     plain.textContent = value;
     const batches = await inlineTextBatches(project, selection.isolatedTarget, plain.innerHTML, value);
     if (projectIdRef.current !== project) throw new Error("Active project changed before the edit could be saved");
-    const result = await commitDomEditPatchBatches(batches, { label: "Edit text", coalesceKey: "bound-text:" + selection.selector });
+    const result = await commitDomEditPatchBatches(batches, {
+      label: "Edit text", coalesceKey: typingKey ?? "bound-text:" + selection.selector, continuous: Boolean(typingKey),
+    });
     if (!result.durable) throw new Error("Bound text was not saved");
   }, [commitDomEditPatchBatches, projectIdRef]);
 
