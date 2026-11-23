@@ -114,7 +114,7 @@ it('cold-loads whitelisted semantic SPA path URLs directly into the requested su
 
   history.replaceState(null, '', '/mcp-setup/claude');
   await mount(3);
-  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude Code');
+  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude');
 
   history.replaceState(null, '', `/editor/${second}`);
   await mount(4);
@@ -160,7 +160,7 @@ it.each(settingsSections)('restores a copied %s page on a fresh mount', async se
     expect(container.querySelector<HTMLElement>('.motion-workspace-content')?.hidden).toBe(true);
     if (section === 'mcp') {
       expect(breadcrumb()).toBeNull();
-      expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude Code');
+      expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude');
       expect(container.querySelector('[role=tab][data-state=active]') || container.querySelector('a[download]')).toBeTruthy();
       expect(container.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
     } else if (section === 'brand-kit') expect(document.querySelector('.om-gallery-collection-tabs [aria-current=page]')?.textContent).toContain('Official collection');
@@ -194,10 +194,10 @@ it('navigates settings, MCP tabs and history without remounting or flushing the 
   await click('Appearance'); expect(page().settings).toBe('appearance');
   await openMcp(); expect(page().settings).toBe('mcp');
   expect(breadcrumb()).toBeNull();
-  await click('Claude Code'); await click('Manual setup');
+  await click('Claude'); await click('Manual setup');
   expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
   await traverse(-1); expect(page().setup).toBe('agent');
-  expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Claude Code');
+  expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Claude');
   await traverse(-1); expect(page().client).toBe('codex');
   await traverse(-1); expect(page().settings).toBe('appearance');
   await traverse(1); expect(page().settings).toBe('mcp');
@@ -271,7 +271,7 @@ it('uses browser history across settings, reloads and new navigation branches', 
 
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
   const detail = 'dialog[aria-label="Template preview"]';
-  await mount(); await openMcp(); await click('Explore templates');
+  await mount(); await openMcp(); await click('Browse all 30+ templates');
   const header = container.querySelector('dialog[aria-label="Template library"] header')!;
   expect(header.querySelector('button[aria-label="Back"], button[aria-label="Forward"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
@@ -286,7 +286,7 @@ it('uses browser history between the template gallery, its preview and the origi
 });
 
 it('restores template details from a copied link and closes back to the originating MCP page', async () => {
-  await mount(); await openMcp(); await click('Claude Code'); await click('Explore templates');
+  await mount(); await openMcp(); await click('Claude'); await click('Browse all 30+ templates');
   expect(page()).toMatchObject({ templates: true, settings: 'mcp' });
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(page().template).toBe('product-promo');
@@ -297,25 +297,25 @@ it('restores template details from a copied link and closes back to the originat
   await traverse(1); expect(container.querySelector<HTMLDialogElement>('dialog[aria-label="Template preview"]')?.open).toBe(true);
   await click('Close template preview'); await click('Close template library');
   expect(page()).toMatchObject({ templates: false, template: null, settings: 'mcp', client: 'claude' });
-  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude Code');
+  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude');
 });
 
 it('keeps an MCP showcase selection in the URL through history and reloads', async () => {
-  await mount(); await openMcp(); await click('Claude Code');
+  await mount(); await openMcp(); await click('Claude');
   const draft = container.querySelector<HTMLInputElement>('[aria-label="Editor draft"]');
-  await click('Preview template Product Promo');
-  expect(page()).toMatchObject({ templates: false, template: 'product-promo', settings: 'mcp', client: 'claude' });
+  await click('Browse all 30+ templates');
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
+  expect(page()).toMatchObject({ templates: true, template: 'product-promo', settings: 'mcp', client: 'claude' });
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');
   await traverse(-1);
-  expect(page()).toMatchObject({ templates: false, template: null, settings: 'mcp', client: 'claude' });
-  expect(container.querySelector('dialog[aria-label="Template library"]')).toBeNull();
+  expect(page()).toMatchObject({ templates: true, template: null, settings: 'mcp', client: 'claude' });
   expect(container.querySelector('[aria-label="Editor draft"]')).toBe(draft);
   expect(editor.mounts).toBe(1);
   await traverse(1);
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');
   await mount(1);
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');
-  await click('Close template preview');
+  await click('Close template preview'); await click('Close template library');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
   expect(container.querySelector('[data-motion-template-library]')).toBeNull();
   expect(page()).toMatchObject({ templates: false, template: null, settings: 'mcp', client: 'claude' });
@@ -1572,9 +1572,9 @@ it('returns from MCP client and setup tabs to Explore, and clears the source on 
   await click('MCP · Connect Agent');
   expect(page().settings).toBe('mcp');
   expect(button('Close settings')).toBeUndefined();
-  await click('Claude Code'); await click('Manual setup');
+  await click('Claude'); await click('Manual setup');
   expect(breadcrumb()?.href).toBe(exploreUrl);
-  expect(container.querySelector('.om-mcp-page > .om-workspace-breadcrumb + .om-mcp-client-row')).not.toBeNull();
+  expect(container.querySelector('.om-mcp-page > .om-workspace-breadcrumb')).not.toBeNull();
   await mount(1);
   await returnThroughBreadcrumb('Explore');
   expect(location.href).toBe(exploreUrl);
@@ -1608,7 +1608,7 @@ it('returns from the settings header to the exact source after changing sections
   await accountAction('Settings');
   const generalUrl = location.href;
   await click('Set up connection');
-  await click('Claude Code'); await click('Manual setup');
+  await click('Claude'); await click('Manual setup');
   await mount(1);
   expect(breadcrumb()?.href).toBe(generalUrl);
   await leaveSettings();
@@ -1629,7 +1629,7 @@ it('keeps the settings sidebar mounted across MCP, agent and provider sections',
   expect(settingsBack()).not.toBeNull();
   expect(button('Close settings')).toBeUndefined();
   expect(breadcrumb()).toBeNull();
-  await click('Claude Code'); await click('Manual setup');
+  await click('Claude'); await click('Manual setup');
   const setupUrl = location.href;
   expect(new URL(setupUrl).pathname).toBe('/settings/mcp');
   const providers = [...sidebar!.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Model providers')!;

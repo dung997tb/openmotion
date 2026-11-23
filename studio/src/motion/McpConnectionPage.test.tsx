@@ -73,14 +73,14 @@ it('loads Docker discovery through the real hook and enables container setup, co
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : docker)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount();
-  expect(document.querySelector('pre')?.textContent).toContain('deploy/README.md');
-  expect(document.querySelector('pre')?.textContent).toContain('welcome and video cards');
-  await act(async () => button('Copy connection instruction').click());
+  await act(async () => button('Install OpenDesign in Codex').click());
   expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('existing OpenMotion Docker deployment'));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('deploy/README.md'));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('welcome and video cards'));
+  await act(async () => button('Manual setup').click());
   expect([...document.querySelectorAll('a')].find(link => link.textContent?.trim() === 'Connection guide')?.href).toContain('deploy/README.md');
-  for (const [client, host] of [['Codex', 'codex'], ['Claude Code', 'claude'], ['DeepSeek Harness', 'deepseek'], ['Other MCP clients', 'mcp']]) {
+  for (const [client, host] of [['Codex', 'codex'], ['Claude', 'claude'], ['DeepSeek Harness', 'deepseek'], ['Other MCP clients', 'mcp']]) {
     await act(async () => tab(client).click());
-    await act(async () => tab('Manual setup').click());
     expect(document.body.textContent).not.toContain('Could not load settings');
     expect(document.querySelector('pre')?.textContent).toContain('docker');
     expect(button('Copy configuration').disabled).toBe(false);
@@ -125,11 +125,20 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   const { openLibrary, openProviders } = await mount();
   expect(document.querySelector('h1')?.textContent).toContain('Codex');
-  await act(async () => tab('Claude Code').click());
-  expect(document.querySelector('h1')?.textContent).toContain('Claude Code');
-  await act(async () => tab('Manual setup').click());
+  expect(document.querySelectorAll('.om-mcp-client-dock [role=tab]')).toHaveLength(5);
+  await act(async () => tab('Claude').click());
+  expect(document.querySelector('h1')?.textContent).toContain('Claude');
+  expect(button('Install OpenDesign in Claude Code')).toBeDefined();
+  await act(async () => button('Claude Desktop').click());
+  expect(button('Install OpenDesign in Claude Desktop')).toBeDefined();
+  await act(async () => button('Claude Code (Recommended · Full)').click());
+  await act(async () => button('Manual setup').click());
   expect(document.querySelector('pre')?.textContent).toContain('claude mcp add');
   expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
+  await act(async () => tab('DeepSeek Harness').click());
+  expect(document.querySelectorAll('.om-mcp-hero-cta-row > *')).toHaveLength(2);
+  expect(document.querySelector('.om-mcp-manual-note a')?.getAttribute('href')).toContain('/integrations/dsh');
+  await act(async () => tab('Claude').click());
   await act(async () => button('Copy example prompt').click());
   const example = copy.mock.calls[0][0];
   expect(example).toMatch(/^@OpenDesign Turn this bottled drink image/);
@@ -143,7 +152,9 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   await act(async () => button('Browse all 30+ templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
   await act(async () => button('Manage providers').click()); expect(openProviders).toHaveBeenCalledOnce();
   expect(tab('ChatGPT')).toBeUndefined();
-  expect(document.querySelectorAll('.om-mcp-client-row [role=tab]')).toHaveLength(6);
+  expect(document.querySelectorAll('#showcase .om-mcp-carousel-module')).toHaveLength(3);
+  expect(document.querySelectorAll('#mcp-faq .om-mcp-faq-acc')).toHaveLength(6);
+  expect(document.querySelector('#dev-drawer')?.getAttribute('data-open')).toBeNull();
   expect(fetcher).toHaveBeenCalledOnce();
   for (const [, init] of fetcher.mock.calls as unknown as [string, RequestInit][]) expect(init?.method ?? 'GET').toBe('GET');
 });
@@ -165,19 +176,18 @@ it('keeps example prompts available while setup discovery is unavailable and can
   vi.stubGlobal('fetch', vi.fn(async () => broken ? Response.json({}, { status: 503 }) : Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount();
-  expect(button('Copy connection instruction').disabled).toBe(false);
-  await act(async () => button('Copy connection instruction').click());
+  expect(button('Install OpenDesign in Codex').disabled).toBe(false);
+  await act(async () => button('Install OpenDesign in Codex').click());
   expect(copy).toHaveBeenCalledWith(expect.stringContaining('https://github.com/nexu-io/openmotion#quick-start'));
   expect(copy.mock.calls[0][0]).not.toContain('127.0.0.1');
-  await act(async () => tab('Manual setup').click());
+  await act(async () => button('Manual setup').click());
   expect(document.body.textContent).toContain('Could not load settings');
   expect(document.querySelector('a[download]')).toBeNull();
   expect(document.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
   expect(document.body.textContent).toContain('Your visual MCP guide');
   broken = false;
   for (const retry of [...document.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent === 'Retry')) await act(async () => retry.click());
-  await act(async () => tab('Let your Agent set it up').click());
-  expect(button('Copy connection instruction').disabled).toBe(false);
+  expect(button('Install OpenDesign in Codex').disabled).toBe(false);
   expect(document.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
 });
 
@@ -194,8 +204,8 @@ it('aborts pending setup discovery when leaving the page', async () => {
   await mount();
   expect(reads.map(read => read.path)).toEqual(['/motion-api/integration']);
   for (const { path, signal } of reads) expect(signal?.aborted, path).toBe(false);
-  expect(button('Copy connection instruction').disabled).toBe(false);
-  await act(async () => button('Copy connection instruction').click());
+  expect(button('Install OpenDesign in Codex').disabled).toBe(false);
+  await act(async () => button('Install OpenDesign in Codex').click());
   expect(copy).toHaveBeenCalledWith(expect.stringContaining('https://github.com/nexu-io/openmotion#quick-start'));
   expect(document.querySelector('a[download]')).toBeNull();
   act(() => root!.unmount()); root = undefined;
@@ -307,4 +317,39 @@ it.each(['en', 'zh-CN'] as const)('copies the Black Friday campaign workflow han
   copy.mockRejectedValue(new Error('Clipboard blocked'));
   await act(async () => card.querySelector('button')!.click());
   expect(card.querySelector('textarea')?.value).toBe(instruction);
+});
+
+it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ and collapsed developer drawer', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await mount('zh-CN');
+  expect(document.querySelectorAll('.om-mcp-stage-step')).toHaveLength(4);
+  const step2 = document.querySelectorAll<HTMLButtonElement>('.om-mcp-stage-step')[1];
+  await act(async () => step2.click());
+  expect(document.querySelector('.om-mcp-stage-prompt-text')?.textContent).toContain('白底音箱');
+  await act(async () => document.querySelector<HTMLButtonElement>('.om-mcp-stage-prompt-copy')!.click());
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 把这张白底音箱放进暖光客厅桌面'));
+
+  const modules = document.querySelectorAll('#showcase .om-mcp-carousel-module');
+  expect(modules).toHaveLength(3);
+  const firstMod = modules[0];
+  await act(async () => firstMod.querySelectorAll<HTMLButtonElement>('.om-mcp-carousel-tab')[1].click());
+  expect(firstMod.querySelector('.om-mcp-carousel-title')?.textContent).toContain('暗调黑金高级质感发布短片');
+  await act(async () => firstMod.querySelector<HTMLButtonElement>('.om-mcp-carousel-primary')!.click());
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 用这张香水瓶实拍图'));
+  await act(async () => firstMod.querySelector<HTMLButtonElement>('.om-mcp-carousel-secondary')!.click());
+  expect(document.querySelector('[role=dialog]')?.textContent).toContain('Studio 可编辑工程示例');
+  await act(async () => button('关闭').click());
+  expect(document.querySelector('[role=dialog]')).toBeNull();
+
+  const quickFaqItems = document.querySelectorAll<HTMLDetailsElement>('#mcp-faq .om-mcp-faq-acc');
+  expect(quickFaqItems).toHaveLength(6);
+  expect([...quickFaqItems].every(item => !item.open)).toBe(true);
+  await act(async () => quickFaqItems[0].querySelector('summary')!.click());
+  expect(quickFaqItems[0].open).toBe(true);
+
+  const drawer = document.querySelector('#dev-drawer')!;
+  expect(drawer.getAttribute('data-open')).toBeNull();
+  await act(async () => drawer.querySelector<HTMLButtonElement>('.om-mcp-dev-toggle')!.click());
+  expect(drawer.getAttribute('data-open')).toBe('true');
 });

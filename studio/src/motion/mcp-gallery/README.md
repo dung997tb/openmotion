@@ -1,3 +1,2 @@
-# MCP gallery covers
-
-These WebP stills are the original embedded covers for the twelve entries in the supplied OpenDesign MCP demo gallery. They are visual references for the associated example prompts.
+Bundled WebP covers and showcase visuals used by the MCP setup page (`McpHeroShowcaseStage`, `McpFeatureCarousels`, and `McpTemplateShowcase`).
+All 20 files are local OpenDesign demo assets sized well under the 1 MiB repository limit.
