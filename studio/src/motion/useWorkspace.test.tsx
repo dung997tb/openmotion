@@ -306,6 +306,13 @@ it('pauses while hidden and coalesces foreground and online checks', async () =>
     await mount(async () => {}, first);
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
+    await advance(500);
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await advance(0);
+    expect(countReads()).toEqual({ status: 1, catalog: 1 });
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
     await advance(120_000);
     expect(countReads()).toEqual({ status: 1, catalog: 1 });
     hidden.mockReturnValue(false);

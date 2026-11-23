@@ -31,9 +31,15 @@ it('reads remote-worker heartbeat from /api/environment/ffmpeg and rechecks on d
   expect(result!.status?.title).toContain('Render worker');
   const initialReads = fetcher.mock.calls.length;
   ready = true;
+  window.dispatchEvent(new Event('focus'));
   await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
   expect(fetcher).toHaveBeenCalledTimes(initialReads);
-  await act(async () => result!.recheck());
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(fetcher).toHaveBeenCalledTimes(initialReads);
+  hidden.mockReturnValue(false);
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(fetcher).toHaveBeenCalledTimes(initialReads + 1);
   expect(result!.status?.ok).toBe(true);
   expect(result!.status?.workers).toHaveLength(1);
   expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
@@ -59,7 +65,7 @@ it('keeps a completed recheck when an older status request finishes later', asyn
   try {
     await act(async () => { root.render(<View />); });
     expect(result!.status?.ok).toBe(false);
-    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await act(async () => { result!.recheck(); });
     ready = true;
     await act(async () => { result!.recheck(); });
     expect(result!.status?.ok).toBe(true);

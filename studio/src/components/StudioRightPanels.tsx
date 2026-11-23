@@ -43,6 +43,7 @@ export const StudioRightPanels = memo(function StudioRightPanels({
   recordingDuration,
   onToggleRecording,
   sdkSession,
+  sdkSourcePath,
   publishSdkSession,
   forceReloadSdkSession,
   reloadPreview,
@@ -195,7 +196,7 @@ export const StudioRightPanels = memo(function StudioRightPanels({
     <DesignPanelPromoteProvider
       selection={domEditGroupSelections.length > 1 ? null : domEditSelection}
       projectId={projectId}
-      activeCompPath={activeCompPath}
+      activeCompPath={sdkSourcePath}
       showToast={showToast}
       readProjectFile={readProjectFile}
       writeProjectFile={writeProjectFile}

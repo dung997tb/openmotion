@@ -548,6 +548,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
       recordingState: gestureState,
       recordingDuration: gestureRecording.recordingDuration,
       onToggleRecording: handleToggleRecording,
+      sdkSourcePath: activeCompPath ?? masterCompPath,
       sdkSession: sdkHandle.session,
       publishSdkSession: sdkHandle.publish,
       forceReloadSdkSession: sdkHandle.forceReload,

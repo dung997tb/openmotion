@@ -70,14 +70,15 @@ beforeEach(async () => {
 });
 afterEach(() => { act(() => root.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.useRealTimers(); });
 
-it('does not poll an idle player but refreshes on focus and while the review list is visible', async () => {
+it('does not poll an idle player but refreshes on returning to the tab and while the review list is visible', async () => {
   expect(state.request).toHaveBeenCalledTimes(1);
   state.visible = false; await render();
   expect(useReviewPresentationStore.getState().playerHost).toBeTruthy();
   vi.useFakeTimers(); state.request.mockClear();
   await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
-  expect(state.request).not.toHaveBeenCalled();
   await act(async () => window.dispatchEvent(new Event('focus')));
+  expect(state.request).not.toHaveBeenCalled();
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   expect(state.request).toHaveBeenCalledTimes(1);
   state.visible = true; await render();
   expect(state.request).toHaveBeenCalledTimes(2);
@@ -127,7 +128,7 @@ it('keeps the empty list simple and shows only recovery when loading fails', asy
   expect(button('Filter comments')).toBeUndefined();
   expect(document.querySelector('[data-review-footer]')).toBeNull();
   state.request.mockRejectedValue(new Error('Disconnected'));
-  await act(async () => window.dispatchEvent(new Event('focus')));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not load comments');
   expect(document.body.textContent).not.toContain('No comments here yet');
 });
@@ -136,7 +137,7 @@ it('copies all pending comments without entering selection mode', async () => {
   await click('Comment here'); await type('First change'); await click('Save comment');
   await click('Comment here'); await type('Second change'); await click('Save comment');
   state.comments[0].status = 'resolved';
-  await act(async () => window.dispatchEvent(new Event('focus')));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await click('Copy pending for Agent (1)');
   expect(copy.mock.calls[0][0]).toContain('Second change');
@@ -237,7 +238,7 @@ it('hides a draft on source refresh and requires explicit recapture', async () =
   readyPreview(); await click('Draw a comment'); await type('Keep my review');
   await act(async () => useReviewMarkupStore.getState().add({ kind: 'rectangle', points: [{ x: 0.1, y: 0.2 }, { x: 0.7, y: 0.8 }] }));
   state.revision = 'd'.repeat(64);
-  await act(async () => window.dispatchEvent(new Event('focus')));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   expect(useReviewMarkupStore.getState().draft).toMatchObject({ stale: true, locked: true });
   expect(button('Recapture current frame')).toBeTruthy();
   expect(document.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Keep my review');
