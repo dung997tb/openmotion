@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
-import { diffPreviewChanges } from "./peerTimingPreview";
+import { diffPreviewChanges, diffScriptedPreviewStyles } from "./peerTimingPreview";
 
 const source = '<!doctype html><main data-composition-id="root" data-duration="15"><audio id="a" data-start="2" data-duration="3"></audio><script>window.run(1)</script></main>';
 
@@ -29,12 +29,12 @@ describe("peer timing classification", () => {
     expect(diffPreviewChanges('<script id="x">a()</script>', '<script id="x">b()</script>')).toBeNull();
   });
 
-  it("recognizes only the exact IDs mounted by the preview bundler on the first nested edit", () => {
+  it("recognizes only the exact IDs mounted by the preview bundler on the first nested edit", async () => {
     const before = '<template><div data-composition-id="intro"><p id="title">Hi</p></div></template>';
     const next = ensureHfIds(before).replace('id="title"', 'id="title" style="font-size: 54px"');
-    expect(diffPreviewChanges(before, next, true)).toMatchObject([{ id: "title", styles: [["font-size", "", "54px"]] }]);
+    expect(await diffScriptedPreviewStyles(before, next)).toMatchObject([{ id: "title", styles: [["font-size", "", "54px"]] }]);
     expect(diffPreviewChanges(before, next)).toBeNull();
-    expect(diffPreviewChanges(before, next.replace(/data-hf-id="[^"]+"/, 'data-hf-id="unrelated"'), true)).toBeNull();
+    expect(await diffScriptedPreviewStyles(before, next.replace(/data-hf-id="[^"]+"/, 'data-hf-id="unrelated"'))).toBeNull();
   });
 
   it("includes the containing-block change on the first drag of a static layer", () => {

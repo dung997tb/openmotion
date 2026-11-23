@@ -1,4 +1,3 @@
-import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { createPreviewAdapter } from "./lib/previewAdapter";
 import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
 
@@ -57,13 +56,11 @@ function changedStyles(left: HTMLElement, right: HTMLElement): PreviewChange["st
 }
 
 /** Strip only supported changes, then compare the entire remaining document before touching the player. */
-export function diffPreviewChanges(previous: string, current: string, temporary = false): PreviewChange[] | null {
+export function diffPreviewChanges(previous: string, current: string): PreviewChange[] | null {
   // This optional fast path runs on the UI thread; large source rewrites use the regular loader.
   if (previous === current || Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
   const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
-  // The first visual edit can persist the same IDs already mounted by the preview compiler.
-  const newlyStamped = temporary && !previous.includes("data-hf-id=") && current.includes("data-hf-id=");
-  const before = parse(newlyStamped ? ensureHfIds(previous) : previous);
+  const before = parse(previous);
   const after = parse(current);
   if (before.compatMode !== after.compatMode || before.doctype?.publicId !== after.doctype?.publicId ||
       before.doctype?.systemId !== after.doctype?.systemId || before.doctype?.name !== after.doctype?.name) return null;
@@ -111,6 +108,17 @@ export function diffPreviewChanges(previous: string, current: string, temporary 
   return changes;
 }
 
+/** The first visual edit can persist the exact IDs already mounted by the compiler. */
+export async function diffScriptedPreviewStyles(previous: string, current: string) {
+  if (Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
+  if (!previous.includes("data-hf-id=") && current.includes("data-hf-id=")) {
+    const { ensureHfIds } = await import("@hyperframes/parsers/hf-ids");
+    previous = ensureHfIds(previous);
+  }
+  const changes = diffPreviewChanges(previous, current);
+  return changes?.every(change => change.styles && !change.attributes.length && !change.text) ? changes : null;
+}
+
 export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
@@ -124,9 +132,9 @@ export async function tryApplyPeerChanges(
   const temporary = options === "temporary";
   if (temporary ? document.canRebind : !document.canRebind) return false;
   const localSave = typeof options === "object" ? options : undefined;
-  const changes = diffPreviewChanges(update.previous.content, update.current.content, temporary);
+  const changes = temporary ? await diffScriptedPreviewStyles(update.previous.content, update.current.content) :
+    diffPreviewChanges(update.previous.content, update.current.content);
   if (!changes || !isCurrent()) return false;
-  if (temporary && changes.some(change => !change.styles || change.attributes.length || change.text)) return false;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;
