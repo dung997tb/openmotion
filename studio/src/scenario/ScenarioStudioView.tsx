@@ -20,7 +20,8 @@ import { productBrief, readProducts, studioUsesProduct, type StudioProduct } fro
 import { StudioProductPicker } from './StudioProductPicker';
 
 const AUTOSAVE_DELAY_MS = 800;
-const hiddenStudioPresets = new Set(['bf-keyboard']);
+// One example per workflow: the one that has a real run behind it.
+const hiddenStudioPresets = new Set(['bf-keyboard', 'design-saas', 'motion-reel', 'gemini-3d', 'inf-review']);
 /** Brief fields a picked product owns; an example never overwrites them. */
 const productFieldIds = new Set(['productName', 'productDescription', 'pageUrl']);
 const INPUT_WIDTH_KEY = 'openmotion.studio.inputWidth.v1';
