@@ -87,7 +87,7 @@ async function renderNav(overrides: Partial<CreativeNavigationProps> = {}) {
   return props;
 }
 
-it('places Workflows with a New badge directly after Explore, opens a 3-column mega menu with all 5 scenarios and recent runs', async () => {
+it('places Workflows with a New badge directly after Explore, opens scene tabs over all 5 workflow cards and recent runs', async () => {
   const props = await renderNav();
   const slots = [...container.querySelectorAll<HTMLElement>('.om-creative-strip > [data-nav-slot]')];
   const labels = slots.map(slot => {
@@ -111,14 +111,17 @@ it('places Workflows with a New badge directly after Explore, opens a 3-column m
 
   const menu = document.querySelector<HTMLElement>('.om-creative-menu-workflows')!;
   expect(menu).not.toBeNull();
-  const columns = [...menu.querySelectorAll<HTMLElement>('.om-scenario-mega-column')];
-  expect(columns).toHaveLength(3);
-  expect(columns.map(col => col.dataset.scenarioCategory)).toEqual(scenarioCategories.map(c => c.id));
-  expect(columns.map(col => col.querySelector('h2')?.textContent)).toEqual(['Topics', 'Campaigns', 'Roles']);
-
+  // Scene tabs over one card per workflow, each with its cover, studio name and what it hands back.
+  const sceneTabs = [...menu.querySelectorAll<HTMLButtonElement>('[data-studio-scene-tab]')];
+  expect(sceneTabs.map(tab => tab.textContent)).toEqual(['All scenes', 'E-commerce', 'Marketing', 'Social', 'Film']);
   const tiles = [...menu.querySelectorAll<HTMLButtonElement>('[data-scenario-tile]')];
   expect(tiles).toHaveLength(scenarioDefinitions.length);
   expect(tiles.map(tile => tile.dataset.scenarioTile)).toEqual(scenarioDefinitions.map(s => s.id));
+  expect(tiles.find(tile => tile.dataset.scenarioTile === 'black-friday')?.textContent).toContain('Promo Kit Studio');
+  await act(async () => sceneTabs[1].click());
+  expect([...menu.querySelectorAll<HTMLButtonElement>('[data-scenario-tile]')].map(tile => tile.dataset.scenarioTile))
+    .toEqual(['design-full-chain', 'black-friday']);
+  await act(async () => sceneTabs[0].click());
 
   // Lazy recent run appears in footer and opens with runId.
   const runBtn = menu.querySelector<HTMLButtonElement>('.om-scenario-mega-run')!;
