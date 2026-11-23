@@ -4,8 +4,16 @@ import test from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { PrismMotionCatalog, parsePrismMotionPublication, type PrismEnvironment } from '../../src/services/prism-motion-catalog.ts';
 
-const loadPrismMotionTemplates = (environment: PrismEnvironment, fetchImpl: typeof fetch) =>
-  new PrismMotionCatalog(environment, { publicOrigin: 'https://cms-test.example', fetchImpl }).getTemplates();
+async function loadPrismMotionTemplates(environment: PrismEnvironment, fetchImpl: typeof fetch) {
+  let error: unknown;
+  const catalog = new PrismMotionCatalog(environment, {
+    publicOrigin: 'https://cms-test.example', fetchImpl, onRefreshError: cause => { error = cause; },
+  });
+  await catalog.getTemplates();
+  await setImmediate();
+  if (error) throw error;
+  return catalog.getTemplates();
+}
 
 const resourceId = '1500c9af-186b-457f-b74d-a58113f657d8';
 const publicationId = '121e747a-bb51-48d6-a44b-56ea20d07c98';
@@ -184,9 +192,11 @@ test('concurrent cold callers share one download; stale reads use the previous s
   const release = cms.pause();
   const cold = Array.from({ length: 20 }, () => cms.catalog.getTemplates());
   assert.equal(cms.requests.length, 1);
+  assert((await Promise.all(cold)).every(items => items.length === 0));
   release();
-  const [snapshot, ...others] = await Promise.all(cold);
-  assert(others.every(items => items === snapshot));
+  await setImmediate();
+  const snapshot = await cms.catalog.getTemplates();
+  assert.equal(snapshot.length, 2);
   assert.equal(cms.requests.length, 3);
   cms.advance(99);
   assert.equal(await cms.catalog.getTemplates(), snapshot);
@@ -204,6 +214,8 @@ test('concurrent cold callers share one download; stale reads use the previous s
 
 test('publishes a changed edition only after every language has been verified; failed refreshes back off', async () => {
   const cms = fakeCms();
+  await cms.catalog.getTemplates();
+  await setImmediate();
   const original = await cms.catalog.getTemplates();
   cms.advance(100);
   cms.data.manifest.publicationId = '121e747a-bb51-48d6-a44b-56ea20d07c99';
@@ -230,12 +242,16 @@ test('publishes a changed edition only after every language has been verified; f
 test('a failed initial read can be retried and caches never cross their deployment environment', async () => {
   const dev = fakeCms('dev'), prod = fakeCms('prod');
   dev.fail(true);
-  await assert.rejects(Promise.all([dev.catalog.getTemplates(), dev.catalog.getTemplates()]), /503/);
+  assert.deepEqual(await Promise.all([dev.catalog.getTemplates(), dev.catalog.getTemplates()]), [[], []]);
+  await setImmediate();
+  assert.match(String(dev.errors[0]), /503/);
   assert.equal(dev.requests.length, 1);
   dev.fail(false);
-  await assert.rejects(dev.catalog.getTemplates(), /503/);
+  assert.deepEqual(await dev.catalog.getTemplates(), []);
   assert.equal(dev.requests.length, 1);
   dev.advance(10);
+  await Promise.all([dev.catalog.getTemplates(), prod.catalog.getTemplates()]);
+  await setImmediate();
   const [devResult, prodResult] = await Promise.all([dev.catalog.getTemplates(), prod.catalog.getTemplates()]);
   assert.equal(devResult[0].catalogVersion, 'prism:dev:' + publicationId);
   assert.equal(prodResult[0].catalogVersion, 'prism:prod:' + publicationId);

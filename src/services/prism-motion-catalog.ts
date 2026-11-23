@@ -187,10 +187,9 @@ export class PrismMotionCatalog {
   private readonly ttlMs: number;
   private readonly retryMs: number;
   private readonly onRefreshError?: (error: unknown) => void;
-  private cached?: readonly PreparedCatalogTemplate[];
-  private pending?: Promise<readonly PreparedCatalogTemplate[]>;
+  private cached: readonly PreparedCatalogTemplate[] = [];
+  private pending?: Promise<void>;
   private checkAfter = 0;
-  private lastError?: unknown;
 
   constructor(environment: PrismEnvironment, options: PrismMotionCatalogOptions = {}) {
     assert(environment === 'dev' || environment === 'prod', 'Unknown Prism environment');
@@ -209,30 +208,21 @@ export class PrismMotionCatalog {
   }
 
   async getTemplates(): Promise<readonly PreparedCatalogTemplate[]> {
-    if (!this.cached) {
-      if (this.now() < this.checkAfter) throw this.lastError;
-      return this.pending ?? this.refresh();
-    }
     if (!this.pending && this.now() >= this.checkAfter) {
-      void this.refresh().catch(error => this.onRefreshError?.(error));
+      this.pending = this.refresh();
     }
     return this.cached;
   }
 
-  private refresh(): Promise<readonly PreparedCatalogTemplate[]> {
-    this.pending = readPublication(this.environment, this.origin, this.fetchImpl, this.cached)
-      .then(templates => {
-        this.cached = templates;
-        this.lastError = undefined;
-        this.checkAfter = this.now() + this.ttlMs;
-        return templates;
-      })
-      .catch(error => {
-        this.lastError = error;
-        this.checkAfter = this.now() + this.retryMs;
-        throw error;
-      })
-      .finally(() => { this.pending = undefined; });
-    return this.pending;
+  private async refresh(): Promise<void> {
+    try {
+      this.cached = await readPublication(this.environment, this.origin, this.fetchImpl, this.cached);
+      this.checkAfter = this.now() + this.ttlMs;
+    } catch (error) {
+      this.checkAfter = this.now() + this.retryMs;
+      this.onRefreshError?.(error);
+    } finally {
+      this.pending = undefined;
+    }
   }
 }
