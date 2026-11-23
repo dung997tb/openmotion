@@ -1,3 +1,5 @@
+import { planClipMove } from "../../../packages/edit-core";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useCallback, type MutableRefObject } from "react";
 import type { TimelineElement } from "../player";
 import { toAuthoredStart, toCompositionTime } from "../player/store/timelineElement";
@@ -125,11 +127,14 @@ export function useTimelineClipTimingEditing({
         // persist like any other move, or the lane snaps back on reload.
         const trackChanged = updates.track !== element.track;
         const authoredStart = toAuthoredStart(element, updates.start);
+        const command = startChanged && !trackChanged && sdkSession && element.hfId &&
+          !element.link && !element.implicitTextTiming && targetPath === activeCompPath && getCachedCloudDisklessMode()
+          ? planClipMove(sdkSession, element.hfId, Number(formatTimelineAttributeNumber(authoredStart))) : undefined;
         if (startChanged || trackChanged) {
           const liveAttrs: Array<[string, string]> = [];
           if (element.implicitTextTiming) liveAttrs.push(["data-duration", formatTimelineAttributeNumber(element.duration)]);
           if (startChanged)
-            liveAttrs.push(["data-start", formatTimelineAttributeNumber(authoredStart)]);
+            liveAttrs.push(["data-start", command ? String(command.start) : formatTimelineAttributeNumber(authoredStart)]);
           if (trackChanged) {
             liveAttrs.push(["data-track-index", formatTimelineAttributeNumber(updates.track)]);
           }
@@ -206,7 +211,7 @@ export function useTimelineClipTimingEditing({
                   readProjectFile: (path) => readFileContent(projectIdRef.current ?? "", path),
                   publishSession: publishSdkSession,
                 },
-                { label: "Move timeline clip", ...step, skipRefresh: true },
+                { label: "Move timeline clip", ...step, skipRefresh: true, command },
               ).then((result) => {
                 if (!cutoverCommittedOrThrow(result)) return moveFallback();
                 return finishMoveGsapSync(sdkTimingGsapSync(result));

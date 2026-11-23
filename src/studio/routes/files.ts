@@ -1,3 +1,4 @@
+import { commitClipMove } from '../../services/clip-move.ts';
 import path from 'node:path';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -232,6 +233,24 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       });
     } catch (error) {
       if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {
+        return c.json(await buildConflictPayload(deps, auth.workspaceId, error), 409);
+      }
+      throw error;
+    }
+  });
+
+  app.post('/api/projects/:id/edits/*', async (c) => {
+    const auth = await getAuthContext(c, deps, { scope: 'projects:write', minRole: 'editor' });
+    const path = normalizeSafeProjectPath(extractWildcardPath(c.req.url, '/edits/'), true);
+    const body = await c.req.json().catch(() => null);
+    const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
+    try {
+      const commit = await commitClipMove(deps.files, auth, c.req.param('id'), path, body,
+        c.req.header('idempotency-key') ?? '', { source: 'studio', ifMatch: c.req.header('if-match') ?? '', writeToken });
+      return c.json({ version: commit.versionsByPath[path] ?? c.req.header('if-match'), revision: commit.revision, writeToken: commit.writeToken });
+    } catch (error) {
+      if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {
+        if (typeof error.details?.currentContent === 'string') return c.json(error.details, 409);
         return c.json(await buildConflictPayload(deps, auth.workspaceId, error), 409);
       }
       throw error;

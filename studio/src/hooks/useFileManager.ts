@@ -120,9 +120,10 @@ export function useFileManager({
   // shared writer — a host mounting useProjectFileWriter directly has no
   // editor tab and does not need this.
   const writeProjectFile = useCallback(
-    async (path: string, content: string, expectedContent?: string): Promise<void> => {
+    async (...args: Parameters<typeof writeProjectFileRaw>): Promise<void> => {
+      const [path, content] = args;
       const writeProjectId = projectIdRef.current;
-      await writeProjectFileRaw(path, content, expectedContent);
+      await writeProjectFileRaw(...args);
       if (projectIdRef.current === writeProjectId && editingPathRef.current === path) {
         setEditingFile({ path, content });
       }

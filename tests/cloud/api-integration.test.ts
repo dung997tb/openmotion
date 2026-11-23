@@ -1433,6 +1433,53 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
 // ---------------------------------------------------------------------------
 
 describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, WorkspaceStatus, /phase1/call, /generations, /tracking/preferences)', () => {
+  it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
+    const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    const { projectId } = await (await post('/motion-api/projects', { title: 'Clip move parity' })).json();
+    const file = (path: string) => `/api/projects/${projectId}/files/${path}`;
+    const source = '<html><body><div data-composition-id="scene" data-duration="12"><div id="title" data-hf-id="hf-title" data-start="2" data-duration="3"><span class="word"></span></div><script>const tl=gsap.timeline();tl.to("#title",{opacity:1,duration:0.5},2.25);tl.to(".word",{duration:1,keyframes:{"0%":{x:20},"100%":{x:80}}},2.5);tl.to("#other",{x:10},7);</script></div></body></html>';
+    for (const path of ['ui.html', 'agent.html']) {
+      const seed = await app.request(file(path), { method: 'PUT', headers: { 'If-None-Match': '*' }, body: source });
+      assert.equal(seed.status, 200);
+    }
+
+    const base = (await app.request(file('ui.html'))).headers.get('etag')!;
+    const command = { kind: 'moveClip', hfId: 'hf-title', start: 5 };
+    const studio = (key: string) => post(`/api/projects/${projectId}/edits/ui.html`, command,
+      { 'If-Match': base, 'Idempotency-Key': key });
+    const first = await studio('drag');
+    assert.equal(first.status, 200, await first.clone().text());
+    assert.equal((await (await studio('drag')).json()).version, (await first.json()).version);
+    assert.equal((await studio('stale-drag')).status, 409);
+    const { content } = await (await app.request(file('ui.html'))).json();
+    assert.match(content, /data-start="5"/);
+    assert.match(content, /duration:0.5},5.25\)/);
+    assert.match(content, /"100%":\{x:80\}\}\},5\.5\)/);
+    assert.match(content, /hf-hold/);
+    assert.match(content, /"#other",\{x:10\},7\)/);
+
+    const headers: Record<string, string> = { Authorization: `Bearer ${config.DEV_PAT}`, Accept: 'application/json, text/event-stream' };
+    const rpc = (method: string, params: unknown) => post('/mcp', { jsonrpc: '2.0', id: 1, method, params }, headers);
+    const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'move-parity', version: '1' } });
+    headers['Mcp-Session-Id'] = init.headers.get('mcp-session-id')!;
+    const tool = async (name: string, args: unknown) => (await (await rpc('tools/call', { name, arguments: args })).json()).result;
+    const project = (await tool('openmotion_get_project', { projectId })).structuredContent;
+    const args = { projectId, requestId: 'agent-move', expectedRevision: project.revision, expectedVersionId: project.currentVersionId,
+      edit: { ...command, compositionPath: 'agent.html' } };
+    for (const edit of [{ ...args.edit, start: 10 }, { ...args.edit, hfId: 'missing' }]) {
+      assert.equal((await tool('openmotion_edit_project', { ...args, edit })).isError, true);
+    }
+    const moved = await tool('openmotion_edit_project', args);
+    assert.equal(moved.isError, undefined, JSON.stringify(moved));
+    assert.equal((await (await app.request(file('agent.html'))).json()).content, content);
+    const replay = (await tool('openmotion_edit_project', args)).structuredContent;
+    assert.equal(replay.replayed, true);
+    assert.deepEqual(replay.version, moved.structuredContent.version);
+    assert.equal((await tool('openmotion_edit_project', { ...args, requestId: 'stale-agent' })).isError, true);
+  });
+
   it('replays caption commands with the original track and guards both project versions', async () => {
     const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (path: string, data: unknown) => app.request('/motion-api/' + path, {

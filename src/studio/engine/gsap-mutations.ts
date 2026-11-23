@@ -1,12 +1,12 @@
+import { extractGsapScriptBlock as readGsapBlock } from '../../../packages/edit-core/gsap-block.ts';
+export type { ExtractedGsapBlock } from '../../../packages/edit-core/gsap-block.ts';
 import { GSAP_CDN } from '@hyperframes/core';
 import {
   hasCompositionOutsideTemplates,
   insertBeforeCloseTag,
-  parseHTMLContent,
 } from '@hyperframes/core/compiler/html-document';
 import {
   extractGsapLabels,
-  findTimelineScript,
   parseGsapScriptAcorn,
 } from '@hyperframes/parsers/gsap-parser-acorn';
 import {
@@ -16,7 +16,6 @@ import {
   addLabelToScript,
   addMotionPathPointInScript,
   addMotionPathToScript,
-  clipQueryRoot,
   convertToKeyframesFromScript,
   copyAnimationsInScript,
   dedupePositionWritesInScript,
@@ -68,33 +67,8 @@ const HOLD_SYNC_MUTATION_TYPES = new Set([
   'delete-all-for-selector',
 ]);
 
-export interface ExtractedGsapBlock {
-  scriptText: string;
-  document: Document;
-  root: ParentNode;
-  replaceScript(newText: string): string;
-}
-
-export function extractGsapScriptBlock(html: string): ExtractedGsapBlock | null {
-  const document = parseHTMLContent(ensureHfIds(html));
-  // linkedom serializes the template's child nodes, not its detached content fragment.
-  const scripts = [
-    ...Array.from(document.querySelectorAll('script:not([src])')),
-    ...Array.from(document.querySelectorAll('template')).flatMap((tmpl) =>
-      Array.from(tmpl.querySelectorAll('script:not([src])')),
-    ),
-  ];
-  const script = findTimelineScript(scripts);
-  if (!script) return null;
-  return {
-    scriptText: script.textContent || '',
-    document,
-    root: clipQueryRoot(script),
-    replaceScript(newText: string): string {
-      script.textContent = newText;
-      return document.toString();
-    },
-  };
+export function extractGsapScriptBlock(html: string) {
+  return readGsapBlock(ensureHfIds(html));
 }
 
 export function parseGsapAnimationsFromHtml(html: string) {

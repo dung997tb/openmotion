@@ -29,6 +29,17 @@ test('an existing index alone is not proof of a current source build', async t =
   assert.equal(await sourceBuildCurrent(root), false);
 });
 
+test('changing only shared clip editing invalidates the Studio build', async t => {
+  const root = await fixture(t);
+  const core = path.join(root, 'packages/edit-core');
+  await mkdir(core, { recursive: true });
+  await writeFile(path.join(core, 'index.ts'), 'original rule');
+  await recordSourceBuild(root);
+  assert.equal(await sourceBuildCurrent(root), true);
+  await writeFile(path.join(core, 'index.ts'), 'updated rule');
+  assert.equal(await sourceBuildCurrent(root), false);
+});
+
 test('Studio rebuilds for component library source edits and reuses the build after packing the library', async t => {
   const root = await fixture(t);
   const library = path.join(root, 'packages/open-design-ui');

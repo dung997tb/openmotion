@@ -1,3 +1,4 @@
+import { moveClip } from "../../../packages/edit-core";
 import type { Composition, GsapTweenSpec } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { PatchOperation } from "./sourcePatcher";
@@ -149,13 +150,14 @@ export async function sdkTimingPersist(
   if (wrongCompositionFile(deps, targetPath))
     return declinedCutover("wrong_composition_file", "timing");
   try {
+    const command = options?.command;
     const serializedBefore = sdkSession.serialize();
     const result = await persistSdkCandidateMutation(
       sdkSession,
       targetPath,
       serializedBefore,
       deps,
-      (session) => session.setTiming(hfId, timingUpdate),
+      (session, source) => command ? moveClip(session, command, source) : session.setTiming(hfId, timingUpdate),
       options,
       serializedBefore,
     );

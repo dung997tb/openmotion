@@ -1,3 +1,4 @@
+import { clipMoveExample, clipMoveInstruction, clipMoveLimits } from './clip-move-guide.ts';
 import { reviewCommentsPrompt } from './review-comments.ts';
 import { formatTemplatePrompt } from './template-prompts.ts';
 import { templateGuideContinuationInstruction } from './template-guide.ts';
@@ -412,6 +413,12 @@ ${apiDiscoveryCommand(info)}
 ## Tools
 
 ${info.tools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
+
+## Move a timeline clip
+
+${clipMoveLimits} ${clipMoveInstruction}
+
+${clipMoveExample}
 
 ## Cloud Asset Import & Unified OpenDesign Model Gateway
 
