@@ -134,6 +134,19 @@ Check each item; fix every hit before deploying.
     broken, referent-unclear, filler-verb ("Elevate", "Seamless"…), or fake-precise
     (`92%`, `4.1×` without a source).
 
+## Playable-ad addendum
+
+For a **Format: playable ad** brief, score each line 0 (missing), 1 (partial) or 2 (meets the [playable-ad recipe](game-playable-ad.md)) and record the scores with evidence in `design/verification.md`. Ship only with no 0 and a total of at least 10 of 12; name every 1 in the final message.
+
+| Line | 2 means |
+|---|---|
+| First-frame play | Scene and player object drawn on the first frame, no title card; the first touch anywhere starts play and scores within 1 s |
+| Tutorial | Animated hand on the exact first-move target with one short line; hides on input, returns after the hint delay |
+| Level arc | 3–8 levels: obvious level-1 win, a near-fail level (pilot `maxDanger` 0.6–0.9), a twist; reference wins and idle loses terminally in `openmotion_game_simulate` |
+| End card and CTA | Win and fail cards both reached in playtest; CTA (primary) and Play again (secondary); CTA tap logs `cta_click` through `openStore()`, Play again never does |
+| Single file | Inlined `index.html` regenerated from the sources; zero requests; no storage, dialogs or SDK stubs; size reported |
+| Polish | No overlapping HUD numbers or popups at 390×844; corners free; feedback on every input; three languages fit |
+
 ## Optional post-publication trailer acceptance
 
 - Offer a trailer after publishing; run `openmotion_game_trailer` only when requested. Use its server-owned headless recording, never the user's visible browser/profile/desktop.

@@ -335,6 +335,49 @@ test('portrait briefs are stored and told to the Agent; invalid orientation is r
   await assert.rejects(service.create({...brief,orientation:'square'} as any),/Invalid orientation/);
 }));
 
+test('playable-ad briefs are portrait single-player only and carry the ad recipe to the Agent',()=>fixture(async(_,workspace)=>{
+  const {service}=await fakeKits(workspace);
+  const {game}=await service.create({...brief,orientation:'portrait',playableAd:true});
+  assert.equal(game.playableAd,true);
+  const stored=JSON.parse(await readFile(path.join(service.root,game.id,'game.json'),'utf8'));
+  assert.match(stored.rawPrompt,/portrait 9:16 phone game/);
+  assert.match(stored.rawPrompt,/Format: playable ad/);
+  // Landscape or multiplayer briefs ignore the flag rather than building a broken ad.
+  const wide=await service.create({...brief,orientation:'landscape',playableAd:true});assert.equal(wide.game.playableAd,undefined);
+  const party=await service.create({...brief,multiplayer:true,orientation:'portrait',playableAd:true});assert.equal(party.game.playableAd,undefined);
+  const plain=JSON.parse(await readFile(path.join(service.root,wide.game.id,'game.json'),'utf8'));assert.doesNotMatch(plain.rawPrompt,/playable ad/);
+  await assert.rejects(service.create({...brief,orientation:'portrait',playableAd:'yes'} as any),/Invalid playableAd/);
+}));
+
+test('a remix of a playable ad keeps the ad recipe in its Agent instruction',()=>fixture(async(_,workspace)=>{
+  const {service}=await fakeKits(workspace);
+  const ad=(await service.create({...brief,orientation:'portrait',playableAd:true})).game;
+  const remix=await service.remix(ad.id);
+  assert.equal(remix.game.playableAd,true);
+  assert.match(remix.agentInstruction,/Format: playable ad/);
+  const stored=JSON.parse(await readFile(path.join(service.root,remix.game.id,'game.json'),'utf8'));
+  assert.match(stored.rawPrompt,/Format: playable ad/);
+}));
+
+test('a playable ad may name store pages, other games may not; threshold 0 skips the movement assertion',()=>fixture(async(_,workspace)=>{
+  const {service}=await fakeKits(workspace);
+  const store="<script>const config={store:{ios:'https://apps.apple.com/app/id1',android:'https://play.google.com/store/apps/details?id=a.b'}};</script>";
+  const ad=(await service.create({...brief,orientation:'portrait',playableAd:true})).game;
+  await service.write(ad.id,[{path:'index.html',content:store}]);
+  assert.equal((await service.validate(ad.id)).diagnostics.filter((d:any)=>/External network host/.test(d.message)).length,0);
+  const plain=(await service.create(brief)).game;
+  await service.write(plain.id,[{path:'index.html',content:store}]);
+  assert.ok((await service.validate(plain.id)).diagnostics.some((d:any)=>/apps\.apple\.com/.test(d.message)));
+  const base={before:{state:{selfId:'a',players:{a:{x:0,z:0}}}},after:{state:{selfId:'a',phase:'playing',players:{a:{x:0,z:0}}}},clients:1,script:[{type:'click',x:10,y:10}] as any,mobile:{width:390,height:844,scrollWidth:390}};
+  const movement=(t?:number,extra:any={})=>gamePlaytestAssertions({...base,...extra,movementThreshold:t}).find((a:any)=>a.name==='scriptedMovement') as any;
+  // Threshold 0 skips movement and says so; the record never claims a threshold that was not checked.
+  const skipped=movement(0);
+  assert.equal(skipped.passed,true);assert.equal(skipped.skipped,true);assert.equal(skipped.expected,'movement not asserted (threshold 0)');assert.equal(skipped.reason,undefined);
+  assert.equal(movement().passed,false);
+  // A missing authoritative state still fails even when movement is skipped.
+  const blind=movement(0,{after:{}});assert.equal(blind.passed,false);assert.match(blind.reason,/Missing authoritative/);
+}));
+
 test('single-player 3d selects arcade plus vendor without characters',()=>fixture(async(_,workspace)=>{
   const {service}=await fakeKits(workspace);const {game}=await service.create({...brief,style:'3d'});
   assert.equal((await service.read(game.id,'assets/marker.txt')).content,'arcade asset');
