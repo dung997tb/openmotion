@@ -14,6 +14,9 @@ describe("addBlockToProject", () => {
     { existingEnd: 0, start: 0, duration: 5 },
     { existingEnd: 43.13, start: 0, duration: 43.13 },
     { existingEnd: 43.13, start: 40, duration: 3.13 },
+    { existingEnd: 43.13, start: 43.07, duration: 0.06 },
+    { existingEnd: 43.13, start: 43.08, duration: 0.05 },
+    { existingEnd: 43.13, start: 43.12, duration: 0.05 },
     { existingEnd: 43.13, start: 43.13, duration: 5 },
     { existingEnd: 43.13, start: 45, duration: 5 },
   ])("places an undated overlay at $start on a $existingEnd-second timeline", async ({ existingEnd, start, duration }) => {

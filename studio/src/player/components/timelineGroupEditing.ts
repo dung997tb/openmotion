@@ -1,4 +1,5 @@
 import { clampPlaybackRate } from "@hyperframes/parsers/media-duration";
+import { MIN_TIMELINE_CLIP_DURATION_SECONDS } from "../../../../packages/edit-core/time-bounds";
 import { roundToCenti } from "../../utils/rounding";
 import type { TimelineElement } from "../store/playerStore";
 import { clampToHostStart } from "../store/timelineElement";
@@ -6,7 +7,6 @@ import { getTimelineEditCapabilities } from "./timelineEditCapabilities";
 import { isStillImageTimelineElement } from "../../utils/timelineInspector";
 
 const DEFAULT_TIMELINE_MIN_DURATION = 0.1;
-const ABSOLUTE_TIMELINE_MIN_DURATION = 0.05;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -27,7 +27,7 @@ function floorTimelineTime(value: number): number {
 }
 
 export function resolveTimelineMinDuration(minDuration?: number): number {
-  return Math.max(ABSOLUTE_TIMELINE_MIN_DURATION, minDuration ?? DEFAULT_TIMELINE_MIN_DURATION);
+  return Math.max(MIN_TIMELINE_CLIP_DURATION_SECONDS, minDuration ?? DEFAULT_TIMELINE_MIN_DURATION);
 }
 
 /** Playback rate never drops to zero (would make media-in-point math divide by ~0). */

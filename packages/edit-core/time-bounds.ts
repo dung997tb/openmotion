@@ -1,6 +1,7 @@
 import { instantTolerance } from "@hyperframes/core/clip-facts";
 
 export const DEFAULT_COMPOSITION_DURATION_SECONDS = 5;
+export const MIN_TIMELINE_CLIP_DURATION_SECONDS = 0.05;
 
 // Native timing mutations round start and duration independently to milliseconds.
 // Their summed end can drift by up to 1 ms from an adjacent authored frame boundary.

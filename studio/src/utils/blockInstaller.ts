@@ -16,7 +16,7 @@ import { deriveTimelineStoreKeyForDomId } from "../player/lib/timelineElementHel
 import { resolveDropTrack, topTrackZIndex } from "./timelineDropTrackInsert";
 import { usePlayerStore } from "../player";
 import { studioApiFetch } from "./studioApiFetch";
-import { DEFAULT_COMPOSITION_DURATION_SECONDS } from "../../../packages/edit-core/time-bounds";
+import { DEFAULT_COMPOSITION_DURATION_SECONDS, MIN_TIMELINE_CLIP_DURATION_SECONDS } from "../../../packages/edit-core/time-bounds";
 import { roundToCenti } from "./rounding";
 
 function getMaxZIndexFromIframe(iframe: HTMLIFrameElement | null): number {
@@ -135,7 +135,7 @@ function resolveBlockPlacement({
   );
   const remaining = roundToCenti(contentEnd - start);
   const duration = placementDuration ?? blockDuration ??
-    (remaining > 0 ? remaining : DEFAULT_COMPOSITION_DURATION_SECONDS);
+    (remaining > 0 ? Math.max(remaining, MIN_TIMELINE_CLIP_DURATION_SECONDS) : DEFAULT_COMPOSITION_DURATION_SECONDS);
   const nextTrack = Math.max(0, ...timelineElements.map((element) => element.track)) + 1;
   const track = placementTrack ?? (isBlock ? 0 : nextTrack);
   return { duration, isBlock, start, track };
