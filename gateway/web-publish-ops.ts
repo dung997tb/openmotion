@@ -61,27 +61,17 @@ function normalizeEmbedHttpsUrl(raw: string | undefined): string | null {
   if (!raw?.trim()) return null;
   try {
     const parsed = new URL(raw.trim());
-    if (parsed.protocol !== 'https:') return null;
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
     return parsed.href;
   } catch {
     return null;
   }
 }
 
-async function ensureCloudGameWrapper(
-  rootDir: string,
-  targetId: string,
-  embedUrl: string,
-  title: string,
-): Promise<{ dir: string; revision: string }> {
-  if (!SAFE_GAME_TARGET_ID.test(targetId)) {
-    throw new Error('INVALID_ARGUMENT: Invalid game targetId');
-  }
-  const wrapperDir = path.join(rootDir, 'web-publish-cache', 'games', targetId);
-  const indexFile = path.join(wrapperDir, 'index.html');
-  const safeTitle = escapeHtmlAttr(title || targetId);
+function renderCloudGameWrapperHtml(embedUrl: string, title: string): string {
+  const safeTitle = escapeHtmlAttr(title);
   const safeUrl = escapeHtmlAttr(embedUrl);
-  const html = `<!doctype html>
+  return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -96,16 +86,37 @@ async function ensureCloudGameWrapper(
   <iframe
     src="${safeUrl}"
     title="${safeTitle}"
-    allow="fullscreen; gamepad; autoplay; clipboard-write"
+    sandbox="allow-scripts allow-same-origin allow-pointer-lock"
+    allow="fullscreen; gamepad; autoplay"
     allowfullscreen
     referrerpolicy="no-referrer-when-downgrade"
   ></iframe>
 </body>
 </html>
 `;
+}
+
+async function ensureCloudGameWrapper(
+  rootDir: string,
+  targetId: string,
+  embedUrl: string,
+  title: string,
+  readOnly = false,
+): Promise<{ dir: string; revision: string }> {
+  if (!SAFE_GAME_TARGET_ID.test(targetId)) {
+    throw new Error('INVALID_ARGUMENT: Invalid game targetId');
+  }
+  const wrapperDir = path.join(rootDir, 'web-publish-cache', 'games', targetId);
+  const indexFile = path.join(wrapperDir, 'index.html');
+  const existing = await readFile(indexFile, 'utf8').catch(() => null);
+  if (readOnly) {
+    const html = existing ?? renderCloudGameWrapperHtml(embedUrl, title || targetId);
+    const revision = createHash('sha256').update(html, 'utf8').digest('hex').slice(0, 16);
+    return { dir: wrapperDir, revision };
+  }
+  const html = renderCloudGameWrapperHtml(embedUrl, title || targetId);
   const revision = createHash('sha256').update(html, 'utf8').digest('hex').slice(0, 16);
   await mkdir(wrapperDir, { recursive: true });
-  const existing = await readFile(indexFile, 'utf8').catch(() => null);
   if (existing !== html) {
     await writeFile(indexFile, html, 'utf8');
   }
@@ -121,6 +132,7 @@ export async function resolveWebPublishTarget(
     filePath?: string;
     title?: string;
     embedUrl?: string;
+    readOnly?: boolean;
   },
   origin: string,
 ): Promise<WebPublishTarget> {
@@ -171,7 +183,7 @@ export async function resolveWebPublishTarget(
     const validEmbedUrl = normalizeEmbedHttpsUrl(input.embedUrl);
     if (validEmbedUrl) {
       const cleanTitle = input.title?.trim() || targetId;
-      const wrapper = await ensureCloudGameWrapper(rootDir, targetId, validEmbedUrl, cleanTitle);
+      const wrapper = await ensureCloudGameWrapper(rootDir, targetId, validEmbedUrl, cleanTitle, input.readOnly === true);
       return {
         kind: 'game',
         id: targetId,
@@ -345,7 +357,7 @@ export async function webPublishOperation(
     try {
       const resolved = await resolveWebPublishTarget(
         store,
-        { targetKind, targetId, sourcePath, filePath, title, embedUrl },
+        { targetKind, targetId, sourcePath, filePath, title, embedUrl, readOnly: true },
         origin,
       );
       return await service.status(resolved, { filePath, refresh: input.refresh === true });
@@ -395,7 +407,7 @@ export async function webPublishOperation(
     }
     const resolved = await resolveWebPublishTarget(
       store,
-      { targetKind, targetId, sourcePath, filePath, title, embedUrl },
+      { targetKind, targetId, sourcePath, filePath, title, embedUrl, readOnly: true },
       origin,
     );
     return await service.unpublish(resolved, { filePath });
