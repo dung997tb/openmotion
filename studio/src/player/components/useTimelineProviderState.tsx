@@ -116,7 +116,8 @@ export function useTimelineProviderState({
   const refreshAfterLaneMove = useTimelineLaneMoveRefresh();
   useMusicBeatAnalysis();
   const timelineElements = usePlayerStore(s =>
-    initialElements && !s.timelineReady && !s.elements.length && !s.clipManifest ? initialElements : s.elements,
+    initialElements && !s.timelineReady && !s.timelineSourceProjected && !s.elements.length && !s.clipManifest
+      ? initialElements : s.elements,
   );
   const adjustedBeatAnalysis = useAdjustedBeatAnalysis();
   const duration = usePlayerStore((s) => s.duration);

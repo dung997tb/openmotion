@@ -53,8 +53,8 @@ interface ExternalFileChangeCoordinatorOptions {
   getPendingCandidate?: () => { path: string; content: string } | null;
   discardPendingChanges: () => void;
   reloadPreview: (path?: string) => void;
-  reloadSdkSession: (path: string) => void;
-  refreshOpenSource?: (path: string) => void;
+  /** Accept synchronously after capturing the displayed source and before opening the next revision. */
+  refreshFileViews: (payload: unknown, acceptChange: () => void) => Promise<boolean> | void;
   persistConflictSnapshot: (projectId: string, conflict: StudioFileConflictError) => Promise<void>;
   persistFailureSnapshot?: (
     projectId: string,
@@ -78,7 +78,7 @@ interface ExternalFileChangeCoordinatorOptions {
     affectedCompositions: readonly string[] | null,
   ) => void;
   /**
-   * Called alongside `reloadPreview`/`reloadSdkSession` on every accepted
+   * Called alongside `reloadPreview`/`refreshFileViews` on every accepted
    * external change. The file tree (`useFileTree`) is only ever refreshed
    * from Studio's OWN file operations (create/delete/rename/upload) — an
    * external change (an agent writing outside Studio) reloads the preview
@@ -204,6 +204,8 @@ export function sseFileChangeChannel(
 }
 
 function eventIdentity(path: string, payload: unknown): string | null {
+  const revision = readFileChangeField(payload, "revision");
+  if (revision) return `${path}\0${revision}\0${readFileChangeWriteToken(payload) ?? ""}`;
   const version = readFileChangeVersion(payload);
   if (version) return `${path}\0${version}`;
   const content = readFileChangeContent(payload);
@@ -219,8 +221,7 @@ export function useExternalFileChangeCoordinator({
   getPendingCandidate,
   discardPendingChanges,
   reloadPreview,
-  reloadSdkSession,
-  refreshOpenSource,
+  refreshFileViews,
   persistConflictSnapshot,
   persistFailureSnapshot,
   loadConflictSnapshot,
@@ -238,6 +239,7 @@ export function useExternalFileChangeCoordinator({
   const useHotChannel = !cloud && Boolean(import.meta.hot || testHotAdapter());
   const [blocked, setBlockedState] = useState<ExternalFileChangeBlockedState | null>(null);
   const generationRef = useRef(0);
+  const previewGeneration = useRef(0);
   const mountedRef = useRef(true);
   const lastEventIdentityRef = useRef<string | null>(null);
   const blockedRef = useRef<ExternalFileChangeBlockedState | null>(null);
@@ -270,6 +272,7 @@ export function useExternalFileChangeCoordinator({
   useEffect(() => {
     generationRef.current += 1;
     setBlocked(null);
+    previewGeneration.current++;
     lastEventIdentityRef.current = null;
   }, [projectId, activeCompPath, setBlocked]);
 
@@ -322,14 +325,21 @@ export function useExternalFileChangeCoordinator({
     (owed: unknown, accept = true) => {
       const path = readStudioFileChangePath(owed) ?? ".";
       const affectsPreview = readFileChangeAffectsPreview(owed);
-      if (accept) onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(owed));
+      const inPlace = refreshFileViews(owed, () => {
+        if (accept) onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(owed));
+      });
       logReload(affectsPreview ? "reload" : "file-tree only", {
         path,
         by: "external-change coordinator",
       });
-      if (affectsPreview) reloadPreview(path);
-      reloadSdkSession(path);
-      refreshOpenSource?.(path);
+      if (affectsPreview) {
+        const ticket = ++previewGeneration.current;
+        if (inPlace) {
+          void inPlace.catch(() => false).then(applied => {
+            if (!applied && mountedRef.current && previewGeneration.current === ticket) reloadPreview(path);
+          });
+        } else reloadPreview(path);
+      }
       // Fire-and-forget: a failed refresh leaves the tree as stale as it was,
       // which is the status quo this exists to improve on, not a new failure
       // mode to surface. The `absent`-triggered fallback in useSdkSession
@@ -337,7 +347,7 @@ export function useExternalFileChangeCoordinator({
       // a watcher event the SSE never delivered).
       if (readFileTreeChanged(owed)) void refreshFileTree?.();
     },
-    [onAcceptedPersistedFileChange, reloadPreview, reloadSdkSession, refreshFileTree, refreshOpenSource],
+    [onAcceptedPersistedFileChange, reloadPreview, refreshFileViews, refreshFileTree],
   );
 
   const persistSnapshotInOrder = useCallback(async (write: () => Promise<void>) => {

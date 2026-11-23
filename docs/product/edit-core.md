@@ -35,3 +35,9 @@ Canvas geometry can depend on the rendered viewport. Studio can measure it as in
 Start with an existing command when the intent and affected files match. Add a command for a distinct editing rule, such as split or trim. Keep transport-specific checks in the service and each transformation in one place. Start with the [command dispatcher](../../packages/edit-core/commands.ts), [wire schema](../../packages/edit-core/schema.ts) and [cloud executor](../../src/services/project-edit.ts).
 
 Exercise a migrated action through Studio and remote MCP on identical input. Compare saved contents and undo results. For batches, cover multiple targets, a failing target, a stale version and a retried request. For collaboration, verify that another open Studio receives the resulting change. Count edit writes separately from reads for previews and the SSE subscription.
+
+### Keeping a second Studio timeline in sync
+
+After a file commit, the receiving Studio reads the changed composition it is displaying. Its timeline, SDK session and open source editor share that read. The file source supplies authored clip timing and track placement. The preview refresh proceeds independently so a slow media load cannot delay the timeline update. The outgoing player may still report playback data. Its old manifest cannot replace a newer authored timeline. Switching projects or compositions invalidates outstanding reads.
+
+A supported isolated preview can apply numeric timing changes to the live document. It acknowledges only an exact match for the project, document, file version and affected nodes. Scripted compositions, structural edits and version mismatches refresh through the existing preview replacement flow. The timeline remains usable during that refresh.

@@ -8,6 +8,7 @@ import { createPreviewAdapter } from "../lib/previewAdapter";
 import { bindPreviewLease } from "../lib/previewLease";
 import { rememberPreviewPosition } from "../lib/previewReconnect";
 import { announcePreviewDocumentLoaded } from "../sceneSwap";
+import { rememberPeerTimingDocument } from "../peerTimingPreview";
 import { usePlayerStore } from "../store/playerStore";
 import { registerRetryFailedAssetsHandler } from "../store/readinessSlice";
 import type { PreviewAssetFailure, PreviewAssetProgress } from "../lib/previewAssetReadiness";
@@ -116,6 +117,10 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       }
       function message(event: MessageEvent) {
         if (!bridge?.accepts(event)) return;
+        if (event.data.type === "preview-ready") {
+          rememberPeerTimingDocument(iframe!, bridge.token, event.data.timingDocumentId);
+          return;
+        }
         if (event.data.type === "asset-readiness") {
           const parsed = parseBridgeAssetProgress(event.data);
           if (parsed && tracksAssets && !passive) {
@@ -205,6 +210,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         callbacks.current.onReadyToShowChange?.(false);
         callbacks.current.onCompositionLoadingChange?.(true);
         runtimeTime = undefined;
+        rememberPeerTimingDocument(iframe, null, null);
         iframe.src = next.href;
         bridge = createPreviewAdapter({ iframe, expectedOrigin: props.origin });
         if (tracksAssets && !passive) {

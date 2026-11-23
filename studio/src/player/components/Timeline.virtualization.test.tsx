@@ -293,6 +293,28 @@ describe("Timeline row virtualization", { timeout: 30_000 }, () => {
     usePlayerStore.getState().reset();
   });
 
+  it("clears initial rows when a peer deletes the last clip before the preview is ready", async () => {
+    const { Timeline } = await import("./Timeline");
+    const { usePlayerStore } = await import("../store/playerStore");
+    const { parseAuthoredTimeline } = await import("../lib/authoredTimeline");
+    const { openTimelineSource, beginTimelineSourceRead, beginPeerTimelineUpdate } = await import("../lib/peerTimeline");
+    const page = (body: string) => `<main data-composition-id="master" data-duration="12">${body}</main>`;
+    const html = page('<section id="intro" data-start="0" data-duration="4"></section>');
+    const project = "peer-at-open", path = "index.html";
+    usePlayerStore.getState().beginTimelineSession(project);
+    const close = openTimelineSource(project, path);
+    const source = parseAuthoredTimeline(html, path, project)!;
+    beginTimelineSourceRead(project, path)(html, source);
+    const { host, root } = await mountTimeline(<Timeline initialElements={source.elements} readOnly />);
+    expect(host.querySelector(`[data-el-id="${source.elements[0].key}"]`)).not.toBeNull();
+    await act(async () => { beginPeerTimelineUpdate(project, path)!(page(""), null); });
+    expect(usePlayerStore.getState().timelineReady).toBe(false);
+    expect(host.querySelector(`[data-el-id="${source.elements[0].key}"]`)).toBeNull();
+    act(() => root.unmount());
+    close();
+    usePlayerStore.getState().reset();
+  });
+
   it("displays authored track metadata without enabling edits, then uses the runtime rows or its confirmed empty timeline", async () => {
     const { Timeline } = await import("./Timeline");
     const { usePlayerStore } = await import("../store/playerStore");

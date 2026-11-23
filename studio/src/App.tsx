@@ -178,6 +178,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const previewPersistence = useStableHandlers(previewPersistenceResult, projectId);
   const externalFileChanges = useStudioExternalFileChanges({
     projectId,
+    previewIframeRef,
     activeCompPath,
     masterCompPath,
     fileManager,

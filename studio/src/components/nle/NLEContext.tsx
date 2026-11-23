@@ -1,3 +1,4 @@
+import { beginTimelineSourceRead, openTimelineSource } from "../../player/lib/peerTimeline";
 import { parseAuthoredTimeline } from "../../player/lib/authoredTimeline";
 import { normalizeToZones } from "../../player/components/timelineZones";
 import { buildProjectApiPath } from "../../utils/projectRouting";
@@ -161,6 +162,9 @@ export function NLEProvider({
     onCompositionChange,
   });
 
+  const activeSource = compositionStack.length > 1 ? compositionStack[compositionStack.length - 1]!.id : "index.html";
+  useLayoutEffect(() => openTimelineSource(projectId, activeSource), [projectId, activeSource]);
+
   // Wrap handleDrillDown to also scan the iframe DOM for data-composition-src
   const iframeRef_ = iframeRef;
   const handleDrillDown = useCallback(
@@ -211,6 +215,7 @@ export function NLEProvider({
     setCompositionSourceMap(emptyMap);
     onCompIdToSrcChangeRef.current?.(emptyMap);
 
+    const rememberSource = beginTimelineSourceRead(projectId, "index.html");
     studioApiFetch(buildProjectApiPath(projectId, `/files/index.html`), {
       signal: controller.signal,
     })
@@ -236,10 +241,11 @@ export function NLEProvider({
         setCompositionSourceMap(map);
         onCompIdToSrcChangeRef.current?.(map);
         const player = usePlayerStore.getState();
-        if (player.timelineProjectId === projectId && !player.timelineReady && !player.elements.length && !player.clipManifest) {
-          const source = parseAuthoredTimeline(html, "index.html", projectId);
-          if (source?.elements.length) setAuthoredTimeline({ projectId, elements: normalizeToZones(source.elements) });
-        }
+        const needsInitialRows = player.timelineProjectId === projectId && !player.timelineReady &&
+          !player.elements.length && !player.clipManifest;
+        const source = needsInitialRows ? parseAuthoredTimeline(html, "index.html", projectId) : null;
+        rememberSource(html, source ?? undefined);
+        if (source?.elements.length) setAuthoredTimeline({ projectId, elements: normalizeToZones(source.elements) });
       })
       .catch((err: unknown) => {
         if (!current || controller.signal.aborted) return;
