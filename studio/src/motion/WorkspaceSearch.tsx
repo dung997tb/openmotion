@@ -14,6 +14,7 @@ import { mediaLabels, modelDestination, sceneDestination, studioIconTone, suppor
 import { motionSkills } from './skillCatalog';
 import { ModelAvatar } from './settingsPrimitives';
 import { useMediaCatalog } from './useMediaCatalog';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 type Result = { id: string; label: string; detail?: string; modality?: Modality; icon: ReactNode; open: () => void };
 
@@ -51,6 +52,8 @@ export function WorkspaceSearch({ onSkill, onScene, onStudio, onAsset, onCommuni
   destination: StudioDestination | null; onLibrary: () => void; onAccount: () => void;
 }) {
   const { t } = useI18n();
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
   const [open, setOpen] = useState(false), [input, setInput] = useState('');
   const [offset, setOffset] = useState(0);
   const query = open ? input.trim().toLocaleLowerCase() : '';
@@ -59,8 +62,11 @@ export function WorkspaceSearch({ onSkill, onScene, onStudio, onAsset, onCommuni
   const pattern = query ? new RegExp('(' + [...terms].sort((a, b) => b.length - a.length).map(escapeRegex).join('|') + ')', 'iu') : null;
   const matches = (...fields: string[]) => terms.every(term => fields.join(' ').toLocaleLowerCase().includes(term));
   const providers = new Map(catalog.catalog?.status.providers.map(provider => [provider.id, provider.label]));
+  const visibleStudios = creativeStudios.filter(studio =>
+    (gameStudioEnabled || studio.id !== 'game') && (designStudioEnabled || studio.id !== 'design'),
+  );
   const groups: [string, Result[]][] = [
-    ['Studios', creativeStudios.filter(studio => matches(studio.title, t(studio.title))).map(studio =>
+    ['Studios', visibleStudios.filter(studio => matches(studio.title, t(studio.title))).map(studio =>
       ({ id: studio.id, label: t(studio.title), icon: searchIcon(studio.icon, studioIconTone(studio)), open: () => onStudio(studio) }))],
     ['Scenes', studioScenes.filter(scene => query && matches(scene.id, t(scene.label), t(scene.hint), t(mediaLabels[scene.modality]))).map(scene =>
       ({ id: scene.id, label: t(scene.label), detail: t(mediaLabels[scene.modality]), icon: searchIcon(scene.icon, scene.modality), open: () => onScene(sceneDestination(scene, destination)) }))],

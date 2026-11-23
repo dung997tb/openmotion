@@ -20,12 +20,15 @@ import { reviewFrameMatches, useReviewMarkupStore } from './reviewMarkupStore';
 import { ReviewMarkupTools, ReviewAnnotationLabel } from './ReviewMarkupTools';
 import { ReviewCommentCard } from './ReviewCommentCard';
 import { useReviewPresentationStore } from './reviewPresentationStore';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 const scopeLabels = { project: 'Whole video', frame: 'Current frame', element: 'Selected element' } as const;
 type Draft = { anchor: ReviewAnchor; sourceRevision: string; requestId: string; annotated: boolean };
 
 export function ReviewCommentsPanel() {
+  const reviewCommentsEnabled = useCloudFeatureEnabled('reviewComments');
   const shell = useStudioShellContext();
+  if (!reviewCommentsEnabled) return null;
   return <ProjectReviewComments key={shell.projectId} />;
 }
 

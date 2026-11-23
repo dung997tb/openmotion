@@ -26,7 +26,7 @@ export type OverlayLayerProps = {
   closeStandalonePreview: () => void;
   returnToExplore: () => void;
   openSkill: (skill: string) => void;
-  openScenario: (scenario: 'black-friday', runId?: string, fromPage?: boolean) => void;
+  openScenario?: (scenario: 'black-friday', runId?: string, fromPage?: boolean) => void;
   openProject: (id: string) => Promise<boolean>;
   openTemplate: (id: string) => void;
   placement: 'in-workspace' | 'portal';
@@ -91,7 +91,7 @@ export function OverlayLayer({
               collectionSkillTrigger.current = trigger;
               navigatePage({ skill });
             }}
-            onStartScenario={() => openScenario('black-friday', undefined, true)}
+            onStartScenario={openScenario ? () => openScenario('black-friday', undefined, true) : undefined}
             inWorkspace={templatesPage}
             open
             projectId={projectId}

@@ -16,6 +16,7 @@ import { isMediaFile } from "../utils/mediaTypes";
 import { useStudioShellContext } from "../contexts/StudioContext";
 import { useFileManagerContext } from "../contexts/FileManagerContext";
 import { getPersistedRenderSettings } from "./renders/renderSettings";
+import { useCloudFeatureEnabled } from "../utils/cloudFeatures";
 
 const SourceEditor = lazy(() => import('./editor/SourceEditor').then(module => ({ default: module.SourceEditor })));
 
@@ -55,6 +56,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
   onAddCompositionToTimeline,
 }: StudioLeftPanelsProps) {
   const mvp = useMvpEditor();
+  const asrEnabled = useCloudFeatureEnabled('asr');
   const { projectId, activeCompPath, renderQueue, waitForPendingDomEditSaves } = useStudioShellContext();
   const {
     compositions,
@@ -141,7 +143,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
           />
         </PanelColumn>
       </Dock.Panel>
-      <Dock.Panel id="transcript"><TranscriptPanel onAddToTimeline={onAddAssetToTimeline} /></Dock.Panel>
+      {asrEnabled && <Dock.Panel id="transcript"><TranscriptPanel onAddToTimeline={onAddAssetToTimeline} /></Dock.Panel>}
       <Dock.Panel id="captions"><CaptionsPanel /></Dock.Panel>
       <Dock.Panel id="code">
         <PanelColumn footer={lintButton}>

@@ -47,6 +47,7 @@ import { RouteViewport } from '../router/RouteViewport';
 import { OverlayLayer } from '../router/OverlayLayer';
 import { StudioRouterProvider } from '../router/createAppRouter';
 import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
+import { isCloudFeatureEnabled, useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 import { WorkspaceChromeContext, useWorkspaceChrome, type WorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 export { useWorkspaceChrome, useOptionalWorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
@@ -69,6 +70,11 @@ export function WorkspaceFrame(props: WorkspaceFrameProps) {
 
 function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: WorkspaceFrameProps) {
   const { t, locale } = useI18n();
+  const localAgentsEnabled = useCloudFeatureEnabled('localAgents');
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
+  const workflowsEnabled = useCloudFeatureEnabled('workflows');
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
+  const brandKitEnabled = useCloudFeatureEnabled('brandKit');
   const routerLocation = useLocation();
   const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname));
   const [source, setSource] = useState(() => readLocationWorkspaceSource(routerLocation.state));
@@ -135,6 +141,20 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     }
     writeWorkspaceHistory(target, replace, { page: nextSource, settings: settingsSource });
   }, []);
+  useEffect(() => {
+    if (page.settings === 'local' && !localAgentsEnabled) {
+      navigatePage({ settings: 'providers', mcpInSettings: false, assets: false, skills: false, templates: false }, true);
+      return;
+    }
+    if (
+      (page.settings === 'brand-kit' && !brandKitEnabled)
+      || (page.designScene && !designStudioEnabled)
+      || ((page.scenarioHub || page.scenario) && !workflowsEnabled)
+      || (page.specialty?.id === 'game' && !gameStudioEnabled)
+    ) {
+      navigatePage({ explore: true, templates: false, ...lastExplore.current }, true);
+    }
+  }, [page.settings, page.designScene, page.scenarioHub, page.scenario, page.specialty, localAgentsEnabled, brandKitEnabled, designStudioEnabled, workflowsEnabled, gameStudioEnabled, navigatePage]);
   const presentation = workspacePresentation(location.search);
   const guard = useRef<EditorGuard | null>(null);
   const [editorState, setEditorState] = useState<Pick<EditorGuard, 'blocked' | 'saveState' | 'message'> | null>(null);
@@ -272,7 +292,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     if (!settingsSource || !restoreWorkspaceSource(settingsSource)) openHome();
   };
   useEffect(() => {
-    const open = () => openSettings('local');
+    const open = () => openSettings(isCloudFeatureEnabled('localAgents') ? 'local' : 'providers');
     window.addEventListener('motion:agents-open', open);
     return () => window.removeEventListener('motion:agents-open', open);
   }, [openSettings]);
@@ -374,7 +394,10 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const chooseStudio = (entry: CreativeStudio, kind?: Modality, fromPage = false) => {
     if (entry.surface === 'techniques') navigatePage({ specialty: entry, skill: null, templates: false, ...lastExplore.current });
     else if (entry.surface === 'editor') navigatePage({ motion: true, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
-    else if (entry.id === 'design' && !kind) navigatePage({ designScene: defaultDesignScene, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
+    else if (entry.id === 'design' && !kind) {
+      if (designStudioEnabled) navigatePage({ designScene: defaultDesignScene, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
+      else openStudio(studioDestination(entry, 'text-to-image'), undefined, fromPage);
+    }
     else if (entry.id === 'cinema' && !kind) navigatePage({ cinemaLanding: true, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
     else if (!kind && hasStudioHome(entry)) openStudio({ ...studioDestination(entry, page.studio?.studio.id === entry.id ? page.studio.scene.id : null), home: true }, undefined, fromPage);
     else if (kind === 'audio') {
@@ -458,7 +481,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     closeStandalonePreview,
     returnToExplore,
     openSkill,
-    openScenario,
+    openScenario: workflowsEnabled ? openScenario : undefined,
     openProject: (id: string) => workspace.open('projects', id),
     openTemplate: openTemplateFromOverlay,
   };
@@ -473,10 +496,10 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
         specialty={page.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
         openAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion, templates: false })}
         onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={currentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={visibleSettings} destination={templatesPage ? null : page.studio} soundTab={templatesPage ? null : page.soundTab ?? null} motionActive={!templatesPage && (page.motion || editorActive)}
-        designActive={!templatesPage && Boolean(page.designScene)} cinemaActive={!templatesPage && page.cinemaLanding}
-        scenarioActive={!templatesPage && !settings ? (page.scenario ?? (page.scenarioHub ? 'hub' : null)) : null}
-        onOpenScenario={(id, runId) => openScenario(id, runId)}
-        onOpenScenarioHub={() => openScenarioHub()}
+        designActive={designStudioEnabled && !templatesPage && Boolean(page.designScene)} cinemaActive={!templatesPage && page.cinemaLanding}
+        scenarioActive={workflowsEnabled && !templatesPage && !settings ? (page.scenario ?? (page.scenarioHub ? 'hub' : null)) : null}
+        onOpenScenario={workflowsEnabled ? (id, runId) => openScenario(id, runId) : undefined}
+        onOpenScenarioHub={workflowsEnabled ? () => openScenarioHub() : undefined}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />
       <AuthRecoveryNotice
         onRetry={workspace.retryConnection}

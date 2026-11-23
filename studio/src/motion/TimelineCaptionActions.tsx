@@ -106,6 +106,6 @@ function RecordingActions({ onAddToTimeline }: { onAddToTimeline: (path: string)
         </> : <Button variant="primary" disabled={disabled} onClick={() => { usePlayerStore.getState().setIsPlaying(false); void recorder.start(); }}>{t('Start recording')}</Button>}
       </div>
     </Popover>
-    <Tooltip label={t('Open transcript')}><IconButton aria-label={t('Open transcript')} onClick={() => useDockLayoutStore.getState().activatePanel('transcript')} icon={<RemixIcon name="file-text-line" size={16} />} /></Tooltip>
+    {transcriptServiceAvailable && <Tooltip label={t('Open transcript')}><IconButton aria-label={t('Open transcript')} onClick={() => useDockLayoutStore.getState().activatePanel('transcript')} icon={<RemixIcon name="file-text-line" size={16} />} /></Tooltip>}
   </div>;
 }

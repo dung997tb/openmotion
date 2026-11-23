@@ -39,6 +39,7 @@ import { ExploreDesignSection } from '../design/scenes/ExploreDesignSection';
 import type { DesignTabId } from '../design/scenes/DesignSceneTabs';
 import { scenarioDefinitions, type ScenarioId } from '../../../shared/scenarios';
 import { ScenarioHighlights } from './ScenarioHighlights';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 import './sceneDiscovery.css';
 
 type ExploreArea = Parameters<typeof reportCreativeClick>[1];
@@ -81,7 +82,7 @@ type ExploreProps = {
   onModelHub: (id: string) => void;
   onCreators: (trigger: HTMLElement) => void;
   onOpenBlackFriday: (trigger: HTMLButtonElement) => void;
-  onBrandKit: () => void;
+  onBrandKit?: () => void;
   onMcp: (client?: 'claude', example?: string) => void;
   onSelectDesignScene?: (scene: DesignTabId) => void;
   onOpenDesignProject?: (projectId: string) => void;
@@ -261,6 +262,11 @@ const footerLegalLinks = [
 
 function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandKit, onMcp, onSkill, onStartScenario, onOpenScenarioHub }: Pick<ExploreProps, 'active' | 'onModel' | 'onNavigate' | 'onChooseStudio' | 'onBrandKit' | 'onMcp' | 'onSkill' | 'onStartScenario' | 'onOpenScenarioHub'>) {
   const { t, locale, setLocale } = useI18n(), { openAssets, openModelSettings, openLibrary, openSkills } = useWorkspaceChrome();
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
+  const indexedStudios = creativeStudios.filter(studio =>
+    (gameStudioEnabled || studio.id !== 'game') && (designStudioEnabled || studio.id !== 'design'),
+  );
   const [skillCategory, setSkillCategory] = useState<SkillCategory | null>(null);
   const [modelsFor, setModelsFor] = useState<StudioScene['modality'] | null>(null);
   const gateway = useMediaCatalog(active && modelsFor !== null);
@@ -305,12 +311,12 @@ function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandK
         }}>{t('All workflows')}</Button>}
       </div>}
       {primaryMediaStudios.map(renderMediaColumn)}
-      <div><h3>{t('Studios')}</h3>{creativeStudios.map(studio => <Button variant="plain" className="om-nav-item" key={studio.id} onClick={() => { track('capability_index', 'open_studio', { studio: studio.id }); onChooseStudio(studio); }}>{t(studio.title)}</Button>)}</div>
+      <div><h3>{t('Studios')}</h3>{indexedStudios.map(studio => <Button variant="plain" className="om-nav-item" key={studio.id} onClick={() => { track('capability_index', 'open_studio', { studio: studio.id }); onChooseStudio(studio); }}>{t(studio.title)}</Button>)}</div>
       <div className="om-capability-column-stack">
         {audioStudio && renderMediaColumn(audioStudio)}
         <div><h3>{t('Workspace')}</h3>
           <Button variant="plain" className="om-nav-item" onClick={event => { track('capability_index', 'template_library'); openLibrary(event.currentTarget); }}>{t('Template library')}</Button>
-          <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_brand_kit'); onBrandKit(); }}>{t('Brand Kit')}</Button>
+          {onBrandKit && <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_brand_kit'); onBrandKit(); }}>{t('Brand Kit')}</Button>}
           <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_assets'); openAssets(); }}>{t('Workspace assets')}</Button>
           <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_providers'); openModelSettings(); }}>{t('Model providers')}</Button>
           <Button variant="plain" className="om-nav-item" onClick={() => { track('capability_index', 'open_mcp'); onMcp(); }}>{t('MCP · Connect Agent')}</Button>
@@ -388,6 +394,7 @@ function CapabilityIndex({ active, onModel, onNavigate, onChooseStudio, onBrandK
 
 function ExploreCollection({ community, root, firstPages, ...props }: ExploreProps & { firstPages: Map<string, TemplatePage>; community?: ExploreCommunity; root: RefObject<HTMLElement | null> }) {
   const { t, locale } = useI18n();
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
   const { active, onNavigate, onChooseStudio, onSkill, filters } = props;
   const { openLibrary, openSkills } = useWorkspaceChrome();
   const [priority, setPriority] = useState<string | null>(null);
@@ -539,7 +546,7 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
           onSkill={onSkill} playing={playing} onPriority={setPriority} />)}</div>
       </ExploreShelf>
     </>}
-    {!community && discoveryStudios.filter(studio => !home || studio.id !== 'design').map(studioSection)}
+    {!community && discoveryStudios.filter(studio => (!home || studio.id !== 'design') && (gameStudioEnabled || studio.id !== 'game')).map(studioSection)}
   </>;
 }
 

@@ -5,10 +5,10 @@ import { usePlayerStore } from '../player/store/playerStore';
 import { useStudioShellContext } from '../contexts/StudioContext';
 import { useNativeCaptionWrite } from './useNativeCaptionWrite';
 
-export function ManualTextPanel({ kind = 'text' }: { kind?: 'text' | 'caption' }) {
+export function ManualTextPanel({ kind = 'text', allowSubtitleImport = false }: { kind?: 'text' | 'caption'; allowSubtitleImport?: boolean }) {
   const { t } = useI18n(), shell = useStudioShellContext(), { write, busy, disabled } = useNativeCaptionWrite();
   const [text, setText] = useState(''), [duration, setDuration] = useState(3);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null), subtitleInput = useRef<HTMLInputElement>(null);
   const add = async () => {
     const content = text.trim() || t('Default text');
     const lines = kind === 'caption' ? content.split(/\n+/).filter(Boolean) : [content];
@@ -16,7 +16,17 @@ export function ManualTextPanel({ kind = 'text' }: { kind?: 'text' | 'caption' }
       segments: lines.map((text, index) => ({ id: `cue-${index + 1}`, text, start: index * duration, end: (index + 1) * duration })) });
     if (ok && kind === 'caption') setText('');
   };
+  const importSubtitles = async (file: File) => {
+    try {
+      if (file.size > 2_000_000) throw new Error('Subtitle file exceeds 2 MB');
+      const subtitles = await file.text();
+      await write({ command: 'caption_add', subtitles, timelineStart: usePlayerStore.getState().currentTime });
+    } catch (error) {
+      shell.showToast(t(error instanceof Error ? error.message : 'Caption update failed'), 'error');
+    }
+  };
   return <section aria-label={t(kind === 'text' ? 'Text' : 'Manual captions')} className="flex min-h-0 flex-1 flex-col" onKeyDown={event => event.stopPropagation()}>
+    {allowSubtitleImport && kind === 'caption' && <input ref={subtitleInput} hidden type="file" accept=".srt,.vtt" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importSubtitles(file); }} />}
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
       <label className="flex flex-col gap-2 text-step-11 text-text-2">{t(kind === 'text' ? 'Text' : 'Caption text')}
         <span className="om-field"><textarea ref={input} aria-label={t(kind === 'text' ? 'Text content' : 'Caption text')} rows={5} maxLength={20000} value={text} placeholder={t('Default text')} disabled={disabled} onChange={event => setText(event.target.value)} /></span>
@@ -27,6 +37,9 @@ export function ManualTextPanel({ kind = 'text' }: { kind?: 'text' | 'caption' }
       </label>
       <p className="text-step-11 leading-relaxed text-text-3">{t('Added at the playhead. Select the clip to edit its text, font and position.')}</p>
     </div>
-    <div className="shrink-0 border-t border-border p-3"><Button variant="primary" className="w-full" disabled={disabled || !Number.isFinite(duration) || duration < 0.1 || duration > 3600 || (kind === 'caption' && !text.trim()) || Boolean(shell.writeBlockedReason)} onClick={() => void add()}>{t(busy ? 'Adding…' : kind === 'text' ? 'Add text' : 'Add captions')}</Button></div>
+    <div className="flex shrink-0 flex-col gap-2 border-t border-border p-3">
+      <Button variant="primary" className="w-full" disabled={disabled || !Number.isFinite(duration) || duration < 0.1 || duration > 3600 || (kind === 'caption' && !text.trim()) || Boolean(shell.writeBlockedReason)} onClick={() => void add()}>{t(busy ? 'Adding…' : kind === 'text' ? 'Add text' : 'Add captions')}</Button>
+      {allowSubtitleImport && kind === 'caption' && <Button size="sm" variant="ghost" disabled={disabled || Boolean(shell.writeBlockedReason)} onClick={() => subtitleInput.current?.click()}>{t('Import SRT / VTT')}</Button>}
+    </div>
   </section>;
 }

@@ -36,6 +36,7 @@ import { isFeatureScene } from './creativeStudios';
 import { isSupportedReferenceMime, OPEN_DESIGN_MAX_REFERENCE_BYTES, prepareReferenceImage, ReferenceImageError } from './compressReferenceImage';
 import { imageModelLabel, isOpenDesignProvider } from './imageMenuModels';
 import { AssetGalleryToolbar } from './AssetGalleryToolbar';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 import './assets.css';
 
 export function AssetsPage({ active, hasProject = false, studio, routeId, routeVersion, onAssetRoute }: { routeId?: string | null; routeVersion?: string | null; onAssetRoute?: (id: string | null, version: string | null) => void; active: boolean; hasProject?: boolean; studio?: StudioCreation }) {
@@ -66,8 +67,9 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const mediaGenerations = Boolean(studio && (studio.destination.scene.modality === 'image' || studio.destination.scene.modality === 'video'));
   const browser = useAssetBrowser({ kind, revision, active, lockedSource: mediaGenerations ? 'generated' : undefined });
   // Games made in Game Studio appear in the library view only, never inside a Studio form.
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
   const [gamesView, setGamesView] = useState(false);
-  const myGames = useMyGames(active && !studio);
+  const myGames = useMyGames(active && !studio && gameStudioEnabled);
   // One page view each time the library is shown; the page stays mounted while hidden. Inside a Design, Cinema or
   // Sound Studio the same page is that Studio's form, so it reports the Studio and scene instead of the library.
   useEffect(() => {
@@ -532,7 +534,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
       refresh(); toast.showToast(t(studio ? 'Added to Generations' : 'Generation started. Track it in Tasks.'), 'info');
     }} onError={onError} onInfo={onInfo} onClose={() => { selectionRequest.current++; setSelectingTask(false); setCreating(false); }} />;
   const soundWorkbench = studio?.destination.scene.modality === 'audio' && !audioStudio;
-  const libraryToolbar = <AssetGalleryToolbar browser={browser} games={gamesView} onGames={() => { setGamesView(true); if (kind === 'trash') setKind('all'); }} onKindChange={next => {
+  const libraryToolbar = <AssetGalleryToolbar browser={browser} games={gameStudioEnabled && gamesView} onGames={gameStudioEnabled ? () => { setGamesView(true); if (kind === 'trash') setKind('all'); } : undefined} onKindChange={next => {
     if (next !== kind || gamesView) tracking.reportAssetsClick('assets_library', next === 'trash' ? 'trash_view' : 'kind_filter', { asset_kind: next });
     setGamesView(false); setKind(next);
   }} />;
@@ -636,7 +638,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
           onDismissJob={dismissJob}
           onDownload={() => { tracking.reportAssetsClick('assets_library', 'download_asset', { modality: studio.destination.scene.modality }); toast.showToast(t('Download started'), 'info'); }}
         />
-      ) : !studio && gamesView ? <section aria-label={t('Games')}>{libraryToolbar}<div className="om-asset-results"><GameAssetsGrid data={myGames} query={browser.query} /></div></section> : <AssetBrowserContent browser={browser} hoverPreview={active} leadingTiles={leadingPlaceholderTiles} emptyContent={studioEmpty} toolbar={studio ? (blankCanvas ? <></> : undefined) : <>{libraryToolbar}{kind === 'all' && !browser.query && browser.source === 'all' && <GameAssetsRow data={myGames} onViewAll={() => setGamesView(true)} />}</>} onOpen={asset => { tracking.reportAssetsClick('assets_library', 'open_asset', { modality: asset.modality }); open(asset); }} onCreate={studio ? undefined : modality => { tracking.reportAssetsClick('assets_library', 'create_asset', { modality }); startDraft({ modality, prompt: '', references: [] }); }} />}
+      ) : !studio && gameStudioEnabled && gamesView ? <section aria-label={t('Games')}>{libraryToolbar}<div className="om-asset-results"><GameAssetsGrid data={myGames} query={browser.query} /></div></section> : <AssetBrowserContent browser={browser} hoverPreview={active} leadingTiles={leadingPlaceholderTiles} emptyContent={studioEmpty} toolbar={studio ? (blankCanvas ? <></> : undefined) : <>{libraryToolbar}{gameStudioEnabled && kind === 'all' && !browser.query && browser.source === 'all' && <GameAssetsRow data={myGames} onViewAll={() => setGamesView(true)} />}</>} onOpen={asset => { tracking.reportAssetsClick('assets_library', 'open_asset', { modality: asset.modality }); open(asset); }} onCreate={studio ? undefined : modality => { tracking.reportAssetsClick('assets_library', 'create_asset', { modality }); startDraft({ modality, prompt: '', references: [] }); }} />}
       </>}
     </main>
     {creating && !studio && <ResizablePane className="om-creator-pane" storageKey="motion-assets-creator-width" initial={460} min={340} max={800} edge="left" label={t('Resize creator')}>{composer}</ResizablePane>}
