@@ -1524,7 +1524,7 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
       const isolated = createApiFixture({
         config: {
           AUTH_MODE: 'dev',
-          PREVIEW_PUBLIC_ORIGIN: 'https://openmotion-preview.powerformer.net',
+          PREVIEW_PUBLIC_ORIGIN: 'https://preview.example.test',
           PREVIEW_TOKEN_SECRET: 'test-preview-secret-0123456789abcdef',
         },
       });
@@ -1533,7 +1533,7 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
       const isolatedHtml = await isolatedSpa.text();
       assert.match(
         isolatedHtml,
-        /<link rel="preconnect" href="https:\/\/openmotion-preview\.powerformer\.net" crossorigin>/,
+        /<link rel="preconnect" href="https:\/\/preview\.example\.test" crossorigin>/,
       );
       assert.match(
         isolatedHtml,
