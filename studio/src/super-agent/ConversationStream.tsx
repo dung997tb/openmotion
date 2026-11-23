@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import type { GameCard } from '../../../shared/game-contract';
 import type { Model } from '../../../shared/gateway';
@@ -46,6 +46,7 @@ import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRun
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
 import { WorkspaceBack } from '../motion/WorkspaceBack';
 import { compactDirLabel } from './ChangedFilesTree';
+import { DockableModeComposer, type DockableComposerHandle } from './DockableModeComposer';
 import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
@@ -59,7 +60,8 @@ import {
   formatModePromptPrefix,
   getModeComposerPlaceholder,
   ModeComposerControls,
-  ModeComposerTopBar,
+  ModeComposerOptionsBar,
+  hasGenerationModelPicker,
   isPlayableAd,
   type ModeComposerOptions,
 } from './ModeComposerControls';
@@ -246,16 +248,27 @@ export function ConversationStream({
   const headerIntentMeta = superAgentIntentMeta(
     chat?.intent ?? (activeMode ? modeToSuperAgentIntent(activeMode.id) : undefined),
   );
+  const templatePromptRef = useRef<string | null>(null);
   const updateModeOptions = useCallback((patch: Partial<ModeComposerOptions>) => {
+    if (patch.gameTemplate) {
+      const prompt = buildGameUserPrompt(patch.gameTemplate, locale);
+      templatePromptRef.current = prompt;
+      setText(prompt);
+    } else if (patch.gameTemplate === null) {
+      const previousPrompt = templatePromptRef.current;
+      templatePromptRef.current = null;
+      // Removing a template clears its suggestion but keeps the user's edits.
+      if (previousPrompt !== null) setText(current => current === previousPrompt ? '' : current);
+    }
     setModeOptions(prev => ({ ...prev, ...patch }));
-  }, []);
+  }, [locale]);
   useEffect(() => {
     if (activeModeId === 'motion') {
-      updateModeOptions({ motionEngine: DEFAULT_MODE_COMPOSER_OPTIONS.motionEngine });
+      setModeOptions(prev => ({ ...prev, motionEngine: DEFAULT_MODE_COMPOSER_OPTIONS.motionEngine }));
     } else if (activeModeId === 'media') {
-      updateModeOptions({ mediaSubMode: DEFAULT_MODE_COMPOSER_OPTIONS.mediaSubMode });
+      setModeOptions(prev => ({ ...prev, mediaSubMode: DEFAULT_MODE_COMPOSER_OPTIONS.mediaSubMode }));
     }
-  }, [activeModeId, updateModeOptions]);
+  }, [activeModeId]);
   const handleCatalogModelsChange = useCallback((models: Model[]) => {
     mediaModelsRef.current = models;
   }, []);
@@ -270,6 +283,7 @@ export function ConversationStream({
   useEffect(() => {
     if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
     appliedDraftSeedRef.current = draftSeed.id;
+    templatePromptRef.current = null;
     setText(draftSeed.text);
     pendingHiddenInstructionsRef.current = draftSeed.hiddenInstructions?.trim() || undefined;
     pendingContextTagsRef.current = draftSeed.contextTags?.length ? draftSeed.contextTags : undefined;
@@ -279,7 +293,7 @@ export function ConversationStream({
       setActiveModeId(null);
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
-    requestAnimationFrame(() => composerRef.current?.focus());
+    requestAnimationFrame(focusModeComposer);
   }, [draftSeed, chat?.messages.length]);
 
   const appliedGameTemplateSeedRef = useRef<number | null>(null);
@@ -289,8 +303,7 @@ export function ConversationStream({
     const picked = gameTemplateSeed.game;
     if (!chat?.messages.length) {
       setActiveModeId('game');
-      setModeOptions(prev => ({
-        ...prev,
+      updateModeOptions({
         gameTemplate: picked,
         gameGenre: picked.genre,
         gameStyle: picked.style,
@@ -298,13 +311,12 @@ export function ConversationStream({
         gameOrientation: picked.orientation ?? 'landscape',
         gameMultiplayer: picked.multiplayer,
         gamePlayableAd: Boolean(picked.playableAd),
-      }));
+      });
     } else {
-      const displayTitle = localizedGameTitle(picked, locale);
-      setText(prev => (prev.trim() ? prev : t('Remix · {title}', { title: displayTitle })));
+      setText(prev => prev.trim() || buildGameUserPrompt(picked, locale));
     }
-    requestAnimationFrame(() => composerRef.current?.focus());
-  }, [gameTemplateSeed, chat?.messages.length, locale, t]);
+    requestAnimationFrame(focusModeComposer);
+  }, [gameTemplateSeed, chat?.messages.length, locale, updateModeOptions]);
 
   useEffect(() => {
     if (!active) {
@@ -325,6 +337,12 @@ export function ConversationStream({
   const followRef = useRef(true);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const dockRef = useRef<DockableComposerHandle>(null);
+
+  function focusModeComposer() {
+    if (dockRef.current) dockRef.current.focus();
+    else composerRef.current?.focus();
+  }
 
   const activeRuntime = useMemo(() => {
     if (!runtimes?.length) return undefined;
@@ -438,6 +456,7 @@ export function ConversationStream({
       setActiveModeId(null);
       pendingHiddenInstructionsRef.current = undefined;
       pendingContextTagsRef.current = undefined;
+      templatePromptRef.current = null;
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     followRef.current = true;
@@ -448,13 +467,15 @@ export function ConversationStream({
     const exists = attachments.some(existing => resourceKey(existing) === key);
     if (exists) {
       onAttachmentsChange(attachments.filter(existing => resourceKey(existing) !== key));
-    } else {
-      onAttachmentsChange([...attachments, item].slice(0, 30));
-      if (attachments.length < 30 && item.kind === 'motion-template') {
-        if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
-        else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
-      }
+      return false;
     }
+    if (attachments.length >= 30) return false;
+    onAttachmentsChange([...attachments, item]);
+    if (item.kind === 'motion-template') {
+      if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
+      else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
+    }
+    return true;
   };
 
   useEffect(() => {
@@ -470,17 +491,23 @@ export function ConversationStream({
     }
   }, [activeModeId, chat?.id, chat?.messages.length]);
 
+  const focusComposerAfterModeChange = useCallback(() => {
+    requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
+  }, []);
+
   const exitActiveMode = useCallback(() => {
     setActiveModeId(null);
     updateModeOptions({ gameTemplate: null });
     if (requestedMode) onChangeRequestedMode?.(null);
-  }, [requestedMode, onChangeRequestedMode, updateModeOptions]);
+    focusComposerAfterModeChange();
+  }, [requestedMode, onChangeRequestedMode, updateModeOptions, focusComposerAfterModeChange]);
 
   const switchActiveMode = (value: string) => {
     const mode = findSuperAgentMode(value);
     if (!mode) return;
     setActiveModeId(mode.id);
     onChangeRequestedMode?.(mode.id);
+    focusComposerAfterModeChange();
   };
 
   const handleSubmit = async () => {
@@ -623,6 +650,26 @@ export function ConversationStream({
   };
 
   const artifactCount = chat?.artifacts.length ?? 0;
+  const showModeShowcase = activeMode !== null && !chat?.messages.length && !loading && !loadFailed;
+  const hasModelPicker = hasGenerationModelPicker(activeMode?.id);
+  const modeOptionsBar = activeMode && (
+    <ModeComposerOptionsBar
+      active={active}
+      modeId={activeMode.id}
+      options={modeOptions}
+      disabled={busy || sending}
+      onChange={updateModeOptions}
+      onCatalogModelsChange={handleCatalogModelsChange}
+      onOpenResourcePicker={category => {
+        setResourceCategory(category);
+        setResourceMenuOpen(true);
+      }}
+      onOpenModelSettings={() => {
+        if (onOpenModelSettings) onOpenModelSettings();
+        else onOpenAgentSettings();
+      }}
+    />
+  );
 
   return (
     <section
@@ -804,6 +851,18 @@ export function ConversationStream({
             <ModeResourceShowcase
               active={active}
               mode={activeMode}
+              renderComposer={templateRevision => activeMode.id === 'coding' ? renderComposer() : (
+                <DockableModeComposer
+                  ref={dockRef}
+                  scrollRef={listRef}
+                  templateRevision={templateRevision}
+                  inputRef={composerRef}
+                  action={renderComposerAction()}
+                  preview={text.trim() || getModeComposerPlaceholder(activeMode, modeOptions, t)}
+                >
+                  {renderComposer(<span className="om-sa-dock-action-slot" aria-hidden="true" />)}
+                </DockableModeComposer>
+              )}
               attachments={attachments}
               modeOptions={modeOptions}
               playingGameId={playingGameId}
@@ -811,12 +870,13 @@ export function ConversationStream({
               onToggleAttachment={toggleResourceAttachment}
               onPlayGame={onPlayGame}
               onDeployGame={onDeployGame}
-              onFocusComposer={() => composerRef.current?.focus()}
+              onFocusComposer={focusModeComposer}
               onPickPrompt={prompt => {
                 setText(prompt);
-                composerRef.current?.focus();
+                focusModeComposer();
               }}
               onOpenAllResources={category => {
+                focusModeComposer();
                 setResourceCategory(category ?? 'all');
                 setResourceMenuOpen(true);
               }}
@@ -839,7 +899,7 @@ export function ConversationStream({
                   data-tone={card.tone}
                   onClick={() => {
                     setActiveModeId(card.id);
-                    composerRef.current?.focus();
+                    focusComposerAfterModeChange();
                   }}
                 >
                   <span className="om-sa-starter-head">
@@ -885,7 +945,7 @@ export function ConversationStream({
                       onClick={() => {
                         setMoreStartersOpen(false);
                         setActiveModeId(card.id);
-                        composerRef.current?.focus();
+                        focusComposerAfterModeChange();
                       }}
                     >
                       <span className="om-sa-starter-icon" data-tone={card.tone} aria-hidden="true">
@@ -926,6 +986,37 @@ export function ConversationStream({
         )}
       </div>
 
+      {!showModeShowcase && renderComposer()}
+    </section>
+  );
+
+  function renderComposerAction() {
+    return busy ? (
+      <IconButton
+        variant="plain"
+        className="om-sa-send-btn"
+        data-stop
+        aria-label={t('Stop')}
+        disabled={sending}
+        onClick={onStop}
+        icon={<RemixIcon name="checkbox-blank-fill" size={14} />}
+      />
+    ) : (
+      <IconButton
+        variant="plain"
+        className="om-sa-send-btn"
+        data-ready={canSubmit || undefined}
+        data-sending={(sending || scaffoldingGame) || undefined}
+        aria-label={t('Send')}
+        disabled={!canSubmit}
+        onClick={() => void handleSubmit()}
+        icon={<RemixIcon name={(sending || scaffoldingGame) ? 'loader-4-line' : 'arrow-right-line'} size={18} />}
+      />
+    );
+  }
+
+  function renderComposer(action: ReactNode = renderComposerAction()) {
+    return (
       <div className="om-sa-composer-wrap">
         <SuperAgentLiveProgressDock
           chat={chat}
@@ -961,24 +1052,7 @@ export function ConversationStream({
           </div>
         )}
 
-        {activeMode && (
-          <ModeComposerTopBar
-            active={active}
-            modeId={activeMode.id}
-            options={modeOptions}
-            disabled={busy || sending}
-            onChange={updateModeOptions}
-            onCatalogModelsChange={handleCatalogModelsChange}
-            onOpenResourcePicker={category => {
-              setResourceCategory(category);
-              setResourceMenuOpen(true);
-            }}
-            onOpenModelSettings={() => {
-              if (onOpenModelSettings) onOpenModelSettings();
-              else onOpenAgentSettings();
-            }}
-          />
-        )}
+        {!hasModelPicker && modeOptionsBar}
 
         <div className="om-sa-composer">
           {(attachments.length > 0 || (activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate))) && (
@@ -1244,23 +1318,26 @@ export function ConversationStream({
                 onOpenChange={setModelMenuOpen}
                 side="top"
                 align="start"
-                aria-label={t('Agent & model')}
+                aria-label={t('Chat model')}
                 className="om-agent-settings-popover om-sa-model-popover"
                 trigger={
                   <Button
                     variant="plain"
                     type="button"
-                    className="om-sa-model-trigger"
+                    className={activeMode ? 'om-sa-model-trigger om-sa-mode-param-trigger' : 'om-sa-model-trigger'}
+                    data-active={(activeMode && modelMenuOpen) || undefined}
                     disabled={busy || sending}
                   >
-                    <span className="om-sa-model-avatar" data-engine={selection.engine} aria-hidden="true">
+                    <span className={activeMode ? 'om-sa-mode-param-avatar' : 'om-sa-model-avatar'} data-engine={selection.engine} aria-hidden="true">
                       {selection.model !== 'default' ? (
                         <ModelAvatar name={triggerPrimaryLabel} modelId={selection.model} provider={activeProviderRef} />
                       ) : (
                         <ProviderAvatar name={activeAgent?.label ?? selection.engine} provider={activeProviderRef} />
                       )}
                     </span>
-                    <span className="om-sa-model-trigger-name">{triggerPrimaryLabel}</span>
+                    <span className="om-sa-model-trigger-name">
+                      {hasModelPicker ? t('Chat · {model}', { model: triggerPrimaryLabel }) : triggerPrimaryLabel}
+                    </span>
                     {triggerSecondaryLabel && (
                       <span className="om-sa-model-trigger-sub" data-engine={selection.engine}>{triggerSecondaryLabel}</span>
                     )}
@@ -1270,11 +1347,15 @@ export function ConversationStream({
                         <span>{t(activeRuntime.name)}</span>
                       </span>
                     )}
-                    <RemixIcon name="arrow-down-s-line" size={15} />
+                    <RemixIcon name="arrow-down-s-line" size={activeMode ? 14 : 15} />
                   </Button>
                 }
               >
                 <div className="om-sa-model-menu">
+                  <header className="om-sa-model-menu-heading">
+                    <h3>{t('Chat model')}</h3>
+                    <p>{t('Understands your request, plans the steps and calls tools.')}</p>
+                  </header>
                   {runtimes && (runtimes.length > 1 || (activeRuntime && activeRuntime.kind !== 'local-direct')) && (
                     <div className="om-sa-runtime-pills" role="group" aria-label={t('Execution runtime')}>
                       {runtimes.map(rt => {
@@ -1536,6 +1617,7 @@ export function ConversationStream({
                   </div>
                 </div>
               </Popover>
+              {hasModelPicker && modeOptionsBar}
             </div>
 
             <div className="om-sa-composer-send">
@@ -1621,32 +1703,11 @@ export function ConversationStream({
                 </div>
               </Popover>
 
-              {busy ? (
-                <IconButton
-                  variant="plain"
-                  className="om-sa-send-btn"
-                  data-stop
-                  aria-label={t('Stop')}
-                  disabled={sending}
-                  onClick={onStop}
-                  icon={<RemixIcon name="checkbox-blank-fill" size={14} />}
-                />
-              ) : (
-                <IconButton
-                  variant="plain"
-                  className="om-sa-send-btn"
-                  data-ready={canSubmit || undefined}
-                  data-sending={(sending || scaffoldingGame) || undefined}
-                  aria-label={t('Send')}
-                  disabled={!canSubmit}
-                  onClick={() => void handleSubmit()}
-                  icon={<RemixIcon name={(sending || scaffoldingGame) ? 'loader-4-line' : 'arrow-right-line'} size={18} />}
-                />
-              )}
+              {action}
             </div>
           </div>
         </div>
       </div>
-    </section>
-  );
+    );
+  }
 }

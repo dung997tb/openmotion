@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { blackFridayTemplates } from '../../../shared/black-friday-collection';
 import type { GalleryTemplate } from '../../../shared/catalog';
 import { gameGenres, type GameCard, type GameGenre } from '../../../shared/game-contract';
@@ -29,12 +29,14 @@ import {
   toGameResourceAttachment,
 } from '../motion/game/gameSuperAgent';
 import { sceneExamples } from '../motion/sceneShowcase';
+import { SkillMedia } from '../motion/SkillMedia';
 import { motionSkills, skillCategories, type MotionSkill, type SkillCategory } from '../motion/skillCatalog';
 import { templateCollectionFacets, templatesInCollection, type TemplateCollection } from '../motion/templateCollections';
 import { aiTechnologyIndustry, purposeOrder } from '../motion/templateDiscoveryTaxonomy';
 import { useCoveredTemplates } from '../motion/useCoveredTemplates';
 import type { ModeComposerOptions } from './ModeComposerControls';
 import { resourceDisplaySubtitle, resourceDisplayTitle, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
+import { ShowcaseCarousel } from './ShowcaseCarousel';
 import { fetchWorkspaceResources } from './superAgentClient';
 
 export type SuperAgentCreationModeId = 'coding' | 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
@@ -45,7 +47,7 @@ export type SuperAgentModeSpec = {
   icon: string;
   label: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   placeholder: string;
   defaultPrompt: string;
   pickerCategory: ResourceCategoryTab;
@@ -123,8 +125,7 @@ export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
     tone: 'agent',
     icon: 'gamepad-line',
     label: 'Game Studio',
-    title: 'Create your own game in minutes',
-    subtitle: 'Pick a genre, style and setting, describe your game in one line and your Agent builds a playable web game.',
+    title: 'Create a playable game in minutes',
     placeholder: 'Describe the game you want to make',
     defaultPrompt: 'Build a playable retro neon arcade space-shooter game in HTML5 Canvas with keyboard and mouse controls, score & wave HUD, particle explosions, and a restart button. Preview it in the Artifact Viewer.',
     pickerCategory: 'projects',
@@ -200,6 +201,32 @@ type CuratedShowcaseCard = {
   posterPosition?: string;
   prompt: string;
 };
+
+type MediaBannerExample = {
+  id: string;
+  title: string;
+  prompt: string;
+  poster: string;
+  posterPosition?: string;
+  skill?: MotionSkill;
+};
+
+const imageBannerExamples: MediaBannerExample[] = [
+  ...gptImageStory.cases.map(item => item.example),
+  ...sceneExamples['text-to-image'].slice(0, 2),
+].map(example => ({ ...example, id: example.title }));
+
+const videoBannerExamples: MediaBannerExample[] = [
+  'openmotion-splash-float-product',
+  'openmotion-paper-collage-explainer',
+  'babylon-js',
+  'openmotion-whiteboard-doodle',
+  'openmotion-light-shadow-product',
+].flatMap(id => {
+  const skill = motionSkills.find(item => item.id === id);
+  if (!skill?.cover?.poster) return [];
+  return [{ id, title: skill.title, prompt: skill.example, poster: skill.cover.poster, skill }];
+});
 
 function buildImageCardsByCategory(category: string, isZh: boolean): CuratedShowcaseCard[] {
   const gpt: CuratedShowcaseCard[] = gptImageStory.cases.map((item, idx) => ({
@@ -454,6 +481,7 @@ const GAME_STATUS_LABELS: Partial<Record<GameCard['status'], string>> = {
 export function ModeResourceShowcase({
   active = true,
   mode,
+  renderComposer,
   attachments,
   modeOptions,
   playingGameId = null,
@@ -468,11 +496,12 @@ export function ModeResourceShowcase({
 }: {
   active?: boolean;
   mode: SuperAgentModeSpec;
+  renderComposer: (templateRevision: number) => ReactNode;
   attachments: SuperAgentResourceAttachment[];
   modeOptions?: ModeComposerOptions;
   playingGameId?: string | null;
   onChangeModeOptions?: (patch: Partial<ModeComposerOptions>) => void;
-  onToggleAttachment: (item: SuperAgentResourceAttachment) => void;
+  onToggleAttachment: (item: SuperAgentResourceAttachment) => boolean;
   onPlayGame?: (game: GameCard) => void;
   onDeployGame?: (game: GameCard) => void;
   onFocusComposer?: () => void;
@@ -483,6 +512,8 @@ export function ModeResourceShowcase({
 }) {
   const { t, locale } = useI18n();
   const isZh = locale === 'zh-CN';
+  const templateHeadingId = useId();
+  const [templateRevision, setTemplateRevision] = useState(0);
 
   // Motion & Cinema modes share Explore's full covered Motion template catalog.
   const coveredMotion = useCoveredTemplates(locale, mode.id === 'motion' || mode.id === 'media', { showFirstPage: true });
@@ -507,8 +538,6 @@ export function ModeResourceShowcase({
   const [activeSkillCategory, setActiveSkillCategory] = useState<SkillCategory | 'all'>('all');
   const [gameQuery, setGameQuery] = useState('');
   const [gameSort, setGameSort] = useState<GameSort>('relevance');
-  const [fanIndex, setFanIndex] = useState(0);
-  const [fanPaused, setFanPaused] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -524,37 +553,6 @@ export function ModeResourceShowcase({
     () => gameCatalog.filter(g => g.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [gameCatalog],
   );
-
-  // Auto-rotate the fanned game showcase smoothly when visible and idle.
-  useEffect(() => {
-    if (!active || mode.id !== 'game' || fannedGames.length <= 1 || fanPaused) return;
-    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return;
-      setFanIndex(prev => (prev + 1) % fannedGames.length);
-    }, 4500);
-    return () => window.clearInterval(timer);
-  }, [active, mode.id, fannedGames.length, fanPaused]);
-
-  const fanSlots = useMemo(() => {
-    const total = fannedGames.length;
-    if (total === 0) return [];
-    const center = ((fanIndex % total) + total) % total;
-    const maxOffset = Math.min(3, Math.floor((total - 1) / 2));
-    const offsets: number[] = [];
-    for (let d = -maxOffset; d <= maxOffset; d += 1) {
-      offsets.push(d);
-    }
-    if (total % 2 === 0 && maxOffset < 3) {
-      offsets.push(maxOffset + 1);
-    }
-    return offsets.map(offset => {
-      const idx = (center + offset + total) % total;
-      return { game: fannedGames[idx]!, index: idx, offset };
-    });
-  }, [fannedGames, fanIndex]);
 
   // Build real categories & live counts per mode.
   const filters = useMemo<FilterOption[]>(() => {
@@ -855,13 +853,19 @@ export function ModeResourceShowcase({
     );
 
   const selectedKeys = useMemo(() => new Set(attachments.map(resourceKey)), [attachments]);
+  const markTemplateApplied = () => setTemplateRevision(previous => previous + 1);
+  const applyTemplatePrompt = (prompt: string) => {
+    onPickPrompt(prompt);
+    markTemplateApplied();
+  };
   const selectGameForAgent = (game: GameCard) => {
     const title = localizedGameTitle(game, locale);
     if (game.source === 'mine') {
       const att = toGameResourceAttachment(game, title);
-      const alreadyAttached = selectedKeys.has(resourceKey(att));
-      onToggleAttachment(att);
-      if (!alreadyAttached) onFocusComposer?.();
+      if (onToggleAttachment(att)) {
+        markTemplateApplied();
+        onFocusComposer?.();
+      }
       return;
     }
     const isSelected = modeOptions?.gameTemplate?.id === game.id;
@@ -878,7 +882,10 @@ export function ModeResourceShowcase({
           }
         : {}),
     });
-    if (!isSelected) onFocusComposer?.();
+    if (!isSelected) {
+      markTemplateApplied();
+      onFocusComposer?.();
+    }
   };
   const visibleGames = showGameCards ? filteredGames.slice(0, visibleCount) : null;
   const visibleCurated = !showGameCards && curatedCards ? curatedCards.slice(0, visibleCount) : null;
@@ -896,73 +903,24 @@ export function ModeResourceShowcase({
             icon={<RemixIcon name="close-line" size={16} />}
           />
         </div>
-        {mode.id === 'game' && fanSlots.length > 0 ? (
-          <div
-            className="om-sa-game-fan"
-            role="region"
-            aria-roledescription="carousel"
-            aria-label={t('Game Studio')}
-            onMouseEnter={() => setFanPaused(true)}
-            onMouseLeave={() => setFanPaused(false)}
-            onFocusCapture={() => setFanPaused(true)}
-            onBlurCapture={event => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setFanPaused(false);
-              }
-            }}
-            onKeyDown={event => {
-              if (fannedGames.length <= 1) return;
-              if (event.key === 'ArrowLeft') {
-                event.preventDefault();
-                setFanIndex(prev => (prev - 1 + fannedGames.length) % fannedGames.length);
-              } else if (event.key === 'ArrowRight') {
-                event.preventDefault();
-                setFanIndex(prev => (prev + 1) % fannedGames.length);
-              }
-            }}
-          >
-            {fannedGames.length > 1 && (
-              <IconButton
-                variant="plain"
-                type="button"
-                className="om-sa-game-fan-nav"
-                data-side="prev"
-                aria-label={t('Previous')}
-                onClick={() => setFanIndex(prev => (prev - 1 + fannedGames.length) % fannedGames.length)}
-                icon={<RemixIcon name="arrow-left-line" size={16} />}
-              />
-            )}
-            {fanSlots.map(({ game, index, offset }) => {
+        {mode.id === 'game' && fannedGames.length > 0 ? (
+          <ShowcaseCarousel key={mode.id} items={fannedGames} label={t(mode.label)} active={active}
+            selectedId={modeOptions?.gameTemplate?.id} playingId={playingGameId}>
+            {(game, { centered: isCenter, bringToFront }) => {
               const title = localizedGameTitle(game, locale);
               const cover = coverUrl(game);
               const isSelected = modeOptions?.gameTemplate?.id === game.id;
               const isPlaying = playingGameId === game.id;
-              const isCenter = offset === 0;
-              const isEdgeHidden = Math.abs(offset) > 2;
               return (
-                <div
-                  key={game.id}
-                  className="om-sa-game-fan-item"
-                  data-slot={offset}
-                  data-center={isCenter || undefined}
-                  data-selected={isSelected || undefined}
-                  data-playing={isPlaying || undefined}
-                  aria-hidden={isEdgeHidden || undefined}
-                  inert={isEdgeHidden || undefined}
-                >
+                <>
                   <Button
                     variant="plain"
                     type="button"
                     className="om-sa-game-fan-card"
+                    data-composer-source={isCenter || undefined}
                     aria-pressed={isCenter ? isSelected : undefined}
                     aria-label={isCenter ? `${t('Remix')}: ${title}` : title}
-                    onClick={() => {
-                      if (!isCenter) {
-                        setFanIndex(index);
-                        return;
-                      }
-                      selectGameForAgent(game);
-                    }}
+                    onClick={isCenter ? () => selectGameForAgent(game) : bringToFront}
                   >
                     {cover && <img src={cover} alt="" />}
                     {isCenter && (
@@ -1006,21 +964,33 @@ export function ModeResourceShowcase({
                       )}
                     </div>
                   )}
-                </div>
+                </>
               );
-            })}
-            {fannedGames.length > 1 && (
-              <IconButton
-                variant="plain"
-                type="button"
-                className="om-sa-game-fan-nav"
-                data-side="next"
-                aria-label={t('Next')}
-                onClick={() => setFanIndex(prev => (prev + 1) % fannedGames.length)}
-                icon={<RemixIcon name="arrow-right-line" size={16} />}
-              />
+            }}
+          </ShowcaseCarousel>
+        ) : mode.id === 'image' || mode.id === 'motion' ? (
+          <ShowcaseCarousel key={mode.id} items={mode.id === 'image' ? imageBannerExamples : videoBannerExamples}
+            label={t(mode.label)} active={active}>
+            {(example, { centered, playing, bringToFront }) => (
+              <Button variant="plain" type="button" className="om-sa-game-fan-card"
+                data-composer-source={centered || undefined}
+                aria-label={centered ? `${t('Use this prompt')}: ${t(example.title)}` : t(example.title)}
+                onClick={centered ? () => applyTemplatePrompt(example.skill
+                  ? `${t(example.title)}\n${t(example.prompt)}`
+                  : t(example.prompt)) : bringToFront}>
+                {example.skill
+                  ? <SkillMedia skill={example.skill} playing={playing} />
+                  : <img src={example.poster} alt="" style={{ objectPosition: example.posterPosition }} />}
+                {centered && (
+                  <span className="om-sa-game-select-cue" aria-hidden="true">
+                    <RemixIcon name="sparkling-line" size={13} />
+                    <span>{t('Use this prompt')}</span>
+                  </span>
+                )}
+                <span className="om-sa-game-fan-label">{t(example.title)}</span>
+              </Button>
             )}
-          </div>
+          </ShowcaseCarousel>
         ) : (
           <span className="om-creation-icon om-sa-mode-hero-icon" data-tone={mode.tone} aria-hidden="true">
             <RemixIcon name={mode.icon} size={22} />
@@ -1028,7 +998,7 @@ export function ModeResourceShowcase({
         )}
         <div className="om-sa-mode-hero-copy">
           <h2>{t(mode.title)}</h2>
-          <p className="om-muted">{t(mode.subtitle)}</p>
+          {mode.subtitle && <p className="om-muted">{t(mode.subtitle)}</p>}
         </div>
 
         {mode.id === 'game' && (
@@ -1055,8 +1025,11 @@ export function ModeResourceShowcase({
             })}
           </div>
         )}
+      </div>
 
-        <div className="om-sa-mode-ideas">
+      <div className="om-sa-mode-composer-group">
+        {renderComposer(templateRevision)}
+        <div className="om-sa-mode-ideas" data-composer-source>
           {mode.id === 'game' ? (
             GAME_STUDIO_QUICK_IDEAS.map(idea => (
               <Button
@@ -1103,7 +1076,8 @@ export function ModeResourceShowcase({
       </div>
 
       {mode.id !== 'coding' && (
-      <section className="om-sa-showcase-panel">
+      <section className="om-sa-showcase-panel" aria-labelledby={templateHeadingId}>
+        <h3 id={templateHeadingId} className="om-sa-showcase-heading">{t('Discover templates')}</h3>
         <div className="om-sa-showcase-bar" data-game-bar={showGameCards || undefined}>
           <div className="om-sa-showcase-tabs" role="tablist" aria-label={t('Template filters')}>
             {filters.map(f => (
@@ -1245,6 +1219,7 @@ export function ModeResourceShowcase({
                       variant="plain"
                       type="button"
                       className="om-sa-game-tile-cover"
+                      data-composer-source
                       aria-pressed={isSelected}
                       aria-label={isMine ? `${t('Attach')}: ${title}` : `${t('Remix')}: ${title}`}
                       onClick={() => selectGameForAgent(game)}
@@ -1352,7 +1327,8 @@ export function ModeResourceShowcase({
                 variant="plain"
                 type="button"
                 className="om-sa-showcase-card"
-                onClick={() => onPickPrompt(t(card.prompt))}
+                data-composer-source
+                onClick={() => applyTemplatePrompt(t(card.prompt))}
               >
                 <div className="om-sa-showcase-thumb" aria-hidden="true">
                   <img
@@ -1399,9 +1375,12 @@ export function ModeResourceShowcase({
                   variant="plain"
                   type="button"
                   className="om-sa-showcase-card"
+                  data-composer-source
                   aria-pressed={isSelected}
                   data-selected={isSelected || undefined}
-                  onClick={() => onToggleAttachment(item)}
+                  onClick={() => {
+                    if (onToggleAttachment(item)) markTemplateApplied();
+                  }}
                 >
                   <ResourceShowcaseThumb item={item} active={active} />
                   <span className="om-sa-showcase-check" aria-hidden="true">
