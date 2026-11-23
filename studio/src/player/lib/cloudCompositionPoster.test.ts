@@ -5,6 +5,7 @@ import { syncPeerComposition } from "../../hooks/syncPeerComposition";
 import { openTimelineSource } from "./peerTimeline";
 import { loadCloudCompositionPoster } from "./cloudCompositionPoster";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
+import { confirmedSource, forgetSource, rememberSource } from "../../utils/confirmedTextSources";
 import { usePlayerStore } from "../store/playerStore";
 
 vi.mock("./thumbnailImageDecoder", () => ({ decodeImageThumbnail: vi.fn() }));
@@ -23,6 +24,27 @@ describe("cloud composition representatives", () => {
     expect(await loadCloudCompositionPoster(url(), "p", 4, signal())).toEqual(picture);
     expect(decodeImageThumbnail).toHaveBeenCalledWith(new URL("/api/projects/p/preview/assets/hero.png", location.origin).href, expect.anything());
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("seeds a versioned source from the initial poster without replacing a newer edit or a different session", async () => {
+    const path = "compositions/scene.html";
+    const content = '<img src="assets/first.png">';
+    const headers = { "X-OpenMotion-Text-Edits": "1" };
+    const state = { timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: {} };
+    usePlayerStore.setState(state);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content, version: "v1" }, { headers })));
+    vi.mocked(decodeImageThumbnail).mockResolvedValue(picture);
+    try {
+      await loadCloudCompositionPoster(url(), "p", 3, signal());
+      expect(confirmedSource("p", path)).toBeUndefined();
+      await loadCloudCompositionPoster(url(), "p", 4, signal());
+      expect(confirmedSource("p", path)).toEqual({ content, version: "v1" });
+      rememberSource("p", path, { content: "later", version: "v2" });
+      await loadCloudCompositionPoster(url(), "p", 4, signal());
+      expect(confirmedSource("p", path)?.version).toBe("v2");
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      forgetSource("p", path);
+    }
   });
   it("reuses the editor source only for the same file, thumbnail revision and session", async () => {
     const file = "compositions/scene.html";

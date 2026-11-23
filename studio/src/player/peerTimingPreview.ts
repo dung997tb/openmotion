@@ -1,18 +1,23 @@
 import { createPreviewAdapter } from "./lib/previewAdapter";
-import { TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
 // A WindowProxy survives navigation. Bind a request to the document that acknowledged the handshake.
-const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string }>();
-export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, id: unknown): void {
-  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id });
+const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean }>();
+export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown): void {
+  const id = timingId ?? styleId;
+  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id, canRebind: id === timingId });
   else documents.delete(frame);
 }
 
 /** A scripted or older document can start rebuilding in parallel with the source read. */
 export function hasPeerTimingDocument(frame: HTMLIFrameElement): boolean {
-  return documents.has(frame);
+  return documents.get(frame)?.canRebind === true;
+}
+
+export function hasScriptedStylePreview(frame: HTMLIFrameElement) {
+  return documents.get(frame)?.canRebind === false;
 }
 
 export interface PeerTimingUpdate {
@@ -53,7 +58,7 @@ function changedStyles(left: HTMLElement, right: HTMLElement): PreviewChange["st
 /** Strip only supported changes, then compare the entire remaining document before touching the player. */
 export function diffPreviewChanges(previous: string, current: string): PreviewChange[] | null {
   // This optional fast path runs on the UI thread; large source rewrites use the regular loader.
-  if (previous === current || Math.max(previous.length, current.length) > 128 * 1024) return null;
+  if (previous === current || Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
   const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
   const before = parse(previous);
   const after = parse(current);
@@ -103,17 +108,32 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
   return changes;
 }
 
+/** The first visual edit can persist the exact IDs already mounted by the compiler. */
+export async function diffScriptedPreviewStyles(previous: string, current: string) {
+  if (Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
+  if (!previous.includes("data-hf-id=") && current.includes("data-hf-id=")) {
+    const { ensureHfIds } = await import("@hyperframes/parsers/hf-ids");
+    previous = ensureHfIds(previous);
+  }
+  const changes = diffPreviewChanges(previous, current);
+  return changes?.every(change => change.styles && !change.attributes.length && !change.text) ? changes : null;
+}
+
 export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
   isCurrent: () => boolean,
-  localSave?: { gestureId?: string },
+  options?: "temporary" | { gestureId?: string },
 ): Promise<boolean> {
   if (!frame || !isCurrent()) return false;
   const adapter = createPreviewAdapter({ iframe: frame });
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
-  const changes = diffPreviewChanges(update.previous.content, update.current.content);
+  const temporary = options === "temporary";
+  if (temporary ? document.canRebind : !document.canRebind) return false;
+  const localSave = typeof options === "object" ? options : undefined;
+  const changes = temporary ? await diffScriptedPreviewStyles(update.previous.content, update.current.content) :
+    diffPreviewChanges(update.previous.content, update.current.content);
   if (!changes || !isCurrent()) return false;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
@@ -121,7 +141,7 @@ export async function tryApplyPeerChanges(
   try {
     const applied = await adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
-      changes, ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
+      changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
     return applied === true && document.id === documents.get(frame)?.id && isCurrent();
   } catch { return false; }

@@ -9,11 +9,11 @@ const etag = (n: number) => '"sha256:' + sha(n) + '"';
 const root = { compositionId: 'root', tag: 'main', attributes: [['data-duration', '15', '14']] };
 const clip = { id: 'clip', tag: 'audio', attributes: [['data-start', '2', '3'], ['data-media-start', null, '1']] };
 
-function preview() {
+function preview(canRebindTiming = true) {
   const document = parseHTMLContent('<html><body><main data-composition-id="root" data-hf-authored-duration="15"><audio id="clip" data-start="2"></audio><div id="title" style="left:10px">Hello</div></main></body></html>');
   const script = document.createElement('script');
   script.setAttribute('data-openmotion-preview', JSON.stringify({
-    projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1) }, studioOrigin: 'https://studio.test', canRebindTiming: true,
+    projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1), 'scenes/intro.html': sha(3) }, studioOrigin: 'https://studio.test', canRebindTiming,
   }));
   Object.defineProperty(document, 'currentScript', { value: script });
   const replies: { result?: unknown }[] = [];
@@ -71,6 +71,24 @@ it('updates text and placement on the same live nodes without seeking or replaci
   assert.equal(node.style.fontSize, '52px');
   assert.deepEqual(hooks, []);
   assert.equal(send(message), false);
+});
+
+it('shows a confirmed nested style on the old scripted document while keeping its loaded revision for rebuild', () => {
+  const { send, document, hooks } = preview(false);
+  const path = 'scenes/intro.html';
+  document.querySelector('main')!.setAttribute('data-composition-file', path);
+  const change = { id: 'title', tag: 'div', attributes: [], styles: [['font-size', '', '54px']] };
+  const message = { type: 'peer-presentation', temporary: true, path, before: etag(3), after: etag(4), changes: [change] };
+  assert.equal(send({ ...message, temporary: false }), false);
+  assert.equal(send({ ...message, before: etag(1) }), false);
+  assert.equal(send({ ...message, path: 'index.html', before: etag(1) }), false);
+  assert.equal(send({ ...message, changes: [{ ...change, text: ['Hello', 'changed'] }] }), false);
+  assert.equal(send({ ...message, changes: [{ ...change, attributes: [['data-duration', null, '9']] }] }), false);
+  assert.equal(send(message), true);
+  assert.equal(document.getElementById('title')!.style.fontSize, '54px');
+  assert.equal(send({ ...message, before: etag(4), after: etag(5),
+    changes: [{ ...change, styles: [['font-size', '54px', '56px']] }] }), false);
+  assert.deepEqual(hooks, []);
 });
 
 it('confirms an optimistic inspector value only for the writer and only on its displayed base', () => {
