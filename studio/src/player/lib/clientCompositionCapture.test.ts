@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canCaptureCompositionInBrowser,
+  captureSampleTimes,
   clearClientCompositionCaptureCacheForTest,
   computeCompositionSampleTimes,
   createClientCompositionCaptureRequest,
@@ -24,6 +25,26 @@ afterEach(() => {
 });
 
 describe("clientCompositionCapture", () => {
+  it("samples selector filmstrips inside their visible interval in the rendered composition", () => {
+    const clip = { selector: "#card", seekTime: 12, duration: 2, frameCount: 2 };
+    expect(captureSampleTimes(20, clip)).toEqual([12.5, 13.5]);
+    expect(captureSampleTimes(20, { ...clip, frameCount: 1 })).toEqual([13]);
+    // A nested composition has its own clock, independent of its parent's start.
+    expect(captureSampleTimes(5, { ...clip, seekTime: 2 })).toEqual([2.5, 3.5]);
+    expect(captureSampleTimes(20, { ...clip, selector: undefined })).toEqual([5, 15]);
+  });
+
+  it("clamps partially visible, zero-length and sub-frame selection windows", () => {
+    const clip = { selector: "#card", seekTime: 19, duration: 4, frameCount: 4 };
+    const times = captureSampleTimes(20, clip);
+    expect(times).toHaveLength(4);
+    expect(times.every(value => value > 19 && value < 20)).toBe(true);
+    expect(captureSampleTimes(20, { ...clip, duration: 0 })).toEqual([19]);
+    expect(captureSampleTimes(20, { ...clip, seekTime: 25 })).toEqual([20]);
+    expect(captureSampleTimes(20, { ...clip, seekTime: -1, frameCount: 1 })).toEqual([1.5]);
+    expect(captureSampleTimes(20, { ...clip, duration: 0.0001 }).every(t => t > 19 && t < 19.0001)).toBe(true);
+  });
+
   it("disables browser capture automatically under HappyDOM unless overridden", () => {
     expect(canCaptureCompositionInBrowser()).toBe(false);
     setClientCompositionCaptureCapabilityForTest(true);

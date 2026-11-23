@@ -289,6 +289,23 @@ export function computeCompositionSampleTimes(
   return Array.from({ length: count }, (_, i) => Number((start + i * step).toFixed(3)));
 }
 
+/** Selector thumbnails sample the clip's visible interval in its own composition. */
+export function captureSampleTimes(
+  documentDuration: number,
+  input: Pick<ClientCaptureInput, "frameCount" | "selector" | "seekTime" | "duration">,
+): number[] {
+  const { duration, frameCount, seekTime, selector } = input;
+  if (!selector || duration === undefined || !Number.isFinite(duration)) {
+    return computeCompositionSampleTimes(documentDuration || duration || 0, frameCount, seekTime);
+  }
+  const start = typeof seekTime === "number" && Number.isFinite(seekTime) ? seekTime : 0;
+  const limit = documentDuration > 0 ? documentDuration : Infinity;
+  const from = Math.min(limit, Math.max(0, start));
+  const to = Math.min(limit, Math.max(from, start + duration));
+  if (from === to) return [from];
+  return computeCompositionSampleTimes(1, frameCount).map(fraction => from + (to - from) * fraction);
+}
+
 function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
@@ -806,8 +823,8 @@ async function captureSameOrigin(
     const outW = CAPTURE_TARGET_WIDTH;
     const outH = Math.max(27, Math.round((outW * targetH) / Math.max(1, targetW)));
     const scale = outW / Math.max(1, targetW);
-    const actualDuration = win.__player?.getDuration?.() || input.duration || 0;
-    const times = computeCompositionSampleTimes(actualDuration, input.frameCount, input.seekTime);
+    const actualDuration = win.__player?.getDuration?.() || 0;
+    const times = captureSampleTimes(actualDuration, input);
 
     const blobs: Blob[] = [];
     for (const t of times) {
@@ -910,7 +927,7 @@ async function captureIsolatedOrigin(
       iframe.src = isolatedUrl.href;
     });
 
-    const times = computeCompositionSampleTimes(duration || input.duration || 0, input.frameCount, input.seekTime);
+    const times = captureSampleTimes(duration, input);
     const requestId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const payload = await new Promise<{
@@ -990,6 +1007,7 @@ function coverCacheKey(
     rev: input.contentRevision,
     sel: input.selector,
     idx: input.selectorIndex,
+    samples: input.selector ? "clip-window-v1" : undefined,
   });
 }
 
