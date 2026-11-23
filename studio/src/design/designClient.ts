@@ -1,10 +1,8 @@
 import {
   designRoutes,
-  type DesignComment, type DesignCommentAnchor, type DesignDeployMode,
-  type DesignDeploymentRecord, type DesignDeployStatusResponse, type DesignEditorApp,
-  type DesignExportFormat, type DesignProject, type DesignProjectDetail, type DesignScenarioId,
-  type DesignSkillSummary, type DesignSystemSummary, type DesignTemplateSummary,
-  type DesignVersion,
+  type DesignComment, type DesignCommentAnchor, type DesignEditorApp, type DesignExportFormat,
+  type DesignProject, type DesignProjectDetail, type DesignScenarioId, type DesignSkillSummary,
+  type DesignSystemSummary, type DesignTemplateSummary, type DesignVersion,
 } from '../../../shared/design-project';
 
 export class DesignApiError extends Error {
@@ -194,33 +192,4 @@ export const designClient = {
       method: 'POST',
       body: JSON.stringify({ editorId }),
     }),
-  getDeployment: (id: string, options?: { filePath?: string; refresh?: boolean }) => {
-    const query = new URLSearchParams();
-    if (options?.filePath) query.set('filePath', options.filePath);
-    if (options?.refresh) query.set('refresh', '1');
-    const suffix = query.toString();
-    return requestJson<DesignDeployStatusResponse>(
-      suffix ? `${designRoutes.deploy(id)}?${suffix}` : designRoutes.deploy(id),
-    );
-  },
-  deployProject: (
-    id: string,
-    payload: { filePath?: string; workspaceId?: string; deployMode?: DesignDeployMode; name?: string } = {},
-  ) =>
-    requestJson<{
-      deployment: DesignDeploymentRecord;
-      url: string | null;
-      updated: boolean;
-    }>(designRoutes.deploy(id), {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  unpublishProject: (id: string, payload: { filePath?: string } = {}) =>
-    requestJson<{ deployment: DesignDeploymentRecord }>(
-      designRoutes.deploy(id),
-      {
-        method: 'DELETE',
-        body: JSON.stringify(payload),
-      },
-    ),
 };

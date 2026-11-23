@@ -20,7 +20,6 @@ import { DiagnosticExport } from './DiagnosticExport';
 import { discord, feishu } from './CommunityLink';
 import { GITHUB_REPOSITORY, repositorySupportLinks } from './githubRepository';
 import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
-import { getDesktopBridge, isDesktopApp, useDesktopUpdateState } from '../utils/platformHost';
 
 import type { SettingsSection } from './workspacePageRouting';
 export type { SettingsSection } from './workspacePageRouting';
@@ -206,17 +205,10 @@ function GeneralSettings({ openConnections }: { openConnections: () => void }) {
 
 function ResourceSettings({ about, openConnections }: { about: boolean; openConnections: () => void }) {
   const { t, locale } = useI18n();
-  const desktopApp = isDesktopApp();
-  const updater = useDesktopUpdateState();
   const communityLinks = locale === 'zh-CN' ? [feishu, discord] : [discord, feishu];
   const [version, setVersion] = useState<string>();
   useEffect(() => {
     let active = true;
-    if (desktopApp) {
-      void getDesktopBridge()?.getAppInfo()
-        .then(info => { if (active && info?.appVersion) setVersion(info.appVersion); })
-        .catch(() => {});
-    }
     void fetch('/api/health')
       .then(async res => {
         if (!res.ok) throw new Error('unavailable');
@@ -226,28 +218,12 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
       .then(data => { if (active && data?.version) setVersion(current => current || data.version); })
       .catch(() => {});
     return () => { active = false; };
-  }, [desktopApp]);
+  }, []);
   const links = [
     { label: 'Documentation', href: `${GITHUB_REPOSITORY}/tree/main/docs`, icon: 'file-text-line' },
     ...repositorySupportLinks,
     { label: 'View source code', href: GITHUB_REPOSITORY, icon: 'code-s-slash-line' },
   ];
-  const updateStatusLabel =
-    updater.state?.status === 'available'
-      ? t('Update available: {version}', { version: updater.state.availableVersion || '' })
-      : updater.state?.status === 'downloading'
-        ? t('Downloading update… {progress}%', { progress: updater.state.progress ?? 0 })
-        : updater.state?.status === 'downloaded'
-          ? t('Update {version} ready to install', { version: updater.state.availableVersion || '' })
-          : updater.state?.status === 'up-to-date'
-            ? t('You are on the latest version')
-            : updater.state?.status === 'checking'
-              ? t('Checking for updates…')
-              : updater.state?.status === 'unsupported'
-                ? t('Auto-update applies to packaged desktop releases.')
-                : updater.state?.status === 'error'
-                  ? updater.state.message || t('Update check failed')
-                  : t('Desktop updates keep OpenMotion and local MCP tools current.');
   return (
     <div className="om-settings-page">
       <h1 className="om-title">{t(about ? 'About OpenMotion' : 'Help')}</h1>
@@ -256,29 +232,6 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
           <h2 className="om-product-brand" aria-label="OpenMotion" />
           <p className="om-muted">{t('An editable cloud workspace for AI video and motion.')}</p>
           <span className="om-badge">{version ? `${t('Version')} ${version}` : t('Version unavailable')}</span>
-        </section>
-      )}
-      {about && desktopApp && (
-        <section className="om-card om-card-stack">
-          <div className="om-runtime-card-head">
-            <h2 className="om-subtitle">{t('Desktop updates')}</h2>
-            <div className="om-runtime-row-actions">
-              {updater.state?.status === 'available' && (
-                <Button variant="ghost" className="om-button h-auto" data-primary disabled={updater.busy} onClick={() => void updater.downloadUpdate()}>
-                  <RemixIcon name="download-2-line" size={14} />{t('Download update')}
-                </Button>
-              )}
-              {updater.state?.status === 'downloaded' && (
-                <Button variant="ghost" className="om-button h-auto" data-primary disabled={updater.busy} onClick={() => void updater.installUpdateNow()}>
-                  <RemixIcon name="refresh-line" size={14} />{t('Restart to update')}
-                </Button>
-              )}
-              <Button variant="ghost" className="om-button h-auto" disabled={updater.busy} onClick={() => void updater.checkForUpdates()}>
-                <RemixIcon name="refresh-line" size={14} />{t('Check for updates')}
-              </Button>
-            </div>
-          </div>
-          <p className="om-muted">{updateStatusLabel}</p>
         </section>
       )}
       <div className="om-card om-resource-links">
@@ -320,15 +273,7 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
       )}
       {!about && (
         <section className="om-card om-card-stack">
-          <div className="om-runtime-card-head">
-            <h2 className="om-subtitle">{t('Diagnostics & logs')}</h2>
-            {desktopApp && (
-              <Button variant="ghost" className="om-button h-auto" onClick={() => void getDesktopBridge()?.openLogsFolder()}>
-                <RemixIcon name="folder-open-line" size={15} />
-                {t('Open logs folder')}
-              </Button>
-            )}
-          </div>
+          <h2 className="om-subtitle">{t('Diagnostics & logs')}</h2>
           <DiagnosticExport />
         </section>
       )}

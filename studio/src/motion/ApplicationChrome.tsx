@@ -8,12 +8,6 @@ import { Menu, MenuItem, MenuSeparator, MenuSubmenu, MenuRadioGroup, MenuRadioIt
 import { Tooltip } from '../components/ui/Tooltip';
 import { languages, useI18n, type Locale } from '../i18n/I18n';
 import { setStudioTheme, useStudioThemePreference } from '../utils/studioTheme';
-import {
-  exportDesktopDiagnosticBundle,
-  getDesktopBridge,
-  isDesktopApp,
-  useDesktopChrome,
-} from '../utils/platformHost';
 import { useWorkspaceChrome } from './WorkspaceFrame';
 import { buildLoginUrl, useAccountSummary } from './AccountSettings';
 import { CommunityLink } from './CommunityLink';
@@ -45,8 +39,6 @@ export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset,
   const { openAssets, openHome } = useWorkspaceChrome();
   const homeHint = atExploreHome ? undefined : t('Back to Explore');
   const header = useRef<HTMLElement>(null);
-  const desktopChrome = useDesktopChrome();
-  const desktopBridge = getDesktopBridge();
   const [compactActions, setCompactActions] = useState(false);
   useLayoutEffect(() => {
     const observer = new ResizeObserver(([entry]) => setCompactActions(entry.contentRect.width <= 560));
@@ -69,34 +61,6 @@ export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset,
       <div className="om-app-header-links"><CommunityLink /><GitHubLink /></div>
       <PricingEntry trackingPage={navigation.trackingPage} />
       <ApplicationAccountMenu settings={settings} openSettings={openSettings} />
-      {desktopChrome?.customWindowControls && desktopBridge && (
-        <div className="om-desktop-window-controls" role="group" aria-label={t('Window controls')}>
-          <IconButton
-            variant="plain"
-            type="button"
-            className="om-nav-item"
-            aria-label={t('Minimize window')}
-            onClick={() => void desktopBridge.windowMinimize()}
-            icon={<RemixIcon name="subtract-line" size={14} />}
-          />
-          <IconButton
-            variant="plain"
-            type="button"
-            className="om-nav-item"
-            aria-label={t(desktopChrome.maximized ? 'Restore window' : 'Maximize window')}
-            onClick={() => void desktopBridge.windowToggleMaximize()}
-            icon={<RemixIcon name="checkbox-blank-line" size={12} />}
-          />
-          <IconButton
-            variant="plain"
-            type="button"
-            className="om-nav-item om-desktop-window-close"
-            aria-label={t('Close window')}
-            onClick={() => void desktopBridge.windowClose()}
-            icon={<RemixIcon name="close-line" size={14} />}
-          />
-        </div>
-      )}
     </div>
   </header>;
 }
@@ -117,7 +81,6 @@ export function WorkspaceUtilityActions({ openSettings }: { openSettings: (secti
 
 export function ApplicationAccountMenu({ settings, openSettings }: { settings: SettingsSection | null; openSettings: (section: SettingsSection) => void }) {
   const { t, locale, setLocale } = useI18n();
-  const desktopApp = isDesktopApp();
   const { account } = useAccountSummary();
   useEffect(() => {
     if (!account) return;
@@ -228,16 +191,6 @@ export function ApplicationAccountMenu({ settings, openSettings }: { settings: S
           </span>
         </MenuItem>
       ))}
-      {desktopApp && (
-        <>
-          <MenuItem onClick={() => { void getDesktopBridge()?.checkForUpdates(); openSettings('about'); }}>
-            <span className="om-menu-label"><RemixIcon name="refresh-line" size={16} />{t('Check for updates')}</span>
-          </MenuItem>
-          <MenuItem onClick={() => { void exportDesktopDiagnosticBundle(); }}>
-            <span className="om-menu-label"><RemixIcon name="download-2-line" size={16} />{t('Export diagnostic logs')}</span>
-          </MenuItem>
-        </>
-      )}
       <MenuItem onClick={() => openSettings('help')}>
         <span className="om-menu-label"><RemixIcon name="question-line" size={16} />{t('Help')}</span>
       </MenuItem>
