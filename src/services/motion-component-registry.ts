@@ -11,9 +11,16 @@ import { getMimeType } from '../studio/etag.ts';
 const items = catalog.items as RegistryItem[];
 const byName = new Map(items.map(item => [item.name, item]));
 // The sidebar uses card metadata. Installation uses the complete manifest server-side.
-export const motionComponentCards = items.map(({ name, title, type, description, tags, preview, sourcePrompt, ...rest }) => ({
-  name, title, type, description, tags, preview, sourcePrompt, ...('duration' in rest ? { duration: rest.duration } : {}),
-}));
+function primaryFile(item: RegistryItem) {
+  return item.files.find(file => file.type === 'hyperframes:snippet')
+    ?? item.files.find(file => file.type === 'hyperframes:composition') ?? item.files[0];
+}
+
+export const motionComponentCards = items.map(item => {
+  const { name, title, type, description, tags, preview, sourcePrompt } = item;
+  return { name, title, type, description, tags, preview, sourcePrompt, compositionFile: primaryFile(item).target,
+    ...('params' in item && { params: item.params }), ...('duration' in item && { duration: item.duration }) };
+});
 
 export function listMotionComponents(query = '', offset = 0, limit = 20) {
   const needle = query.trim().toLowerCase();
@@ -31,22 +38,23 @@ function mountableSnippet(name: string, bytes: Buffer): Buffer {
   return Buffer.from(`<div data-composition-id="${name}" data-width="1920" data-height="1080">\n${html}\n</div>`);
 }
 
-export type MotionComponentFiles = Pick<ProjectFilesService, 'listFiles' | 'commitChanges'>;
+export type MotionComponentFiles = Pick<ProjectFilesService, 'listFiles' | 'commitChanges' | 'commitTextEdits'>;
 
-export async function installMotionComponent(
-  auth: AuthContext, files: MotionComponentFiles,
-  projectId: string, name: string, options: { writeToken?: string; requestId?: string } = {},
-) {
+export function getMotionComponent(name: string) {
   const item = byName.get(name);
   if (!item) throw new CloudError('NOT_FOUND', 'Unknown motion component', { status: 404 });
-  const existing = new Set((await files.listFiles(auth, projectId, { allowTrashed: false })).map(file => file.path));
+  return item;
+}
+
+/** Prepare missing registry files without writing a project version. The caller commits them with its primary edit. */
+export async function prepareMotionComponent(item: RegistryItem, existing: ReadonlySet<string>, forPlacement = false) {
   const missing = item.files.filter(file => !existing.has(file.target));
+  const ops: ProjectFileOp[] = [];
   if (missing.length) {
     const directory = item.type === 'hyperframes:block' ? 'blocks' : 'components';
     const base = `https://raw.githubusercontent.com/heygen-com/hyperframes/${catalog.revision}/registry/${directory}/${item.name}/`;
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]);
-    const ops: ProjectFileOp[] = [];
     let remaining = 128 * 1024 * 1024;
     const pending = missing.values();
     async function download() {
@@ -56,7 +64,11 @@ export async function installMotionComponent(
         const data = await boundedMediaBody(response, Math.min(remaining, 64 * 1024 * 1024));
         remaining -= data.length;
         if (remaining < 0) throw new Error('Component exceeds the install size limit');
-        ops.push({ op: 'upsert_binary', path: file.target, data: file.type === 'hyperframes:snippet' ? mountableSnippet(name, data) : data, mimeType: getMimeType(file.target) });
+        let content = file.type === 'hyperframes:snippet' ? mountableSnippet(item.name, data) : data;
+        if (forPlacement && item.type === 'hyperframes:component' && file.target === primaryFile(item).target) {
+          content = Buffer.from(content.toString('utf8').replace(/background:\s*(?:#(?:0a0a0a|000000|000|0a0805)|rgba?\([^)]*\))\s*;/g, 'background: transparent;'));
+        }
+        ops.push({ op: 'upsert_binary', path: file.target, data: content, mimeType: getMimeType(file.target) });
       }
     }
     try {
@@ -66,14 +78,34 @@ export async function installMotionComponent(
     } finally {
       controller.abort();
     }
+  }
+  return ops;
+}
+
+export async function installMotionComponent(
+  auth: AuthContext, files: MotionComponentFiles, projectId: string, name: string,
+  options: { writeToken?: string; requestId?: string; hostFile?: unknown } = {},
+) {
+  const item = getMotionComponent(name);
+  const primary = primaryFile(item);
+  const result = { block: item, written: [primary.target, ...item.files.filter(file => file !== primary).map(file => file.target)] };
+  if (options.hostFile !== undefined) {
+    if (!options.requestId) throw new CloudError('INVALID_ARGUMENT', 'Provide a request ID for a placement', { status: 400 });
+    const commit = await files.commitTextEdits(auth, projectId, {
+      installComponent: name, files: [options.hostFile], label: `Add ${item.type === 'hyperframes:block' ? 'block' : 'component'}: ${item.title}`,
+    }, { source: 'agent', requestId: options.requestId, command: { scope: 'project:components:install',
+      hash: canonicalInputHash({ projectId, name, hostFile: options.hostFile }), result: {} } });
+    return { ...result, versionId: commit.versionId, versions: commit.versionsByPath };
+  }
+  const existing = await files.listFiles(auth, projectId, { allowTrashed: false });
+  const ops = await prepareMotionComponent(item, new Set(existing.map(file => file.path)));
+  if (ops.length) {
     await files.commitChanges(auth, {
-      projectId, ops, filePreconditions: missing.map(file => ({ path: file.target, ifNoneMatch: '*' })),
+      projectId, ops, filePreconditions: ops.map(file => ({ path: file.path, ifNoneMatch: '*' })),
       source: options.requestId ? 'agent' : 'studio', summary: `Install ${item.title}`, writeToken: options.writeToken,
       ...(options.requestId && { requestId: options.requestId, idempotencyScope: 'project:components:install',
         commandReceipt: { inputHash: canonicalInputHash({ projectId, name }), result: {} } }),
     });
   }
-  const primary = item.files.find(file => file.type === 'hyperframes:snippet')
-    ?? item.files.find(file => file.type === 'hyperframes:composition') ?? item.files[0];
-  return { block: item, written: [primary.target, ...item.files.filter(file => file !== primary).map(file => file.target)] };
+  return result;
 }

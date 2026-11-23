@@ -255,9 +255,13 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
 
   app.post('/api/projects/:id/text-edits', bodyLimit({maxSize: 32 * 1024 * 1024}), async c => {
     const auth = await getAuthContext(c, deps, {scope: 'projects:write', minRole: 'editor'});
-    if (!deps.files.textPatchWrites) return c.json({error: 'Text patch writes are disabled'}, 503);
     const requestId = c.req.header('idempotency-key') ?? '';
     const body = await c.req.json().catch(() => null);
+    // Catalog placement also supports complete host text on deployments without patch storage.
+    if (!deps.files.textPatchWrites && !(body?.installComponent && Array.isArray(body.files) &&
+      body.files.every((file: {content?: unknown} | null) => typeof file?.content === 'string'))) {
+      return c.json({error: 'Text patch writes are disabled'}, 503);
+    }
     try {
       const commit = await deps.files.commitTextEdits(auth, c.req.param('id'), body, {
         requestId, source: 'studio', writeToken: createWriteToken(c.req.header('x-hyperframes-write-token')),

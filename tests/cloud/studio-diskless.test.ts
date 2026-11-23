@@ -925,6 +925,62 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal((await env.files.readTextFile(env.auth, projectId, written[0]))?.content, 'edited');
   });
 
+  it('commits a catalog placement once and undoes a newly installed component with its host', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const host = 'index.html', effect = 'compositions/components/blur-in.html';
+    const original = '<main data-composition-id="root"></main>';
+    const mounted = '<main data-composition-id="root"><div data-composition-src="' + effect + '"></div></main>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: host, content: original }] });
+    const read = (path: string) => env.files.readTextFile(env.auth, projectId, path);
+    const prior = (await read(host))!;
+    let fail = true;
+    const fetcher = t.mock.method(globalThis, 'fetch', async () => fail
+      ? new Response(null, { status: 502 }) : new Response('<div style="background: #000;">Hello</div>'));
+    const add = (version: string, requestId = randomUUID()) => env.studioApp.request(`/api/projects/${projectId}/text-edits`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
+      body: JSON.stringify({ installComponent: 'blur-in', files: [{ path: host, baseVersion: version, content: mounted }], label: 'Add Blur In' }),
+    });
+    assert.equal((await add(prior.version)).status, 502);
+    assert.equal((await read(host))?.version, prior.version);
+    assert.equal(await read(effect), null);
+    fail = false;
+    const id = randomUUID();
+    const response = await add(prior.version, id);
+    assert.equal(response.status, 200, await response.clone().text());
+    const receipt = await response.json();
+    assert.deepEqual(receipt.changedPaths.sort(), [effect, host]);
+    assert.match((await read(effect))!.content, /background: transparent/);
+    const downloads = fetcher.mock.callCount();
+    const replay = await add(prior.version, id);
+    assert.equal((await replay.json()).versionId, receipt.versionId);
+    assert.equal((await add(prior.version)).status, 409);
+    assert.equal(fetcher.mock.callCount(), downloads);
+    await env.history.step(env.auth, projectId, 'back');
+    assert.equal((await read(host))?.version, prior.version);
+    assert.equal(await read(effect), null);
+    await env.history.step(env.auth, projectId, 'forward');
+    assert.equal((await read(host))?.version, receipt.versions[host]);
+    assert.equal((await read(effect))?.version, receipt.versions[effect]);
+    await env.history.step(env.auth, projectId, 'back');
+    const customized = '<div data-composition-id="blur-in" style="background: #000;">Edited locally</div>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: effect, content: customized }] });
+    const previous = (await read(effect))!;
+    const dispatcher = new McpToolDispatcher(parseConfig({
+      NODE_ENV: 'test', AUTH_MODE: 'dev', MODEL_GATEWAY_MODE: 'mock', DATABASE_URL: 'postgres://test:test@localhost/openmotion',
+      REDIS_URL: 'redis://localhost:6379', SESSION_SECRET: '0'.repeat(32),
+    }), { componentFiles: env.files });
+    const mcp = await dispatcher.dispatch('openmotion_assets_use', { action: 'install_component', projectId, name: 'blur-in',
+      requestId: randomUUID(), hostFile: { path: host, baseVersion: prior.version, content: mounted } },
+      { auth: env.auth, supportsMcpAppsUi: false });
+    assert(!mcp.isError, JSON.stringify(mcp.structuredContent));
+    assert.equal((await read(host))?.version, receipt.versions[host]);
+    assert.equal((await read(effect))?.version, previous.version);
+    await env.history.step(env.auth, projectId, 'back');
+    assert.equal((await read(effect))?.version, previous.version);
+    assert.equal(fetcher.mock.callCount(), downloads);
+  });
+
   it('installs the same mountable fragment via Studio and MCP, bundles nested references and undoes each installation', async t => {
     const env = createStudioTestEnv();
     const mcp = new McpToolDispatcher(parseConfig({

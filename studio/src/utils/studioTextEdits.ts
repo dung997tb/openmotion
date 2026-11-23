@@ -88,20 +88,35 @@ export async function tryStudioCommandPatches(project: string, commands: Composi
   return { ...saved, divergent };
 }
 
-async function commitTextEdits(project: string, edits: Prepared[], history?: StudioWriteHistory, label = 'Edit file') {
+/** A catalog drop creates the missing files and edits their host in one project transaction. */
+export async function placeCatalogComponent(project: string, path: string, name: string, label: string,
+  insertHost: (content: string) => string) {
+  let source = confirmedSource(project, path);
+  if (!source) {
+    const response = await studioApiFetch('/api/projects/' + encodeURIComponent(project) + '/files/' + encodeURIComponent(path));
+    if (!response.ok) throw await createStudioSaveHttpError(response, 'Could not read ' + path);
+    const data = await response.json();
+    if (typeof data.content !== 'string' || typeof data.version !== 'string') throw new Error('Missing composition source or version');
+    observeSourceRead(project, path, response, data);
+    source = { content: data.content, version: data.version };
+  }
+  return commitTextEdits(project, [{ path, before: source.content, version: source.version, after: insertHost(source.content) }], undefined, label, name);
+}
+
+async function commitTextEdits(project: string, edits: Prepared[], history?: StudioWriteHistory, label = 'Edit file', installComponent?: string) {
   const { createTextPatch } = await import('../../../shared/create-text-patch');
   const { stampHfIdsInPlace } = await import('@hyperframes/parsers/hf-ids');
   const versions = Object.fromEntries(edits.map(file => [file.path, file.version]));
   const changed = edits.filter(file => file.after !== file.before);
   const files = changed.map(file => {
     if (/\.html?$/i.test(file.path)) file.after = stampHfIdsInPlace(file.after);
-    const patch = createTextPatch(file.before, file.after);
+    const patch = installComponent && !supportsProjectTextEdits(project) ? null : createTextPatch(file.before, file.after);
     return { path: file.path, baseVersion: file.version, ...(patch === null ? { content: file.after } : { patch }) };
   });
   if (!files.length) return { versions, changedPaths: [], divergent: [] };
   const dependencies = Object.fromEntries(edits.filter(file => file.before === file.after).map(file => [file.path, file.version]));
   const body = JSON.stringify({ files, ...(Object.keys(dependencies).length && { dependencies }), label: history?.label ?? label,
-    ...(history?.continuous && { undoGroup: history.windowId }) });
+    ...(installComponent && { installComponent }), ...(history?.continuous && { undoGroup: history.windowId }) });
   const requestId = createStudioWriteToken();
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': requestId, ...studioWriteHeaders(history, requestId) };
   const commit = await trackStudioProjectSave(project, files[0].path, () => retryStudioSave(async () => {
@@ -128,7 +143,8 @@ async function commitTextEdits(project: string, edits: Prepared[], history?: Stu
   }));
   for (const file of changed) {
     const version = commit.versions[file.path];
-    rememberSource(project, file.path, { content: file.after, version });
+    if (installComponent && !supportsProjectTextEdits(project)) forgetSource(project, file.path);
+    else rememberSource(project, file.path, { content: file.after, version });
     acknowledgeFileEdit(project, file.path, file.version, version);
   }
   return { versions: { ...versions, ...commit.versions }, changedPaths: commit.changedPaths, divergent: [] };

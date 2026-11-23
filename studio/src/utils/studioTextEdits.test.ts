@@ -4,7 +4,7 @@ import { applyTextPatch } from '../../../shared/text-patch';
 import { readProjectFileContent, studioHistoryForWrite } from './studioFileHistory';
 import { submitStudioCommands } from './projectEditBatch';
 import { observedSourceVersion, confirmedSource } from './confirmedTextSources';
-import { tryStudioTextEdit } from './studioTextEdits';
+import { placeCatalogComponent, tryStudioTextEdit } from './studioTextEdits';
 import { onRebasedFileEdit } from './rebasedFileEdit';
 import { readVersionedSource } from './readVersionedSource';
 
@@ -12,6 +12,21 @@ const version = (n: number) => '"patch:' + n.toString(16).padStart(64, '0') + '"
 const sourceResponse = (content: string, n: number) => Response.json({ content, version: version(n) },
   { headers: { 'X-OpenMotion-Text-Edits': '1' } });
 const receipt = (paths: string[], n: number) => Response.json({ versions: Object.fromEntries(paths.map(path => [path, version(n)])), changedPaths: paths });
+
+it('sends a cached host patch and the catalog dependency together, without a separate install request', async () => {
+  const project = 'catalog-patch', path = 'intro.html';
+  const before = '<main data-hf-id="hf-main">' + ' '.repeat(800) + '</main>';
+  const fetch = vi.fn().mockResolvedValueOnce(sourceResponse(before, 1)).mockResolvedValueOnce(receipt([path], 2));
+  vi.stubGlobal('fetch', fetch);
+  await readProjectFileContent(project, path);
+  await placeCatalogComponent(project, path, 'blur-in', 'Add component: Blur In', html => html.replace('</main>', 'mounted</main>'));
+  expect(fetch).toHaveBeenCalledTimes(2);
+  const [url, request] = fetch.mock.calls[1];
+  expect(url).toBe('/api/projects/catalog-patch/text-edits');
+  const body = JSON.parse(request.body);
+  expect(body).toMatchObject({ installComponent: 'blur-in', files: [{ path, baseVersion: version(1) }] });
+  expect(applyTextPatch(before, body.files[0].patch)).toContain('mounted</main>');
+});
 
 it('marks ongoing typing on the wire and keeps an independently confirmed edit separate', async () => {
   const project = 'continuous-input', path = 'titles.css';
