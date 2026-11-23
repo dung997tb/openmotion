@@ -744,7 +744,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
             const target =
               targetKind === 'html' && !sourcePath
                 ? { kind: 'html' as const, id: targetId, entryPath: filePath || 'index.html' }
-                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath, embedUrl, title }, originUrl);
+                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath, embedUrl, title, readOnly: true }, originUrl);
             return json(res, 200, await publishService.status(target, { filePath, refresh }));
           }
           if (req.method === 'POST') {
@@ -776,7 +776,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
             const target =
               targetKind === 'html' && !sourcePath
                 ? { kind: 'html' as const, id: targetId, entryPath: filePath || 'index.html' }
-                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath, embedUrl }, originUrl);
+                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath, embedUrl, readOnly: true }, originUrl);
             return json(res, 200, await publishService.unpublish(target, { filePath }));
           }
         }

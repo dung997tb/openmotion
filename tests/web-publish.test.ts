@@ -739,6 +739,8 @@ test('WebPublish deploys embeddable community games via an OpenDesign Cloud wrap
   const wrapperHtml = await readFile(path.join(target.sourcePath, 'index.html'), 'utf8');
   assert.ok(wrapperHtml.includes('src="https://bridge-mind.github.io/turbo-kart-rally/"'));
   assert.ok(wrapperHtml.includes('<title>Turbo Kart Rally · OpenDesign</title>'));
+  assert.ok(wrapperHtml.includes('sandbox="allow-scripts allow-same-origin allow-pointer-lock"'));
+  assert.equal(wrapperHtml.includes('clipboard-write'), false);
 
   // Must not pollute local user GameProjects catalog
   const games = new GameProjects(store.directory);
@@ -770,7 +772,24 @@ test('WebPublish deploys embeddable community games via an OpenDesign Cloud wrap
   assert.equal(statusAfter.active?.url, published.url);
   assert.equal(statusAfter.freshness, 'fresh');
 
-  // 3. Non-https embedUrl values are rejected
+  // 2b. Status with embedUrl and omitted title stays read-only and preserves wrapper title & freshness
+  const statusWithEmbedNoTitle = (await webPublishOperation(
+    store,
+    {
+      command: 'status',
+      targetKind: 'game',
+      targetId: 'community-turbo-kart',
+      embedUrl: 'https://bridge-mind.github.io/turbo-kart-rally/',
+    },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(statusWithEmbedNoTitle.active?.url, published.url);
+  assert.equal(statusWithEmbedNoTitle.freshness, 'fresh');
+  const wrapperAfterStatus = await readFile(path.join(target.sourcePath, 'index.html'), 'utf8');
+  assert.ok(wrapperAfterStatus.includes('<title>Turbo Kart Rally · OpenDesign</title>'));
+
+  // 3. Non-https and credential-bearing embedUrl values are rejected
   await assert.rejects(
     () =>
       resolveWebPublishTarget(
@@ -794,6 +813,20 @@ test('WebPublish deploys embeddable community games via an OpenDesign Cloud wrap
           targetId: 'community-http-local',
           embedUrl: 'http://127.0.0.1:8080/game',
           title: 'Insecure Local Game',
+        },
+        'http://127.0.0.1:4173',
+      ),
+    /GAME_NOT_FOUND|not found/i,
+  );
+  await assert.rejects(
+    () =>
+      resolveWebPublishTarget(
+        store,
+        {
+          targetKind: 'game',
+          targetId: 'community-creds-url',
+          embedUrl: 'https://user:pass@example.com/private-game/',
+          title: 'Private Preview Game',
         },
         'http://127.0.0.1:4173',
       ),

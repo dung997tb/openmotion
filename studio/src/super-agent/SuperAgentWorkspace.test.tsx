@@ -422,8 +422,13 @@ it('displays active conversation, tool steps, approvals, and multi-tab Artifact 
   const iframe = viewer.querySelector('iframe');
   expect(iframe?.getAttribute('src')).toContain('/motion-api/design/raw/dproj-1/index.html');
 
-  // Switch Design Project Artifact to Code tab and verify CodeViewer renders index.html
-  const codeBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
+  // Switch Design Project Artifact to Code view via the compact icon dropdown and verify CodeViewer renders index.html
+  const viewModeBtn = viewer.querySelector('.om-sa-view-mode-trigger') as HTMLButtonElement;
+  expect(viewModeBtn).toBeTruthy();
+  await act(async () => viewModeBtn.click());
+  await flush();
+  const codeBtn = [...document.querySelectorAll('.om-sa-view-mode-popover button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
+  expect(codeBtn).toBeTruthy();
   await act(async () => codeBtn.click());
   await flush();
   expect(viewer.textContent).toContain('<canvas id="game"></canvas>');
@@ -1311,10 +1316,13 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   // Viewer opens game iframe in portrait viewport & supports Code inspection + Open in Game Studio
   const viewer = document.querySelector('.om-sa-viewer')!;
   expect(viewer).toBeTruthy();
-  // Share belongs in the active tab toolbar (compact), never in the outer browser window tab strip
+  // Share belongs in the active tab toolbar (emphasized), never in the outer browser window tab strip
   expect(viewer.querySelector('.om-sa-viewer-tabs-bar .om-web-publish-trigger')).toBeNull();
-  const toolbarShareBtn = viewer.querySelector('.om-sa-viewer-toolbar .om-web-publish-trigger--compact');
+  const toolbarShareBtn = viewer.querySelector('.om-sa-viewer-toolbar .om-sa-share-trigger');
   expect(toolbarShareBtn).toBeTruthy();
+  expect(toolbarShareBtn?.textContent?.trim()).toBe('Share');
+  // User's own game does not clutter the toolbar with an Attach to Chat button
+  expect(viewer.querySelector('.om-sa-viewer-toolbar .om-sa-game-use-btn')).toBeNull();
   // Non-web game tab omits disabled Back/Forward browser history arrows
   expect(viewer.querySelector('.om-sa-nav-btns button[aria-label="Back"]')).toBeNull();
   expect(viewer.querySelector('.om-sa-nav-btns button[aria-label="Forward"]')).toBeNull();
@@ -1339,7 +1347,12 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   expect(stage?.getAttribute('data-viewport')).toBe('desktop');
   expect(document.querySelector('.om-sa-device-menu')).toBeNull();
 
-  const codeBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
+  const viewModeBtn = viewer.querySelector('.om-sa-view-mode-trigger') as HTMLButtonElement;
+  expect(viewModeBtn).toBeTruthy();
+  await act(async () => viewModeBtn.click());
+  await flush();
+  const codeBtn = [...document.querySelectorAll('.om-sa-view-mode-popover button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
+  expect(codeBtn).toBeTruthy();
   await act(async () => codeBtn.click());
   await flush();
   expect(viewer.textContent).toContain('index.html');
