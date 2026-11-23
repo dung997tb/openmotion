@@ -69,26 +69,29 @@ const PRIMARY_STARTERS: {
   tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
-  featured?: boolean;
   badge?: string;
 }[] = [
-  { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game', featured: true, badge: 'New' },
-  { id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
+  { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game', badge: 'New' },
   { id: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
   { id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
+  { id: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
 ];
 
 const EXTRA_STARTERS: {
   id: SuperAgentCreationModeId;
-  tone: 'agent' | 'image' | 'video' | 'audio';
+  tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
 }[] = [
-  { id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema video' },
-  { id: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
+  { id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema Video' },
+  { id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
   { id: 'website', tone: 'image', icon: 'layout-line', title: 'Build a website' },
 ];
+
+const COMPOSER_MODES = [...PRIMARY_STARTERS, ...EXTRA_STARTERS]
+  .map(starter => findSuperAgentMode(starter.id))
+  .filter(mode => mode !== null);
 
 export type AgentSelection = {
   runtimeId?: string;
@@ -118,7 +121,7 @@ export function ConversationStream({
   selection,
   permissionMode,
   onBack,
-  onExitRequestedMode,
+  onChangeRequestedMode,
   onPlayGame,
   onDeployGame,
   onRetryLoad,
@@ -176,7 +179,7 @@ export function ConversationStream({
   selection: AgentSelection;
   permissionMode: SuperAgentPermissionMode;
   onBack?: () => void;
-  onExitRequestedMode?: () => void;
+  onChangeRequestedMode?: (mode: SuperAgentCreationModeId | null) => void;
   onPlayGame?: (game: GameCard) => void;
   onDeployGame?: (game: GameCard) => void;
   onRetryLoad: () => void;
@@ -234,6 +237,7 @@ export function ConversationStream({
   const [inspectingEngine, setInspectingEngine] = useState<SuperAgentEngine | null>(null);
   const inspectedEnginesRef = useRef<Set<SuperAgentEngine>>(new Set());
   const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(() => requestedMode ?? null);
+  const previousRequestedMode = useRef(requestedMode);
   const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(DEFAULT_MODE_COMPOSER_OPTIONS);
   const [scaffoldingGame, setScaffoldingGame] = useState(false);
   const [previewingChipKey, setPreviewingChipKey] = useState<string | null>(null);
@@ -245,6 +249,13 @@ export function ConversationStream({
   const updateModeOptions = useCallback((patch: Partial<ModeComposerOptions>) => {
     setModeOptions(prev => ({ ...prev, ...patch }));
   }, []);
+  useEffect(() => {
+    if (activeModeId === 'motion') {
+      updateModeOptions({ motionEngine: DEFAULT_MODE_COMPOSER_OPTIONS.motionEngine });
+    } else if (activeModeId === 'media') {
+      updateModeOptions({ mediaSubMode: DEFAULT_MODE_COMPOSER_OPTIONS.mediaSubMode });
+    }
+  }, [activeModeId, updateModeOptions]);
   const handleCatalogModelsChange = useCallback((models: Model[]) => {
     mediaModelsRef.current = models;
   }, []);
@@ -405,7 +416,7 @@ export function ConversationStream({
   const triggerPrimaryLabel = selectedModelMeta?.label
     ?? (selection.model !== 'default' ? selection.model : activeAgent?.label ?? selection.engine);
   const triggerSecondaryLabel = selection.reasoning !== 'default' && reasoningEfforts.includes(selection.reasoning)
-    ? selection.reasoning
+    ? t(selection.reasoning)
     : selection.model !== 'default'
       ? (activeAgent?.label ?? selection.engine)
       : t('Default');
@@ -413,7 +424,10 @@ export function ConversationStream({
   useEffect(() => {
     if (requestedMode && !chat?.messages.length) {
       setActiveModeId(requestedMode);
+    } else if (!requestedMode && previousRequestedMode.current && !chat?.id) {
+      setActiveModeId(null);
     }
+    previousRequestedMode.current = requestedMode;
   }, [requestedMode, chat?.id, chat?.messages.length]);
 
   useEffect(() => {
@@ -436,6 +450,10 @@ export function ConversationStream({
       onAttachmentsChange(attachments.filter(existing => resourceKey(existing) !== key));
     } else {
       onAttachmentsChange([...attachments, item].slice(0, 30));
+      if (attachments.length < 30 && item.kind === 'motion-template') {
+        if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
+        else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
+      }
     }
   };
 
@@ -455,8 +473,15 @@ export function ConversationStream({
   const exitActiveMode = useCallback(() => {
     setActiveModeId(null);
     updateModeOptions({ gameTemplate: null });
-    if (requestedMode) onExitRequestedMode?.();
-  }, [requestedMode, onExitRequestedMode, updateModeOptions]);
+    if (requestedMode) onChangeRequestedMode?.(null);
+  }, [requestedMode, onChangeRequestedMode, updateModeOptions]);
+
+  const switchActiveMode = (value: string) => {
+    const mode = findSuperAgentMode(value);
+    if (!mode) return;
+    setActiveModeId(mode.id);
+    onChangeRequestedMode?.(mode.id);
+  };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -812,7 +837,6 @@ export function ConversationStream({
                   type="button"
                   className="om-sa-starter-card"
                   data-tone={card.tone}
-                  data-featured={card.featured || undefined}
                   onClick={() => {
                     setActiveModeId(card.id);
                     composerRef.current?.focus();
@@ -823,7 +847,7 @@ export function ConversationStream({
                       <RemixIcon name={card.icon} size={20} />
                     </span>
                     {card.badge && (
-                      <span className="om-sa-starter-badge" lang="en">{card.badge}</span>
+                      <span className="om-badge" data-nav-badge={card.badge} lang="en">{card.badge}</span>
                     )}
                   </span>
                   <strong>{t(card.title)}</strong>
@@ -870,21 +894,6 @@ export function ConversationStream({
                       <span>{t(card.title)}</span>
                     </Button>
                   ))}
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-more-item"
-                    onClick={() => {
-                      setMoreStartersOpen(false);
-                      setResourceCategory('all');
-                      setResourceMenuOpen(true);
-                    }}
-                  >
-                    <span className="om-sa-starter-icon" aria-hidden="true">
-                      <RemixIcon name="apps-2-line" size={16} />
-                    </span>
-                    <span>{t('Workspace resources')}</span>
-                  </Button>
                 </div>
               </Popover>
             </div>
@@ -1193,10 +1202,23 @@ export function ConversationStream({
                 />
               </Popover>
 
-              {activeMode && (
-                <span className="om-sa-active-mode-pill" data-tone={activeMode.tone}>
-                  <RemixIcon name={activeMode.icon} size={13} />
-                  <span>{t(activeMode.label)}</span>
+              {active && activeMode && (
+                <span className="om-sa-active-mode-pill" data-mode={activeMode.id}>
+                  <Select
+                    appearance="boxed"
+                    modal={false}
+                    label={t('Creation mode')}
+                    value={activeMode.id}
+                    onCommit={switchActiveMode}
+                    disabled={busy || sending || scaffoldingGame}
+                    className="om-sa-mode-select"
+                    popupClassName="om-sa-creation-mode-menu"
+                    options={COMPOSER_MODES.map(mode => ({
+                      value: mode.id,
+                      label: t(mode.label),
+                      icon: <RemixIcon name={mode.icon} size={13} />,
+                    }))}
+                  />
                   <IconButton
                     variant="plain"
                     className="om-sa-chip-remove"
@@ -1245,7 +1267,7 @@ export function ConversationStream({
                     {activeRuntime && activeRuntime.kind !== 'local-direct' && (
                       <span className="om-sa-runtime-chip">
                         <RemixIcon name={activeRuntime.kind === 'local-bridge' ? 'link' : 'plug-line'} size={11} />
-                        <span>{activeRuntime.name}</span>
+                        <span>{t(activeRuntime.name)}</span>
                       </span>
                     )}
                     <RemixIcon name="arrow-down-s-line" size={15} />
@@ -1476,7 +1498,7 @@ export function ConversationStream({
                               data-active={activeLevel || undefined}
                               onClick={() => onChangeSelection({ ...selection, reasoning: level })}
                             >
-                              {level === 'default' ? t('Default') : level}
+                              {t(level === 'default' ? 'Default' : level)}
                             </Button>
                           );
                         })}

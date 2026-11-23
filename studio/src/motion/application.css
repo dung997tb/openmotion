@@ -381,6 +381,24 @@
 .om-media-mega-entries .om-scene-tile-art { width: 100%; aspect-ratio: 16 / 10.5; margin-bottom: 0; border-radius: var(--motion-radius-xl); border: 1px solid color-mix(in srgb, var(--motion-border) 70%, transparent); background: radial-gradient(ellipse at 50% 0%, var(--motion-raised), var(--motion-panel) 65%, var(--motion-inset)); transition: border-color var(--motion-duration-fast) ease, transform var(--motion-duration-fast) ease; }
 .om-media-mega-entries .om-scene-tile:not(:disabled):hover .om-scene-tile-art { border-color: var(--motion-border-strong); transform: translateY(-1px); }
 .om-media-mega-entries .om-scene-tile strong { justify-content: center; font-size: var(--motion-text-md); font-weight: var(--motion-weight-medium); color: var(--motion-strong); }
+.om-creative-menu-agent { width: min(760px, calc(100vw - var(--motion-space-24))); }
+.om-agent-nav-menu { display: grid; gap: var(--motion-space-16); }
+.om-creative-menu-agent .om-agent-nav-menu h2 { margin: 0; padding: 0; color: var(--motion-strong); font-size: var(--motion-text-title); font-weight: var(--motion-weight-semibold); }
+.om-agent-nav-menu .om-scene-tile-art .om-badge { position: absolute; inset-block-start: var(--motion-space-8); inset-inline-end: var(--motion-space-8); }
+.om-agent-nav-more { display: grid; gap: var(--motion-space-6); padding-block-start: var(--motion-space-12); border-block-start: 1px solid var(--motion-border-subtle); }
+.om-agent-nav-more h3 { margin: 0; color: var(--motion-muted); font-size: var(--motion-text-sm); font-weight: var(--motion-weight-medium); }
+.om-agent-nav-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--motion-space-4); }
+.om-agent-nav-list .om-nav-item { text-align: start; color: var(--motion-strong); }
+.om-agent-nav-list svg { flex: none; color: var(--motion-muted); }
+.om-agent-nav-menu .om-audio-menu-spotlight-copy .om-badge[data-nav-badge] {
+  padding-inline: var(--motion-space-6);
+  font-size: var(--motion-text-sm);
+}
+.om-agent-nav-menu .om-audio-menu-spotlight-title { font-size: var(--motion-text-md); }
+.om-agent-nav-menu :is(.om-audio-menu-spotlight-desc, .om-audio-menu-spotlight-cta) { font-size: var(--motion-text-sm); }
+@media (max-width: 520px) {
+  .om-agent-nav-menu .om-media-mega-entries { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .om-edit-demo-sparkle { position: absolute; left: var(--motion-space-8); bottom: var(--motion-space-8); color: var(--motion-overlay-ink); opacity: .9; pointer-events: none; }
 .om-character-demo { position: relative; display: grid; align-content: center; justify-items: center; gap: var(--motion-space-6); padding: var(--motion-space-10); background: radial-gradient(ellipse at 50% 0%, var(--motion-neutral-n10), var(--motion-on-brand) 68%, var(--motion-neutral-n11)); }
 .om-character-portraits { display: flex; align-items: center; justify-content: center; }
