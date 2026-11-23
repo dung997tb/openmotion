@@ -28,6 +28,7 @@ import {
   quantizeCompositionFrameCount,
   retainCachedCompositionCapture,
   selectInitialGateCompositionPaths,
+  selectorCaptureWindowKey,
 } from "../lib/clientCompositionCapture";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 import { Skeleton } from "../../components/ui/Skeleton";
@@ -228,8 +229,12 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     ),
   );
   const captureMeasured = useValueAtRest(container.width > 0);
+  const captureStart = useValueAtRest(seekTime);
+  const captureDuration = useValueAtRest(effectiveClipDuration);
+  const selectorStart = selector ? captureStart : undefined;
+  const selectorDuration = selector ? captureDuration : undefined;
   const captureCacheKey = captureEnabled && captureMeasured
-    ? `${projectId}|${previewUrl}|${contentRevision}|${desiredCaptureFrames}|${selector ?? ""}|${selectorIndex ?? 0}`
+    ? `${projectId}|${previewUrl}|${contentRevision}|${desiredCaptureFrames}|${selector ?? ""}|${selectorIndex ?? 0}|${selectorCaptureWindowKey({ selector, seekTime: selectorStart, duration: selectorDuration }) ?? ""}`
     : null;
 
   // Tier 0: synchronous in-memory hit (0ms across project/composition switches).
@@ -243,6 +248,8 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
             frameCount: desiredCaptureFrames,
             selector,
             selectorIndex,
+            seekTime: selectorStart,
+            duration: selectorDuration,
           })
         : null,
     [
@@ -254,6 +261,8 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
       projectId,
       selector,
       selectorIndex,
+      selectorStart,
+      selectorDuration,
     ],
   );
 
@@ -273,6 +282,8 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
       frameCount: desiredCaptureFrames,
       selector,
       selectorIndex,
+      seekTime: selectorStart,
+      duration: selectorDuration,
     })
       .then((lease) => {
         if (cancelled) {
@@ -298,6 +309,8 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     projectId,
     selector,
     selectorIndex,
+    selectorStart,
+    selectorDuration,
     syncCachedValue,
   ]);
 
@@ -335,8 +348,8 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
             sessionEpoch,
             contentRevision,
             frameCount: desiredCaptureFrames,
-            duration: effectiveClipDuration,
-            seekTime,
+            duration: captureDuration,
+            seekTime: captureStart,
             selector,
             selectorIndex,
             priority,
@@ -350,13 +363,13 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
       captureMeasured,
       contentRevision,
       desiredCaptureFrames,
-      effectiveClipDuration,
+      captureDuration,
       idbPending,
       participatesInInitialGate,
       previewUrl,
       priority,
       projectId,
-      seekTime,
+      captureStart,
       selector,
       selectorIndex,
       sessionEpoch,
