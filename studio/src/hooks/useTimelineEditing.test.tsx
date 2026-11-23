@@ -519,7 +519,7 @@ describe("useTimelineEditing timeline z-index reorder", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {
         expect(requestUrl(input)).toBe("/api/projects/p1/edits/index.html");
-        expect(JSON.parse(String(init.body))).toEqual({ kind: "moveClip", hfId: "hf-clip", start: 1 });
+        expect(JSON.parse(String(init.body))).toEqual({ kind: "moveClip", hfId: "hf-clip", start: 1.23 });
         expect(new Headers(init.headers).get("if-match")).toMatch(/^"sha256:/);
         expect(new Headers(init.headers).get("idempotency-key")).toBeTruthy();
         await pending;
@@ -533,8 +533,8 @@ describe("useTimelineEditing timeline z-index reorder", () => {
       onZIndexCommit: vi.fn(), recordEdit: history, sdkSession: session,
       publishSdkSession: () => "rejected-active-target" });
     try {
-      const saving = hook.move(clip, { start: 1, track: 0 });
-      expect(iframe.contentDocument!.getElementById("clip")!.getAttribute("data-start")).toBe("1");
+      const saving = hook.move(clip, { start: 1.234, track: 0 });
+      expect(iframe.contentDocument!.getElementById("clip")!.getAttribute("data-start")).toBe("1.23");
       await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
       expect(history).not.toHaveBeenCalled();
       release();

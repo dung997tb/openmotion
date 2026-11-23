@@ -20,7 +20,7 @@ function findClip(children: readonly HyperFramesElement[], hfId: string): HyperF
 }
 
 /** Move one independently timed clip within the current composition duration. */
-export function canMoveClip(session: Composition, move: MoveClip): boolean {
+function canMoveClip(session: Composition, move: MoveClip): boolean {
   if (!Number.isFinite(move.start) || move.start < 0) return false;
   const stages = session.getRootElements().filter(root => 'data-composition-id' in root.attributes);
   if (stages.length !== 1) return false;
@@ -28,9 +28,17 @@ export function canMoveClip(session: Composition, move: MoveClip): boolean {
   if ('data-timeline-locked' in stage.attributes) return false;
   const clip = findClip(stage.children, move.hfId);
   if (!clip || 'data-link' in clip.attributes) return false;
+  // A reference such as "intro + 1" needs the composition's resolved clock.
+  if (!Number.isFinite(Number(clip.attributes['data-start'] ?? 0))) return false;
   const duration = Number(clip.attributes['data-duration']);
   const end = Number(stage.attributes['data-duration']);
   return Number.isFinite(duration) && duration > 0 && Number.isFinite(end) && move.start + duration <= end;
+}
+
+/** Plan the optimistic edit from the visible composition without modifying it. */
+export function planClipMove(session: Composition, hfId: string, start: number): MoveClip | undefined {
+  const command: MoveClip = { kind: 'moveClip', hfId, start };
+  return canMoveClip(session, command) ? command : undefined;
 }
 
 /** The SDK shifts the clip and its targeted tweens together, preserving their offsets. */
