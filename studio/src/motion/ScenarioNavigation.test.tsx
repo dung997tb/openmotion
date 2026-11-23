@@ -88,7 +88,7 @@ async function renderNav(overrides: Partial<CreativeNavigationProps> = {}) {
   return props;
 }
 
-it('opens Super Agent creation modes and returns home from the navigation spotlight', async () => {
+it('opens Super Agent creation modes and launches game creation from the navigation spotlight', async () => {
   const props = await renderNav();
   const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Super Agent · Features"]')!;
   await act(async () => trigger.click());
@@ -110,7 +110,7 @@ it('opens Super Agent creation modes and returns home from the navigation spotli
   expect(spotlight.querySelector('[data-nav-badge="New"]')?.textContent).toBe('New');
   expect(spotlight.querySelector('strong')?.textContent).toBe('Build a minigame in minutes');
   await act(async () => spotlight.click());
-  expect(props.onOpenAgentStart).toHaveBeenLastCalledWith(null);
+  expect(props.onOpenAgentStart).toHaveBeenLastCalledWith('game');
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
 });
 

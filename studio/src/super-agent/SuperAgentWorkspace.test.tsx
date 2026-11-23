@@ -7,6 +7,7 @@ import { NearScreenIntersectionObserver } from '../hooks/intersectionObserverTes
 import { I18nProvider } from '../i18n/I18n';
 import { translate } from '../i18n/messages';
 import { ApplicationHeader } from '../motion/ApplicationChrome';
+import { communityGames } from '../motion/game/gameCatalog';
 import { WorkspaceChromeContext } from '../motion/WorkspaceChromeContext';
 import { SUPER_AGENT_API } from '../../../shared/super-agent';
 import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
@@ -365,6 +366,8 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
   await flush();
 
   expect(document.body.textContent).toContain('What can I create for you?');
+  expect(container.querySelector('.om-sa-home-hero + .om-sa-starter-grid')).toBeTruthy();
+  expect(container.querySelector('.om-sa-stream > .om-sa-messages + .om-sa-composer-wrap textarea')).toBeTruthy();
   expect([...container.querySelectorAll('.om-sa-starter-card strong')].map(node => node.textContent)).toEqual([
     'Build a game', 'Generate image', 'Make a video', 'Create audio', 'Create slides', 'Explore more',
   ]);
@@ -519,7 +522,7 @@ it('localizes creation mode introductions, prompt ideas, and composer guidance i
     const copy = [
       t(mode.label),
       t(mode.title),
-      t(mode.subtitle),
+      ...(mode.subtitle ? [t(mode.subtitle)] : []),
       getModeComposerPlaceholder(mode, DEFAULT_MODE_COMPOSER_OPTIONS, t),
       ...mode.quickIdeas.flatMap(idea => [t(idea.title), t(idea.prompt)]),
     ];
@@ -554,10 +557,85 @@ it('shows Chinese image controls and keeps the draft when switching creation mod
   expect(container.querySelector('[role="tablist"]')?.textContent).toContain('多图融合');
   const example = container.querySelector<HTMLButtonElement>('.om-sa-showcase-card')!;
   expect(example.textContent).toContain('GPT Image 2.6 · 图片');
+  const inputGroup = container.querySelector('.om-sa-mode-composer-group')!;
+  expect(inputGroup.firstElementChild?.querySelector('.om-sa-composer-wrap')).toBeTruthy();
+  expect(inputGroup.querySelector('.om-sa-dock-slot + .om-sa-mode-ideas')).toBeTruthy();
+  expect(inputGroup.nextElementSibling).toBe(container.querySelector('.om-sa-showcase-panel'));
+  const galleryHeading = inputGroup.nextElementSibling?.querySelector('h3');
+  expect(galleryHeading?.textContent).toBe('探索模版');
+  expect(galleryHeading?.nextElementSibling?.querySelector('[role="tablist"]')).toBeTruthy();
   const composer = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  const send = inputGroup.querySelector<HTMLButtonElement>('.om-sa-send-btn')!;
+  const modelPicker = inputGroup.querySelector<HTMLElement>('.om-sa-composer-tools > .om-sa-composer-model-picker')!;
+  expect(modelPicker.getAttribute('aria-label')).toBe('图像生成模型');
+  const chatTrigger = inputGroup.querySelector<HTMLButtonElement>('.om-sa-model-trigger')!;
+  expect(modelPicker.previousElementSibling).toBe(chatTrigger);
+  expect(chatTrigger.textContent).toContain('对话 ·');
+  expect(modelPicker.textContent).toContain('生图 ·');
+  await act(async () => chatTrigger.click());
+  expect(document.querySelector('.om-sa-model-menu h3')?.textContent).toBe('对话模型');
+  await act(async () => chatTrigger.click());
+  expect(send.disabled).toBe(true);
   expect(composer.placeholder).toBe('描述你想生成的图像，或说明如何修改参考图…');
   await act(async () => example.click());
   expect(composer.value).toMatch(/[\u3400-\u9fff]/u);
+
+  const scroll = container.querySelector<HTMLElement>('.om-sa-messages')!;
+  const slot = inputGroup.querySelector<HTMLElement>('.om-sa-dock-slot')!;
+  Object.defineProperty(scroll, 'clientHeight', { value: 600 });
+  vi.spyOn(slot, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(0, 100 - scroll.scrollTop, 700, 150),
+  );
+  await act(async () => {
+    scroll.scrollTop = 350;
+    scroll.dispatchEvent(new Event('scroll'));
+  });
+  expect(slot.dataset.position).toBe('compact');
+  expect(modelPicker.closest('[inert]')).toBeTruthy();
+  expect(slot.querySelectorAll('.om-sa-send-btn')).toHaveLength(1);
+  expect(slot.querySelector('.om-sa-send-btn')).toBe(send);
+  expect(send.closest('[inert]')).toBeNull();
+  expect(send.disabled).toBe(false);
+  const summary = slot.querySelector<HTMLButtonElement>('.om-sa-dock-summary')!;
+  expect(summary.textContent).toContain(composer.value);
+  await act(async () => summary.click());
+  expect(slot.dataset.position).toBe('expanded');
+  expect(modelPicker.closest('[inert]')).toBeNull();
+  expect(document.activeElement).toBe(composer);
+  const firstPrompt = composer.value;
+  const firstSweep = slot.querySelector('.om-sa-template-sweep');
+  expect(firstSweep).not.toBeNull();
+  const secondExample = container.querySelectorAll<HTMLButtonElement>('.om-sa-showcase-card')[1];
+  await act(async () => secondExample.querySelector('img')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+  expect(slot.dataset.position).toBe('expanded');
+  await act(async () => secondExample.click());
+  expect(slot.dataset.position).toBe('expanded');
+  expect(composer.value).not.toBe(firstPrompt);
+  const secondSweep = slot.querySelector('.om-sa-template-sweep');
+  expect(secondSweep).not.toBeNull();
+  expect(secondSweep).not.toBe(firstSweep);
+  expect(slot.querySelector('textarea')).toBe(composer);
+  const expandedDraft = composer.value;
+  await act(async () => composer.dispatchEvent(new Event('scroll')));
+  expect(slot.dataset.position).toBe('expanded');
+  for (const offset of [400, 350]) {
+    await act(async () => {
+      scroll.scrollTop = offset;
+      scroll.dispatchEvent(new Event('scroll'));
+    });
+    expect(slot.dataset.position).toBe('compact');
+    expect(document.activeElement).toBe(summary);
+    expect(summary.textContent).toContain(expandedDraft);
+    await act(async () => summary.click());
+    expect(slot.dataset.position).toBe('expanded');
+    expect(composer.value).toBe(expandedDraft);
+    expect(slot.querySelector('.om-sa-template-sweep')).toBe(secondSweep);
+  }
+  await act(async () => slot.querySelector<HTMLButtonElement>('.om-sa-dock-fold')!.click());
+  expect(document.activeElement).toBe(summary);
+  await act(async () => example.click());
+  expect(slot.dataset.position).toBe('expanded');
+  expect(scroll.scrollTop).toBe(350);
 
   const trigger = container.querySelector<HTMLButtonElement>('.om-sa-mode-param-trigger')!;
   await act(async () => trigger.click());
@@ -580,8 +658,9 @@ it('shows Chinese image controls and keeps the draft when switching creation mod
   await act(async () => audio.click());
   expect(onChangeRequestedMode).toHaveBeenCalledWith('audio');
   expect(container.querySelector('.om-sa-stream')?.getAttribute('data-mode')).toBe('audio');
-  expect(modeSelect.textContent).toBe('音频与音效');
-  expect(composer.value).toBe(draft);
+  expect(container.querySelector('[role="combobox"][aria-label="创作模式"]')?.textContent).toBe('音频与音效');
+  expect(container.querySelector('textarea')?.value).toBe(draft);
+  expect(container.querySelectorAll('.om-sa-composer-wrap')).toHaveLength(1);
 });
 
 it.each(['motion', 'media'] as const)('keeps the %s dropdown limited to video models and supports editable templates', async requestedMode => {
@@ -629,28 +708,30 @@ it.each(['motion', 'media'] as const)('keeps the %s dropdown limited to video mo
   });
   await flush();
 
-  const bar = container.querySelector('.om-sa-composer-top-bar')!;
-  const trigger = bar.querySelector<HTMLButtonElement>('.om-sa-composer-top-pill')!;
-  const label = () => trigger.querySelector('.om-sa-composer-top-pill-label')?.textContent;
+  const bar = container.querySelector('.om-sa-composer-tools > .om-sa-composer-model-picker')!;
+  const trigger = bar.querySelector<HTMLButtonElement>('.om-sa-mode-param-trigger')!;
+  const label = () => trigger.querySelector('.om-sa-mode-param-label')?.textContent;
   const parameters = () => container.querySelector('.om-sa-mode-param-trigger')?.textContent;
-  expect(bar.querySelectorAll('.om-sa-composer-top-pill')).toHaveLength(1);
-  expect(label()).toBe('Fixture Video');
-  expect(trigger.hasAttribute('data-active')).toBe(true);
+  expect(bar.querySelectorAll('.om-sa-mode-param-trigger')).toHaveLength(1);
+  expect(label()).toBe('Video · Fixture Video');
+  expect(trigger.hasAttribute('data-active')).toBe(false);
   expect(trigger.querySelector('.om-sa-mode-param-avatar .om-avatar')).toBeTruthy();
 
   await act(async () => trigger.click());
+  expect(trigger.hasAttribute('data-active')).toBe(true);
+  expect(document.querySelector('.om-sa-mode-model-popover h3')?.textContent).toBe('Video generation model');
   const options = [...document.querySelectorAll<HTMLButtonElement>('.om-sa-mode-model-row')];
   expect(options.map(option => option.querySelector('strong')?.textContent)).toEqual(['Auto (Recommended)', 'Alternate Video', 'Fixture Video']);
   expect(options[0].getAttribute('aria-selected')).toBe(String(requestedMode === 'media'));
 
   await act(async () => options[1].click());
-  expect(label()).toBe('Alternate Video');
+  expect(label()).toBe('Video · Alternate Video');
   expect(parameters()).toContain('5s');
 
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Attach workspace resources"]')!.click());
   await flush();
   await act(async () => document.querySelector<HTMLButtonElement>('.om-sa-resource-row')!.click());
-  expect(label()).toBe('Alternate Video');
+  expect(label()).toBe('Video · Alternate Video');
   expect(parameters()).toContain('30fps');
 });
 
@@ -673,6 +754,8 @@ it('displays active conversation, tool steps, approvals, and multi-tab Artifact 
     );
   });
   await flush();
+
+  expect(container.querySelector('.om-sa-stream > .om-sa-messages + .om-sa-composer-wrap textarea')).toBeTruthy();
 
   // Artifact Viewer stays closed by default on initial load / refresh and opens manually
   expect(document.querySelector('.om-sa-viewer')).toBeNull();
@@ -2008,7 +2091,8 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     await flush();
 
     // Verifies Game Studio hero, 6 genre strip buttons, top controls, and game market template cards
-    expect(container.textContent).toContain('Create your own game in minutes');
+    expect(container.querySelector('.om-sa-mode-hero-copy h2')?.textContent).toBe('Create a playable game in minutes');
+    expect(container.querySelector('.om-sa-mode-hero-copy p')).toBeNull();
     expect(container.querySelectorAll('.om-sa-game-genre-card').length).toBe(6);
     expect(container.querySelectorAll('.om-sa-game-showcase-card').length).toBeGreaterThan(0);
 
@@ -2774,6 +2858,9 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('The Little Prince: Star Journey');
 
+  const gameInput = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(gameInput.value).toBe(communityGames.find(game => game.id === 'community-little-prince')!.description);
+
   // Top fanned Hero carousel rotates smoothly via Next/Previous controls and side-card clicks
   const initialCenterLabel = container.querySelector('.om-sa-game-fan-item[data-slot="0"] .om-sa-game-fan-card')?.getAttribute('aria-label');
   const nextFanBtn = container.querySelector('.om-sa-game-fan-nav[data-side="next"]') as HTMLButtonElement;
@@ -2796,6 +2883,20 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   await act(async () => listCoverBtn.click());
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Remix ·');
+
+  const racingGame = communityGames.find(game => game.id === 'community-turbo-kart')!;
+  const racingCard = container.querySelector<HTMLButtonElement>(`.om-sa-game-tile-cover[aria-label="Remix: ${racingGame.title}"]`)!;
+  await act(async () => racingCard.click());
+  expect(gameInput.value).toBe(racingGame.description);
+  await act(async () => racingCard.click());
+  expect(gameInput.value).toBe('');
+  await act(async () => racingCard.click());
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(gameInput, 'Make the race three laps.');
+    gameInput.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => racingCard.click());
+  expect(gameInput.value).toBe('Make the race three laps.');
 
   const listPlayBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
   expect(listPlayBtn).toBeTruthy();

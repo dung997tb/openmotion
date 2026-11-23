@@ -406,10 +406,29 @@ function modelShortDescription(model: Model, t: (text: string) => string): strin
   return model.provider;
 }
 
-/**
- * Keeps model, generation route, and reference choices above the composer.
- */
-export function ModeComposerTopBar({
+const generationModelCopy = {
+  image: {
+    trigger: 'Image · {model}',
+    title: 'Image generation model',
+    description: 'Creates or edits images from your description or reference images.',
+  },
+  video: {
+    trigger: 'Video · {model}',
+    title: 'Video generation model',
+    description: 'Generates video clips from your description.',
+  },
+  audio: {
+    trigger: 'Audio · {model}',
+    title: 'Audio generation model',
+    description: 'Generates audio from a script or a description of the sound.',
+  },
+};
+
+export function hasGenerationModelPicker(modeId: SuperAgentCreationModeId | undefined) {
+  return modeId === 'image' || modeId === 'motion' || modeId === 'media' || modeId === 'audio';
+}
+
+export function ModeComposerOptionsBar({
   active = true,
   modeId,
   options,
@@ -429,7 +448,7 @@ export function ModeComposerTopBar({
   onOpenModelSettings: () => void;
 }) {
   const { t } = useI18n();
-  const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion' || modeId === 'audio');
+  const needsMediaCatalog = active && hasGenerationModelPicker(modeId);
   const { catalog } = useMediaCatalog(needsMediaCatalog);
   const [openMenu, setOpenMenu] = useState<
     | 'video-model'
@@ -484,21 +503,17 @@ export function ModeComposerTopBar({
         });
   }, [catalog?.models, providers]);
 
-  const renderFloatingModelPill = ({
+  const renderModelPicker = ({
     menuKey,
     modality,
     selectedId,
     modelsActive = true,
-    fallbackLabel,
-    title,
     onSelect,
   }: {
     menuKey: 'video-model' | 'image-model' | 'audio-model';
-    modality: Modality;
+    modality: keyof typeof generationModelCopy;
     selectedId: string;
     modelsActive?: boolean;
-    fallbackLabel: string;
-    title: string;
     onSelect: (id: string) => void;
   }) => {
     const list = getModelsFor(modality);
@@ -506,7 +521,9 @@ export function ModeComposerTopBar({
     const defaultRouteModel = (defaultRouteId ? list.find(item => item.id === defaultRouteId) : undefined) ?? list[0];
     const selectedModel = selectedId !== 'auto' ? list.find(item => item.id === selectedId) : undefined;
     const displayModel = selectedModel ?? defaultRouteModel;
-    const label = displayModel?.label ?? fallbackLabel;
+    const copy = generationModelCopy[modality];
+    const title = t(copy.title);
+    const label = t(copy.trigger, { model: displayModel?.label ?? t('Auto') });
     const autoSelected = modelsActive && selectedId === 'auto';
 
     return (
@@ -521,9 +538,8 @@ export function ModeComposerTopBar({
           <Button
             variant="plain"
             type="button"
-            className="om-sa-composer-top-pill"
-            data-active
-            data-open={openMenu === menuKey || undefined}
+            className="om-sa-mode-param-trigger"
+            data-active={openMenu === menuKey || undefined}
             disabled={disabled}
           >
             {displayModel ? (
@@ -541,16 +557,17 @@ export function ModeComposerTopBar({
             ) : (
               <RemixIcon name="add-line" size={13} />
             )}
-            <span className="om-sa-composer-top-pill-label">{label}</span>
-            <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            <span className="om-sa-mode-param-label">{label}</span>
+            <RemixIcon name="arrow-down-s-line" size={14} />
           </Button>
         }
       >
         <div className="om-sa-mode-menu">
-          <div className="om-sa-mode-menu-head">
-            <span className="om-sa-popover-label">{title}</span>
+          <header className="om-sa-model-menu-heading">
+            <h3>{title}</h3>
             <span className="om-sa-mode-menu-count">{list.length}</span>
-          </div>
+            <p>{t(copy.description)}</p>
+          </header>
           <div className="om-sa-mode-model-list" role="listbox" aria-label={title}>
             <Button
               variant="plain"
@@ -634,13 +651,11 @@ export function ModeComposerTopBar({
 
   if (modeId === 'motion' || modeId === 'media') {
     return (
-      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Video generation options')}>
-        {renderFloatingModelPill({
+      <div className="om-sa-composer-model-picker" role="group" aria-label={t(generationModelCopy.video.title)}>
+        {renderModelPicker({
           menuKey: 'video-model',
           modality: 'video',
           selectedId: options.videoModelId,
-          fallbackLabel: t('Auto'),
-          title: t('Video model'),
           modelsActive: modeId === 'motion' ? options.motionEngine === 'video-model' : options.mediaSubMode === 'video',
           onSelect: id => onChange(modeId === 'motion'
             ? { motionEngine: 'video-model', videoModelId: id }
@@ -652,13 +667,11 @@ export function ModeComposerTopBar({
 
   if (modeId === 'audio') {
     return (
-      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Audio model')}>
-        {renderFloatingModelPill({
+      <div className="om-sa-composer-model-picker" role="group" aria-label={t(generationModelCopy.audio.title)}>
+        {renderModelPicker({
           menuKey: 'audio-model',
           modality: 'audio',
           selectedId: options.audioModelId,
-          fallbackLabel: t('Audio model'),
-          title: t('Audio model'),
           onSelect: id => onChange({ audioModelId: id }),
         })}
       </div>
@@ -667,13 +680,11 @@ export function ModeComposerTopBar({
 
   if (modeId === 'image') {
     return (
-      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Image model')}>
-        {renderFloatingModelPill({
+      <div className="om-sa-composer-model-picker" role="group" aria-label={t(generationModelCopy.image.title)}>
+        {renderModelPicker({
           menuKey: 'image-model',
           modality: 'image',
           selectedId: options.imageModelId,
-          fallbackLabel: t('Image model'),
-          title: t('Image model'),
           onSelect: id => onChange({ imageModelId: id }),
         })}
       </div>
