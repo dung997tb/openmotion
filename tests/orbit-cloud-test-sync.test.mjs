@@ -258,6 +258,55 @@ test("retries HTTP 503 target_busy and succeeds on subsequent 202 response", asy
 	}
 });
 
+test("publication retries a lost connection or receipt with the same idempotency key and body", async (t) => {
+	const { dir } = await createDigestsFixture();
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const requests = [];
+	const retryDelays = [];
+	const disconnected = new TypeError("fetch failed", { cause: Object.assign(new Error(), { code: "ECONNRESET" }) });
+	const result = await publishCloudTestToOrbit({
+		digestsDir: dir,
+		env: baseEnv(),
+		getRemoteHead: () => SOURCE_SHA,
+		retryDelayMs: 1,
+		sleep: async ms => retryDelays.push(ms),
+		log: () => {},
+		fetchImpl: async (_url, request) => {
+			requests.push([request.headers["Idempotency-Key"], request.body]);
+			if (requests.length === 1) throw disconnected;
+			if (requests.length === 2) return { status: 202, text: async () => { throw disconnected; } };
+			return Response.json({ releaseId: "rel_retry", deploymentId: "dep_retry", status: "queued" }, { status: 202 });
+		},
+	});
+	assert.equal(result.deploymentId, "dep_retry");
+	assert.deepEqual(retryDelays, [1, 1]);
+	assert.deepEqual(requests, [requests[0], requests[0], requests[0]]);
+});
+
+test("publication bounds transport retries and fails immediately for a certificate error", async (t) => {
+	const { dir } = await createDigestsFixture();
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	for (const [code, expected, message] of [
+		["UND_ERR_CONNECT_TIMEOUT", 2, /after 2 attempts \(UND_ERR_CONNECT_TIMEOUT\)/],
+		["CERT_HAS_EXPIRED", 1, /fetch failed/],
+	]) {
+		let calls = 0;
+		await assert.rejects(() => publishCloudTestToOrbit({
+			digestsDir: dir,
+			env: baseEnv(),
+			getRemoteHead: () => SOURCE_SHA,
+			maxAttempts: 2,
+			sleep: async () => {},
+			log: () => {},
+			fetchImpl: async () => {
+				calls++;
+				throw new TypeError("fetch failed", { cause: Object.assign(new Error(), { code }) });
+			},
+		}), message);
+		assert.equal(calls, expected);
+	}
+});
+
 test("aborts 503 retry as skipped when remote head advances to a newer commit", async () => {
 	const { dir } = await createDigestsFixture();
 	try {
