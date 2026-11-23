@@ -11,6 +11,7 @@ import type { BlobMetadata, StoragePort } from '../contracts/storage.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { workspaces } from '../db/schema/auth.ts';
+import { idempotencyReceipts as receipts } from '../db/schema/jobs.ts';
 import {
   catalogTemplateFiles,
   catalogTemplates,
@@ -381,6 +382,7 @@ export interface ClonedProjectFile {
 }
 
 export interface CloneTemplateResult {
+  replayed?: true;
   projectId: string;
   sessionId: string;
   artifactId: string;
@@ -394,6 +396,44 @@ export interface CloneTemplateResult {
   historySeq: number;
   fileCount: number;
   files: ClonedProjectFile[];
+}
+
+/** Reserve the request before cloning so concurrent retries wait for the same commit. */
+async function cloneOnce(
+  tx: DbExecutor,
+  ctx: AuthContext,
+  options: CloneTemplateOptions,
+  requestId: string,
+  clone: (tx: DbExecutor) => Promise<CloneTemplateResult>,
+): Promise<CloneTemplateResult> {
+  const key = { workspaceId: ctx.workspaceId, scope: 'template:clone', requestId };
+  const inputHash = createHash('sha256').update(JSON.stringify([
+    ctx.userId, options.templateId.trim(), options.sessionId, options.title?.trim(), options.titleKey,
+    options.requirements, options.namingLanguage, options.locale, Boolean(options.activateWorkspace),
+  ])).digest('hex');
+  await tx.insert(receipts).values(asInsert(receipts, { ...key, inputHash, state: 'pending' }))
+    .onConflictDoNothing({ target: [receipts.workspaceId, receipts.scope, receipts.requestId] });
+  const where = and(eq(receipts.workspaceId, key.workspaceId), eq(receipts.scope, key.scope), eq(receipts.requestId, requestId));
+  const [prior] = await tx.select().from(receipts).where(where).for('update');
+  if (prior?.inputHash !== inputHash) {
+    throw new CloudError('REQUEST_ID_CONFLICT', 'This request already belongs to a different template clone', { status: 409, applied: false });
+  }
+  if (prior.responsePayload) {
+    const result = prior.responsePayload as unknown as Omit<CloneTemplateResult, 'files'>;
+    // The immutable baseline already holds the file list. Avoid storing a second manifest per clone.
+    const files = await tx.select({
+      path: projectVersionFiles.path, sha256: projectVersionFiles.sha256,
+      sizeBytes: projectVersionFiles.sizeBytes, mimeType: projectVersionFiles.mimeType,
+    }).from(projectVersionFiles).where(and(eq(projectVersionFiles.workspaceId, ctx.workspaceId),
+      eq(projectVersionFiles.versionId, result.versionId))).orderBy(asc(projectVersionFiles.path));
+    return { ...result, replayed: true, files: files.map(file => ({ ...file, blobScope: 'catalog', isText: isTextProjectPath(file.path) })) };
+  }
+  const result = await clone(tx);
+  const { files: _files, ...responsePayload } = result;
+  await tx.update(receipts).set(asUpdate(receipts, {
+    state: 'completed', resourceId: result.projectId, responsePayload, updatedAt: new Date(),
+  })).where(where);
+  return result;
 }
 
 export interface CatalogPort {
@@ -1369,7 +1409,8 @@ export class CatalogService implements CatalogPort {
       };
     };
 
-    const result = options.tx ? await executeClone(options.tx) : await this.db.transaction(executeClone);
+    const run = (tx: DbExecutor) => validatedRequestId ? cloneOnce(tx, ctx, options, validatedRequestId, executeClone) : executeClone(tx);
+    const result = options.tx ? await run(options.tx) : await this.db.transaction(run);
     this.logger?.info('Cloned catalog template zero-copy into workspace', {
       workspaceId: ctx.workspaceId,
       projectId: result.projectId,

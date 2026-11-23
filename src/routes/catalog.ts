@@ -396,7 +396,7 @@ export function createCatalogRoutes(deps: CatalogRoutesDeps): Hono<CatalogRouteE
         sessionId: cloned.sessionId,
         exportJob: null,
       },
-      201,
+      cloned.replayed ? 200 : 201,
     );
   };
 

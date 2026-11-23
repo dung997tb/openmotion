@@ -473,6 +473,35 @@ it('opens Motion templates inside the workspace and returns from the full librar
   expect(location.hash).toContain('t=12');
 });
 
+it('lists editable Motion projects without posters and appends later pages with their original template IDs', async () => {
+  const fallback = fetcher.getMockImplementation()!;
+  const firstId = 'motion-cms-first', secondId = 'motion-cms-later';
+  const pageOffsets: number[] = [];
+  fetcher.mockImplementation(async (input, init) => {
+    const url = new URL(input, location.origin);
+    if (!url.pathname.endsWith('/template-catalog') || url.searchParams.get('category') !== 'builtin')
+      return fallback(input, init);
+    expect(url.searchParams.get('covered')).not.toBe('true');
+    const offset = Number(url.searchParams.get('offset'));
+    pageOffsets.push(offset);
+    const id = offset === 0 ? firstId : secondId;
+    return Response.json({ items: [{ id, title: id, kind: 'prism', collection: 'example', hasHtmlProject: true, tags: [] }],
+      next: offset === 0 ? 8 : null, total: 9 });
+  });
+  await mount();
+  await click('Motion templates');
+  const cards = () => [...container.querySelectorAll<HTMLElement>('.om-studio-template-grid article')].map(card => card.dataset.templateId);
+  expect(cards()).toEqual([firstId]);
+  expect(container.querySelector('.om-gallery-poster-fallback')).toBeTruthy();
+  await click('More templates');
+  expect(pageOffsets).toEqual([0, 8]);
+  expect(cards()).toEqual([firstId, secondId]);
+  expect(container.querySelector('.om-shelf-more')).toBeNull();
+  const card = container.querySelector<HTMLButtonElement>(`article[data-template-id="${secondId}"] button`)!;
+  await act(async () => card.click());
+  expect(new URL(location.href).searchParams.get('template')).toBe(secondId);
+});
+
 it('restores Motion templates on reload and opens a project from its narrow workspace drawer', async () => {
   vi.stubGlobal('innerWidth', 800);
   history.replaceState(null, '', firstUrl.replace('#', '&page=motion#'));

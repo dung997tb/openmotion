@@ -222,6 +222,7 @@ interface TableStore {
   project_versions: RowRecord[];
   project_version_files: RowRecord[];
   project_history_entries: RowRecord[];
+  idempotency_receipts: RowRecord[];
   workspace_blobs: RowRecord[];
 }
 
@@ -389,6 +390,7 @@ class MockPgHarness {
     project_versions: [],
     project_version_files: [],
     project_history_entries: [],
+    idempotency_receipts: [],
     workspace_blobs: [],
   };
 
@@ -524,7 +526,7 @@ class MockPgHarness {
         // INSERT
         if (lower.startsWith('insert into ')) {
           const insertMatch = normalizedSql.match(
-            /^insert\s+into\s+"([^"]+)"\s*\(([^)]+)\)\s*values\s+(.+?)(?:\s+on\s+conflict\s+\(([^)]+)\)\s+do\s+update\s+set\s+(.+))?$/i,
+            /^insert\s+into\s+"([^"]+)"\s*\(([^)]+)\)\s*values\s+(.+?)(?:\s+on\s+conflict\s+\(([^)]+)\)\s+do\s+(?:nothing|update\s+set\s+(.+)))?$/i,
           );
           if (!insertMatch) {
             throw new Error(`MockPg unsupported INSERT: ${normalizedSql}`);
@@ -573,11 +575,12 @@ class MockPgHarness {
               }
             }
 
-            if (conflictCols && conflictSetRaw) {
+            if (conflictCols) {
               const existing = table.find((row) =>
                 conflictCols.every((c) => row[c] === record[c]),
               );
               if (existing) {
+                if (!conflictSetRaw) continue;
                 const assignments = splitTopLevelCommas(conflictSetRaw);
                 for (const assign of assignments) {
                   const m = assign.match(/^"([^"]+)"\s*=\s*(.+)$/);
@@ -1215,6 +1218,16 @@ describe('CatalogService Zero-Copy Cloning & Tenant Isolation', () => {
       title: 'My Welcome Clone',
       requestId: 'req_clone_1',
     });
+
+    const putCount = storage.putCalls;
+    const replay = await catalog.cloneTemplateToProject(ctxA, {
+      templateId: WELCOME_TEMPLATE_ID, title: 'My Welcome Clone', requestId: 'req_clone_1',
+    });
+    assert.deepEqual(replay, { ...cloned, replayed: true });
+    assert.equal(storage.putCalls, putCount);
+    await assert.rejects(() => catalog.cloneTemplateToProject(ctxA, {
+      templateId: WELCOME_TEMPLATE_ID, title: 'Different clone', requestId: 'req_clone_1',
+    }), { code: 'REQUEST_ID_CONFLICT' });
 
     assert.equal(cloned.templateId, WELCOME_TEMPLATE_ID);
     assert.equal(cloned.projectType, 'template');
