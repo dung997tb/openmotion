@@ -13,6 +13,12 @@
   },
   "include": [
     "src/**/*.ts",
-    "../shared/platform-host.ts"
+    "../shared/platform-host.ts",
+    "../shared/desktop-contract.ts",
+    "../shared/desktop-builtin-rules.ts",
+    "../shared/signed-config.ts",
+    "../shared/engine-command-contract.ts",
+    "../shared/desktop-auth-handoff.ts",
+    "../shared/connect-script-protocol.ts"
   ]
 }
