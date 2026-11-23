@@ -24,8 +24,8 @@ control for temporal coherence — the right trade for game sprites.
 | # | Stage | Tool | Output |
 |---|---|---|---|
 | 1 | Source image | manifest / user / `game-stylization.md` pipeline | character or object image |
-| 2 | Key-pose image | `openmotion_media_use` (discover) → `openmotion_assets_use` (`action: "generate"`, `modality: "image"`, pinned `referenceAssets`) | full-body pose at the action's mid/peak phase |
-| 3 | Animation video | `openmotion_media_use` (discover I2V model) → `openmotion_assets_use` (`action: "generate"`, `modality: "video"`, pinned key-pose reference) | short clip (e.g. 4–5 s, 720p), explicit AR = key-pose ratio |
+| 2 | Key-pose image | `openmotion_media_use` (discover) → `openmotion_assets_use` (`action: "generate"`, `modality: "image"`, pinned `references`) | full-body pose at the action's mid/peak phase |
+| 3 | Animation video | `openmotion_media_use` (discover I2V model with positive `maxInputImages`) → `openmotion_assets_use` (`action: "generate"`, `modality: "video"`, pinned key-pose `references`) | short clip (e.g. 4–5 s, 720p), matching key-pose aspect ratio per model schema |
 | 4 | Raw frames | ffmpeg | every frame of the video as PNG |
 | 5 | Frame selection | local script | `frame_count` frames (2–64, default 25), evenly spaced, first + last always kept |
 | 6 | Alpha | configured transparent-background edit or local chroma-keying, per frame | transparent-background PNGs |
@@ -71,7 +71,7 @@ action.
 - `cast` / `effect` → energy gathered at the hands / pre-release
 - flames, water, props → the shape at its most typical, not its extreme
 
-**How:** after discovery via `openmotion_media_use` (`action: "models"`, `modality: "image"`) and spending approval, call `openmotion_assets_use` (`action: "generate"`, `modality: "image"`) with a configured reference-capable model, the source image pinned in `referenceAssets`, the STYLE FORMULA verbatim in the prompt, plus the pose instruction. The prompt MUST demand:
+**How:** after discovery via `openmotion_media_use` (`action: "models"`, `modality: "image"`) and spending approval, call `openmotion_assets_use` (`action: "generate"`, `modality: "image"`) with a configured image-edit model (`supportsImageReference: true`), the source image pinned in `references`, the STYLE FORMULA verbatim in the prompt, plus the pose instruction. The prompt MUST demand:
 
 - *full body / full object in frame* — head to feet visible;
 - *empty margin above and below the subject* — the motion needs headroom and
@@ -105,20 +105,16 @@ Prompt shape (pass only schema-supported parameters for the chosen model):
 
 | Param | Guidance |
 |---|---|
-| model | discovered I2V model from `openmotion_media_use` (`modality: "video"`, `supportsImageReference: true`) |
+| model | discovered video model from `openmotion_media_use` (`modality: "video"`) with positive `maxInputImages` (or `mode: "image-to-video"`; reserve `supportsImageReference: true` for image-model editing) |
 | duration | shortest supported cycle (typically 4–5 s) |
 | resolution | 720p (or model's clean standard tier) |
-| aspect_ratio | **= the key-pose image's ratio, passed EXPLICITLY on every call** — never omitted |
-| start frame | pinned `assetId`/`versionId` of the stage-2 key pose — always |
+| ratio / aspect_ratio | follow the discovered model's first-frame ratio contract (see below: omit `parameters.ratio` or pass `"adaptive"` for first-frame-adaptive models; pass the key-pose ratio explicitly only when the model requires an explicit ratio) |
+| start frame | pinned `assetId`/`versionId` of the stage-2 key pose in `references` — always |
 | end frame | the SAME image **only if supported by the model AND the action is a loop** |
 
-**Aspect ratio is read off the key-pose file and passed explicitly** (a 1:1
-pose → `aspect_ratio: "1:1"`, and so on). "Auto" does not exist as a real
-parameter value: omitting the parameter does NOT mean "follow the input" —
-it silently falls back to the TOOL's default (shipped failure: an unset
-ratio on a 1:1 key pose came back as 3:4). A mismatched ratio reframes the
-input, eats the top/bottom margins the key pose was built with, and is the
-cheapest way to violate the "subject is never cropped" hard rule.
+**Match the discovered model's first-frame ratio contract:**
+- **First-frame-adaptive models** (such as Cloud/account `wan-2.7` or `doubao-seedance-2-5-260628`, whose schema derives output geometry from the input image): **omit `parameters.ratio` or set `parameters.ratio: "adaptive"`**. Passing a fixed ratio like `"16:9"` or `"1:1"` conflicts with the first-frame input and is rejected by parameter resolution.
+- **Explicit-ratio models** (providers that do not derive geometry from the input image and expose a fixed aspect-ratio parameter): read the ratio off the key-pose image and pass it explicitly (a 1:1 pose → `"1:1"`) so the model does not fall back to a mismatched default ratio (such as 3:4) that reframes the input and crops top/bottom margins.
 
 **Why start = end for loops:** the video model is forced to return to the
 exact starting pose, so frame 1 and the final frame are identical and the
@@ -164,7 +160,7 @@ what to do and stays silent about everything else. Two parts:
 direction-neutral. The ONLY exception: the requested action IS a turn —
    then it is a one-shot (start frame only, `once`), never a loop.
 
-Prompt shape (submit via `openmotion_assets_use` `action: "generate"`, `modality: "video"`, pinning the key pose in `referenceAssets`, setting `generate_audio: false` when supported, and explicitly passing the key-pose aspect ratio):
+Prompt shape (submit via `openmotion_assets_use` `action: "generate"`, `modality: "video"`, pinning the key pose in `references`, setting `generate_audio: false` when supported, and following the discovered model's ratio contract — omitting `parameters.ratio` or using `"adaptive"` for first-frame-adaptive models, or passing the key-pose ratio explicitly only when the model requires one):
 
 ```text
 <one action>. Camera locked, no camera movement, no zoom, subject stays fully in frame, plain static background. The character performs ONLY this action; nothing else happens. The subject keeps facing the same direction for the entire video.

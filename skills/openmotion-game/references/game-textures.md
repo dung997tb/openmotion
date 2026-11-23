@@ -7,7 +7,7 @@
 > The pipeline may be entered at any phase (only the seam fix, or only maps from an
 > existing tile). Discover configured image-edit models via `openmotion_media_use`
 > (`action: "models"`, `modality: "image"`), obtain spending approval, and generate
-> through `openmotion_assets_use` (`action: "generate"` with pinned `referenceAssets`
+> through `openmotion_assets_use` (`action: "generate"` with pinned `references`
 > imported via `action: "import"`). Embed the game's STYLE FORMULA
 > (see `game-stylization.md`) in every generation prompt.
 >
@@ -78,7 +78,7 @@ working folder). Then:
   reference. For structured materials (bricks, planks, tiles) append the
   alignment add-on; for references that are already tiled previews append
   the anti-repetition add-on; for stock images append the watermark add-on.
-- Obtain spending approval, then submit via `openmotion_assets_use` (`action: "generate"`, `modality: "image"`, full discovered `model` ID, `prompt` containing the EDIT template + STYLE FORMULA, `referenceAssets: [{ assetId, versionId }]`, square `1:1` aspect ratio per the model's supported schema, and a stable `requestId`). Poll with `action: "status"` until complete and inspect with `action: "read"`.
+- Obtain spending approval, then submit via `openmotion_assets_use` (`action: "generate"`, `modality: "image"`, full discovered `model` ID, `prompt` containing the EDIT template + STYLE FORMULA, `references: [{ assetId, versionId }]`, square `1:1` aspect ratio per the model's supported schema, and a stable `requestId`). Poll with `action: "status"` until complete and inspect with `action: "read"`.
 - Inspect the result **next to the reference**. Check: same material, same colors, nothing added or removed,
   no restyle. If the model restyled — one retry with a stronger "do not restyle"
   clause. If a structured seam survives the retry, switch to the
@@ -182,7 +182,7 @@ pipeline.
 ## Prompt templates
 
 All prompts go to the discovered reference-capable image model (`1:1` square ratio), with the
-reference attached as a pinned Workspace Asset (`referenceAssets`, never a raw external URL).
+reference attached as a pinned Workspace Asset (`references`, never a raw external URL).
 
 ## 1. Seamless edit (Phase 1)
 
