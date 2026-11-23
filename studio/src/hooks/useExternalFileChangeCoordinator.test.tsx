@@ -20,7 +20,7 @@ import {
 
 type HotHandler = (payload?: unknown) => void;
 type CoordinatorOptions = Omit<Parameters<typeof useExternalFileChangeCoordinator>[0], "refreshFileViews"> & {
-  refreshFileViews: (payload: unknown) => Promise<boolean> | void;
+  refreshFileViews: (payload: unknown) => Promise<boolean> | "unaffected" | void;
 };
 function acceptingFileViews(options: CoordinatorOptions) {
   return {
@@ -128,6 +128,19 @@ describe("external file change coordinator", () => {
     await act(async () => refuseFirst(false));
     expect(options.reloadPreview).not.toHaveBeenCalled();
     await send("three");
+    expect(options.reloadPreview).toHaveBeenCalledExactlyOnceWith("index.html");
+  });
+
+  it("keeps an owed preview fallback when a later file only changes another composition", async () => {
+    let decline!: (applied: boolean) => void;
+    const refreshFileViews = vi.fn()
+      .mockReturnValueOnce(new Promise<boolean>(resolve => { decline = resolve; }))
+      .mockReturnValue("unaffected");
+    const { options } = await mountCoordinator({ refreshFileViews });
+    await act(async () => handler?.({ path: "index.html" }));
+    await act(async () => handler?.({ path: "unrelated.html" }));
+    expect(options.reloadPreview).not.toHaveBeenCalled();
+    await act(async () => decline(false));
     expect(options.reloadPreview).toHaveBeenCalledExactlyOnceWith("index.html");
   });
 

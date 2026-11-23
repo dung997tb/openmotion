@@ -1,5 +1,6 @@
 import { useCallback, useMemo, type MutableRefObject } from "react";
-import { changedFilePaths, readFileChangeAffectsPreview } from "../components/editor/manualEditsParsing";
+import { changedFilePaths, readFileChangeAffectsPreview, readFileTreeChanged } from "../components/editor/manualEditsParsing";
+import { isUnrelatedPreviewHtmlChange } from "../player/lib/previewHtmlSources";
 import { syncPeerComposition } from "./syncPeerComposition";
 import { createRemoteFileReader } from "./remoteFileReads";
 import { knownCompositionSource } from "../player/lib/compositionPosterSource";
@@ -71,17 +72,21 @@ export function useStudioExternalFileChanges({
     [bumpThumbnailRevisions, onOutsideChange],
   );
   const filesForChange = useMemo(() => createRemoteFileReader(), []);
-  const refreshFileViews = useCallback((payload: unknown, acceptChange: () => void) => {
+  const refreshFileViews = useCallback((payload: unknown, acceptChange: (unaffectedPreview?: string) => void) => {
     const activePath = activeCompPath ?? masterCompPath;
     const previous = projectId && activePath
       ? knownCompositionSource(usePlayerStore.getState(), projectId, activePath)
       : null;
     // Capture the displayed source first. All readers below belong to the new thumbnail revision.
-    acceptChange();
-    if (!projectId) return;
     const paths = changedFilePaths(payload);
+    const affectsPreview = readFileChangeAffectsPreview(payload);
+    const unrelated = affectsPreview && isUnrelatedPreviewHtmlChange(
+      previewIframeRef.current, projectId, activePath, paths, readFileTreeChanged(payload),
+    );
+    acceptChange(unrelated ? activePath ?? undefined : undefined);
+    if (!projectId) return;
     const read = filesForChange(projectId, payload);
-    const preview = readFileChangeAffectsPreview(payload)
+    const preview = unrelated ? "unaffected" as const : affectsPreview
       ? syncPeerComposition(projectId, activePath, paths, read, previewIframeRef, previous)
       : undefined;
     for (const path of paths ?? ["."]) {

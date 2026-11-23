@@ -54,7 +54,7 @@ interface ExternalFileChangeCoordinatorOptions {
   discardPendingChanges: () => void;
   reloadPreview: (path?: string) => void;
   /** Accept synchronously after capturing the displayed source and before opening the next revision. */
-  refreshFileViews: (payload: unknown, acceptChange: () => void) => Promise<boolean> | void;
+  refreshFileViews: (payload: unknown, acceptChange: (unaffectedPreview?: string) => void) => Promise<boolean> | "unaffected" | void;
   persistConflictSnapshot: (projectId: string, conflict: StudioFileConflictError) => Promise<void>;
   persistFailureSnapshot?: (
     projectId: string,
@@ -324,10 +324,12 @@ export function useExternalFileChangeCoordinator({
   const deliverOwed = useCallback(
     (owed: unknown, accept = true) => {
       const path = readStudioFileChangePath(owed) ?? ".";
-      const affectsPreview = readFileChangeAffectsPreview(owed);
-      const inPlace = refreshFileViews(owed, () => {
-        if (accept) onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(owed));
+      const inPlace = refreshFileViews(owed, unaffectedPreview => {
+        const compositions = readFileChangeAffectedCompositions(owed);
+        if (accept) onAcceptedPersistedFileChange(path, unaffectedPreview && compositions
+          ? compositions.filter(item => item !== unaffectedPreview) : compositions);
       });
+      const affectsPreview = readFileChangeAffectsPreview(owed) && inPlace !== "unaffected";
       logReload(affectsPreview ? "reload" : "file-tree only", {
         path,
         by: "external-change coordinator",

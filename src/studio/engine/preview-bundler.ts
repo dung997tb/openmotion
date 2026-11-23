@@ -1,4 +1,5 @@
 import { formatFileVersion } from '../etag.ts';
+import { staticPreviewHtmlSources } from './preview-html-sources.ts';
 import { bridgeDocumentTags, previewBuildBusyScript } from './preview-bridge.ts';
 import { posix } from 'node:path';
 import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
@@ -560,7 +561,7 @@ function applyStudioPreviewAugmentations(
   html: string,
   project: VirtualProjectReader,
   activeCompositionPath: string,
-  options: { capture: boolean; gsapBaseUrl: string; bridgeOrigin?: string; studioOrigin?: string; canRebindTiming?: boolean; variables?: Record<string, unknown> | null },
+  options: { capture: boolean; gsapBaseUrl: string; bridgeOrigin?: string; studioOrigin?: string; canRebindTiming?: boolean; htmlSources?: string[]; variables?: Record<string, unknown> | null },
 ): string {
   let out = repairCodeExtrudeMaterial(html);
 
@@ -581,7 +582,7 @@ function applyStudioPreviewAugmentations(
   if (options.bridgeOrigin) {
     const versions = Object.fromEntries(project.listFiles().filter(file => /\.html?$/i.test(file.path))
       .map(file => [file.path, file.blobScope === 'patch' ? formatFileVersion(file.blobScope, file.sha256) : file.sha256]));
-    const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions, options.studioOrigin, options.canRebindTiming);
+    const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions, options.studioOrigin, options.canRebindTiming, options.htmlSources);
     out = injectTagsAtHeadStart(out, tags.preload);
     out = insertBeforeCloseTag(out, 'body', tags.script) ?? out + tags.script;
   }
@@ -688,6 +689,10 @@ export async function bundlePreviewInMemory(
     !project.exists(STUDIO_MOTION_PATH) && !project.exists(STUDIO_MANUAL_EDITS_PATH) &&
     canRebindDocumentTiming(document, runtimeUrl));
 
+  const htmlSources = options.bridgeOrigin && !options.capture && entryFile === 'index.html' &&
+    !Object.keys(options.variables ?? {}).length && !project.exists(STUDIO_MOTION_PATH) && !project.exists(STUDIO_MANUAL_EDITS_PATH)
+    ? staticPreviewHtmlSources(entryFile, document, runtimeUrl) : undefined;
+
   // Inline local <link rel="stylesheet"> stylesheets from VirtualProjectReader.
   for (const el of [...document.querySelectorAll('link[rel="stylesheet"]')]) {
     const href = el.getAttribute('href');
@@ -722,10 +727,15 @@ export async function bundlePreviewInMemory(
       if (!isRelativeUrl(srcPath)) return null;
       const resolved = resolveVirtualPath(sourceDir, decodedUrlPath(srcPath));
       if (!resolved) return null;
+      htmlSources?.add(resolved);
       const html = project.readText(resolved);
       return html === null ? null : scopeNestedSources(project, resolved, sourceDir, ensureHfIds(html));
     },
-    parseHtml: parseHTMLContent,
+    parseHtml: html => {
+      const doc = parseHTMLContent(html);
+      htmlSources?.inspect(doc);
+      return doc;
+    },
     hostIdentityMap,
     rewriteInlineStyles: true,
     assetExists: (assetPath) => {
@@ -743,7 +753,7 @@ export async function bundlePreviewInMemory(
     parseHostVariables: parseHostVariableValues,
     buildScopeSelector: (compId) => cssAttributeSelector('data-composition-id', compId),
     scriptErrorLabel: '[HyperFrames] composition script error:',
-    onMissingComposition: () => {},
+    onMissingComposition: () => htmlSources?.markUnknown(),
   });
 
   // Inline local classic <script src="..."> scripts from VirtualProjectReader.
@@ -884,6 +894,7 @@ export async function bundlePreviewInMemory(
     bridgeOrigin: options.bridgeOrigin,
     studioOrigin: options.studioOrigin,
     canRebindTiming,
+    htmlSources: htmlSources?.paths(),
   });
   html = addScenePartsManifest(html, [`meta[name="${PROJECT_SIGNATURE_META}"]`]);
   return html;
