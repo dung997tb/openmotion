@@ -23,6 +23,7 @@ import {
   resolveCapabilityCatalog,
 } from '../shared/capability-registry.ts';
 import { findLandingScene } from '../shared/studio-catalog.ts';
+import { isStandaloneSpaPath } from '../shared/spa-routes.ts';
 import { imageFeatures, imageFeaturePrompt } from '../shared/image-features.ts';
 import { videoFeatures, videoFeaturePrompt } from '../shared/video-features.ts';
 
@@ -471,15 +472,19 @@ test('Studio assetOperation(generate) enforces capability preflight, findLanding
     assert.equal(schema.properties.shots.default, '3');
     assert.match(buildCapabilityPrompt('multi-shot', 'A lunar rover', {}), /a cohesive 3-shot narrative sequence/);
 
-    // 2. findLandingScene excludes coming_soon capabilities by default and admits live overrides
+    // 2. findLandingScene and isStandaloneSpaPath exclude coming_soon capabilities by default and admit live overrides
     assert.equal(findLandingScene('inpainting'), undefined);
     assert.equal(findLandingScene('upscale-4k'), undefined);
+    assert.equal(isStandaloneSpaPath('/create/inpainting'), false);
+    assert.equal(isStandaloneSpaPath('/create/upscale-4k'), false);
     const withLiveUpscale = resolveCapabilityCatalog([
       { id: 'upscale-4k', status: 'live', channels: { gui: true, mcp: true } },
     ]);
     const liveScene = findLandingScene('upscale-4k', withLiveUpscale);
     assert.equal(liveScene?.id, 'upscale-4k');
     assert.equal(liveScene?.modality, 'image');
+    assert.equal(isStandaloneSpaPath('/create/upscale-4k', '', '', withLiveUpscale), true);
+    assert.equal(isStandaloneSpaPath('/create/inpainting', '', '', withLiveUpscale), false);
 
     // 3. openmotion_assets_use(action="generate") executes full capability preflight before gateway.submit
     const gateway = gatewayFor(store);
@@ -517,15 +522,37 @@ test('Studio assetOperation(generate) enforces capability preflight, findLanding
         /CAPABILITY_COMING_SOON/,
       );
 
-      // 3b. GUI-disabled capability rejected before submit
+      // 3b. Channel enforcement distinguishes GUI vs MCP callers
+      // shot-image is live with channels: { gui: false, mcp: true }: rejected on GUI, accepted on MCP
+      await assert.rejects(
+        api.call(
+          'openmotion_assets_use',
+          {
+            action: 'generate',
+            requestId: 'preflight-channel-gui',
+            modality: 'image',
+            model: 'codex:image-generation',
+            prompt: 'First frame',
+            capabilityId: 'shot-image',
+          },
+          undefined,
+          { channel: 'gui' },
+        ),
+        /CAPABILITY_CHANNEL_DISABLED/,
+      );
+      await saveCapabilityOverrides(store, [
+        { id: 'expand-image', status: 'live', channels: { gui: true, mcp: false } },
+      ]);
+      // expand-image overridden to GUI-only: rejected on MCP channel
       await assert.rejects(
         api.call('openmotion_assets_use', {
           action: 'generate',
-          requestId: 'preflight-channel',
+          requestId: 'preflight-channel-mcp',
           modality: 'image',
           model: 'codex:image-generation',
-          prompt: 'First frame',
-          capabilityId: 'shot-image',
+          prompt: 'Expand borders',
+          capabilityId: 'expand-image',
+          references: [ref1],
         }),
         /CAPABILITY_CHANNEL_DISABLED/,
       );
@@ -590,6 +617,24 @@ test('Studio assetOperation(generate) enforces capability preflight, findLanding
       );
 
       assert.equal(submitCalls, 0, 'gateway.submit must never be invoked when capability preflight fails');
+
+      // 3f. MCP-only live capability (shot-image) succeeds on default MCP channel
+      const origRun = gateway.submit.bind(gateway);
+      gateway.submit = (async (input: any) => {
+        submitCalls += 1;
+        return { id: '00000000-0000-4000-8000-000000000099', state: 'queued', modality: input.modality, capabilityId: input.capabilityId };
+      }) as typeof gateway.submit;
+      const mcpAccepted = await api.call('openmotion_assets_use', {
+        action: 'generate',
+        requestId: 'preflight-mcp-shot-image',
+        modality: 'image',
+        model: 'codex:image-generation',
+        prompt: 'Opening shot frame',
+        capabilityId: 'shot-image',
+      });
+      assert.equal(mcpAccepted.job.capabilityId, 'shot-image');
+      assert.equal(submitCalls, 1);
+      void origRun;
     } finally {
       gateway.submit = origSubmit;
     }

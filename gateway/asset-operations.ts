@@ -8,7 +8,13 @@ import { requireNativeRuntime } from '../scripts/npm-runtime.mjs';
 import { pluginRoot } from '../hyperframes.ts';
 import { readLibraryAsset } from './asset-read.ts';
 
-export async function assetOperation(store: WorkspaceStore, args: any, importProject?: (input: any, options?: { receiptName: string; reusePinnedContent: boolean }) => Promise<any>, tracking?: OmTracking) {
+export async function assetOperation(
+  store: WorkspaceStore,
+  args: any,
+  importProject?: (input: any, options?: { receiptName: string; reusePinnedContent: boolean }) => Promise<any>,
+  tracking?: OmTracking,
+  channel: 'gui' | 'mcp' = 'mcp',
+) {
   const library = new AssetLibrary(store), gateway = gatewayFor(store, tracking);
   if (args.action === 'list') return library.list(args);
   if (args.action === 'read') return readLibraryAsset(library, args);
@@ -24,7 +30,7 @@ export async function assetOperation(store: WorkspaceStore, args: any, importPro
   if (args.action === 'generate') {
     if (!args.requestId || !args.model) throw new Error('Choose a model and supply a stable requestId');
     if (typeof args.capabilityId === 'string' && args.capabilityId.trim()) {
-      await preflightAssetCapabilityGenerate(store, args, tracking);
+      await preflightAssetCapabilityGenerate(store, args, tracking, channel);
     }
     await requireNativeRuntime(pluginRoot, 'media');
     const job = await gateway.submit({ modality: args.modality, prompt: args.prompt, model: args.model, mode: args.mode,

@@ -142,11 +142,13 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   }, [routerLocation, routeCapabilities]);
   useEffect(() => scheduleIdleRouteWarmup(), []);
   useEffect(() => {
-    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }), true);
+    const capabilities = routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities;
+    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }, capabilities), true);
   }, [page]);
   const navigatePage = useCallback((patch: Partial<WorkspacePage>, replace = false, mode?: 'from-page' | 'keep') => {
     const current = new URL(location.href);
-    const target = new URL(workspacePageHref(current.href, patch), current);
+    const capabilities = routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities;
+    const target = new URL(workspacePageHref(current.href, patch, capabilities), current);
     initializeWorkspaceHistory();
     const index = workspaceHistoryIndex();
     const origin = !replace && index !== null && target.href !== current.href ? { href: current.href, index } : null;
@@ -222,7 +224,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const closeStandalonePreview = () => {
     // A card pushes one preview entry. Copied links start a new history session at index zero.
     if (onNavigate && (workspaceHistoryIndex() ?? 0) > 0) history.back();
-    else writeWorkspaceHistory(workspacePageHref(location.href, { template: null }), true);
+    else writeWorkspaceHistory(workspacePageHref(location.href, { template: null }, routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities), true);
   };
   const collectionSkillTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {

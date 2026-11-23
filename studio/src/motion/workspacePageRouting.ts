@@ -109,8 +109,12 @@ export function readWorkspacePage(search: string, hash = '', pathname = '', capa
     template: query.get('template') || null };
 }
 
-export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): string {
-  const url = new URL(href), current = readWorkspacePage(url.search, url.hash, url.pathname), page = { ...current, ...patch };
+export function workspacePageHref(
+  href: string,
+  patch: Partial<WorkspacePage>,
+  capabilities?: readonly CapabilityDefinition[],
+): string {
+  const url = new URL(href), current = readWorkspacePage(url.search, url.hash, url.pathname, capabilities), page = { ...current, ...patch };
   const originalPathname = url.pathname;
   const pathProject = editorProjectIdFromPath(originalPathname);
   const rawRetainedProject = pathProject ?? url.searchParams.get('project') ?? parseProjectIdFromHash(url.hash);

@@ -285,13 +285,15 @@ async function invokePhase1WithTracking(
   store: WorkspaceStore,
   context: Service,
   originUrl: string,
-  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string },
+  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string; channel?: unknown },
 ) {
   if (!context.runtimeRoot) throw new Error('RUNTIME_NOT_READY');
   const phase1 = ensurePhase1(store, context, originUrl);
   const host = validHostContext(data.trackingHost) ? data.trackingHost : unknownHost;
+  const channel: 'gui' | 'mcp' = data.channel === 'gui' ? 'gui' : 'mcp';
   let result = await phase1.call(data.name, data.arguments ?? {}, host, {
     attributeEntry: Object.hasOwn(data, 'trackingHost'),
+    channel,
   });
   if (host.host_agent !== 'unknown' && context.tracking?.enabled() && (result.previewUrl || result.previewHandoff)) {
     const hosts = context.trackingHosts ??= new Map();
@@ -471,7 +473,11 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       if (projectHeader !== undefined && projectHeader !== id) return json(res, 400, { error: 'PROJECT_SCOPE_MISMATCH' });
       store = store.forProject(id);
     }
-    if (context.ensureStudio && !isStandaloneSpaPath(url.pathname, url.search) && (isSpaRoutePath(url.pathname) || url.pathname.startsWith('/sessions/'))) {
+    const needsRuntimeCaps = url.pathname.startsWith('/create/') || url.searchParams.get('page') === 'create';
+    const routeCapabilities = needsRuntimeCaps
+      ? await loadCapabilityCatalog(store.workspaceStore ?? store).catch(() => undefined)
+      : undefined;
+    if (context.ensureStudio && !isStandaloneSpaPath(url.pathname, url.search, '', routeCapabilities) && (isSpaRoutePath(url.pathname) || url.pathname.startsWith('/sessions/'))) {
       const projectId = editorProjectIdFromPath(url.pathname) ?? url.searchParams.get('project');
       const sessionId = url.searchParams.get('session');
       if (projectId !== null) {
