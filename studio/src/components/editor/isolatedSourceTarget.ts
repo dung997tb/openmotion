@@ -18,6 +18,6 @@ export function isIsolatedSourceTarget(target: IsolatedSourceTarget | null): tar
 }
 
 export function isolatedPatchTarget({ sourceFile, sha256, elementId, hfId }: IsolatedSourceTarget) {
-  const target = typeof hfId === "string" && hfId ? { hfId } : { id: elementId };
+  const target = { ...(hfId && { hfId }), ...(elementId && { id: elementId }) };
   return { sourceFile, ifMatch: '"sha256:' + sha256 + '"', target };
 }

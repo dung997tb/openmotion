@@ -1,5 +1,6 @@
-import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { isolatedEditVersion } from "../utils/isolatedEditVersions";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { submitStudioCommands } from "../utils/projectEditBatch";
 import { studioFileContentVersion } from "../utils/studioFileVersion";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
@@ -153,6 +154,23 @@ export function useDomEditPersist({
         coalesceMs: options?.coalesceMs,
       };
       const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs) : undefined;
+      if (cloudCommand && selection.isolatedTarget && !options?.prepareContent && !options?.validateContent) {
+        const command = { ...cloudCommand, compositionPath: targetPath };
+        const versions = { [targetPath]: '"sha256:' + selection.isolatedTarget.sha256 + '"' };
+        const result = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
+          if (projectIdRef.current !== expectedProjectId) throw new Error("Active project changed before the edit could be saved");
+          if (options?.shouldSave && !options.shouldSave()) return null;
+          return submitStudioCommands(pid, [command], versions, writeHistory);
+        });
+        if (!result) return;
+        const changed = result.changedPaths.includes(targetPath);
+        if (changed) {
+          await editHistory.recordEdit({ ...history, files: {} });
+          forceReloadSdkSession?.();
+          reloadPreview();
+        }
+        return { sourceFile: targetPath, version: result.versions[targetPath], changed };
+      }
       const writeEdit = writeHistory
         ? (path: string, content: string, expected?: string, command?: ProjectEditCommand) => writeProjectFile(path, content, expected, command, writeHistory)
         : writeProjectFile;

@@ -1,3 +1,4 @@
+import { submitStudioCommands } from "../utils/projectEditBatch";
 import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
@@ -22,6 +23,7 @@ import {
   batchesAreInlineStyleOnly,
   formatUnsafeFieldList,
   patchElementBatches,
+  isolatedCanvasCommands,
 } from "./useDomEditCommitsHelpers";
 import type { CutoverResult } from "../utils/sdkCutover";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
@@ -171,7 +173,15 @@ export function useDomEditCommits({
             writeProjectFile,
             sourceFiles,
             async () => {
-              const atomicResult = await patchElementBatches(pid, batches, cloudHistoryForWrite(writeProjectFile, options));
+              const history = cloudHistoryForWrite(writeProjectFile, options);
+              const intent = history && isolatedCanvasCommands(batches);
+              if (intent) {
+                const result = await submitStudioCommands(pid, intent.commands, intent.versions, history);
+                const changed = result.changedPaths.length > 0;
+                if (changed) await editHistory.recordEdit({ ...options, files: {} });
+                return { allMatched: true, changed };
+              }
+              const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
                 atomicResult.files
                   .filter((result) => result.changed)
