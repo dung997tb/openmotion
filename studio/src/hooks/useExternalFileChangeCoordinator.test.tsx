@@ -873,7 +873,7 @@ describe("external file change coordinator", () => {
     expect(reloadPreview).not.toHaveBeenCalled();
     expect(refreshFileViews).not.toHaveBeenCalled();
     expect(onAcceptedPersistedFileChange).toHaveBeenCalledOnce();
-    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null);
+    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null, undefined);
   });
 
   it("accepts a matching content echo without a write token and suppresses every reload", async () => {
@@ -894,7 +894,7 @@ describe("external file change coordinator", () => {
     );
 
     expect(onAcceptedPersistedFileChange).toHaveBeenCalledOnce();
-    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null);
+    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null, undefined);
     expect(drainPendingChanges).not.toHaveBeenCalled();
     expect(reloadPreview).not.toHaveBeenCalled();
     expect(refreshFileViews).not.toHaveBeenCalled();
@@ -1224,12 +1224,12 @@ describe("external file change coordinator", () => {
       markStudioWriteToken("studio-write-1");
 
       await act(async () =>
-        handler?.(sseDelivery({ path: "index.html", version: "v2", writeToken: "studio-write-1" })),
+        handler?.(sseDelivery({ path: "index.html", fileVersions: { "index.html": "v2" }, writeToken: "studio-write-1" })),
       );
 
       expect(drainPendingChanges).not.toHaveBeenCalled();
       expect(reloadPreview).not.toHaveBeenCalled();
-      expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null);
+      expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null, { token: "studio-write-1", version: "v2" });
     });
 
     it("hands the server's affected compositions to the thumbnail refresh", async () => {
@@ -1257,6 +1257,15 @@ describe("external file change coordinator", () => {
         ["index.html", "compositions/scene-a.html"],
       );
       expect(onAcceptedPersistedFileChange).toHaveBeenNthCalledWith(2, "assets/logo.svg", null);
+    });
+
+    it("does not treat a delayed self echo as the latest source after a peer event", async () => {
+      const onAcceptedPersistedFileChange = vi.fn();
+      await mountCoordinator({ onAcceptedPersistedFileChange });
+      markStudioWriteToken("delayed-self");
+      await act(async () => handler?.(sseDelivery({ path: "index.html", fileVersions: { "index.html": "v3" }, writeToken: "another-tab" })));
+      await act(async () => handler?.(sseDelivery({ path: "index.html", fileVersions: { "index.html": "v2" }, writeToken: "delayed-self" })));
+      expect(onAcceptedPersistedFileChange).toHaveBeenLastCalledWith("index.html", null, undefined);
     });
 
     it("reloads once when one watcher event reaches two subscribers", async () => {

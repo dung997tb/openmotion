@@ -4,8 +4,10 @@ import { knownCompositionSource, MAX_POSTER_SOURCE_LENGTH, rememberCompositionPo
 import { syncPeerComposition } from "../../hooks/syncPeerComposition";
 import { openTimelineSource } from "./peerTimeline";
 import { loadCloudCompositionPoster } from "./cloudCompositionPoster";
+import { expectPosterFileVersion, readPosterFile } from "./posterFileRead";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
 import { confirmedSource, forgetSource, rememberSource } from "../../utils/confirmedTextSources";
+import { invalidateLatestSourceWrite, markStudioWriteToken } from "../../utils/studioFileVersion";
 import { usePlayerStore } from "../store/playerStore";
 
 vi.mock("./thumbnailImageDecoder", () => ({ decodeImageThumbnail: vi.fn() }));
@@ -16,6 +18,70 @@ const original = usePlayerStore.getState();
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); usePlayerStore.setState(original); });
 
 describe("cloud composition representatives", () => {
+  it("reuses only the confirmed bytes for this generation, independent of echo/receipt order", async () => {
+    const project = "poster-echo", path = "compositions/scene.html", epoch = 4;
+    const store = usePlayerStore.getState();
+    usePlayerStore.setState({ timelineProjectId: project, timelineSessionEpoch: epoch, thumbnailRevisions: {} });
+    const fetch = vi.fn(async () => Response.json({ content: "from server" }));
+    vi.stubGlobal("fetch", fetch);
+    const read = (revision: number, pid = project, file = path) => readPosterFile(pid, epoch, file, revision, signal());
+    try {
+      rememberSource(project, path, { content: "one", version: "v1" });
+      markStudioWriteToken("local-1");
+      expectPosterFileVersion(project, path, { token: "local-1", version: "v1" });
+      expect(await read(0)).toBe("one");
+      store.bumpThumbnailRevisions([path], path);
+      markStudioWriteToken("local-2");
+      expectPosterFileVersion(project, path, { token: "local-2", version: "v2" });
+      rememberSource(project, path, { content: "two", version: "v2" });
+      expect(await read(1)).toBe("two");
+      expect(fetch).not.toHaveBeenCalled();
+
+      // A failed or superseded local write has no matching confirmed source.
+      store.bumpThumbnailRevisions([path], path);
+      markStudioWriteToken("local-3");
+      expectPosterFileVersion(project, path, { token: "local-3", version: "v3" });
+      expect(await read(2)).toBe("from server");
+      expect(await read(2, "other-project")).toBe("from server");
+      expect(await read(0, project, "other.html")).toBe("from server");
+      // A reconnect discards the echo proof, even when the bytes are still cached.
+      store.bumpThumbnailRevisions(null, ".");
+      expect(await read(3)).toBe("from server");
+      expect(fetch).toHaveBeenCalledTimes(4);
+    } finally {
+      forgetSource(project, path);
+    }
+  });
+
+  it("revalidates a late self echo after another editor writes or the project is reopened", async () => {
+    const project = "poster-order", path = "intro.html", token = "local-late";
+    const store = usePlayerStore.getState();
+    store.beginTimelineSession(project);
+    const read = () => {
+      const s = usePlayerStore.getState();
+      return readPosterFile(project, s.timelineSessionEpoch, path, s.thumbnailRevisions[path] ?? 0, signal());
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: "newer on server" })));
+    try {
+      markStudioWriteToken(token);
+      rememberSource(project, path, { content: "old local", version: "v2" });
+      invalidateLatestSourceWrite();
+      store.bumpThumbnailRevisions([path], path);
+      expect(await read()).toBe("newer on server");
+      store.bumpThumbnailRevisions([path], path);
+      expectPosterFileVersion(project, path, { token, version: "v2" });
+      expect(await read()).toBe("newer on server");
+
+      markStudioWriteToken("prior-session");
+      store.beginTimelineSession("other");
+      store.beginTimelineSession(project);
+      expectPosterFileVersion(project, path, { token: "prior-session", version: "v2" });
+      expect(await read()).toBe("newer on server");
+    } finally {
+      forgetSource(project, path);
+    }
+  });
+
   it("uses the exact current-project manifest without reading HTML", async () => {
     usePlayerStore.setState({ previewBooted: true, timelineProjectId: "p", timelineSessionEpoch: 4,
       elements: [{ id: "photo", tag: "img", src: "../assets/hero.png", sourceFile: "compositions/scene.html", start: 0, duration: 4, track: 0 }] });
