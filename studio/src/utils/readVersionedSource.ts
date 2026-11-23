@@ -17,13 +17,16 @@ export async function readVersionedSource(url: string, base?: SourceVersion): Pr
     'If-None-Match': base.version,
     [TEXT_PATCH_BASE_HEADER]: base.version,
   } });
+  // A compression proxy may weaken the HTTP validator without changing the version in the JSON.
+  // Compare the opaque read tag; keep the authoritative source version for subsequent writes.
+  const readTag = response.headers.get('etag')?.replace(/^W\//, '');
   if (response.status === 304) {
-    return response.headers.get('etag') === base.version ? sourceResponse(base, response.headers) : studioApiFetch(url);
+    return readTag === base.version ? sourceResponse(base, response.headers) : studioApiFetch(url);
   }
   if (!response.ok || response.headers.get('X-OpenMotion-Representation') !== 'text-patch') return response;
   try {
     const body = await response.json();
-    if (body.baseVersion === base.version && /^"patch:[a-f0-9]{64}"$/.test(body.version) && body.version === response.headers.get('etag')) {
+    if (body.baseVersion === base.version && /^"patch:[a-f0-9]{64}"$/.test(body.version) && body.version === readTag) {
       const content = applyTextPatch(base.content, body.patch);
       return sourceResponse({ content, version: body.version }, response.headers);
     }
