@@ -1,6 +1,11 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  designScenarios,
+  findDesignScenario,
+  type DesignScenarioId,
+} from '../../../shared/design-project';
+import {
   gameGenres,
   gameSettings,
   gameStyles,
@@ -10,6 +15,7 @@ import {
   type GameStyle,
 } from '../../../shared/game-contract';
 import type { Modality, Model } from '../../../shared/gateway';
+import type { SuperAgentResourceAttachment } from '../../../shared/super-agent';
 import { Popover } from '../components/ui/Popover';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
@@ -28,8 +34,43 @@ import { useMediaCatalog } from '../motion/useMediaCatalog';
 import type { SuperAgentCreationModeId, SuperAgentModeSpec } from './ModeResourceShowcase';
 import type { ResourceCategoryTab } from './ResourcePickerDialog';
 
+export type DesignModeFormat = 'html' | 'image';
+export type DesignViewportTarget = 'responsive' | 'desktop' | 'tablet' | 'mobile';
+export type ImageDesignScene = 'text-to-image' | 'image-edit' | 'remove-background' | 'relight' | 'character';
+export type ImageDesignStyle = 'auto' | 'photorealistic' | 'editorial' | '3d-render' | 'illustration' | 'poster' | 'minimalist';
+export type ImageDesignLighting = 'auto' | 'studio' | 'natural' | 'dramatic' | 'neon' | 'warm';
+export type ImageDesignBackground = 'auto' | 'transparent' | 'solid';
+export type HtmlDesignStyle = 'auto' | 'minimal' | 'editorial' | 'saas' | 'bento' | 'brutalist';
+export type HtmlDesignTheme = 'auto' | 'light' | 'dark' | 'both';
+export type HtmlDesignInteraction = 'single' | 'multi-screen' | 'interactive';
+export type HtmlDesignMotion = 'subtle' | 'expressive';
+export type DocPaperFormat = 'a4' | 'letter' | 'report';
+export type WebCloneFidelity = 'faithful' | 'brand-remix' | 'responsive-refresh';
+export type LiveArtifactView = 'kpi' | 'charts' | 'table';
+export type WebglSceneType = 'particles' | 'product-3d' | 'shader' | 'hero';
+export type WebglInteractionType = 'pointer' | 'orbit' | 'scroll';
+
 export type ModeComposerOptions = {
-  // Image Artwork
+  // Design Studio (unified Image design + HTML Design)
+  designFormat: DesignModeFormat;
+  designScenario: DesignScenarioId;
+  designViewport: DesignViewportTarget;
+  designStyle: HtmlDesignStyle;
+  designTheme: HtmlDesignTheme;
+  designInteraction: HtmlDesignInteraction;
+  designMotion: HtmlDesignMotion;
+  deckSpeakerNotes: boolean;
+  docPaper: DocPaperFormat;
+  cloneFidelity: WebCloneFidelity;
+  liveDataView: LiveArtifactView;
+  webglScene: WebglSceneType;
+  webglInteraction: WebglInteractionType;
+
+  // Image Artwork / Image design
+  imageScene: ImageDesignScene;
+  imageStyle: ImageDesignStyle;
+  imageLighting: ImageDesignLighting;
+  imageBackground: ImageDesignBackground;
   imageModelId: string;
   imageAspect: 'auto' | '1:1' | '16:9' | '9:16' | '4:3' | '3:4' | '3:2';
   imageQuality: 'standard' | 'high';
@@ -89,6 +130,24 @@ export function isPlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation
 }
 
 export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
+  designFormat: 'image',
+  designScenario: 'prototype',
+  designViewport: 'responsive',
+  designStyle: 'auto',
+  designTheme: 'auto',
+  designInteraction: 'interactive',
+  designMotion: 'subtle',
+  deckSpeakerNotes: true,
+  docPaper: 'a4',
+  cloneFidelity: 'faithful',
+  liveDataView: 'kpi',
+  webglScene: 'particles',
+  webglInteraction: 'pointer',
+
+  imageScene: 'text-to-image',
+  imageStyle: 'auto',
+  imageLighting: 'auto',
+  imageBackground: 'auto',
   imageModelId: 'auto',
   imageAspect: '16:9',
   imageQuality: 'standard',
@@ -173,12 +232,234 @@ const CODING_FOCUS_LABELS: Record<ModeComposerOptions['codingFocus'], string> = 
   review: 'Code review',
 };
 
+const DESIGN_VIEWPORT_LABELS: Record<DesignViewportTarget, string> = {
+  responsive: 'Responsive',
+  desktop: 'Desktop',
+  tablet: 'Tablet',
+  mobile: 'Mobile',
+};
+
+export const IMAGE_SCENE_CHOICES: readonly {
+  id: ImageDesignScene;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  { id: 'text-to-image', label: 'Text to image', icon: 'image-line', description: 'Generate original posters, hero visuals & artwork' },
+  { id: 'image-edit', label: 'Image edit', icon: 'edit-line', description: 'Modify, restyle, or refine an attached reference image' },
+  { id: 'remove-background', label: 'Remove background', icon: 'scissors-line', description: 'Isolate a crisp subject with transparent or clean backdrop' },
+  { id: 'relight', label: 'Relight', icon: 'flashlight-line', description: 'Change lighting mood, direction & atmosphere cleanly' },
+  { id: 'character', label: 'Character', icon: 'group-line', description: 'Keep character identity consistent across poses & scenes' },
+];
+
+const IMAGE_STYLE_LABELS: Record<ImageDesignStyle, string> = {
+  auto: 'Auto',
+  photorealistic: 'Photorealistic',
+  editorial: 'Editorial',
+  '3d-render': '3D Render',
+  illustration: 'Illustration',
+  poster: 'Poster',
+  minimalist: 'Minimalist',
+};
+
+const IMAGE_LIGHTING_LABELS: Record<ImageDesignLighting, string> = {
+  auto: 'Auto',
+  studio: 'Studio',
+  natural: 'Natural',
+  dramatic: 'Dramatic',
+  neon: 'Neon',
+  warm: 'Warm',
+};
+
+const IMAGE_BACKGROUND_LABELS: Record<ImageDesignBackground, string> = {
+  auto: 'Auto',
+  transparent: 'Transparent',
+  solid: 'Clean solid',
+};
+
+const HTML_DESIGN_STYLE_LABELS: Record<HtmlDesignStyle, string> = {
+  auto: 'Auto',
+  minimal: 'Minimal',
+  editorial: 'Editorial',
+  saas: 'SaaS Modern',
+  bento: 'Bento',
+  brutalist: 'Brutalist',
+};
+
+const HTML_DESIGN_THEME_LABELS: Record<HtmlDesignTheme, string> = {
+  auto: 'Auto',
+  light: 'Light',
+  dark: 'Dark',
+  both: 'Light & Dark',
+};
+
+const HTML_DESIGN_INTERACTION_LABELS: Record<HtmlDesignInteraction, string> = {
+  single: 'Single view',
+  'multi-screen': 'Multi-screen',
+  interactive: 'Interactive app',
+};
+
+const HTML_DESIGN_MOTION_LABELS: Record<HtmlDesignMotion, string> = {
+  subtle: 'Subtle',
+  expressive: 'Expressive',
+};
+
+const DOC_PAPER_LABELS: Record<DocPaperFormat, string> = {
+  a4: 'A4 Portrait',
+  letter: 'Letter',
+  report: 'Visual Report',
+};
+
+const CLONE_FIDELITY_LABELS: Record<WebCloneFidelity, string> = {
+  faithful: 'Faithful clone',
+  'brand-remix': 'Brand remix',
+  'responsive-refresh': 'Responsive refresh',
+};
+
+const LIVE_DATA_VIEW_LABELS: Record<LiveArtifactView, string> = {
+  kpi: 'KPI Dashboard',
+  charts: 'Charts & Filters',
+  table: 'Table & Drilldown',
+};
+
+const WEBGL_SCENE_LABELS: Record<WebglSceneType, string> = {
+  particles: 'Particle field',
+  'product-3d': '3D Product stage',
+  shader: 'Fluid shader',
+  hero: 'Interactive hero',
+};
+
+const WEBGL_INTERACTION_LABELS: Record<WebglInteractionType, string> = {
+  pointer: 'Pointer',
+  orbit: 'Orbit',
+  scroll: 'Scroll',
+};
+
+export const DESIGN_VIEWPORT_CHOICES: readonly {
+  id: DesignViewportTarget;
+  label: string;
+  icon: string;
+  badge: string;
+  description: string;
+}[] = [
+  {
+    id: 'responsive',
+    label: 'Responsive',
+    icon: 'layout-line',
+    badge: 'Fluid',
+    description: 'Fluid layout across desktop & mobile',
+  },
+  {
+    id: 'desktop',
+    label: 'Desktop',
+    icon: 'computer-line',
+    badge: '1440px',
+    description: '1440px widescreen desktop canvas',
+  },
+  {
+    id: 'tablet',
+    label: 'Tablet',
+    icon: 'tablet-line',
+    badge: '820×1180',
+    description: '820×1180 tablet viewport',
+  },
+  {
+    id: 'mobile',
+    label: 'Mobile',
+    icon: 'smartphone-line',
+    badge: '390×844',
+    description: '390×844 mobile phone frame',
+  },
+];
+
+export function designScenarioOptionsPatch(scenario: DesignScenarioId): Partial<ModeComposerOptions> {
+  if (scenario === 'mobile-app') {
+    return { designFormat: 'html', designScenario: scenario, designViewport: 'mobile' };
+  }
+  if (scenario === 'deck') {
+    return { designFormat: 'html', designScenario: scenario, deckFormat: 'slides' };
+  }
+  if (scenario === 'document') {
+    return { designFormat: 'html', designScenario: scenario, deckFormat: 'document' };
+  }
+  return { designFormat: 'html', designScenario: scenario, designViewport: 'responsive' };
+}
+
+export function buildDesignHiddenDirective(options: ModeComposerOptions): string {
+  if (options.designFormat === 'image') {
+    const extras: string[] = [];
+    if (options.imageScene !== 'text-to-image') extras.push(`scene="${options.imageScene}"`);
+    if (options.imageModelId !== 'auto') extras.push(`model="${options.imageModelId}"`);
+    if (options.imageAspect !== 'auto') extras.push(`aspectRatio="${options.imageAspect}"`);
+    if (options.imageQuality === 'high') extras.push('quality="high"');
+    if (options.imageCount > 1) extras.push(`count=${options.imageCount}`);
+    const artNotes: string[] = [];
+    if (options.imageStyle !== 'auto') artNotes.push(`style=${IMAGE_STYLE_LABELS[options.imageStyle]}`);
+    if (options.imageLighting !== 'auto') artNotes.push(`lighting=${IMAGE_LIGHTING_LABELS[options.imageLighting]}`);
+    if (options.imageBackground !== 'auto') artNotes.push(`background=${IMAGE_BACKGROUND_LABELS[options.imageBackground]}`);
+    return `Design Studio Image mode: generate or edit the visual asset using openmotion_assets_use(action="generate", modality="image"${extras.length ? `, ${extras.join(', ')}` : ''})${artNotes.length ? ` with ${artNotes.join(', ')}` : ''}, poll status if queued, and present the completed image in the Artifact Viewer via openmotion_present_artifact(kind="asset-image", assetId=..., versionId=...).`;
+  }
+
+  const refUrl = options.webReferenceUrl.trim();
+  const detailNotes: string[] = [];
+  if (options.designStyle !== 'auto') detailNotes.push(`style=${HTML_DESIGN_STYLE_LABELS[options.designStyle]}`);
+  if (options.designTheme !== 'auto') detailNotes.push(`theme=${HTML_DESIGN_THEME_LABELS[options.designTheme]}`);
+  if (options.designScenario === 'prototype' || options.designScenario === 'mobile-app') {
+    detailNotes.push(`scope=${HTML_DESIGN_INTERACTION_LABELS[options.designInteraction]}`);
+    detailNotes.push(`motion=${HTML_DESIGN_MOTION_LABELS[options.designMotion]}`);
+  } else if (options.designScenario === 'deck') {
+    detailNotes.push(options.deckSpeakerNotes ? 'include speaker notes' : 'omit speaker notes');
+  } else if (options.designScenario === 'document') {
+    detailNotes.push(`pageFormat=${DOC_PAPER_LABELS[options.docPaper]}`);
+  } else if (options.designScenario === 'web-clone') {
+    detailNotes.push(`rebuildMode=${CLONE_FIDELITY_LABELS[options.cloneFidelity]}`);
+  } else if (options.designScenario === 'live-artifact') {
+    detailNotes.push(`dataView=${LIVE_DATA_VIEW_LABELS[options.liveDataView]}`);
+  } else if (options.designScenario === 'webgl') {
+    detailNotes.push(`webglScene=${WEBGL_SCENE_LABELS[options.webglScene]}`);
+    detailNotes.push(`interaction=${WEBGL_INTERACTION_LABELS[options.webglInteraction]}`);
+  }
+  return `Design Studio HTML mode (scenario="${options.designScenario}"): read openmotion://workflow/design/start and the scenario guide via openmotion_design_catalog if needed, create or update an editable HTML/CSS/JS project via openmotion_design_project(action="create", scenario="${options.designScenario}") and openmotion_design_edit(action="write")${detailNotes.length ? ` (${detailNotes.join(', ')})` : ''}${refUrl ? `, inspect reference URL ${refUrl} when adapting layout/brand` : ''}, and finish by calling openmotion_present_artifact(kind="design-project", projectId=...) so it opens in the Artifact Viewer.`;
+}
+
 export function getModeComposerPlaceholder(
   mode: SuperAgentModeSpec | null,
   options: ModeComposerOptions,
   t: (text: string) => string,
 ): string {
   if (!mode) return t('Ask Super Agent to build a game, website, video, deck, or asset…');
+  if (mode.id === 'design') {
+    if (options.designFormat === 'image') {
+      switch (options.imageScene) {
+        case 'image-edit':
+          return t('Attach a reference image and describe the edits, restyling, or details to change…');
+        case 'remove-background':
+          return t('Attach an image and describe the subject to isolate or new backdrop to use…');
+        case 'relight':
+          return t('Attach a photo and describe the target lighting mood, direction, and color tone…');
+        case 'character':
+          return t('Describe the character pose, outfit, and scene while keeping identity consistent…');
+        default:
+          return t('Describe the poster, illustration, product visual, or image edit you want to generate…');
+      }
+    }
+    switch (options.designScenario) {
+      case 'prototype':
+        return t('Describe the website, landing page, or interactive web prototype you want to build…');
+      case 'mobile-app':
+        return t('Describe the mobile app flows, screens, and navigation you want to prototype…');
+      case 'deck':
+        return t('Describe the slide deck topic, key narrative, and slide count…');
+      case 'document':
+        return t('Describe the document, resume, or visual report you want to create…');
+      case 'web-clone':
+        return t('Paste a website URL or describe the page layout you want to rebuild in editable HTML…');
+      case 'live-artifact':
+        return t('Describe the live data dashboard, metrics, and interactive filters driven by data.json…');
+      case 'webgl':
+        return t('Describe the interactive WebGL shader, 3D stage, or particle scene you want to build…');
+    }
+  }
   if (mode.id === 'coding') {
     if (options.codingFocus === 'debug') return t('Describe the bug, stack trace, or failing behavior to investigate and fix…');
     if (options.codingFocus === 'refactor') return t('Describe the module or code pattern to refactor cleanly…');
@@ -222,7 +503,50 @@ export function formatModePromptPrefix(
     return found ? `${found.label} (${found.id})` : id;
   };
 
-  if (mode.id === 'image') {
+  if (mode.id === 'design') {
+    if (options.designFormat === 'image') {
+      parts.push('Mode: Design Studio · Image Artwork');
+      const sceneMeta = IMAGE_SCENE_CHOICES.find(item => item.id === options.imageScene);
+      if (sceneMeta) parts.push(`Scene: ${sceneMeta.label}`);
+      const modelLabel = findModelLabel(options.imageModelId);
+      if (modelLabel) parts.push(`Image Model: ${modelLabel}`);
+      if (options.imageStyle !== 'auto') parts.push(`Style: ${IMAGE_STYLE_LABELS[options.imageStyle]}`);
+      if (options.imageLighting !== 'auto') parts.push(`Lighting: ${IMAGE_LIGHTING_LABELS[options.imageLighting]}`);
+      if (options.imageBackground !== 'auto') parts.push(`Background: ${IMAGE_BACKGROUND_LABELS[options.imageBackground]}`);
+      if (options.imageAspect !== 'auto') parts.push(`Aspect: ${options.imageAspect}`);
+      if (options.imageQuality === 'high') parts.push('Quality: High / 2K');
+      if (options.imageCount > 1) parts.push(`Count: ${options.imageCount} variations`);
+    } else {
+      const scenario = findDesignScenario(options.designScenario) ?? designScenarios[0];
+      parts.push('Mode: Design Studio · HTML Design');
+      parts.push(`Module: ${scenario.label} (scenario=${scenario.id})`);
+      if (scenario.id === 'deck') {
+        parts.push('Format: Slides (16:9)');
+        if (options.deckSlides !== 'auto') parts.push(`Length: ${options.deckSlides} slides`);
+        parts.push(`Density: ${DECK_DENSITY_LABELS[options.deckDensity]}`);
+        parts.push(`Speaker Notes: ${options.deckSpeakerNotes ? 'Included' : 'None'}`);
+      } else if (scenario.id === 'document') {
+        parts.push(`Format: ${DOC_PAPER_LABELS[options.docPaper]}`);
+        parts.push(`Density: ${DECK_DENSITY_LABELS[options.deckDensity]}`);
+      } else {
+        parts.push(`Viewport: ${DESIGN_VIEWPORT_LABELS[options.designViewport]}`);
+        if (scenario.id === 'prototype' || scenario.id === 'mobile-app') {
+          parts.push(`Scope: ${HTML_DESIGN_INTERACTION_LABELS[options.designInteraction]}`);
+          parts.push(`Motion: ${HTML_DESIGN_MOTION_LABELS[options.designMotion]}`);
+        } else if (scenario.id === 'web-clone') {
+          parts.push(`Rebuild: ${CLONE_FIDELITY_LABELS[options.cloneFidelity]}`);
+        } else if (scenario.id === 'live-artifact') {
+          parts.push(`Data View: ${LIVE_DATA_VIEW_LABELS[options.liveDataView]}`);
+        } else if (scenario.id === 'webgl') {
+          parts.push(`Scene: ${WEBGL_SCENE_LABELS[options.webglScene]}`);
+          parts.push(`Controls: ${WEBGL_INTERACTION_LABELS[options.webglInteraction]}`);
+        }
+      }
+      if (options.designStyle !== 'auto') parts.push(`Style: ${HTML_DESIGN_STYLE_LABELS[options.designStyle]}`);
+      if (options.designTheme !== 'auto') parts.push(`Theme: ${HTML_DESIGN_THEME_LABELS[options.designTheme]}`);
+      if (options.webReferenceUrl.trim()) parts.push(`Reference URL: ${options.webReferenceUrl.trim()}`);
+    }
+  } else if (mode.id === 'image') {
     parts.push('Mode: Image Artwork');
     const modelLabel = findModelLabel(options.imageModelId);
     if (modelLabel) parts.push(`Image Model: ${modelLabel}`);
@@ -303,6 +627,7 @@ export function ModeComposerTopBar({
   active = true,
   modeId,
   options,
+  attachments,
   disabled,
   onChange,
   onCatalogModelsChange,
@@ -312,6 +637,7 @@ export function ModeComposerTopBar({
   active?: boolean;
   modeId: SuperAgentCreationModeId;
   options: ModeComposerOptions;
+  attachments?: SuperAgentResourceAttachment[];
   disabled?: boolean;
   onChange: (patch: Partial<ModeComposerOptions>) => void;
   onCatalogModelsChange?: (models: Model[]) => void;
@@ -319,7 +645,13 @@ export function ModeComposerTopBar({
   onOpenModelSettings: () => void;
 }) {
   const { t } = useI18n();
-  const needsMediaCatalog = active && (modeId === 'image' || modeId === 'media' || modeId === 'motion' || modeId === 'audio');
+  const needsMediaCatalog = active && (
+    modeId === 'image'
+    || modeId === 'media'
+    || modeId === 'motion'
+    || modeId === 'audio'
+    || (modeId === 'design' && options.designFormat === 'image')
+  );
   const { catalog } = useMediaCatalog(needsMediaCatalog);
   const [openMenu, setOpenMenu] = useState<
     | 'video-model'
@@ -327,6 +659,15 @@ export function ModeComposerTopBar({
     | 'audio-model'
     | 'import'
     | 'coding-workdir'
+    | 'design-format'
+    | 'design-module'
+    | 'design-viewport'
+    | 'design-deck'
+    | 'design-style'
+    | 'design-image-scene'
+    | 'design-image-style'
+    | 'design-image-aspect'
+    | 'design-image-quality'
     | 'game-genre'
     | 'game-style'
     | 'game-setting'
@@ -352,6 +693,10 @@ export function ModeComposerTopBar({
   useEffect(() => {
     setOpenMenu(null);
   }, [modeId]);
+
+  useEffect(() => {
+    setOpenMenu(null);
+  }, [options.designFormat]);
 
   useEffect(() => {
     if (catalog?.models && onCatalogModelsChange) {
@@ -404,6 +749,7 @@ export function ModeComposerTopBar({
         onOpenChange={next => setOpenMenu(next ? menuKey : null)}
         side="top"
         align="start"
+        initialFocus={false}
         aria-label={title}
         className="om-sa-mode-popover om-sa-mode-model-popover"
         trigger={
@@ -517,6 +863,1007 @@ export function ModeComposerTopBar({
       </Popover>
     );
   };
+
+  if (modeId === 'design') {
+    const isHtml = options.designFormat === 'html';
+    const activeScenario = findDesignScenario(options.designScenario) ?? designScenarios[0];
+    const activeViewport = DESIGN_VIEWPORT_CHOICES.find(v => v.id === options.designViewport) ?? DESIGN_VIEWPORT_CHOICES[0];
+    const attachedBrandKits = (attachments ?? []).filter(item => item.kind === 'brand-kit');
+    const brandKitLabel = attachedBrandKits.length === 1
+      ? attachedBrandKits[0].title
+      : attachedBrandKits.length > 1
+        ? `${t('Brand Kit')} (${attachedBrandKits.length})`
+        : t('Brand Kit');
+    const hasUrl = Boolean(options.webReferenceUrl.trim());
+    const urlShortLabel = hasUrl
+      ? options.webReferenceUrl.trim().replace(/^https?:\/\//, '').slice(0, 26)
+      : activeScenario.id === 'web-clone'
+        ? t('Reference URL')
+        : t('Import from…');
+
+    const renderReferenceUrlPill = (includeBrandKitLink: boolean) => (
+      <Popover
+        open={openMenu === 'import'}
+        onOpenChange={next => setOpenMenu(next ? 'import' : null)}
+        side="top"
+        align="start"
+        aria-label={t('Reference URL')}
+        className="om-sa-mode-popover"
+        trigger={
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-composer-top-pill"
+            data-active={hasUrl || openMenu === 'import' || undefined}
+            data-open={openMenu === 'import' || undefined}
+            disabled={disabled}
+          >
+            <RemixIcon name="global-line" size={13} />
+            <span className="om-sa-composer-top-pill-label">{urlShortLabel}</span>
+            <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+          </Button>
+        }
+      >
+        <div className="om-sa-mode-menu">
+          <div className="om-sa-mode-field">
+            <span className="om-sa-popover-label">{t('Reference website URL')}</span>
+            <div className="om-sa-mode-url-row">
+              <input
+                type="url"
+                className="om-sa-mode-url-input"
+                value={urlDraft}
+                placeholder="https://example.com"
+                onChange={event => setUrlDraft(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onChange({ webReferenceUrl: urlDraft.trim() });
+                    setOpenMenu(null);
+                  }
+                }}
+              />
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-popover-pill"
+                data-active
+                onClick={() => {
+                  onChange({ webReferenceUrl: urlDraft.trim() });
+                  setOpenMenu(null);
+                }}
+              >
+                {t('Apply')}
+              </Button>
+              {hasUrl && (
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  onClick={() => {
+                    setUrlDraft('');
+                    onChange({ webReferenceUrl: '' });
+                    setOpenMenu(null);
+                  }}
+                >
+                  {t('Clear')}
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="om-sa-model-menu-foot">
+            {includeBrandKitLink && (
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-popover-link-row"
+                onClick={() => {
+                  setOpenMenu(null);
+                  onOpenResourcePicker('brand-kit');
+                }}
+              >
+                <RemixIcon name="palette-line" size={15} />
+                <span>{t('Attach Brand Kit')}</span>
+                <RemixIcon name="arrow-right-up-line" size={14} />
+              </Button>
+            )}
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-popover-link-row"
+              onClick={() => {
+                setOpenMenu(null);
+                onOpenResourcePicker('design-template');
+              }}
+            >
+              <RemixIcon name="layout-line" size={15} />
+              <span>{t('Attach Design Template')}</span>
+              <RemixIcon name="arrow-right-up-line" size={14} />
+            </Button>
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-popover-link-row"
+              onClick={() => {
+                setOpenMenu(null);
+                onOpenResourcePicker('skills');
+              }}
+            >
+              <RemixIcon name="book-open-line" size={15} />
+              <span>{t('Attach Design Skill')}</span>
+              <RemixIcon name="arrow-right-up-line" size={14} />
+            </Button>
+          </div>
+        </div>
+      </Popover>
+    );
+
+    const renderBrandKitPill = () => (
+      <Button
+        variant="plain"
+        type="button"
+        className="om-sa-composer-top-pill"
+        data-active={attachedBrandKits.length > 0 || undefined}
+        disabled={disabled}
+        onClick={() => {
+          setOpenMenu(null);
+          onOpenResourcePicker('brand-kit');
+        }}
+      >
+        <RemixIcon name="palette-line" size={13} />
+        <span className="om-sa-composer-top-pill-label">{brandKitLabel}</span>
+      </Button>
+    );
+
+    const slidesLabel = options.deckSlides === 'auto' ? t('Auto') : options.deckSlides;
+    const docFormatLabel = DOC_PAPER_LABELS[options.docPaper];
+    const activeImageScene = IMAGE_SCENE_CHOICES.find(item => item.id === options.imageScene) ?? IMAGE_SCENE_CHOICES[0];
+    const attachedImageAssets = (attachments ?? []).filter(item => item.kind === 'asset' && item.modality === 'image');
+    const refImageLabel = attachedImageAssets.length === 1
+      ? attachedImageAssets[0].title
+      : attachedImageAssets.length > 1
+        ? `${t('Reference')} (${attachedImageAssets.length})`
+        : t('Reference');
+    const imageMoodParts = [
+      options.imageStyle !== 'auto' ? t(IMAGE_STYLE_LABELS[options.imageStyle]) : null,
+      options.imageLighting !== 'auto' ? t(IMAGE_LIGHTING_LABELS[options.imageLighting]) : null,
+      options.imageBackground !== 'auto' ? t(IMAGE_BACKGROUND_LABELS[options.imageBackground]) : null,
+    ].filter(Boolean) as string[];
+    const imageMoodSummary = imageMoodParts.length ? imageMoodParts.slice(0, 2).join(' · ') : t('Style & Mood');
+    const htmlStyleParts = [
+      options.designStyle !== 'auto' ? t(HTML_DESIGN_STYLE_LABELS[options.designStyle]) : null,
+      options.designTheme !== 'auto' ? t(HTML_DESIGN_THEME_LABELS[options.designTheme]) : null,
+    ].filter(Boolean) as string[];
+    const htmlStyleSummary = htmlStyleParts.length ? htmlStyleParts.join(' · ') : t('Style & Theme');
+
+    const htmlModuleOptionsSummary = (() => {
+      if (activeScenario.id === 'webgl') {
+        return `${t(WEBGL_SCENE_LABELS[options.webglScene])} · ${t(WEBGL_INTERACTION_LABELS[options.webglInteraction])}`;
+      }
+      if (activeScenario.id === 'web-clone') {
+        return `${t(CLONE_FIDELITY_LABELS[options.cloneFidelity])} · ${t(activeViewport.label)}`;
+      }
+      if (activeScenario.id === 'live-artifact') {
+        return `${t(LIVE_DATA_VIEW_LABELS[options.liveDataView])} · ${t(activeViewport.label)}`;
+      }
+      return t(activeViewport.label);
+    })();
+
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Design options')}>
+        {/* Pill 1: Format switcher (Image design / HTML Design) */}
+        <Popover
+          open={openMenu === 'design-format'}
+          onOpenChange={next => setOpenMenu(next ? 'design-format' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Design medium')}
+          className="om-sa-mode-popover om-sa-game-choice-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active
+              data-open={openMenu === 'design-format' || undefined}
+              aria-haspopup="listbox"
+              aria-expanded={openMenu === 'design-format'}
+              disabled={disabled}
+            >
+              <span key={options.designFormat} className="om-sa-pill-swap">
+                <RemixIcon name={isHtml ? 'layout-2-line' : 'image-line'} size={13} />
+                <span className="om-sa-composer-top-pill-label">
+                  {t(isHtml ? 'HTML Design' : 'Image design')}
+                </span>
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t('Design medium')}</span>
+            </div>
+            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Design medium')}>
+              {([
+                {
+                  id: 'image' as const,
+                  icon: 'image-line',
+                  label: 'Image design',
+                  badge: 'AI',
+                  description: 'Posters, illustrations, product visuals & edits',
+                },
+                {
+                  id: 'html' as const,
+                  icon: 'layout-2-line',
+                  label: 'HTML Design',
+                  badge: 'HTML',
+                  description: 'Interactive prototypes, apps, slides, docs & WebGL',
+                },
+              ]).map(item => {
+                const selected = options.designFormat === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    variant="plain"
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={selected || undefined}
+                    className="om-sa-game-choice-row"
+                    onClick={() => {
+                      onChange({ designFormat: item.id });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span className="om-sa-game-choice-visual" aria-hidden="true">
+                      <RemixIcon name={item.icon} size={15} />
+                    </span>
+                    <span className="om-sa-game-choice-copy">
+                      <span className="om-sa-game-choice-title">
+                        <strong>{t(item.label)}</strong>
+                        <small>{item.badge}</small>
+                      </span>
+                      <span>{t(item.description)}</span>
+                    </span>
+                    <span className="om-sa-game-choice-check" aria-hidden="true">
+                      {selected && <RemixIcon name="check-line" size={15} />}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
+
+        {isHtml ? (
+          <>
+            {/* Pill 2: HTML Design Module selector */}
+            <Popover
+              open={openMenu === 'design-module'}
+              onOpenChange={next => setOpenMenu(next ? 'design-module' : null)}
+              side="top"
+              align="start"
+              initialFocus={false}
+              aria-label={t('Design module')}
+              className="om-sa-mode-popover om-sa-game-choice-popover"
+              trigger={
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-composer-top-pill"
+                  data-active
+                  data-open={openMenu === 'design-module' || undefined}
+                  aria-haspopup="listbox"
+                  aria-expanded={openMenu === 'design-module'}
+                  disabled={disabled}
+                >
+                  <span key={activeScenario.id} className="om-sa-pill-swap">
+                    <RemixIcon name={activeScenario.icon} size={13} />
+                    <span className="om-sa-composer-top-pill-label">{t(activeScenario.label)}</span>
+                  </span>
+                  <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                </Button>
+              }
+            >
+              <div className="om-sa-mode-menu">
+                <div className="om-sa-mode-menu-head">
+                  <span className="om-sa-popover-label">{t('Design module')}</span>
+                </div>
+                <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Design module')}>
+                  {designScenarios.map(sc => {
+                    const selected = activeScenario.id === sc.id;
+                    return (
+                      <Button
+                        key={sc.id}
+                        variant="plain"
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        data-active={selected || undefined}
+                        className="om-sa-game-choice-row"
+                        onClick={() => {
+                          onChange(designScenarioOptionsPatch(sc.id));
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <span className="om-sa-game-choice-visual" aria-hidden="true">
+                          <RemixIcon name={sc.icon} size={15} />
+                        </span>
+                        <span className="om-sa-game-choice-copy">
+                          <span className="om-sa-game-choice-title">
+                            <strong>{t(sc.label)}</strong>
+                          </span>
+                          <span>{t(sc.hint)}</span>
+                        </span>
+                        <span className="om-sa-game-choice-check" aria-hidden="true">
+                          {selected && <RemixIcon name="check-line" size={15} />}
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            </Popover>
+
+            {activeScenario.id === 'web-clone' && renderReferenceUrlPill(true)}
+
+            {/* Pill 3: Contextual layout / format / module-specific options pill */}
+            {activeScenario.id === 'deck' || activeScenario.id === 'document' ? (
+              <Popover
+                open={openMenu === 'design-deck'}
+                onOpenChange={next => setOpenMenu(next ? 'design-deck' : null)}
+                side="top"
+                align="start"
+                initialFocus={false}
+                aria-label={t(activeScenario.id === 'deck' ? 'Slides' : 'Document')}
+                className="om-sa-mode-popover"
+                trigger={
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-composer-top-pill"
+                    data-active={openMenu === 'design-deck' || undefined}
+                    data-open={openMenu === 'design-deck' || undefined}
+                    disabled={disabled}
+                  >
+                    <RemixIcon name={activeScenario.id === 'deck' ? 'slideshow-line' : 'file-text-line'} size={13} />
+                    <span className="om-sa-composer-top-pill-label">
+                      {activeScenario.id === 'deck'
+                        ? `${t('Slides')} · ${slidesLabel}`
+                        : `${t(docFormatLabel)} · ${t(DECK_DENSITY_LABELS[options.deckDensity])}`}
+                    </span>
+                    <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                  </Button>
+                }
+              >
+                <div className="om-sa-mode-menu">
+                  {activeScenario.id === 'deck' ? (
+                    <>
+                      <div className="om-sa-mode-field">
+                        <span className="om-sa-popover-label">{t('Length')}</span>
+                        <div className="om-sa-popover-pills">
+                          {(['5-7', '8-12', '12-16', 'auto'] as const).map(len => (
+                            <Button
+                              key={len}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-popover-pill"
+                              aria-pressed={options.deckSlides === len}
+                              data-active={options.deckSlides === len || undefined}
+                              onClick={() => onChange({ deckSlides: len })}
+                            >
+                              {len === 'auto' ? t('Auto') : len}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="om-sa-mode-field">
+                        <span className="om-sa-popover-label">{t('Speaker notes')}</span>
+                        <div className="om-sa-popover-pills">
+                          {([true, false] as const).map(include => (
+                            <Button
+                              key={String(include)}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-popover-pill"
+                              aria-pressed={options.deckSpeakerNotes === include}
+                              data-active={options.deckSpeakerNotes === include || undefined}
+                              onClick={() => onChange({ deckSpeakerNotes: include })}
+                            >
+                              {t(include ? 'Included' : 'Off')}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="om-sa-mode-field">
+                      <span className="om-sa-popover-label">{t('Page format')}</span>
+                      <div className="om-sa-popover-pills">
+                        {(['a4', 'letter', 'report'] as const).map(paper => (
+                          <Button
+                            key={paper}
+                            variant="plain"
+                            type="button"
+                            className="om-sa-popover-pill"
+                            aria-pressed={options.docPaper === paper}
+                            data-active={options.docPaper === paper || undefined}
+                            onClick={() => onChange({ docPaper: paper, deckFormat: paper === 'report' ? 'report' : 'document' })}
+                          >
+                            {t(DOC_PAPER_LABELS[paper])}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="om-sa-mode-field">
+                    <span className="om-sa-popover-label">{t('Density')}</span>
+                    <div className="om-sa-popover-pills">
+                      {(['visual', 'balanced', 'detailed'] as const).map(density => (
+                        <Button
+                          key={density}
+                          variant="plain"
+                          type="button"
+                          className="om-sa-popover-pill"
+                          aria-pressed={options.deckDensity === density}
+                          data-active={options.deckDensity === density || undefined}
+                          onClick={() => onChange({ deckDensity: density })}
+                        >
+                          {t(DECK_DENSITY_LABELS[density])}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </Popover>
+            ) : (
+              <Popover
+                open={openMenu === 'design-viewport'}
+                onOpenChange={next => setOpenMenu(next ? 'design-viewport' : null)}
+                side="top"
+                align="start"
+                initialFocus={false}
+                aria-label={t('Viewport & layout')}
+                className="om-sa-mode-popover"
+                trigger={
+                  <Button
+                    variant="plain"
+                    type="button"
+                    className="om-sa-composer-top-pill"
+                    data-active={
+                      options.designViewport !== 'responsive'
+                      || activeScenario.id === 'webgl'
+                      || openMenu === 'design-viewport'
+                      || undefined
+                    }
+                    data-open={openMenu === 'design-viewport' || undefined}
+                    disabled={disabled}
+                  >
+                    <span key={`${activeScenario.id}-${activeViewport.id}`} className="om-sa-pill-swap">
+                      <RemixIcon name={activeScenario.id === 'webgl' ? 'sparkling-line' : activeViewport.icon} size={13} />
+                      <span className="om-sa-composer-top-pill-label">{htmlModuleOptionsSummary}</span>
+                    </span>
+                    <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                  </Button>
+                }
+              >
+                <div className="om-sa-mode-menu">
+                  {activeScenario.id === 'webgl' && (
+                    <>
+                      <div className="om-sa-mode-field">
+                        <span className="om-sa-popover-label">{t('3D scene')}</span>
+                        <div className="om-sa-popover-pills">
+                          {(['particles', 'product-3d', 'shader', 'hero'] as const).map(scene => (
+                            <Button
+                              key={scene}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-popover-pill"
+                              aria-pressed={options.webglScene === scene}
+                              data-active={options.webglScene === scene || undefined}
+                              onClick={() => onChange({ webglScene: scene })}
+                            >
+                              {t(WEBGL_SCENE_LABELS[scene])}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="om-sa-mode-field">
+                        <span className="om-sa-popover-label">{t('Interaction')}</span>
+                        <div className="om-sa-popover-pills">
+                          {(['pointer', 'orbit', 'scroll'] as const).map(ctrl => (
+                            <Button
+                              key={ctrl}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-popover-pill"
+                              aria-pressed={options.webglInteraction === ctrl}
+                              data-active={options.webglInteraction === ctrl || undefined}
+                              onClick={() => onChange({ webglInteraction: ctrl })}
+                            >
+                              {t(WEBGL_INTERACTION_LABELS[ctrl])}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {activeScenario.id === 'web-clone' && (
+                    <div className="om-sa-mode-field">
+                      <span className="om-sa-popover-label">{t('Rebuild mode')}</span>
+                      <div className="om-sa-popover-pills">
+                        {(['faithful', 'brand-remix', 'responsive-refresh'] as const).map(mode => (
+                          <Button
+                            key={mode}
+                            variant="plain"
+                            type="button"
+                            className="om-sa-popover-pill"
+                            aria-pressed={options.cloneFidelity === mode}
+                            data-active={options.cloneFidelity === mode || undefined}
+                            onClick={() => onChange({ cloneFidelity: mode })}
+                          >
+                            {t(CLONE_FIDELITY_LABELS[mode])}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {activeScenario.id === 'live-artifact' && (
+                    <div className="om-sa-mode-field">
+                      <span className="om-sa-popover-label">{t('Data layout')}</span>
+                      <div className="om-sa-popover-pills">
+                        {(['kpi', 'charts', 'table'] as const).map(view => (
+                          <Button
+                            key={view}
+                            variant="plain"
+                            type="button"
+                            className="om-sa-popover-pill"
+                            aria-pressed={options.liveDataView === view}
+                            data-active={options.liveDataView === view || undefined}
+                            onClick={() => onChange({ liveDataView: view })}
+                          >
+                            {t(LIVE_DATA_VIEW_LABELS[view])}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="om-sa-mode-field">
+                    <span className="om-sa-popover-label">{t('Viewport')}</span>
+                    <div className="om-sa-popover-pills">
+                      {DESIGN_VIEWPORT_CHOICES.map(item => (
+                        <Button
+                          key={item.id}
+                          variant="plain"
+                          type="button"
+                          className="om-sa-popover-pill"
+                          aria-pressed={options.designViewport === item.id}
+                          data-active={options.designViewport === item.id || undefined}
+                          onClick={() => onChange({ designViewport: item.id })}
+                        >
+                          {t(item.label)}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  {(activeScenario.id === 'prototype' || activeScenario.id === 'mobile-app') && (
+                    <>
+                      <div className="om-sa-mode-field">
+                        <span className="om-sa-popover-label">{t('Scope')}</span>
+                        <div className="om-sa-popover-pills">
+                          {(['single', 'multi-screen', 'interactive'] as const).map(scope => (
+                            <Button
+                              key={scope}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-popover-pill"
+                              aria-pressed={options.designInteraction === scope}
+                              data-active={options.designInteraction === scope || undefined}
+                              onClick={() => onChange({ designInteraction: scope })}
+                            >
+                              {t(HTML_DESIGN_INTERACTION_LABELS[scope])}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="om-sa-mode-field">
+                        <span className="om-sa-popover-label">{t('Motion')}</span>
+                        <div className="om-sa-popover-pills">
+                          {(['subtle', 'expressive'] as const).map(motion => (
+                            <Button
+                              key={motion}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-popover-pill"
+                              aria-pressed={options.designMotion === motion}
+                              data-active={options.designMotion === motion || undefined}
+                              onClick={() => onChange({ designMotion: motion })}
+                            >
+                              {t(HTML_DESIGN_MOTION_LABELS[motion])}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </Popover>
+            )}
+
+            {/* Pill 4: Visual style & Theme */}
+            <Popover
+              open={openMenu === 'design-style'}
+              onOpenChange={next => setOpenMenu(next ? 'design-style' : null)}
+              side="top"
+              align="start"
+              initialFocus={false}
+              aria-label={t('Style & Theme')}
+              className="om-sa-mode-popover"
+              trigger={
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-composer-top-pill"
+                  data-active={htmlStyleParts.length > 0 || openMenu === 'design-style' || undefined}
+                  data-open={openMenu === 'design-style' || undefined}
+                  disabled={disabled}
+                >
+                  <RemixIcon name="brush-line" size={13} />
+                  <span className="om-sa-composer-top-pill-label">{htmlStyleSummary}</span>
+                  <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                </Button>
+              }
+            >
+              <div className="om-sa-mode-menu">
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Visual style')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['auto', 'minimal', 'editorial', 'saas', 'bento', 'brutalist'] as const).map(style => (
+                      <Button
+                        key={style}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.designStyle === style}
+                        data-active={options.designStyle === style || undefined}
+                        onClick={() => onChange({ designStyle: style })}
+                      >
+                        {t(HTML_DESIGN_STYLE_LABELS[style])}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Theme')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['auto', 'light', 'dark', 'both'] as const).map(theme => (
+                      <Button
+                        key={theme}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.designTheme === theme}
+                        data-active={options.designTheme === theme || undefined}
+                        onClick={() => onChange({ designTheme: theme })}
+                      >
+                        {t(HTML_DESIGN_THEME_LABELS[theme])}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Popover>
+
+            {/* Pill 5: Brand Kit shortcut pill */}
+            {renderBrandKitPill()}
+
+            {/* Pill 6: Import from… pill (when not already shown as Reference URL) */}
+            {activeScenario.id !== 'web-clone' && renderReferenceUrlPill(false)}
+          </>
+        ) : (
+          <>
+            {/* Pill 2: Image Scene selector */}
+            <Popover
+              open={openMenu === 'design-image-scene'}
+              onOpenChange={next => setOpenMenu(next ? 'design-image-scene' : null)}
+              side="top"
+              align="start"
+              initialFocus={false}
+              aria-label={t('Image scene')}
+              className="om-sa-mode-popover om-sa-game-choice-popover"
+              trigger={
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-composer-top-pill"
+                  data-active={options.imageScene !== 'text-to-image' || openMenu === 'design-image-scene' || undefined}
+                  data-open={openMenu === 'design-image-scene' || undefined}
+                  aria-haspopup="listbox"
+                  aria-expanded={openMenu === 'design-image-scene'}
+                  disabled={disabled}
+                >
+                  <span key={activeImageScene.id} className="om-sa-pill-swap">
+                    <RemixIcon name={activeImageScene.icon} size={13} />
+                    <span className="om-sa-composer-top-pill-label">{t(activeImageScene.label)}</span>
+                  </span>
+                  <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                </Button>
+              }
+            >
+              <div className="om-sa-mode-menu">
+                <div className="om-sa-mode-menu-head">
+                  <span className="om-sa-popover-label">{t('Image scene')}</span>
+                </div>
+                <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Image scene')}>
+                  {IMAGE_SCENE_CHOICES.map(sc => {
+                    const selected = options.imageScene === sc.id;
+                    return (
+                      <Button
+                        key={sc.id}
+                        variant="plain"
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        data-active={selected || undefined}
+                        className="om-sa-game-choice-row"
+                        onClick={() => {
+                          onChange({ imageScene: sc.id });
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <span className="om-sa-game-choice-visual" aria-hidden="true">
+                          <RemixIcon name={sc.icon} size={15} />
+                        </span>
+                        <span className="om-sa-game-choice-copy">
+                          <span className="om-sa-game-choice-title">
+                            <strong>{t(sc.label)}</strong>
+                          </span>
+                          <span>{t(sc.description)}</span>
+                        </span>
+                        <span className="om-sa-game-choice-check" aria-hidden="true">
+                          {selected && <RemixIcon name="check-line" size={15} />}
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            </Popover>
+
+            {/* Pill 3: Image Model */}
+            {renderFloatingModelPill({
+              menuKey: 'image-model',
+              modality: 'image',
+              selectedId: options.imageModelId,
+              isActiveEngine: true,
+              fallbackLabel: t('Image model'),
+              title: t('Image model'),
+              onSelect: id => onChange({ imageModelId: id }),
+            })}
+
+            {/* Pill 4: Style, Lighting & Background */}
+            <Popover
+              open={openMenu === 'design-image-style'}
+              onOpenChange={next => setOpenMenu(next ? 'design-image-style' : null)}
+              side="top"
+              align="start"
+              initialFocus={false}
+              aria-label={t('Style & Mood')}
+              className="om-sa-mode-popover"
+              trigger={
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-composer-top-pill"
+                  data-active={imageMoodParts.length > 0 || openMenu === 'design-image-style' || undefined}
+                  data-open={openMenu === 'design-image-style' || undefined}
+                  disabled={disabled}
+                >
+                  <RemixIcon name="brush-line" size={13} />
+                  <span className="om-sa-composer-top-pill-label">{imageMoodSummary}</span>
+                  <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                </Button>
+              }
+            >
+              <div className="om-sa-mode-menu">
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Visual style')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['auto', 'photorealistic', 'editorial', '3d-render', 'illustration', 'poster', 'minimalist'] as const).map(style => (
+                      <Button
+                        key={style}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.imageStyle === style}
+                        data-active={options.imageStyle === style || undefined}
+                        onClick={() => onChange({ imageStyle: style })}
+                      >
+                        {t(IMAGE_STYLE_LABELS[style])}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Lighting')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['auto', 'studio', 'natural', 'dramatic', 'neon', 'warm'] as const).map(light => (
+                      <Button
+                        key={light}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.imageLighting === light}
+                        data-active={options.imageLighting === light || undefined}
+                        onClick={() => onChange({ imageLighting: light })}
+                      >
+                        {t(IMAGE_LIGHTING_LABELS[light])}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Background')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['auto', 'transparent', 'solid'] as const).map(bg => (
+                      <Button
+                        key={bg}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.imageBackground === bg}
+                        data-active={options.imageBackground === bg || undefined}
+                        onClick={() => onChange({ imageBackground: bg })}
+                      >
+                        {t(IMAGE_BACKGROUND_LABELS[bg])}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Popover>
+
+            {/* Pill 5: Aspect Ratio */}
+            <Popover
+              open={openMenu === 'design-image-aspect'}
+              onOpenChange={next => setOpenMenu(next ? 'design-image-aspect' : null)}
+              side="top"
+              align="start"
+              initialFocus={false}
+              aria-label={t('Aspect ratio')}
+              className="om-sa-mode-popover"
+              trigger={
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-composer-top-pill"
+                  data-active={options.imageAspect !== 'auto' || openMenu === 'design-image-aspect' || undefined}
+                  data-open={openMenu === 'design-image-aspect' || undefined}
+                  disabled={disabled}
+                >
+                  <RemixIcon name="layout-line" size={13} />
+                  <span className="om-sa-composer-top-pill-label">
+                    {options.imageAspect === 'auto' ? t('Auto') : options.imageAspect}
+                  </span>
+                  <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                </Button>
+              }
+            >
+              <div className="om-sa-mode-menu">
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Aspect ratio')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2'] as const).map(ratio => (
+                      <Button
+                        key={ratio}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.imageAspect === ratio}
+                        data-active={options.imageAspect === ratio || undefined}
+                        onClick={() => {
+                          onChange({ imageAspect: ratio });
+                          setOpenMenu(null);
+                        }}
+                      >
+                        {ratio === 'auto' ? t('Auto') : ratio}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Popover>
+
+            {/* Pill 6: Quality & Variations */}
+            <Popover
+              open={openMenu === 'design-image-quality'}
+              onOpenChange={next => setOpenMenu(next ? 'design-image-quality' : null)}
+              side="top"
+              align="start"
+              initialFocus={false}
+              aria-label={t('Quality')}
+              className="om-sa-mode-popover"
+              trigger={
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-composer-top-pill"
+                  data-active={options.imageQuality === 'high' || options.imageCount > 1 || openMenu === 'design-image-quality' || undefined}
+                  data-open={openMenu === 'design-image-quality' || undefined}
+                  disabled={disabled}
+                >
+                  <RemixIcon name="sparkling-line" size={13} />
+                  <span className="om-sa-composer-top-pill-label">
+                    {`${options.imageQuality === 'high' ? '2K' : t('Standard')} · ${options.imageCount}×`}
+                  </span>
+                  <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+                </Button>
+              }
+            >
+              <div className="om-sa-mode-menu">
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Quality')}</span>
+                  <div className="om-sa-popover-pills">
+                    {(['standard', 'high'] as const).map(q => (
+                      <Button
+                        key={q}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.imageQuality === q}
+                        data-active={options.imageQuality === q || undefined}
+                        onClick={() => onChange({ imageQuality: q })}
+                      >
+                        {q === 'high' ? t('High · 2K') : t('Standard')}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="om-sa-mode-field">
+                  <span className="om-sa-popover-label">{t('Variations')}</span>
+                  <div className="om-sa-popover-pills">
+                    {([1, 2, 4] as const).map(count => (
+                      <Button
+                        key={count}
+                        variant="plain"
+                        type="button"
+                        className="om-sa-popover-pill"
+                        aria-pressed={options.imageCount === count}
+                        data-active={options.imageCount === count || undefined}
+                        onClick={() => onChange({ imageCount: count })}
+                      >
+                        {`${count} ${count === 1 ? t('image') : t('images')}`}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Popover>
+
+            {/* Pill 7: Reference image shortcut pill */}
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={attachedImageAssets.length > 0 || undefined}
+              disabled={disabled}
+              onClick={() => {
+                setOpenMenu(null);
+                onOpenResourcePicker('asset');
+              }}
+            >
+              <RemixIcon name="image-line" size={13} />
+              <span className="om-sa-composer-top-pill-label">{refImageLabel}</span>
+            </Button>
+
+            {/* Pill 8: Brand Kit shortcut pill */}
+            {renderBrandKitPill()}
+          </>
+        )}
+      </div>
+    );
+  }
 
   if (modeId === 'motion' || modeId === 'media') {
     const isVideoActive = modeId === 'motion'

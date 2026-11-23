@@ -1,6 +1,24 @@
 import type { BrowserPickedElement, BrowserRect } from './browser.ts';
+import type { DesignScenarioId } from './design-project.ts';
 
 export const SUPER_AGENT_API = '/motion-api/super-agent';
+
+export const SUPER_AGENT_DESIGN_MODULES = [
+  'image',
+  'prototype',
+  'mobile-app',
+  'deck',
+  'document',
+  'web-clone',
+  'live-artifact',
+  'webgl',
+] as const;
+
+export type SuperAgentDesignModuleId = DesignScenarioId | 'image';
+
+export function isSuperAgentDesignModule(value: unknown): value is SuperAgentDesignModuleId {
+  return typeof value === 'string' && (SUPER_AGENT_DESIGN_MODULES as readonly string[]).includes(value);
+}
 
 export type SuperAgentEngine = string;
 export type SuperAgentPermissionMode = 'on-request' | 'auto';
@@ -187,6 +205,7 @@ export type SuperAgentMessage = {
 export type SuperAgentIntent =
   | 'chat'
   | 'coding'
+  | 'design'
   | 'image'
   | 'video'
   | 'audio'
@@ -197,6 +216,7 @@ export type SuperAgentIntent =
 
 export type SuperAgentModeId =
   | 'coding'
+  | 'design'
   | 'website'
   | 'motion'
   | 'deck'
@@ -864,6 +884,8 @@ export function modeToSuperAgentIntent(mode?: SuperAgentModeId): SuperAgentInten
   switch (mode) {
     case 'coding':
       return 'coding';
+    case 'design':
+      return 'design';
     case 'image':
       return 'image';
     case 'motion':
@@ -919,6 +941,10 @@ export function detectIntentFromPrompt(
   attachments?: SuperAgentResourceAttachment[],
 ): SuperAgentIntent {
   const source = (text || '').trim();
+  if (/^\[Mode:\s*Design Studio\s*·\s*Image Artwork/i.test(source)) return 'image';
+  if (/^\[Mode:\s*Design Studio\s*·\s*HTML Design\s*\|\s*Module:\s*(?:Slide deck|Document)\b/i.test(source)) return 'slides';
+  if (/^\[Mode:\s*Design Studio\b/i.test(source)) return 'design';
+  if (/^\[Mode:\s*Game Studio\b/i.test(source)) return 'game';
   if (/^\[(?:Mode:\s*Coding|Coding:)/i.test(source)) return 'coding';
   if (/^\[Mode:\s*Image Artwork/i.test(source)) return 'image';
   if (/^\[Mode:\s*(?:Motion graphics|AI Cinema Video)/i.test(source)) return 'video';
@@ -1149,6 +1175,8 @@ export function superAgentIntentMeta(intent?: SuperAgentIntent): {
   switch (intent) {
     case 'coding':
       return { icon: 'code-s-slash-line', tone: 'coding', label: 'Coding' };
+    case 'design':
+      return { icon: 'palette-line', tone: 'image', label: 'Design Studio' };
     case 'image':
       return { icon: 'image-line', tone: 'image', label: 'Image' };
     case 'video':

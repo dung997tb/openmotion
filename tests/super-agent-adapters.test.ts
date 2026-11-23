@@ -421,11 +421,17 @@ test('SuperAgentConversations captures Claude thinking_delta, Bash/Edit classifi
 
 test('detectIntentFromPrompt, inferSuperAgentIntent, generateSuperAgentTitle, and superAgentIntentMeta classify tasks cleanly', () => {
   assert.equal(modeToSuperAgentIntent('coding'), 'coding');
+  assert.equal(modeToSuperAgentIntent('design'), 'design');
   assert.equal(modeToSuperAgentIntent('motion'), 'video');
   assert.equal(modeToSuperAgentIntent('deck'), 'slides');
 
   assert.equal(detectIntentFromPrompt('Fix the bug in dashboard.tsx'), 'coding');
   assert.equal(detectIntentFromPrompt('帮我写个单元测试检查 parser.ts'), 'coding');
+  assert.equal(detectIntentFromPrompt('[Mode: Game Studio] Build a wave shooter'), 'game');
+  assert.equal(detectIntentFromPrompt('[Mode: Design Studio · HTML Design | Module: Prototype] Create a fintech landing page'), 'design');
+  assert.equal(detectIntentFromPrompt('[Mode: Design Studio · HTML Design | Module: Slide deck] Create a 6-slide deck'), 'slides');
+  assert.equal(detectIntentFromPrompt('[Mode: Design Studio · HTML Design | Module: Document] Write an annual report'), 'slides');
+  assert.equal(detectIntentFromPrompt('[Mode: Design Studio · Image Artwork] Generate a neon hero banner'), 'image');
   assert.equal(detectIntentFromPrompt('Build a retro arcade shooter game'), 'game');
   assert.equal(detectIntentFromPrompt('帮我写一个贪吃蛇小游戏'), 'game');
   assert.equal(detectIntentFromPrompt('Design a SaaS pricing landing page'), 'website');
@@ -461,6 +467,7 @@ test('detectIntentFromPrompt, inferSuperAgentIntent, generateSuperAgentTitle, an
   // Title generation preserves short prompts, strips noise, and upgrades generic hello titles
   assert.equal(generateSuperAgentTitle({ prompt: 'Build a retro arcade shooter game' }), 'Build a retro arcade shooter game');
   assert.equal(generateSuperAgentTitle({ prompt: '[Mode: Coding] Please fix bug in server.ts' }), 'fix bug in server.ts');
+  assert.equal(generateSuperAgentTitle({ prompt: '[Mode: Design Studio · HTML Design | Module: Prototype] Build a clean dashboard' }), 'Build a clean dashboard');
   assert.equal(generateSuperAgentTitle({ prompt: '帮我写一个贪吃蛇小游戏' }), '写一个贪吃蛇小游戏');
   assert.equal(
     generateSuperAgentTitle({
@@ -472,6 +479,7 @@ test('detectIntentFromPrompt, inferSuperAgentIntent, generateSuperAgentTitle, an
   );
 
   assert.equal(superAgentIntentMeta('coding').icon, 'code-s-slash-line');
+  assert.deepEqual(superAgentIntentMeta('design'), { icon: 'palette-line', tone: 'image', label: 'Design Studio' });
   assert.equal(superAgentIntentMeta('website').icon, 'layout-line');
   assert.equal(superAgentIntentMeta('chat').icon, 'chat-1-line');
 });

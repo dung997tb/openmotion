@@ -10,6 +10,7 @@ import {
   safeBrowserTabId,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentDesignModuleId,
   type SuperAgentChatSummary,
   type SuperAgentIntent,
   type SuperAgentPermissionMode,
@@ -216,6 +217,7 @@ export function SuperAgentWorkspace({
   active,
   chatId,
   requestedMode = null,
+  requestedDesignModule = null,
   requestedGameId = null,
   onBack,
   onExitRequestedMode,
@@ -233,6 +235,7 @@ export function SuperAgentWorkspace({
   active: boolean;
   chatId: string | null;
   requestedMode?: SuperAgentCreationModeId | null;
+  requestedDesignModule?: SuperAgentDesignModuleId | null;
   requestedGameId?: string | null;
   onBack?: () => void;
   onExitRequestedMode?: () => void;
@@ -298,6 +301,7 @@ export function SuperAgentWorkspace({
     text: string;
     hiddenInstructions?: string;
     mode?: SuperAgentCreationModeId;
+    designModule?: SuperAgentDesignModuleId;
   } | null>(null);
   const [gameTemplateSeed, setGameTemplateSeed] = useState<{ id: number; game: GameCard } | null>(null);
   const playedGamesRef = useRef<Map<string, GameCard>>(new Map());
@@ -701,6 +705,7 @@ export function SuperAgentWorkspace({
       text: payload.prompt,
       ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
       mode: payload.mode,
+      ...(payload.designModule ? { designModule: payload.designModule } : {}),
     });
 
     if (payload.initialArtifact) {
@@ -709,7 +714,11 @@ export function SuperAgentWorkspace({
         engine: selection.engine,
         model: selection.model !== 'default' ? selection.model : undefined,
         permissionMode,
-        ...(payload.mode === 'game' ? { intent: 'game' as SuperAgentIntent } : {}),
+        ...(payload.mode === 'game'
+          ? { intent: 'game' as SuperAgentIntent }
+          : payload.mode === 'design'
+            ? { intent: 'design' as SuperAgentIntent }
+            : {}),
         ...(payload.title ? { title: payload.title } : {}),
         initialArtifact: payload.initialArtifact,
       })
@@ -834,9 +843,13 @@ export function SuperAgentWorkspace({
     setSending(true);
     try {
       const target = await ensureChatCreated(
-        meta?.mode === 'game' || meta?.initialArtifact
+        meta?.mode === 'game' || meta?.mode === 'design' || meta?.initialArtifact
           ? {
-              ...(meta?.mode === 'game' ? { intent: 'game' } : {}),
+              ...(meta?.mode === 'game'
+                ? { intent: 'game' }
+                : meta?.mode === 'design'
+                  ? { intent: 'design' }
+                  : {}),
               ...(meta?.initialArtifact ? { initialArtifact: meta.initialArtifact } : {}),
             }
           : undefined,
@@ -1213,7 +1226,9 @@ export function SuperAgentWorkspace({
       setDraftSeed({
         id: pendingAutoSend.id,
         text: payload.prompt,
+        ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
         mode: payload.mode,
+        ...(payload.designModule ? { designModule: payload.designModule } : {}),
       });
       if (payload.initialArtifact) {
         void createSuperAgentChat({
@@ -1221,7 +1236,11 @@ export function SuperAgentWorkspace({
           engine: selection.engine,
           model: selection.model !== 'default' ? selection.model : undefined,
           permissionMode,
-          ...(payload.mode === 'game' ? { intent: 'game' as SuperAgentIntent } : {}),
+          ...(payload.mode === 'game'
+            ? { intent: 'game' as SuperAgentIntent }
+            : payload.mode === 'design'
+              ? { intent: 'design' as SuperAgentIntent }
+              : {}),
           ...(payload.title ? { title: payload.title } : {}),
           initialArtifact: payload.initialArtifact,
         })
@@ -1250,7 +1269,11 @@ export function SuperAgentWorkspace({
                 engine: selection.engine,
                 model: selection.model !== 'default' ? selection.model : undefined,
                 permissionMode,
-                ...(payload.mode === 'game' ? { intent: 'game' as SuperAgentIntent } : {}),
+                ...(payload.mode === 'game'
+                  ? { intent: 'game' as SuperAgentIntent }
+                  : payload.mode === 'design'
+                    ? { intent: 'design' as SuperAgentIntent }
+                    : {}),
                 ...(payload.title ? { title: payload.title } : {}),
                 ...(payload.initialArtifact ? { initialArtifact: payload.initialArtifact } : {}),
               })
@@ -1288,6 +1311,7 @@ export function SuperAgentWorkspace({
           text: payload.prompt,
           ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
           mode: payload.mode,
+          ...(payload.designModule ? { designModule: payload.designModule } : {}),
         });
         showToast(error instanceof Error ? error.message : t('Could not start Super Agent'));
       } finally {
@@ -1422,6 +1446,7 @@ export function SuperAgentWorkspace({
             active={active}
             chat={activeChat}
             requestedMode={requestedMode}
+            requestedDesignModule={requestedDesignModule}
             playingGameId={playingGameId}
             loading={loadingChat}
             loadFailed={loadFailed}

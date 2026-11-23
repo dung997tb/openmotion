@@ -357,10 +357,17 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
   await flush();
 
   expect(document.body.textContent).toContain('What can I create for you?');
-  expect(document.body.textContent).toContain('Generate image');
-  expect(document.body.textContent).toContain('Make a video');
-  expect(document.body.textContent).toContain('Create audio');
-  expect(document.body.textContent).toContain('Explore more');
+  const starterLabels = [...document.querySelectorAll('.om-sa-starter-grid > .om-sa-starter-card')].map(
+    b => b.querySelector('strong')?.textContent?.trim(),
+  );
+  expect(starterLabels).toEqual([
+    'Build a game',
+    'Design Studio',
+    'Generate image',
+    'Make a video',
+    'Create audio',
+    'Explore more',
+  ]);
 
   // No standalone Resources entry button in the stream header
   const standaloneResBtn = [...document.querySelectorAll('.om-sa-stream-head button')].find(
@@ -384,6 +391,20 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
   await flush();
 
   expect(document.querySelector('.om-sa-composer-chips')?.textContent).toContain('Neon Arcade');
+
+  // Secondary shortcuts (including Coding) live in Explore more
+  const moreBtn = [...document.querySelectorAll('button')].find(
+    b => b.textContent?.includes('Explore more'),
+  ) as HTMLButtonElement;
+  expect(moreBtn).toBeTruthy();
+  await act(async () => moreBtn.click());
+  await flush();
+  const moreMenuText = document.querySelector('.om-sa-more-menu')?.textContent ?? '';
+  expect(moreMenuText).toContain('Coding');
+  expect(moreMenuText).toContain('Cinema video');
+  expect(moreMenuText).toContain('Create slides');
+  expect(moreMenuText).toContain('Build a website');
+  expect(moreMenuText).toContain('Workspace resources');
 });
 
 it('displays active conversation, tool steps, approvals, and multi-tab Artifact Viewer with Preview/Code switching', async () => {
@@ -1078,11 +1099,17 @@ it('enters pure Coding mode from starter card without creative templates and ren
   expect(document.querySelector('.om-sa-chat-status-badge[data-state="failed"]')).toBeTruthy();
   expect(document.querySelector('.om-sa-chat-icon[data-intent="chat"][data-tone="neutral"]')).toBeTruthy();
 
-  const codingCard = [...document.querySelectorAll('.om-sa-starter-card')].find(
+  const moreBtn = [...document.querySelectorAll('.om-sa-starter-card')].find(
+    el => el.textContent?.includes('Explore more'),
+  ) as HTMLButtonElement;
+  expect(moreBtn).toBeTruthy();
+  await act(async () => moreBtn.click());
+  await flush();
+  const codingItem = [...document.querySelectorAll('.om-sa-more-item')].find(
     el => el.textContent?.includes('Coding'),
   ) as HTMLButtonElement;
-  expect(codingCard).toBeTruthy();
-  await act(async () => codingCard.click());
+  expect(codingItem).toBeTruthy();
+  await act(async () => codingItem.click());
   await flush();
 
   expect(document.body.textContent).toContain('Code, debug & ship');
@@ -2808,4 +2835,690 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
     alwaysAllow: true,
   });
   expect(container.querySelector('.om-sa-approval')).toBeNull();
+});
+
+function setupDesignStudioMocks() {
+  const createdChats: any[] = [];
+  const turnBodies: any[] = [];
+  let chatCounter = 0;
+
+  const designItems = [
+    {
+      id: 'tpl-proto-1',
+      kind: 'design-template',
+      title: 'Fintech Interactive Landing',
+      subtitle: 'prototype',
+      scenario: 'prototype',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-proto-1/preview/index.html',
+      tags: ['saas', 'landing'],
+    },
+    {
+      id: 'tpl-mobile-1',
+      kind: 'design-template',
+      title: 'Fitness Tracker App',
+      subtitle: 'mobile-app',
+      scenario: 'mobile-app',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-mobile-1/preview/index.html',
+      tags: ['mobile', 'health'],
+    },
+    {
+      id: 'tpl-deck-1',
+      kind: 'design-template',
+      title: 'Series A Pitch Deck',
+      subtitle: 'deck',
+      scenario: 'deck',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-deck-1/preview/index.html',
+      tags: ['pitch', 'slides'],
+    },
+    {
+      id: 'tpl-doc-1',
+      kind: 'design-template',
+      title: 'Executive Finance Report',
+      subtitle: 'document',
+      scenario: 'document',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-doc-1/preview/index.html',
+      tags: ['report', 'a4'],
+    },
+    {
+      id: 'tpl-clone-1',
+      kind: 'design-template',
+      title: 'Developer Docs Clone',
+      subtitle: 'web-clone',
+      scenario: 'web-clone',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-clone-1/preview/index.html',
+      tags: ['docs', 'clone'],
+    },
+    {
+      id: 'tpl-live-1',
+      kind: 'design-template',
+      title: 'Live Sales Telemetry',
+      subtitle: 'live-artifact',
+      scenario: 'live-artifact',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-live-1/preview/index.html',
+      tags: ['kpi', 'data'],
+    },
+    {
+      id: 'tpl-webgl-1',
+      kind: 'design-template',
+      title: '3D Shader Stage',
+      subtitle: 'webgl',
+      scenario: 'webgl',
+      previewUrl: '/motion-api/design/catalog/templates/tpl-webgl-1/preview/index.html',
+      tags: ['shader', '3d'],
+    },
+  ];
+  const designProjects = [
+    {
+      id: 'dproj-custom-1',
+      kind: 'design-project',
+      title: 'My Custom Landing',
+      subtitle: 'prototype',
+      scenario: 'prototype',
+      previewUrl: '/motion-api/design/raw/dproj-custom-1/index.html',
+    },
+  ];
+  const brandKits = [
+    {
+      id: 'catalog:vercel',
+      kind: 'brand-kit',
+      title: 'Vercel',
+      subtitle: 'Developer Tools · Official Brand Kit',
+      swatches: ['#000000', '#ffffff'],
+    },
+  ];
+  const designSkills = [
+    {
+      id: 'design-editorial',
+      kind: 'design-skill',
+      title: 'Editorial Layout Skill',
+      subtitle: 'document',
+      scenario: 'document',
+    },
+  ];
+  const assets = [
+    {
+      id: 'asset-poster-1',
+      kind: 'asset',
+      title: 'Product Hero Poster',
+      subtitle: 'image',
+      modality: 'image',
+      versionId: 'v1',
+      previewUrl: '/motion-api/assets/asset-poster-1/versions/v1/media',
+    },
+  ];
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? 'GET').toUpperCase();
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({
+        agents: [
+          {
+            id: 'codex',
+            label: 'Codex',
+            icon: 'codex',
+            installed: true,
+            auth: 'signed-in',
+            models: [{ id: 'gpt-5', label: 'GPT-5', reasoning: ['medium'] }],
+          },
+        ],
+      });
+    }
+    if (url.startsWith('/motion-api/agent-runtimes')) {
+      return json({
+        runtimes: [
+          {
+            id: 'local-direct',
+            kind: 'local-direct',
+            name: 'This computer',
+            status: 'online',
+            agents: [{ id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [] }],
+            runnableAgentIds: ['codex'],
+          },
+        ],
+      });
+    }
+    if (url === '/motion-api/models/capabilities') {
+      return json({
+        providers: [{ id: 'openai', ready: true, configured: true }],
+        routes: { image: 'openai:gpt-image-1.5' },
+      });
+    }
+    if (url.startsWith('/motion-api/models')) {
+      return json({
+        models: [
+          {
+            id: 'openai:gpt-image-1.5',
+            provider: 'openai',
+            modelId: 'gpt-image-1.5',
+            label: 'GPT Image 1.5',
+            modality: 'image',
+            mode: 'text-to-image',
+            source: 'builtin',
+            supportsImageReference: true,
+          },
+        ],
+        nextOffset: null,
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      const parsed = new URL(url, 'http://localhost');
+      const kind = parsed.searchParams.get('kind');
+      const items = kind === 'design-template'
+        ? designItems
+        : kind === 'design-project'
+          ? designProjects
+          : kind === 'brand-kit'
+            ? brandKits
+            : kind === 'design-skill'
+              ? designSkills
+              : kind === 'asset'
+                ? assets
+                : [...designItems, ...designProjects, ...brandKits, ...designSkills, ...assets];
+      return json({ counts: sampleResources.counts, items, generatedAt: Date.now() });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') {
+      return json({ conversations: [] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      chatCounter += 1;
+      const chat: SuperAgentChat = {
+        id: `dddd0000-0000-0000-0000-00000000000${chatCounter}`,
+        title: 'Design Task',
+        intent: body.intent ?? 'design',
+        engine: 'codex',
+        model: 'gpt-5',
+        permissionMode: 'on-request',
+        createdAt: 1000,
+        updatedAt: 1000,
+        state: 'idle',
+        messages: [],
+        artifacts: [],
+        approvals: [],
+      };
+      createdChats.push({ body, chat });
+      return json({ conversation: chat });
+    }
+    const turnMatch = url.match(new RegExp(`^${SUPER_AGENT_API}/chats/([^/]+)/turn$`));
+    if (turnMatch && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      turnBodies.push(body);
+      const found = createdChats.find(c => c.chat.id === turnMatch[1])?.chat ?? { ...sampleChat, id: turnMatch[1], intent: 'design', state: 'running', artifacts: [], approvals: [], messages: [] };
+      return json({
+        conversation: {
+          ...found,
+          state: 'running',
+          messages: [{ id: 'u-1', role: 'user', text: body.text, createdAt: 2000 }],
+        },
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/chats/`)) {
+      const id = url.split('/').pop();
+      const found = createdChats.find(c => c.chat.id === id)?.chat;
+      if (found) return json({ conversation: found });
+    }
+    return json({});
+  }) as any;
+
+  return { createdChats, turnBodies };
+}
+
+it('enters Design Studio from starter card with all 8 modules, floating option pills, synchronized showcase tabs, and search filtering', async () => {
+  setupDesignStudioMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  vi.stubGlobal('IntersectionObserver', NearScreenIntersectionObserver);
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <SuperAgentWorkspace
+            active
+            chatId={null}
+            onChatIdChange={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn()}
+            onOpenAsset={vi.fn()}
+            onOpenBrandKit={vi.fn()}
+            onOpenAgentSettings={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+    await flushMore();
+
+    const designCard = [...container.querySelectorAll('.om-sa-starter-card')].find(
+      b => b.textContent?.includes('Design Studio'),
+    ) as HTMLButtonElement;
+    expect(designCard).toBeTruthy();
+    await act(async () => designCard.click());
+    await flushMore();
+
+    // All 8 Design Studio modules appear in the hero switcher with Image design first & active by default
+    expect(container.textContent).toContain('Design anything, from visuals to live HTML');
+    const moduleLabels = [...container.querySelectorAll('.om-sa-design-module-card')].map(el => el.textContent?.trim());
+    expect(moduleLabels).toEqual([
+      'Image design',
+      'Prototype',
+      'Mobile App',
+      'Slide deck',
+      'Document',
+      'Website clone',
+      'Live artifact',
+      'WebGL',
+    ]);
+
+    // Default active module is Image design with rich floating option pills
+    const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+    expect(topBar).toBeTruthy();
+    expect(topBar.textContent).toContain('Image design');
+    expect(topBar.textContent).toContain('Text to image');
+    expect(topBar.textContent).toContain('GPT Image 1.5');
+    expect(topBar.textContent).toContain('Style & Mood');
+    expect(topBar.textContent).toContain('Reference');
+    expect(topBar.textContent).toContain('Brand Kit');
+    expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).toContain('All image scenes');
+
+    // Switching to Prototype switches top bar to HTML Design pills & filters to Prototype templates (?thumb=1)
+    const protoCard = [...container.querySelectorAll('.om-sa-design-module-card')].find(
+      el => el.textContent?.trim() === 'Prototype',
+    ) as HTMLButtonElement;
+    await act(async () => protoCard.click());
+    await flushMore();
+
+    expect(topBar.textContent).toContain('HTML Design');
+    expect(topBar.textContent).toContain('Prototype');
+    expect(topBar.textContent).toContain('Responsive');
+    expect(topBar.textContent).toContain('Style & Theme');
+    expect(topBar.textContent).toContain('Brand Kit');
+    expect(topBar.textContent).toContain('Import from…');
+    expect(container.textContent).toContain('Fintech Interactive Landing');
+    expect(container.textContent).not.toContain('3D Shader Stage');
+    expect(container.querySelector('.om-sa-showcase-iframe-wrap .om-design-card-thumb iframe')?.getAttribute('src')).toContain('?thumb=1');
+
+    // Switching to WebGL via the module strip updates top bar, placeholder, quick ideas, and showcase cards
+    const webglCard = [...container.querySelectorAll('.om-sa-design-module-card')].find(
+      el => el.textContent?.trim() === 'WebGL',
+    ) as HTMLButtonElement;
+    await act(async () => webglCard.click());
+    await flushMore();
+
+    expect(topBar.textContent).toContain('WebGL');
+    expect(topBar.textContent).toContain('Particle field · Pointer');
+    expect(container.querySelector('.om-sa-composer textarea')?.getAttribute('placeholder')).toContain('WebGL');
+    expect(container.textContent).toContain('Reactive particle hero');
+    expect(container.textContent).toContain('3D Shader Stage');
+    expect(container.textContent).not.toContain('Fintech Interactive Landing');
+
+    // Switching back to All templates and filtering by search input narrows visible items
+    const allTab = [...container.querySelectorAll('.om-sa-showcase-tab')].find(
+      el => el.textContent?.includes('All templates'),
+    ) as HTMLButtonElement;
+    await act(async () => allTab.click());
+    await flushMore();
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="Filter templates…"]')!;
+    expect(searchInput).toBeTruthy();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(searchInput, 'Sales Telemetry');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain('Live Sales Telemetry');
+    expect(container.textContent).not.toContain('3D Shader Stage');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('switches HTML Design modules via floating pill dropdown and updates contextual viewport/slides/doc/URL pills', async () => {
+  setupDesignStudioMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="design"
+          requestedDesignModule="prototype"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+  const pickModule = async (currentPillText: string, nextModuleLabel: string) => {
+    const trigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes(currentPillText)) as HTMLButtonElement;
+    expect(trigger).toBeTruthy();
+    await act(async () => trigger.click());
+    await flush();
+    const row = [...document.querySelectorAll('.om-sa-game-choice-row')].find(
+      b => b.querySelector('strong')?.textContent === nextModuleLabel,
+    ) as HTMLButtonElement;
+    expect(row).toBeTruthy();
+    await act(async () => row.click());
+    await flushMore();
+  };
+
+  // Mobile App -> automatically selects Mobile viewport
+  await pickModule('Prototype', 'Mobile App');
+  expect(topBar.textContent).toContain('Mobile App');
+  expect(topBar.textContent).toContain('Mobile');
+
+  // Slide deck -> swaps Viewport pill for Slides · 8-12 pill
+  await pickModule('Mobile App', 'Slide deck');
+  expect(topBar.textContent).toContain('Slides');
+  expect(topBar.textContent).not.toContain('Responsive');
+
+  // Document -> shows A4 Portrait format pill
+  await pickModule('Slide deck', 'Document');
+  expect(topBar.textContent).toContain('A4 Portrait');
+
+  // Website clone -> promotes Reference URL pill immediately beside module selector + Faithful clone
+  await pickModule('Document', 'Website clone');
+  const pillLabels = [...topBar.querySelectorAll('.om-sa-composer-top-pill')].map(el => el.textContent?.trim());
+  expect(pillLabels[1]).toContain('Website clone');
+  expect(pillLabels[2]).toContain('Reference URL');
+  expect(pillLabels[3]).toContain('Faithful clone');
+
+  // Live artifact -> shows KPI Dashboard pill
+  await pickModule('Website clone', 'Live artifact');
+  expect(topBar.textContent).toContain('KPI Dashboard');
+});
+
+it('configures rich Image design scene/style/lighting/background options and sends clean visible prompts with hiddenInstructions', async () => {
+  const { createdChats, turnBodies } = setupDesignStudioMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="design"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  // Default Design Studio entry opens on Image design with rich configuration pills
+  const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+  expect(topBar.textContent).toContain('Image design');
+  expect(topBar.textContent).toContain('GPT Image 1.5');
+  expect(topBar.textContent).toContain('Standard · 1×');
+  expect(topBar.textContent).toContain('Reference');
+  expect(topBar.textContent).toContain('Brand Kit');
+  expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).toContain('All image scenes');
+
+  // Pick Image scene -> Relight
+  const sceneTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Text to image')) as HTMLButtonElement;
+  await act(async () => sceneTrigger.click());
+  await flush();
+  const relightOption = [...document.querySelectorAll('.om-sa-game-choice-row')].find(
+    b => b.querySelector('strong')?.textContent === 'Relight',
+  ) as HTMLButtonElement;
+  await act(async () => relightOption.click());
+  await flushMore();
+  expect(topBar.textContent).toContain('Relight');
+
+  // Pick Style & Mood -> Editorial + Neon + Transparent
+  const styleTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Style & Mood')) as HTMLButtonElement;
+  await act(async () => styleTrigger.click());
+  await flush();
+  for (const label of ['Editorial', 'Neon', 'Transparent']) {
+    const pill = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.trim() === label) as HTMLButtonElement;
+    expect(pill).toBeTruthy();
+    await act(async () => pill.click());
+    await flush();
+  }
+  expect(topBar.textContent).toContain('Editorial · Neon');
+
+  const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(textarea, 'Neon product hero artwork');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flush();
+  const sendBtn = container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+  await act(async () => sendBtn.click());
+  await flushMore();
+
+  expect(createdChats[0]?.body?.intent).toBe('design');
+  expect(turnBodies[0]?.mode).toBe('design');
+  expect(turnBodies[0]?.text).toBe('Neon product hero artwork');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Mode: Design Studio · Image Artwork');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Scene: Relight');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Style: Editorial');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Lighting: Neon');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Background: Transparent');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('openmotion_assets_use');
+  expect(container.querySelector('.om-sa-user-bubble')?.textContent).toBe('Neon product hero artwork');
+});
+
+it('submits HTML Design Website clone with Reference URL, attached template, and hidden design instructions', async () => {
+  const { createdChats, turnBodies } = setupDesignStudioMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="design"
+          requestedDesignModule="web-clone"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  const refUrlTrigger = [...container.querySelectorAll('.om-sa-composer-top-pill')].find(
+    b => b.textContent?.includes('Reference URL'),
+  ) as HTMLButtonElement;
+  expect(refUrlTrigger).toBeTruthy();
+  await act(async () => refUrlTrigger.click());
+  await flush();
+  const urlInput = document.querySelector<HTMLInputElement>('.om-sa-mode-url-input')!;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(urlInput, 'https://example.org/pricing');
+    urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const applyBtn = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.trim() === 'Apply') as HTMLButtonElement;
+  await act(async () => applyBtn.click());
+  await flush();
+
+  // Pick Style & Theme -> Bento + Dark
+  const styleThemeBtn = [...container.querySelectorAll('.om-sa-composer-top-pill')].find(
+    b => b.textContent?.includes('Style & Theme'),
+  ) as HTMLButtonElement;
+  expect(styleThemeBtn).toBeTruthy();
+  await act(async () => styleThemeBtn.click());
+  await flush();
+  for (const label of ['Bento', 'Dark']) {
+    const pill = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.trim() === label) as HTMLButtonElement;
+    expect(pill).toBeTruthy();
+    await act(async () => pill.click());
+    await flush();
+  }
+
+  // Attach the matching Design template card from the showcase
+  const cloneCard = [...container.querySelectorAll('.om-sa-showcase-card')].find(
+    el => el.textContent?.includes('Developer Docs Clone'),
+  ) as HTMLButtonElement;
+  expect(cloneCard).toBeTruthy();
+  await act(async () => cloneCard.click());
+  await flush();
+
+  const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(textarea, 'Rebuild pricing comparison section');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flush();
+  const sendBtn = container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+  await act(async () => sendBtn.click());
+  await flushMore();
+
+  expect(createdChats[0]?.body?.intent).toBe('design');
+  expect(turnBodies[0]?.mode).toBe('design');
+  expect(turnBodies[0]?.text).toBe('Rebuild pricing comparison section');
+  expect(turnBodies[0]?.attachments?.some((att: any) => att.id === 'tpl-clone-1')).toBe(true);
+  expect(turnBodies[0]?.hiddenInstructions).toContain('scenario="web-clone"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Style: Bento');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('Theme: Dark');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('https://example.org/pricing');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('openmotion_design_project');
+  expect(container.querySelector('.om-sa-user-bubble')?.textContent).toBe('Rebuild pricing comparison section');
+});
+
+it('preserves legacy website/deck/image requested modes, Explore more shortcuts, and design-template handoffs inside Design Studio', async () => {
+  setupDesignStudioMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  const cases: Array<{ mode: 'website' | 'deck' | 'image'; designModule?: 'webgl'; expectedPill: string }> = [
+    { mode: 'website', expectedPill: 'Prototype' },
+    { mode: 'deck', expectedPill: 'Slide deck' },
+    { mode: 'image', expectedPill: 'Image design' },
+  ];
+
+  for (const item of cases) {
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <SuperAgentWorkspace
+            active
+            chatId={null}
+            requestedMode={item.mode}
+            onChatIdChange={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn()}
+            onOpenAsset={vi.fn()}
+            onOpenBrandKit={vi.fn()}
+            onOpenAgentSettings={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+    await flushMore();
+    expect(container.querySelector('.om-sa-composer-top-bar')?.textContent).toContain(item.expectedPill);
+  }
+
+  // Queued handoff from Design Studio (WebGL template) opens Design Studio WebGL with attachment
+  queueSuperAgentHandoff(buildSuperAgentHandoff(
+    { kind: 'design-template', id: 'tpl-webgl-1', title: '3D Shader Stage', scenario: 'webgl' },
+    { prompt: 'Customize 3D Shader Stage', autoSend: false },
+  ));
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  expect(container.querySelector('.om-sa-composer-top-bar')?.textContent).toContain('WebGL');
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('3D Shader Stage');
+  expect(container.querySelector<HTMLTextAreaElement>('.om-sa-composer textarea')?.value).toContain('Customize 3D Shader Stage');
+});
+
+it('opens Design Studio Image design directly from the primary Generate image starter card', async () => {
+  setupDesignStudioMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  const imageStarter = [...container.querySelectorAll('.om-sa-starter-card')].find(
+    el => el.textContent?.includes('Generate image'),
+  ) as HTMLButtonElement;
+  expect(imageStarter).toBeTruthy();
+  await act(async () => imageStarter.click());
+  await flushMore();
+
+  expect(container.querySelector('.om-sa-composer-top-bar')?.textContent).toContain('Image design');
+  expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).toContain('All image scenes');
 });

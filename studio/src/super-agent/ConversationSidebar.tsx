@@ -223,7 +223,9 @@ export function ConversationSidebar({
           className="om-sa-new-chat-btn"
           onClick={onCreate}
         >
-          <RemixIcon name="edit-line" size={15} />
+          <span className="om-sa-chat-icon-wrap" aria-hidden="true">
+            <RemixIcon name="edit-line" size={14} />
+          </span>
           <span>{t('New task')}</span>
         </Button>
       </div>

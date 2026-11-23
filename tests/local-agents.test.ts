@@ -333,3 +333,54 @@ test('LocalAgentDirectory routes Antigravity, Claude, Kiro, Gemini, Qwen, Vibe a
     if (prevVibe === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = prevVibe;
   }
 });
+
+test('LocalAgentDirectory warms up Antigravity by default and hydrates persisted models across restarts without probing', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'motion-agy-cache-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let acpCalls = 0;
+  let probeCalls = 0;
+
+  const first = new LocalAgentDirectory(
+    root,
+    async bin => (bin === 'agy' ? '/usr/local/bin/agy' : null),
+    async (_bin, args) => {
+      probeCalls += 1;
+      if (args[0] === '--version') return { ok: true, text: '1.5.14' };
+      return { ok: true, text: 'Usage: --model <id>' };
+    },
+    async () => {},
+    {
+      acp: async () => {
+        acpCalls += 1;
+        return {
+          auth: 'unknown',
+          models: [
+            { id: 'gemini-4-neon', label: 'Gemini 4 Neon', source: 'cli', reasoning: ['medium', 'high'] },
+            { id: 'gemini-4-flash', label: 'Gemini 4 Flash', source: 'cli' },
+          ],
+        };
+      },
+    },
+  );
+
+  const warmed = await first.warmup();
+  assert.equal(acpCalls, 1);
+  assert.equal(warmed.agents.find(a => a.id === 'antigravity')?.models.length, 2);
+
+  // Restarted directory hydrates Antigravity models immediately from disk with 0 CLI probes
+  let restartedProbes = 0;
+  const restarted = new LocalAgentDirectory(
+    root,
+    async bin => (bin === 'agy' ? '/usr/local/bin/agy' : null),
+    async () => {
+      restartedProbes += 1;
+      return { ok: true, text: '' };
+    },
+  );
+  const listed = await restarted.list();
+  const agy = listed.agents.find(a => a.id === 'antigravity');
+  assert.equal(restartedProbes, 0);
+  assert.equal(probeCalls > 0, true);
+  assert.deepEqual(agy?.models.map(m => m.id), ['gemini-4-neon', 'gemini-4-flash']);
+  assert.ok(agy?.checkedAt);
+});

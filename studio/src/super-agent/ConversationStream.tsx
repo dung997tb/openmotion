@@ -2,6 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
+import { isDesignScenario } from '../../../shared/design-project';
 import type { GameCard } from '../../../shared/game-contract';
 import type { Model } from '../../../shared/gateway';
 import type { LocalAgent } from '../../../shared/local-agents';
@@ -10,6 +11,7 @@ import {
   superAgentIntentMeta,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentDesignModuleId,
   type SuperAgentEngine,
   type SuperAgentPermissionMode,
   type SuperAgentResourceAttachment,
@@ -50,7 +52,9 @@ import {
   type SuperAgentCreationModeId,
 } from './ModeResourceShowcase';
 import {
+  buildDesignHiddenDirective,
   DEFAULT_MODE_COMPOSER_OPTIONS,
+  designScenarioOptionsPatch,
   formatModePromptPrefix,
   getModeComposerPlaceholder,
   ModeComposerControls,
@@ -59,8 +63,32 @@ import {
   type ModeComposerOptions,
 } from './ModeComposerControls';
 
+export function resolveCreationModeEntry(
+  mode: SuperAgentCreationModeId | null,
+  designModule?: SuperAgentDesignModuleId | null,
+): { modeId: SuperAgentCreationModeId | null; optionsPatch?: Partial<ModeComposerOptions> } {
+  if (mode === 'design') {
+    if (designModule && isDesignScenario(designModule)) {
+      return { modeId: 'design', optionsPatch: designScenarioOptionsPatch(designModule) };
+    }
+    return { modeId: 'design', optionsPatch: { designFormat: 'image' } };
+  }
+  if (mode === 'website') {
+    return { modeId: 'design', optionsPatch: designScenarioOptionsPatch('prototype') };
+  }
+  if (mode === 'deck') {
+    return { modeId: 'design', optionsPatch: designScenarioOptionsPatch('deck') };
+  }
+  if (mode === 'image') {
+    return { modeId: 'design', optionsPatch: { designFormat: 'image' } };
+  }
+  return { modeId: mode };
+}
+
 const PRIMARY_STARTERS: {
+  key?: string;
   id: SuperAgentCreationModeId;
+  designModule?: SuperAgentDesignModuleId;
   tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
@@ -68,21 +96,24 @@ const PRIMARY_STARTERS: {
   badge?: string;
 }[] = [
   { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game', featured: true, badge: 'New' },
-  { id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
-  { id: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
+  { key: 'design', id: 'design', tone: 'image', icon: 'palette-line', title: 'Design Studio', badge: 'New' },
+  { key: 'image', id: 'design', designModule: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
   { id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
 ];
 
 const EXTRA_STARTERS: {
+  key: string;
   id: SuperAgentCreationModeId;
-  tone: 'agent' | 'image' | 'video' | 'audio';
+  designModule?: SuperAgentDesignModuleId;
+  tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
 }[] = [
-  { id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema video' },
-  { id: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
-  { id: 'website', tone: 'image', icon: 'layout-line', title: 'Build a website' },
+  { key: 'coding', id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
+  { key: 'media', id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema video' },
+  { key: 'deck', id: 'design', designModule: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
+  { key: 'website', id: 'design', designModule: 'prototype', tone: 'image', icon: 'layout-line', title: 'Build a website' },
 ];
 
 export type AgentSelection = {
@@ -96,6 +127,7 @@ export function ConversationStream({
   active = true,
   chat,
   requestedMode = null,
+  requestedDesignModule = null,
   playingGameId = null,
   loading,
   loadFailed,
@@ -147,6 +179,7 @@ export function ConversationStream({
   active?: boolean;
   chat: SuperAgentChat | null;
   requestedMode?: SuperAgentCreationModeId | null;
+  requestedDesignModule?: SuperAgentDesignModuleId | null;
   playingGameId?: string | null;
   loading: boolean;
   loadFailed: boolean;
@@ -155,7 +188,13 @@ export function ConversationStream({
   viewerOpen: boolean;
   counts: SuperAgentResourceCounts | null;
   attachments: SuperAgentResourceAttachment[];
-  draftSeed?: { id: number; text: string; hiddenInstructions?: string; mode?: SuperAgentCreationModeId } | null;
+  draftSeed?: {
+    id: number;
+    text: string;
+    hiddenInstructions?: string;
+    mode?: SuperAgentCreationModeId;
+    designModule?: SuperAgentDesignModuleId;
+  } | null;
   gameTemplateSeed?: { id: number; game: GameCard } | null;
   agents: LocalAgent[];
   agentsLoaded?: boolean;
@@ -219,17 +258,36 @@ export function ConversationStream({
   const [browsingEngine, setBrowsingEngine] = useState<SuperAgentEngine>(selection.engine);
   const [inspectingEngine, setInspectingEngine] = useState<SuperAgentEngine | null>(null);
   const inspectedEnginesRef = useRef<Set<SuperAgentEngine>>(new Set());
-  const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(() => requestedMode ?? null);
-  const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(DEFAULT_MODE_COMPOSER_OPTIONS);
+  const initialResolvedMode = resolveCreationModeEntry(requestedMode, requestedDesignModule);
+  const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(() => initialResolvedMode.modeId);
+  const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(() => ({
+    ...DEFAULT_MODE_COMPOSER_OPTIONS,
+    ...initialResolvedMode.optionsPatch,
+  }));
   const [scaffoldingGame, setScaffoldingGame] = useState(false);
   const [previewingChipKey, setPreviewingChipKey] = useState<string | null>(null);
   const mediaModelsRef = useRef<Model[]>([]);
   const activeMode = findSuperAgentMode(activeModeId);
   const headerIntentMeta = superAgentIntentMeta(
-    chat?.intent ?? (activeMode ? modeToSuperAgentIntent(activeMode.id) : undefined),
+    chat?.intent ?? (
+      activeMode
+        ? activeMode.id === 'design'
+          ? (modeOptions.designFormat === 'image'
+            ? 'image'
+            : (modeOptions.designScenario === 'deck' || modeOptions.designScenario === 'document' ? 'slides' : 'design'))
+          : modeToSuperAgentIntent(activeMode.id)
+        : undefined
+    ),
   );
   const updateModeOptions = useCallback((patch: Partial<ModeComposerOptions>) => {
     setModeOptions(prev => ({ ...prev, ...patch }));
+  }, []);
+  const enterMode = useCallback((mode: SuperAgentCreationModeId | null, designModule?: SuperAgentDesignModuleId | null) => {
+    const resolved = resolveCreationModeEntry(mode, designModule);
+    setActiveModeId(resolved.modeId);
+    if (resolved.optionsPatch) {
+      setModeOptions(prev => ({ ...prev, ...resolved.optionsPatch }));
+    }
   }, []);
   const handleCatalogModelsChange = useCallback((models: Model[]) => {
     mediaModelsRef.current = models;
@@ -247,13 +305,13 @@ export function ConversationStream({
     setText(draftSeed.text);
     pendingHiddenInstructionsRef.current = draftSeed.hiddenInstructions?.trim() || undefined;
     if (draftSeed.mode && !chat?.messages.length) {
-      setActiveModeId(draftSeed.mode);
+      enterMode(draftSeed.mode, draftSeed.designModule);
     } else if (!draftSeed.mode) {
       setActiveModeId(null);
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     requestAnimationFrame(() => composerRef.current?.focus());
-  }, [draftSeed, chat?.messages.length]);
+  }, [draftSeed, chat?.messages.length, enterMode]);
 
   const appliedGameTemplateSeedRef = useRef<number | null>(null);
   useEffect(() => {
@@ -360,6 +418,37 @@ export function ConversationStream({
 
   const browsingChoice = engineChoices.find(item => item.id === browsingEngine) ?? engineChoices[0];
 
+  // Proactively prewarm installed un-inspected local agents (e.g. Antigravity, Codex, Claude)
+  // in the background when Super Agent becomes active so switching agents in the picker is instant.
+  useEffect(() => {
+    if (!active) return;
+    if (activeRuntime?.kind === 'remote-service') return;
+    if (activeRuntime?.kind === 'local-bridge' && activeRuntime.status !== 'online') return;
+    const runtimeKey = activeRuntime?.id ?? 'local';
+    const candidates = engineChoices
+      .map(item => item.agent)
+      .filter((agent): agent is LocalAgent => Boolean(
+        agent
+        && agent.installed
+        && !agent.checkedAt
+        && agent.models.length === 0
+        && !inspectedEnginesRef.current.has(`${runtimeKey}:${agent.id}`),
+      ))
+      .slice(0, 4);
+    if (!candidates.length) return;
+    let cancelled = false;
+    for (const target of candidates) {
+      inspectedEnginesRef.current.add(`${runtimeKey}:${target.id}`);
+      const req = activeRuntime?.kind === 'local-bridge'
+        ? inspectBridgeAgent(activeRuntime.id, target.id).then(() => { if (!cancelled) notifyRuntimesChanged(); })
+        : gatewayRequest(`settings/agents/${target.id}/inspect`, 'POST', {}).then(() => { if (!cancelled) notifyAgentsChanged(); });
+      void req.catch(() => { /* keep fallback default option */ });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [active, activeRuntime?.id, activeRuntime?.kind, activeRuntime?.status, engineChoices]);
+
   useEffect(() => {
     if (!modelMenuOpen) return;
     if (activeRuntime?.kind === 'remote-service') return;
@@ -396,14 +485,14 @@ export function ConversationStream({
 
   useEffect(() => {
     if (requestedMode && !chat?.messages.length) {
-      setActiveModeId(requestedMode);
+      enterMode(requestedMode, requestedDesignModule);
     }
-  }, [requestedMode, chat?.id, chat?.messages.length]);
+  }, [requestedMode, requestedDesignModule, chat?.id, chat?.messages.length, enterMode]);
 
   useEffect(() => {
     setRenaming(false);
     if (requestedMode && !chat?.messages.length) {
-      setActiveModeId(requestedMode);
+      enterMode(requestedMode, requestedDesignModule);
     } else if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
       setActiveModeId(null);
       pendingHiddenInstructionsRef.current = undefined;
@@ -507,6 +596,9 @@ export function ConversationStream({
     const prefix = activeMode
       ? formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current)
       : '';
+    const designDirective = activeMode?.id === 'design'
+      ? buildDesignHiddenDirective(modeOptions)
+      : undefined;
     const annotationSummary = attachments
       .filter(att => att.kind === 'browser-annotation')
       .map(att => att.annotation?.comment?.trim() || '')
@@ -516,6 +608,7 @@ export function ConversationStream({
     const rawBody = text.trim() || annotationSummary || prefix;
     const hiddenInstructions = [
       rawBody === prefix ? '' : prefix,
+      designDirective,
       pendingHiddenInstructionsRef.current,
     ].filter(Boolean).join('\n\n') || undefined;
     const ok = await onSend(rawBody, {
@@ -763,14 +856,14 @@ export function ConversationStream({
             <div className="om-sa-starter-grid">
               {PRIMARY_STARTERS.map(card => (
                 <Button
-                  key={card.id}
+                  key={card.key ?? card.id}
                   variant="plain"
                   type="button"
                   className="om-sa-starter-card"
                   data-tone={card.tone}
                   data-featured={card.featured || undefined}
                   onClick={() => {
-                    setActiveModeId(card.id);
+                    enterMode(card.id, card.designModule);
                     composerRef.current?.focus();
                   }}
                 >
@@ -791,6 +884,7 @@ export function ConversationStream({
                 onOpenChange={setMoreStartersOpen}
                 side="bottom"
                 align="end"
+                initialFocus={false}
                 aria-label={t('Explore more')}
                 className="om-agent-settings-popover om-sa-more-popover"
                 trigger={
@@ -810,13 +904,13 @@ export function ConversationStream({
                 <div className="om-sa-more-menu">
                   {EXTRA_STARTERS.map(card => (
                     <Button
-                      key={card.id}
+                      key={card.key}
                       variant="plain"
                       type="button"
                       className="om-sa-more-item"
                       onClick={() => {
                         setMoreStartersOpen(false);
-                        setActiveModeId(card.id);
+                        enterMode(card.id, card.designModule);
                         composerRef.current?.focus();
                       }}
                     >
@@ -912,6 +1006,7 @@ export function ConversationStream({
             active={active}
             modeId={activeMode.id}
             options={modeOptions}
+            attachments={attachments}
             disabled={busy || sending}
             onChange={updateModeOptions}
             onCatalogModelsChange={handleCatalogModelsChange}

@@ -3,8 +3,9 @@ import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { blackFridayTemplates } from '../../../shared/black-friday-collection';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { designScenarios, isDesignScenario } from '../../../shared/design-project';
 import { gameGenres, type GameCard, type GameGenre } from '../../../shared/game-contract';
-import type { SuperAgentResourceAttachment } from '../../../shared/super-agent';
+import type { SuperAgentDesignModuleId, SuperAgentResourceAttachment } from '../../../shared/super-agent';
 import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ScaledPreviewThumb } from '../design/ScaledPreviewThumb';
@@ -33,11 +34,11 @@ import { motionSkills, skillCategories, type MotionSkill, type SkillCategory } f
 import { templateCollectionFacets, templatesInCollection, type TemplateCollection } from '../motion/templateCollections';
 import { aiTechnologyIndustry, purposeOrder } from '../motion/templateDiscoveryTaxonomy';
 import { useCoveredTemplates } from '../motion/useCoveredTemplates';
-import type { ModeComposerOptions } from './ModeComposerControls';
+import { designScenarioOptionsPatch, type ImageDesignScene, type ModeComposerOptions } from './ModeComposerControls';
 import { resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import { fetchWorkspaceResources } from './superAgentClient';
 
-export type SuperAgentCreationModeId = 'coding' | 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
+export type SuperAgentCreationModeId = 'coding' | 'design' | 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
 
 export type SuperAgentModeSpec = {
   id: SuperAgentCreationModeId;
@@ -53,6 +54,22 @@ export type SuperAgentModeSpec = {
 };
 
 export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
+  {
+    id: 'design',
+    tone: 'image',
+    icon: 'palette-line',
+    label: 'Design Studio',
+    title: 'Design anything, from visuals to live HTML',
+    subtitle: 'Switch between HTML Design Studio modules and AI Image design below, attach templates or Brand Kits, and describe what you want to create.',
+    placeholder: 'Describe the website, mobile app, slide deck, or visual artwork you want to design…',
+    defaultPrompt: 'Design a modern interactive website prototype with a bold hero, interactive feature tabs, pricing toggle, and responsive mobile layout, then open it in the Artifact Viewer.',
+    pickerCategory: 'design-template',
+    quickIdeas: [
+      { title: 'AI product landing page', prompt: 'Build a responsive AI product landing page with interactive feature switcher, pricing toggle, and customer proof.' },
+      { title: 'Mobile app prototype', prompt: 'Design a mobile app prototype in a 390x844 phone viewport with bottom tab navigation and smooth transitions.' },
+      { title: 'Investor pitch deck', prompt: 'Create an 8-slide investor pitch deck covering problem, solution, traction KPIs, and roadmap with speaker notes.' },
+    ],
+  },
   {
     id: 'coding',
     tone: 'coding',
@@ -184,6 +201,49 @@ export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
     ],
   },
 ];
+
+const DESIGN_MODULE_QUICK_IDEAS: Record<SuperAgentDesignModuleId, readonly { title: string; prompt: string }[]> = {
+  prototype: [
+    { title: 'AI product landing page', prompt: 'Build a responsive AI product landing page with interactive feature switcher, pricing toggle, and customer proof.' },
+    { title: 'Interactive SaaS dashboard', prompt: 'Create a live analytics dashboard with KPI cards, interactive filters, and trend charts.' },
+    { title: 'Editorial studio showcase', prompt: 'Design a kinetic editorial agency portfolio website with bold typography and interactive project previews.' },
+  ],
+  'mobile-app': [
+    { title: 'Fitness coaching app', prompt: 'Prototype a mobile fitness coaching app covering goal setup, weekly plans, workout check-ins and progress review.' },
+    { title: 'Personal finance wallet', prompt: 'Design an iOS personal finance app with account balance, recent transactions, budget rings and quick transfer.' },
+    { title: 'Travel itinerary companion', prompt: 'Create a mobile travel companion app with itinerary timeline, boarding pass card and offline city tips.' },
+  ],
+  deck: [
+    { title: 'Investor pitch deck', prompt: 'Create an 8-slide investor pitch deck covering problem, solution, traction KPIs, and roadmap with speaker notes.' },
+    { title: 'Quarterly business review', prompt: 'Build a quarterly performance deck with metric comparisons, key milestones, and next-quarter priorities.' },
+    { title: 'Product launch keynote', prompt: 'Design a clean 10-slide keynote presentation announcing a new hardware & AI product with bold visual slides.' },
+  ],
+  document: [
+    { title: 'One-page designer resume', prompt: 'Draft a one-page resume for a senior product designer with summary, experience, skills and selected work.' },
+    { title: 'Quarterly finance report', prompt: 'Write a two-page quarterly finance report with KPIs, charts and commentary.' },
+    { title: 'Competitor landscape brief', prompt: 'Draft a structured competitor analysis report with positioning matrix and executive summary.' },
+  ],
+  'web-clone': [
+    { title: 'Clone a SaaS home page', prompt: 'Rebuild a modern developer-tool landing page as clean, responsive, editable HTML with interactive tabs.' },
+    { title: 'Rebuild an editorial blog', prompt: 'Recreate an editorial publication homepage with featured stories, reading list, and dark/light theme.' },
+    { title: 'Responsive pricing page clone', prompt: 'Rebuild a multi-tier pricing page with billing toggle, feature comparison table, and FAQ accordion.' },
+  ],
+  'live-artifact': [
+    { title: 'Live sales KPI dashboard', prompt: 'Create a live sales dashboard driven by data.json with KPIs, a trend chart and a top-accounts table.' },
+    { title: 'Real-time metrics board', prompt: 'Build an operational telemetry dashboard backed by data.json with live filter chips and status breakdown.' },
+    { title: 'Interactive cohort explorer', prompt: 'Design a retention cohort analysis viewer powered by data.json with date-range and segment controls.' },
+  ],
+  webgl: [
+    { title: 'Reactive particle hero', prompt: 'Build a WebGL2 hero with a flowing particle field that reacts to the pointer and scroll.' },
+    { title: 'Interactive 3D product stage', prompt: 'Create a WebGL2 interactive 3D showcase with smooth camera orbit, studio lighting, and material presets.' },
+    { title: 'Fluid shader background', prompt: 'Author an interactive GLSL shader canvas with live color palette controls and pointer ripples.' },
+  ],
+  image: [
+    { title: 'Cinematic product hero', prompt: 'Generate a studio-lit product hero illustration matching the attached Brand Kit colors and mood.' },
+    { title: 'Editorial poster artwork', prompt: 'Design a bold editorial campaign visual with dramatic lighting and clean composition.' },
+    { title: 'Brand campaign visual', prompt: 'Create a cohesive key visual artwork tailored for social launch banners and product thumbnails.' },
+  ],
+};
 
 export function findSuperAgentMode(id: SuperAgentCreationModeId | null): SuperAgentModeSpec | null {
   return id ? SUPER_AGENT_MODES.find(item => item.id === id) ?? null : null;
@@ -393,7 +453,7 @@ type FilterOption = { id: string; label: string; count?: number };
 function ResourceShowcaseThumb({ item, active = true }: { item: SuperAgentResourceAttachment; active?: boolean }) {
   const [imgFailed, setImgFailed] = useState(false);
 
-  if (item.kind === 'design-template' && item.previewUrl) {
+  if ((item.kind === 'design-template' || item.kind === 'design-project') && item.previewUrl) {
     return (
       <div className="om-sa-showcase-thumb om-sa-showcase-iframe-wrap" aria-hidden="true">
         <ScaledPreviewThumb src={item.previewUrl} title={item.title} active={active} />
@@ -489,8 +549,9 @@ export function ModeResourceShowcase({
     [coveredMotion.catalog],
   );
 
-  // Full workspace catalogs cached per kind for Design templates, Brand Kits, Design Skills, Assets, and Game Studio.
+  // Full workspace catalogs cached per kind for Design templates, Design projects, Brand Kits, Design Skills, Assets, and Game Studio.
   const [designTemplates, setDesignTemplates] = useState<SuperAgentResourceAttachment[] | null>(null);
+  const [designProjects, setDesignProjects] = useState<SuperAgentResourceAttachment[] | null>(null);
   const [brandKits, setBrandKits] = useState<SuperAgentResourceAttachment[] | null>(null);
   const [designSkills, setDesignSkills] = useState<SuperAgentResourceAttachment[] | null>(null);
   const [assets, setAssets] = useState<SuperAgentResourceAttachment[] | null>(null);
@@ -499,6 +560,7 @@ export function ModeResourceShowcase({
 
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [activeSkillCategory, setActiveSkillCategory] = useState<SkillCategory | 'all'>('all');
+  const [designQuery, setDesignQuery] = useState('');
   const [gameQuery, setGameQuery] = useState('');
   const [gameSort, setGameSort] = useState<GameSort>('relevance');
   const [fanIndex, setFanIndex] = useState(0);
@@ -553,6 +615,34 @@ export function ModeResourceShowcase({
   // Build real categories & live counts per mode.
   const filters = useMemo<FilterOption[]>(() => {
     switch (mode.id) {
+      case 'design': {
+        if (modeOptions?.designFormat === 'image') {
+          return [
+            { id: 'all-image', label: 'All image scenes', count: buildImageCardsByCategory('all-image').length },
+            { id: 'gpt-image', label: 'GPT Image 2.6', count: gptImageStory.cases.length },
+            { id: 'text-to-image', label: 'Text to image', count: sceneExamples['text-to-image'].length },
+            { id: 'image-edit', label: 'Image edit', count: sceneExamples['image-edit'].length },
+            { id: 'remove-background', label: 'Remove background', count: sceneExamples['remove-background'].length },
+            { id: 'relight', label: 'Relight', count: sceneExamples.relight.length },
+            { id: 'character', label: 'Character', count: sceneExamples.character.length },
+            { id: 'asset', label: 'Workspace Assets', count: assets ? assets.filter(a => a.modality === 'image').length : undefined },
+            { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
+          ];
+        }
+        return [
+          { id: 'all', label: 'All templates', count: designTemplates ? designTemplates.length : undefined },
+          ...designScenarios.map(sc => ({
+            id: sc.id,
+            label: sc.label,
+            count: designTemplates ? designTemplates.filter(i => i.scenario === sc.id).length : undefined,
+          })),
+          ...(designProjects && designProjects.length > 0
+            ? [{ id: 'my-designs', label: 'My designs', count: designProjects.length }]
+            : []),
+          { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
+          { id: 'design-skill', label: 'Design Skills', count: designSkills?.length },
+        ];
+      }
       case 'coding':
         return [];
       case 'website': {
@@ -649,27 +739,57 @@ export function ModeResourceShowcase({
         ];
       }
     }
-  }, [mode.id, designTemplates, brandKits, designSkills, assets, publishedGameTemplates, myGames, coveredMotion.catalog, motionCatalog, motionPurposes, isZh]);
+  }, [mode.id, modeOptions?.designFormat, designTemplates, designProjects, brandKits, designSkills, assets, publishedGameTemplates, myGames, coveredMotion.catalog, motionCatalog, motionPurposes, isZh]);
 
   // Reset active tab when switching mode.
   useEffect(() => {
-    setActiveFilter(filters[0]?.id ?? 'all');
+    if (mode.id !== 'design') {
+      setActiveFilter(filters[0]?.id ?? 'all');
+    }
     setActiveSkillCategory('all');
+    setDesignQuery('');
     setGameQuery('');
     setGameSort('relevance');
     setVisibleCount(PAGE_BATCH_SIZE);
   }, [mode.id]);
 
+  const prevImageSceneRef = useRef<ImageDesignScene | undefined>(modeOptions?.imageScene);
+
+  // Sync Design Studio showcase filter with the selected design medium & module.
+  useEffect(() => {
+    if (mode.id !== 'design') return;
+    setActiveFilter(
+      modeOptions?.designFormat === 'image'
+        ? 'all-image'
+        : (modeOptions?.designScenario ?? 'prototype'),
+    );
+  }, [mode.id, modeOptions?.designFormat, modeOptions?.designScenario]);
+
+  // Sync Image scene pill changes into the Image showcase tab.
+  useEffect(() => {
+    const nextScene = modeOptions?.imageScene;
+    const prevScene = prevImageSceneRef.current;
+    prevImageSceneRef.current = nextScene;
+    if (mode.id === 'design' && modeOptions?.designFormat === 'image' && nextScene && prevScene && nextScene !== prevScene) {
+      setActiveFilter(nextScene);
+    }
+  }, [mode.id, modeOptions?.designFormat, modeOptions?.imageScene]);
+
+  useEffect(() => {
+    if (mode.id === 'design') setDesignQuery('');
+  }, [mode.id, modeOptions?.designFormat]);
+
   // Reset visible scroll window when filter changes.
   useEffect(() => {
     setVisibleCount(PAGE_BATCH_SIZE);
-  }, [activeFilter, activeSkillCategory, gameQuery, gameSort]);
+  }, [activeFilter, activeSkillCategory, designQuery, gameQuery, gameSort]);
 
   // Eagerly fetch needed catalogs cleanly with full limits (no truncation).
   useEffect(() => {
     let cancelled = false;
-    const ensure = async (kind: 'design-template' | 'brand-kit' | 'design-skill' | 'asset') => {
+    const ensure = async (kind: 'design-template' | 'design-project' | 'brand-kit' | 'design-skill' | 'asset') => {
       if (kind === 'design-template' && designTemplates !== null) return;
+      if (kind === 'design-project' && designProjects !== null) return;
       if (kind === 'brand-kit' && brandKits !== null) return;
       if (kind === 'design-skill' && designSkills !== null) return;
       if (kind === 'asset' && assets !== null) return;
@@ -678,12 +798,14 @@ export function ModeResourceShowcase({
         const res = await fetchWorkspaceResources({ kind, limit: 600 });
         if (cancelled) return;
         if (kind === 'design-template') setDesignTemplates(res.items);
+        if (kind === 'design-project') setDesignProjects(res.items);
         if (kind === 'brand-kit') setBrandKits(res.items);
         if (kind === 'design-skill') setDesignSkills(res.items);
         if (kind === 'asset') setAssets(res.items);
       } catch {
         if (cancelled) return;
         if (kind === 'design-template') setDesignTemplates([]);
+        if (kind === 'design-project') setDesignProjects([]);
         if (kind === 'brand-kit') setBrandKits([]);
         if (kind === 'design-skill') setDesignSkills([]);
         if (kind === 'asset') setAssets([]);
@@ -692,7 +814,17 @@ export function ModeResourceShowcase({
       }
     };
 
-    if (mode.id === 'website' || mode.id === 'deck') {
+    if (mode.id === 'design') {
+      if (modeOptions?.designFormat === 'image') {
+        if (activeFilter === 'asset') void ensure('asset');
+        if (activeFilter === 'brand-kit') void ensure('brand-kit');
+      } else {
+        void ensure('design-template');
+        void ensure('design-project');
+        if (activeFilter === 'brand-kit') void ensure('brand-kit');
+        if (activeFilter === 'design-skill') void ensure('design-skill');
+      }
+    } else if (mode.id === 'website' || mode.id === 'deck') {
       void ensure('design-template');
       if (activeFilter === 'brand-kit') void ensure('brand-kit');
       if (activeFilter === 'design-skill') void ensure('design-skill');
@@ -716,10 +848,19 @@ export function ModeResourceShowcase({
     return () => {
       cancelled = true;
     };
-  }, [mode.id, activeFilter, designTemplates, brandKits, designSkills, assets]);
+  }, [mode.id, modeOptions?.designFormat, activeFilter, designTemplates, designProjects, brandKits, designSkills, assets]);
 
   // Resolve active curated cards (Image / Cinema / Audio / AI Video).
   const curatedCards = useMemo<CuratedShowcaseCard[] | null>(() => {
+    if (mode.id === 'design' && modeOptions?.designFormat === 'image' && activeFilter !== 'asset' && activeFilter !== 'brand-kit') {
+      const base = buildImageCardsByCategory(activeFilter);
+      const needle = designQuery.trim().toLocaleLowerCase();
+      if (!needle) return base;
+      return base.filter(card =>
+        [card.title, t(card.title), card.subtitle, card.prompt]
+          .some(text => text.toLocaleLowerCase().includes(needle)),
+      );
+    }
     if (mode.id === 'image' && activeFilter !== 'asset' && activeFilter !== 'brand-kit' && activeFilter !== 'design-template') {
       return buildImageCardsByCategory(activeFilter);
     }
@@ -730,15 +871,32 @@ export function ModeResourceShowcase({
       return buildCinemaCardsByCategory('ai-video', isZh);
     }
     return null;
-  }, [mode.id, activeFilter, isZh]);
+  }, [mode.id, modeOptions?.designFormat, activeFilter, designQuery, isZh, t]);
 
   // Resolve full resource items for all other tabs (NO 12-item cap!).
   const resourceItems = useMemo<SuperAgentResourceAttachment[]>(() => {
     if (curatedCards) return [];
-    if (activeFilter === 'brand-kit') return brandKits ?? [];
-    if (activeFilter === 'design-template') return designTemplates ?? [];
+    const applyDesignSearch = (items: SuperAgentResourceAttachment[]) => {
+      if (mode.id !== 'design') return items;
+      const needle = designQuery.trim().toLocaleLowerCase();
+      if (!needle) return items;
+      return items.filter(item =>
+        [item.id, item.title, item.subtitle, item.scenario, ...(item.tags ?? [])]
+          .filter(Boolean)
+          .some(text => String(text).toLocaleLowerCase().includes(needle)),
+      );
+    };
+    if (mode.id === 'design' && activeFilter === 'my-designs') {
+      return applyDesignSearch(designProjects ?? []);
+    }
+    if (activeFilter === 'brand-kit') return applyDesignSearch(brandKits ?? []);
+    if (activeFilter === 'design-template') return applyDesignSearch(designTemplates ?? []);
     if (activeFilter === 'design-skill') {
       const all = designSkills ?? [];
+      if (mode.id === 'design') {
+        const activeScen = modeOptions?.designScenario ?? 'prototype';
+        return applyDesignSearch([...all].sort((a, b) => Number(b.scenario === activeScen) - Number(a.scenario === activeScen)));
+      }
       if (mode.id === 'deck') {
         const scoped = all.filter(s => s.scenario === 'deck' || s.scenario === 'document');
         return scoped.length ? scoped : all;
@@ -751,7 +909,9 @@ export function ModeResourceShowcase({
     }
     if (activeFilter === 'asset') {
       const all = assets ?? [];
-      if (mode.id === 'image') return all.filter(a => a.modality === 'image');
+      if (mode.id === 'image' || (mode.id === 'design' && modeOptions?.designFormat === 'image')) {
+        return applyDesignSearch(all.filter(a => a.modality === 'image'));
+      }
       if (mode.id === 'audio') return all.filter(a => a.modality === 'audio');
       if (mode.id === 'media') return all.filter(a => a.modality === 'video');
       return all;
@@ -777,13 +937,17 @@ export function ModeResourceShowcase({
       }
       return motionCatalog.map(motionTemplateToAttachment);
     }
-    // Design templates (website / deck / game)
+    // Design templates (design / website / deck / game)
     const all = designTemplates ?? [];
+    if (mode.id === 'design') {
+      const scoped = activeFilter === 'all' ? all : all.filter(i => i.scenario === activeFilter);
+      return applyDesignSearch(scoped);
+    }
     if (activeFilter !== 'all') return all.filter(i => i.scenario === activeFilter);
     if (mode.id === 'deck') return all.filter(i => i.scenario === 'deck' || i.scenario === 'document');
     if (mode.id === 'game') return all.filter(i => i.scenario === 'webgl' || i.scenario === 'live-artifact' || i.scenario === 'prototype');
     return all.filter(i => i.scenario !== 'deck' && i.scenario !== 'document' && i.scenario !== 'webgl');
-  }, [curatedCards, activeFilter, activeSkillCategory, mode.id, brandKits, designSkills, assets, motionCatalog, locale, designTemplates]);
+  }, [curatedCards, activeFilter, activeSkillCategory, mode.id, modeOptions?.designFormat, modeOptions?.designScenario, designQuery, brandKits, designSkills, assets, motionCatalog, locale, designTemplates, designProjects]);
 
   const showGameCards = mode.id === 'game' && activeFilter !== 'brand-kit';
 
@@ -844,7 +1008,12 @@ export function ModeResourceShowcase({
       || (activeFilter === 'brand-kit' && brandKits === null)
       || (activeFilter === 'design-skill' && designSkills === null)
       || (activeFilter === 'asset' && assets === null)
-      || ((mode.id === 'website' || mode.id === 'deck') && activeFilter !== 'brand-kit' && activeFilter !== 'design-skill' && designTemplates === null)
+      || (activeFilter === 'my-designs' && designProjects === null)
+      || ((mode.id === 'website' || mode.id === 'deck' || (mode.id === 'design' && modeOptions?.designFormat !== 'image'))
+        && activeFilter !== 'brand-kit'
+        && activeFilter !== 'design-skill'
+        && activeFilter !== 'my-designs'
+        && designTemplates === null)
       || (loadingKind !== null && totalCount === 0)
     );
 
@@ -1050,8 +1219,72 @@ export function ModeResourceShowcase({
           </div>
         )}
 
+        {mode.id === 'design' && (() => {
+          const isHtml = modeOptions?.designFormat !== 'image';
+          const activeScenario = modeOptions?.designScenario ?? 'prototype';
+          return (
+            <div className="om-sa-design-module-strip" role="group" aria-label={t('Design module')}>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-design-module-card"
+                aria-pressed={!isHtml}
+                data-active={!isHtml || undefined}
+                onClick={() => {
+                  onChangeModeOptions?.({ designFormat: 'image' });
+                  setActiveFilter('all-image');
+                }}
+              >
+                <span className="om-sa-design-module-icon" aria-hidden="true">
+                  <RemixIcon name="image-line" size={15} />
+                </span>
+                <span>{t('Image design')}</span>
+              </Button>
+              {designScenarios.map(sc => {
+                const selected = isHtml && activeScenario === sc.id;
+                return (
+                  <Button
+                    key={sc.id}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-design-module-card"
+                    aria-pressed={selected}
+                    data-active={selected || undefined}
+                    onClick={() => {
+                      onChangeModeOptions?.(designScenarioOptionsPatch(sc.id));
+                      setActiveFilter(sc.id);
+                    }}
+                  >
+                    <span className="om-sa-design-module-icon" aria-hidden="true">
+                      <RemixIcon name={sc.icon} size={15} />
+                    </span>
+                    <span>{t(sc.label)}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          );
+        })()}
+
         <div className="om-sa-mode-ideas">
-          {mode.id === 'game' ? (
+          {mode.id === 'design' ? (
+            DESIGN_MODULE_QUICK_IDEAS[
+              modeOptions?.designFormat === 'image' ? 'image' : (modeOptions?.designScenario ?? 'prototype')
+            ].map(idea => (
+              <Button
+                key={idea.title}
+                variant="plain"
+                type="button"
+                className="om-sa-idea-chip"
+                onClick={() => onPickPrompt(t(idea.prompt))}
+              >
+                <span className="om-sa-tone-icon" data-tone={mode.tone} aria-hidden="true">
+                  <RemixIcon name="sparkling-line" size={12} />
+                </span>
+                <span>{t(idea.title)}</span>
+              </Button>
+            ))
+          ) : mode.id === 'game' ? (
             GAME_STUDIO_QUICK_IDEAS.map(idea => (
               <Button
                 key={idea.title}
@@ -1109,7 +1342,24 @@ export function ModeResourceShowcase({
                 aria-selected={activeFilter === f.id}
                 data-active={activeFilter === f.id || undefined}
                 className="om-sa-showcase-tab"
-                onClick={() => setActiveFilter(f.id)}
+                onClick={() => {
+                  setActiveFilter(f.id);
+                  if (mode.id === 'design') {
+                    if (modeOptions?.designFormat === 'image') {
+                      if (
+                        f.id === 'text-to-image'
+                        || f.id === 'image-edit'
+                        || f.id === 'remove-background'
+                        || f.id === 'relight'
+                        || f.id === 'character'
+                      ) {
+                        onChangeModeOptions?.({ imageScene: f.id });
+                      }
+                    } else if (isDesignScenario(f.id)) {
+                      onChangeModeOptions?.(designScenarioOptionsPatch(f.id));
+                    }
+                  }
+                }}
               >
                 <span>{t(f.label)}</span>
                 {typeof f.count === 'number' && <span className="om-sa-tab-count">{f.count}</span>}
@@ -1150,6 +1400,43 @@ export function ModeResourceShowcase({
                   />
                 </div>
               )}
+            </div>
+          ) : mode.id === 'design' ? (
+            <div className="om-sa-design-bar-controls">
+              <span className="om-field om-sa-game-search om-sa-design-search">
+                <RemixIcon name="search-line" size={14} />
+                <input
+                  value={designQuery}
+                  placeholder={t('Filter templates…')}
+                  aria-label={t('Filter templates…')}
+                  onChange={event => setDesignQuery(event.target.value)}
+                />
+                {designQuery && (
+                  <IconButton
+                    variant="plain"
+                    className="om-sa-game-search-clear"
+                    aria-label={t('Clear')}
+                    onClick={() => setDesignQuery('')}
+                    icon={<RemixIcon name="close-line" size={12} />}
+                  />
+                )}
+              </span>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-showcase-more"
+                onClick={() => onOpenAllResources(
+                  activeFilter === 'brand-kit' ? 'brand-kit'
+                    : activeFilter === 'asset' ? 'asset'
+                    : activeFilter === 'skills' || activeFilter === 'design-skill' ? 'skills'
+                    : activeFilter === 'my-designs' ? 'projects'
+                    : modeOptions?.designFormat === 'image' ? 'asset'
+                    : mode.pickerCategory,
+                )}
+              >
+                <span>{t('View all')}</span>
+                <RemixIcon name="arrow-right-up-line" size={13} />
+              </Button>
             </div>
           ) : (
             <Button
@@ -1339,7 +1626,7 @@ export function ModeResourceShowcase({
           )
         ) : (
         <div className="om-sa-showcase-grid" aria-busy={isLoading}>
-          {visibleCurated ? (
+          {visibleCurated && visibleCurated.length > 0 ? (
             visibleCurated.map(card => (
               <Button
                 key={card.id}
@@ -1366,6 +1653,19 @@ export function ModeResourceShowcase({
                 </div>
               </Button>
             ))
+          ) : visibleCurated ? (
+            <div className="om-sa-showcase-empty">
+              <p className="om-muted">{t('No matching resources found')}</p>
+              {designQuery && (
+                <Button
+                  variant="ghost"
+                  className="om-button h-auto"
+                  onClick={() => setDesignQuery('')}
+                >
+                  {t('Clear')}
+                </Button>
+              )}
+            </div>
           ) : isLoading ? (
             Array.from({ length: 10 }, (_, idx) => (
               <div key={idx} className="om-sa-showcase-skeleton">

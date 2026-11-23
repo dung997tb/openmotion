@@ -1334,6 +1334,26 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
   assert.ok(zhHandoff.hiddenInstructions?.includes('openmotion://workflow/template/start'));
   assert.equal(zhHandoff.prompt.includes('openmotion://'), false);
 
+  const designProtoHandoff = buildSuperAgentHandoff({ kind: 'design-template', id: 'tpl-proto', title: 'Landing', scenario: 'prototype' });
+  assert.equal(designProtoHandoff.mode, 'design');
+  assert.equal(designProtoHandoff.designModule, 'prototype');
+
+  const designDeckHandoff = buildSuperAgentHandoff({ kind: 'design-template', id: 'tpl-deck', title: 'Pitch Deck', scenario: 'deck' });
+  assert.equal(designDeckHandoff.mode, 'design');
+  assert.equal(designDeckHandoff.designModule, 'deck');
+
+  const designWebglHandoff = buildSuperAgentHandoff({ kind: 'design-template', id: 'tpl-webgl', title: '3D Globe', scenario: 'webgl' });
+  assert.equal(designWebglHandoff.mode, 'design');
+  assert.equal(designWebglHandoff.designModule, 'webgl');
+
+  const designSkillHandoff = buildSuperAgentHandoff({ kind: 'design-skill', id: 'skill-1', title: 'Editorial' });
+  assert.equal(designSkillHandoff.mode, 'design');
+  assert.equal(designSkillHandoff.designModule, 'prototype');
+
+  const brandKitHandoff = buildSuperAgentHandoff({ kind: 'brand-kit', id: 'catalog:vercel', title: 'Vercel' });
+  assert.equal(brandKitHandoff.mode, 'design');
+  assert.equal(brandKitHandoff.designModule, 'prototype');
+
   // 2) describeSuperAgentApproval turns raw Codex Python-script JSON into a clear 1-line summary
   const pythonAudioDetail = JSON.stringify({
     command: 'python3 - <<\'OPENMOTION_SCORE\'\nfrom pathlib import Path\ndestination = Path("欢快背景音乐.wav")\nOPENMOTION_SCORE',
