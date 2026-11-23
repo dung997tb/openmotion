@@ -7,7 +7,7 @@ import type { CatalogTemplateKind } from '../db/schema/blobs-assets.ts';
 import type { Logger } from '../infra/logger.ts';
 import {
   normalizeCatalogAssetPath,
-  type CatalogAssetHead,
+  type CatalogHead,
   type CatalogPort,
   type ResolvedCatalogAsset,
 } from '../services/catalog-service.ts';
@@ -151,7 +151,8 @@ function extractWildcardAssetPath(
   return normalizeCatalogAssetPath(decodedSegments.join('/'));
 }
 
-function buildHeadResponse(head: CatalogAssetHead): Response {
+function buildHeadResponse(head: CatalogHead): Response {
+  if ('kind' in head) return buildAssetResponse(head);
   const headers = new Headers({
     'Content-Type': head.mimeType,
     'Content-Length': String(head.sizeBytes),

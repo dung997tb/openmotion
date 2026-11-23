@@ -1,3 +1,5 @@
+import type { PrismMotionCatalog, PreparedCatalogTemplate } from './prism-motion-catalog.ts';
+import { builtinTemplateMetadata, getBuiltinTemplateSource } from './builtin-template-source.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { and, asc, eq } from 'drizzle-orm';
@@ -290,7 +292,7 @@ export interface CatalogListOptions {
 }
 
 export interface CatalogListResult extends TemplatePage {
-  source: 'catalog-cas';
+  source: 'catalog-cas' | 'prism';
 }
 
 export interface CatalogFileSummary {
@@ -346,6 +348,8 @@ export type ResolvedCatalogAsset =
       vary: string;
       contentDisposition?: string;
     };
+
+export type CatalogHead = CatalogAssetHead | Extract<ResolvedCatalogAsset, { kind: 'redirect' }>;
 
 export interface ResolveSourceAssetOptions {
   raw?: boolean;
@@ -440,11 +444,11 @@ export interface CatalogPort {
   listTemplates(options?: CatalogListOptions): Promise<CatalogListResult>;
   listBuiltinTemplates(locale?: string): Promise<GalleryTemplate[]>;
   getTemplate(templateId: string, options?: { locale?: string }): Promise<CatalogTemplateDetail>;
-  headPosterAsset(templateId: string): Promise<CatalogAssetHead>;
+  headPosterAsset(templateId: string): Promise<CatalogHead>;
   resolvePosterAsset(templateId: string, options?: { presignTtlSec?: number }): Promise<ResolvedCatalogAsset>;
-  headPreviewAsset(templateId: string): Promise<CatalogAssetHead>;
+  headPreviewAsset(templateId: string): Promise<CatalogHead>;
   resolvePreviewAsset(templateId: string, options?: { presignTtlSec?: number }): Promise<ResolvedCatalogAsset>;
-  headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogAssetHead>;
+  headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogHead>;
   resolveSourceAsset(
     templateId: string,
     assetPath: string,
@@ -519,7 +523,7 @@ interface StoredCatalogMetadata {
   remoteAssets?: StoredRemoteAsset[];
 }
 
-type CatalogTemplateRow = typeof catalogTemplates.$inferSelect;
+type CatalogTemplateRow = Omit<typeof catalogTemplates.$inferSelect, 'updatedAt'>;
 type CatalogTemplateFileRow = typeof catalogTemplateFiles.$inferSelect;
 
 function projectRowToGalleryTemplate(
@@ -660,6 +664,7 @@ function deriveDefaultProjectTitle(row: CatalogTemplateRow, locale = 'en'): stri
 // ---------------------------------------------------------------------------
 
 export interface CatalogServiceDeps {
+  prismCatalog?: Pick<PrismMotionCatalog, 'getTemplates'>;
   db: Database;
   storage: StoragePort;
   textCache?: HotTextCache;
@@ -676,7 +681,11 @@ export class CatalogService implements CatalogPort {
   private readonly defaultLocale: string;
   private readonly presignGetTtlSec: number;
 
+  private readonly publishedCards = new WeakMap<readonly PreparedCatalogTemplate[], Map<string, GalleryTemplate[]>>();
+  private readonly prismCatalog?: Pick<PrismMotionCatalog, 'getTemplates'>;
+
   constructor(deps: CatalogServiceDeps) {
+    this.prismCatalog = deps.prismCatalog;
     this.db = deps.db;
     this.storage = deps.storage;
     this.textCache = deps.textCache;
@@ -686,6 +695,22 @@ export class CatalogService implements CatalogPort {
   }
 
   private async loadTemplateIndex(options: Pick<CatalogListOptions, 'kind' | 'locale'>) {
+    if (this.prismCatalog) {
+      const cms = options.kind === 'builtin' ? [] : await this.prismCatalog.getTemplates();
+      const first = cms[0];
+      const locale = catalogLocale(Object.keys(first?.metadata.locales ?? {}), options.locale ?? this.defaultLocale, this.defaultLocale);
+      const key = (options.kind ?? 'all') + '/' + locale;
+      const cards = this.publishedCards.get(cms) ?? new Map<string, GalleryTemplate[]>();
+      let items = cards.get(key);
+      if (!items) {
+        const builtins = options.kind === 'prism' ? [] : BUILTIN_TEMPLATES.map(builtinTemplateMetadata);
+        const rows = [...cms].sort((a, b) => a.sortOrder - b.sortOrder).concat(builtins);
+        items = rows.map(row => projectRowToGalleryTemplate(row, locale));
+        cards.set(key, items);
+        this.publishedCards.set(cms, cards);
+      }
+      return { items, catalogVersion: first?.catalogVersion ?? 'builtin' };
+    }
     const baseQuery = this.db.select().from(catalogTemplates);
     const rows = options.kind
       ? await baseQuery
@@ -708,7 +733,8 @@ export class CatalogService implements CatalogPort {
 
   async listAllTemplates() {
     const { items, catalogVersion } = await this.loadTemplateIndex({});
-    return { templates: items.sort(compareFeaturedTemplates), catalogVersion, total: items.length };
+    return { templates: items.toSorted(compareFeaturedTemplates), catalogVersion, total: items.length,
+      source: this.prismCatalog ? 'prism' : 'cloud-catalog-cas' };
   }
 
   async listTemplates(options: CatalogListOptions = {}): Promise<CatalogListResult> {
@@ -736,11 +762,12 @@ export class CatalogService implements CatalogPort {
       ...page,
       catalogTotal: items.length,
       catalogVersion,
-      source: 'catalog-cas',
+      source: this.prismCatalog ? 'prism' : 'catalog-cas',
     };
   }
 
   async listBuiltinTemplates(locale?: string): Promise<GalleryTemplate[]> {
+    if (this.prismCatalog) return (await this.loadTemplateIndex({ kind: 'builtin', locale })).items;
     const rows = await this.db
       .select()
       .from(catalogTemplates)
@@ -750,22 +777,20 @@ export class CatalogService implements CatalogPort {
     return rows.map((row) => projectRowToGalleryTemplate(row, resolvedLocale));
   }
 
+  private async getPreparedTemplateForClone(id: string): Promise<PreparedCatalogTemplate> {
+    const builtin = await getBuiltinTemplateSource(id);
+    if (builtin) return builtin;
+    const template = (await this.prismCatalog!.getTemplates()).find(item => item.id === id);
+    if (!template) throw new CloudError('NOT_FOUND', `Template '${id}' not found`, { status: 404, applied: false });
+    return template;
+  }
+
   async getTemplate(templateId: string, options: { locale?: string } = {}): Promise<CatalogTemplateDetail> {
     const id = validateTemplateId(templateId);
-    const rows = await this.db
-      .select()
-      .from(catalogTemplates)
-      .where(eq(catalogTemplates.id, id));
-    const row = rows[0];
-    if (!row) {
-      throw new CloudError('NOT_FOUND', `Template '${id}' not found`, { status: 404, applied: false });
-    }
-
-    const fileRows = await this.db
-      .select()
-      .from(catalogTemplateFiles)
-      .where(eq(catalogTemplateFiles.templateId, id))
-      .orderBy(asc(catalogTemplateFiles.path));
+    const source = this.prismCatalog ? await this.getPreparedTemplateForClone(id) : undefined;
+    const row = source ?? await this.requireTemplateRow(id);
+    const fileRows = source?.files ?? await this.db.select().from(catalogTemplateFiles)
+      .where(eq(catalogTemplateFiles.templateId, id)).orderBy(asc(catalogTemplateFiles.path));
 
     const gallery = projectRowToGalleryTemplate(row, options.locale ?? this.defaultLocale);
     const instructions = row.instructionsMd ?? buildTemplateRecipe(gallery);
@@ -776,7 +801,7 @@ export class CatalogService implements CatalogPort {
       mimeType: file.mimeType,
       metadata: file.metadata ?? null,
       isProjectFile: file.isProjectFile,
-      isAvailable: file.isAvailable,
+      isAvailable: source ? true : file.isAvailable,
     }));
 
     return {
@@ -800,8 +825,37 @@ export class CatalogService implements CatalogPort {
     };
   }
 
-  async headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogAssetHead> {
+  private async publishedAsset(id: string, path: string, locale?: string): Promise<ResolvedCatalogAsset> {
+    const template = await this.getPreparedTemplateForClone(id);
+    const file = template.files.find(item => item.path === path);
+    const headers = { cacheControl: REDIRECT_CACHE_CONTROL, vary: REDIRECT_VARY };
+    if (file?.bytes) return {
+      ...headers, kind: 'inline', body: file.bytes, sizeBytes: file.sizeBytes, sha256: file.sha256,
+      etag: formatStrongShaEtag(file.sha256), mimeType: file.mimeType, metadata: file.metadata,
+    };
+    const card = projectRowToGalleryTemplate(template, locale ?? this.defaultLocale);
+    const links: Record<string, string | undefined> = template.kind === 'prism' ? {
+      'poster.jpg': card.posterUrl, 'preview.webm': card.previewUrl,
+      'motion.md': card.motionDocumentUrl, 'preview.html': card.motionGuideUrl,
+    } : {};
+    const location = file?.remoteUrl ?? links[path];
+    if (location) return {
+      ...headers, kind: 'redirect', location, mimeType: file?.mimeType ?? mimeTypeForPath(path),
+      metadata: file?.metadata ?? null,
+    };
+    throw new CloudError('NOT_FOUND', `No published '${path}' for template '${id}'`, { status: 404, applied: false });
+  }
+
+  private async publishedHead(id: string, path: string): Promise<CatalogHead> {
+    const asset = await this.publishedAsset(id, path);
+    if (asset.kind === 'redirect') return asset;
+    return { templateId: id, path, sha256: asset.sha256, sizeBytes: asset.sizeBytes, mimeType: asset.mimeType,
+      etag: asset.etag, metadata: asset.metadata, isAvailable: true };
+  }
+
+  async headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogHead> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedHead(id, normalizeCatalogAssetPath(assetPath));
     const normalizedPath = normalizeCatalogAssetPath(assetPath);
     const rows = await this.db
       .select()
@@ -833,8 +887,9 @@ export class CatalogService implements CatalogPort {
     };
   }
 
-  async headPosterAsset(templateId: string): Promise<CatalogAssetHead> {
+  async headPosterAsset(templateId: string): Promise<CatalogHead> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedHead(id, 'poster.jpg');
     const row = await this.requireTemplateRow(id);
     const posterPath = resolvePosterPathForRow(row);
     return this.headTemplateAsset(id, posterPath);
@@ -845,6 +900,7 @@ export class CatalogService implements CatalogPort {
     options: { presignTtlSec?: number } = {},
   ): Promise<ResolvedCatalogAsset> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedAsset(id, 'poster.jpg');
     const row = await this.requireTemplateRow(id);
     const posterPath = resolvePosterPathForRow(row);
 
@@ -892,8 +948,9 @@ export class CatalogService implements CatalogPort {
     throw new CloudError('NOT_FOUND', `Poster not found for template '${id}'`, { status: 404, applied: false });
   }
 
-  async headPreviewAsset(templateId: string): Promise<CatalogAssetHead> {
+  async headPreviewAsset(templateId: string): Promise<CatalogHead> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedHead(id, 'preview.webm');
     const row = await this.requireTemplateRow(id);
     const previewPath = resolvePreviewPathForRow(row);
     if (!previewPath) {
@@ -910,6 +967,7 @@ export class CatalogService implements CatalogPort {
     options: { presignTtlSec?: number } = {},
   ): Promise<ResolvedCatalogAsset> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedAsset(id, 'preview.webm');
     const row = await this.requireTemplateRow(id);
     const previewPath = resolvePreviewPathForRow(row);
 
@@ -962,6 +1020,7 @@ export class CatalogService implements CatalogPort {
     options: ResolveSourceAssetOptions = {},
   ): Promise<ResolvedCatalogAsset> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedAsset(id, normalizeCatalogAssetPath(assetPath), options.locale);
     const normalizedPath = normalizeCatalogAssetPath(assetPath);
     const row = await this.requireTemplateRow(id);
 
