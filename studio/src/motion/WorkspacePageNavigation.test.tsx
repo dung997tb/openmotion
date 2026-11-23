@@ -9,7 +9,7 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import type { StudioCreation } from './CreativeWorkspace';
 import { MotionApp } from './MotionApp';
 import { I18nProvider } from '../i18n/I18n';
-import { useWorkspaceChrome } from './WorkspaceFrame';
+import { preloadAllWorkspaceSurfaces, useWorkspaceChrome } from './WorkspaceFrame';
 import { readWorkspacePage, settingsSections } from './workspacePageRouting';
 import { editorProjectIdFromPath } from '../../../shared/spa-routes';
 import { workspaceHistoryIndex, writeWorkspaceHistory } from '../utils/workspaceHistory';
@@ -68,6 +68,10 @@ const returnThroughBreadcrumb = async (label: string) => {
   await act(async () => { link!.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
 };
 async function mount(key = 0) { await act(async () => root.render(<I18nProvider initialLocale="en"><MotionApp key={key} /></I18nProvider>)); }
+beforeAll(async () => {
+  await preloadAllWorkspaceSurfaces();
+});
+
 beforeEach(() => {
   localStorage.clear(); history.replaceState(null, '', firstUrl);
   editor.mounts = 0; editor.fail = false; editor.wait = async () => {};
@@ -1076,6 +1080,7 @@ it('resumes the project from the Explore spotlight without remounting its editor
   const draft = container.querySelector('[aria-label="Editor draft"]');
   expect(draft?.getAttribute('data-project')).toBe(second);
   await click('Explore');
+  await click('Featured · Motion Studio');
   expect(container.querySelector('.om-feature-slide:not([inert]) h2')?.textContent).toBe('Motion Studio');
   await click('Open in Motion Editor');
   expect(page()).toMatchObject({ explore: false, motion: false });
@@ -1096,6 +1101,7 @@ it.each([
       ? Promise.resolve(Response.json({ ...catalog, activeId }))
       : fallback(input, init));
   await mount();
+  await click('Featured · Motion Studio');
   await click('Open in Motion Editor');
   expect(page()).toMatchObject({ explore: false, motion: false, templates: false });
   expect(container.querySelector('[aria-label="Editor draft"]')?.getAttribute('data-project')).toBe(activeId);
@@ -1179,19 +1185,21 @@ it('rotates the visible Explore spotlight and plays visible Skill previews witho
   vi.useFakeTimers();
   try {
     await act(async () => { observed.get(hero)!(true); cards.forEach(card => observed.get(card)!(true)); });
+    expect(hero.dataset.scene).toBe('game');
+    for (const card of cards) expect(card.querySelector('video[src]')).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(6000); });
     expect(hero.dataset.scene).toBe('motion');
     expect(hero.querySelector('video[src]')?.getAttribute('src')).toMatch(/^blob:/);
-    for (const card of cards) expect(card.querySelector('video[src]')).toBeTruthy();
-    act(() => { vi.advanceTimersByTime(6000); });
-    expect(hero.dataset.scene).toBe('black-friday');
     expect(hero.querySelectorAll('.om-feature-slide:not([inert])')).toHaveLength(1);
     act(() => { vi.advanceTimersByTime(2500); });
     const segment = hero.querySelector<HTMLButtonElement>('.om-media-segments [aria-current]')!;
     act(() => segment.focus());
     act(() => { vi.advanceTimersByTime(6000); });
-    expect(hero.dataset.scene).toBe('black-friday');
+    expect(hero.dataset.scene).toBe('motion');
     act(() => segment.blur());
     act(() => { vi.advanceTimersByTime(3500); });
+    expect(hero.dataset.scene).toBe('black-friday');
+    act(() => { vi.advanceTimersByTime(6000); });
     expect(hero.dataset.scene).toBe('hub-gemini-4');
     await act(async () => { vi.advanceTimersByTime(6000); });
     expect(hero.dataset.scene).toBe('text-to-image');
@@ -1207,13 +1215,13 @@ it('rotates the visible Explore spotlight and plays visible Skill previews witho
   } finally { vi.useRealTimers(); }
 });
 
-it('opens Black Friday from the second Explore slide and reuses the native Skill detail in the collection', async () => {
+it('opens Black Friday from the third Explore slide and reuses the native Skill detail in the collection', async () => {
   await mount();
   await click('Explore');
   const hero = container.querySelector<HTMLElement>('.om-feature-carousel')!;
   const segments = hero.querySelectorAll<HTMLButtonElement>('.om-media-segments button');
-  expect(segments[1].getAttribute('aria-label')).toBe('Featured · Black Friday collection');
-  await act(async () => segments[1].click());
+  expect(segments[2].getAttribute('aria-label')).toBe('Featured · Black Friday collection');
+  await act(async () => segments[2].click());
   await click('View collection');
   expect(page()).toMatchObject({ explore: true, templates: true, templateCollection: 'black-friday' });
   expect(container.querySelector('[aria-label="Video purpose"]')).toBeNull();
@@ -1376,15 +1384,15 @@ it('recovers community templates and opens the library from the community headin
   expect(container.querySelector('.om-feed-group [data-scene="music"]')).not.toBeNull();
   await click('Retry');
   expect(spotlight.querySelector('.om-featured-caption strong')?.textContent).toBe('first');
-  const sections = [...container.querySelector('.om-explore-sections')!.children].slice(0, 8);
+  const sections = [...container.querySelector('.om-explore-sections')!.children].slice(0, 9);
   expect(sections.map(section => section.getAttribute('aria-labelledby') ?? section.getAttribute('data-studio') ?? section.className))
-    .toEqual(['om-explore-features', 'explore-workflows', 'explore-highlights', 'explore-claude', 'explore-community', 'explore-seedance', 'image', 'design']);
+    .toEqual(['om-explore-features', 'explore-workflows', 'explore-highlights', 'explore-games', 'explore-claude', 'explore-community', 'explore-seedance', 'image', 'design']);
   for (const id of ['explore-seedance', 'explore-gpt-image']) {
     const heading = container.querySelector(`#${id}`)!;
     expect(heading.previousElementSibling).toBeNull();
     expect(heading.closest('section')!.querySelector('.om-feed-card-label')).toBeNull();
   }
-  expect(sections[5].querySelector('.om-studio-collection-cards .om-feed-card-label')).toBeNull();
+  expect(sections[6].querySelector('.om-studio-collection-cards .om-feed-card-label')).toBeNull();
   const picks = container.querySelector('[aria-labelledby="explore-community"]')!;
   expect([...picks.querySelectorAll('[data-template-id]')].map(node => node.getAttribute('data-template-id'))).toEqual(['second']);
   const communityActions = [...container.querySelectorAll<HTMLButtonElement>('.om-explore-feed > header button')];
@@ -1419,7 +1427,7 @@ it('lists each primary destination once in order, with the Image mega menu and t
   await mount();
   const nav = container.querySelector('.om-app-header nav.om-creative-navigation')!;
   const destinations = [...nav.querySelectorAll('button:not([aria-expanded]),a')].map(node => node.getAttribute('aria-label') ?? node.textContent?.trim());
-  expect(destinations).toEqual(['Explore', 'Workflows', 'Image', 'Video', 'Audio', 'MCP', 'Design Studio', 'Motion Studio', 'Cinema Studio', 'Sound Studio', 'Shorts Studio', 'Marketing Studio', 'Explainer Studio', '3D Studio', 'Game Studio']);
+  expect(destinations).toEqual(['Explore', 'Workflows', 'Image', 'Video', 'Audio', 'MCP', 'Super Agent', 'Design Studio', 'Motion Studio', 'Cinema Studio', 'Sound Studio', 'Shorts Studio', 'Marketing Studio', 'Explainer Studio', '3D Studio', 'Game Studio']);
   const badges = [...nav.querySelectorAll('button[aria-describedby]')].map(node =>
     [node.getAttribute('aria-label'), document.getElementById(node.getAttribute('aria-describedby')!)?.textContent]);
   expect(badges).toEqual([['Workflows', 'New'], ['Design Studio', 'New'], ['Motion Studio', 'Top'], ['Cinema Studio', 'Hot'], ['Game Studio', 'New']]);
@@ -1500,7 +1508,7 @@ it('localizes every top navigation Studio label in Chinese while keeping English
   await act(async () => root.render(<I18nProvider initialLocale="zh-CN"><MotionApp /></I18nProvider>));
   const nav = container.querySelector('.om-app-header nav.om-creative-navigation')!;
   const destinations = [...nav.querySelectorAll('button:not([aria-expanded]),a')].map(node => node.getAttribute('aria-label') ?? node.textContent?.trim());
-  expect(destinations).toEqual(['探索', '工作流', '图片', '视频', '音频', 'MCP', '设计工作室', 'Motion 工作室', '影视工作室', '音频工作室', '短视频工作室', '营销工作室', '讲解视频工作室', '3D 工作室', '游戏工作室']);
+  expect(destinations).toEqual(['探索', '工作流', '图片', '视频', '音频', 'MCP', 'Super Agent', '设计工作室', 'Motion 工作室', '影视工作室', '音频工作室', '短视频工作室', '营销工作室', '讲解视频工作室', '3D 工作室', '游戏工作室']);
   const badges = [...nav.querySelectorAll('button[aria-describedby]')].map(node => {
     const badge = document.getElementById(node.getAttribute('aria-describedby')!);
     return [node.getAttribute('aria-label'), badge?.textContent, badge?.getAttribute('lang')];
@@ -2097,4 +2105,46 @@ it('hides the Black Friday banner on Explore home, shows it on other tabs, and k
     localStorage.clear();
     resetBannerDismissal();
   }
+});
+
+it('surfaces Game Studio in the Explore spotlight carousel and featured showcase section and routes to Game Studio and Super Agent Game mode', async () => {
+  await mount();
+  await click('Explore');
+  const feed = container.querySelector<HTMLElement>('.om-explore-host:not([hidden]) .om-explore')!;
+  const carousel = feed.querySelector('.om-feature-carousel')!;
+  const gameSegment = carousel.querySelector<HTMLButtonElement>('.om-media-segments button[aria-label="Featured · Game Studio"]')!;
+  expect(gameSegment).toBeTruthy();
+  await act(async () => gameSegment.click());
+  const activeSlide = carousel.querySelector<HTMLElement>('.om-feature-slide:not([inert])')!;
+  expect(activeSlide.dataset.scene).toBe('game');
+  expect(activeSlide.querySelector('h2')?.textContent).toBe('Game Studio');
+
+  await act(async () => activeSlide.querySelector<HTMLButtonElement>('[data-slide-action="destination"]')!.click());
+  expect(page().specialty?.id).toBe('game');
+  expect(location.pathname).toBe('/studios/game');
+
+  await clickWorkspaceBack();
+  expect(page().explore).toBe(true);
+
+  const gameBand = container.querySelector<HTMLElement>('section[aria-labelledby="explore-games"]')!;
+  expect(gameBand).toBeTruthy();
+  expect(gameBand.querySelector('h2#explore-games')?.textContent).toBe('Game Studio');
+  const storyTitles = [...gameBand.querySelectorAll('.om-story-card strong')].map(el => el.textContent);
+  expect(storyTitles).toEqual(['What the Water Keeps', 'Evensong']);
+
+  await act(async () => {
+    gameBand.querySelectorAll<HTMLButtonElement>('.om-story-card')[0].click();
+  });
+  expect(page().specialty?.id).toBe('game');
+  expect(page().gameId).toBe('community-what-the-water-keeps');
+  expect(location.pathname).toBe('/studios/game');
+
+  await clickWorkspaceBack();
+  expect(page().explore).toBe(true);
+
+  const buildGameBtn = [...gameBand.querySelectorAll<HTMLButtonElement>('button')].find(btn => btn.textContent?.includes('Build a game'))!;
+  expect(buildGameBtn).toBeTruthy();
+  await act(async () => buildGameBtn.click());
+  expect(page().superAgent).toBe(true);
+  expect(location.pathname).toBe('/agent');
 });

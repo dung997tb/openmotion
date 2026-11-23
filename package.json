@@ -45,7 +45,16 @@
     "typecheck:backend": "tsc -p tsconfig.backend.json",
     "typecheck:template-cards": "tsc -p mcp-ui/tsconfig.json",
     "build:template-cards": "npm run typecheck:template-cards && node --experimental-strip-types scripts/build-template-cards.mjs",
-    "design:metrics": "node scripts/ui-metrics.ts"
+    "design:metrics": "node scripts/ui-metrics.ts",
+    "dev:web": "node scripts/dev-unified.mjs --mode=web",
+    "dev:desktop": "node scripts/dev-unified.mjs --mode=desktop",
+    "desktop:build": "node desktop/scripts/build.mjs",
+    "desktop:stage": "node desktop/scripts/stage-app.mjs",
+    "desktop:test": "node --experimental-strip-types --test desktop/tests/desktop.test.mjs",
+    "desktop:pack:dir": "npm run build:studio && npm run desktop:build && npm run desktop:stage && npm --prefix desktop run pack:dir",
+    "desktop:pack:mac": "npm run build:studio && npm run desktop:build && npm run desktop:stage && npm --prefix desktop run pack:mac",
+    "desktop:pack:win": "npm run build:studio && npm run desktop:build && npm run desktop:stage && npm --prefix desktop run pack:win",
+    "desktop:pack:linux": "npm run build:studio && npm run desktop:build && npm run desktop:stage && npm --prefix desktop run pack:linux"
   },
   "dependencies": {
     "@hyperframes/core": "0.9.7",

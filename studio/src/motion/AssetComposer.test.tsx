@@ -10,7 +10,7 @@ const { generate, loadGateway, gatewayRequest, chrome } = vi.hoisted(() => ({
   chrome: { openModelSettings: vi.fn(), openProviderSettings: vi.fn(), openAccountSettings: vi.fn(), openSubscriptionSettings: vi.fn() },
 }));
 vi.mock('./assetClient', () => ({ assetRequest: generate }));
-vi.mock('./gatewayClient', () => ({ loadGateway, gatewayRequest }));
+vi.mock('./gatewayClient', () => ({ loadGateway, gatewayRequest, invalidateGatewayCache: vi.fn() }));
 vi.mock('./AssetConversation', () => ({ AssetConversation: () => null }));
 vi.mock('../i18n/I18n', () => ({ useI18n: () => ({ t: (text: string) => text }) }));
 vi.mock('./WorkspaceFrame', () => ({ useWorkspaceChrome: () => chrome }));
@@ -1063,4 +1063,191 @@ it('uses action-verb CTAs for remove-background and relight, exposes full picker
   const sourceButtons = [...container.querySelectorAll<HTMLButtonElement>('.om-source-actions button')].map(node => node.textContent);
   expect(sourceButtons).toEqual(['Upload image', 'Choose an asset']);
   expect(container.querySelector('.om-studio-form-heading')).toBeNull();
+});
+
+it('keeps Character reference upload actions available up to 5 images even with a 1-ref model selected or before setup', async () => {
+  const { mediaEditorDestination } = await import('./creativeStudios');
+  const existing = featureModels();
+  const multiCatalog = {
+    models: [existing.sunburst, existing.seedream],
+    status: { routes: {}, providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: true }] },
+  };
+  const oneRef = [reference('hero-1')];
+  const fiveRefs = ['hero-1', 'hero-2', 'hero-3', 'hero-4', 'hero-5'].map(id => reference(id));
+
+  // Even when Seedream 5.5 (1-ref) is selected, Character reference keeps Upload/Choose open because Sunburst (multi-ref) is available.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: 'Hero in Tokyo', model: existing.seedream.id, references: oneRef }} studio={{
+    catalog: { catalog: multiCatalog, failed: false, retry: vi.fn() }, chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  }} />));
+  expect(container.querySelector('.om-source-actions')).not.toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // Hides Upload/Choose once all 5 Character reference slots are filled.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: 'Hero in Tokyo', references: fiveRefs }} studio={{
+    catalog: { catalog: multiCatalog, failed: false, retry: vi.fn() }, chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  }} />));
+  expect(container.querySelector('.om-source-actions')).toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // Before provider setup (!selected), Character reference still allows attaching up to 5 images.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: 'Hero in Tokyo', references: oneRef }} studio={{
+    catalog: { catalog: { models: [], status: { routes: {}, providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: false }] } }, failed: false, retry: vi.fn() },
+    chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  }} />));
+  expect(container.querySelector('.om-source-actions')).not.toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // While catalog is still loading (undefined), Character reference falls back to its 5-image limit.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: 'Hero in Tokyo', references: oneRef }} studio={{
+    catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+    chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  }} />));
+  expect(container.querySelector('.om-source-actions')).not.toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // Going from 1 -> 2 references with Seedream 5.5 selected switches the active model to Sunburst.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: 'Hero in Tokyo', model: existing.seedream.id, references: [reference('hero-1'), reference('hero-2')] }} studio={{
+    catalog: { catalog: multiCatalog, failed: false, retry: vi.fn() }, chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  }} />));
+  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Generation model"]')?.textContent).toContain('GPT Image 2.6 Sunburst');
+  expect(container.querySelector('.om-source-actions')).not.toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // When only a 1-ref model is available on Character reference, Upload/Choose closes after 1 image.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: 'Hero in Tokyo', references: oneRef }} studio={{
+    catalog: { catalog: { models: [existing.seedream], status: { routes: {}, providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: true }] } }, failed: false, retry: vi.fn() },
+    chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  }} />));
+  expect(container.querySelector('.om-source-actions')).toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // Single-reference features (remove-background) still close after 1 image.
+  await act(async () => root.render(<AssetComposer {...props} onUploadReference={vi.fn()} draft={{ modality: 'image', prompt: '', references: oneRef }} studio={{
+    catalog: { catalog: multiCatalog, failed: false, retry: vi.fn() }, chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('remove-background'),
+  }} />));
+  expect(container.querySelector('.om-source-actions')).toBeNull();
+  expect(container.querySelector('.om-scene-source-count')).toBeNull();
+  expect(container.querySelector('.om-scene-source-files')?.getAttribute('data-layout')).toBeNull();
+});
+
+it('shows reference quota counter, compact thumbnail grid, drag/paste upload, stable uploading button, and auto-switch toast', async () => {
+  const { mediaEditorDestination } = await import('./creativeStudios');
+  const existing = featureModels();
+  const multiCatalog = {
+    models: [existing.sunburst, existing.seedream],
+    status: { routes: {}, providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: true }] },
+  };
+  const onUploadFiles = vi.fn();
+  const onInfo = vi.fn();
+  const studio = {
+    catalog: { catalog: multiCatalog, failed: false, retry: vi.fn() },
+    chooseModel: vi.fn(),
+    remember: vi.fn(),
+    destination: mediaEditorDestination('character'),
+  };
+
+  // 1 reference with Seedream 5.5 selected -> shows 1 / 5 counter and grid layout.
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    onUploadReference={vi.fn()}
+    onUploadFiles={onUploadFiles}
+    onInfo={onInfo}
+    draft={{ modality: 'image', prompt: 'Hero in Tokyo', model: existing.seedream.id, references: [reference('hero-1')] }}
+    studio={studio}
+  />));
+  expect(container.querySelector('.om-scene-source-count')?.textContent).toBe('1 / 5');
+  expect(container.querySelector('.om-scene-source-files')?.getAttribute('data-layout')).toBe('grid');
+  expect(container.querySelector('.om-scene-source-file')?.getAttribute('data-layout')).toBe('grid');
+  expect(container.querySelector('.om-source-hint')?.textContent).toBe('Drop or paste images here');
+
+  // Dragging & dropping image files onto the reference section triggers onUploadFiles.
+  const sourceSection = container.querySelector<HTMLElement>('.om-scene-source')!;
+  const dropped = new File(['img'], 'drop.png', { type: 'image/png' });
+  const dragEnter = new Event('dragenter', { bubbles: true, cancelable: true });
+  Object.defineProperty(dragEnter, 'dataTransfer', { value: { types: ['Files'], files: [dropped] } });
+  await act(async () => sourceSection.dispatchEvent(dragEnter));
+  expect(sourceSection.getAttribute('data-dragging')).toBe('true');
+
+  const dropEvent = new Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(dropEvent, 'dataTransfer', { value: { types: ['Files'], files: [dropped] } });
+  await act(async () => sourceSection.dispatchEvent(dropEvent));
+  expect(sourceSection.getAttribute('data-dragging')).toBeNull();
+  expect(onUploadFiles).toHaveBeenCalledWith([dropped], 'drop');
+
+  // Pasting an image works even when focus is on document.body (e.g. after clicking the drop zone).
+  onUploadFiles.mockClear();
+  const pasted = new File(['clip'], 'clip.png', { type: 'image/png' });
+  const bodyImagePaste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(bodyImagePaste, 'clipboardData', {
+    value: {
+      getData: () => '',
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => pasted }],
+      files: [pasted],
+    },
+  });
+  await act(async () => document.body.dispatchEvent(bodyImagePaste));
+  expect(bodyImagePaste.defaultPrevented).toBe(true);
+  expect(onUploadFiles).toHaveBeenCalledWith([pasted], 'paste');
+
+  // Pasting rich text + image from Word/Excel into the prompt textarea does not hijack text paste.
+  onUploadFiles.mockClear();
+  const promptTextarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  const richPaste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(richPaste, 'clipboardData', {
+    value: {
+      getData: (type: string) => (type === 'text/plain' ? 'Copied prompt text' : ''),
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => pasted }],
+      files: [pasted],
+    },
+  });
+  await act(async () => promptTextarea.dispatchEvent(richPaste));
+  expect(richPaste.defaultPrevented).toBe(false);
+  expect(onUploadFiles).not.toHaveBeenCalled();
+
+  // Uploading state keeps the upload button mounted/disabled AND disables Generate so credits cannot be spent mid-upload.
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    onUploadReference={vi.fn()}
+    onUploadFiles={onUploadFiles}
+    uploadingReferences
+    onInfo={onInfo}
+    draft={{ modality: 'image', prompt: 'Hero in Tokyo', model: existing.seedream.id, references: [reference('hero-1')] }}
+    studio={studio}
+  />));
+  const uploadingBtn = container.querySelector<HTMLButtonElement>('.om-source-actions button')!;
+  expect(uploadingBtn.disabled).toBe(true);
+  expect(uploadingBtn.textContent).toBe('Uploading…');
+  expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')?.disabled).toBe(true);
+
+  // Growing from 1 -> 2 references triggers model switch from Seedream 5.5 to Sunburst and emits one info notice.
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    onUploadReference={vi.fn()}
+    onUploadFiles={onUploadFiles}
+    onInfo={onInfo}
+    draft={{ modality: 'image', prompt: 'Hero in Tokyo', model: existing.seedream.id, references: [reference('hero-1'), reference('hero-2')] }}
+    studio={studio}
+  />));
+  expect(container.querySelector('.om-scene-source-count')?.textContent).toBe('2 / 5');
+  expect(onInfo).toHaveBeenCalledTimes(1);
+  expect(onInfo).toHaveBeenCalledWith('{from} supports 1 reference image. Switched to {to}.');
+
+  // Adding a 3rd reference does not repeat the switch notice.
+  onInfo.mockClear();
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    onUploadReference={vi.fn()}
+    onUploadFiles={onUploadFiles}
+    onInfo={onInfo}
+    draft={{ modality: 'image', prompt: 'Hero in Tokyo', model: existing.seedream.id, references: [reference('hero-1'), reference('hero-2'), reference('hero-3')] }}
+    studio={studio}
+  />));
+  expect(onInfo).not.toHaveBeenCalled();
 });

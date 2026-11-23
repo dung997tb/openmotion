@@ -14,6 +14,8 @@ import type { SkillParameters } from './skillCatalog';
 import { findCinemaTemplate } from './cinemaTemplates';
 import { useState, useRef, useCallback, useEffect, useTransition, type ReactNode } from 'react';
 import { useInRouterContext, useLocation } from 'react-router';
+import { queueSuperAgentHandoff } from './superAgentHandoff';
+import type { SuperAgentHandoffPayload } from '../../../shared/capability-hub';
 import { useI18n } from '../i18n/I18n';
 import { MotionIcon } from './icons';
 import { RemixIcon } from '../icons/RemixIcons';
@@ -24,6 +26,10 @@ import { StudioConnectionToast } from '../components/StudioConnectionToast';
 import { ErrorNotice } from '../components/ui/ErrorNotice';
 import { isConnectionFailure } from '../components/ui/errorNoticeMessage';
 import { preservePresentation, workspacePresentation } from '../../../shared/workspace-url';
+import type { DesktopMenuAction } from '../../../shared/platform-host';
+import { exportDesktopDiagnosticBundle, getDesktopBridge, openExternalUrl } from '../utils/platformHost';
+import { discord, feishu } from './CommunityLink';
+import { GITHUB_REPOSITORY } from './githubRepository';
 import { trackMotion } from './tracking';
 import { ApplicationHeader, WorkspaceUtilityActions } from './ApplicationChrome';
 import { BlackFridayTopBanner } from './BlackFridayTopBanner';
@@ -44,8 +50,19 @@ import { RouteViewport } from '../router/RouteViewport';
 import { OverlayLayer } from '../router/OverlayLayer';
 import { StudioRouterProvider } from '../router/createAppRouter';
 import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
+import { preloadAllWorkspacePages, preloadStudioRoute } from '../router/lazyPages';
 
-import { WorkspaceChromeContext, useWorkspaceChrome, type WorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
+export type { WorkspaceSurfaceKey } from './WorkspaceChromeContext';
+
+export function preloadWorkspaceSurface(surface: WorkspaceSurfaceKey): void {
+  preloadStudioRoute(surface === 'scenarios' ? 'workflows' : surface);
+}
+
+export async function preloadAllWorkspaceSurfaces(): Promise<void> {
+  await preloadAllWorkspacePages();
+}
+
+import { WorkspaceChromeContext, useWorkspaceChrome, type WorkspaceChrome, type WorkspaceSurfaceKey, type EditorGuard } from './WorkspaceChromeContext';
 export { useWorkspaceChrome, useOptionalWorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 
 type WorkspaceFrameProps = {
@@ -84,6 +101,12 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const pageOpen = isWorkspacePageOpen(page, templatesPage);
   const lastExplore = useRef({ community: page.community, medium: page.medium });
   if (page.explore) lastExplore.current = { community: page.community, medium: page.medium };
+  const lastAgentChat = useRef<string | null>(page.superAgentChat);
+  if (page.superAgent && page.superAgentChat) {
+    lastAgentChat.current = page.superAgentChat;
+  } else if (page.superAgent && !page.superAgentChat) {
+    lastAgentChat.current = null;
+  }
   const skillBriefs = useRef(new Map<string, SkillParameters>());
   const studioDrafts = useRef(new Map<string, AssetDraft>());
   const [studioVisit, setStudioVisit] = useState(0);
@@ -297,6 +320,19 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     openLibrary(trigger);
     if (narrow) setSidebarOpen(false);
   };
+  const openInSuperAgent = useCallback((payload: SuperAgentHandoffPayload) => {
+    queueSuperAgentHandoff(payload);
+    preloadWorkspaceSurface('agent');
+    navigatePage({
+      superAgent: true,
+      superAgentChat: payload.newChat === false ? lastAgentChat.current : null,
+      settings: null,
+      assets: false,
+      skills: false,
+      templates: false,
+      template: null,
+    });
+  }, [navigatePage]);
   const value: WorkspaceChrome = { workspace, switchingDisabled, saveState: editorState?.saveState || saveState, registerEditor, beforeViewChange,
     openLibrary,
     openConnections: entry => {
@@ -307,7 +343,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     openProviderSettings: provider => navigatePage({ settings: 'providers', provider, assets: false, skills: false, templates: false }),
     openAccountSettings: () => openSettings('account'),
     openSubscriptionSettings: () => openSettings('subscription'),
-    openHome, openAssets, assetsOpen: assetsOpen && !settings && !templatesPage, openSkills, skillsOpen: skillsOpen && !settings, toggleSidebar, sidebarOpen, navigationCollapsed,
+    openHome, openAssets, openInSuperAgent, preloadSurface: preloadWorkspaceSurface, assetsOpen: assetsOpen && !settings && !templatesPage, openSkills, skillsOpen: skillsOpen && !settings, toggleSidebar, sidebarOpen, navigationCollapsed,
     projectNavigation: !hostChrome && editorActive ? <span className="motion-project-navigation-trigger" hidden={sidebarOpen && !narrow}>
       <WorkspaceProjectsButton applicationRef={applicationRef} expanded={sidebarOpen} previewEnabled={!narrow && !sidebarOpen} onToggle={toggleSidebar}>
         {close => <WorkspaceSidebar archives={archives} currentId={projectId} close={close} expand={() => { close(); toggleSidebar(); }} onNavigate={close} query={projectQuery} setQuery={setProjectQuery} openSettings={openSettings} openTemplates={openMotionTemplates} />}
@@ -365,7 +401,9 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const openScenario = useCallback((scenario: ScenarioId, runId?: string, fromPage = false) => {
     navigatePage({ scenario, scenarioRun: runId ?? null, scenarioStep: null, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
   }, [navigatePage]);
-  const currentPage = templatesPage || page.explore || skillsOpen ? 'explore' : standaloneMcp ? 'mcp' : null;
+  const visibleSettings = templatesPage || standaloneMcp ? null : settings;
+  const superAgentActive = page.superAgent && !visibleSettings && !templatesPage;
+  const currentPage = templatesPage || page.explore || skillsOpen ? 'explore' : standaloneMcp ? 'mcp' : superAgentActive ? 'agent' : null;
   // Count arrivals to template and discovery pages. Media forms report their own scene views.
   const routeView = resolveRouteArrival(page, templatesPage);
   useEffect(() => {
@@ -393,11 +431,52 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     navigatePage({ settings: 'mcp', templates: false, mcpExample: example ?? null, ...(client && { client, setup: 'agent' }) },
       false, fromPage ? 'from-page' : undefined);
   };
-  const openPage = (target: 'explore' | 'mcp', client?: McpClient, example?: string) => {
+  const openPage = (target: 'explore' | 'mcp' | 'agent', client?: McpClient, example?: string) => {
     if (target === 'explore') { openHome(); return; }
+    if (target === 'agent') {
+      navigatePage({ superAgent: true, superAgentChat: lastAgentChat.current, settings: null, templates: false });
+      return;
+    }
     openMcp(client, example);
   };
-  const visibleSettings = templatesPage || standaloneMcp ? null : settings;
+  const desktopMenuHandlerRef = useRef<(action: DesktopMenuAction) => void>(() => {});
+  desktopMenuHandlerRef.current = action => {
+    if (action === 'open-settings') openSettings('general');
+    else if (action === 'open-about') openSettings('about');
+    else if (action === 'open-help') openSettings('help');
+    else if (action === 'open-agent-runtimes') openSettings('local');
+    else if (action === 'open-mcp-connect') openMcp();
+    else if (action === 'new-project') navigatePage({ explore: true, templates: false });
+    else if (action === 'check-updates') {
+      void getDesktopBridge()?.checkForUpdates();
+      openSettings('about');
+    } else if (action === 'export-logs') {
+      void exportDesktopDiagnosticBundle().then(result => {
+        if (result.ok) {
+          navigationToast.showToast(t('Diagnostic logs exported'), 'info', 'feedback');
+        } else if (!result.canceled) {
+          navigationToast.showToast(
+            result.error || t('Could not export diagnostics. Use the command line if Studio cannot connect.'),
+            'error',
+            'feedback',
+          );
+        }
+      });
+    } else if (action === 'report-issue') {
+      void openExternalUrl(`${GITHUB_REPOSITORY}/issues/new/choose`);
+    } else if (action === 'join-community-feishu') {
+      void openExternalUrl(feishu.href);
+    } else if (action === 'join-community-discord') {
+      void openExternalUrl(discord.href);
+    } else if (action === 'reload-app') {
+      window.location.reload();
+    }
+  };
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge || typeof bridge.subscribeMenuActions !== 'function') return;
+    return bridge.subscribeMenuActions(action => desktopMenuHandlerRef.current(action));
+  }, []);
   const showStudioBackToExplore = page.studio?.scene.modality === 'image' && fromExplore && !sourcePage.community && !sourcePage.medium;
   const openTemplateFromOverlay = (id: string) => {
     if (!switchingDisabled) void (sessionId ? workspace.createArtifact(sessionId, id) : workspace.startSession(undefined, id));

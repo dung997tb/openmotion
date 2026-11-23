@@ -1,4 +1,4 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
+import { createElement, lazy, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react';
 
 const CHUNK_ERROR_PATTERN =
   /dynamically imported module|loading (?:css )?chunk|importing a module script|chunkloaderror/i;
@@ -79,6 +79,46 @@ export function lazyWithChunkReload<T extends ComponentType<any>>(
       throw error;
     }),
   );
+}
+
+export type PreloadableLazyComponent<T extends ComponentType<any>> = ComponentType<ComponentProps<T>> & {
+  preload: () => Promise<{ default: T }>;
+};
+
+export function preloadableLazyWithChunkReload<T extends ComponentType<any>>(
+  importer: () => Promise<{ default: T }>,
+  deps?: ReloadDeps,
+): PreloadableLazyComponent<T> {
+  let loaded: T | null = null;
+  let pending: Promise<{ default: T }> | null = null;
+
+  const load = () => {
+    if (loaded) return Promise.resolve({ default: loaded });
+    if (!pending) {
+      pending = importer()
+        .then(mod => {
+          loaded = mod.default;
+          return mod;
+        })
+        .catch((error: unknown) => {
+          if (isChunkLoadError(error) && attemptChunkReload(deps)) {
+            return new Promise<never>(() => {});
+          }
+          pending = null;
+          throw error;
+        });
+    }
+    return pending;
+  };
+
+  const Lazy = lazy(load);
+
+  const Preloadable = ((props: ComponentProps<T>) =>
+    loaded
+      ? createElement(loaded, props)
+      : createElement(Lazy, props)) as PreloadableLazyComponent<T>;
+  Preloadable.preload = load;
+  return Preloadable;
 }
 
 export function bindVitePreloadErrorReload(

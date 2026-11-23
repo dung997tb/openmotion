@@ -3,7 +3,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { designProjectsFor } from '../design-projects.ts';
-import { ScenarioRuns } from '../gateway/scenario-runs.ts';
+import { ScenarioRuns, type ScenarioHost } from '../gateway/scenario-runs.ts';
 import { gatewayFor } from '../gateway/service.ts';
 import { execute, pluginRoot } from '../hyperframes.ts';
 import { verificationBinaries } from '../scripts/verify-export.ts';
@@ -43,6 +43,52 @@ async function callScenario(
   return { status: res.status, body };
 }
 
+test('scenario generation localizes video and audio names using the current or saved draft locale', () =>
+  fixture(async store => {
+    const runs = new ScenarioRuns(store.directory, store);
+    const submittedNames: unknown[] = [];
+    const host: ScenarioHost = {
+      origin: () => 'http://localhost',
+      assets: async input => {
+        submittedNames.push(input.name);
+        return { job: { id: `job-${submittedNames.length}`, state: 'queued' } };
+      },
+      design: designProjectsFor(store.directory),
+      resolveAsset: async () => null,
+      createMotionProject: async () => { throw new Error('Unexpected Motion project creation'); },
+      exportMotionArchive: async () => { throw new Error('Unexpected Motion archive export'); },
+    };
+    const { run } = await runs.create({ scenarioId: 'motion-full-chain', requestId: 'localized-media-english' });
+    const date = run.title.split(' · ').at(-1);
+    const { run: afterMusic } = await runs.generate({
+      runId: run.id, expectedRevision: run.revision, requestId: 'localized-media-audio',
+      stepId: 'soundtrack', modality: 'audio', model: 'account:elevenlabs-music-v2', prompt: 'Calm piano', locale: 'zh-CN',
+    }, host);
+    const video = {
+      runId: run.id, expectedRevision: afterMusic.revision, requestId: 'localized-media-video',
+      stepId: 'motion-film', modality: 'video' as const, model: 'test:video', prompt: 'A moving title', locale: 'zh-CN',
+    };
+    const { run: afterVideo } = await runs.generate(video, host);
+    await runs.generate(video, host);
+    await runs.generate({
+      ...video, expectedRevision: afterVideo.revision, requestId: 'localized-media-video-en', locale: 'en',
+    }, host);
+
+    const { run: custom } = await runs.create({
+      scenarioId: 'motion-full-chain', requestId: 'localized-media-custom', title: 'My 夏日短片', locale: 'ja',
+    });
+    await runs.generate({
+      ...video, runId: custom.id, expectedRevision: custom.revision, requestId: 'localized-media-video-ja', locale: undefined,
+    }, host);
+    assert.deepEqual(submittedNames, [
+      `创意到动效短片 · ${date} · 配乐与音频 v1`,
+      `创意到动效短片 · ${date} · 动效影片 v1`,
+      `Idea to Motion Film · ${date} · Motion film v2`,
+      'My 夏日短片 · モーション映像 v1',
+    ]);
+  }),
+);
+
 test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, generation, design embed, motion and persistence', () =>
   fixture(async store => {
     const api = transport(store, { runtimeRoot: pluginRoot } as Service);
@@ -69,17 +115,21 @@ test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, gene
       requestId: 'req-create-bf',
       scenarioId: 'black-friday',
       title: 'Holiday Tote Campaign',
+      locale: 'zh-CN',
     });
     assert.equal(created1.status, 200);
     const run1 = created1.body.run;
     assert.equal(run1.revision, 1);
     assert.equal(run1.scenarioId, 'black-friday');
+    assert.match(run1.steps['product-images'].draft.prompt, /^拍摄一张商业产品图/);
+    assert.equal(run1.steps['product-images'].draft.promptLocale, 'zh-CN');
 
     const createdReplay = await callScenario(api, {
       command: 'create',
       requestId: 'req-create-bf',
       scenarioId: 'black-friday',
       title: 'Holiday Tote Campaign',
+      locale: 'zh-CN',
     });
     assert.equal(createdReplay.status, 200);
     assert.equal(createdReplay.body.run.id, run1.id);
@@ -122,7 +172,7 @@ test('scenario runs end-to-end: catalog, CRUD, conflicts, pool, iterations, gene
     assert.equal(updatedBrief.status, 200);
     let currentRun = updatedBrief.body.run;
     assert.equal(currentRun.revision, 2);
-    assert.match(String(currentRun.steps['product-images'].draft.prompt), /Holiday Tote/);
+    assert.match(String(currentRun.steps['product-images'].draft.prompt), /产品名称：Holiday Tote/);
     assert.match(String(currentRun.steps['sales-film'].draft.prompt), /\$79/);
 
     // 4. add_pool with real uploaded asset pins version, dedupes ref, rejects unknown asset

@@ -1,11 +1,13 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from 'open-design-ui/button';
-import type { ScenarioStepDefinition } from '../../../shared/scenarios';
+import type { ScenarioBriefField, ScenarioStepDefinition } from '../../../shared/scenarios';
 import type { ScenarioStepState, StepIteration } from '../../../shared/scenario-runs';
 import { FieldInput } from '../components/ui/FormField';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { BriefVersionComparison } from './BriefVersionComparison';
+import { briefSnapshot } from './briefVersion';
 
 export type IterationHistoryProps = {
   step: ScenarioStepDefinition;
@@ -18,12 +20,13 @@ export type IterationHistoryProps = {
   onCancel(iterationId: string): Promise<void>;
   busy?: ReadonlySet<string>;
   embedded?: boolean;
+  briefFields?: readonly ScenarioBriefField[];
 };
 
 const SOURCE_LABELS: Record<StepIteration['source'], string> = {
   generated: 'Generated',
   local: 'Local',
-  agent: 'Agent',
+  agent: 'From Agent',
   manual: 'Manual',
   upload: 'Upload',
   workspace: 'Workspace',
@@ -40,12 +43,16 @@ export function IterationHistory({
   onCancel,
   busy,
   embedded = false,
+  briefFields,
 }: IterationHistoryProps) {
   const { t, formatDate } = useI18n();
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const comparisonRef = useRef<HTMLDivElement>(null);
+  const historyHeaderRef = useRef<HTMLElement>(null);
+  const wasComparingBrief = useRef(false);
 
   const ordered = useMemo(
     () => [...state.iterations].sort((a, b) => b.number - a.number),
@@ -60,6 +67,18 @@ export function IterationHistory({
       .map(id => byId.get(id))
       .filter((item): item is StepIteration => Boolean(item));
   }, [compareIds, state.iterations]);
+
+  const [older, newer] = [...compareIterations].sort((a, b) => a.number - b.number);
+  const before = briefSnapshot(older);
+  const after = briefSnapshot(newer);
+  const briefDiff = briefFields && before && after ? { fields: briefFields, before, after } : null;
+  const comparingBrief = expanded && Boolean(briefDiff);
+
+  useEffect(() => {
+    if (comparingBrief) comparisonRef.current?.focus();
+    else if (wasComparingBrief.current) historyHeaderRef.current?.focus();
+    wasComparingBrief.current = comparingBrief;
+  }, [comparingBrief]);
 
   const toggleCompare = (iterationId: string) => {
     setCompareIds(prev => {
@@ -93,7 +112,7 @@ export function IterationHistory({
       data-embedded={embedded ? 'true' : undefined}
       aria-label={t('Version history')}
     >
-      <header className="om-scenario-history-header">
+      <header className="om-scenario-history-header" ref={historyHeaderRef} tabIndex={-1}>
         {embedded ? (
           <div className="om-scenario-history-heading">
             <RemixIcon name="history-line" size={14} />
@@ -114,7 +133,7 @@ export function IterationHistory({
             <span className="om-badge">{ordered.length}</span>
           </Button>
         )}
-        {expanded && compareIds.length > 0 && (
+        {expanded && compareIds.length > 0 && !comparingBrief && (
           <div className="om-scenario-history-compare-status">
             <span className="om-muted">
               {compareIds.length === 1
@@ -129,59 +148,73 @@ export function IterationHistory({
       </header>
 
       {expanded && compareIterations.length === 2 && (
-        <div className="om-scenario-compare-panel" role="region" aria-label={t('Compare versions')}>
+        <div
+          className="om-scenario-compare-panel"
+          role="region"
+          aria-label={t('Compare versions')}
+          tabIndex={briefDiff ? -1 : undefined}
+          ref={comparisonRef}
+        >
           <div className="om-scenario-compare-header">
             <strong>
               {t('Compare v{left} and v{right}', {
-                left: compareIterations[0].number,
-                right: compareIterations[1].number,
+                left: (briefDiff ? older : compareIterations[0]).number,
+                right: (briefDiff ? newer : compareIterations[1]).number,
               })}
             </strong>
             <Button variant="ghost" size="sm" type="button" onClick={() => setCompareIds([])}>
               {t('Close compare')}
             </Button>
           </div>
-          <div className="om-scenario-compare-grid">
-            {compareIterations.map(iteration => {
-              const isActive = state.activeIterationId === iteration.id;
-              return (
-                <div key={iteration.id} className="om-scenario-compare-col">
-                  <div className="om-scenario-compare-col-head">
-                    <div className="om-scenario-iter-badges">
-                      <strong>v{iteration.number}</strong>
-                      <span className="om-badge">{t(SOURCE_LABELS[iteration.source])}</span>
-                      {isActive && (
-                        <span className="om-badge" data-active="true">
-                          {t('Active')}
-                        </span>
+          {briefDiff ? <BriefVersionComparison {...briefDiff} /> : (
+            <div className="om-scenario-compare-grid">
+              {compareIterations.map(iteration => {
+                const isActive = state.activeIterationId === iteration.id;
+                const jobState = iteration.job?.state;
+                const unavailable = jobState === 'failed' || jobState === 'cancelled';
+                return (
+                  <div key={iteration.id} className="om-scenario-compare-col">
+                    <div className="om-scenario-compare-col-head">
+                      <div className="om-scenario-iter-badges">
+                        <strong>{t('Version {number}', { number: iteration.number })}</strong>
+                        <span className="om-badge">{t(SOURCE_LABELS[iteration.source])}</span>
+                        {isActive && (
+                          <span className="om-badge" data-active="true">
+                            {t('Current')}
+                          </span>
+                        )}
+                      </div>
+                      {!isActive && (!iteration.job || iteration.job.state === 'completed') && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          type="button"
+                          onClick={() => void onPromote(iteration.id)}
+                        >
+                          {t('Make active')}
+                        </Button>
                       )}
                     </div>
-                    {!isActive && (!iteration.job || iteration.job.state === 'completed') && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        type="button"
-                        onClick={() => void onPromote(iteration.id)}
-                      >
-                        {t('Make active')}
-                      </Button>
+                    <div className="om-scenario-compare-output">
+                      {unavailable
+                        ? t(jobState === 'failed' ? 'Generation failed' : 'Generation cancelled')
+                        : renderOutput(iteration)}
+                    </div>
+                    {iteration.prompt && (
+                      <p className="om-scenario-compare-prompt">{iteration.prompt}</p>
+                    )}
+                    {iteration.note && (
+                      <p className="om-scenario-iter-note">{iteration.note}</p>
                     )}
                   </div>
-                  <div className="om-scenario-compare-output">{renderOutput(iteration)}</div>
-                  {iteration.prompt && (
-                    <p className="om-scenario-compare-prompt">{iteration.prompt}</p>
-                  )}
-                  {iteration.note && (
-                    <p className="om-scenario-iter-note">{iteration.note}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {expanded && (
+      {expanded && !comparingBrief && (
         <div className="om-scenario-history-strip">
         {ordered.map(iteration => {
           const isActive = state.activeIterationId === iteration.id;
@@ -207,11 +240,11 @@ export function IterationHistory({
             >
               <header className="om-scenario-iter-head">
                 <div className="om-scenario-iter-badges">
-                  <strong className="om-scenario-iter-version">v{iteration.number}</strong>
+                  <strong className="om-scenario-iter-version">{t('Version {number}', { number: iteration.number })}</strong>
                   <span className="om-badge">{t(SOURCE_LABELS[iteration.source])}</span>
                   {isActive && (
                     <span className="om-badge" data-active="true">
-                      {t('Active')}
+                      {t('Current')}
                     </span>
                   )}
                 </div>
@@ -250,7 +283,13 @@ export function IterationHistory({
                 ) : isFailed ? (
                   <div className="om-scenario-iter-error" role="alert">
                     <RemixIcon name="error-warning-line" size={16} />
-                    <p>{job.error || t('Generation failed')}</p>
+                    <p>{t('Generation failed')}</p>
+                    {job.error && (
+                      <details>
+                        <summary>{t('Error details')}</summary>
+                        <p>{job.error}</p>
+                      </details>
+                    )}
                     <Button
                       variant="secondary"
                       size="sm"

@@ -13,6 +13,8 @@ import { ModelGateway, gatewayFor } from '../gateway/service.ts';
 import { assetOperation } from '../gateway/asset-operations.ts';
 import { AssetConversations, type AssetAgentRpc } from '../gateway/asset-chat.ts';
 import { Phase1Service } from '../phase1.ts';
+import { assetDownloadUrl } from '../shared/asset-library.ts';
+import { mediaFilename } from '../shared/render-name.ts';
 
 async function image(dir: string, name = 'image.png', color = 'red') {
   const file = path.join(dir, name);
@@ -21,6 +23,15 @@ async function image(dir: string, name = 'image.png', color = 'red') {
 }
 const agents = async () => [{ id: 'codex', label: 'Codex', installed: true, authenticated: true, imageGeneration: true, available: true, reason: 'ready' }];
 const until = async (predicate: () => boolean | Promise<boolean>) => { for (let i = 0; i < 100; i++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 20)); } throw new Error('Timed out'); };
+
+test('media download names preserve Unicode and keep version suffixes within portable limits', () => {
+  assert.equal(mediaFilename('测试.PNG', '.png'), '测试.png');
+  assert.equal(mediaFilename('CON', '.mp4'), '_CON.mp4');
+  assert.equal(mediaFilename('../配乐:春天 v3', '.mp3'), '__配乐_春天 v3.mp3');
+  const longName = mediaFilename('夏'.repeat(120) + ' v4', '.mp3');
+  assert.match(longName, / v4\.mp3$/u);
+  assert.ok(Buffer.byteLength(longName, 'utf8') < 255);
+});
 
 test('missing media tools reject library generation before invoking the model and preserve idempotency', () => fixture(async store => {
   const original = process.env.HYPERFRAMES_FFPROBE_PATH;
@@ -124,6 +135,11 @@ test('asset HTTP uploads are replayable and media supports byte ranges; project 
   const url = `/motion-api/assets/${asset.id}/versions/${asset.currentVersionId}/file`;
   const range = await fetch(url, { headers: { Range: 'bytes=0-7' } }); assert.equal(range.status, 206); assert.deepEqual(Buffer.from(await range.arrayBuffer()), bytes.subarray(0, 8));
   const download = await fetch(url + '?download=1'); assert.match(download.headers.get('content-disposition')!, /attachment/);
+  const named = await fetch(assetDownloadUrl(asset.id, asset.currentVersionId, "测试 · 夏日's 封面"), { method: 'HEAD' });
+  assert.equal(named.status, 200);
+  const utf8Name = named.headers.get('content-disposition')!.split("UTF-8''")[1];
+  assert.ok(utf8Name.includes('%27'));
+  assert.equal(decodeURIComponent(utf8Name), "测试 · 夏日's 封面.png");
   const invalid = await fetch(url, { headers: { Range: 'bytes=999999-' } }); assert.equal(invalid.status, 416);
   const service = new Phase1Service(store, pluginRoot, { origin: () => 'http://localhost:4173', nativeUrl: () => undefined, openProject: async () => {}, mutation: async task => task(), cancel: async () => {} });
   const project = await service.call('openmotion_create_project', { requestId: 'project', projectType: 'natural_language', title: 'Film', requirements: 'A silent film' });

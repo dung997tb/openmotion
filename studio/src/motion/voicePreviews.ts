@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Model } from '../../../shared/gateway';
 import { generationOptions } from '../../../shared/generation-options';
+import { BoundedLruCache } from '../../../shared/lifecycle';
 import type { SoundPlayableTrack } from './SoundPlayerDock';
 import { deterministicWaveform } from './soundPresets';
 
@@ -126,7 +127,16 @@ export function useVoiceAudition({
   onError?: () => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const blobCacheRef = useRef<Map<string, string>>(new Map());
+  const blobCacheRef = useRef<BoundedLruCache<string, string> | null>(null);
+  const getBlobCache = useCallback(() => {
+    if (!blobCacheRef.current) {
+      blobCacheRef.current = new BoundedLruCache<string, string>({
+        maxEntries: 12,
+        onEvict: url => URL.revokeObjectURL(url),
+      });
+    }
+    return blobCacheRef.current;
+  }, []);
   const abortRef = useRef<AbortController | null>(null);
   const autoplayRef = useRef(false);
   const onPlayStartRef = useRef(onPlayStart);
@@ -166,12 +176,10 @@ export function useVoiceAudition({
 
   // Revoke session-cached preview blobs cleanly on unmount.
   useEffect(() => {
-    const cache = blobCacheRef.current;
     return () => {
       abortRef.current?.abort();
       audioRef.current?.pause();
-      for (const url of cache.values()) URL.revokeObjectURL(url);
-      cache.clear();
+      blobCacheRef.current?.clear();
     };
   }, []);
 
@@ -221,7 +229,7 @@ export function useVoiceAudition({
       return;
     }
 
-    const cached = blobCacheRef.current.get(source.src);
+    const cached = getBlobCache().get(source.src);
     if (cached) {
       autoplayRef.current = true;
       setLoading(false);
@@ -245,7 +253,7 @@ export function useVoiceAudition({
           ? new Blob([blob], { type: mime })
           : blob;
         const objectUrl = URL.createObjectURL(normalized);
-        blobCacheRef.current.set(source.src, objectUrl);
+        getBlobCache().set(source.src, objectUrl);
         autoplayRef.current = true;
         setResolvedSrc(objectUrl);
         setLoading(false);

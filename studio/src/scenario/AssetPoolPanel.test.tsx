@@ -8,6 +8,7 @@ import type { PoolItem } from '../../../shared/scenario-runs';
 import { findScenario } from '../../../shared/scenarios';
 import { I18nProvider } from '../i18n/I18n';
 import * as assetClient from '../motion/assetClient';
+import { AssetUploadError } from '../motion/assetUploadError';
 import { AssetPoolPanel, type AssetPoolPanelProps } from './AssetPoolPanel';
 
 const IMG_ITEM_1: PoolItem = {
@@ -156,27 +157,29 @@ describe('AssetPoolPanel', () => {
     expect(container.querySelectorAll('[data-pool-item]')).toHaveLength(3);
   });
 
-  it('uploads files via uploadLibraryAsset and calls onAddItems with source=upload', async () => {
-    const uploadSpy = vi.spyOn(assetClient, 'uploadLibraryAsset').mockResolvedValue({
-      id: '99999999-9999-4999-8999-999999999999',
-      name: 'product.png',
-      modality: 'image',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      currentVersionId: '88888888-8888-4888-8888-888888888888',
-      versions: [
-        {
-          id: '88888888-8888-4888-8888-888888888888',
-          createdAt: Date.now(),
-          source: 'upload',
-          filename: 'product.png',
-          mimeType: 'image/png',
-          bytes: 128,
-          sha256: 'a'.repeat(64),
-          references: [],
-        },
-      ],
-    });
+  it('lists accepted formats and includes valid files when a mixed upload contains an SVG', async () => {
+    const uploadSpy = vi.spyOn(assetClient, 'uploadLibraryAsset')
+      .mockRejectedValueOnce(new AssetUploadError('rejected', 'unsupported'))
+      .mockResolvedValue({
+        id: '99999999-9999-4999-8999-999999999999',
+        name: 'product.png',
+        modality: 'image',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        currentVersionId: '88888888-8888-4888-8888-888888888888',
+        versions: [
+          {
+            id: '88888888-8888-4888-8888-888888888888',
+            createdAt: Date.now(),
+            source: 'upload',
+            filename: 'product.png',
+            mimeType: 'image/png',
+            bytes: 128,
+            sha256: 'a'.repeat(64),
+            references: [],
+          },
+        ],
+      });
 
     const props = baseProps({ items: [] });
     await act(async () => {
@@ -192,8 +195,12 @@ describe('AssetPoolPanel', () => {
     expect(container.querySelector('.om-scenario-pool-title')?.textContent).toBe('Assets');
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    expect(input.accept.split(',')).toEqual(expect.arrayContaining(['.png', '.mp4', '.mp3']));
+    expect(input.accept).not.toContain('.svg');
+    expect(container.querySelector('.om-scenario-pool-upload-hint--empty')?.textContent).toContain('Images (PNG');
+    const svg = new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' });
     const file = new File(['png-bytes'], 'product.png', { type: 'image/png' });
-    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    Object.defineProperty(input, 'files', { value: [svg, file], configurable: true });
 
     await act(async () => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -215,8 +222,8 @@ describe('AssetPoolPanel', () => {
       },
     ]);
     expect(props.toast.showToast).toHaveBeenCalledWith(
-      'Added 1 file(s) to assets',
-      'info',
+      expect.stringContaining('Uploaded 1, not uploaded 1. Known issue: unsupported file formats.'),
+      'error',
       'feedback',
     );
   });
@@ -246,6 +253,8 @@ describe('AssetPoolPanel', () => {
     // Only the 2 image items are shown; text item is hidden in image pick mode.
     const cards = Array.from(container.querySelectorAll<HTMLElement>('[data-pool-item]'));
     expect(cards).toHaveLength(2);
+    expect(container.querySelector('.om-scenario-pool-title-group .om-badge')?.textContent).toBe('2');
+    expect(container.querySelector('[data-pool-kind="all"] .om-scenario-chip-count')?.textContent).toBe('2');
 
     // Select the second image as well.
     const checkbox2 = container.querySelector<HTMLElement>(
@@ -265,6 +274,32 @@ describe('AssetPoolPanel', () => {
     });
 
     expect(onConfirmPick).toHaveBeenCalledWith([IMG_ITEM_1.id, IMG_ITEM_2.id]);
+  });
+
+  it('opens a picker with its own filters and counts only eligible assets still in the pool', async () => {
+    const props = baseProps();
+    const render = (overrides: Partial<AssetPoolPanelProps> = {}) => act(async () => {
+      root.render(<I18nProvider initialLocale="en"><AssetPoolPanel {...props} {...overrides} /></I18nProvider>);
+    });
+    await render();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.om-scenario-kind-chip[data-pool-kind="text"]')!.click();
+    });
+    const cardIds = () => [...container.querySelectorAll('[data-pool-item]')].map(card => card.getAttribute('data-pool-item'));
+    expect(cardIds()).toEqual([TEXT_ITEM.id]);
+
+    const request: AssetPoolPanelProps['pickRequest'] = {
+      slot: 'references', kinds: ['image'], max: 1, selected: [IMG_ITEM_1.id],
+    };
+    await render({ pickRequest: request });
+    expect(cardIds()).toHaveLength(2);
+    await render({ pickRequest: request, items: [IMG_ITEM_2, TEXT_ITEM] });
+    expect(cardIds()).toEqual([IMG_ITEM_2.id]);
+    expect(container.querySelector('.om-scenario-pool-title-group .om-badge')?.textContent).toBe('1');
+    expect(container.querySelector('.om-scenario-pick-actions button')?.textContent).toBe('Use 0 selected');
+
+    await render();
+    expect(cardIds()).toEqual([TEXT_ITEM.id]);
   });
 
   it('filters by source step in the anchored step-filter popover and supports clear-all', async () => {
@@ -430,7 +465,7 @@ describe('AssetPoolPanel', () => {
     });
     expect(onExportBundle).toHaveBeenCalledWith({
       poolItemIds: [IMG_ITEM_1.id, IMG_ITEM_2.id, TEXT_ITEM.id],
-      activeOnly: true,
+      activeOnly: false,
       includeStandaloneHtml: true,
       includeMotionSource: false,
     });
@@ -560,6 +595,19 @@ describe('AssetPoolPanel', () => {
       .find(b => b.textContent?.includes('Export all (ZIP)'))!;
     await act(async () => { exportAllZipBtn.click(); });
     expect(onExportBundle).toHaveBeenCalledWith({
+      activeOnly: false,
+      includeStandaloneHtml: true,
+      includeMotionSource: true,
+    });
+    await act(async () => { exportMenuTrigger.click(); });
+    const activeOnly = document.querySelector<HTMLElement>('[aria-label="Active outputs only"]')!;
+    expect(activeOnly.getAttribute('aria-checked')).toBe('false');
+    await act(async () => { activeOnly.click(); });
+    expect(activeOnly.getAttribute('aria-checked')).toBe('true');
+    const exportActiveZipBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-scenario-export-actions button'))
+      .find(b => b.textContent?.includes('Export all (ZIP)'))!;
+    await act(async () => { exportActiveZipBtn.click(); });
+    expect(onExportBundle).toHaveBeenLastCalledWith({
       activeOnly: true,
       includeStandaloneHtml: true,
       includeMotionSource: true,

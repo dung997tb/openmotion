@@ -3,16 +3,22 @@ import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { gameGenres, gameSettings, gameStyles, type GameCard, type GameCreated, type GameGenre, type GameSetting, type GameStyle } from '../../../../shared/game-contract';
+import { buildSuperAgentHandoff } from '../../../../shared/capability-hub';
 import { preservePresentation } from '../../../../shared/workspace-url';
 import { StudioToastViewport } from '../../components/StudioToastViewport';
+import { WebPublishPopover } from '../../components/WebPublishPopover';
 import { useToast } from '../../hooks/useToast';
 import { useI18n } from '../../i18n/I18n';
+import { useVisibilityPolling } from '../../hooks/useVisibilityPolling';
 import { RemixIcon } from '../../icons/RemixIcons';
 import { WorkspaceBack } from '../WorkspaceBack';
+import { useOptionalWorkspaceChrome } from '../WorkspaceChromeContext';
 import { MotionIcon } from '../icons';
 import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
+import { GameMasonry, interleavePortrait } from './GameMasonry';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
+import { buildDirectGamePrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import './gameStudio.css';
 
 type Menu = 'genre' | 'style' | 'setting';
@@ -21,18 +27,31 @@ const pending = (game: GameCard) => game.source === 'mine' && (game.status === '
 
 /**
  * Game Studio. The page is the game market; the composer is docked at the bottom. Picking a genre, style and
- * setting (and optionally one line of text) creates a local game draft and an instruction for the user's Agent,
- * which builds, validates and publishes the game through the OpenMotion MCP game tools. Drafts refresh until the
- * Agent finishes, so their state changes here without reloading.
+ * setting (and optionally one line of text) creates a local game draft and hands it off to Super Agent (or the
+ * user's external MCP Agent) to build, validate and publish through the OpenMotion MCP game tools. Drafts refresh
+ * until the Agent finishes, so their state changes here without reloading.
  */
-export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; onOpenMcp: () => void }) {
+export function GameStudio({
+  onExplore,
+  onOpenMcp,
+  initialGameId = null,
+}: {
+  onExplore: () => void;
+  onOpenMcp: () => void;
+  initialGameId?: string | null;
+}) {
   const { t, locale } = useI18n();
+  const chrome = useOptionalWorkspaceChrome();
+  const getGameTitle = useGameTitle();
   const toast = useToast();
   const [genre, setGenre] = useState<GameGenre | null>('shooter');
   const [style, setStyle] = useState<GameStyle | null>(null);
   const [setting, setSetting] = useState<GameSetting | null>(null);
   const [multiplayer, setMultiplayer] = useState(false);
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('landscape');
+  // Portrait games default to a playable ad; it is single-player, so it and Multiplayer switch each other off.
+  const [playableAd, setPlayableAd] = useState(true);
+  const adBuild = orientation === 'portrait' && playableAd;
   const [prompt, setPrompt] = useState('');
   const [menu, setMenu] = useState<Menu>('genre');
   const [submitting, setSubmitting] = useState(false);
@@ -42,14 +61,22 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
   const [category, setCategory] = useState<GameGenre | 'all' | 'portrait'>('all');
   const [sort, setSort] = useState<Sort>('relevance');
   // The open project is tracked by id so polling updates reach it.
-  // ?game=<id> opens that game's detail page directly (used by links from Assets).
-  const [openId, setOpenIdState] = useState<string | null>(() => new URLSearchParams(location.search).get('game'));
+  // ?game=<id> opens that game's detail page directly (used by links from Assets and Super Agent).
+  const [openId, setOpenIdState] = useState<string | null>(() => initialGameId ?? new URLSearchParams(location.search).get('game'));
   const setOpenId = (id: string | null) => {
     setOpenIdState(id);
     const url = new URL(location.href);
     if (id) url.searchParams.set('game', id); else url.searchParams.delete('game');
     history.replaceState(history.state, '', url);
   };
+  useEffect(() => {
+    if (initialGameId) setOpenIdState(initialGameId);
+  }, [initialGameId]);
+  useEffect(() => {
+    const onPopState = () => setOpenIdState(new URLSearchParams(location.search).get('game'));
+    addEventListener('popstate', onPopState);
+    return () => removeEventListener('popstate', onPopState);
+  }, []);
   // The full composer sits at the top of the page. Once it scrolls away, a docked copy floats over the bottom edge: one line
   // while scrolling down, full size while scrolling up. It overlays the page, so its size never moves the content.
   const [scrolledUp, setScrolledUp] = useState(false);
@@ -88,12 +115,7 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
   }).catch(() => { setGames(current => current.some(game => game.source === 'mine') ? current : bundledGames); setOffline(true); });
   useEffect(() => { void load(); }, []);
   // Poll every 4 s while the page is visible, so drafts an Agent starts from its chat show up and open on their own.
-  useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') void load(); };
-    const timer = setInterval(tick, 4000);
-    document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-  }, []);
+  useVisibilityPolling(() => load(), { intervalMs: 4000, immediate: false });
   useEffect(() => {
     const scroller = root.current;
     if (!scroller) return;
@@ -123,13 +145,53 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
     rememberInstruction(created.game.id, created.agentInstruction);
     statuses.current.set(created.game.id, created.game.status);
     setGames(list => [created.game, ...list.filter(game => game.id !== created.game.id)]);
+    if (chrome?.openInSuperAgent) {
+      const displayTitle = getGameTitle(created.game);
+      const ready = created.game.status === 'ready' || created.game.status === 'published';
+      setOpenIdState(null);
+      const handoff = buildSuperAgentHandoff(toGameCapabilityRef(created.game, displayTitle), {
+        prompt: buildDirectGamePrompt(created.game, created.agentInstruction),
+        locale,
+        newChat: true,
+        autoSend: true,
+        ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
+      });
+      chrome.openInSuperAgent({ ...handoff, title: ready ? displayTitle : undefined });
+      return;
+    }
     setOpenId(created.game.id);
+  };
+  const continueInSuperAgent = (game: GameCard, instruction: string) => {
+    if (!chrome?.openInSuperAgent) return;
+    const displayTitle = getGameTitle(game);
+    setOpenIdState(null);
+    const handoff = buildSuperAgentHandoff(toGameCapabilityRef(game, displayTitle), {
+      prompt: buildDirectGamePrompt(game, instruction),
+      locale,
+      newChat: true,
+      autoSend: true,
+    });
+    chrome.openInSuperAgent({ ...handoff, title: undefined });
+  };
+  const editInSuperAgent = (game: GameCard) => {
+    if (!chrome?.openInSuperAgent) return;
+    const displayTitle = getGameTitle(game);
+    setOpenIdState(null);
+    chrome.openInSuperAgent({
+      ...buildSuperAgentHandoff(toGameCapabilityRef(game, displayTitle), {
+        locale,
+        newChat: true,
+        autoSend: false,
+        initialArtifact: toGameArtifact(game, displayTitle),
+      }),
+      prompt: '',
+    });
   };
   const submit = async () => {
     if (!brief || submitting) return;
     setSubmitting(true);
     // Choosing options without typing is enough to start: the composed brief becomes the prompt.
-    try { started(await gameApi.create({ prompt: prompt.trim() || brief, genre, style, setting, multiplayer, orientation })); setPrompt(''); }
+    try { started(await gameApi.create({ prompt: prompt.trim() || brief, genre, style, setting, multiplayer, orientation, playableAd: adBuild })); setPrompt(''); }
     catch (error) { notify(failure(error), 'error'); }
     finally { setSubmitting(false); }
   };
@@ -194,10 +256,11 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
             <Button variant="plain" className="om-game-chip" aria-expanded={menu === 'setting'} data-active={Boolean(setting)} onClick={() => { setToggled(null); setMenu(menu === 'setting' ? 'genre' : 'setting'); }}>
               <RemixIcon name="landscape-line" size={15} />{setting ? t(settingLabels[setting]) : t('Setting')}</Button>
             <span className="om-game-ratio" role="radiogroup" aria-label={t('Aspect ratio')}>
-              {(['landscape', 'portrait'] as const).map(id => <Button key={id} variant="plain" role="radio" className="om-game-ratio-option" aria-checked={orientation === id} onClick={() => setOrientation(id)}>
+              {(['landscape', 'portrait'] as const).map(id => <Button key={id} variant="plain" role="radio" className="om-game-ratio-option" aria-checked={orientation === id} onClick={() => { if (id === 'portrait' && orientation !== 'portrait') { setPlayableAd(true); setMultiplayer(false); } setOrientation(id); }}>
                 <RemixIcon name={id === 'portrait' ? 'smartphone-line' : 'computer-line'} size={15} />{t(id === 'portrait' ? 'Portrait' : 'Landscape')}</Button>)}
             </span>
-            <label className="om-game-switch"><input type="checkbox" role="switch" checked={multiplayer} onChange={event => setMultiplayer(event.target.checked)} /><span aria-hidden="true" />{t('Multiplayer')}</label>
+            {orientation === 'portrait' && <label className="om-game-switch"><input type="checkbox" role="switch" checked={playableAd} onChange={event => { setPlayableAd(event.target.checked); if (event.target.checked) setMultiplayer(false); }} /><span aria-hidden="true" />{t('Playable ad')}</label>}
+            <label className="om-game-switch"><input type="checkbox" role="switch" checked={multiplayer && !adBuild} onChange={event => { setMultiplayer(event.target.checked); if (event.target.checked) setPlayableAd(false); }} /><span aria-hidden="true" />{t('Multiplayer')}</label>
             <IconButton variant="ghost" className="om-game-send" aria-label={t('Start building')} disabled={!brief || submitting} onClick={() => void submit()}
               icon={<RemixIcon name={submitting ? 'loader-4-line' : 'arrow-up-line'} size={18} />} />
           </div>
@@ -235,7 +298,7 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
         {offline && <p className="om-muted om-game-note">{t('Showing the built-in games. Your games appear once the local game service is running.')}</p>}
         {rows.filter(row => row.games.length || row.id === 'all').map(row => <section key={row.id} className="om-game-row" aria-label={row.title}>
           {row.id !== 'featured' && <header><h2 className="om-subtitle"><RemixIcon name={row.icon} size={16} />{row.title}</h2></header>}
-          {row.games.length ? <GameMasonry games={row.games} render={game => <GameTile key={game.id} game={game} locale={locale} onOpen={() => open(game)} />} />
+          {row.games.length ? <GameMasonry games={row.games} minColumn={280} render={game => <GameTile key={game.id} game={game} locale={locale} onOpen={() => open(game)} />} />
             : <div className="om-discovery-empty"><span>{t('No games match these filters.')}</span></div>}
         </section>)}
       </section>
@@ -247,7 +310,7 @@ export function GameStudio({ onExplore, onOpenMcp }: { onExplore: () => void; on
     </div>
 
     {/* The detail page covers the whole window, so it renders outside the workspace frame that clips fixed layers. */}
-    {opened && createPortal(<GameProject key={opened.id} game={opened} offline={offline} onClose={() => setOpenId(null)} onRemix={() => void remix(opened)} onChange={update} onOpenMcp={onOpenMcp} notify={notify} />, document.body)}
+    {opened && createPortal(<GameProject key={opened.id} game={opened} offline={offline} onClose={() => setOpenId(null)} onRemix={() => void remix(opened)} onChange={update} onOpenMcp={onOpenMcp} onContinueInSuperAgent={chrome?.openInSuperAgent ? (instruction => continueInSuperAgent(opened, instruction)) : undefined} onEditInSuperAgent={chrome?.openInSuperAgent ? (() => editInSuperAgent(opened)) : undefined} notify={notify} />, document.body)}
     <StudioToastViewport toasts={toast.toasts} dismissToast={toast.dismissToast} />
   </div>;
 }
@@ -288,7 +351,10 @@ function GameTile({ game, locale, onOpen }: { game: GameCard; locale: string; on
   const label = pending(game) || game.status === 'failed' ? t('Show the Agent instruction for {title}', { title }) : t('Play {title}', { title });
   return <article className="om-game-tile" data-status={game.status} data-orientation={game.orientation === 'portrait' ? 'portrait' : undefined}>
     <Button variant="plain" className="om-game-tile-cover" onClick={onOpen} aria-label={label}>
+      {/* Portrait games share the 16:9 card: the cover sits whole in the middle over a blurred copy of itself. */}
+      {cover && game.orientation === 'portrait' && <img className="om-game-tile-backdrop" src={cover} alt="" loading="lazy" decoding="async" />}
       {cover ? <img src={cover} alt="" loading="lazy" decoding="async" /> : <span className="om-game-tile-placeholder">{title}</span>}
+      {game.orientation === 'portrait' && !game.multiplayer && <span className="om-game-badge"><RemixIcon name="smartphone-line" size={13} />{t('Portrait')}</span>}
       {status && <span className="om-game-status" data-tone={game.status}>{game.status === 'building' && <RemixIcon name="loader-4-line" size={13} />}{t(status)}</span>}
       {game.external && !game.external.embeddable && <span className="om-game-status"><RemixIcon name="external-link-line" size={13} />{t('External link')}</span>}
       {game.multiplayer && <span className="om-game-badge"><RemixIcon name="group-line" size={13} />{t('{count} players', { count: game.maxPlayers })}</span>}
@@ -306,8 +372,8 @@ function GameTile({ game, locale, onOpen }: { game: GameCard; locale: string; on
  * Project view: details, Agent hand-off and actions on the left; the playable game on the right.
  * Drafts show the Agent's progress and load the game as soon as it is ready.
  */
-function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, notify }: {
-  game: GameCard; offline: boolean; onClose: () => void; onRemix: () => void; onChange: (game: GameCard) => void; onOpenMcp: () => void; notify: (message: string, tone: 'info' | 'error') => void;
+function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onContinueInSuperAgent, onEditInSuperAgent, notify }: {
+  game: GameCard; offline: boolean; onClose: () => void; onRemix: () => void; onChange: (game: GameCard) => void; onOpenMcp: () => void; onContinueInSuperAgent?: (instruction: string) => void; onEditInSuperAgent?: () => void; notify: (message: string, tone: 'info' | 'error') => void;
 }) {
   const { t, locale } = useI18n();
   const [view, setView] = useState<'preview' | 'code' | 'trailer'>('preview');
@@ -356,7 +422,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
     catch (error) { notify(t('The trailer could not be started: {reason}', { reason: (error as Error).message }), 'error'); }
   };
   const openTrailerProject = () => { if (trailer?.projectId) window.location.assign(trailerProjectHref(trailer.projectId, location.search)); };
-  useEffect(() => { close.current?.focus(); const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && document.activeElement !== frame.current) onClose(); }; addEventListener('keydown', key); return () => removeEventListener('keydown', key); }, []);
+  useEffect(() => { close.current?.focus(); const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && document.activeElement !== frame.current && !(document.activeElement instanceof Element && document.activeElement.closest('.om-web-publish-popover'))) onClose(); }; addEventListener('keydown', key); return () => removeEventListener('keydown', key); }, []);
   const act = (request: () => Promise<GameCard>) => offline ? notify(t('Start the local game service to save reactions.'), 'info') : void request().then(onChange).catch(() => notify(t('Could not save. Try again.'), 'error'));
   // Games are published to this computer only. The link is copied for local use and labelled as such.
   const share = async () => {
@@ -405,6 +471,10 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.reaction === -1} aria-label={t('Dislike')} onClick={() => act(() => gameApi.react(game.id, game.reaction === -1 ? 0 : -1))} icon={<RemixIcon name={game.reaction === -1 ? 'thumb-down-fill' : 'thumb-down-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Copy link')} onClick={() => void share()} icon={<RemixIcon name="share-forward-line" size={17} />} />
       </footer>}
+      {playable && !game.external && mine && <footer className="om-game-actions" role="toolbar" aria-label={t('Game actions')}>
+        {onEditInSuperAgent && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onEditInSuperAgent}><RemixIcon name="gamepad-line" size={16} />{t('Edit & optimize in Super Agent')}</Button>}
+        <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Copy link')} onClick={() => void share()} icon={<RemixIcon name="share-forward-line" size={17} />} />
+      </footer>}
     </aside>
     <section className="om-game-preview" aria-label={t('Preview')}>
       <header>
@@ -415,13 +485,22 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
           {trailerReady && <Button variant="plain" role="tab" className="om-nav-item" aria-selected={view === 'trailer'} onClick={() => setView('trailer')}><RemixIcon name="film-line" size={15} />{t('Trailer')}</Button>}
         </div> : <span />}
         <span className="om-game-preview-tools">
+          {playable && !game.external && !offline && (
+            <WebPublishPopover
+              targetKind="game"
+              targetId={game.id}
+              title={gameTitle(game)}
+              revisionKey={game.updatedAt}
+              onNotify={(message, tone) => notify(message, tone ?? 'info')}
+            />
+          )}
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Reload game')} disabled={!playable} onClick={() => { setSource(null); setReload(value => value + 1); }} icon={<RemixIcon name="refresh-line" size={17} />} />
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Full screen')} disabled={!url} onClick={() => void (view === 'preview' ? frame.current : stage.current)?.requestFullscreen?.()} icon={<RemixIcon name="fullscreen-line" size={17} />} />
           <Button variant="ghost" className="om-button h-auto" disabled={!url} onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open in new window')}</Button>
         </span>
       </header>
       <div ref={stage} className="om-game-stage" data-orientation={game.orientation === 'portrait' && playable && view === 'preview' ? 'portrait' : undefined}>
-        {!playable && game.status !== 'building' ? <GameHandoff game={game} notify={notify} />
+        {!playable && game.status !== 'building' ? <GameHandoff game={game} notify={notify} onContinueInSuperAgent={onContinueInSuperAgent} />
           : !playable ? <div className="om-game-waiting"><RemixIcon name="loader-4-line" size={28} />
             <strong>{t('Agent is running…')}</strong>
             <span className="om-muted">{t('The game will load here when it is ready.')}</span></div>
@@ -438,41 +517,6 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, not
       </div>
     </section>
   </div>;
-}
-
-/** Spreads portrait games through the list (one after every two landscape games) so the waterfall mixes both shapes. */
-function interleavePortrait(list: GameCard[]) {
-  const portrait = list.filter(game => game.orientation === 'portrait'), others = list.filter(game => game.orientation !== 'portrait');
-  if (!portrait.length || !others.length) return list;
-  const mixed: GameCard[] = [];
-  others.forEach((game, index) => { mixed.push(game); if (index % 2 === 1 && portrait.length) mixed.push(portrait.shift()!); });
-  return [...mixed, ...portrait];
-}
-
-// Titles sit on the cover, so a card's height is just its cover.
-const masonryGap = 12, masonryMinColumn = 280, tileMetaHeight = 0;
-
-/** Waterfall layout: landscape (16:9) and portrait (9:16) cards keep their shapes; each card goes to the shortest column, in list order. */
-function GameMasonry({ games, render }: { games: GameCard[]; render: (game: GameCard) => React.ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const element = box.current; if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    observer.observe(element); return () => observer.disconnect();
-  }, []);
-  const count = Math.max(1, Math.floor((width + masonryGap) / (masonryMinColumn + masonryGap)));
-  const columns = useMemo(() => {
-    const column = width ? (width - masonryGap * (count - 1)) / count : masonryMinColumn;
-    const lists: GameCard[][] = Array.from({ length: count }, () => []), heights = Array(count).fill(0) as number[];
-    for (const game of games) {
-      const shortest = heights.indexOf(Math.min(...heights));
-      lists[shortest].push(game);
-      heights[shortest] += column * (game.orientation === 'portrait' ? 16 / 9 : 9 / 16) + tileMetaHeight + masonryGap;
-    }
-    return lists;
-  }, [games, count, width]);
-  return <div ref={box} className="om-game-masonry">{columns.map((list, index) => <div key={index} className="om-game-masonry-column">{list.map(render)}</div>)}</div>;
 }
 
 /** The user's games, like the project list in the Motion editor: what the Agent is still making, then finished games. */
@@ -512,7 +556,7 @@ function GameSidebar({ games, openId, onOpen }: { games: GameCard[]; openId: str
  * MCP Agent receives the complete instruction — game id, brief and execution steps — by opening Codex with it
  * prefilled or by copying it into any other Agent. The page switches to "Agent is running" once the Agent sets building.
  */
-function GameHandoff({ game, notify }: { game: GameCard; notify: (message: string, tone: 'info' | 'error') => void }) {
+function GameHandoff({ game, notify, onContinueInSuperAgent }: { game: GameCard; notify: (message: string, tone: 'info' | 'error') => void; onContinueInSuperAgent?: (instruction: string) => void }) {
   const { t } = useI18n();
   const [instruction, setInstruction] = useState<string | null>(() => storedInstruction(game.id));
   const [copied, setCopied] = useState(false);
@@ -536,8 +580,9 @@ function GameHandoff({ game, notify }: { game: GameCard; notify: (message: strin
       <li>{t('This page shows “Agent is running” once the Agent starts, and the game when it is ready.')}</li>
     </ol>
     <div className="om-game-handoff-actions">
+      {onContinueInSuperAgent && <Button variant="ghost" className="om-button h-auto" data-primary disabled={!instruction} onClick={() => instruction && onContinueInSuperAgent(instruction)}><RemixIcon name="gamepad-line" size={15} />{t('Continue in Super Agent')}</Button>}
       {/* Copy works with every Agent; the Codex link needs the Codex desktop app and only prefills a new chat (it does not send). */}
-      <Button variant="ghost" className="om-button h-auto" data-primary disabled={!instruction} onClick={() => void copy()}><RemixIcon name={copied ? 'check-line' : 'file-copy-line'} size={15} />{copied ? t('Instruction copied') : t('Copy instruction')}</Button>
+      <Button variant="ghost" className="om-button h-auto" {...(!onContinueInSuperAgent ? { 'data-primary': true } : {})} disabled={!instruction} onClick={() => void copy()}><RemixIcon name={copied ? 'check-line' : 'file-copy-line'} size={15} />{copied ? t('Instruction copied') : t('Copy instruction')}</Button>
       <a className="om-button om-game-handoff-link" title={t('Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.')} aria-disabled={!instruction || undefined} href={instruction ? `codex://new?prompt=${encodeURIComponent(instruction)}` : undefined}><RemixIcon name="external-link-line" size={15} />{t('Open in Codex')}</a>
     </div>
     <pre className="om-game-handoff-text" tabIndex={0} aria-label={t('Agent instruction')}>{instruction ?? t('Loading instruction…')}</pre>

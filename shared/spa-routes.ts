@@ -29,6 +29,7 @@ export const RESERVED_BACKEND_PREFIXES = [
 export const SPA_ROUTE_PREFIXES = [
   '/',
   '/explore',
+  '/agent',
   '/create',
   '/motion',
   '/cinema',
@@ -130,6 +131,10 @@ export function spaPathnameToSearch(pathname: string, search = ''): string {
       case 'explore':
         query.set('page', 'explore');
         if (second && !query.has('community')) query.set('community', second);
+        break;
+      case 'agent':
+        query.set('page', 'agent');
+        if (second && !query.has('chat')) query.set('chat', second);
         break;
       case 'create':
         query.set('page', 'create');

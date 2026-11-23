@@ -1329,6 +1329,35 @@
   pointer-events: none;
 }
 
+.om-scenario-stage-asset-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--motion-space-8);
+  width: 100%;
+  height: 100%;
+  padding: var(--motion-space-12);
+}
+
+.om-scenario-stage-asset-card .om-scenario-stage-caption-row {
+  position: relative;
+  inset: auto;
+}
+
+.om-scenario-stage-asset-frame {
+  position: relative;
+}
+
+.om-scenario-stage-asset-frame .om-scenario-stage-media {
+  object-fit: contain;
+}
+
+.om-scenario-stage-asset-frame .om-scenario-stage-media-btn {
+  background: var(--motion-panel);
+  color: var(--motion-strong);
+  border-color: var(--motion-border-subtle);
+}
+
 .om-scenario-stage-pill {
   --om-tone: var(--motion-accent);
   pointer-events: auto;
@@ -2748,15 +2777,40 @@
   gap: var(--motion-space-8);
 }
 
+.om-scenario-pool-upload-hint {
+  color: var(--motion-muted);
+  font-size: var(--motion-text-xs);
+  white-space: normal;
+}
+
+.om-scenario-pool-upload-hint--menu {
+  display: block;
+  max-inline-size: min(18rem, calc(100vw - 5rem));
+  margin-top: var(--motion-space-2);
+}
+
+.om-scenario-pool-upload-hint--empty {
+  max-inline-size: 42ch;
+  margin: 0;
+  text-align: center;
+}
+
 .om-scenario-pool-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--om-pool-card-min, 224px)), 1fr));
+  align-items: start;
   gap: var(--motion-space-10);
+}
+
+.om-scenario-pool-grid[data-image-picker] {
+  --om-pool-card-min: 166px;
+  --om-pool-thumb-height: 88px;
 }
 
 .om-scenario-pool-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background: var(--motion-bg);
   border: 1px solid var(--motion-border-subtle);
   border-radius: var(--motion-radius-lg);
@@ -2790,6 +2844,32 @@
   position: relative;
   width: 100%;
   background: var(--motion-inset);
+}
+
+.om-scenario-pool-card-media > .om-scenario-thumb {
+  height: var(--om-pool-thumb-height, 112px);
+  aspect-ratio: auto;
+}
+
+.om-scenario-pool-card-media > .om-scenario-thumb--audio {
+  height: auto;
+  min-height: var(--om-pool-thumb-height, 112px);
+}
+
+.om-scenario-pool-card[data-kind="image"] > .om-scenario-pool-card-media {
+  box-sizing: border-box;
+  height: var(--om-pool-thumb-height, 112px);
+  padding: var(--motion-space-6);
+  background: transparent;
+}
+
+.om-scenario-pool-card-media > .om-scenario-thumb[data-kind="image"] {
+  height: 100%;
+  border-radius: var(--motion-radius-md);
+}
+
+.om-scenario-pool-card-media > .om-scenario-thumb[data-kind="image"] img {
+  object-fit: contain;
 }
 
 .om-scenario-pool-card-check {
@@ -2908,20 +2988,24 @@
 .om-scenario-thumb--audio {
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
-  gap: var(--motion-space-6);
-  padding: var(--motion-space-10);
+  padding: var(--motion-space-8);
   aspect-ratio: auto;
-  min-height: 92px;
 }
 
-.om-scenario-audio-head {
-  display: flex;
-  align-items: center;
-  gap: var(--motion-space-6);
-  font-size: var(--motion-text-xs);
-  color: var(--motion-muted);
-  font-weight: var(--motion-weight-medium);
+.om-scenario-thumb--audio .om-asset-audio-player {
+  width: 100%;
+  gap: var(--motion-space-4);
+  padding: 0;
+}
+
+.om-scenario-thumb--audio .motion-audio-preview-waveform {
+  height: var(--motion-space-40);
+  padding-block: var(--motion-space-4);
+}
+
+.om-scenario-thumb--audio audio {
+  display: block;
+  width: 100%;
 }
 
 .om-scenario-thumb--motion {
@@ -3267,6 +3351,52 @@
   line-height: var(--motion-leading-body);
 }
 
+.om-scenario-brief-compare,
+.om-scenario-brief-compare-field,
+.om-scenario-brief-compare-field dl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-8);
+  min-width: 0;
+}
+
+.om-scenario-brief-compare > p,
+.om-scenario-brief-compare-field dl,
+.om-scenario-brief-compare-value dd {
+  margin: 0;
+}
+
+.om-scenario-brief-compare-field {
+  border-top: 1px solid var(--motion-border-subtle);
+  padding-top: var(--motion-space-10);
+}
+
+.om-scenario-brief-compare-value {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--motion-space-8);
+  line-height: var(--motion-leading-body);
+}
+
+.om-scenario-brief-compare-value dt {
+  color: var(--motion-muted);
+}
+
+.om-scenario-brief-compare-value dd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.om-scenario-brief-compare-value del {
+  color: var(--motion-danger);
+  background: var(--motion-danger-soft);
+}
+
+.om-scenario-brief-compare-value ins {
+  color: var(--motion-success);
+  background: var(--motion-accent-soft);
+}
+
 .om-scenario-history-strip {
   display: flex;
   flex-direction: column;
@@ -3448,7 +3578,8 @@
   .om-scenario-body,
   .om-scenario-body[data-pool-collapsed="true"] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(280px, 42vh) minmax(0, 1fr);
+    /* The stacked workspace scrolls as one column, so the form must size its row. */
+    grid-template-rows: max(280px, 42vh) minmax(min-content, 1fr);
     overflow-y: auto;
   }
 
@@ -3463,7 +3594,8 @@
   .om-scenario-workbench,
   .om-scenario-body[data-pool-collapsed="false"] .om-scenario-workbench {
     margin: 0 var(--motion-space-12) var(--motion-space-12);
-    overflow: visible;
+    /* Clip the header and footer to the card radius without creating a scroll container. */
+    overflow: clip;
   }
 
   .om-scenario-step-scroll {
@@ -3851,12 +3983,6 @@
 
 .om-scenario-pool--inline .om-scenario-pool-empty {
   padding: var(--motion-space-10) var(--motion-space-12);
-}
-
-.om-scenario-pool--inline .om-scenario-pool-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--motion-space-10);
 }
 
 .om-agent-composer {
