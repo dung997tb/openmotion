@@ -284,6 +284,7 @@ export function ScenarioStudioView({
   const chosen = deliverables.filter(step => run?.steps[step.id]?.status !== 'skipped');
   const [toggling, setToggling] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<PoolItem | null>(null);
+  const [postMedia, setPostMedia] = useState<Record<string, number>>({});
   const [shownStepId, setShownStepId] = useState<string | null>(null);
   const shownStep = deliverables.find(step => step.id === shownStepId) ?? chosen[0] ?? deliverables[0];
   const toggleDeliverable = async (stepId: string, include: boolean) => {
@@ -339,7 +340,10 @@ export function ScenarioStudioView({
     // Never remove a photo a step has used as its output.
     const latestRun = await api.ensureRun().catch(() => run);
     const usedAsOutput = new Set(Object.values(latestRun?.steps ?? {}).flatMap(state =>
-      state.iterations.flatMap(iteration => iteration.outputs.flatMap(output => output.type === 'pool' ? [output.poolItemId] : []))));
+      state.iterations.flatMap(iteration => [
+        ...iteration.outputs.flatMap(output => output.type === 'pool' ? [output.poolItemId] : output.type === 'social' ? output.posts.flatMap(post => post.mediaPoolItemIds) : []),
+        ...iteration.inputs,
+      ])));
     const stale = poolItems.filter(item => item.tags.includes('product') && item.stepId === null && !usedAsOutput.has(item.id)
       && !(item.ref.type === 'asset' && keep.has(item.ref.assetId + '/' + item.ref.versionId)));
     const items = next.images
@@ -617,6 +621,8 @@ export function ScenarioStudioView({
                     <div className="om-studio-output-posts">
                       {posts.map(post => {
                         const media = post.mediaPoolItemIds.map(id => poolById.get(id)).filter((item): item is PoolItem => Boolean(item));
+                        const mediaIndex = (postMedia[post.id] ?? 0) % Math.max(1, media.length);
+                        const shown = media[mediaIndex];
                         const platform = socialPlatforms.find(item => item.id === post.platform);
                         return (
                           <article key={post.id} className="om-studio-output-post" data-platform={post.platform}>
@@ -629,16 +635,24 @@ export function ScenarioStudioView({
                             </header>
                             <Button variant="plain" className="om-studio-output-post-media" style={{ aspectRatio: post.aspect.replace(':', ' / ') }}
                               disabled={!media.length} aria-label={`${t('Preview')} · ${platform ? t(platform.label) : post.platform}`}
-                              onClick={() => media[0] && setPreviewItem(media[0])}>
-                              {media[0] ? <PoolThumb item={media[0]} run={run} size="lg" /> : (
+                              onClick={() => shown && setPreviewItem(shown)}>
+                              {shown ? <PoolThumb item={shown} run={run} size="lg" /> : (
                                 <span className="om-studio-output-post-placeholder">
                                   <RemixIcon name="image-line" size={20} />
                                   <span>{t('Media is added when the images or video are ready')}</span>
                                 </span>
                               )}
-                              {media.length > 1 && <span className="om-studio-output-post-more">1/{media.length}</span>}
+                              {media.length > 1 && <span className="om-studio-output-post-more">{mediaIndex + 1}/{media.length}</span>}
                               <span className="om-studio-output-post-aspect">{post.aspect}</span>
                             </Button>
+                            {media.length > 1 && (
+                              <div className="om-studio-output-post-pager">
+                                {media.map((item, index) => (
+                                  <Button key={item.id} variant="plain" aria-label={`${index + 1}/${media.length}`} aria-pressed={index === mediaIndex}
+                                    className="om-studio-output-post-dot" onClick={() => setPostMedia(current => ({ ...current, [post.id]: index }))} />
+                                ))}
+                              </div>
+                            )}
                             <div className="om-studio-output-post-body">
                               {post.title && <h3>{post.title}</h3>}
                               <p>{post.text}</p>
