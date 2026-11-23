@@ -26,6 +26,8 @@ export type GameBrief = {
   multiplayer: boolean;
   /** Screen shape the game is built for; portrait is a 9:16 phone layout. Defaults to landscape. */
   orientation?: 'landscape' | 'portrait';
+  /** Portrait only: build a playable ad (instant play, hand tutorial, short levels, end card with a call to action) instead of a regular game. */
+  playableAd?: boolean;
 };
 
 export type GameCard = {
@@ -40,6 +42,8 @@ export type GameCard = {
   maxPlayers: number;
   /** Portrait games are built for a phone held upright (9:16); the stage shows them in a phone-shaped frame. */
   orientation?: 'portrait' | 'landscape';
+  /** True when the game was built as a playable ad. */
+  playableAd?: boolean;
   status: GameStatus;
   /** Studio-relative or absolute URL of the cover image. */
   cover: string | null;
