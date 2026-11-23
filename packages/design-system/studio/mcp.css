@@ -30,6 +30,8 @@
   color: var(--motion-accent);
   font-size: 12.5px;
   font-weight: var(--motion-weight-semibold);
+}
+.om-mcp-entitlement-cta-label {
   text-decoration: underline;
   text-underline-offset: 3px;
 }

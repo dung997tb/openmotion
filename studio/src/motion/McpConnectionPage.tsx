@@ -348,7 +348,8 @@ export function McpConnectionPage({
             click('mcp_resources', 'sign_in');
             changeRoute({ settings: 'account', assets: false, skills: false, templates: false });
           }}>
-            {t('Claim now')} <span aria-hidden="true">→</span>
+            <span className="om-mcp-entitlement-cta-label">{t('Claim now')}</span>
+            <RemixIcon name="arrow-right-s-line" size={15} aria-hidden="true" />
           </Button>
           <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources')}>
             {t('Already have an API key? Use BYOK')}
