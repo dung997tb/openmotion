@@ -1320,23 +1320,20 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   const iframe = viewer.querySelector('iframe');
   expect(iframe?.getAttribute('src')).toContain(`/motion-api/games/${GAME_ID}/play/index.html`);
 
-  // Unified Device toolbar toggle works for Game preview viewports
-  const deviceBtn = viewer.querySelector('button[aria-label="Show device toolbar"]') as HTMLButtonElement;
+  // Responsive viewport dropdown switches Game preview viewports without adding a secondary bar
+  const deviceBtn = viewer.querySelector('button[aria-label="Viewport presets"]') as HTMLButtonElement;
   expect(deviceBtn).toBeTruthy();
   await act(async () => deviceBtn.click());
   await flush();
-  const deviceBar = viewer.querySelector('.om-sa-device-bar');
-  expect(deviceBar).toBeTruthy();
-  const desktopPresetBtn = [...deviceBar!.querySelectorAll('button')].find(b => b.textContent?.includes('Desktop')) as HTMLButtonElement;
+  expect(viewer.querySelector('.om-sa-device-bar')).toBeNull();
+  const deviceMenu = document.querySelector('.om-sa-device-menu');
+  expect(deviceMenu).toBeTruthy();
+  const desktopPresetBtn = [...deviceMenu!.querySelectorAll('button')].find(b => b.textContent?.includes('Desktop')) as HTMLButtonElement;
   expect(desktopPresetBtn).toBeTruthy();
   await act(async () => desktopPresetBtn.click());
   await flush();
   expect(stage?.getAttribute('data-viewport')).toBe('desktop');
-  const deviceCloseBtn = deviceBar!.querySelector('.om-sa-device-close') as HTMLButtonElement;
-  expect(deviceCloseBtn).toBeTruthy();
-  await act(async () => deviceCloseBtn.click());
-  await flush();
-  expect(viewer.querySelector('.om-sa-device-bar')).toBeNull();
+  expect(document.querySelector('.om-sa-device-menu')).toBeNull();
 
   const codeBtn = [...viewer.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
   await act(async () => codeBtn.click());
@@ -1467,16 +1464,24 @@ it('supports web preview device toolbar, browser options menu, and visual elemen
   expect(viewer.querySelector('.om-sa-viewer-tab-btn')?.textContent).toContain('Local App');
   expect(viewer.querySelector('.om-sa-context-actions a[aria-label="Open in external browser"]')).toBeNull();
 
-  // Open Device Toolbar and switch to Mobile preset
-  const deviceBtn = viewer.querySelector('button[aria-label="Show device toolbar"]') as HTMLButtonElement;
+  // Open Viewport presets dropdown and switch to Mobile preset
+  const deviceBtn = viewer.querySelector('button[aria-label="Viewport presets"]') as HTMLButtonElement;
   expect(deviceBtn).toBeTruthy();
   await act(async () => deviceBtn.click());
   await flush();
-  const mobilePreset = [...viewer.querySelectorAll('.om-sa-device-btn')].find(b => b.textContent?.includes('Mobile')) as HTMLButtonElement;
+  expect(viewer.querySelector('.om-sa-device-bar')).toBeNull();
+  const mobilePreset = [...document.querySelectorAll('.om-sa-device-menu-item')].find(b => b.textContent?.includes('Mobile')) as HTMLButtonElement;
   expect(mobilePreset).toBeTruthy();
   await act(async () => mobilePreset.click());
   await flush();
-  expect(viewer.querySelector('.om-sa-device-dims')?.textContent).toContain('390 × 844');
+  expect(viewer.querySelector('.om-sa-web-stage-main')?.getAttribute('data-framed')).toBe('true');
+  // Re-open dropdown to verify active mobile dimensions and Rotate viewport option
+  await act(async () => deviceBtn.click());
+  await flush();
+  expect(document.querySelector('.om-sa-device-menu')?.textContent).toContain('390 × 844');
+  expect(document.querySelector('.om-sa-device-menu')?.textContent).toContain('Rotate viewport');
+  await act(async () => deviceBtn.click());
+  await flush();
 
   // Open Browser options menu and inspect items (including Open in new window)
   const menuBtn = viewer.querySelector('button[aria-label="Browser options"]') as HTMLButtonElement;

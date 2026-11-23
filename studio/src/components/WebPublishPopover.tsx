@@ -267,6 +267,7 @@ export function WebPublishPopover({
       onOpenChange={setOpen}
       side={side}
       align={align}
+      initialFocus={false}
       aria-label={t('Cloud share')}
       className="om-web-publish-popover"
       trigger={
@@ -282,7 +283,7 @@ export function WebPublishPopover({
           title={triggerLabel ?? t('Share')}
           aria-expanded={open}
         >
-          <RemixIcon name="share-forward-line" size={compact ? 13 : 14} />
+          <RemixIcon name="share-forward-line" size={compact ? 14 : 14} />
           <span className="om-web-publish-trigger-label">{triggerLabel ?? t('Share')}</span>
           {isPublished && <span className="om-web-publish-dot" aria-hidden="true" />}
         </Button>
@@ -309,14 +310,18 @@ export function WebPublishPopover({
         <div className="om-web-publish-head-actions">
           <IconButton
             variant="plain"
+            className="om-web-publish-head-btn"
             aria-label={t('Refresh status')}
+            title={t('Refresh status')}
             disabled={loading || mutating}
             onClick={() => void refreshStatus(true)}
-            icon={<RemixIcon name="refresh-line" size={14} className={loading ? 'om-web-publish-spin' : undefined} />}
+            icon={<RemixIcon name="refresh-line" size={15} className={loading ? 'om-web-publish-spin' : undefined} />}
           />
           <IconButton
             variant="plain"
+            className="om-web-publish-head-btn"
             aria-label={t('Close')}
+            title={t('Close')}
             onClick={() => setOpen(false)}
             icon={<RemixIcon name="close-line" size={15} />}
           />

@@ -50,11 +50,11 @@ import {
 
 type WebDevicePresetId = 'responsive' | 'desktop' | 'tablet' | 'mobile';
 
-const WEB_DEVICE_PRESETS: { id: WebDevicePresetId; label: string; width?: number; height?: number }[] = [
-  { id: 'responsive', label: 'Responsive' },
-  { id: 'desktop', label: 'Desktop', width: 1280, height: 800 },
-  { id: 'tablet', label: 'Tablet', width: 768, height: 1024 },
-  { id: 'mobile', label: 'Mobile', width: 390, height: 844 },
+const WEB_DEVICE_PRESETS: { id: WebDevicePresetId; label: string; icon: string; width?: number; height?: number }[] = [
+  { id: 'responsive', label: 'Responsive', icon: 'fullscreen-line' },
+  { id: 'desktop', label: 'Desktop', icon: 'computer-line', width: 1280, height: 800 },
+  { id: 'tablet', label: 'Tablet', icon: 'tablet-line', width: 768, height: 1024 },
+  { id: 'mobile', label: 'Mobile', icon: 'smartphone-line', width: 390, height: 844 },
 ];
 
 export { NEW_VIEWER_TAB_ID, safeBrowserTabId };
@@ -1320,7 +1320,7 @@ export function ArtifactBrowserPane({
   const [pendingWebUrl, setPendingWebUrl] = useState<string | null>(null);
   const [annotateActive, setAnnotateActive] = useState(false);
   const [annotTool, setAnnotTool] = useState<AnnotationOverlayTool>('select');
-  const [deviceBarOpen, setDeviceBarOpen] = useState(false);
+  const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const [webDevicePreset, setWebDevicePreset] = useState<WebDevicePresetId>('responsive');
   const [webDeviceRotated, setWebDeviceRotated] = useState(false);
   const [browserMenuOpen, setBrowserMenuOpen] = useState(false);
@@ -1353,6 +1353,7 @@ export function ArtifactBrowserPane({
     setPendingWebUrl(null);
     setAnnotateActive(false);
     setAnnotTool('select');
+    setDeviceMenuOpen(false);
     setBrowserMenuOpen(false);
     setConsoleEntries([]);
     setConsoleFilter('all');
@@ -1378,6 +1379,7 @@ export function ArtifactBrowserPane({
 
   useEffect(() => {
     if (!active) {
+      setDeviceMenuOpen(false);
       setBrowserMenuOpen(false);
       setAddressEditing(false);
     }
@@ -1386,6 +1388,7 @@ export function ArtifactBrowserPane({
   useEffect(() => {
     if (viewMode === 'code') {
       setAnnotateActive(false);
+      setDeviceMenuOpen(false);
     }
   }, [viewMode]);
 
@@ -1402,19 +1405,19 @@ export function ArtifactBrowserPane({
   }, [activeArtifact?.id, showNewTab, openTabs.length]);
 
   const fixedViewport = useMemo(() => {
-    if (!deviceBarOpen || webDevicePreset === 'responsive') return null;
+    if (webDevicePreset === 'responsive') return null;
     const preset = WEB_DEVICE_PRESETS.find(item => item.id === webDevicePreset);
     if (!preset?.width || !preset?.height) return null;
     return webDeviceRotated
       ? { width: preset.height, height: preset.width }
       : { width: preset.width, height: preset.height };
-  }, [deviceBarOpen, webDevicePreset, webDeviceRotated]);
+  }, [webDevicePreset, webDeviceRotated]);
 
   useEffect(() => {
-    if (activeArtifact?.kind !== 'web' || !deviceBarOpen) return;
+    if (activeArtifact?.kind !== 'web') return;
     const touch = webDevicePreset === 'mobile' || webDevicePreset === 'tablet';
     void webRef.current?.command('set-touch', touch).catch(() => {});
-  }, [activeArtifact?.kind, activeArtifact?.id, deviceBarOpen, webDevicePreset]);
+  }, [activeArtifact?.kind, activeArtifact?.id, webDevicePreset]);
 
   const supportsAnnotate = Boolean(
     activeArtifact && (
@@ -1937,6 +1940,9 @@ export function ArtifactBrowserPane({
             const activeDeviceIcon = activeArtifact?.kind === 'web'
               ? (webDevicePreset === 'mobile' ? 'smartphone-line' : webDevicePreset === 'tablet' ? 'tablet-line' : 'computer-line')
               : (viewport === 'mobile' ? 'smartphone-line' : viewport === 'tablet' ? 'tablet-line' : 'computer-line');
+            const isConstrainedViewport = activeArtifact?.kind === 'web'
+              ? webDevicePreset !== 'responsive'
+              : viewport !== 'desktop';
             return (
               <>
                 {hasModeSwitch && (
@@ -1989,16 +1995,118 @@ export function ArtifactBrowserPane({
                       />
                     </Tooltip>
 
-                    <Tooltip label={t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}>
-                      <IconButton
-                        variant="ghost"
-                        className="motion-icon-button"
-                        data-active={deviceBarOpen || undefined}
-                        aria-label={t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}
-                        onClick={() => setDeviceBarOpen(v => !v)}
-                        icon={<RemixIcon name={activeDeviceIcon} size={15} />}
-                      />
-                    </Tooltip>
+                    <Popover
+                      open={deviceMenuOpen}
+                      onOpenChange={setDeviceMenuOpen}
+                      side="bottom"
+                      align="end"
+                      initialFocus={false}
+                      aria-label={t('Viewport presets')}
+                      tooltip={t('Viewport presets')}
+                      className="om-sa-device-menu-popover"
+                      trigger={
+                        <Button
+                          variant="plain"
+                          type="button"
+                          className="om-sa-device-trigger"
+                          data-active={deviceMenuOpen || undefined}
+                          data-constrained={isConstrainedViewport || undefined}
+                          aria-label={t('Viewport presets')}
+                          aria-expanded={deviceMenuOpen}
+                        >
+                          <RemixIcon name={activeDeviceIcon} size={15} />
+                          <RemixIcon name="arrow-down-s-line" size={13} className="om-sa-device-caret" />
+                        </Button>
+                      }
+                    >
+                      <div className="om-sa-device-menu" role="menu" aria-label={t('Viewport presets')}>
+                        {activeArtifact?.kind === 'web' ? (
+                          <>
+                            {WEB_DEVICE_PRESETS.map(preset => {
+                              const isActive = webDevicePreset === preset.id;
+                              const dims = preset.width && preset.height
+                                ? (isActive && webDeviceRotated ? `${preset.height} × ${preset.width}` : `${preset.width} × ${preset.height}`)
+                                : t('Auto');
+                              return (
+                                <Button
+                                  key={preset.id}
+                                  variant="plain"
+                                  type="button"
+                                  role="menuitemradio"
+                                  aria-checked={isActive}
+                                  className="om-sa-device-menu-item"
+                                  data-active={isActive || undefined}
+                                  onClick={() => {
+                                    setWebDevicePreset(preset.id);
+                                    if (preset.id === 'responsive') setWebDeviceRotated(false);
+                                    setDeviceMenuOpen(false);
+                                  }}
+                                >
+                                  <RemixIcon name={preset.icon} size={14} />
+                                  <span className="om-sa-device-menu-label">{t(preset.label)}</span>
+                                  <small className="om-sa-device-menu-dims">{dims}</small>
+                                  <span className="om-sa-device-menu-check" aria-hidden="true">
+                                    {isActive && <RemixIcon name="check-line" size={14} />}
+                                  </span>
+                                </Button>
+                              );
+                            })}
+                            {fixedViewport && (
+                              <>
+                                <div className="om-sa-browser-menu-sep" role="separator" />
+                                <Button
+                                  variant="plain"
+                                  type="button"
+                                  role="menuitem"
+                                  className="om-sa-device-menu-item"
+                                  data-active={webDeviceRotated || undefined}
+                                  onClick={() => setWebDeviceRotated(v => !v)}
+                                >
+                                  <RemixIcon name="clockwise-line" size={14} />
+                                  <span className="om-sa-device-menu-label">{t('Rotate viewport')}</span>
+                                  <small className="om-sa-device-menu-dims">
+                                    {fixedViewport.width} × {fixedViewport.height}
+                                  </small>
+                                  <span className="om-sa-device-menu-check" aria-hidden="true" />
+                                </Button>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          (activeArtifact?.kind === 'game-project'
+                            ? designViewports.filter(preset => preset.id === 'desktop' || preset.id === 'mobile')
+                            : designViewports
+                          ).map(preset => {
+                            const isActive = viewport === preset.id;
+                            const dims = preset.width && preset.height
+                              ? `${preset.width} × ${preset.height}`
+                              : t('Auto');
+                            return (
+                              <Button
+                                key={preset.id}
+                                variant="plain"
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={isActive}
+                                className="om-sa-device-menu-item"
+                                data-active={isActive || undefined}
+                                onClick={() => {
+                                  setViewport(preset.id);
+                                  setDeviceMenuOpen(false);
+                                }}
+                              >
+                                <RemixIcon name={preset.icon} size={14} />
+                                <span className="om-sa-device-menu-label">{t(preset.label)}</span>
+                                <small className="om-sa-device-menu-dims">{dims}</small>
+                                <span className="om-sa-device-menu-check" aria-hidden="true">
+                                  {isActive && <RemixIcon name="check-line" size={14} />}
+                                </span>
+                              </Button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </Popover>
 
                     <Tooltip label={t('Capture screenshot to chat')}>
                       <IconButton
@@ -2056,6 +2164,7 @@ export function ArtifactBrowserPane({
               onOpenChange={setBrowserMenuOpen}
               side="bottom"
               align="end"
+              initialFocus={false}
               aria-label={t('Browser options')}
               className="om-sa-browser-menu-popover"
               trigger={
@@ -2119,20 +2228,6 @@ export function ArtifactBrowserPane({
                           {webErrorCount > 0 ? webErrorCount : consoleEntries.length}
                         </small>
                       )}
-                    </Button>
-                    <Button
-                      variant="plain"
-                      type="button"
-                      role="menuitem"
-                      className="om-sa-browser-menu-item"
-                      data-active={deviceBarOpen || undefined}
-                      onClick={() => {
-                        setBrowserMenuOpen(false);
-                        setDeviceBarOpen(v => !v);
-                      }}
-                    >
-                      <RemixIcon name="computer-line" size={14} />
-                      <span>{t(deviceBarOpen ? 'Hide device toolbar' : 'Show device toolbar')}</span>
                     </Button>
                   </>
                 )}
@@ -2361,95 +2456,6 @@ export function ArtifactBrowserPane({
         </div>
         {webLoading && <div className="om-sa-viewer-progress" role="progressbar" aria-label={t('Loading…')} />}
       </div>
-
-      {deviceBarOpen && supportsAnnotate && activeArtifact && (
-        <div className="om-sa-device-bar" role="toolbar" aria-label={t('Device toolbar')}>
-          {activeArtifact.kind === 'web' ? (
-            <>
-              <div className="om-sa-device-presets">
-                {WEB_DEVICE_PRESETS.map(preset => (
-                  <Button
-                    key={preset.id}
-                    variant="plain"
-                    type="button"
-                    className="om-sa-device-btn"
-                    data-active={webDevicePreset === preset.id || undefined}
-                    onClick={() => setWebDevicePreset(preset.id)}
-                  >
-                    <span>{t(preset.label)}</span>
-                  </Button>
-                ))}
-              </div>
-              <div className="om-sa-device-right">
-                {fixedViewport && (
-                  <div className="om-sa-device-dims">
-                    <span>{fixedViewport.width} × {fixedViewport.height}</span>
-                    <Tooltip label={t('Rotate viewport')}>
-                      <IconButton
-                        variant="plain"
-                        className="om-sa-device-rotate"
-                        aria-label={t('Rotate viewport')}
-                        data-active={webDeviceRotated || undefined}
-                        onClick={() => setWebDeviceRotated(v => !v)}
-                        icon={<RemixIcon name="refresh-line" size={13} />}
-                      />
-                    </Tooltip>
-                  </div>
-                )}
-                <Tooltip label={t('Hide device toolbar')}>
-                  <IconButton
-                    variant="plain"
-                    className="om-sa-device-close"
-                    aria-label={t('Hide device toolbar')}
-                    onClick={() => setDeviceBarOpen(false)}
-                    icon={<RemixIcon name="close-line" size={13} />}
-                  />
-                </Tooltip>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="om-sa-device-presets" role="group" aria-label={t('Viewport presets')}>
-                {(activeArtifact.kind === 'game-project'
-                  ? designViewports.filter(preset => preset.id === 'desktop' || preset.id === 'mobile')
-                  : designViewports
-                ).map(preset => (
-                  <Button
-                    key={preset.id}
-                    variant="plain"
-                    type="button"
-                    className="om-sa-device-btn"
-                    data-active={viewport === preset.id || undefined}
-                    onClick={() => setViewport(preset.id)}
-                  >
-                    <RemixIcon name={preset.icon} size={13} />
-                    <span>{t(preset.label)}</span>
-                  </Button>
-                ))}
-              </div>
-              <div className="om-sa-device-right">
-                {(() => {
-                  const activePreset = designViewports.find(item => item.id === viewport);
-                  return activePreset?.width && activePreset?.height ? (
-                    <div className="om-sa-device-dims">
-                      <span>{activePreset.width} × {activePreset.height}</span>
-                    </div>
-                  ) : null;
-                })()}
-                <Tooltip label={t('Hide device toolbar')}>
-                  <IconButton
-                    variant="plain"
-                    className="om-sa-device-close"
-                    aria-label={t('Hide device toolbar')}
-                    onClick={() => setDeviceBarOpen(false)}
-                    icon={<RemixIcon name="close-line" size={13} />}
-                  />
-                </Tooltip>
-              </div>
-            </>
-          )}
-        </div>
-      )}
 
       <div className="om-sa-viewer-stage" data-console={consoleOpen && supportsAnnotate ? 'true' : undefined}>
         <div className="om-sa-viewer-stage-body">
