@@ -1,13 +1,13 @@
 import { Button } from 'open-design-ui/button';
 import * as tracking from './pageTracking';
 import type { McpEntry } from './pageTracking';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ModelKind } from '../../../shared/provider-directory';
 import { RemixIcon } from '../icons/RemixIcons';
 import { languages, useI18n, type Locale } from '../i18n/I18n';
 import { Select } from '../components/ui/Select';
 import { AppearanceSettings } from './AppearanceSettings';
-import { ModelSettings, kindLabels } from './ModelSettings';
+import { ModelSettings, modelKindLabel } from './ModelSettings';
 import { AccountSettings } from './AccountSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { clickMethod, clickOption, trackStudioClick } from './editorTracking';
@@ -15,41 +15,36 @@ import { ModelSwitcher } from './ModelSwitcher';
 import { useProviderDirectory } from './useProviderDirectory';
 import { gatewayRequest } from './gatewayClient';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
+import { AgentSettings } from './AgentSettings';
+import { DiagnosticExport } from './DiagnosticExport';
 import { discord, feishu } from './CommunityLink';
 import { GITHUB_REPOSITORY, repositorySupportLinks } from './githubRepository';
+import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
 
 import type { SettingsSection } from './workspacePageRouting';
 export type { SettingsSection } from './workspacePageRouting';
+import { settingsCenterSections as sections, settingsSectionLabel } from './settingsMeta';
 
 const cloudModelKinds: ModelKind[] = ['image', 'video', 'audio'];
-
-const sections: { id: SettingsSection; label: string; icon: string; group: string }[] = [
-  { id: 'account', label: 'Account', icon: 'user-3-line', group: 'Personal' },
-  { id: 'subscription', label: 'Subscription & usage', icon: 'bank-card-line', group: 'Personal' },
-  { id: 'providers', label: 'Model gateway', icon: 'brain-line', group: 'Models & connections' },
-  { id: 'models', label: 'Default models', icon: 'box-3-line', group: 'Models & connections' },
-  { id: 'mcp', label: 'MCP · Connect Agent', icon: 'plug-line', group: 'Models & connections' },
-  { id: 'general', label: 'General', icon: 'equalizer-line', group: 'Preferences' },
-  { id: 'appearance', label: 'Appearance', icon: 'palette-line', group: 'Preferences' },
-  { id: 'privacy', label: 'Privacy & data', icon: 'shield-check-line', group: 'Preferences' },
-  { id: 'help', label: 'Help', icon: 'question-line', group: 'Resources' },
-  { id: 'about', label: 'About OpenMotion', icon: 'information-line', group: 'Resources' },
-];
 
 export function SettingsCenter({
   section,
   onSection: onSectionRaw,
+  onBack,
   openConnections,
   providerId,
   onProviderChange,
+  mcp,
   hasProject = false,
 }: {
   hasProject?: boolean;
   section: SettingsSection;
   onSection: (section: SettingsSection) => void;
+  onBack?: () => void;
   openConnections: (entry: McpEntry) => void;
   providerId?: string | null;
   onProviderChange?: (id: string | null) => void;
+  mcp?: ReactNode;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
@@ -65,7 +60,19 @@ export function SettingsCenter({
       <div className="om-settings-navigation-slot">
         <div className="om-settings-navigation-clip">
           <aside className="om-settings-navigation">
-            <h1 className="om-navigation-title">{t('Settings')}</h1>
+            <div className="om-settings-heading">
+              {onBack
+                ? <Button variant="plain" type="button" className="om-nav-item" onClick={onBack}><RemixIcon name="arrow-left-line" size={16} />{t('Go back')}</Button>
+                : <h1 className="om-navigation-title">{t('Settings')}</h1>}
+              <div className="om-settings-mobile-navigation">
+                <Select
+                  label={t('Settings')}
+                  value={section}
+                  onCommit={value => onSection(value as SettingsSection)}
+                  options={sections.map(item => ({ value: item.id, label: t(item.label), icon: <RemixIcon name={item.icon} size={16} /> }))}
+                />
+              </div>
+            </div>
             <label className="om-field">
               <RemixIcon name="search-line" size={16} />
               <input
@@ -76,14 +83,6 @@ export function SettingsCenter({
                 aria-label={t('Search settings')}
               />
             </label>
-            <div className="om-settings-mobile-navigation">
-              <Select
-                label={t('Settings')}
-                value={section}
-                onCommit={value => onSection(value as SettingsSection)}
-                options={sections.map(item => ({ value: item.id, label: t(item.label), icon: <RemixIcon name={item.icon} size={16} /> }))}
-              />
-            </div>
             <nav aria-label={t('Settings')} className="om-settings-sections">
               {filtered.map((item, index) => (
                 <div key={item.id}>
@@ -107,29 +106,31 @@ export function SettingsCenter({
           </aside>
         </div>
       </div>
-      <main className="om-settings-main" aria-label={t(sections.find(item => item.id === section)?.label || 'Settings')}>
-        {section === 'providers' ? (
-          <ModelSettings key={section} openAccount={() => onSection('account')} providerId={providerId} onProviderChange={onProviderChange} />
-        ) : section === 'account' || section === 'subscription' ? (
-          <AccountSettings key={section} subscription={section === 'subscription'} openProviders={() => onSection('providers')} />
-        ) : section === 'models' ? (
-          <DefaultModels openProviders={() => onSection('providers')} />
-        ) : section === 'appearance' ? (
-          <AppearanceSettings />
-        ) : section === 'privacy' ? (
-          <div className="om-settings-page"><h1 className="om-title">{t('Privacy & data')}</h1><PrivacySettings embedded onClose={() => {}} /></div>
-        ) : section === 'general' ? (
-          <GeneralSettings openConnections={() => openConnections('settings_general')} />
-        ) : (
-          <ResourceSettings about={section === 'about'} openConnections={() => openConnections('settings_resources')} />
-        )}
+      <main key={section} className="om-settings-main" aria-label={t(settingsSectionLabel(section))}>
+        <SettingsSurfaceBoundary>
+          {section === 'mcp' ? mcp : section === 'local' ? <AgentSettings /> : section === 'providers' ? (
+            <ModelSettings key={section} openAccount={() => onSection('account')} providerId={providerId} onProviderChange={onProviderChange} />
+          ) : section === 'account' || section === 'subscription' ? (
+            <AccountSettings key={section} subscription={section === 'subscription'} openProviders={() => onSection('providers')} />
+          ) : section === 'models' ? (
+            <DefaultModels openProviders={() => onSection('providers')} />
+          ) : section === 'appearance' ? (
+            <AppearanceSettings />
+          ) : section === 'privacy' ? (
+            <div className="om-settings-page"><h1 className="om-title">{t('Privacy & data')}</h1><PrivacySettings embedded onClose={() => {}} /></div>
+          ) : section === 'general' ? (
+            <GeneralSettings openConnections={() => openConnections('settings_general')} />
+          ) : (
+            <ResourceSettings about={section === 'about'} openConnections={() => openConnections('settings_resources')} />
+          )}
+        </SettingsSurfaceBoundary>
       </main>
     </div>
   );
 }
 
 function DefaultModels({ openProviders }: { openProviders: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const directory = useProviderDirectory();
   return (
     <div className="om-settings-page">
@@ -143,7 +144,7 @@ function DefaultModels({ openProviders }: { openProviders: () => void }) {
             return (
               <div className="om-preference-row" key={kind}>
                 <div>
-                  <h2 className="om-subtitle">{t(kindLabels[kind])}</h2>
+                  <h2 className="om-subtitle">{modelKindLabel(kind, t, locale)}</h2>
                   <p className="om-muted">
                     {model
                       ? `${provider?.label ?? 'OpenDesign'} · ${model.label}${!provider?.available || !model.enabled ? ' · ' + t('Unavailable') : ''}`
@@ -214,7 +215,7 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
         return (await res.json()) as { version?: string };
       })
       .catch(() => gatewayRequest<{ version?: string }>('health'))
-      .then(data => { if (active && data?.version) setVersion(data.version); })
+      .then(data => { if (active && data?.version) setVersion(current => current || data.version); })
       .catch(() => {});
     return () => { active = false; };
   }, []);
@@ -268,6 +269,12 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
               <RemixIcon name="external-link-line" size={16} />
             </a>
           ))}
+        </section>
+      )}
+      {!about && (
+        <section className="om-card om-card-stack">
+          <h2 className="om-subtitle">{t('Diagnostics & logs')}</h2>
+          <DiagnosticExport />
         </section>
       )}
       {about && (

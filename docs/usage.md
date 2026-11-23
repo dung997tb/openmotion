@@ -168,7 +168,7 @@ To run the Studio, MCP and export in a container instead, follow the [Docker dep
 
 ## 本地文件与升级
 
-一个 `MOTION_DATA_DIR` 保存多个工程和当前选择。macOS新安装默认使用 `~/Library/Application Support/OpenDesign`，保留已有插件根目录 `.motion-data/` 的兼容路径；其他平台默认在插件根目录 `.motion-data/`，建议指定缓存目录外的稳定绝对路径，并定期备份 `project/`、`projects/`、`sessions/` 和 `projects.json`。一期 MCP 数据写入必须显式 projectId，不跟随其他会话全局选择。执行原生 CLI 前重新读取该项目目录。备份还应包含 phase1/versions、phase1/retained 和原生 history root，避免丢失历史媒体。
+一个 `MOTION_DATA_DIR` 保存多个工程和当前选择。macOS新安装默认使用 `~/Library/Application Support/OpenDesign`，保留已有插件根目录 `.motion-data/` 的兼容路径；其他平台默认在插件根目录 `.motion-data/`，建议指定缓存目录外的稳定绝对路径，并定期备份 `project/`、`projects/`、`sessions/` 和 `projects.json`。一期 MCP 数据写入必须显式 projectId，不跟随其他会话全局选择。执行原生 CLI 前重新读取该项目目录。备份还应包含 phase1/versions、phase1/retained 和原生 history root，避免丢失历史媒体。OpenDesign 账号登录不随数据目录走：同一台电脑上所有数据目录、安装方式和渠道共用一份按用户保存的登录（macOS `~/Library/Application Support/OpenDesign/account`，Windows `%LOCALAPPDATA%\OpenDesign\account`，Linux `~/.local/share/OpenDesign/account`），在 Studio 或任一 Agent 里登录、退出都对其他数据目录生效；`MOTION_ACCOUNT_DIR` 可指定别的账号目录，系统临时目录下的数据目录各自独立。
 
 ```text
 .motion-data/
@@ -228,7 +228,7 @@ npm test
 npm run package:plugin
 ```
 
-`npm run dev` 先构建编辑器再启动服务；只改前端后可运行 `npm run build:studio` 并刷新页面。`npm run test:studio` 运行上游单元/DOM 回归与宿主集成测试；`npm run typecheck:studio` 检查前端类型；`npm run design:check` 检查主题变量与对比度。`check` 校验清单、版本、锁定依赖、技能入口、服务 TypeScript 语法及设计规范。测试覆盖原生源文件共享、并发 revision、路径隔离、旧工程迁移、Studio 编辑数据快照、真实 stdio MCP、原生 Studio HTTP 接口、完整目录与同源版本、封面筛选、短指令与参数化指南、四个官方模板的打开/编辑/切换/保留和带音轨的真实 MP4 渲染。没有 FFmpeg 或 Chrome 的机器会跳过渲染集成测试；PR CI 的 phase1-package-e2e 独立任务安装 Chromium、FFmpeg/ffprobe，重新构建并隔离安装真实ZIP，自动跑全部11个Tool；依赖缺失或测试失败直接标红，日志与MP4证据保留14天。合并阻断须同时启用main的必需状态检查，配置与边界见[测试覆盖](mcp-phase1-tools.md#测试代码与ci范围)。
+`npm run dev` 先构建编辑器再启动服务；只改前端后可运行 `npm run build:studio` 并刷新页面。`npm run test:studio` 运行上游单元/DOM 回归与宿主集成测试；`npm run typecheck:studio` 检查前端类型；`npm run design:check` 检查主题变量与对比度。`check` 校验清单、版本、锁定依赖、技能入口、服务 TypeScript 语法及设计规范。测试覆盖原生源文件共享、并发 revision、路径隔离、旧工程迁移、Studio 编辑数据快照、真实 stdio MCP、原生 Studio HTTP 接口、完整目录与同源版本、封面筛选、短指令与参数化指南、四个官方模板的打开/编辑/切换/保留和带音轨的真实 MP4 渲染。没有 FFmpeg 或 Chrome 的机器会跳过渲染集成测试；PR CI 的 phase1-package-e2e 独立任务安装 Chromium、FFmpeg/ffprobe，重新构建并隔离安装真实ZIP，自动跑全部18个Tool；依赖缺失或测试失败直接标红，日志与MP4证据保留14天。合并阻断须同时启用main的必需状态检查，配置与边界见[测试覆盖](mcp-phase1-tools.md#测试代码与ci范围)。
 
 打包产物为 `dist/openmotion-<version>-phase1.zip`，包含编辑器构建产物、设计系统与字体许可、原生模板、完整目录与已校验封面、技能、lockfile、AGENTS.md、CLAUDE.md 和产品文档，排除个人媒体、草稿、node_modules 和原生程序。`bash scripts/install-motion.command` 可注册并安装本地插件，并按 Codex 实际解析的启动配置验证 MCP 握手；它不会重启 Codex。代码改动和打包不会自动替换用户已安装的插件版本。
 

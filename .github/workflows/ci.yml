@@ -254,7 +254,10 @@ jobs:
             tests/template-cards-ui.test.ts \
             tests/template-prompts.test.ts \
             tests/recreate-measure.test.ts \
-            tests/motion-design-remix.test.ts
+            tests/motion-design-remix.test.ts \
+            tests/spa-routes.test.ts \
+            tests/scenario-content.test.ts \
+            tests/inline-storyboard.test.ts
       - name: Validate container and Compose definitions
         if: steps.scope.outputs.full == 'true'
         run: |

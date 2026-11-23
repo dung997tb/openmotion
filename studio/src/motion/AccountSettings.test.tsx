@@ -23,11 +23,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function open(account: Partial<CloudAccountSummary> & Record<string, unknown>, locale: Locale = 'en', tokens: PersonalAccessTokenRecord[] = []) {
+async function open(
+  account: Partial<CloudAccountSummary> & Record<string, unknown>,
+  locale: Locale = 'en',
+  section: 'account' | 'subscription' = 'account',
+  tokens: PersonalAccessTokenRecord[] = [],
+) {
   hooks.summary = { consoleUrl: 'https://open-design.ai/cloud', ...account };
   hooks.tokens = tokens;
   hooks.request.mockImplementation(async (path: string, method = 'GET', body?: Record<string, unknown>) => {
     if (path.startsWith('account/summary')) return hooks.summary;
+    if (path === 'connections' && method === 'GET') return { connections: [] };
     if (path === 'tokens' && method === 'GET') return { tokens: hooks.tokens };
     if (path === 'tokens' && method === 'POST') {
       const created: PersonalAccessTokenRecord = {
@@ -65,7 +71,7 @@ async function open(account: Partial<CloudAccountSummary> & Record<string, unkno
   const container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root!.render(<I18nProvider initialLocale={locale}><AccountSettings openProviders={() => {}} /></I18nProvider>));
+  await act(async () => root!.render(<I18nProvider initialLocale={locale}><AccountSettings subscription={section === 'subscription'} openProviders={() => {}} /></I18nProvider>));
   return container;
 }
 
@@ -154,7 +160,7 @@ it('shows the account email once, under the name only when the account has a dif
 });
 
 it('explains that account models still work when the plan and balance cannot be read', async () => {
-  const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, billingUnavailable: true }, 'zh-CN');
+  const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, billingUnavailable: true }, 'zh-CN', 'subscription');
   expect(page.textContent).toContain('暂时无法读取订阅和余额。账户模型不受影响，可以照常使用。');
 });
 
@@ -190,7 +196,7 @@ it('passes a fresh subscription entry on ordinary and middle clicks without acco
 });
 
 it('replaces missing billing metrics with a dashboard link on 403 and restores them on retry', async () => {
-  const page = await open({ state: 'signed-in', billingUnavailable: true, billingError: { status: 403 } }, 'zh-CN');
+  const page = await open({ state: 'signed-in', billingUnavailable: true, billingError: { status: 403 } }, 'zh-CN', 'subscription');
   expect(page.textContent).toContain('账单服务拒绝了本次查询');
   expect(page.querySelector('.om-account-metrics')).toBeNull();
   const url = new URL(page.querySelector('a')!.href);
@@ -203,8 +209,8 @@ it('replaces missing billing metrics with a dashboard link on 403 and restores t
   expect(page.textContent).not.toContain('账单服务拒绝了本次查询');
 });
 
-it('shows what signing in unlocks to signed-out people', async () => {
-  const page = await open({ state: 'signed-out' }, 'zh-CN');
+it.each(['account', 'subscription'] as const)('shows the same sign-in benefits on the %s page', async section => {
+  const page = await open({ state: 'signed-out' }, 'zh-CN', section);
   expect(page.querySelector('.om-plan-guide h2')?.textContent).toBe('登录 OpenDesign，开始多模态生成');
   expect(page.querySelector('.om-plan-guide .om-badge')?.textContent).toBe('Plus 及以上');
   expect(page.querySelector('.om-plan-guide .om-button')?.textContent).toBe('使用 OpenDesign 登录');
@@ -214,7 +220,7 @@ it('shows what signing in unlocks to signed-out people', async () => {
 
 it('offers Free and Go accounts an upgrade through the registered entry source, and nothing to paid plans', async () => {
   for (const plan of ['free', 'go']) {
-    const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan, balance: '0.00' });
+    const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan, balance: '0.00' }, 'en', 'subscription');
     const [upgrade, manage] = page.querySelectorAll<HTMLAnchorElement>('[data-guide="upgrade"] a');
     expect(page.querySelector('.om-plan-name')?.textContent).toBe(plan === 'free' ? 'Free plan' : 'Go');
     expect(new URL(upgrade.href).searchParams.get('od_entry_source')).toBe('openmotion_manage_subscription');
@@ -222,6 +228,6 @@ it('offers Free and Go accounts an upgrade through the registered entry source, 
     expect(new URL(manage.href).searchParams.get('od_entry_source')).toBe('openmotion_manage_subscription');
     expect(page.querySelector('.om-account-summary h2')?.textContent).toBe('Connected to OpenDesign');
   }
-  const paid = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan: 'plus', balance: '12.00' });
+  const paid = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan: 'plus', balance: '12.00' }, 'en', 'subscription');
   expect(paid.querySelector('[data-guide="upgrade"]')).toBeNull();
 });

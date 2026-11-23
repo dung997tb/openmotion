@@ -19,7 +19,7 @@ export type WorkspaceChrome = {
   openHome: () => void;
   openAssets: () => void;
   assetsOpen: boolean;
-  openSkills: (category?: SkillCategory | null) => void;
+  openSkills: (category?: SkillCategory | null, trigger?: HTMLElement) => void;
   skillsOpen: boolean;
   toggleSidebar: () => void;
   sidebarOpen: boolean;

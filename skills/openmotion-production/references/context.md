@@ -60,7 +60,7 @@ Hyperframes 指引只在 [原生引擎边界](native.md#engine-guidance-boundary
 | 原样模板，明确要 HTML／工程文件 | 所选模板入口负责最小文件操作顺序；应用共享 [运行规范](production.md)、[源版本固定](native.md#pin-source-for-independent-deliverables) 与 [验证范围](verification.md#verification-scope)。缺少实际所选模板说明时补读。不编写内容且未发现缺陷时，不要求 MP4 导出／播放任务、原创设计、素材获取、字体选择或引擎编写指南。 |
 | 原样模板，明确要 MP4 | 沿用相同的固定版本文件顺序和 [验证](verification.md)，包括已完成任务的技术检查和实际文件播放。请求渲染本身不触发原创设计、字体选择、素材获取或新分镜。 |
 
-不为少读而删技术或播放检查。发现缺陷或请求变化时，只扩展受影响的方法集合，不重启整片制作。模板配方和首次体验邀请仍由所选模板入口按条件加载。
+不为少读而删技术或播放检查。发现缺陷或请求变化时，只扩展受影响的方法集合，不重启整片制作。模板配方、改编与局部预览和首次体验邀请仍由所选模板入口按条件加载。
 
 ## 读取结果返回后，再决定依赖它的操作
 
@@ -71,6 +71,14 @@ Hyperframes 指引只在 [原生引擎边界](native.md#engine-guidance-boundary
 ## 会话与产物归属
 
 操作工程时用 `openmotion_get_project({projectId})` 核对项目、sessionId 和当前版本；没有 projectId 时先查分页列表。独立新任务通过 `openmotion_create_project` 创建项目，可传已有 OpenMotion sessionId 归属。何时打开可编辑预览见 [Native 工程循环](native.md#project-loop) 第 6 步。宿主聊天 ID 不自动等于 OpenMotion sessionId，未绑定时不能用全局最近项目猜测归属。
+
+## 在聊天中展示静态创作预览
+
+本轮需要让用户比较创作方向或看分镜时，支持聊天内 HTML 的 Codex 可以沿用 onboarding 的可放大卡片。从当前 OpenMotion 运行时执行 `node scripts/inline-storyboard.mjs --manifest /absolute/preview.json --output /absolute/chat-visualization/preview-v1.html`。输出目录须可供当前聊天访问。脚本会创建缺失的目录，同名时另存新文件，保留此前的预览。在回复里原样放入本次返回的 `contentReference`。宿主不支持或渲染失败时，按同一顺序显示单张图片和标签。
+
+- 清单共用本地化的 `title`、`openLabel`、`backLabel`。卡片提供 `title`、`alt` 及清单同目录的 PNG、JPEG 或 WebP 文件名 `image`。文档超过大小预算时，压缩源图重试。
+- 比较方向时用 `previewType: "creative_directions"` 和 `directions` 提供两到三个候选。每项写稳定的 `id` 和说明表现手法的 `note`。展示按返回的 `candidates` 顺序对应 A–C。收到明确回复后再沿用所选候选。
+- 展示分镜时用 `frames` 传按播放顺序排列的截图，每帧加 `time` 和可选的 `note`，最多 12 张。放大用于查看画面。选择和确认仍通过对话表达。需要验证动作、节奏或声画时，用可播放样片覆盖相关区间。
 
 ## 一份上下文
 

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 
 export const mediaOrigin = 'https://releases.open-design.ai';
-export const skillPreviewMedia = /^studio\/src\/motion\/skill-covers\/[a-z0-9-]+\.(?:mp4|webm|gif)$/;
+export const skillPreviewMedia = /^studio\/src\/motion\/skill-covers\/[a-z0-9-]+\.(?:mp4|webm|gif|webp)$/;
 export const mediaPrefix = 'open-motion/media/sha256/';
 export const maxMediaBytes = 50 * 1024 * 1024;
 export type MediaLock = { path: string; url: string; bytes: number; sha256: string };

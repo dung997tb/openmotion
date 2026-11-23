@@ -1,9 +1,7 @@
 import { Button } from 'open-design-ui/button';
-import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useRef, useState } from 'react';
 import { MotionIcon } from './icons';
 import { GitHubLink } from './GitHubLink';
-import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { Skeleton } from '../components/ui/Skeleton';
 import { RemixIcon } from '../icons/RemixIcons';
@@ -14,11 +12,12 @@ import { mediaLabels } from './creativeStudios';
 import { findModelHub } from './modelHubs';
 import { HubVideoWall } from './HubVideoWall';
 import { reportHubClick, reportHubPageView } from './exploreTracking';
+import { BackToExploreButton } from './BackToExploreButton';
 
 /** Aggregates one model family: what it is, what to make with it, and whether this workspace can use it. */
-export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onSettings, hasProject = false }: {
+export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onSettings, onStartScenario, hasProject = false }: {
   id: string; hasProject?: boolean; onExplore: () => void; onProvider: (provider: string) => void; onModel: (id: string) => void;
-  onUse: () => void; onSettings: (section: 'account' | 'subscription') => void;
+  onUse: () => void; onSettings: (section: 'account' | 'subscription') => void; onStartScenario?: () => void;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
@@ -36,7 +35,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onSettings
     reportHubPageView(hub.id, hasProject, signedIn);
   }, [hub, accountKnown, signedIn, hasProject]);
   if (!hub) return <main className="om-explore"><div className="om-discovery-page">
-    <div><Button variant="plain" className="om-nav-item" onClick={onExplore}><RemixIcon name="arrow-left-line" size={16} />{t('Back to Explore')}</Button></div>
+    <div><BackToExploreButton onClick={onExplore} /></div>
     <section><h1 className="om-title">{t('Page unavailable')}</h1><p className="om-muted">{id}</p></section>
   </div></main>;
   const served = catalog?.models.filter(model => hub.modelPattern.test(model.id) || hub.modelPattern.test(model.modelId)) ?? [];
@@ -49,12 +48,11 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onSettings
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); search.current?.focus(); }
   }}>
     <div className="om-gallery-sticky-header"><header className="om-gallery-header">
-      <div className="om-gallery-wordmark"><Button variant="ghost" type="button" className="om-button h-auto" onClick={() => { track('hub_header', 'back_to_explore'); onExplore(); }}><MotionIcon name="arrow-left" size={16} />{t('Back to Explore')}</Button><span className="om-gallery-page-label">{hub.latestModel}</span></div>
+      <div className="om-gallery-wordmark"><BackToExploreButton onClick={() => { track('hub_header', 'back_to_explore'); onExplore(); }} /><span className="om-gallery-page-label">{hub.latestModel}</span></div>
       <div className="om-control-row om-gallery-header-actions">
         <label className="om-field om-search-field"><MotionIcon name="search" size={16} /><input ref={search} type="search" maxLength={200} value={query} onChange={event => setQuery(event.target.value)} onFocus={() => track('hub_header', 'search_focus')}
           placeholder={t('Search videos, creators, scenes…')} aria-label={t('Search videos')} /><kbd>{searchShortcut}</kbd></label>
         <GitHubLink className="om-button" />
-        <Tooltip label={t('Back to Explore')}><IconButton variant="ghost" className="om-button om-icon-button" onClick={() => { track('hub_header', 'back_to_explore'); onExplore(); }} aria-label={t('Back to Explore')} icon={<MotionIcon name="close" size={16} />} /></Tooltip>
       </div>
     </header></div>
     <div className="om-discovery-page om-model-hub" data-hub={hub.id}>
@@ -75,6 +73,11 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onSettings
               <Button variant="ghost" className="om-button h-auto" data-primary="media" onClick={() => { track('hub_hero', 'sign_in'); onSettings('account'); }}>{t('Sign in to use {model} now', { model: hub.latestModel })}<RemixIcon name="arrow-right-line" size={16} /></Button>
               <Button variant="ghost" className="om-button h-auto" onClick={() => { track('hub_hero', 'manage_connection'); onProvider('opendesign'); }}><RemixIcon name="brain-line" size={16} />{t('Model gateway')}</Button>
             </>}
+          {onStartScenario && (
+            <Button variant="ghost" type="button" className="om-button h-auto" onClick={() => { track('hub_hero', 'open_in_studio'); onStartScenario(); }}>
+              <RemixIcon name="route-line" size={16} />{t('Start Gemini 4 Neon workflow')}
+            </Button>
+          )}
         </div>
       </div>
     </header>

@@ -1,5 +1,4 @@
 import { WorkspaceBack } from './WorkspaceBack';
-import { StudioComingSoon } from './StudioComingSoon';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { CategoryStrip } from './CategoryStrip';
@@ -12,16 +11,18 @@ import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { studioSkillDefaults, localizedSkillPrompt, skillShotPrompt, aspectRatios, durations, motionSkills, skillCategories, skillShortcut, type MotionSkill, type SkillCategory, type SkillParameters } from './skillCatalog';
 import type { AssetDraft } from './AssetComposer';
-import { studioIconTone, studioDestination, studioComingSoon, type StudioDestination } from './creativeStudios';
+import { mediaEditorDestination, studioIconTone, studioComingSoon, type StudioDestination } from './creativeStudios';
 import { useOptionalWorkspaceChrome } from './WorkspaceChromeContext';
 import { StudioTemplateShelf } from './StudioTemplateShelf';
 import { SkillMedia } from './SkillMedia';
+import { ComingSoonGuide } from './ComingSoonGuide';
 import { GitHubMark } from '../../../packages/design-system/react/GitHubMark';
 import { MotionIcon } from './icons';
 import { motionApi } from './useWorkspace';
 import { setupGuideUrl, type IntegrationInfo } from '../../../shared/integration';
 import { AssetPicker } from './AssetBrowser';
 import { Popover } from '../components/ui/Popover';
+import { Tooltip } from '../components/ui/Tooltip';
 import { Collapsible } from '@base-ui/react/collapsible';
 import * as tracking from './pageTracking';
 import { useSkillLayoutMotion } from './useSkillLayoutMotion';
@@ -44,7 +45,7 @@ function githubRepositoryOf(source?: string): string | null {
 }
 
 /** Open-source motion techniques the user can hand to an Agent through OpenMotion MCP. */
-export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryChange, studio, onExplore, onCreate, briefs, previewsEnabled = true, hasProject = false, detailOnly = false }: { routeCategory?: SkillCategory | null; onCategoryChange?: (value: SkillCategory | null) => void; detailOnly?: boolean; studio?: TechniqueStudio; previewsEnabled?: boolean; briefs?: Map<string, SkillParameters>; onCreate?: (destination: StudioDestination, draft?: AssetDraft) => void; onExplore?: () => void; skillId: string | null; onSkillChange: (id: string | null) => void; hasProject?: boolean }) {
+export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryChange, studio, onExplore, onClose, onCreate, briefs, previewsEnabled = true, hasProject = false, detailOnly = false }: { routeCategory?: SkillCategory | null; onCategoryChange?: (value: SkillCategory | null) => void; detailOnly?: boolean; studio?: TechniqueStudio; previewsEnabled?: boolean; briefs?: Map<string, SkillParameters>; onCreate?: (destination: StudioDestination, draft?: AssetDraft) => void; onExplore?: () => void; onClose?: () => void; skillId: string | null; onSkillChange: (id: string | null) => void; hasProject?: boolean }) {
   const { t, locale } = useI18n(), toast = useToast(), displayName = displayNameOf(t);
   const chrome = useOptionalWorkspaceChrome();
   const comingSoon = studioComingSoon(studio);
@@ -68,10 +69,10 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
   }, []);
   const instruction = useRef<HTMLPreElement>(null), command = useRef<HTMLPreElement>(null), search = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (detailOnly || comingSoon) return;
+    if (detailOnly) return;
     const focus = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); search.current?.focus(); } };
     window.addEventListener('keydown', focus); return () => window.removeEventListener('keydown', focus);
-  }, [detailOnly, comingSoon]);
+  }, [detailOnly]);
   // Select the failed text in its own visible surface so one ⌘C copies the requested content.
   useEffect(() => {
     if (!manualCopy || (manualCopy.surface === 'command' && !commandOpen)) return;
@@ -88,7 +89,7 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
       && (!needle || [skill.name, skill.title, displayName(skill), t(skill.useWhen), skill.tagline, t(skill.tagline), t(skill.output), skill.repository ?? 'OpenMotion'].some(value => value.toLocaleLowerCase().includes(needle))));
   };
   const visible = useMemo(() => matching(category, query), [query, category, t, catalog]);
-  const featured = studio && !comingSoon ? catalog[0] : undefined;
+  const featured = studio ? catalog[0] : undefined;
   const featureInHero = featured?.cover?.poster && !query.trim();
   const cards = featureInHero ? visible.filter(skill => skill.id !== featured.id) : visible;
   const recording = parameters.reference && parameters.reference.modality !== 'image';
@@ -97,7 +98,7 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
     if (!studio || comingSoon || !selected || !onCreate) return;
     const reference = parameters.reference;
     if (reference && reference.modality !== 'image') return;
-    const destination = studioDestination(studio, reference ? 'image-to-video' : 'text-to-video');
+    const destination = mediaEditorDestination(reference ? 'image-to-video' : 'text-to-video');
     onCreate(destination, { modality: 'video', prompt: skillShotPrompt(selected, parameters, t), shotPreferences: { aspect: parameters.aspect, duration: parameters.duration },
       references: reference ? [{ reference: { assetId: reference.assetId, versionId: reference.versionId }, name: reference.label }] : [] });
   };
@@ -167,23 +168,26 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
     {!detailOnly && <div ref={main} className="om-skills-main">
       {studio && onExplore && <WorkspaceBack fallback={onExplore} />}
       <main className="om-gallery-results">
-        {studio && comingSoon ? <StudioComingSoon studio={studio} /> : studio ? <section className="om-specialty-intro">
+        {studio ? <section className="om-specialty-intro" data-coming-soon={comingSoon || undefined}>
           <div><h1 className="om-title"><span className="om-studio-heading-icon" data-tone={studioIconTone(studio)}><RemixIcon name={studio.icon} size={24} /></span>{t(studio.title)}</h1><p className="om-muted">{t(studio.briefHint)}</p>
-            {onCreate && <div className="om-specialty-actions">
-              <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => onCreate(studioDestination(studio))}><RemixIcon name="add-line" size={16} />{t(studio.createLabel)}</Button>
-              {studio.id === 'marketing' && <Button variant="ghost" className="om-button h-auto" onClick={() => onCreate(studioDestination(studio, 'text-to-video'))}>{t('Create an ad clip')}</Button>}
+            {comingSoon ? <ComingSoonGuide compact /> : onCreate && <div className="om-specialty-actions">
+              <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => onCreate(mediaEditorDestination(studio.scenes[0]))}><RemixIcon name="add-line" size={16} />{t(studio.createLabel)}</Button>
+              {studio.id === 'marketing' && <Button variant="ghost" className="om-button h-auto" onClick={() => onCreate(mediaEditorDestination('text-to-video'))}>{t('Create an ad clip')}</Button>}
             </div>}
           </div>{featured?.cover?.poster && <Button variant="plain" className="om-specialty-feature" onClick={() => open(featured, 1)}>
             <img src={featured.cover.poster} alt="" /><span className="om-button om-media-caption">{t(featured.title)}<RemixIcon name="arrow-right-line" size={16} /></span>
           </Button>}
-        </section> : <section className="om-gallery-intro om-skills-intro">
-          <div className="om-skills-heading-row">
-            <h1>{t('Teach your Agent new moves.')}</h1>
+        </section> : <section className="om-gallery-intro om-gallery-page-intro om-skills-intro">
+          <h1>{t('Teach your Agent new moves.')}</h1>
+          <div className="om-skills-heading-actions">
             <SkillSubmissionLink />
+            {onClose && <Tooltip label={t('Close')}>
+              <IconButton type="button" variant="ghost" className="om-button om-icon-button" onClick={onClose} aria-label={t('Close')} icon={<MotionIcon name="close" size={16} />} />
+            </Tooltip>}
           </div>
           <p>{t('Pick a skill, fill in the brief and copy the instruction. Your Agent builds an editable project in OpenMotion.')}</p>
         </section>}
-        {!comingSoon && <div className="om-gallery-sticky-header">
+        <div className="om-gallery-sticky-header">
           <div className="om-gallery-toolbar om-skills-toolbar">
             {!studio && <CategoryStrip label="Skill category" selection={category} neutral>
               <Button variant="plain" aria-pressed={!category} onClick={() => pickCategory(null)}>{t('All')}</Button>
@@ -191,8 +195,8 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
             </CategoryStrip>}
             <label className="om-field om-search-field"><MotionIcon name="search" size={18} /><input ref={search} type="search" maxLength={200} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('Search skills...')} aria-label={t('Search skills')} /><kbd aria-hidden="true">⌘ K</kbd></label>
           </div>
-        </div>}
-        {studio && !comingSoon && chrome && !query.trim() && <StudioTemplateShelf key={studio.id + locale} studio={studio.id} root={main} active={previewsEnabled && !selected} />}
+        </div>
+        {studio && chrome && !query.trim() && <StudioTemplateShelf key={studio.id + locale} studio={studio.id} root={main} active={previewsEnabled && !selected} />}
         {studio && <header className="om-studio-skills-heading"><h2 className="om-title om-studio-techniques-title">{t(studio.id === '3d' ? '3D Creative Skills' : 'Creative Skills')}</h2>{comingSoon && <p className="om-muted">{t('While the Studio is coming soon, choose a Skill below and copy its brief to your Agent to start creating.')}</p>}</header>}
         <div className="om-gallery-masonry om-skills-grid">
           {cards.map((skill, index) => <SkillCard key={skill.id} skill={skill} name={displayName(skill)} useWhen={t(skill.useWhen)} selected={skill.id === skillId} onSelect={() => open(skill, index + (featureInHero ? 2 : 1))} />)}

@@ -213,7 +213,6 @@ export function useAccountSummary() {
   }, [refresh]);
   return { account, error, refresh, setAccount };
 }
-
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   const parsed = Date.parse(iso);
@@ -323,7 +322,6 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
     setRefreshing(true);
     try { await state.refresh(true); } finally { setRefreshing(false); }
   }
-
   async function switchWorkspace(workspaceId: string) {
     if (workspaceId === account?.activeWorkspace?.id) return;
     setSwitchingWorkspaceId(workspaceId);
@@ -430,7 +428,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
     <p className="om-account-offer">
       <RemixIcon name="sparkling-fill" size={15} />
       <strong>{t(offer.title)}</strong>
-      <span>{t(offer.detail)}</span>
+      {offer.detail && <span>{t(offer.detail)}</span>}
     </p>
   );
   const name = account?.user?.name?.trim();
@@ -520,7 +518,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
                         disabled={isActive || !canSwitchWorkspace || switchingWorkspaceId !== null}
                         onClick={() => void switchWorkspace(ws.id)}
                       >
-                        {isActive ? <><RemixIcon name="check-line" size={14} />{t('Active')}</> : t(switchingWorkspaceId === ws.id ? 'Switching…' : 'Switch workspace')}
+                        {isActive ? <><RemixIcon name="check-line" size={14} />{t('Active workspace')}</> : t(switchingWorkspaceId === ws.id ? 'Switching…' : 'Switch workspace')}
                       </Button>
                     </div>
                   );
@@ -647,7 +645,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
                   <span className="om-muted">{t('Scopes')}: {DEFAULT_PAT_SCOPES.join(', ')}</span>
                   <Button variant="ghost" className="om-button h-auto" data-primary type="submit" disabled={creatingToken || !tokenName.trim()}>
                     <RemixIcon name="lock-line" size={15} />
-                    {t(creatingToken ? 'Creating…' : 'Create token')}
+                    {t(creatingToken ? 'Creating token…' : 'Create token')}
                   </Button>
                 </div>
               </form>

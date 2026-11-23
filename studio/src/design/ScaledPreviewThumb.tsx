@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Skeleton } from '../components/ui/Skeleton';
+import { CoverPlaceholder } from '../components/ui/CoverPlaceholder';
 
 const VIRTUAL_WIDTH = 960;
 const VIRTUAL_HEIGHT = 600;
@@ -18,12 +19,12 @@ export function ScaledPreviewThumb({
   src,
   title,
   badge,
-  topRight,
+  brandedFallback = false,
 }: {
   src: string;
   title: string;
   badge?: string;
-  topRight?: React.ReactNode;
+  brandedFallback?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -31,7 +32,17 @@ export function ScaledPreviewThumb({
   const [loaded, setLoaded] = useState(false);
   const [scale, setScale] = useState(0.32);
 
-  const thumbSrc = useMemo(() => withThumbParam(src), [src]);
+  const waitForReady = brandedFallback && src?.startsWith('/motion-api/design/catalog/templates/');
+  const thumbSrc = useMemo(() => src ? withThumbParam(src) + (waitForReady ? '&thumbReady=1' : '') : '', [src, waitForReady]);
+
+  useEffect(() => {
+    if (!waitForReady) return;
+    const receiveReady = (event: MessageEvent) => {
+      if (event.source === iframeRef.current?.contentWindow && event.data?.type === 'om:thumb-ready') setLoaded(true);
+    };
+    window.addEventListener('message', receiveReady);
+    return () => window.removeEventListener('message', receiveReady);
+  }, [waitForReady]);
 
   useEffect(() => {
     const el = hostRef.current;
@@ -73,8 +84,8 @@ export function ScaledPreviewThumb({
       onMouseEnter={() => setPlaying(true)}
       onMouseLeave={() => setPlaying(false)}
     >
-      {!loaded && <Skeleton className="om-design-thumb-skeleton" />}
-      {visible && (
+      {!loaded && (brandedFallback ? <CoverPlaceholder fill /> : <Skeleton className="om-design-thumb-skeleton" />)}
+      {visible && thumbSrc && (
         <iframe
           ref={iframeRef}
           title={title}
@@ -82,7 +93,7 @@ export function ScaledPreviewThumb({
           loading="lazy"
           sandbox="allow-scripts"
           tabIndex={-1}
-          onLoad={() => setLoaded(true)}
+          onLoad={waitForReady ? undefined : () => setLoaded(true)}
           style={{
             width: VIRTUAL_WIDTH,
             height: VIRTUAL_HEIGHT,
@@ -92,7 +103,6 @@ export function ScaledPreviewThumb({
         />
       )}
       {badge && <span className="om-design-thumb-badge">{badge}</span>}
-      {topRight && <div className="om-design-thumb-action">{topRight}</div>}
     </div>
   );
 }

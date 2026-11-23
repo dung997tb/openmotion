@@ -228,10 +228,10 @@
     "Write the words you want spoken.": "输入希望朗读的文字…",
     "Speech text": "朗读文本",
     "Text to speech": "语音合成",
-    "Music & sound": "音乐与声音",
+    "Music & sound": "音乐与音效",
     "Text to video": "文生视频",
-    "Image editing": "参考图编辑",
-    "Text to image": "文生图片",
+    "Image editing": "图像编辑",
+    "Text to image": "文生图",
     "Settings follow your model": "参数随模型切换",
     "Resize asset navigation": "调整资产侧栏宽度",
     "Resize creator": "调整创作面板宽度",
@@ -353,7 +353,9 @@
     "Optimizing": "最適化中",
     "Optimizing preview & timeline frames in the background — ready to edit now": "プレビューとタイムラインフレームをバックグラウンドで最適化中 — 今すぐ編集できます",
     "Optimizing high-res preview in the background — ready to edit now": "高解像度プレビューをバックグラウンドで最適化中 — 今すぐ編集できます",
-    "Generating audio waveform in the background — ready to edit now": "音声波形をバックグラウンドで生成中 — 今すぐ編集できます"
+    "Generating audio waveform in the background — ready to edit now": "音声波形をバックグラウンドで生成中 — 今すぐ編集できます",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "参照画像が OpenDesign の 2 MiB アップロード上限を超えています。",
+    "OpenDesign does not accept this reference image format.": "OpenDesign はこの参照画像形式に対応していません。"
   },
   "ko": {
     "Follows first frame": "첫 프레임에 맞춤",
@@ -372,7 +374,9 @@
     "Optimizing": "최적화 중",
     "Optimizing preview & timeline frames in the background — ready to edit now": "백그라운드에서 미리보기 및 타임라인 프레임을 최적화하는 중 — 지금 바로 편집할 수 있습니다",
     "Optimizing high-res preview in the background — ready to edit now": "백그라운드에서 고해상도 미리보기를 최적화하는 중 — 지금 바로 편집할 수 있습니다",
-    "Generating audio waveform in the background — ready to edit now": "백그라운드에서 오디오 파형을 생성하는 중 — 지금 바로 편집할 수 있습니다"
+    "Generating audio waveform in the background — ready to edit now": "백그라운드에서 오디오 파형을 생성하는 중 — 지금 바로 편집할 수 있습니다",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "참조 이미지가 OpenDesign의 2 MiB 업로드 한도를 초과합니다.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign에서 지원하지 않는 참조 이미지 형식입니다."
   },
   "de": {
     "Follows first frame": "Wie das erste Bild",
@@ -391,7 +395,9 @@
     "Optimizing": "Optimierung",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Vorschau und Timeline-Frames werden im Hintergrund optimiert — sofort bearbeitbar",
     "Optimizing high-res preview in the background — ready to edit now": "Hochauflösende Vorschau wird im Hintergrund optimiert — sofort bearbeitbar",
-    "Generating audio waveform in the background — ready to edit now": "Audiowellenform wird im Hintergrund erzeugt — sofort bearbeitbar"
+    "Generating audio waveform in the background — ready to edit now": "Audiowellenform wird im Hintergrund erzeugt — sofort bearbeitbar",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "Das Referenzbild überschreitet das OpenDesign-Upload-Limit von 2 MiB.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign unterstützt dieses Referenzbildformat nicht."
   },
   "fr": {
     "Follows first frame": "Selon la première image",
@@ -410,7 +416,9 @@
     "Optimizing": "Optimisation",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Optimisation de l’aperçu et des vignettes en arrière-plan — prêt pour le montage",
     "Optimizing high-res preview in the background — ready to edit now": "Optimisation de l’aperçu haute résolution en arrière-plan — prêt pour le montage",
-    "Generating audio waveform in the background — ready to edit now": "Génération de la forme d’onde audio en arrière-plan — prêt pour le montage"
+    "Generating audio waveform in the background — ready to edit now": "Génération de la forme d’onde audio en arrière-plan — prêt pour le montage",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "L’image de référence dépasse la limite de 2 Mio d’OpenDesign.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign ne prend pas en charge ce format d’image de référence."
   },
   "ru": {
     "Follows first frame": "По первому кадру",
@@ -429,7 +437,9 @@
     "Optimizing": "Оптимизация",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Фоновая оптимизация предпросмотра и кадров таймлайна — можно монтировать уже сейчас",
     "Optimizing high-res preview in the background — ready to edit now": "Фоновая оптимизация предпросмотра высокого разрешения — можно монтировать уже сейчас",
-    "Generating audio waveform in the background — ready to edit now": "Фоновая генерация звуковой волны — можно монтировать уже сейчас"
+    "Generating audio waveform in the background — ready to edit now": "Фоновая генерация звуковой волны — можно монтировать уже сейчас",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "Размер референсного изображения превышает лимит OpenDesign в 2 МиБ.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign не поддерживает этот формат референсного изображения."
   },
   "es": {
     "Follows first frame": "Según el primer fotograma",
@@ -448,7 +458,9 @@
     "Optimizing": "Optimizando",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Optimizando vista previa y fotogramas en segundo plano — listo para editar ahora",
     "Optimizing high-res preview in the background — ready to edit now": "Optimizando vista previa de alta resolución en segundo plano — listo para editar ahora",
-    "Generating audio waveform in the background — ready to edit now": "Generando forma de onda de audio en segundo plano — listo para editar ahora"
+    "Generating audio waveform in the background — ready to edit now": "Generando forma de onda de audio en segundo plano — listo para editar ahora",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "La imagen de referencia supera el límite de carga de 2 MiB de OpenDesign.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign no admite este formato de imagen de referencia."
   },
   "pt-BR": {
     "Follows first frame": "Conforme o primeiro quadro",
@@ -467,7 +479,9 @@
     "Optimizing": "Otimizando",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Otimizando prévia e quadros da linha do tempo em segundo plano — pronto para editar agora",
     "Optimizing high-res preview in the background — ready to edit now": "Otimizando prévia em alta resolução em segundo plano — pronto para editar agora",
-    "Generating audio waveform in the background — ready to edit now": "Gerando forma de onda de áudio em segundo plano — pronto para editar agora"
+    "Generating audio waveform in the background — ready to edit now": "Gerando forma de onda de áudio em segundo plano — pronto para editar agora",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "A imagem de referência excede o limite de envio de 2 MiB do OpenDesign.",
+    "OpenDesign does not accept this reference image format.": "O OpenDesign não aceita este formato de imagem de referência."
   },
   "it": {
     "Follows first frame": "Come il primo fotogramma",
@@ -486,7 +500,9 @@
     "Optimizing": "Ottimizzazione",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Ottimizzazione di anteprima e fotogrammi in background — pronto per il montaggio",
     "Optimizing high-res preview in the background — ready to edit now": "Ottimizzazione dell’anteprima ad alta risoluzione in background — pronto per il montaggio",
-    "Generating audio waveform in the background — ready to edit now": "Generazione della forma d’onda audio in background — pronto per il montaggio"
+    "Generating audio waveform in the background — ready to edit now": "Generazione della forma d’onda audio in background — pronto per il montaggio",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "L’immagine di riferimento supera il limite di caricamento di 2 MiB di OpenDesign.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign non accetta questo formato di immagine di riferimento."
   },
   "tr": {
     "Follows first frame": "İlk kareye göre",
@@ -505,6 +521,8 @@
     "Optimizing": "Optimize ediliyor",
     "Optimizing preview & timeline frames in the background — ready to edit now": "Önizleme ve zaman çizelgesi kareleri arka planda optimize ediliyor — şimdi düzenlemeye hazır",
     "Optimizing high-res preview in the background — ready to edit now": "Yüksek çözünürlüklü önizleme arka planda optimize ediliyor — şimdi düzenlemeye hazır",
-    "Generating audio waveform in the background — ready to edit now": "Ses dalga formu arka planda oluşturuluyor — şimdi düzenlemeye hazır"
+    "Generating audio waveform in the background — ready to edit now": "Ses dalga formu arka planda oluşturuluyor — şimdi düzenlemeye hazır",
+    "The reference image is larger than the 2 MiB OpenDesign upload limit.": "Referans görsel OpenDesign’ın 2 MiB yükleme sınırını aşıyor.",
+    "OpenDesign does not accept this reference image format.": "OpenDesign bu referans görsel biçimini kabul etmiyor."
   }
 }

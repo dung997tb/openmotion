@@ -11,12 +11,14 @@ import type { useMediaCatalog } from './useMediaCatalog';
 import { floatingCity, seedanceStory, gptImageStory, storyModels, type ModelStory } from './exploreModelStories';
 import { animeOpeningScenario, mcpCapabilities } from './mcpCapabilities';
 import { supportsScene, type StudioDestination } from './creativeStudios';
-import sale from './skill-covers/sale-countdown.webp';
-import shorts from './skill-covers/multi-clips-to-reels.webp';
-import paintedFilm from './skill-covers/footage-to-handpainted.webp';
-import printCover from './skill-covers/color-pop-poster.webp';
-import blueprint from './skill-covers/chalk-blueprint.webp';
-import launch from './skill-covers/premium-halo.webp';
+import { archivedSkillPoster } from './skillCatalog';
+
+const sale = archivedSkillPoster('sale-countdown');
+const shorts = archivedSkillPoster('multi-clips-to-reels');
+const paintedFilm = archivedSkillPoster('footage-to-handpainted');
+const printCover = archivedSkillPoster('color-pop-poster');
+const blueprint = archivedSkillPoster('chalk-blueprint');
+const launch = archivedSkillPoster('premium-halo');
 
 type StoryActions = {
   onNavigate: (target: StudioDestination, prompt: string) => void;
@@ -56,13 +58,13 @@ export function ModelCollection({ story, gateway, onNavigate, onModel }: {
   const heading = 'explore-' + story.id;
   return <section aria-labelledby={heading}>
     <header className="om-discovery-heading"><div>
-      <div className="om-story-model-title"><ProviderAvatar name={story.title} provider={{ id: story.brand, custom: false }} /><h2 id={heading} tabIndex={-1}>{story.title}</h2></div>
+      <h2 id={heading} tabIndex={-1}>{story.title}</h2>
       <p className="om-muted">{t(story.description)}</p>
     </div>
       {loading ? <Skeleton className="om-story-action-skeleton" /> : gateway.failed ? <Button type="button" variant="secondary" className="om-button" onClick={gateway.retry}>{t('Retry loading models')}</Button> :
         <Button type="button" variant="secondary" className="om-button" onClick={featured ? () => onModel(featured.id) : openModelSettings}>{t(featured ? 'Model details' : 'Manage providers')}<RemixIcon name="arrow-right-line" size={16} /></Button>}
     </header>
-    <ModelStoryGallery story={story} models={models} loading={loading} onNavigate={onNavigate} />
+    <ModelStoryGallery story={story} models={models} loading={loading} onNavigate={onNavigate} brandedFallback showLabels={false} />
   </section>;
 }
 

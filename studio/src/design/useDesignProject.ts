@@ -67,7 +67,7 @@ export function useDesignProject(projectId: string): DesignProjectState {
   }, [loadAll]);
 
   useEffect(() => {
-    if (deferred) return;
+    if (!projectId || deferred) return;
     let active = true;
     const tick = async () => {
       if (!active || document.visibilityState !== 'visible') return;
@@ -80,13 +80,12 @@ export function useDesignProject(projectId: string): DesignProjectState {
       } catch (err) {
         if (active && isDeferredP2Error(err)) {
           setDeferred(true);
-          active = false;
         }
       }
     };
     const timer = window.setInterval(tick, 2500);
     return () => { active = false; window.clearInterval(timer); };
-  }, [projectId, loadAll, deferred]);
+  }, [projectId, deferred, loadAll]);
 
   return {
     project, versions, currentVersionId, comments, editors, loading, error, deferred,

@@ -125,6 +125,11 @@ export const designClient = {
       method: 'POST',
       body: JSON.stringify({ ...input, source: input.source ?? 'manual', requestId: input.requestId ?? makeRequestId('write') }),
     }),
+  importAsset: (id: string, input: { expectedRevision: string; assetId: string; versionId: string; path?: string; requestId?: string }) =>
+    requestJson<{ project: DesignProjectDetail; version: DesignVersion; path: string }>(designRoutes.importAsset(id), {
+      method: 'POST',
+      body: JSON.stringify({ ...input, requestId: input.requestId ?? makeRequestId('import-asset') }),
+    }),
   listVersions: (id: string, cursor?: string) =>
     requestJson<{ versions: DesignVersion[]; currentVersionId: string | null; nextCursor: string | null }>(
       `${designRoutes.versions(id)}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,

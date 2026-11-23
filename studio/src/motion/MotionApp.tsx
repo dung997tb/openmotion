@@ -2,6 +2,7 @@ import { isolatedPreviewOrigin, preparePreviewLease, type PreparedPreviewLease }
 import { InitialPreviewLeaseContext } from "./StudioHost";
 import { Button } from 'open-design-ui/button';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useInRouterContext, useLocation } from 'react-router';
 import { useI18n } from '../i18n/I18n';
 import { WorkspaceFrame, WorkspaceMenuButton, useWorkspaceChrome } from './WorkspaceFrame';
 import { requestedProject, validWorkspaceProject, type WorkspaceRoute } from './workspaceRouting';
@@ -11,23 +12,41 @@ import { ArtifactViewer } from './ArtifactViewer';
 import { EditorLoading, readEditorLoadingLayout, type EditorLoadingLayout } from './EditorLoading';
 import { RecoveryScreen } from '../components/RecoveryScreen';
 import { trackMotion } from './tracking';
-import { WORKSPACE_LOCATION_CHANGED, writeWorkspaceHistory } from '../utils/workspaceHistory';
-import { isWorkspaceSettingsPage } from '../../../shared/workspace-url';
+import { writeWorkspaceHistory } from '../utils/workspaceHistory';
+import { editorProjectIdFromPath, isStandaloneSpaPath } from '../../../shared/spa-routes';
+import { StudioRouterProvider } from '../router/createAppRouter';
+import { readWorkspacePage } from './workspacePageRouting';
 
 const noPendingSaves = async () => {};
 
 /** Resolve the native service before mounting any editor that could read or save files. */
 export function MotionApp() {
+  const inRouter = useInRouterContext();
+  if (!inRouter) {
+    return (
+      <StudioRouterProvider>
+        <MotionAppContent />
+      </StudioRouterProvider>
+    );
+  }
+  return <MotionAppContent />;
+}
+
+function MotionAppContent() {
   const { t } = useI18n();
-  const [route, setRoute] = useState(() => ({ projectId: requestedProject(location.search, location.hash), sessionId: new URLSearchParams(location.search).get('session') }));
+  const routerLocation = useLocation();
+  const [route, setRoute] = useState(() => ({
+    projectId: editorProjectIdFromPath(routerLocation.pathname) ?? requestedProject(routerLocation.search, routerLocation.hash),
+    sessionId: new URLSearchParams(routerLocation.search).get('session'),
+  }));
   const { projectId, sessionId } = route;
-  const [settingsPage, setSettingsPage] = useState(() => isWorkspaceSettingsPage(location.search, location.hash));
-  useEffect(() => {
-    const sync = () => setSettingsPage(isWorkspaceSettingsPage(location.search, location.hash));
-    window.addEventListener(WORKSPACE_LOCATION_CHANGED, sync);
-    return () => window.removeEventListener(WORKSPACE_LOCATION_CHANGED, sync);
-  }, []);
-  const [libraryOnly, setLibraryOnly] = useState(() => new URLSearchParams(location.search).get('templates') === '1' && projectId === null && !sessionId);
+  const settingsPage = isStandaloneSpaPath(routerLocation.pathname, routerLocation.search, routerLocation.hash);
+  const [libraryOnly, setLibraryOnly] = useState(
+    () =>
+      readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname).templates &&
+      projectId === null &&
+      !sessionId,
+  );
   const [ready, setReady] = useState<(WorkspaceRoute & { previewLease?: PreparedPreviewLease }) | null>(null);
   const previewScope = useMemo(() => {
     if (ready?.previewLease) return ready.previewLease;
@@ -39,13 +58,18 @@ export function MotionApp() {
   const [attempt, retry] = useState(0);
   const surface = useRef<HTMLDivElement>(null);
   const [loadingLayout, setLoadingLayout] = useState<EditorLoadingLayout | null>(null);
-  const onNavigate = useCallback((opened?: WorkspaceRoute) => {
+  const onNavigate = useCallback((targetHref?: string, opened?: WorkspaceRoute) => {
     const layout = readEditorLoadingLayout(surface.current);
     if (layout) setLoadingLayout(layout);
+    const target = targetHref ? new URL(targetHref, location.origin) : new URL(location.href);
+    const nextPage = readWorkspacePage(target.search, target.hash, target.pathname);
     setReady(opened ?? null);
     setError('');
-    setLibraryOnly(new URLSearchParams(location.search).get('templates') === '1');
-    setRoute({ projectId: requestedProject(location.search, location.hash), sessionId: new URLSearchParams(location.search).get('session') });
+    setLibraryOnly(nextPage.templates);
+    setRoute({
+      projectId: editorProjectIdFromPath(target.pathname) ?? requestedProject(target.search, target.hash),
+      sessionId: target.searchParams.get('session'),
+    });
   }, []);
   const view = useRef({ id: crypto.randomUUID(), started: performance.now(), sent: false });
   useEffect(() => {
@@ -72,9 +96,12 @@ export function MotionApp() {
       if (!resolved || controller.signal.aborted) return;
       if (resolved.artifact) {
         const url = new URL(location.href);
+        const encodedProject = encodeURIComponent(resolved.artifact.projectId);
+        url.pathname = `/editor/${encodedProject}`;
+        url.searchParams.delete('page');
+        url.searchParams.delete('project');
         url.searchParams.set('session', resolved.sessionId);
-        url.searchParams.set('project', resolved.artifact.projectId);
-        if (!url.hash.startsWith(`#project/${resolved.artifact.projectId}`)) url.hash = `project/${resolved.artifact.projectId}`;
+        if (!url.hash.startsWith(`#project/${encodedProject}`)) url.hash = `project/${encodedProject}`;
         writeWorkspaceHistory(url, true);
       }
       setReady({ ...resolved, previewLease });
@@ -93,7 +120,7 @@ export function MotionApp() {
     sessionId={libraryOnly ? undefined : ready?.sessionId ?? sessionId ?? undefined} onNavigate={onNavigate}
     blocked={!ready && !error && !libraryOnly && !settingsPage} onLibraryClose={libraryOnly ? closeLibrary : undefined}>
     <div ref={surface} className="motion-project-surface">
-    {error ? <><div className="motion-home-navigation"><WorkspaceMenuButton /></div><RecoveryScreen title={t('Could not open project')} message={error}><Button variant="ghost" className="om-button h-auto" data-primary onClick={() => retry(value => value + 1)}>{t('Retry')}</Button><a className="om-button" href="/?page=editor">{t('Open active project')}</a></RecoveryScreen></>
+    {error ? <><div className="motion-home-navigation"><WorkspaceMenuButton /></div><RecoveryScreen title={t('Could not open project')} message={error}><Button variant="ghost" className="om-button h-auto" data-primary onClick={() => retry(value => value + 1)}>{t('Retry')}</Button><a className="om-button" href="/editor">{t('Open active project')}</a></RecoveryScreen></>
       : ready ? ready.artifact ? (
         <InitialPreviewLeaseContext.Provider value={previewScope}>
           <ArtifactViewer key={ready.artifact.projectId} artifact={ready.artifact} loadingLayout={loadingLayout} />

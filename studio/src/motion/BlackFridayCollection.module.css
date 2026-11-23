@@ -59,6 +59,11 @@
 .bannerNav {
   composes: om-gallery-results from global;
 }
+:global([data-motion-studio]) .bannerNav :global(.om-back-to-explore) { color: var(--motion-overlay-ink); }
+:global([data-motion-studio]) .bannerNav :global(.om-back-to-explore:hover) {
+  color: var(--motion-overlay-ink);
+  background: var(--motion-neutral-n10);
+}
 .banner > .bannerNav { padding-block: var(--motion-space-24) 0; }
 .bannerCopy {
   display: grid;

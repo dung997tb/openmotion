@@ -8,10 +8,11 @@ type Props = {
   className?: string;
   viewportClassName: string;
   selection?: string | null;
+  plainArrows?: boolean;
   children: ReactNode;
 };
 
-export function HorizontalRail({ label, className = '', viewportClassName, selection, children }: Props) {
+export function HorizontalRail({ label, className = '', viewportClassName, selection, plainArrows = false, children }: Props) {
   const { t } = useI18n();
   const id = useId();
   const count = Children.count(children);
@@ -41,7 +42,7 @@ export function HorizontalRail({ label, className = '', viewportClassName, selec
   useLayoutEffect(() => {
     if (selection === undefined) return;
     const list = viewport.current!;
-    const choice = list.querySelector('[aria-pressed="true"]');
+    const choice = list.querySelector('[aria-pressed="true"], [role="tab"][aria-selected="true"]');
     if (!choice || !list.clientWidth) return;
     const bounds = list.getBoundingClientRect(), target = choice.getBoundingClientRect();
     const padding = getComputedStyle(list);
@@ -55,11 +56,12 @@ export function HorizontalRail({ label, className = '', viewportClassName, selec
     const list = viewport.current!;
     list.scrollBy({ left: direction * list.clientWidth * 0.8, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
   }
-  const arrow = (edge: 'left' | 'right') => <Button type="button" variant="secondary" className="om-button om-icon-button om-rail-arrow p-0" data-edge={edge}
+  const arrow = (edge: 'left' | 'right') => <Button type="button" variant={plainArrows ? 'plain' : 'secondary'}
+    className={`${plainArrows ? 'om-nav-item' : 'om-button'} om-icon-button om-rail-arrow`} data-edge={edge}
     aria-controls={id} aria-label={t(edge === 'left' ? 'Previous' : 'Next') + ' · ' + t(label)} onClick={() => scroll(edge === 'left' ? -1 : 1)}>
     <RemixIcon name="arrow-right-s-line" mirrored={edge === 'left'} size={22} />
   </Button>;
-  return <div className={'om-horizontal-rail ' + className}>
+  return <div className={'om-horizontal-rail ' + className} data-plain-arrows={plainArrows || undefined}>
     <div id={id} ref={viewport} className={'om-rail-viewport om-overflow-fade ' + viewportClassName} data-fade-start={edges.left || undefined} data-fade-end={edges.right || undefined} tabIndex={-1} role="group" aria-label={t(label)}>{children}</div>
     {edges.left && arrow('left')}
     {edges.right && arrow('right')}

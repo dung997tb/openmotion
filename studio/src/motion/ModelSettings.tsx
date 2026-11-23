@@ -8,10 +8,11 @@ import { StudioToastViewport } from '../components/StudioToastViewport';
 import { gatewayRequest, type CloudApiError } from './gatewayClient';
 import { notifyProvidersChanged, useProviderDirectory, type CloudProviderDirectory } from './useProviderDirectory';
 import { ProviderAvatar, ModelAvatar, SettingsError, SettingsLoading } from './settingsPrimitives';
-import { kindLabels, capabilityLabels } from './ModelEditor';
+import { kindLabels, modelKindLabel } from './ModelEditor';
+import { modelDisplayLabel, modelMediaCapabilities, shouldShowInlineModelId } from './modelMediaCapabilities';
 import { ModelCatalog } from './ModelCatalog';
 
-export { kindLabels } from './ModelEditor';
+export { kindLabels, modelKindLabel } from './ModelEditor';
 
 /** Sidebar/status helper preserved for compatibility with existing callers and tests. */
 export function providerListStatus(provider: { configured: boolean; enabled: boolean; available: boolean }): 'available' | 'disabled' | null {
@@ -156,13 +157,13 @@ function GatewayStatusCard({
   data: CloudProviderDirectory;
   openAccount?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const billing = data.billing;
   return (
     <div className="om-card om-card-stack">
       <div className="om-settings-row">
         <div className="om-settings-tags">
-          {provider.kinds.map(kind => <span className="om-badge" key={kind}>{t(kindLabels[kind])}</span>)}
+          {provider.kinds.map(kind => <span className="om-badge" key={kind}>{modelKindLabel(kind, t, locale)}</span>)}
           <span className="om-badge" data-active={provider.available}>
             {t(provider.available ? 'Available' : 'Unavailable')}
           </span>
@@ -194,27 +195,31 @@ function ModelRow({
   busy: boolean;
   onSelect: (selected: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const canSetDefault = ['image', 'video', 'audio'].includes(model.kind);
+  const displayLabel = modelDisplayLabel(model);
+  const showModelId = shouldShowInlineModelId(displayLabel, model.modelId, provider.protocol);
+  const idHint = !showModelId && model.modelId.trim() && model.modelId.trim() !== displayLabel.trim() ? model.modelId : undefined;
+  const capabilityHints = modelMediaCapabilities(model, t);
   return (
-    <div className="om-model-row">
-      <ModelAvatar name={model.label} modelId={model.modelId} provider={provider} />
+    <div className="om-model-row" data-selected={selected || undefined}>
+      <ModelAvatar name={displayLabel} modelId={model.modelId} provider={provider} />
       <div className="om-model-name">
-        <strong>{model.label}</strong>
-        <small className="om-muted">{model.modelId}</small>
-        <div className="om-settings-tags om-model-metadata">
-          {[...(model.capabilities ?? []), ...(model.inputs ?? [])].map(value => (
-            <span className="om-badge" key={value}>{t(capabilityLabels[value])}</span>
-          ))}
+        <div className="om-model-title">
+          <strong title={idHint}>{displayLabel}</strong>
+          {showModelId && <small className="om-muted om-model-id">{model.modelId}</small>}
         </div>
+        {capabilityHints.length > 0 && <small className="om-muted om-model-capabilities">{capabilityHints.join(' · ')}</small>}
       </div>
-      <span className="om-badge">{t(kindLabels[model.kind])}</span>
+      <span className="om-badge om-model-kind-badge">{modelKindLabel(model.kind, t, locale)}</span>
       {canSetDefault && (
         <Button
           variant="ghost"
-          className="om-button h-auto"
+          className="om-button h-auto om-model-default-button"
+          data-active={selected || undefined}
+          aria-pressed={selected}
           disabled={busy || !model.enabled || !provider.available}
-          aria-label={t('Use {model} as default', { model: model.label })}
+          aria-label={t('Use {model} as default', { model: displayLabel })}
           onClick={() => onSelect(selected)}
         >
           {selected ? <><RemixIcon name="check-line" size={14} />{t('Default')}</> : t('Use model')}

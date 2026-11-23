@@ -6,6 +6,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { releaseProfile } from '../shared/mcp-registry.ts';
 import { checkDesign } from './design-check.ts';
+import { checkI18n } from './check-i18n.ts';
+import { checkRouting } from './check-routing.ts';
 import { getWorkflow, markdownAnchors, workflowLinkAnchors, workflowRegistry, phase1WorkflowNames } from '../shared/workflow.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -97,7 +99,9 @@ export async function check() {
     }
   }
   assert.match(await readFile(path.join(root, 'templates/index.html'), 'utf8'), /data-composition-id/);
+  await checkI18n();
+  await checkRouting();
   await checkDesign();
-  console.log('Plugin manifest, marketplace, skill and TypeScript syntax checks passed.');
+  console.log('Plugin manifest, marketplace, skill, i18n, routing and TypeScript syntax checks passed.');
 }
 if (isMain(import.meta.url)) await check();
