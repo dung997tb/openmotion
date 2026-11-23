@@ -2,10 +2,8 @@ import { usePlayerStore } from "../store/playerStore";
 import { thumbnailRevisionOf } from "../store/thumbnailSlice";
 import { compositionPosterSource, MAX_POSTER_SOURCE_LENGTH } from "./compositionPosterSource";
 import { createThumbnailKey } from "./thumbnailScheduler";
-import { MAX_PEER_PREVIEW_SOURCE_LENGTH } from "../../../../shared/preview-timing";
-import { confirmedSource, rememberSource } from "../../utils/confirmedTextSources";
-import { studioApiFetch } from "../../utils/studioApiFetch";
-import { buildProjectApiPath, optionalProjectSourceUrl } from "../../utils/projectRouting";
+import { readPosterFile } from "./posterFileRead";
+import { buildProjectApiPath } from "../../utils/projectRouting";
 import { IMAGE_EXT, VIDEO_EXT } from "../../utils/mediaTypes";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
 import { decodeVideoThumbnail } from "./thumbnailVideoDecoder";
@@ -360,19 +358,7 @@ export async function loadCloudCompositionPoster(
       }
     }
     if (content === undefined) {
-      const response = await studioApiFetch(optionalProjectSourceUrl(projectId, path), { signal, priority: "low" });
-      if (!response.ok) throw new Error(`Composition source unavailable (${response.status})`);
-      const source = await response.json();
-      content = source.content;
-      const version = source.version ?? response.headers.get("etag");
-      const current = usePlayerStore.getState();
-      // The poster already downloaded this file. Seed a missing peer-edit baseline only while this read is current.
-      if (!signal.aborted && typeof content === "string" && content.length <= MAX_PEER_PREVIEW_SOURCE_LENGTH &&
-          typeof version === "string" && response.headers.get("X-OpenMotion-Text-Edits") === "1" &&
-          current.timelineProjectId === projectId && current.timelineSessionEpoch === sessionEpoch &&
-          thumbnailRevisionOf(current.thumbnailRevisions, path) === revision && !confirmedSource(projectId, path)) {
-        rememberSource(projectId, path, { content, version });
-      }
+      content = await readPosterFile(projectId, sessionEpoch, path, revision, signal);
     }
     signal.throwIfAborted();
     const scope = typeof content === "string" && content.length <= MAX_POSTER_SOURCE_LENGTH
