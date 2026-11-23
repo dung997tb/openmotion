@@ -1,7 +1,7 @@
 /* MCP onboarding shares Studio surfaces, type, controls and brand artwork. */
 [data-motion-studio] .om-mcp-page { background: var(--motion-workspace); color: var(--motion-strong); }
 .om-mcp-content { font-size: var(--motion-text-body); line-height: var(--motion-leading-body); }
-.om-mcp-content h1, .om-mcp-content h2, .om-mcp-content h3 { margin: 0; color: var(--motion-strong); font-weight: var(--motion-weight-semibold); }
+.om-mcp-content h2, .om-mcp-content h3 { margin: 0; color: var(--motion-strong); font-weight: var(--motion-weight-semibold); }
 .om-mcp-content h2 { font-size: clamp(26px, 2.7cqi, 34px); line-height: 1.22; letter-spacing: -.02em; font-weight: var(--motion-weight-bold); }
 .om-mcp-content h3 { font-size: var(--motion-text-heading); line-height: var(--motion-leading-body); }
 .om-mcp-content p { margin: var(--motion-space-12) 0; }
@@ -44,7 +44,7 @@
   border-radius: var(--motion-radius-full);
   background: transparent;
   color: var(--motion-muted);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: var(--motion-weight-medium);
 }
 [data-motion-studio] .om-mcp-client-tab:hover { color: var(--motion-strong); background: var(--motion-mcp-dock-hover); }
@@ -75,6 +75,7 @@
   color: var(--motion-mcp-hero-badge-ink);
   box-shadow: var(--motion-shadow-md);
 }
+[data-motion-studio] .om-mcp-h1-logo .om-avatar { font-size: inherit; }
 [data-motion-studio] .om-mcp-h1-logo .om-avatar { background: transparent; border: 0; }
 [data-motion-studio] .om-mcp-h1-logo .om-mcp-generic-icon { color: var(--motion-mcp-hero-badge-ink); }
 .om-mcp-h1-od {
@@ -159,13 +160,14 @@
 
 /* Hero Lower: Left 4-step rail + right visual showcase + bottom prompt bar */
 [data-motion-studio] .om-mcp-stage-step {
-  border-radius: var(--motion-radius-md);
-  background: var(--motion-mcp-dock-bg);
+  border-radius: var(--motion-radius-xl);
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--motion-strong) 2.5%, transparent);
   color: var(--motion-muted);
   text-align: left;
 }
 [data-motion-studio] .om-mcp-stage-step:hover { background: var(--motion-mcp-dock-hover); }
-[data-motion-studio] .om-mcp-stage-step[data-active] { background: var(--motion-mcp-dock-active); }
+[data-motion-studio] .om-mcp-stage-step[data-active] { background: color-mix(in srgb, var(--motion-strong) 9.5%, transparent); }
 .om-mcp-stage-step-head { font-size: var(--motion-text-body); font-weight: var(--motion-weight-semibold); color: var(--motion-text); }
 .om-mcp-stage-step[data-active] .om-mcp-stage-step-head { color: var(--motion-strong); }
 .om-mcp-stage-step-num { font-family: var(--motion-font-mono); font-size: 11.5px; color: var(--motion-dim); font-weight: var(--motion-weight-bold); }
@@ -173,20 +175,20 @@
 .om-mcp-stage-step-desc { font-size: 12.5px; line-height: 1.45; color: var(--motion-dim); }
 .om-mcp-stage-step[data-active] .om-mcp-stage-step-desc { color: var(--motion-muted); }
 .om-mcp-stage-frame {
-  border-radius: var(--motion-radius-xl);
+  border-radius: 24px;
   background: var(--motion-mcp-stage-bg);
   border: 1px solid var(--motion-mcp-gallery-border-strong);
   box-shadow: var(--motion-shadow-lg);
 }
 .om-mcp-stage-vignette { background: var(--motion-mcp-stage-vignette); }
-[data-motion-studio] .om-mcp-beat-dot { border-radius: var(--motion-radius-xs); background: var(--motion-mcp-stage-dot); padding: 0; }
+[data-motion-studio] .om-mcp-beat-dot { border-radius: var(--motion-radius-sm); background: var(--motion-mcp-stage-dot); padding: 0; }
 [data-motion-studio] .om-mcp-beat-dot[data-active] { background: var(--motion-brand); }
 .om-mcp-stage-prompt-bar {
-  border-radius: var(--motion-radius-md);
-  background: var(--motion-mcp-gallery-panel);
-  border: 1px solid var(--motion-mcp-gallery-border);
+  border-radius: var(--motion-radius-xl);
+  background: color-mix(in srgb, var(--motion-strong) 4%, transparent);
   font-size: 13.5px;
-  color: var(--motion-strong);
+  line-height: 1.55;
+  color: var(--motion-text);
 }
 [data-motion-studio] .om-mcp-stage-prompt-copy {
   border-radius: var(--motion-radius-full);
@@ -411,6 +413,9 @@
 .om-mcp-contact .om-text-link { display: inline-flex; }
 
 @media (prefers-reduced-motion: no-preference) {
+  .om-mcp-stage-slide { transition: opacity .7s ease; }
+  .om-mcp-stage-slide img { transition: transform 4.5s ease-out; }
+  .om-mcp-beat-dot { transition: background .2s, width .2s; }
   .om-mcp-demo-card { transition: transform .22s, border-color .22s, box-shadow .22s; }
   .om-mcp-demo-card:hover { transform: translateY(-4px); box-shadow: var(--motion-shadow-lg); }
   .om-mcp-demo-cover > img { transition: transform .7s cubic-bezier(.22, 1, .36, 1); }
