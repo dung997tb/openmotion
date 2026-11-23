@@ -169,7 +169,7 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changed } = await serializeStudioFileMutations(
+          const { allMatched, changed, reconcileFromServer } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
@@ -179,7 +179,7 @@ export function useDomEditCommits({
                 const result = await submitStudioCommands(pid, intent.commands, intent.versions, history);
                 const changed = result.changedPaths.length > 0;
                 if (changed) await editHistory.recordEdit({ ...options, files: {} });
-                return { allMatched: true, changed };
+                return { allMatched: true, changed, reconcileFromServer: result.divergent.length > 0 };
               }
               const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
@@ -216,9 +216,11 @@ export function useDomEditCommits({
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
                 changed: anyChanged,
+                reconcileFromServer: false,
               };
             },
           );
+          if (reconcileFromServer) return { durable: true, allMatched, changed };
           if (changed) forceReloadSdkSession?.();
           const durable = allMatched;
           // A z-only reorder already applied its inline styles to the live iframe

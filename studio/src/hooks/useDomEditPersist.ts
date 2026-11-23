@@ -223,7 +223,7 @@ export function useDomEditPersist({
               targetPath,
               patchedContent,
               prepare,
-              (path, content, expected) => writeProjectFile(path, content, expected, undefined, writeHistory).then(() => {}),
+              async (path, content, expected) => { await writeEdit(path, content, expected); },
               showToast,
             )
           : { content: patchedContent, failed: false };

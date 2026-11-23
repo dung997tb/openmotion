@@ -9,7 +9,7 @@ import { findTagByTarget, type PatchTarget } from "../utils/sourcePatcher";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import { serializeStudioFileMutation } from "../utils/studioFileMutationCoordinator";
 import { useFileTree } from "./useFileTree";
-import { useEditorSave } from "./useEditorSave";
+import { useEditorSave, type EditorSaveHandle } from "./useEditorSave";
 import { readProjectFileContentWithVersion, useProjectFileWriter } from "./useProjectFileWriter";
 import { studioApiFetch } from "../utils/studioApiFetch";
 import { importErrorCategory, reportAssetImport, reportEdit, setProjectInventory, type ImportEntryPoint, type ImportErrorCategory } from "../motion/editorTracking";
@@ -68,12 +68,19 @@ export function useFileManager({
   const editingPathRef = useRef(editingFile?.path);
   editingPathRef.current = editingFile?.path;
 
+  const openFileRef = useRef(editingFile);
+  openFileRef.current = editingFile;
+
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
+  const pendingSource = useRef<EditorSaveHandle["getPendingCandidate"]>(null);
   const onSavedContent = useCallback((pid: string, path: string, content: string) => {
+    const draft = pendingSource.current?.();
+    if (draft?.path === path && draft.content !== content) return;
     if (projectIdRef.current === pid && editingPathRef.current === path) {
-      setEditingFile({ path, content });
+      openFileRef.current = { path, content };
+      setEditingFile(openFileRef.current);
     }
   }, []);
 
@@ -125,18 +132,16 @@ export function useFileManager({
   // ── Editor save (debounced content change) ──
 
   const editorSave = useEditorSave({
-    editingPathRef,
+    editingFileRef: openFileRef,
     projectIdRef,
-    readProjectFile,
     writeProjectFile,
     recordEdit,
     setRefreshKey,
     showToast,
   });
   const { saveRafRef, handleContentChange, getPendingCandidate } = editorSave;
+  pendingSource.current = getPendingCandidate;
   const sourceRefreshRef = useRef(0);
-  const openFileRef = useRef(editingFile);
-  openFileRef.current = editingFile;
   const refreshOpenSource = useCallback((changedPath: string) => {
     const open = openFileRef.current;
     if (!open || open.content == null || (changedPath !== "." && changedPath !== open.path)) return;

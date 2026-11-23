@@ -6,7 +6,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
-import { markStudioWriteToken, resetStudioWriteTokens } from "../utils/studioFileVersion";
+import { acceptFileEditReceipt } from "../utils/rebasedFileEdit";
+import { markStudioWriteToken, resetStudioWriteTokens, studioFileContentVersion } from "../utils/studioFileVersion";
 import { markSelfWrite, resetSelfWriteRegistry } from "./sdkSelfWriteRegistry";
 import {
   useExternalFileChangeCoordinator,
@@ -68,6 +69,27 @@ describe("external file change coordinator", () => {
   afterEach(async () => {
     while (roots.length > 0) await act(async () => roots.pop()?.unmount());
     vi.unstubAllGlobals();
+  });
+
+  it("refreshes a rebased no-op even if its own SSE echo was already suppressed", async () => {
+    const refreshOpenSource = vi.fn();
+    const refreshFileTree = vi.fn();
+    const { options } = await mountCoordinator({ refreshOpenSource, refreshFileTree });
+    const path = "intro.html";
+    const version = await studioFileContentVersion("Agent and human");
+    markStudioWriteToken("origin");
+    await act(async () => { handler?.({ projectId: "project-a", path, version, writeToken: "origin" }); });
+    expect(options.reloadPreview).not.toHaveBeenCalled();
+    await act(async () => {
+      await acceptFileEditReceipt("project-a", path, "V1", "old projection", version, { rebased: true, changedPaths: [] });
+    });
+    expect(options.reloadPreview).toHaveBeenCalledExactlyOnceWith(path);
+    expect(refreshOpenSource).toHaveBeenCalledExactlyOnceWith(path);
+    expect(refreshFileTree).not.toHaveBeenCalled();
+    await act(async () => {
+      await acceptFileEditReceipt("project-a", path, "V1", "Agent and human", version, { rebased: true });
+    });
+    expect(options.reloadPreview).toHaveBeenCalledTimes(1);
   });
 
   describe("SSE reconnect recovery", () => {
