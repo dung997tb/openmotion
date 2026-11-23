@@ -147,7 +147,7 @@ export function useEditorSave({
         if (error instanceof StudioFileConflictError && error.syncLatest) {
           session.queue.cancel();
           if (sessions.current.get(key) === session) sessions.current.delete(key);
-          showToast(`Couldn't save ${open.path}. Loading the latest version.`, "error");
+          showToast(error.message, "error");
           return;
         }
         reportFailure(open.path, error);
