@@ -11,6 +11,9 @@ import {
   scriptOutline,
   socialPostsMarkdown,
 } from '../shared/scenario-content.ts';
+import { localizedScenarioMediaLabel } from '../shared/scenario-media-names.ts';
+import { resolveScenarioStepPrompt, scenarioStepPrompt } from '../shared/scenario-prompts.ts';
+import type { PoolItem, ScenarioRun } from '../shared/scenario-runs.ts';
 import {
   scenarioConcisePrompt,
   scenarioSkills,
@@ -26,6 +29,35 @@ import {
   type ScenarioWorkspaceMode,
 } from '../shared/scenarios.ts';
 import { workflowResources } from '../shared/workflow.ts';
+
+test('existing generated media labels follow the interface locale and retain their original versions', () => {
+  const scenario = findScenario('motion-full-chain')!;
+  const audio: PoolItem = {
+    id: 'audio', kind: 'audio', ref: { type: 'asset', assetId: 'audio-asset', versionId: 'audio-version' },
+    source: 'generated', stepId: 'soundtrack', label: 'Idea to Motion Film · 2026-11-21 · Soundtrack v3',
+    tags: [], pinned: false, addedAt: 0,
+  };
+  const video: PoolItem = {
+    ...audio, id: 'video', kind: 'video', stepId: 'motion-film', label: 'Launch · Summer · Motion film v4',
+  };
+  const stepState = (item: PoolItem, modality: 'audio' | 'video', number: number): ScenarioRun['steps'][string] => ({
+    stepId: item.stepId!, status: 'done', activeIterationId: null, bindings: {}, draft: {}, links: {},
+    iterations: [{
+      id: item.id, source: 'generated', createdAt: 0, number, inputs: [],
+      job: { jobId: item.id, state: 'completed', modality, model: 'fixture:model' },
+      outputs: [{ type: 'pool', poolItemId: item.id }],
+    }],
+  });
+  const run = { steps: { soundtrack: stepState(audio, 'audio', 3), 'motion-film': stepState(video, 'video', 4) } };
+  const zh = localizedScenarioMediaLabel(audio, run, scenario, 'zh-CN');
+  assert.equal(zh, '创意到动效短片 · 2026-11-21 · 配乐与音频 v3');
+  assert.equal(localizedScenarioMediaLabel({ ...audio, label: zh }, run, scenario, 'en'), audio.label);
+  assert.equal(localizedScenarioMediaLabel(video, run, scenario, 'zh-CN'), 'Launch · Summer · 动效影片 v4');
+  assert.equal(localizedScenarioMediaLabel({ ...audio, id: 'unlinked' }, run, scenario, 'zh-CN'), audio.label);
+  assert.equal(localizedScenarioMediaLabel({ ...audio, source: 'upload' }, run, scenario, 'zh-CN'), audio.label);
+  assert.equal(localizedScenarioMediaLabel({ ...audio, label: '夏日钢琴配乐' }, run, scenario, 'zh-CN'), '夏日钢琴配乐');
+  assert.equal(audio.label, 'Idea to Motion Film · 2026-11-21 · Soundtrack v3');
+});
 
 test('scenarioStarterPage escapes untrusted brief content, includes slots and valid structure for every recipe', () => {
   const recipes: PageRecipeId[] = ['landing', 'sale', 'link-in-bio', 'code-animation'];
@@ -168,6 +200,46 @@ test('draftSocialPosts enforces platform character, hashtag and title limits, ro
   const scriptZh = scriptOutline({ personaName: 'Mina', topic: '批量拍摄' }, 'zh-CN');
   assert.ok(scriptEn.includes('[Hook') && scriptEn.includes('Mina'));
   assert.match(scriptZh, /开场 Hook/);
+});
+
+test('automatic step prompts localize instructions and options while preserving authored text', () => {
+  const motion = findScenario('motion-full-chain')!;
+  const storyboard = motion.steps.find(step => step.id === 'storyboard')!;
+  const soundtrack = motion.steps.find(step => step.id === 'soundtrack')!;
+  const brief = { concept: 'Learn to code.', visualStyle: '极简杂志风', aspect: '9:16', tone: 'premium', durationSeconds: '15' };
+  const legacy = fillScenarioTemplate(storyboard.promptTemplate!, brief);
+
+  const chinese = resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: legacy }, 'zh-CN');
+  assert.match(chinese, /^生成一张分镜画面。\n影片概念：Learn to code\.\n风格描述：极简杂志风\n.*9:16 竖屏$/);
+  const musicPrompt = scenarioStepPrompt(motion, soundtrack, brief, 'zh-CN');
+  assert.match(musicPrompt, /文案语气：高级质感/);
+  assert.match(musicPrompt, /时长：15 秒/);
+  assert.equal(scenarioStepPrompt(motion, storyboard, {}, 'ja-JP'), '絵コンテの1コマを作成してください。');
+  assert.match(resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: chinese, promptLocale: 'zh-CN' }, 'fr'), /^Créez une image de storyboard\./);
+  assert.equal(resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: legacy, promptEdited: true }, 'zh-CN'), legacy);
+  assert.equal(resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: 'Custom storyboard' }, 'zh-CN'), 'Custom storyboard');
+});
+
+test('empty saved motion-film prompts use the current brief and interface language', () => {
+  const motion = findScenario('motion-full-chain')!;
+  const film = motion.steps.find(step => step.id === 'motion-film')!;
+  const brief = { concept: '秋季新品', visualStyle: '极简杂志风', aspect: '9:16', durationSeconds: '15' };
+  const legacy = { prompt: 'Motion film sequence for : s' };
+  const localized = { prompt: scenarioStepPrompt(motion, film, {}, 'zh-CN'), promptLocale: 'zh-CN' };
+
+  assert.equal(resolveScenarioStepPrompt(motion, film, brief, legacy, 'zh-CN'), [
+    '制作一段动效影片。',
+    '影片概念：秋季新品',
+    '风格描述：极简杂志风',
+    '宽高比：9:16 竖屏',
+    '时长：15 秒',
+  ].join('\n'));
+  assert.equal(
+    resolveScenarioStepPrompt(motion, film, brief, localized, 'ja'),
+    scenarioStepPrompt(motion, film, brief, 'ja'),
+  );
+  assert.equal(resolveScenarioStepPrompt(motion, film, {}, legacy, 'zh-CN'), '制作一段动效影片。');
+  assert.equal(resolveScenarioStepPrompt(motion, film, brief, { ...legacy, promptEdited: true }, 'zh-CN'), legacy.prompt);
 });
 
 test('fillScenarioTemplate handles missing fields gracefully and prompt builders include every required tool', () => {

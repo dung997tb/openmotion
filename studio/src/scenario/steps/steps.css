@@ -520,6 +520,17 @@
   background: color-mix(in srgb, var(--om-tone, var(--motion-accent)) 6%, var(--motion-bg));
 }
 
+.om-step-binding-slot .om-step-binding-control[aria-invalid="true"] {
+  border-color: var(--motion-danger);
+  box-shadow: none;
+}
+
+.om-step-binding-error {
+  margin: 0;
+  color: var(--motion-danger);
+  font-size: var(--motion-text-xs);
+}
+
 .om-step-binding-content {
   flex: 1 1 160px;
   min-width: 0;
@@ -1336,6 +1347,10 @@
   min-width: 0;
 }
 
+.om-step-param-field--duration {
+  grid-column: 1 / -1;
+}
+
 .om-step-gen-actions {
   display: flex;
   align-items: center;
@@ -1658,7 +1673,9 @@
   width: 64px;
   height: 64px;
   border-radius: var(--motion-radius-sm);
-  object-fit: cover;
+  overflow: hidden;
+  background: var(--motion-inset);
+  object-fit: contain;
   display: block;
 }
 
@@ -1717,37 +1734,40 @@
 }
 
 .om-step-social-preview-frame {
+  --om-social-preview-aspect: 16 / 9;
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  max-width: calc(360px * (var(--om-social-preview-aspect)));
+  aspect-ratio: var(--om-social-preview-aspect);
   border-radius: var(--motion-radius-md);
   overflow: hidden;
   background: var(--motion-inset);
 }
 
 .om-step-social-preview-frame[data-aspect="1:1"] {
-  aspect-ratio: 1 / 1;
+  --om-social-preview-aspect: 1 / 1;
 }
 
 .om-step-social-preview-frame[data-aspect="4:5"] {
-  aspect-ratio: 4 / 5;
+  --om-social-preview-aspect: 4 / 5;
 }
 
 .om-step-social-preview-frame[data-aspect="3:4"] {
-  aspect-ratio: 3 / 4;
+  --om-social-preview-aspect: 3 / 4;
 }
 
 .om-step-social-preview-frame[data-aspect="9:16"] {
-  aspect-ratio: 9 / 16;
-  max-height: 260px;
+  --om-social-preview-aspect: 9 / 16;
 }
 
-.om-step-social-preview-frame img {
+.om-step-social-preview-frame > :is(img, video) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  max-height: none;
+  object-fit: contain;
   display: block;
 }
 

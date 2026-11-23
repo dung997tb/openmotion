@@ -156,13 +156,7 @@ export function PoolThumb({
             </Button>
           </div>
         ) : (
-          <>
-            <div className="om-scenario-audio-head">
-              <RemixIcon name="voiceprint-line" size={16} />
-              <span>{t('Audio')}</span>
-            </div>
-            <AssetAudioPreview src={src} onError={() => setFailed(true)} />
-          </>
+          <AssetAudioPreview src={src} onError={() => setFailed(true)} />
         )}
       </div>
     );

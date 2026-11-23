@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StepIteration } from '../../../../shared/scenario-runs';
+import { I18nProvider } from '../../i18n/I18n';
 import { BriefStep } from './BriefStep';
 import { createStepProps, makeBaseRun, mountStep, setFieldValue } from './stepTestHelpers';
 
@@ -138,6 +139,38 @@ describe('BriefStep', () => {
           brief: expect.objectContaining({ productName: 'Old Tote' }),
         }),
       );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('localizes saved brief labels and option values while restoring the original values', async () => {
+    const values = { idea: 'A product reveal', audience: 'Creators', tone: 'premium' };
+    const savedVersion: StepIteration = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      number: 1,
+      createdAt: 1700000000000,
+      source: 'manual',
+      inputs: [],
+      outputs: [{ type: 'brief', values }],
+    };
+    const run = makeBaseRun('motion-full-chain', {
+      steps: { brief: { iterations: [savedVersion], activeIterationId: savedVersion.id } },
+    });
+    const { props, mocks } = createStepProps('motion-full-chain', 'brief', { run });
+    const mounted = await mountStep(
+      <I18nProvider initialLocale="zh-CN"><BriefStep {...props} /></I18nProvider>,
+    );
+
+    try {
+      const version = mounted.container.querySelector('[data-test-iterations]')!;
+      expect(version.querySelector('p')?.textContent).toBe(
+        '核心创意：A product reveal · 目标受众：Creators · 文案语气：高级质感',
+      );
+      await act(async () => { version.querySelector('button')!.click(); });
+      expect(mocks.mutate).toHaveBeenCalledWith('brief-restore', 'update_brief', {
+        brief: expect.objectContaining(values),
+      });
     } finally {
       await mounted.unmount();
     }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { designProjectsFor } from '../design-projects.ts';
@@ -9,9 +9,11 @@ import { verificationBinaries } from '../scripts/verify-export.ts';
 import type { Service } from '../server.ts';
 import { readProjectZip } from '../shared/project-zip.ts';
 import { draftSocialPosts } from '../shared/scenario-content.ts';
+import type { ScenarioRun } from '../shared/scenario-runs.ts';
 import { findScenario } from '../shared/scenarios.ts';
 import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
+import { mediaBytes } from './media-fixtures.ts';
 
 async function makePng(dir: string, name = 'hero.png'): Promise<Buffer> {
   const file = path.join(dir, name);
@@ -205,7 +207,7 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
 
     assert.ok(keys.some(k => k.startsWith(`${prefix}media/images/`) && k.endsWith('.png')), 'media/images/* present');
     assert.ok(
-      keys.some(k => k.startsWith(`${prefix}media/images/brand-mark-`) && k.endsWith('.png')),
+      entries.has(`${prefix}media/images/Brand Mark.png`),
       `Unattached uploaded pool asset expected in full bundle, got: ${keys.join(', ')}`,
     );
     assert.ok(entries.has(`${prefix}social/posts.json`), 'social/posts.json present');
@@ -221,11 +223,10 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
       activeOnly: true,
     });
     const allStepsEntries = readProjectZip(await readFile(allStepsExport.bundle.archivePath));
-    const allStepsKeys = [...allStepsEntries.keys()];
-    const allStepsPrefix = allStepsKeys[0].split('/')[0] + '/';
+    const allStepsPrefix = [...allStepsEntries.keys()][0].split('/')[0] + '/';
     assert.ok(allStepsEntries.has(`${allStepsPrefix}README.md`), 'README.md present when all content steps are selected');
     assert.ok(
-      allStepsKeys.some(k => k.startsWith(`${allStepsPrefix}media/images/brand-mark-`) && k.endsWith('.png')),
+      allStepsEntries.has(`${allStepsPrefix}media/images/Brand Mark.png`),
       'Unattached pool asset present when all content steps are selected',
     );
 
@@ -243,7 +244,7 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
     assert.deepEqual(singleManifest.selection, { poolItemIds: [heroPoolId] });
     assert.equal(singleManifest.pool.length, 1);
     assert.equal(singleKeys.length, 2, `Expected manifest + 1 asset, got: ${singleKeys.join(', ')}`);
-    assert.ok(singleKeys.some(k => k.startsWith(`${singlePrefix}media/images/nova-hero-`)));
+    assert.ok(singleEntries.has(`${singlePrefix}media/images/Nova Hero.png`));
 
     // Focused export: multi-select poolItemIds exports heterogeneous items (image + Design page)
     const pagePoolItem = run.pool.find((item: { kind: string }) => item.kind === 'page');
@@ -261,7 +262,7 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
     assert.ok(!multiEntries.has(`${multiPrefix}README.md`), 'Focused pool export omits README.md');
     assert.ok(!multiKeys.some(k => k.startsWith(`${multiPrefix}brief/`)), 'Focused pool export omits brief/');
     assert.ok(!multiKeys.some(k => k.startsWith(`${multiPrefix}social/`)), 'Focused pool export omits social/');
-    assert.ok(multiKeys.some(k => k.startsWith(`${multiPrefix}media/images/nova-hero-`)));
+    assert.ok(multiEntries.has(`${multiPrefix}media/images/Nova Hero.png`));
     assert.ok(multiKeys.some(k => k.startsWith(`${multiPrefix}web/`) && k.endsWith('/index.html')));
 
     // Unknown poolItemId rejects with POOL_ITEM_NOT_FOUND
@@ -315,4 +316,149 @@ test('scenario bundle export creates valid ZIP with embedded web assets, idempot
     // Unknown bundle id returns 404
     const missingRes = await api('/motion-api/scenarios/bundles/dddddddd-dddd-4ddd-8ddd-dddddddddddd/file');
     assert.equal(missingRes.status, 404);
+
+    posts[0].mediaPoolItemIds = [heroPoolId];
+    run = (await callScenario(api, {
+      command: 'add_iteration',
+      runId: run.id,
+      expectedRevision: run.revision,
+      requestId: 'bundle-social-attach',
+      stepId: 'social',
+      iteration: { source: 'manual', outputs: [{ type: 'social', posts }] },
+    })).run;
+    const writeback = await callScenario(api, {
+      command: 'add_pool',
+      runId: run.id,
+      expectedRevision: run.revision,
+      requestId: 'bundle-social-writeback',
+      recordIteration: true,
+      items: [{
+        ref: { type: 'asset', assetId: extraAsset.id, versionId: extraAsset.currentVersionId },
+        stepId: 'social',
+        source: 'agent',
+      }],
+    });
+    const updatedRun: ScenarioRun = writeback.run;
+    assert.deepEqual(updatedRun.steps.social.iterations.at(-1)?.outputs.map(out => out.type), ['pool']);
+    const afterWriteback = await callScenario(api, {
+      command: 'export',
+      runId: run.id,
+      requestId: 'bundle-export-after-writeback',
+      stepIds: ['social'],
+    });
+    const afterEntries = readProjectZip(await readFile(afterWriteback.bundle.archivePath));
+    const afterPrefix = [...afterEntries.keys()][0].split('/')[0] + '/';
+    assert.deepEqual(JSON.parse(afterEntries.get(`${afterPrefix}social/posts.json`)!.toString()), posts);
+    assert.ok(afterEntries.has(`${afterPrefix}social/posts.md`));
+    for (const post of posts) assert.ok(afterEntries.has(`${afterPrefix}social/${post.platform}.txt`));
+    const afterManifest = JSON.parse(afterEntries.get(`${afterPrefix}manifest.json`)!.toString()) as {
+      pool: { id: string; path?: string }[];
+    };
+    for (const id of [heroPoolId, writeback.poolItemIds[0]]) {
+      const item = afterManifest.pool.find(item => item.id === id);
+      assert.ok(item?.path && afterEntries.has(afterPrefix + item.path), 'attached and written-back images are bundled');
+    }
+  }, false));
+
+test('workflow ZIP uses localized titles, preserves media versions and honors active-only export', () =>
+  fixture(async store => {
+    const api = transport(store, { runtimeRoot: pluginRoot } as Service);
+    let { run }: { run: ScenarioRun } = await callScenario(api, {
+      command: 'create', scenarioId: 'motion-full-chain', requestId: 'soundtrack-bundle-create',
+    });
+    const audio = await mediaBytes('audio');
+    const video = await mediaBytes('video');
+    const items = [
+      { bytes: audio, modality: 'audio', stepId: 'soundtrack', stepTitle: 'Soundtrack', version: 1, ext: 'mp3' },
+      { bytes: audio, modality: 'audio', stepId: 'soundtrack', stepTitle: 'Soundtrack', version: 2, ext: 'mp3' },
+      { bytes: video, modality: 'video', stepId: 'motion-film', stepTitle: 'Motion film', version: 1, ext: 'mp4' },
+    ] as const;
+    for (const { bytes, stepId, stepTitle, version, ext } of items) {
+      const label = `${run.title} · ${stepTitle} v${version}`;
+      const upload = await api(`/motion-api/assets/upload?requestId=media-upload-${stepId}-${version}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(`${label}.${ext}`) },
+        body: new Blob([new Uint8Array(bytes)]),
+      });
+      assert.equal(upload.status, 200);
+      const { asset } = await upload.json();
+      ({ run } = await callScenario(api, {
+        command: 'add_pool', runId: run.id, expectedRevision: run.revision,
+        requestId: `media-iteration-${stepId}-${version}`, recordIteration: true,
+        items: [{
+          ref: { type: 'asset', assetId: asset.id, versionId: asset.currentVersionId },
+          label, stepId, source: 'generated',
+        }],
+      }));
+    }
+    // Emulate a run whose media jobs completed before localized names were introduced.
+    for (const { modality, stepId, version } of items) {
+      const iteration = run.steps[stepId].iterations[version - 1];
+      iteration.job = { jobId: iteration.id, state: 'completed', modality, model: 'fixture:media' };
+    }
+    await writeFile(path.join(store.directory, 'scenarios', 'runs', `${run.id}.json`), JSON.stringify(run));
+    const date = run.title.split(' · ').at(-1);
+    for (const activeOnly of [false, true]) {
+      const { bundle } = await callScenario(api, {
+        command: 'export', runId: run.id, requestId: `soundtrack-bundle-${activeOnly}`, activeOnly, locale: 'zh-CN',
+      });
+      assert.ok(bundle.filename.startsWith(`创意到动效短片 · ${date} · `));
+      const entries = readProjectZip(await readFile(bundle.archivePath));
+      const prefix = `${bundle.filename.slice(0, -4)}/`;
+      const firstTrack = `${prefix}media/audio/创意到动效短片 · ${date} · 配乐与音频 v1.mp3`;
+      assert.deepEqual(entries.get(firstTrack), activeOnly ? undefined : audio);
+      assert.deepEqual(entries.get(`${prefix}media/audio/创意到动效短片 · ${date} · 配乐与音频 v2.mp3`), audio);
+      assert.deepEqual(entries.get(`${prefix}media/video/创意到动效短片 · ${date} · 动效影片 v1.mp4`), video);
+      const download = await api(bundle.downloadUrl, { method: 'HEAD' });
+      assert.equal(decodeURIComponent(download.headers.get('content-disposition')!.split("UTF-8''")[1]), bundle.filename);
+    }
+  }, false));
+
+test('full workflow ZIP keeps the script after saving a brief version and honors a promoted script', () =>
+  fixture(async store => {
+    const api = transport(store, { runtimeRoot: pluginRoot } as Service);
+    let { run } = await callScenario(api, {
+      command: 'create',
+      scenarioId: 'ai-influencer',
+      requestId: 'script-bundle-create',
+    });
+    const stepId = 'brief';
+    const scripts = ['First script.', 'Revised script ready for recording.'];
+    for (const [index, script] of scripts.entries()) {
+      ({ run } = await callScenario(api, {
+        command: 'add_iteration',
+        runId: run.id,
+        expectedRevision: run.revision,
+        requestId: `script-bundle-v${index}`,
+        stepId,
+        iteration: { source: 'manual', outputs: [{ type: 'script', text: script }] },
+      }));
+    }
+    const firstScriptId = run.steps.brief.iterations[0].id;
+    ({ run } = await callScenario(api, {
+      command: 'add_iteration',
+      runId: run.id,
+      expectedRevision: run.revision,
+      requestId: 'script-bundle-save-brief',
+      stepId,
+      iteration: { source: 'manual', outputs: [{ type: 'brief', values: { idea: 'Creative brief' } }] },
+    }));
+
+    async function exportedScript(requestId: string) {
+      const { bundle } = await callScenario(api, { command: 'export', runId: run.id, requestId });
+      const entries = readProjectZip(await readFile(bundle.archivePath));
+      const prefix = [...entries.keys()][0].split('/')[0] + '/';
+      assert.ok(entries.has(`${prefix}brief/brief.md`));
+      return entries.get(`${prefix}brief/script.md`)?.toString();
+    }
+    assert.equal(await exportedScript('script-bundle-latest'), scripts[1]);
+    ({ run } = await callScenario(api, {
+      command: 'promote',
+      runId: run.id,
+      expectedRevision: run.revision,
+      requestId: 'script-bundle-promote',
+      stepId,
+      iterationId: firstScriptId,
+    }));
+    assert.equal(await exportedScript('script-bundle-promoted'), scripts[0]);
   }, false));

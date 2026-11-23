@@ -3,6 +3,7 @@ import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Model } from '../../../../shared/gateway';
 import type { PoolItem, StepIteration } from '../../../../shared/scenario-runs';
+import { I18nProvider } from '../../i18n/I18n';
 import { MediaStep } from './MediaStep';
 import { createStepProps, makeBaseRun, mountStep, setFieldValue } from './stepTestHelpers';
 
@@ -49,6 +50,16 @@ const imageModel: Model = {
   maxInputImages: 4,
 };
 
+const codexImageModel: Model = {
+  id: 'codex:image-generation',
+  provider: 'codex',
+  modelId: 'image-generation',
+  label: 'Codex Image',
+  modality: 'image',
+  source: 'builtin',
+  mode: 'text-to-image',
+};
+
 const videoModel: Model = {
   id: 'fal:wan',
   provider: 'fal',
@@ -75,6 +86,208 @@ afterEach(() => {
 });
 
 describe('MediaStep', () => {
+  it('uses the localized legacy draft in generation without treating a plain blur as an edit', async () => {
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: 'fal', label: 'fal', available: true, enabled: true, configured: true, credentialSource: 'stored', verification: 'verified', reason: 'ok' }],
+          agents: [],
+          routes: { image: imageModel.id },
+          capabilities: [],
+        },
+        models: [imageModel],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+    const run = makeBaseRun('motion-full-chain', {
+      brief: { concept: '秋季上新', visualStyle: '极简', aspect: '9:16' },
+      steps: { storyboard: { draft: { prompt: 'Storyboard frame for 秋季上新: 极简, 9:16 composition' } } },
+    });
+    const { props, mocks } = createStepProps('motion-full-chain', 'storyboard', { run });
+    const mounted = await mountStep(<I18nProvider initialLocale="zh-CN"><MediaStep {...props} /></I18nProvider>);
+
+    try {
+      const field = mounted.container.querySelector<HTMLTextAreaElement>('#media-prompt-storyboard')!;
+      expect(field.value).toContain('生成一张分镜画面。\n影片概念：秋季上新\n风格描述：极简');
+      await act(async () => { field.focus(); field.blur(); });
+      expect(mocks.mutate).not.toHaveBeenCalled();
+      const generate = Array.from(mounted.container.querySelectorAll('button')).find(button => button.textContent?.trim() === '生成')!;
+      await act(async () => { generate.click(); });
+      expect(mocks.mutate).toHaveBeenCalledWith('generate:storyboard', 'generate', expect.objectContaining({
+        prompt: field.value,
+        parameters: { image_size: 'portrait_16_9', num_images: 1 },
+      }));
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('uses the brief aspect for Codex Image and allows an explicit storyboard choice', async () => {
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: 'codex', label: 'Codex', available: true, enabled: true, configured: true, credentialSource: 'local-agent', verification: 'unverified', reason: 'ready' }],
+          agents: [],
+          routes: { image: codexImageModel.id },
+          capabilities: [],
+        },
+        models: [codexImageModel],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+
+    const run = makeBaseRun('motion-full-chain', { brief: { concept: 'New season', aspect: '9:16' } });
+    const { props, mocks } = createStepProps('motion-full-chain', 'storyboard', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+    try {
+      const aspect = mounted.container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Aspect ratio"]')!;
+      const generate = [...mounted.container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Generate')!;
+      expect(aspect.textContent).toBe('9:16');
+      await act(async () => { generate.click(); });
+      expect(mocks.mutate).toHaveBeenLastCalledWith('generate:storyboard', 'generate', expect.objectContaining({
+        parameters: { aspect_ratio: '9:16' },
+      }));
+
+      const updatedRun = { ...run, brief: { ...run.brief, aspect: '16:9' } };
+      await mounted.rerender(<MediaStep {...props} run={updatedRun} />);
+      expect(aspect.textContent).toBe('16:9');
+
+      await act(async () => { aspect.click(); });
+      const square = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === '1:1')!;
+      await act(async () => { square.click(); });
+      expect(aspect.textContent).toBe('1:1');
+      await act(async () => { generate.click(); });
+      expect(mocks.mutate).toHaveBeenLastCalledWith('generate:storyboard', 'generate', expect.objectContaining({
+        parameters: { aspect_ratio: '1:1' },
+      }));
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it.each(['account', 'opendesign'] as const)('submits the %s soundtrack slider value with the current prompt', async provider => {
+    const musicModel: Model = {
+      id: `${provider}:elevenlabs-music-v2`,
+      provider,
+      modelId: 'elevenlabs-music-v2',
+      label: 'ElevenLabs Music',
+      modality: 'audio',
+      source: 'builtin',
+      mode: 'text-to-audio',
+    };
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: provider, label: 'OpenDesign', available: true, enabled: true, configured: true, credentialSource: 'account', verification: 'verified', reason: 'ok', mediaEntitlement: 'included' }],
+          agents: [],
+          routes: { audio: musicModel.id },
+          capabilities: [],
+        },
+        models: [musicModel],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+    const { props, mocks } = createStepProps('motion-full-chain', 'soundtrack');
+    const mounted = await mountStep(<I18nProvider initialLocale="zh-CN"><MediaStep {...props} /></I18nProvider>);
+
+    try {
+      const duration = mounted.container.querySelector<HTMLInputElement>('.om-duration-track input[type="range"]')!;
+      const readout = mounted.container.querySelector('.om-duration-readout')!;
+      const prompt = mounted.container.querySelector<HTMLTextAreaElement>('#media-prompt-soundtrack')!;
+      const generate = [...mounted.container.querySelectorAll('button')].find(button => button.textContent?.trim() === '生成')!;
+      const expectSubmission = (seconds: number, text: string) => {
+        expect(mocks.mutate).toHaveBeenLastCalledWith('generate:soundtrack', 'generate', expect.objectContaining({
+          model: musicModel.id,
+          mode: 'text-to-audio',
+          locale: 'zh-CN',
+          parameters: provider === 'account' ? { duration: seconds } : { music_length_ms: seconds * 1000 },
+          prompt: text,
+        }));
+      };
+      expect(duration.getAttribute('aria-label')).toBe('时长（秒）');
+      expect(duration.min).toBe('3');
+      expect(duration.max).toBe('60');
+      await act(async () => { generate.click(); });
+      expectSubmission(3, '创作一段配乐。');
+
+      const customPrompt = '轻快的钢琴配乐';
+      await act(async () => { setFieldValue(prompt, customPrompt); });
+      for (const seconds of [4, 5, 6, 7]) {
+        await act(async () => { duration.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+        expect(readout.textContent).toBe(`${seconds}秒`);
+        await act(async () => { generate.click(); });
+        expectSubmission(seconds, customPrompt);
+      }
+      const tenSeconds = [...mounted.container.querySelectorAll<HTMLButtonElement>('.om-duration-tick')].find(button => button.textContent === '10')!;
+      await act(async () => { tenSeconds.click(); });
+      await act(async () => { generate.click(); });
+      expectSubmission(10, customPrompt);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('uses the video model range on the slider and keeps fixed-duration model choices', async () => {
+    const continuous: Model = {
+      ...videoModel, id: 'account:seedance', provider: 'account', modelId: 'seedance', label: 'Continuous Video',
+      supportsImageReference: true, nativeOptions: { durations: { values: [4, 5, 6, 7, 8, 9], default: 5 } },
+    };
+    const discrete: Model = {
+      ...continuous, id: 'account:fixed', modelId: 'fixed', label: 'Fixed-duration Video',
+      nativeOptions: { durations: { values: [5, 10], default: 5 } },
+    };
+    mockUseMediaCatalog.mockReturnValue({
+      catalog: {
+        status: {
+          providers: [{ id: 'account', label: 'OpenDesign', available: true, mediaEntitlement: 'included' }],
+          agents: [],
+          routes: { video: continuous.id },
+          capabilities: [],
+        },
+        models: [continuous, discrete],
+      },
+      failed: false,
+      retry: vi.fn(),
+    });
+    const run = makeBaseRun('motion-full-chain', {
+      pool: [imagePoolItem],
+      steps: { 'motion-film': { bindings: { firstFrame: [imagePoolItem.id] }, draft: { prompt: 'A moving title' } } },
+    });
+    const { props, mocks } = createStepProps('motion-full-chain', 'motion-film', { run });
+    const mounted = await mountStep(<MediaStep {...props} />);
+    try {
+      const slider = mounted.container.querySelector<HTMLInputElement>('.om-duration-track input[type="range"]')!;
+      expect(slider.getAttribute('aria-label')).toBe('Duration (seconds)');
+      expect(slider.min).toBe('4');
+      expect(slider.max).toBe('9');
+      expect(slider.value).toBe('5');
+      await act(async () => { slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+      const generate = [...mounted.container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Generate')!;
+      await act(async () => { generate.click(); });
+      expect(mocks.mutate).toHaveBeenLastCalledWith('generate:motion-film', 'generate', expect.objectContaining({
+        model: continuous.id, parameters: { duration: 6 }, prompt: 'A moving title', referencePoolItemIds: [imagePoolItem.id],
+      }));
+
+      const modelPicker = mounted.container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Model"]')!;
+      await act(async () => { modelPicker.click(); });
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.includes(discrete.label))!;
+      await act(async () => { option.click(); });
+      expect(mounted.container.querySelector('.om-duration-track input[type="range"]')).toBeNull();
+      const fixedChoices = [...mounted.container.querySelectorAll<HTMLButtonElement>('.om-option-pill')];
+      expect(fixedChoices.map(item => item.textContent)).toEqual(['5s', '10s']);
+      await act(async () => { fixedChoices[1].click(); });
+      await act(async () => { generate.click(); });
+      expect(mocks.mutate).toHaveBeenLastCalledWith('generate:motion-film', 'generate', expect.objectContaining({
+        model: discrete.id, parameters: { duration: 10 },
+      }));
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('shows provider-setup panel and hides Generate button when no compatible models are available', async () => {
     mockUseMediaCatalog.mockReturnValue({
       catalog: { status: { providers: [], agents: [], routes: {}, capabilities: [] }, models: [] },
@@ -197,6 +410,8 @@ describe('MediaStep', () => {
 
     try {
       const fileInput = mounted.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      expect(fileInput.accept).toBe('.png,.jpg,.jpeg,.webp,.gif,.avif');
+      expect(mounted.container.textContent).toContain('Supported formats · PNG, JPG, JPEG, WebP, GIF, AVIF');
       const file = new File(['png-bytes'], 'product.png', { type: 'image/png' });
       Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] });
       await act(async () => {
@@ -610,7 +825,7 @@ describe('MediaStep', () => {
         model: imageModel.id,
         prompt: 'Storyboard frame for hello: sssss, composition',
         scene: 'text-to-image',
-        parameters: { image_size: 'landscape_4_3', num_images: 1 },
+        parameters: { image_size: 'landscape_16_9', num_images: 1 },
       });
       expect((retryCall?.[2] as { parameters?: Record<string, unknown> })?.parameters).not.toHaveProperty('aspect_ratio');
     } finally {

@@ -1,12 +1,17 @@
 // Run after build:studio with node --experimental-strip-types --test tests/studio-responsive-browser.ts.
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import puppeteer, { type Page } from 'puppeteer-core';
 import { browserExecutable } from '../browser.ts';
+import { AssetLibrary } from '../gateway/asset-library.ts';
+import { scenarioRunsFor } from '../gateway/scenario-runs.ts';
 import { gatewayFor } from '../gateway/service.ts';
 import { startServer } from '../server.ts';
 import { editorProjectIdFromPath } from '../shared/spa-routes.ts';
 import { fixture } from './fixtures.ts';
+import { mediaBytes } from './media-fixtures.ts';
 
 async function checkCreator(page: Page, stacked: boolean) {
   const geometry = await page.$eval('.om-creator-pane', pane => {
@@ -104,6 +109,106 @@ test('Explore is home and project navigation stays in the workspace', { timeout:
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForSelector('.motion-timeline-icon-controls', { visible: true });
       assert.ok(await page.waitForSelector('.om-project-navigation:not([inert])', { visible: true }));
+    } finally { await browser.close(); await running.close(); }
+  });
+});
+
+test('Narrow workflows keep rounded card corners and scroll the full form', { timeout: 60_000 }, async () => {
+  await fixture(async store => {
+    const running = await startServer(store, 0, { editor: true });
+    const browser = await puppeteer.launch({ executablePath: await browserExecutable(), headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.evaluateOnNewDocument(() => {
+        localStorage.setItem('motion.studio.locale', 'zh-CN');
+        localStorage.setItem('hf-studio-ui-preferences', JSON.stringify({ theme: 'system' }));
+      });
+      const url = new URL('/?page=scenario&scenario=motion-full-chain', (await running.info()).previewUrl);
+      for (const [width, height, theme] of [[390, 740, 'light'], [695, 763, 'dark'], [899, 730, 'light']] as const) {
+        await page.setViewport({ width, height });
+        await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: theme }]);
+        await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('.om-scenario-card-footer', { visible: true });
+        await page.evaluate(() => document.fonts.ready);
+        assert.ok(await page.$eval('.om-scenario-workbench', card => {
+          const { left, right, top } = card.getBoundingClientRect();
+          return [left + 2, right - 2].every(x => !card.contains(document.elementFromPoint(x, top + 2)));
+        }), `The card header stays inside the rounded corners at ${width}px`);
+        assert.ok(await page.evaluate(() => {
+          const form = document.querySelector('.om-scenario-step-frame')!.getBoundingClientRect();
+          const footer = document.querySelector('.om-scenario-card-footer')!.getBoundingClientRect();
+          return form.bottom <= footer.top + 1;
+        }), `The footer follows the entire form at ${width}px`);
+
+        await page.mouse.move(width - 30, height - 60);
+        await page.mouse.wheel({ deltaY: height * 2 });
+        await page.waitForFunction(() => {
+          const body = document.querySelector('.om-scenario-body')!;
+          const footer = document.querySelector('.om-scenario-card-footer')!;
+          return body.scrollTop > 0 && footer.getBoundingClientRect().bottom <= body.getBoundingClientRect().bottom;
+        }, { timeout: 5_000 });
+        await page.click('.om-scenario-primary-cta');
+        await page.waitForSelector('[data-step-frame="storyboard"]');
+      }
+    } finally { await browser.close(); await running.close(); }
+  });
+});
+
+test('Workflow asset cards keep audio controls inside the thumbnail', { timeout: 60_000 }, async () => {
+  await fixture(async store => {
+    const source = path.join(store.directory, 'track.mp3');
+    await writeFile(source, await mediaBytes('audio'));
+    const asset = await new AssetLibrary(store).importFile(source, { requestId: 'audio-card-asset', name: 'Track' });
+    const { run } = await scenarioRunsFor(store).create({ requestId: 'audio-card-run', scenarioId: 'motion-full-chain' });
+    const running = await startServer(store, 0, { editor: true });
+    const browser = await puppeteer.launch({ executablePath: await browserExecutable(), headless: true });
+    try {
+      const origin = (await running.info()).previewUrl;
+      const response = await fetch(new URL('/motion-api/phase1/call', origin), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: new URL(origin).origin },
+        body: JSON.stringify({
+          name: 'openmotion_assets_use',
+          arguments: {
+            action: 'scenario',
+            scenario: {
+              command: 'add_pool',
+              runId: run.id,
+              expectedRevision: run.revision,
+              requestId: 'audio-card-pool',
+              items: [{ ref: { type: 'asset', assetId: asset.id, versionId: asset.currentVersionId }, source: 'upload' }],
+            },
+          },
+        }),
+      });
+      assert.equal(response.status, 200, await response.text());
+      const page = await browser.newPage();
+      const url = new URL(`/?page=scenario&scenario=motion-full-chain&run=${run.id}`, origin);
+      for (const [width, theme] of [[390, 'light'], [761, 'dark'], [1440, 'dark']] as const) {
+        await page.setViewport({ width, height: 760 });
+        await page.emulateMediaFeatures([
+          { name: 'prefers-color-scheme', value: theme },
+          { name: 'prefers-reduced-motion', value: 'reduce' },
+        ]);
+        await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+        const toggleSelector = width >= 1100 ? '.om-scenario-pool-desktop-toggle' : '.om-scenario-pool-toggle';
+        const toggle = await page.waitForSelector(toggleSelector, { visible: true, timeout: 5000 });
+        if (await toggle!.evaluate(button => button.getAttribute('aria-expanded')) === 'false') await toggle!.click();
+        await page.waitForSelector('.om-scenario-thumb--audio audio', { visible: true });
+        await page.waitForFunction(() => {
+          const audio = document.querySelector<HTMLAudioElement>('.om-scenario-thumb--audio audio');
+          return audio && Number.isFinite(audio.duration);
+        });
+        assert.ok(await page.$eval('.om-scenario-pool-card[data-kind="audio"]', card => {
+          const player = card.querySelector<HTMLAudioElement>('audio')!;
+          const bounds = player.getBoundingClientRect();
+          const preview = card.querySelector('.om-scenario-thumb--audio')!.getBoundingClientRect();
+          const details = card.querySelector('.om-scenario-pool-card-body')!.getBoundingClientRect();
+          return player.controls && bounds.height > 0 && bounds.top >= preview.top
+            && bounds.left >= preview.left && bounds.right <= preview.right
+            && bounds.bottom <= preview.bottom && bounds.bottom <= details.top;
+        }), `The player and timestamps fit inside the audio card at ${width}px`);
+      }
     } finally { await browser.close(); await running.close(); }
   });
 });

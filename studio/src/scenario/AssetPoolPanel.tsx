@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { assetMediaUrl, type AssetReference, type LibraryAsset } from '../../../shared/asset-library';
+import { assetDownloadUrl, assetUploadAccept, type AssetReference, type LibraryAsset } from '../../../shared/asset-library';
 import { findDesignScenario, type DesignProject } from '../../../shared/design-project';
 import type { PoolItem, PoolRef, ScenarioBundleReceipt, ScenarioRun } from '../../../shared/scenario-runs';
 import type { PoolKind, ScenarioDefinition, ScenarioStepDefinition } from '../../../shared/scenarios';
@@ -15,6 +15,7 @@ import { Popover } from '../components/ui/Popover';
 import { Skeleton } from '../components/ui/Skeleton';
 import { designClient } from '../design/designClient';
 import type { useToast } from '../hooks/useToast';
+import { assetUploadFormatsHint, assetUploadMessage, recordAssetUploadFailure, type AssetUploadSummary } from '../i18n/assetUploadMessages';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { AssetPicker } from '../motion/AssetBrowser';
@@ -22,7 +23,7 @@ import { uploadLibraryAsset } from '../motion/assetClient';
 import { useOptionalWorkspaceChrome } from '../motion/WorkspaceChromeContext';
 import { downloadText } from './scenarioClient';
 import { PoolItemPreviewDialog, PoolThumb, resolvePoolTextContent } from './PoolItemPreview';
-import { isScenarioConflictError } from './steps/stepUtils';
+import { isScenarioConflictError, triggerUrlDownload } from './steps/stepUtils';
 
 export type PoolPickRequest = {
   slot: string;
@@ -73,6 +74,8 @@ export type AssetPoolPanelProps = {
 const MAX_POOL_ADD_BATCH = 50;
 
 type KindFilter = 'all' | PoolKind;
+type PoolFilters = { kind: KindFilter; steps: string[] };
+const EMPTY_POOL_FILTERS: PoolFilters = { kind: 'all', steps: [] };
 
 const KIND_FILTERS: readonly { id: KindFilter; label: string; icon: string }[] = [
   { id: 'all', label: 'All', icon: 'stack-line' },
@@ -157,11 +160,15 @@ export function AssetPoolPanel({
   toast,
 }: AssetPoolPanelProps) {
   const { t } = useI18n();
+  const uploadHintId = useId();
+  const uploadHint = assetUploadFormatsHint(t);
   const chrome = useOptionalWorkspaceChrome();
   const layoutMode = usePoolLayoutMode();
 
-  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
-  const [stepFilters, setStepFilters] = useState<string[]>([]);
+  const [browseFilters, setBrowseFilters] = useState(EMPTY_POOL_FILTERS);
+  const [pickFilters, setPickFilters] = useState(EMPTY_POOL_FILTERS);
+  const { kind: kindFilter, steps: stepFilters } = pickRequest ? pickFilters : browseFilters;
+  const setFilters = pickRequest ? setPickFilters : setBrowseFilters;
   const [uploading, setUploading] = useState(false);
   const [importingProjects, setImportingProjects] = useState(false);
   const [fileDragActive, setFileDragActive] = useState(false);
@@ -174,14 +181,15 @@ export function AssetPoolPanel({
   const [selectedDesignIds, setSelectedDesignIds] = useState<string[]>([]);
   const [motionPickerOpen, setMotionPickerOpen] = useState(false);
   const [selectedMotionIds, setSelectedMotionIds] = useState<string[]>([]);
-  const [previewItem, setPreviewItem] = useState<PoolItem | null>(null);
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const previewItem = items.find(item => item.id === previewItemId) ?? null;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [draftPickIds, setDraftPickIds] = useState<string[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
   const [exportPopoverOpen, setExportPopoverOpen] = useState(false);
-  const [exportActiveOnly, setExportActiveOnly] = useState(true);
+  const [exportActiveOnly, setExportActiveOnly] = useState(false);
   const [exportStandaloneHtml, setExportStandaloneHtml] = useState(true);
   const [exportMotionSource, setExportMotionSource] = useState(false);
 
@@ -191,6 +199,7 @@ export function AssetPoolPanel({
 
   // Sync draft selection when pick mode activates or changes.
   useEffect(() => {
+    setPickFilters(EMPTY_POOL_FILTERS);
     if (pickRequest) {
       setDraftPickIds(pickRequest.selected);
       setSelectionMode(false);
@@ -250,17 +259,17 @@ export function AssetPoolPanel({
     [scenario.steps],
   );
 
-  // Items eligible under pickRequest (if active) + step filter.
+  const eligibleItems = useMemo(
+    () => pickRequest ? items.filter(item => pickRequest.kinds.includes(item.kind)) : items,
+    [items, pickRequest],
+  );
+  const eligibleIds = useMemo(() => new Set(eligibleItems.map(item => item.id)), [eligibleItems]);
+  const selectedPickIds = draftPickIds.filter(id => eligibleIds.has(id)).slice(0, pickRequest?.max);
+
   const stepFilteredItems = useMemo(() => {
-    return items.filter(item => {
-      if (pickRequest && !pickRequest.kinds.includes(item.kind)) {
-        return false;
-      }
-      if (stepFilters.length === 0) return true;
-      const key = item.stepId ?? MANUAL_STEP_KEY;
-      return stepFilters.includes(key);
-    });
-  }, [items, pickRequest, stepFilters]);
+    if (stepFilters.length === 0) return eligibleItems;
+    return eligibleItems.filter(item => stepFilters.includes(item.stepId ?? MANUAL_STEP_KEY));
+  }, [eligibleItems, stepFilters]);
 
   const kindCounts = useMemo(() => {
     const counts: Record<KindFilter, number> = {
@@ -280,14 +289,13 @@ export function AssetPoolPanel({
 
   const stepCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of items) {
-      if (pickRequest && !pickRequest.kinds.includes(item.kind)) continue;
+    for (const item of eligibleItems) {
       if (kindFilter !== 'all' && item.kind !== kindFilter) continue;
       const key = item.stepId ?? MANUAL_STEP_KEY;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;
-  }, [items, kindFilter, pickRequest]);
+  }, [eligibleItems, kindFilter]);
 
   const visibleItems = useMemo(() => {
     const matched = stepFilteredItems.filter(item =>
@@ -299,6 +307,10 @@ export function AssetPoolPanel({
     });
   }, [kindFilter, stepFilteredItems]);
 
+  const setKindFilter = (kind: KindFilter) => setFilters(prev => ({ ...prev, kind }));
+  const setStepFilters = (update: string[] | ((prev: string[]) => string[])) => {
+    setFilters(prev => ({ ...prev, steps: typeof update === 'function' ? update(prev.steps) : update }));
+  };
   const setStepFilter = (key: string, checked: boolean) => {
     setStepFilters(prev => {
       if (checked) return prev.includes(key) ? prev : [...prev, key];
@@ -312,10 +324,7 @@ export function AssetPoolPanel({
     );
   };
 
-  const clearAllFilters = () => {
-    setKindFilter('all');
-    setStepFilters([]);
-  };
+  const clearAllFilters = () => setFilters(EMPTY_POOL_FILTERS);
 
   const addItemsBatched = useCallback(
     async (
@@ -339,12 +348,12 @@ export function AssetPoolPanel({
   );
 
   const uploadFilesToPool = async (files: File[]) => {
-    if (files.length === 0) return;
+    if (uploading || files.length === 0) return;
 
     setUploading(true);
     try {
       const toAdd: { ref: PoolRef; label: string; stepId: null; source: 'upload' }[] = [];
-      let failedCount = 0;
+      const summary: AssetUploadSummary = { uploaded: 0, failed: 0, unknown: 0, reasons: new Set() };
 
       for (const file of files) {
         try {
@@ -359,23 +368,21 @@ export function AssetPoolPanel({
             stepId: null,
             source: 'upload',
           });
-        } catch {
-          failedCount += 1;
+        } catch (error) {
+          recordAssetUploadFailure(summary, file, error);
         }
       }
 
       if (toAdd.length > 0) {
         await addItemsBatched(toAdd);
+        summary.uploaded = toAdd.length;
+      }
+      if (summary.failed || summary.unknown) {
+        toast.showToast(assetUploadMessage(summary), 'error', 'feedback');
+      } else {
         toast.showToast(
           t('Added {count} file(s) to assets', { count: toAdd.length }),
           'info',
-          'feedback',
-        );
-      }
-      if (failedCount > 0) {
-        toast.showToast(
-          t('{count} file(s) could not be uploaded', { count: failedCount }),
-          'error',
           'feedback',
         );
       }
@@ -518,13 +525,7 @@ export function AssetPoolPanel({
   const handleDownloadItem = async (item: PoolItem) => {
     try {
       if (item.ref.type === 'asset') {
-        const href = `${assetMediaUrl(item.ref.assetId, item.ref.versionId)}?download`;
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = item.label;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+        triggerUrlDownload(assetDownloadUrl(item.ref.assetId, item.ref.versionId, item.label));
       } else if (item.ref.type === 'design') {
         await designClient.downloadExport(item.ref.projectId, {
           format: 'zip',
@@ -642,16 +643,17 @@ export function AssetPoolPanel({
   const togglePickItem = (itemId: string) => {
     if (!pickRequest) return;
     setDraftPickIds(prev => {
-      if (prev.includes(itemId)) {
-        return prev.filter(id => id !== itemId);
+      const selected = prev.filter(id => eligibleIds.has(id)).slice(0, pickRequest.max);
+      if (selected.includes(itemId)) {
+        return selected.filter(id => id !== itemId);
       }
       if (pickRequest.max === 1) {
         return [itemId];
       }
-      if (pickRequest.max && prev.length >= pickRequest.max) {
-        return prev;
+      if (pickRequest.max && selected.length >= pickRequest.max) {
+        return selected;
       }
-      return [...prev, itemId];
+      return [...selected, itemId];
     });
   };
 
@@ -740,9 +742,10 @@ export function AssetPoolPanel({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,video/*,audio/*"
+        accept={assetUploadAccept()}
         className="om-scenario-hidden-file-input"
         aria-label={t('Upload files to assets')}
+        aria-describedby={items.length === 0 ? uploadHintId : undefined}
         onChange={event => void handleFileUpload(event)}
       />
 
@@ -752,7 +755,7 @@ export function AssetPoolPanel({
             <RemixIcon name="stack-line" size={14} />
           </span>
           <h2 className="om-scenario-pool-title">{t('Assets')}</h2>
-          <span className="om-badge">{items.length}</span>
+          <span className="om-badge">{pickRequest ? visibleItems.length : items.length}</span>
         </div>
         <div className="om-scenario-pool-header-actions">
           <Menu
@@ -778,9 +781,12 @@ export function AssetPoolPanel({
           >
             <MenuItem
               icon={<RemixIcon name="upload-2-line" size={14} />}
+              aria-label={t('Upload files…')}
+              aria-describedby={`${uploadHintId}-menu`}
               onClick={() => fileInputRef.current?.click()}
             >
               {t('Upload files…')}
+              <span id={`${uploadHintId}-menu`} className="om-scenario-pool-upload-hint om-scenario-pool-upload-hint--menu">{uploadHint}</span>
             </MenuItem>
             <MenuItem
               icon={<RemixIcon name="folder-open-line" size={14} />}
@@ -1074,9 +1080,9 @@ export function AssetPoolPanel({
               variant="primary"
               size="sm"
               type="button"
-              onClick={() => onConfirmPick(draftPickIds)}
+              onClick={() => onConfirmPick(selectedPickIds)}
             >
-              {t('Use {count} selected', { count: draftPickIds.length })}
+              {t('Use {count} selected', { count: selectedPickIds.length })}
             </Button>
             <Button variant="ghost" size="sm" type="button" onClick={onCancelPick}>
               {t('Cancel')}
@@ -1268,6 +1274,8 @@ export function AssetPoolPanel({
                 size="sm"
                 type="button"
                 icon={<RemixIcon name="upload-2-line" size={14} />}
+                loading={uploading}
+                aria-describedby={uploadHintId}
                 onClick={() => fileInputRef.current?.click()}
               >
                 {t('Upload files')}
@@ -1282,6 +1290,7 @@ export function AssetPoolPanel({
                 {t('Pick from workspace')}
               </Button>
             </div>
+            <p id={uploadHintId} className="om-scenario-pool-upload-hint om-scenario-pool-upload-hint--empty">{uploadHint}</p>
           </div>
         ) : visibleItems.length === 0 ? (
           <div className="om-scenario-pool-empty">
@@ -1299,10 +1308,13 @@ export function AssetPoolPanel({
             )}
           </div>
         ) : (
-          <div className="om-scenario-pool-grid">
+          <div
+            className="om-scenario-pool-grid"
+            data-image-picker={pickRequest?.kinds.length === 1 && pickRequest.kinds[0] === 'image' ? true : undefined}
+          >
             {visibleItems.map(item => {
               const isHighlighted = highlightedIds.has(item.id);
-              const isSelectedForPick = draftPickIds.includes(item.id);
+              const isSelectedForPick = selectedPickIds.includes(item.id);
               const isSelectedForExport = !pickRequest && selectedExportSet.has(item.id);
               const isCardSelected = pickRequest ? isSelectedForPick : isSelectedForExport;
               const pickLimitReached =
@@ -1310,7 +1322,7 @@ export function AssetPoolPanel({
                 pickRequest.max !== undefined &&
                 pickRequest.max > 1 &&
                 !isSelectedForPick &&
-                draftPickIds.length >= pickRequest.max;
+                selectedPickIds.length >= pickRequest.max;
               const canUse = presentation !== 'inline' && currentStep.accepts.includes(item.kind);
               const stepTitle = item.stepId ? stepTitleMap.get(item.stepId) : null;
               const sourceBadge = stepTitle
@@ -1447,7 +1459,7 @@ export function AssetPoolPanel({
                           )}
                           <MenuItem
                             icon={<RemixIcon name="eye-line" size={14} />}
-                            onClick={() => setPreviewItem(item)}
+                            onClick={() => setPreviewItemId(item.id)}
                           >
                             {t('Preview')}
                           </MenuItem>
@@ -1794,7 +1806,7 @@ export function AssetPoolPanel({
           Boolean(previewItem && currentStep.accepts.includes(previewItem.kind))
         }
         canDownloadMotion={Boolean(onExportBundle)}
-        onClose={() => setPreviewItem(null)}
+        onClose={() => setPreviewItemId(null)}
         onUseInCurrentStep={item => void onUseInCurrentStep(item)}
         onDownload={item => void handleDownloadItem(item)}
         onOpen={handleOpenItem}

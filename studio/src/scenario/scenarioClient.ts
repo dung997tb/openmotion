@@ -144,6 +144,7 @@ export const scenarioClient = {
     parameters?: Record<string, unknown>;
     referencePoolItemIds?: string[];
     scene?: string;
+    locale?: string;
   }) =>
     scenarioRequest<{ run: ScenarioRun; job: Record<string, unknown>; iteration: StepIteration }>('generate', args),
 
@@ -202,6 +203,7 @@ export const scenarioClient = {
   export: (args: {
     runId: string;
     requestId: string;
+    locale?: string;
     stepIds?: string[];
     poolItemIds?: string[];
     activeOnly?: boolean;

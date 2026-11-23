@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { assetMediaUrl } from '../../../../shared/asset-library';
 import { designRoutes } from '../../../../shared/design-project';
 import { draftSocialPosts, socialPostsMarkdown } from '../../../../shared/scenario-content';
-import type { PoolItem, SocialPost, StepIteration } from '../../../../shared/scenario-runs';
+import { findOutputIteration, type PoolItem, type SocialPost, type StepIteration } from '../../../../shared/scenario-runs';
 import { socialPlatforms, type SocialPlatformId } from '../../../../shared/scenarios';
 import { MenuItem, Select } from '../../components/ui';
 import { FilterChip } from '../../components/ui/FilterChip';
 import { FieldInput, FieldTextarea } from '../../components/ui/FormField';
+import { VideoFrameThumbnail } from '../../components/ui/VideoFrameThumbnail';
+import { useNearViewport } from '../../hooks/useNearViewport';
 import { useI18n } from '../../i18n/I18n';
 import { RemixIcon } from '../../icons/RemixIcons';
 import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
@@ -17,6 +19,7 @@ import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
 import { SocialPlatformGlyph } from './SocialPlatformGlyph';
 import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
+import { StepVideoPreview } from './StepVideoPreview';
 import {
   briefStringValue,
   buildStepAgentPrompt,
@@ -60,6 +63,10 @@ function formatSinglePostText(post: SocialPost): string {
 }
 
 function MediaMiniThumb({ item }: { item: PoolItem }) {
+  const { t } = useI18n();
+  const [thumbnail, setThumbnail] = useState<HTMLDivElement | null>(null);
+  const nearViewport = useNearViewport(thumbnail);
+
   if (item.ref.type === 'asset' && item.kind === 'image') {
     return (
       <img
@@ -70,11 +77,33 @@ function MediaMiniThumb({ item }: { item: PoolItem }) {
       />
     );
   }
+  if (item.ref.type === 'asset' && item.kind === 'video') {
+    const src = assetMediaUrl(item.ref.assetId, item.ref.versionId);
+    return (
+      <div ref={setThumbnail} className="om-step-social-media-thumb" role="img" aria-label={item.label}>
+        {nearViewport && <VideoFrameThumbnail key={src} src={src} fallbackLabel={t('Preview unavailable')} />}
+      </div>
+    );
+  }
   return (
     <span className="om-step-social-media-icon" aria-hidden="true">
       <RemixIcon name={poolKindIcon(item.kind)} size={16} />
     </span>
   );
+}
+
+function SocialImagePreview({ src, label }: { src: string; label: string }) {
+  const { t } = useI18n();
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="om-step-inline-error" role="status">
+        <span>{t('Preview unavailable')}</span>
+        <Button variant="ghost" size="sm" onClick={() => setFailed(false)}>{t('Retry')}</Button>
+      </div>
+    );
+  }
+  return <img src={src} alt={label} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 export function SocialPackStep({
@@ -122,20 +151,7 @@ export function SocialPackStep({
     (typeof state.draft.link === 'string' && state.draft.link) || defaultPagePreviewLink(run),
   );
 
-  const activeIteration = useMemo(() => {
-    if (state.activeIterationId) {
-      const activeIter = state.iterations.find(
-        iter => iter.id === state.activeIterationId && iter.outputs.some(out => out.type === 'social'),
-      );
-      if (activeIter) return activeIter;
-    }
-    for (let i = state.iterations.length - 1; i >= 0; i -= 1) {
-      if (state.iterations[i].outputs.some(out => out.type === 'social')) {
-        return state.iterations[i];
-      }
-    }
-    return undefined;
-  }, [state.iterations, state.activeIterationId]);
+  const activeIteration = findOutputIteration(state, 'social');
 
   const iterVariant = useMemo(() => {
     const raw = activeIteration?.settings?.variant;
@@ -369,6 +385,8 @@ export function SocialPackStep({
           <div className="om-step-field">
             <span className="om-step-field-label">{t('Copy tone')}</span>
             <Select
+              appearance="boxed"
+              className="om-step-input"
               label={t('Copy tone')}
               value={tone}
               options={TONE_OPTIONS.map(opt => ({ value: opt.value, label: t(opt.label) }))}
@@ -471,6 +489,9 @@ export function SocialPackStep({
               .map(id => pool.byId.get(id))
               .filter((item): item is PoolItem => Boolean(item));
             const leadMedia = mediaItems[0];
+            const leadSrc = leadMedia?.ref.type === 'asset'
+              ? assetMediaUrl(leadMedia.ref.assetId, leadMedia.ref.versionId)
+              : null;
 
             return (
               <article key={post.id} className="om-step-card om-step-social-card" data-social-platform={post.platform}>
@@ -638,12 +659,10 @@ export function SocialPackStep({
                   </div>
                   {leadMedia && (
                     <div className="om-step-social-preview-frame" data-aspect={post.aspect}>
-                      {leadMedia.ref.type === 'asset' && leadMedia.kind === 'image' ? (
-                        <img
-                          src={assetMediaUrl(leadMedia.ref.assetId, leadMedia.ref.versionId)}
-                          alt={leadMedia.label}
-                          loading="lazy"
-                        />
+                      {leadSrc && leadMedia.kind === 'image' ? (
+                        <SocialImagePreview key={leadSrc} src={leadSrc} label={leadMedia.label} />
+                      ) : leadSrc && leadMedia.kind === 'video' ? (
+                        <StepVideoPreview key={leadSrc} src={leadSrc} active={active} label={leadMedia.label} />
                       ) : (
                         <span className="om-step-slot-icon">
                           <RemixIcon name={poolKindIcon(leadMedia.kind)} size={20} />

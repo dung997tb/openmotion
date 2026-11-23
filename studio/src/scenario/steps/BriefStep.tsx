@@ -1,9 +1,10 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { briefMarkdown, scriptOutline } from '../../../../shared/scenario-content';
-import type { StepIteration } from '../../../../shared/scenario-runs';
-import { fillScenarioTemplate, type ScenarioBriefField } from '../../../../shared/scenarios';
+import { scenarioStepPrompt } from '../../../../shared/scenario-prompts';
+import { findOutputIteration, type StepIteration } from '../../../../shared/scenario-runs';
+import type { ScenarioBriefField } from '../../../../shared/scenarios';
 import { MenuItem, Select } from '../../components/ui';
 import { CoverPlaceholder } from '../../components/ui/CoverPlaceholder';
 import { FilterChip } from '../../components/ui/FilterChip';
@@ -15,8 +16,10 @@ import { gemini4Videos } from '../../motion/gemini4Videos';
 import { findModelHub } from '../../motion/modelHubs';
 import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { useMediaCatalog } from '../../motion/useMediaCatalog';
+import { briefSnapshot, formatBriefFieldValue } from '../briefVersion';
 import { downloadText } from '../scenarioClient';
 import type { StepProps } from '../stepContract';
+import { cleanBriefForSave, useBriefAutosave } from '../useBriefAutosave';
 import type { BriefPreset } from './briefPresets';
 import { BriefPromptComposer } from './BriefPromptComposer';
 import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
@@ -27,8 +30,6 @@ import {
   extractErrorMessage,
   isScenarioConflictError,
 } from './stepUtils';
-
-const AUTOSAVE_DELAY_MS = 800;
 
 function initialBriefValues(
   fields: readonly ScenarioBriefField[],
@@ -51,33 +52,6 @@ function initialBriefValues(
   return next;
 }
 
-function cleanBriefForSave(
-  fields: readonly ScenarioBriefField[],
-  values: Record<string, string | string[]>,
-): Record<string, string | string[]> {
-  const out: Record<string, string | string[]> = {};
-  for (const field of fields) {
-    const val = values[field.id];
-    if (field.kind === 'list' || field.kind === 'multi') {
-      out[field.id] = Array.isArray(val) ? val.map(v => v.trim()).filter(Boolean) : [];
-    } else {
-      out[field.id] = typeof val === 'string' ? val : '';
-    }
-  }
-  return out;
-}
-
-function findActiveScript(iterations: readonly StepIteration[], activeIterationId: string | null): string {
-  const active = iterations.find(iter => iter.id === activeIterationId);
-  const activeOut = active?.outputs.find((out): out is { type: 'script'; text: string } => out.type === 'script');
-  if (activeOut) return activeOut.text;
-  for (let i = iterations.length - 1; i >= 0; i -= 1) {
-    const out = iterations[i].outputs.find((item): item is { type: 'script'; text: string } => item.type === 'script');
-    if (out) return out.text;
-  }
-  return '';
-}
-
 function InspirationPoster({ src, title }: { src: string; title: string }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) return <CoverPlaceholder fill />;
@@ -93,6 +67,7 @@ export function BriefStep({
   api,
   pool,
   toast,
+  briefSaveRef,
   nav,
   renderExportMenu,
   renderIterations,
@@ -115,14 +90,15 @@ export function BriefStep({
   const [geminiExpanded, setGeminiExpanded] = useState(false);
   const dirtyFieldsRef = useRef<Set<string>>(new Set());
   const activeFieldRef = useRef<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestValuesRef = useRef(values);
   latestValuesRef.current = values;
 
   // Script state for AI Influencer
   const activeScriptFromRun = useMemo(
-    () => (isAiInfluencer ? findActiveScript(state.iterations, state.activeIterationId) : ''),
-    [isAiInfluencer, state.iterations, state.activeIterationId],
+    () => (isAiInfluencer
+      ? findOutputIteration(state, 'script')?.outputs.find(out => out.type === 'script')?.text ?? ''
+      : ''),
+    [isAiInfluencer, state],
   );
   const [scriptText, setScriptText] = useState(activeScriptFromRun);
   const [scriptExpanded, setScriptExpanded] = useState(() => Boolean(activeScriptFromRun.trim()));
@@ -169,65 +145,9 @@ export function BriefStep({
     });
   }, [run?.brief, run?.revision, scenario.briefFields]);
 
-  const flushBriefSave = useCallback(async (patchOverride?: Record<string, string | string[]>) => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    const keysToSend = patchOverride
-      ? Object.keys(patchOverride)
-      : Array.from(dirtyFieldsRef.current);
-    if (!keysToSend.length) return;
-
-    const snapshot = patchOverride ?? latestValuesRef.current;
-    const fieldsById = new Map(scenario.briefFields.map(field => [field.id, field]));
-    const patch: Record<string, string | string[]> = {};
-    for (const key of keysToSend) {
-      const field = fieldsById.get(key);
-      if (!field) continue;
-      const raw = snapshot[key];
-      if (field.kind === 'list' || field.kind === 'multi') {
-        patch[key] = Array.isArray(raw) ? raw.map(v => v.trim()).filter(Boolean) : [];
-      } else {
-        patch[key] = typeof raw === 'string' ? raw : '';
-      }
-    }
-    if (!Object.keys(patch).length) return;
-
-    try {
-      await api.mutate('brief-autosave', 'update_brief', { brief: patch });
-      for (const key of Object.keys(patch)) {
-        const current = latestValuesRef.current[key];
-        const sent = patch[key];
-        const currentClean = Array.isArray(current) ? current.map(v => v.trim()).filter(Boolean) : current;
-        if (JSON.stringify(currentClean) === JSON.stringify(sent)) {
-          dirtyFieldsRef.current.delete(key);
-        }
-      }
-    } catch {
-      // Conflicts are reported by useScenarioRun; keep dirty fields intact so edits are preserved.
-    }
-  }, [api, scenario.briefFields]);
-
-  const flushBriefSaveRef = useRef(flushBriefSave);
-  flushBriefSaveRef.current = flushBriefSave;
-
-  useEffect(() => () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (dirtyFieldsRef.current.size > 0) {
-      void flushBriefSaveRef.current();
-    }
-  }, []);
-
-  const scheduleAutosave = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      void flushBriefSave();
-    }, AUTOSAVE_DELAY_MS);
-  }, [flushBriefSave]);
+  const { flushBrief: flushBriefSave, flushInBackground, scheduleAutosave } = useBriefAutosave(
+    scenario.briefFields, api.mutate, dirtyFieldsRef, latestValuesRef, briefSaveRef,
+  );
 
   const updateField = (fieldId: string, value: string | string[]) => {
     dirtyFieldsRef.current.add(fieldId);
@@ -299,13 +219,13 @@ export function BriefStep({
   // Downstream prompts
   const downstreamSteps = useMemo(
     () => scenario.steps
-      .filter((s): s is typeof s & { promptTemplate: string } => Boolean(s.promptTemplate))
+      .filter(s => s.promptTemplate)
       .map(s => ({
         step: s,
-        filled: fillScenarioTemplate(s.promptTemplate, values),
+        filled: scenarioStepPrompt(scenario, s, values, locale),
         userEdited: Boolean(run?.steps[s.id]?.draft?.promptEdited),
       })),
-    [scenario.steps, values, run?.steps],
+    [scenario, values, run?.steps, locale],
   );
 
   const [applyingPrompts, setApplyingPrompts] = useState(false);
@@ -317,7 +237,7 @@ export function BriefStep({
         if (entry.userEdited || !entry.filled) continue;
         await api.mutate(`seed-prompt:${entry.step.id}`, 'update_step', {
           stepId: entry.step.id,
-          draft: { prompt: entry.filled },
+          draft: { prompt: entry.filled, promptLocale: locale },
         });
         updatedCount += 1;
       }
@@ -494,7 +414,7 @@ export function BriefStep({
             onFocus={() => { activeFieldRef.current = field.id; }}
             onBlur={() => {
               activeFieldRef.current = null;
-              if (dirtyFieldsRef.current.size > 0) void flushBriefSave();
+              if (dirtyFieldsRef.current.size > 0) flushInBackground();
             }}
             onChange={e => updateField(field.id, e.target.value)}
           />
@@ -512,7 +432,7 @@ export function BriefStep({
             onFocus={() => { activeFieldRef.current = field.id; }}
             onBlur={() => {
               activeFieldRef.current = null;
-              if (dirtyFieldsRef.current.size > 0) void flushBriefSave();
+              if (dirtyFieldsRef.current.size > 0) flushInBackground();
             }}
             onChange={e => updateField(field.id, e.target.value)}
           />
@@ -598,7 +518,7 @@ export function BriefStep({
   };
 
   return (
-    <div className="om-step-body" data-step-body="brief">
+    <div className="om-step-body" data-step-body="brief" inert={api.busy.has('create-new-run')}>
       {renderExportMenu(exportMenuExtras)}
 
       {editorMode === 'guided' ? (
@@ -612,7 +532,7 @@ export function BriefStep({
           onFocusField={fieldId => {
             activeFieldRef.current = fieldId;
             if (fieldId === null && dirtyFieldsRef.current.size > 0) {
-              void flushBriefSave();
+              flushInBackground();
             }
           }}
           onApplyPreset={handleApplyPreset}
@@ -947,16 +867,17 @@ export function BriefStep({
 
       {state.iterations.length > 0 && renderIterations({
         renderOutput: (iteration: StepIteration) => {
-          const briefOut = iteration.outputs.find(
-            (out): out is { type: 'brief'; values: Record<string, string | string[]> } => out.type === 'brief',
-          );
+          const savedBrief = briefSnapshot(iteration);
           const scriptOut = iteration.outputs.find(
             (out): out is { type: 'script'; text: string } => out.type === 'script',
           );
-          if (briefOut) {
-            const entries = Object.entries(briefOut.values)
-              .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
-              .filter(line => !line.endsWith(': '))
+          if (savedBrief) {
+            const listFormat = new Intl.ListFormat(locale, { style: 'short', type: 'unit' });
+            const entries = scenario.briefFields
+              .flatMap(field => {
+                const value = formatBriefFieldValue(field, savedBrief[field.id], t, listFormat);
+                return value ? [t('{label}: {value}', { label: t(field.label), value })] : [];
+              })
               .slice(0, 3);
             return (
               <div className="om-step-iter-text">
@@ -964,7 +885,7 @@ export function BriefStep({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => void handleRestoreBrief(briefOut.values)}
+                  onClick={() => void handleRestoreBrief(savedBrief)}
                 >
                   {t('Restore')}
                 </Button>

@@ -5,6 +5,8 @@ import { DesignError, type DesignAssetResolver, type DesignProjects } from '../d
 import { atomicJson, jsonFile } from '../phase1-versions.ts';
 import { withProcessLock } from '../shared/process-lock.ts';
 import { applyImageToHtml, scenarioStarterPage, type EmbedImageTarget } from '../shared/scenario-content.ts';
+import { generatedScenarioMediaName } from '../shared/scenario-media-names.ts';
+import { isAutomaticScenarioPrompt, scenarioStepPrompt } from '../shared/scenario-prompts.ts';
 import {
   SCENARIO_LIMITS,
   type IterationOutput,
@@ -17,7 +19,6 @@ import {
   type StepIteration,
 } from '../shared/scenario-runs.ts';
 import {
-  fillScenarioTemplate,
   findScenario,
   findScenarioStep,
   scenarioCategories,
@@ -413,14 +414,14 @@ export class ScenarioRuns {
     }
   }
 
-  private seedPrompts(run: ScenarioRun, scenario: ScenarioDefinition) {
+  private seedPrompts(run: ScenarioRun, scenario: ScenarioDefinition, previousBrief: ScenarioRun['brief']) {
     for (const stepDef of scenario.steps) {
       if (!stepDef.promptTemplate) continue;
       const state = run.steps[stepDef.id];
-      if (!state || state.iterations.length > 0 || state.draft.promptEdited) continue;
-      const filled = fillScenarioTemplate(stepDef.promptTemplate, run.brief);
+      if (!state || state.iterations.length > 0 || !isAutomaticScenarioPrompt(scenario, stepDef, previousBrief, state.draft)) continue;
+      const filled = scenarioStepPrompt(scenario, stepDef, run.brief, run.locale);
       if (filled) {
-        state.draft = { ...state.draft, prompt: filled };
+        state.draft = { ...state.draft, prompt: filled, promptLocale: run.locale };
       }
     }
   }
@@ -636,8 +637,8 @@ export class ScenarioRuns {
       for (const stepDef of scenario.steps) {
         const draft: Record<string, unknown> = {};
         if (stepDef.promptTemplate) {
-          const seeded = fillScenarioTemplate(stepDef.promptTemplate, brief);
-          if (seeded) draft.prompt = seeded;
+          const seeded = scenarioStepPrompt(scenario, stepDef, brief, locale);
+          if (seeded) Object.assign(draft, { prompt: seeded, promptLocale: locale });
         }
         steps[stepDef.id] = {
           stepId: stepDef.id,
@@ -711,8 +712,9 @@ export class ScenarioRuns {
       { expectedRevision: input.expectedRevision, brief: input.brief },
       (run, scenario) => {
         const validated = validateBriefPatch(scenario, input.brief);
-        run.brief = { ...run.brief, ...validated };
-        this.seedPrompts(run, scenario);
+        const previousBrief = run.brief;
+        run.brief = { ...previousBrief, ...validated };
+        this.seedPrompts(run, scenario, previousBrief);
         return { run };
       },
     );
@@ -1104,6 +1106,7 @@ export class ScenarioRuns {
       parameters?: Record<string, unknown>;
       referencePoolItemIds?: string[];
       scene?: string;
+      locale?: string;
     },
     host: ScenarioHost,
   ): Promise<{ run: ScenarioRun; job: any; iteration: StepIteration }> {
@@ -1122,6 +1125,7 @@ export class ScenarioRuns {
         parameters: input.parameters,
         referencePoolItemIds: input.referencePoolItemIds,
         scene: input.scene,
+        locale: input.locale,
       },
       async (snapshot, scenario) => {
         const stepDef = this.requireStep(scenario, input.stepId);
@@ -1143,6 +1147,9 @@ export class ScenarioRuns {
         }
 
         const nextNumber = (stepState.iterations.at(-1)?.number ?? 0) + 1;
+        const name = input.modality === 'image'
+          ? `${snapshot.title} · ${stepDef.title} v${nextNumber}`
+          : generatedScenarioMediaName(snapshot.title, scenario.title, stepDef.title, nextNumber, input.locale ?? snapshot.locale);
         let assetResult;
         try {
           assetResult = await host.assets({
@@ -1153,7 +1160,7 @@ export class ScenarioRuns {
             ...(input.mode ? { mode: input.mode } : {}),
             prompt: input.prompt,
             ...(input.parameters ? { parameters: input.parameters } : {}),
-            name: `${snapshot.title} · ${stepDef.title} v${nextNumber}`.slice(0, 200),
+            name: name.slice(0, 200),
             ...(references.length ? { references } : {}),
           });
         } catch (error) {
@@ -1763,6 +1770,7 @@ export class ScenarioRuns {
     input: {
       runId: string;
       requestId: string;
+      locale?: string;
       stepIds?: string[];
       poolItemIds?: string[];
       activeOnly?: boolean;
@@ -1776,6 +1784,7 @@ export class ScenarioRuns {
     try {
       const bundle = await buildScenarioBundle(this.dataDirectory, host, run, scenario, {
         requestId: input.requestId,
+        locale: input.locale,
         stepIds: input.stepIds,
         poolItemIds: input.poolItemIds,
         activeOnly: input.activeOnly,

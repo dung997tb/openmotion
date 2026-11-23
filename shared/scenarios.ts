@@ -68,7 +68,7 @@ export type ScenarioStepDefinition = {
   skills?: readonly ScenarioSkillRef[];
   /** image | video: generator scenes; the first one is the default. */
   scenes?: readonly StudioScene['id'][];
-  /** image | video | audio: English template with {field} placeholders seeded from the brief. */
+  /** Identifies prompt inputs and recognizes defaults from drafts saved before localization. */
   promptTemplate?: string;
   audioModes?: readonly ('speech' | 'music')[];
   page?: {
