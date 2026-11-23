@@ -179,7 +179,8 @@
     "Target scale": "目标倍率",
     "4K Ultra HD": "4K 超清",
     "2x Crisp HD": "2x 高清增强",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "选择一张图片，智能放大并锐化至清晰 4K 分辨率。"
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "选择一张图片，智能放大并锐化至清晰 4K 分辨率。",
+    "Choose an audio or video asset.": "请选择音频或视频素材。"
   },
   "ja": {
     "Soundscape": "音楽・効果音",
@@ -361,7 +362,8 @@
     "Target scale": "目標倍率",
     "4K Ultra HD": "4K 超高精細",
     "2x Crisp HD": "2倍 高精細",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "画像アセットを鮮明な4K解像度に高精細化します。"
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "画像アセットを鮮明な4K解像度に高精細化します。",
+    "Choose an audio or video asset.": "音声または動画アセットを選択してください。"
   },
   "ko": {
     "Soundscape": "음악 및 효과음",
@@ -543,7 +545,8 @@
     "Target scale": "목표 배율",
     "4K Ultra HD": "4K 초고화질",
     "2x Crisp HD": "2배 선명한 HD",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "이미지 자산을 선명한 4K 해상도로 업스케일합니다."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "이미지 자산을 선명한 4K 해상도로 업스케일합니다.",
+    "Choose an audio or video asset.": "오디오 또는 비디오 에셋을 선택하세요."
   },
   "de": {
     "Soundscape": "Musik & SFX",
@@ -728,7 +731,8 @@
     "Target scale": "Zielskalierung",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x Scharfes HD",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Ein Bild scharf auf 4K-Auflösung hochskalieren."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Ein Bild scharf auf 4K-Auflösung hochskalieren.",
+    "Choose an audio or video asset.": "Bitte ein Audio- oder Video-Asset auswählen."
   },
   "fr": {
     "Soundscape": "Musique & SFX",
@@ -913,7 +917,8 @@
     "Target scale": "Facteur d’échelle",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x HD net",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Agrandir et affiner une image en résolution 4K nette."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Agrandir et affiner une image en résolution 4K nette.",
+    "Choose an audio or video asset.": "Choisissez une ressource audio ou vidéo."
   },
   "ru": {
     "Soundscape": "Музыка и SFX",
@@ -1100,7 +1105,8 @@
     "Target scale": "Масштаб увеличения",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x Чёткий HD",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Увеличить и повысить резкость изображения до 4K."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Увеличить и повысить резкость изображения до 4K.",
+    "Choose an audio or video asset.": "Выберите аудио- или видеоматериал."
   },
   "es": {
     "Soundscape": "Música y SFX",
@@ -1285,7 +1291,8 @@
     "Target scale": "Escala objetivo",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x HD nítido",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Escalar y enfocar una imagen a resolución 4K nítida."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Escalar y enfocar una imagen a resolución 4K nítida.",
+    "Choose an audio or video asset.": "Elige un recurso de audio o video."
   },
   "pt-BR": {
     "Soundscape": "Música e SFX",
@@ -1470,7 +1477,8 @@
     "Target scale": "Escala de destino",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x HD nítido",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Ampliar e dar nitidez a uma imagem em resolução 4K."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Ampliar e dar nitidez a uma imagem em resolução 4K.",
+    "Choose an audio or video asset.": "Escolha um recurso de áudio ou vídeo."
   },
   "it": {
     "Soundscape": "Musica e SFX",
@@ -1655,7 +1663,8 @@
     "Target scale": "Scala di destinazione",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x HD nitido",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Ingrandisci e rendi nitida un’immagine in risoluzione 4K."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Ingrandisci e rendi nitida un’immagine in risoluzione 4K.",
+    "Choose an audio or video asset.": "Scegli una risorsa audio o video."
   },
   "tr": {
     "Soundscape": "Müzik ve SFX",
@@ -1837,6 +1846,7 @@
     "Target scale": "Hedef ölçek",
     "4K Ultra HD": "4K Ultra HD",
     "2x Crisp HD": "2x Net HD",
-    "Upscale and sharpen an image asset to crisp 4K resolution.": "Bir görseli net 4K çözünürlüğe yükseltin ve keskinleştirin."
+    "Upscale and sharpen an image asset to crisp 4K resolution.": "Bir görseli net 4K çözünürlüğe yükseltin ve keskinleştirin.",
+    "Choose an audio or video asset.": "Bir ses veya video öğesi seçin."
   }
 }

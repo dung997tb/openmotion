@@ -1,3 +1,4 @@
+import { buildCapabilityParameters } from '../shared/capability-registry.ts';
 import type { OmTracking } from '../shared/tracking.ts';
 import path from 'node:path';
 import type { WorkspaceStore } from '../workspace.ts';
@@ -29,17 +30,23 @@ export async function assetOperation(
   }
   if (args.action === 'generate') {
     if (!args.requestId || !args.model) throw new Error('Choose a model and supply a stable requestId');
+    let effectiveOptions = args.capabilityOptions;
+    let effectiveParameters = args.parameters;
     if (typeof args.capabilityId === 'string' && args.capabilityId.trim()) {
-      await preflightAssetCapabilityGenerate(store, args, tracking, channel);
+      const preflight = await preflightAssetCapabilityGenerate(store, args, tracking, channel);
+      if (Object.keys(preflight.options).length) effectiveOptions = preflight.options;
+      if (preflight.capability.executor.kind === 'dedicated-model' || preflight.capability.executor.kind === 'prompt-preset') {
+        effectiveParameters = buildCapabilityParameters(preflight.capability, preflight.options, args.parameters ?? {});
+      }
     }
     await requireNativeRuntime(pluginRoot, 'media');
     const job = await gateway.submit({ modality: args.modality, prompt: args.prompt, model: args.model, mode: args.mode,
-      idempotencyKey: args.requestId, parameters: args.parameters,
+      idempotencyKey: args.requestId, parameters: effectiveParameters,
       ...(args.capabilityId ? { capabilityId: args.capabilityId } : {}),
-      ...(args.capabilityOptions ? { capabilityOptions: args.capabilityOptions } : {}),
+      ...(effectiveOptions ? { capabilityOptions: effectiveOptions } : {}),
       library: { assetId: args.assetId, title: args.name, parentVersionId: args.parentVersionId,
         ...(args.capabilityId ? { capabilityId: args.capabilityId } : {}),
-        ...(args.capabilityOptions ? { capabilityOptions: args.capabilityOptions } : {}),
+        ...(effectiveOptions ? { capabilityOptions: effectiveOptions } : {}),
         references: args.references, conversationId: args.conversationId } });
     return { job, next: { action: 'status', jobId: job.id } };
   }

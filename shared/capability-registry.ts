@@ -832,15 +832,30 @@ export function capabilitySupportsModel(capability: CapabilityDefinition, model:
   return false;
 }
 
+export function resolveCapabilityOptions(
+  capability: CapabilityDefinition,
+  options: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const controls = capability.input.controls ?? [];
+  const resolved: Record<string, unknown> = { ...options };
+  for (const control of controls) {
+    if (resolved[control.key] === undefined) {
+      resolved[control.key] = defaultCapabilityControlChoice(control).value;
+    }
+  }
+  return resolved;
+}
+
 export function buildCapabilityParameters(
   capability: CapabilityDefinition,
   options: Record<string, unknown> = {},
   extraParameters: Record<string, unknown> = {},
 ): Record<string, unknown> {
   if (capability.executor.kind === 'dedicated-model') {
+    const effectiveOptions = resolveCapabilityOptions(capability, options);
     const mapped: Record<string, unknown> = { ...(capability.executor.defaultParameters ?? {}) };
     const keyMap = capability.executor.optionToParameter ?? {};
-    for (const [key, value] of Object.entries(options)) {
+    for (const [key, value] of Object.entries(effectiveOptions)) {
       if (value !== undefined) mapped[keyMap[key] ?? key] = value;
     }
     return { ...mapped, ...extraParameters };

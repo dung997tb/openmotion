@@ -21,7 +21,7 @@ import { useWorkspaceChrome } from './WorkspaceFrame';
 import { useMediaCatalog } from './useMediaCatalog';
 import type { StudioCreation } from './CreativeWorkspace';
 import { studioExamples } from './sceneShowcase';
-import { buildCapabilityParameters, buildCapabilityPrompt, defaultCapabilities, defaultCapabilityControlChoice, findCapability } from '../../../shared/capability-registry';
+import { buildCapabilityParameters, buildCapabilityPrompt, defaultCapabilities, defaultCapabilityControlChoice, findCapability, resolveCapabilityOptions } from '../../../shared/capability-registry';
 import { isFeatureScene, needsImage, sceneFeature, sceneVideoFeature } from './creativeStudios';
 import { imageFeaturePrompt, imageFeatures, relightControls, type RelightChoices } from '../../../shared/image-features';
 import { videoFeatureParameters, videoFeaturePrompt, videoFeatures } from '../../../shared/video-features';
@@ -245,12 +245,15 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
         : feature ? imageFeaturePrompt(feature, draft.prompt, draft.relight)
         : videoFeature ? videoFeaturePrompt(videoFeature, draft.prompt, draft.videoChoices)
         : draft.prompt;
+      const effectiveCapabilityOptions = activeCapability
+        ? resolveCapabilityOptions(activeCapability, mergedCapabilityOptions)
+        : mergedCapabilityOptions;
       const submittedParameters = activeCapability
-        ? buildCapabilityParameters(activeCapability, mergedCapabilityOptions, { ...parsed, ...featureRule?.parameters })
+        ? buildCapabilityParameters(activeCapability, effectiveCapabilityOptions, { ...parsed, ...featureRule?.parameters })
         : { ...parsed, ...featureRule?.parameters };
       const result = await assetRequest<{ job: GenerationJob }>({ action: 'generate', requestId: crypto.randomUUID(), modality: draft.modality, prompt, model: selected.id, mode: selected.mode, parameters: submittedParameters,
         ...(activeCapability ? { capabilityId: activeCapability.id } : {}),
-        ...(Object.keys(mergedCapabilityOptions).length ? { capabilityOptions: mergedCapabilityOptions } : {}),
+        ...(Object.keys(effectiveCapabilityOptions).length ? { capabilityOptions: effectiveCapabilityOptions } : {}),
         ...(draft.target ? { assetId: draft.target.asset.id, parentVersionId: draft.target.versionId } : {}), references: draft.references.map(r => r.reference) });
       if (mounted.current) {
         setDraft(current => current === draft ? { ...current, model: selected.id, parameters: parsed } : current);

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ToolInputError } from '../shared/tool-input-error.ts';
 import type { OmTracking } from '../shared/tracking.ts';
 import type { WorkspaceStore } from '../workspace.ts';
-import type { AssetReference } from '../shared/asset-library.ts';
+import type { AssetReference, AssetVersion, LibraryAsset } from '../shared/asset-library.ts';
 import { mediaProviders, modelReferenceLimit, type Modality, type Model } from '../shared/gateway.ts';
 import { generationOptions, resolveGenerationParameters, validateGenerationOptions } from '../shared/generation-options.ts';
 import {
@@ -14,6 +14,7 @@ import {
   findCapability,
   listCapabilitiesForChannel,
   resolveCapabilityCatalog,
+  resolveCapabilityOptions,
   type CapabilityCostTier,
   type CapabilityDefinition,
   type CapabilityOverride,
@@ -202,13 +203,39 @@ function selectCompatibleModels(
   });
 }
 
+type ScriptReceipt = {
+  inputHash: string;
+  assetId: string;
+  status?: 'pending' | 'completed';
+  versionId?: string;
+};
+
+type ScriptExecutionResult = {
+  capabilityId: string;
+  executorKind: 'script';
+  costTier: CapabilityCostTier;
+  asset: LibraryAsset;
+  version: AssetVersion;
+};
+
+const inFlightScriptRuns = new Map<string, Promise<ScriptExecutionResult>>();
+
+async function readScriptReceipt(receiptPath: string): Promise<ScriptReceipt | undefined> {
+  return readFile(receiptPath, 'utf8').then(
+    raw => JSON.parse(raw) as ScriptReceipt,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err;
+      return undefined;
+    },
+  );
+}
+
 function validateCapabilityOptions(capability: CapabilityDefinition, options: unknown): Record<string, unknown> {
-  if (options === undefined) return {};
-  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+  if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options))) {
     throw new ToolInputError('options must be an object', 'options', 'invalid_type');
   }
   const controls = capability.input.controls ?? [];
-  const record = options as Record<string, unknown>;
+  const record = (options ?? {}) as Record<string, unknown>;
   if (controls.length > 0) {
     for (const [key, value] of Object.entries(record)) {
       const control = controls.find(item => item.key === key);
@@ -218,7 +245,7 @@ function validateCapabilityOptions(capability: CapabilityDefinition, options: un
       }
     }
   }
-  return record;
+  return resolveCapabilityOptions(capability, record);
 }
 
 export async function capabilityDiscover(
@@ -561,54 +588,98 @@ export async function capabilityRun(
         references,
       });
       const receiptPath = path.join(library.root, 'requests', `${assetHash(`script:${args.requestId}`)}.json`);
-      const existingReceipt = await readFile(receiptPath, 'utf8').then(
-        raw => JSON.parse(raw) as { inputHash: string; assetId: string; versionId?: string },
-        (err: NodeJS.ErrnoException) => {
-          if (err.code !== 'ENOENT') throw err;
-          return undefined;
-        },
-      );
-      if (existingReceipt) {
-        if (existingReceipt.inputHash !== inputHash) {
-          throw new Error('REQUEST_ID_CONFLICT: requestId was already used with different capability inputs');
+      const workspaceLock = store.workspaceStore ?? store;
+      const reservation = await workspaceLock.lock(async () => {
+        const existingReceipt = await readScriptReceipt(receiptPath);
+        if (existingReceipt) {
+          if (existingReceipt.inputHash !== inputHash) {
+            throw new Error('REQUEST_ID_CONFLICT: requestId was already used with different capability inputs');
+          }
+          const saved = await library.get(existingReceipt.assetId).catch(() => undefined);
+          const priorVersion = saved?.versions.find(v => v.requestId === args.requestId);
+          if (saved && priorVersion) {
+            return {
+              kind: 'replayed' as const,
+              result: {
+                capabilityId: cap.id,
+                executorKind: 'script' as const,
+                costTier: cap.costTier,
+                asset: saved,
+                version: priorVersion,
+                replayed: true,
+              },
+            };
+          }
+          if (existingReceipt.status === 'pending') {
+            const inFlight = inFlightScriptRuns.get(receiptPath);
+            if (inFlight) {
+              return { kind: 'wait' as const, promise: inFlight };
+            }
+          }
         }
-        const saved = await library.get(existingReceipt.assetId).catch(() => undefined);
-        const priorVersion = saved?.versions.find(v => v.requestId === args.requestId);
-        if (saved && priorVersion) {
-          return {
-            capabilityId: cap.id,
-            executorKind: 'script' as const,
-            costTier: cap.costTier,
-            asset: saved,
-            version: priorVersion,
-            replayed: true,
-          };
-        }
-      }
-      const resolvedRefs = await Promise.all(
-        references.map(async ref => {
-          const item = await library.resolve(ref);
-          return { assetId: ref.assetId, versionId: ref.versionId, filename: item.filename };
-        }),
-      );
-      const output = await handler({
-        store,
-        capability: cap,
-        requestId: args.requestId,
-        prompt: rawPrompt,
-        options,
-        parameters: args.parameters ?? {},
-        references: resolvedRefs,
+        const targetAssetId = existingReceipt?.assetId ?? args.assetId ?? crypto.randomUUID();
+        await atomicAssetJson(receiptPath, {
+          inputHash,
+          assetId: targetAssetId,
+          status: 'pending',
+        } satisfies ScriptReceipt);
+        let resolveInFlight!: (value: ScriptExecutionResult) => void;
+        let rejectInFlight!: (reason?: unknown) => void;
+        const gate = new Promise<ScriptExecutionResult>((resolve, reject) => {
+          resolveInFlight = resolve;
+          rejectInFlight = reject;
+        });
+        gate.catch(() => {});
+        inFlightScriptRuns.set(receiptPath, gate);
+        return {
+          kind: 'run' as const,
+          targetAssetId,
+          gate,
+          resolveInFlight,
+          rejectInFlight,
+        };
       });
+
+      if (reservation.kind === 'replayed') return reservation.result;
+      if (reservation.kind === 'wait') {
+        const completed = await reservation.promise;
+        return { ...completed, replayed: true };
+      }
+
       try {
-        const prepared = await library.prepare(output.sourcePath);
+        const resolvedRefs = await Promise.all(
+          references.map(async ref => {
+            const item = await library.resolve(ref);
+            return { assetId: ref.assetId, versionId: ref.versionId, filename: item.filename };
+          }),
+        );
+        const output = await handler({
+          store,
+          capability: cap,
+          requestId: args.requestId,
+          prompt: rawPrompt,
+          options,
+          parameters: args.parameters ?? {},
+          references: resolvedRefs,
+        });
+        let prepared: Awaited<ReturnType<AssetLibrary['prepare']>> | undefined;
         try {
-          const asset = await (store.workspaceStore ?? store).lock(async () => {
-            const targetAssetId = existingReceipt?.assetId ?? args.assetId ?? crypto.randomUUID();
-            await atomicAssetJson(receiptPath, { inputHash, assetId: targetAssetId });
-            return library.addLocked(prepared, {
+          prepared = await library.prepare(output.sourcePath);
+          const committed = await workspaceLock.lock(async () => {
+            const latestReceipt = await readScriptReceipt(receiptPath);
+            if (latestReceipt && latestReceipt.inputHash !== inputHash) {
+              throw new Error('REQUEST_ID_CONFLICT: requestId was already used with different capability inputs');
+            }
+            if (latestReceipt) {
+              const saved = await library.get(latestReceipt.assetId).catch(() => undefined);
+              const priorVersion = saved?.versions.find(v => v.requestId === args.requestId);
+              if (saved && priorVersion) {
+                return { asset: saved, version: priorVersion, replayed: true };
+              }
+            }
+            const asset = await library.addLocked(prepared!, {
               assetId: args.assetId,
-              createId: targetAssetId,
+              createId: latestReceipt?.assetId ?? reservation.targetAssetId,
               name: args.name || output.name || cap.title,
               expectedModality: cap.modality === '3d' ? undefined : cap.modality,
               version: {
@@ -625,22 +696,44 @@ export async function capabilityRun(
                 conversationId: args.conversationId,
               },
             });
+            const version = asset.versions.find(v => v.requestId === args.requestId) ?? asset.versions[asset.versions.length - 1];
+            await atomicAssetJson(receiptPath, {
+              inputHash,
+              assetId: asset.id,
+              status: 'completed',
+              versionId: version.id,
+            } satisfies ScriptReceipt);
+            return { asset, version, replayed: false };
           });
-          const version = asset.versions.find(v => v.requestId === args.requestId) ?? asset.versions[asset.versions.length - 1];
-          return {
+          const result: ScriptExecutionResult = {
             capabilityId: cap.id,
-            executorKind: 'script' as const,
+            executorKind: 'script',
             costTier: cap.costTier,
-            asset,
-            version,
+            asset: committed.asset,
+            version: committed.version,
           };
+          reservation.resolveInFlight(result);
+          return committed.replayed ? { ...result, replayed: true } : result;
         } finally {
-          await rm(prepared.file, { force: true }).catch(() => {});
+          if (prepared) await rm(prepared.file, { force: true }).catch(() => {});
           await output.cleanup?.();
         }
       } catch (error) {
-        await output.cleanup?.();
+        await workspaceLock.lock(async () => {
+          const latestReceipt = await readScriptReceipt(receiptPath).catch(() => undefined);
+          if (latestReceipt?.status === 'pending' && latestReceipt.inputHash === inputHash) {
+            const saved = await library.get(latestReceipt.assetId).catch(() => undefined);
+            if (!saved?.versions.some(v => v.requestId === args.requestId)) {
+              await rm(receiptPath, { force: true }).catch(() => {});
+            }
+          }
+        }).catch(() => {});
+        reservation.rejectInFlight(error);
         throw error;
+      } finally {
+        if (inFlightScriptRuns.get(receiptPath) === reservation.gate) {
+          inFlightScriptRuns.delete(receiptPath);
+        }
       }
     }
 
@@ -727,32 +820,51 @@ export async function capabilityRun(
       throw new Error(`CAPABILITY_UNAVAILABLE: No configured provider/model is ready for capability ${cap.id}`);
     }
 
+    if (args.mode !== undefined) {
+      if (!['text-to-image', 'text-to-video', 'text-to-audio', 'text-to-speech'].includes(args.mode)) {
+        throw new ToolInputError('Unsupported generation mode', 'mode', 'invalid_enum');
+      }
+      if (args.mode !== `text-to-${cap.modality}` && !(cap.modality === 'audio' && args.mode === 'text-to-speech')) {
+        throw new ToolInputError('Generation mode does not match modality', 'mode', 'invalid_enum');
+      }
+    }
+    const executorMode =
+      cap.executor.kind === 'model' || cap.executor.kind === 'prompt-preset' || cap.executor.kind === 'dedicated-model'
+        ? cap.executor.mode
+        : undefined;
+    const requestedMode = args.mode ?? executorMode;
+    if (['account', 'opendesign'].includes(chosen.provider) && requestedMode && requestedMode !== chosen.mode) {
+      throw new Error(`CAPABILITY_MODEL_INCOMPATIBLE: Generation mode ${requestedMode} does not match the selected ${chosen.provider === 'account' ? 'account' : 'Cloud'} model`);
+    }
+    const resolvedModel: Model = requestedMode ? { ...chosen, mode: requestedMode } : chosen;
+
     const videoPresetParams: Record<string, unknown> =
       cap.id === 'camera-control' || cap.id === 'multi-shot'
-        ? videoFeatureParameters(cap.id as VideoFeatureId, chosen)
+        ? videoFeatureParameters(cap.id as VideoFeatureId, resolvedModel)
         : {};
     if (cap.executor.kind === 'prompt-preset' && cap.executor.forceAudio) {
-      const audioField = (chosen.generationOptions ?? generationOptions(chosen))?.fields.find(
+      const audioField = (resolvedModel.generationOptions ?? generationOptions(resolvedModel))?.fields.find(
         field => field.key === 'generate_audio' || field.key === 'audio',
       );
       videoPresetParams[audioField?.key ?? 'generate_audio'] = true;
     }
     const mergedParameters = buildCapabilityParameters(cap, options, { ...videoPresetParams, ...(args.parameters ?? {}) });
+    const resolvedParameters = resolveGenerationParameters(resolvedModel, mergedParameters, references.length > 0);
+    validateGenerationOptions(resolvedModel, resolvedParameters, references.length > 0);
+    if (resolvedModel.provider === 'opendesign' && references.length > 0 && resolvedParameters.images !== undefined) {
+      throw new Error('Choose pinned references or parameters.images for Cloud input');
+    }
     const effectivePrompt =
       cap.executor.kind === 'dedicated-model'
         ? rawPrompt.trim() || cap.title
         : buildCapabilityPrompt(cap.id, rawPrompt, options, catalog);
-    const effectiveMode =
-      cap.executor.kind === 'model' || cap.executor.kind === 'prompt-preset' || cap.executor.kind === 'dedicated-model'
-        ? cap.executor.mode
-        : args.mode;
 
     const quote = await estimateCapabilityQuote({
       store,
       capability: cap,
-      model: chosen,
+      model: resolvedModel,
       options,
-      parameters: mergedParameters,
+      parameters: resolvedParameters,
       referenceCount: references.length,
     });
     if (args.dryRun === true) {
@@ -760,8 +872,9 @@ export async function capabilityRun(
         dryRun: true,
         capabilityId: cap.id,
         executorKind: cap.executor.kind,
-        selectedModel: chosen.id,
-        effectiveParameters: mergedParameters,
+        selectedModel: resolvedModel.id,
+        mode: resolvedModel.mode,
+        effectiveParameters: resolvedParameters,
         quote,
       };
     }
@@ -770,8 +883,8 @@ export async function capabilityRun(
     const job = await gateway.submit({
       modality: cap.modality,
       prompt: effectivePrompt,
-      model: chosen.id,
-      mode: args.mode ?? effectiveMode ?? chosen.mode,
+      model: resolvedModel.id,
+      mode: requestedMode ?? resolvedModel.mode,
       idempotencyKey: args.requestId,
       parameters: mergedParameters,
       capabilityId: cap.id,

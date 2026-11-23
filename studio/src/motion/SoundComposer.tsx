@@ -5,7 +5,9 @@ import {
   buildCapabilityParameters,
   buildCapabilityPrompt,
   defaultCapabilities,
+  defaultCapabilityControlChoice,
   findCapability,
+  resolveCapabilityOptions,
 } from '../../../shared/capability-registry';
 import type { GenerationJob, Model } from '../../../shared/gateway';
 import { generationOptions, resolveGenerationParameters } from '../../../shared/generation-options';
@@ -171,11 +173,14 @@ export function SoundComposer({
       const baseParams = typeof effectiveVoice === 'string' && effectiveVoice.trim()
         ? { ...parsed, voice: effectiveVoice }
         : parsed;
+      const effectiveCapabilityOptions = activeCapability
+        ? resolveCapabilityOptions(activeCapability, capabilityOptions)
+        : capabilityOptions;
       const submitParams = activeCapability
-        ? buildCapabilityParameters(activeCapability, capabilityOptions, baseParams)
+        ? buildCapabilityParameters(activeCapability, effectiveCapabilityOptions, baseParams)
         : baseParams;
       const submittedPrompt = activeCapability
-        ? buildCapabilityPrompt(activeCapability.id, draft.prompt, capabilityOptions, runtimeCapabilities) || activeCapability.title
+        ? buildCapabilityPrompt(activeCapability.id, draft.prompt, effectiveCapabilityOptions, runtimeCapabilities) || activeCapability.title
         : draft.prompt;
       const result = await assetRequest<{ job: GenerationJob }>({
         action: 'generate',
@@ -186,7 +191,7 @@ export function SoundComposer({
         mode: selected.mode,
         parameters: submitParams,
         ...(activeCapability ? { capabilityId: activeCapability.id } : {}),
-        ...(Object.keys(capabilityOptions).length ? { capabilityOptions } : {}),
+        ...(Object.keys(effectiveCapabilityOptions).length ? { capabilityOptions: effectiveCapabilityOptions } : {}),
         references: draft.references.map(item => item.reference),
       });
       if (mounted.current) {
@@ -296,7 +301,7 @@ export function SoundComposer({
                 <span className="om-sound-field-label">{t(control.label)}</span>
                 <Select
                   label={t(control.label)}
-                  value={capabilityOptions[control.key] ?? control.choices[0].value}
+                  value={capabilityOptions[control.key] ?? defaultCapabilityControlChoice(control).value}
                   options={control.choices.map(choice => ({ value: choice.value, label: t(choice.label) }))}
                   onCommit={value => setDraft(current => ({
                     ...current,

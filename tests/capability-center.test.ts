@@ -8,6 +8,7 @@ import { verificationBinaries } from '../scripts/verify-export.ts';
 import { Phase1Service } from '../phase1.ts';
 import { gatewayFor } from '../gateway/service.ts';
 import {
+  capabilityRun,
   registerCapabilityQuoteEstimator,
   registerCapabilityScriptExecutor,
   saveCapabilityOverrides,
@@ -16,11 +17,13 @@ import {
   unregisterCapabilityScriptExecutor,
 } from '../gateway/capability-center.ts';
 import {
+  buildCapabilityParameters,
   buildCapabilityPrompt,
   capabilityControlSchema,
   defaultCapabilities,
   findCapability,
   resolveCapabilityCatalog,
+  resolveCapabilityOptions,
 } from '../shared/capability-registry.ts';
 import { findLandingScene } from '../shared/studio-catalog.ts';
 import { isStandaloneSpaPath } from '../shared/spa-routes.ts';
@@ -636,6 +639,212 @@ test('Studio assetOperation(generate) enforces capability preflight, findLanding
       assert.equal(submitCalls, 1);
       void origRun;
     } finally {
+      gateway.submit = origSubmit;
+    }
+  }, false));
+
+test('concurrent script requestId reservation, capability dryRun parameter validation, and default control option mapping', () =>
+  fixture(async store => {
+    const root = store.directory;
+    const sampleImage = path.join(root, 'concurrent-sample.png');
+    const api = service(store);
+    const { writeFile } = await import('node:fs/promises');
+    const tinyPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+8X8AAAAASUVORK5CYII=',
+      'base64',
+    );
+    await writeFile(sampleImage, tinyPng);
+
+    // 1. Concurrent script requests share one execution and conflict on differing inputs
+    let handlerCalls = 0;
+    let releaseGate!: () => void;
+    let enteredGate!: () => void;
+    const gateEntered = new Promise<void>(resolve => { enteredGate = resolve; });
+    const gate = new Promise<void>(resolve => { releaseGate = resolve; });
+
+    registerCapabilityScriptExecutor('test-concurrent-script', async () => {
+      handlerCalls += 1;
+      enteredGate();
+      await gate;
+      const outPath = path.join(root, `concurrent-out-${handlerCalls}.png`);
+      await writeFile(outPath, tinyPng);
+      return { sourcePath: outPath, name: 'Concurrent Output' };
+    });
+
+    let failOnce = true;
+    registerCapabilityScriptExecutor('test-retry-script', async () => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('TRANSIENT_SCRIPT_FAILURE');
+      }
+      const outPath = path.join(root, 'retry-out.png');
+      await writeFile(outPath, tinyPng);
+      return { sourcePath: outPath, name: 'Retry Output' };
+    });
+
+    const gateway = gatewayFor(store);
+    let submitCalls = 0;
+    const origSubmit = gateway.submit.bind(gateway);
+    gateway.submit = (async (...args: Parameters<typeof gateway.submit>) => {
+      submitCalls += 1;
+      return origSubmit(...args);
+    }) as typeof gateway.submit;
+    (gateway as any).options.detect = async () => [
+      { id: 'codex', label: 'Codex', installed: true, authenticated: true, imageGeneration: true, available: true, reason: 'fixture' },
+    ];
+    (gateway as any).models = async () => [
+      { id: 'codex:image-generation', provider: 'codex', modelId: 'image-generation', label: 'Codex Image', modality: 'image', source: 'builtin', mode: 'text-to-image', supportsImageReference: true, maxInputImages: 5 },
+      { id: 'codex:real-esrgan-4k', provider: 'codex', modelId: 'real-esrgan-4k', label: 'Real-ESRGAN 4K', modality: 'image', source: 'live', mode: 'text-to-image', supportsImageReference: true, maxInputImages: 1 },
+    ];
+
+    try {
+      await saveCapabilityOverrides(store, [
+        {
+          id: 'remove-background',
+          status: 'live',
+          channels: { gui: true, mcp: true },
+          executor: { kind: 'script', scriptId: 'test-concurrent-script' },
+          input: { promptRequired: false, minReferences: 0, maxReferences: 1 },
+        },
+        {
+          id: 'expand-image',
+          status: 'live',
+          channels: { gui: true, mcp: true },
+          executor: { kind: 'script', scriptId: 'test-retry-script' },
+          input: { promptRequired: false, minReferences: 0, maxReferences: 1 },
+        },
+        {
+          id: 'upscale-4k',
+          status: 'live',
+          channels: { gui: true, mcp: true },
+          executor: {
+            kind: 'dedicated-model',
+            providers: ['codex'],
+            models: ['real-esrgan-4k'],
+            recommendedModel: 'real-esrgan-4k',
+            mode: 'text-to-image',
+            optionToParameter: { scale: 'upscale_factor' },
+            defaultParameters: { face_enhance: false },
+          },
+        },
+      ]);
+
+      const firstPromise = capabilityRun(store, {
+        capabilityId: 'remove-background',
+        requestId: 'script-concurrent-req-1',
+        prompt: 'Cut out subject',
+      });
+      await gateEntered;
+
+      // Concurrent identical call waits on the reserved execution; conflicting input rejects immediately
+      const secondPromise = capabilityRun(store, {
+        capabilityId: 'remove-background',
+        requestId: 'script-concurrent-req-1',
+        prompt: 'Cut out subject',
+      });
+      await assert.rejects(
+        capabilityRun(store, {
+          capabilityId: 'remove-background',
+          requestId: 'script-concurrent-req-1',
+          prompt: 'Different conflicting prompt',
+        }),
+        /REQUEST_ID_CONFLICT/,
+      );
+
+      releaseGate();
+      const [first, second] = await Promise.all([firstPromise, secondPromise]);
+      assert.equal(handlerCalls, 1, 'concurrent identical script calls must invoke handler exactly once');
+      assert.equal(first.asset.id, second.asset.id);
+      assert.equal(first.version.id, second.version.id);
+      assert.equal(Boolean(first.replayed || second.replayed), true);
+
+      // Failed script execution releases pending receipt so the same requestId can be retried cleanly
+      await assert.rejects(
+        capabilityRun(store, {
+          capabilityId: 'expand-image',
+          requestId: 'script-retry-req-1',
+          prompt: 'Retry me',
+        }),
+        /TRANSIENT_SCRIPT_FAILURE/,
+      );
+      const retried = await capabilityRun(store, {
+        capabilityId: 'expand-image',
+        requestId: 'script-retry-req-1',
+        prompt: 'Retry me',
+      });
+      assert.equal(retried.executorKind, 'script');
+      assert.ok(retried.asset.id);
+
+      // 2. Registered-capability dryRun validates model parameters and mode just like real submission
+      await assert.rejects(
+        api.call('openmotion_capability_run', {
+          capabilityId: 'text-to-image',
+          model: 'codex:image-generation',
+          prompt: 'Poster',
+          parameters: { aspect_ratio: '99:1' },
+          dryRun: true,
+        }),
+        /Invalid Aspect ratio: aspect_ratio/,
+      );
+      const validDryRun = await api.call('openmotion_capability_run', {
+        capabilityId: 'text-to-image',
+        model: 'codex:image-generation',
+        prompt: 'Poster',
+        parameters: { aspect_ratio: '16:9' },
+        dryRun: true,
+      });
+      assert.equal(validDryRun.dryRun, true);
+      assert.equal(validDryRun.effectiveParameters.aspect_ratio, '16:9');
+
+      // 3. Dedicated-model option mapping applies control defaults when options are omitted
+      const imported = await api.call('openmotion_asset_manage', {
+        action: 'import',
+        requestId: 'import-upscale-src',
+        sourcePath: sampleImage,
+        name: 'Upscale Src',
+      });
+      const srcRef = { assetId: imported.asset.id, versionId: imported.asset.currentVersionId };
+      const liveCatalog = resolveCapabilityCatalog([
+        {
+          id: 'upscale-4k',
+          status: 'live',
+          channels: { gui: true, mcp: true },
+          executor: {
+            kind: 'dedicated-model',
+            providers: ['codex'],
+            models: ['real-esrgan-4k'],
+            recommendedModel: 'real-esrgan-4k',
+            mode: 'text-to-image',
+            optionToParameter: { scale: 'upscale_factor' },
+            defaultParameters: { face_enhance: false },
+          },
+        },
+      ]);
+      const upscaleCap = findCapability('upscale-4k', liveCatalog)!;
+      assert.deepEqual(resolveCapabilityOptions(upscaleCap, {}), { scale: '4x' });
+      assert.deepEqual(buildCapabilityParameters(upscaleCap, {}), { face_enhance: false, upscale_factor: '4x' });
+
+      const upscaleDryRun = await api.call('openmotion_capability_run', {
+        capabilityId: 'upscale-4k',
+        references: [srcRef],
+        dryRun: true,
+      });
+      assert.equal(upscaleDryRun.dryRun, true);
+      assert.equal(upscaleDryRun.effectiveParameters.upscale_factor, '4x');
+      assert.equal(upscaleDryRun.effectiveParameters.face_enhance, false);
+
+      let capturedOptions: Record<string, unknown> | undefined;
+      registerCapabilityQuoteEstimator(async input => {
+        capturedOptions = input.options;
+        return { currency: 'USD', estimatedCost: 0.04, source: 'test-default-options' };
+      });
+      await api.call('openmotion_capability_discover', { action: 'quote', capabilityId: 'upscale-4k' });
+      assert.deepEqual(capturedOptions, { scale: '4x' });
+      assert.equal(submitCalls, 0, 'dryRun and quote checks must never invoke gateway.submit');
+    } finally {
+      registerCapabilityQuoteEstimator(undefined);
+      unregisterCapabilityScriptExecutor('test-concurrent-script');
+      unregisterCapabilityScriptExecutor('test-retry-script');
       gateway.submit = origSubmit;
     }
   }, false));
