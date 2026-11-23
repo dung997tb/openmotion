@@ -1,4 +1,5 @@
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
 import {
   createStudioSaveHttpError,
@@ -102,7 +103,7 @@ function isAtomicElementPatchFile(value: unknown): value is AtomicElementPatchFi
 // This is the single client owner for dispatching and validating the aggregate
 // atomic endpoint. Splitting validation from the request would weaken that wire contract.
 // fallow-ignore-next-line complexity
-export async function patchElementBatches(projectId: string, batches: DomEditPatchBatch[]) {
+export async function patchElementBatches(projectId: string, batches: DomEditPatchBatch[], history?: StudioWriteHistory) {
   const guarded = batches.map(batch => batch.ifMatch
     ? { ...batch, ifMatch: isolatedEditVersion(projectId, batch.sourceFile, batch.ifMatch) }
     : batch);
@@ -114,7 +115,7 @@ export async function patchElementBatches(projectId: string, batches: DomEditPat
       `/api/projects/${encodeURIComponent(projectId)}/file-mutations/patch-element-batches`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+        headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
         body,
       },
     );
@@ -197,6 +198,7 @@ export async function postPatchElement(
   body: unknown,
   showToast: ShowToast,
   ifMatch?: string,
+  history?: StudioWriteHistory,
 ): Promise<PatchElementResponse> {
   const expected = ifMatch && isolatedEditVersion(projectId, targetPath, ifMatch);
   const response = await studioApiFetch(
@@ -206,7 +208,7 @@ export async function postPatchElement(
     ),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders(), ...(expected && { "If-Match": expected }) },
+      headers: { "Content-Type": "application/json", ...studioWriteHeaders(history), ...(expected && { "If-Match": expected }) },
       body: JSON.stringify(body),
     },
   );
@@ -226,6 +228,7 @@ interface AssignAutoIdParams {
   targetPath: string;
   selection: DomEditSelection;
   autoId: string;
+  history?: StudioWriteHistory;
   showToast: ShowToast;
 }
 
@@ -235,6 +238,7 @@ export async function assignGsapTargetAutoIdIfNeeded({
   targetPath,
   selection,
   autoId,
+  history,
   showToast,
 }: AssignAutoIdParams): Promise<string | null> {
   const patchBody = {
@@ -251,7 +255,7 @@ export async function assignGsapTargetAutoIdIfNeeded({
     return null;
   }
   try {
-    const { elementId } = await postPatchElement(projectId, targetPath, patchBody, showToast);
+    const { elementId } = await postPatchElement(projectId, targetPath, patchBody, showToast, undefined, history);
     if (elementId) return elementId;
     showToast(`Couldn't assign element id: element not found in ${targetPath}`, "error");
     return null;

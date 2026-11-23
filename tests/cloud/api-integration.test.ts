@@ -1433,6 +1433,118 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
 // ---------------------------------------------------------------------------
 
 describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, WorkspaceStatus, /phase1/call, /generations, /tracking/preferences)', () => {
+  it('names writes at commit and steps one project history across Studio and the agent', async () => {
+    const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = async (url: string, body: unknown) => {
+      const response = await app.request(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      assert.ok(response.ok, await response.clone().text());
+      return response.json();
+    };
+    const { projectId } = await post('/motion-api/projects', { title: 'Shared undo' });
+    const base = `/api/projects/${projectId}`;
+    const file = base + '/files/title.txt';
+    const history = async () => (await app.request(base + '/history')).json();
+    const write = async (title: string, headers: Record<string, string>) => {
+      const saved = await app.request(file, { method: 'PUT', headers, body: title });
+      assert.equal(saved.status, 200);
+      return saved.json();
+    };
+
+    const first = await write('First title', { 'If-None-Match': '*' });
+    const second = await write('New title', { 'If-Match': first.version });
+    const beforeAgent = await history();
+    assert.equal(beforeAgent.currentSeq, 3);
+    const args = { projectId, requestId: 'save-caption', expectedRevision: second.revision,
+      expectedVersionId: second.versionId, files: [{ path: 'captions.srt', content: 'Hello' }] };
+    const agentEdit = () => post('/motion-api/phase1/call', { name: 'openmotion_edit_project', arguments: args });
+    await agentEdit();
+    assert.equal((await agentEdit()).replayed, true);
+    await post(base + '/history/claim', { label: 'Late title label' });
+    const afterAgent = await history();
+    assert.equal(afterAgent.currentSeq, 4);
+    assert.equal(afterAgent.back.label, 'Edited captions.srt');
+    assert.equal(afterAgent.entries[0].who.kind, 'agent');
+
+    const undo = await post(base + '/history/undo', { entryId: beforeAgent.back.id });
+    assert.equal(undo.stepLabel, 'Edited captions.srt');
+    assert.equal(undo.seq, 3);
+    assert.equal((await (await app.request(file)).json()).content, 'New title');
+    assert.equal((await app.request(base + '/files/captions.srt')).status, 404);
+    const step = (direction: string) => post(base + '/history/step', { direction });
+    assert.equal((await step('back')).seq, 2);
+    assert.equal((await (await app.request(file)).json()).content, 'First title');
+    assert.equal((await step('forward')).seq, 3);
+    assert.equal((await step('forward')).stepLabel, 'Edited captions.srt');
+    assert.equal((await (await app.request(base + '/files/captions.srt')).json()).content, 'Hello');
+  });
+
+  it('names and coalesces saves from the same Studio edit window while retaining separate gestures', async () => {
+    const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const created = await app.request('/motion-api/projects', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({title: 'Edit windows'})});
+    const {projectId} = await created.json();
+    const base = '/api/projects/' + projectId;
+    const save = async (text: string, window: string, label: string, version?: string) => {
+      const res = await app.request(base + '/files/notes.txt', {method: 'PUT', body: text, headers: {
+        'X-OpenMotion-Edit-Window': window, 'X-OpenMotion-Edit-Label': encodeURIComponent(label),
+        ...(version ? {'If-Match': version} : {'If-None-Match': '*'}),
+      }});
+      assert.equal(res.status, 200, await res.clone().text());
+      return res.json();
+    };
+    const window = randomUUID();
+    const first = await save('one', window, 'Edit source');
+    const second = await save('two', window, 'Edit source', first.version);
+    assert.equal(second.versionId, first.versionId);
+    const third = await save('three', randomUUID(), '移动标题', second.version);
+    assert.notEqual(third.versionId, second.versionId);
+    const history = await (await app.request(base + '/history')).json();
+    assert.equal(history.currentSeq, 3);
+    assert.equal(history.back.label, '移动标题');
+    assert.equal(history.entries[1].label, 'Edit source');
+  });
+
+  it('undoes a timeline deletion and its follow-up ripple as one named action', async () => {
+    const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const json = async (url: string, init?: RequestInit) => {
+      const response = await app.request(url, init);
+      assert.ok(response.ok, await response.clone().text());
+      return response.json();
+    };
+    const { projectId } = await json('/motion-api/projects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Delete history' }),
+    });
+    const base = `/api/projects/${projectId}`;
+    const file = base + '/files/scene.html';
+    await json(file, { method: 'PUT', headers: { 'If-None-Match': '*' }, body:
+      '<html><body><main data-composition-id="main" data-duration="6"><div id="first" data-start="0" data-duration="2"></div><div id="middle" data-start="2" data-duration="2"></div><div id="tail" data-start="4" data-duration="2"></div></main></body></html>' });
+    const before = await json(file);
+    const { currentSeq } = await json(base + '/history');
+    const label = 'Delete timeline clip';
+    const gesture = { 'X-OpenMotion-Edit-Window': randomUUID(), 'X-OpenMotion-Edit-Label': encodeURIComponent(label) };
+    const removed = await json(base + '/file-mutations/remove-elements/scene.html', {
+      method: 'POST', headers: { ...gesture, 'Content-Type': 'application/json', 'If-Match': before.version },
+      body: JSON.stringify({ targets: [{ id: 'middle' }] }),
+    });
+    assert.doesNotMatch(removed.content, /id="middle"/);
+    assert.match(removed.content, /data-duration="6"/);
+    const shrunk = removed.content.replace('data-start="4"', 'data-start="2"').replace('data-duration="6"', 'data-duration="4"');
+    assert.doesNotMatch(shrunk, /data-start="4"|data-duration="6"/);
+    await json(file, { method: 'PUT', headers: { ...gesture, 'If-Match': removed.version }, body: shrunk });
+    assert.equal((await json(file)).content, shrunk);
+    const after = await json(base + '/history');
+    assert.equal(after.currentSeq, currentSeq + 1);
+    assert.equal(after.back.label, label);
+    const step = (direction: 'back' | 'forward') => json(base + '/history/step', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
+    });
+    assert.equal((await step('back')).seq, currentSeq);
+    assert.equal((await json(file)).content, before.content);
+    await step('forward');
+    assert.equal((await json(file)).content, shrunk);
+  });
+
   it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
     const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>

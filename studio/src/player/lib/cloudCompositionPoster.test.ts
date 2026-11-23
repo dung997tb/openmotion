@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { rememberCompositionPosterSource } from "./compositionPosterSource";
 import { loadCloudCompositionPoster } from "./cloudCompositionPoster";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
 import { usePlayerStore } from "../store/playerStore";
@@ -20,6 +21,27 @@ describe("cloud composition representatives", () => {
     expect(await loadCloudCompositionPoster(url(), "p", 4, signal())).toEqual(picture);
     expect(decodeImageThumbnail).toHaveBeenCalledWith(new URL("/api/projects/p/preview/assets/hero.png", location.origin).href, expect.anything());
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("reuses the editor source only for the same file, thumbnail revision and session", async () => {
+    const file = "compositions/scene.html";
+    usePlayerStore.setState({ timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: { [file]: 1 } });
+    const before = usePlayerStore.getState();
+    const fetch = vi.fn(async () => Response.json({ content: '<img src="assets/new.png">' }));
+    vi.stubGlobal("fetch", fetch);
+    vi.mocked(decodeImageThumbnail).mockResolvedValue(picture);
+    rememberCompositionPosterSource(before, "p", file, '<img src="assets/old.png">');
+    await loadCloudCompositionPoster(url("?revision=1"), "p", 4, signal());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(decodeImageThumbnail).toHaveBeenLastCalledWith(expect.stringContaining("assets/old.png"), expect.anything());
+
+    await loadCloudCompositionPoster(url("?revision=1"), "p", 5, signal());
+    expect(fetch).toHaveBeenCalledTimes(1);
+    before.bumpThumbnailRevisions([file], file);
+    // A stale SDK read can finish after the next edit.
+    rememberCompositionPosterSource(before, "p", file, '<img src="assets/late.png">');
+    await loadCloudCompositionPoster(url("?revision=2"), "p", 4, signal());
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(decodeImageThumbnail).toHaveBeenLastCalledWith(expect.stringContaining("assets/new.png"), expect.anything());
   });
   it("respects the selected occurrence in an inert template without external fetches", async () => {
     const html = '<template><div class="tile"><img src="https://example.invalid/logo.png"></div><div class="tile"><video poster="assets/2.jpg"></video></div></template>';

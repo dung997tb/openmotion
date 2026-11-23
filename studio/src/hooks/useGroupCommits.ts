@@ -132,12 +132,12 @@ async function commitStructuralMutation(
     label,
     writeFile: deps.writeProjectFile,
     recordEdit: deps.editHistory.recordEdit,
-    rewrite: async (originalContent) => {
+    rewrite: async (originalContent, history) => {
       const mutateResponse = await studioApiFetch(
         buildProjectApiPath(pid, `/file-mutations/${route}/${encodeURIComponent(targetPath)}`),
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+          headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
           body: JSON.stringify(body),
         },
       );

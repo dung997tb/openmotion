@@ -5,6 +5,7 @@ import {
 } from "../utils/studioFileMutationCoordinator";
 import type { Composition } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
+import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { roundTo3 } from "../utils/rounding";
 import {
   sdkGsapTweenPersist,
@@ -125,6 +126,8 @@ export function useGsapAnimationOps({
       const { autoId } = address;
       let selector = address.selector;
 
+      const label = `Add GSAP ${method} animation`;
+      const history = autoId ? cloudHistoryForWrite(writeProjectFile, { label }) : undefined;
       if (autoId) {
         const pid = projectIdRef.current;
         if (!pid) return;
@@ -135,6 +138,7 @@ export function useGsapAnimationOps({
             targetPath,
             selection,
             autoId,
+            history,
             showToast,
           });
         const savedId = await (writeProjectFile
@@ -172,7 +176,7 @@ export function useGsapAnimationOps({
           { kind: "add", target: selection.hfId, spec },
           sdkSession,
           sdkDeps,
-          { label: `Add GSAP ${method} animation` },
+          { label },
         );
         if (cutoverCommittedOrThrow(handled)) return;
       }
@@ -189,7 +193,7 @@ export function useGsapAnimationOps({
           properties: toDefaults[method] ?? { opacity: 1 },
           fromProperties: method === "fromTo" ? { opacity: 0 } : undefined,
         },
-        { label: `Add GSAP ${method} animation`, softReload: true },
+        { label, softReload: true, ...(history && { history }) },
       );
     },
     [

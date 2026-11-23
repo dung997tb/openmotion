@@ -5,6 +5,9 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { usePlayerStore } from "../player/store/playerStore";
+import { useCaptionStore } from "../captions/store";
+import { registerCaptionIframe } from "../captions/components/CaptionOverlayUtils";
+import { buildCaptionModel } from "../captions/parser";
 import { useAppHotkeys } from "./useAppHotkeys";
 import { mountReactHarness } from "./domSelectionTestHarness";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -42,6 +45,7 @@ function Harness() {
     domEditSelectionRef: selectionRef,
     clearDomSelectionRef: useRef<() => void>(() => undefined),
     editHistory: {
+      projectWide: true,
       canUndo: true,
       canRedo: true,
       undo: historyUndo,
@@ -144,6 +148,28 @@ describe("preview iframe hotkey forwarding", () => {
     await press(inner, { key: "Delete" });
     expect(historyUndo).not.toHaveBeenCalled();
     expect(domDelete).not.toHaveBeenCalled();
+  });
+
+  it("undoes a visible caption draft before stepping cloud project history", async () => {
+    const inner = mountWithPreview();
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    Object.defineProperty(iframe, "offsetParent", {value: document.body});
+    const unregister = registerCaptionIframe({current: iframe});
+    const prior = useCaptionStore.getState();
+    const model = buildCaptionModel([], { width: 640, height: 360, duration: 5 });
+    const changed = { ...model };
+    try {
+      useCaptionStore.setState({ isEditMode: true, model: changed, past: [model], future: [] });
+      await press(inner, {key: "z", ctrlKey: true});
+      expect(useCaptionStore.getState().model).toBe(model);
+      expect(historyUndo).not.toHaveBeenCalled();
+      await press(inner, {key: "z", ctrlKey: true});
+      expect(historyUndo).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+      useCaptionStore.setState(prior);
+    }
   });
 
   it("takes one tracked undo step per Cmd+Z pressed inside the preview", async () => {

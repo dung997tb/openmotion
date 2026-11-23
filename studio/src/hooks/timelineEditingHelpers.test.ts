@@ -652,7 +652,8 @@ describe("persistElementAttribute", () => {
         onFileRead: vi.fn(), patchLive: vi.fn(),
       });
       expect(writeProjectFile).toHaveBeenCalledWith("index.html", expect.stringContaining('data-volume="0.4"'), source,
-        { kind: "editElements", patches: [{ target: { id: "music" }, operations: [{type: "html-attribute", property: "data-volume", value: "0.4"}] }] });
+        { kind: "editElements", patches: [{ target: { id: "music" }, operations: [{type: "html-attribute", property: "data-volume", value: "0.4"}] }] },
+        {label: "Set volume", windowId: expect.any(String)});
     } finally {
       fetch.mockRestore();
       setCachedCloudDisklessMode(null);

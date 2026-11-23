@@ -1,8 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
-import { saveProjectFilesWithHistory } from "./studioFileHistory";
+import { setCachedCloudDisklessMode } from "./cloudRuntime";
+import { saveProjectFilesWithHistory, saveServerRewriteWithHistory, type StudioWriteHistory } from "./studioFileHistory";
 import { serializeStudioFileMutation } from "./studioFileMutationCoordinator";
 
 describe("saveProjectFilesWithHistory", () => {
+  it("passes each cloud action label and reuses a window only for the same coalescible action", async () => {
+    const writeFile = vi.fn();
+    const save = (label: string, coalesceKey?: string) => saveProjectFilesWithHistory({
+      projectId: "p", files: { "index.html": () => "edited" }, readFile: async () => "original",
+      writeFile, recordEdit: async () => {}, label, coalesceKey,
+    });
+    setCachedCloudDisklessMode(true);
+    try {
+      await save("Edit source", "source:index.html");
+      await save("Edit source", "source:index.html");
+      await save("Split clip");
+      await save("Edit source", "source:index.html");
+      const histories = writeFile.mock.calls.map(args => args[4]);
+      expect(histories[0]).toEqual({label: "Edit source", windowId: expect.any(String)});
+      expect(histories[1]).toEqual(histories[0]);
+      expect(histories[2].label).toBe("Split clip");
+      expect(new Set([histories[1].windowId, histories[2].windowId, histories[3].windowId]).size).toBe(3);
+    } finally {
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
+  it("allocates a single window before the rewrite and reuses it for the follow-up save", async () => {
+    setCachedCloudDisklessMode(true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: "before" })));
+    try {
+      const writeFile = vi.fn();
+      const rewrite = vi.fn(async (_source: string, _history?: StudioWriteHistory) => ({ disk: "removed", after: "shrunk" }));
+      await saveServerRewriteWithHistory({
+        projectId: "p", path: "index.html", label: "Delete timeline clip",
+        writeFile, rewrite, recordEdit: vi.fn(),
+      });
+      const history = { label: "Delete timeline clip", windowId: expect.any(String) };
+      expect(rewrite).toHaveBeenCalledWith("before", history);
+      expect(writeFile).toHaveBeenCalledExactlyOnceWith("index.html", "shrunk", "removed", undefined,
+        rewrite.mock.lastCall?.[1]);
+    } finally {
+      vi.unstubAllGlobals();
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
   it("reads before content, writes after content, and records a history entry", async () => {
     const reads: Record<string, string> = { "index.html": "before" };
     const writes: Record<string, string> = {};
@@ -233,5 +276,31 @@ describe("saveProjectFilesWithHistory", () => {
         files: { "index.html": { before: "sdk-after", after: "sdk-after+editor" } },
       }),
     );
+  });
+  it("keeps the same undo window when a repeated gesture batches two compositions", async () => {
+    const windows: string[] = [];
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const windowId = new Headers(init?.headers).get("X-OpenMotion-Edit-Window");
+      expect(windowId).toBeTruthy();
+      windows.push(windowId!);
+      return Response.json({ versions: {} });
+    });
+    const writeFile = vi.fn();
+    const save = () => saveProjectFilesWithHistory({
+      projectId: "p", label: "Move clips", coalesceKey: "drag", writeFile,
+      files: { "index.html": () => "after", "child.html": () => "after" },
+      commandForWrite: () => ({ kind: "moveClip", hfId: "hf-clip", start: 2 }),
+      readFile: async () => "before", recordEdit: vi.fn(),
+    });
+    setCachedCloudDisklessMode(true);
+    try {
+      await save();
+      await save();
+      expect(windows).toEqual([expect.any(String), windows[0]]);
+      expect(writeFile).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+      setCachedCloudDisklessMode(null);
+    }
   });
 });

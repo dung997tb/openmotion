@@ -1110,6 +1110,7 @@ export class ProjectFilesService {
       if (
         shouldCreateVersion &&
         hasFileChanges &&
+        safeWindowId !== null &&
         this.historyCoalesceWindowMs > 0 &&
         isInteractiveStudioEdit &&
         currentVersionId !== null &&

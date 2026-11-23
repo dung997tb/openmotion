@@ -1,4 +1,5 @@
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import type { StudioWriteHistory } from "./studioFileHistory";
 import { acknowledgeFileEdit } from "./isolatedEditVersions";
 import { studioApiFetch } from "./studioApiFetch";
 import { createStudioWriteToken, studioFileContentVersion, studioWriteHeaders } from "./studioFileVersion";
@@ -8,7 +9,7 @@ import { trackStudioProjectSave } from "./studioSaveState";
 type BatchItem = { path: string; before: string; after: string; command: ProjectEditCommand };
 
 /** The caller holds the file queues. Persist the complete gesture as one version. */
-export async function commitStudioEditBatch(projectId: string, edits: readonly BatchItem[]): Promise<void> {
+export async function commitStudioEditBatch(projectId: string, edits: readonly BatchItem[], history?: StudioWriteHistory): Promise<void> {
   if (!edits.length) return;
   const original = new Map<string, string>();
   for (const { path, before } of edits) {
@@ -25,7 +26,7 @@ export async function commitStudioEditBatch(projectId: string, edits: readonly B
     try {
       response = await studioApiFetch(`/api/projects/${encodeURIComponent(projectId)}/edits`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": requestId, ...studioWriteHeaders() },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": requestId, ...studioWriteHeaders(history) },
         body,
       });
     } catch (cause) {

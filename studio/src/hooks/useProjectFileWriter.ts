@@ -1,4 +1,5 @@
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import { acknowledgeFileEdit } from "../utils/isolatedEditVersions";
 import { useCallback, useMemo } from "react";
 import {
@@ -62,7 +63,7 @@ export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions)
   );
 
   const writeProjectFile = useCallback(
-    async (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand): Promise<void> => {
+    async (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory): Promise<void> => {
       if (!projectId) throw new Error("No active project");
       return trackStudioProjectSave(projectId, path, async () => {
         const writeProjectId = projectId;
@@ -99,7 +100,7 @@ export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions)
                 headers: {
                   "Content-Type": command ? "application/json" : "text/plain",
                   ...(requestId && { "Idempotency-Key": requestId }),
-                  ...studioWriteHeaders(),
+                  ...studioWriteHeaders(history),
                   ...(expectedVersion ? { "If-Match": expectedVersion } : { "If-None-Match": "*" }),
                 },
                 body: command ? JSON.stringify(command) : content,

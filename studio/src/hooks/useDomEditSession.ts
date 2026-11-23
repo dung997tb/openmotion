@@ -173,7 +173,7 @@ export function useDomEditSession({
     refreshDomEditSelectionFromPreview,
   });
   // ── GSAP cache (hoisted so both useGsapScriptCommits and useDomEditWiring share the same instance) ──
-  const { version: gsapCacheVersion, bump: bumpGsapCache } = useGsapCacheVersion();
+  const { version: gsapCacheVersion, changedPath: gsapChangedPath, bump: bumpGsapCache } = useGsapCacheVersion();
 
   const {
     commitMutation: gsapCommitMutation,
@@ -402,9 +402,8 @@ export function useDomEditSession({
     previewIframeRef,
     previewIframe,
     captionEditMode: previewCaptionEditMode,
-    refreshKey,
     gsapCacheVersion,
-    bumpGsapCache,
+    gsapChangedPath,
     showToast,
     refreshPreviewDocumentVersion,
     syncPreviewHotkeys,

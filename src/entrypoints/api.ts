@@ -1355,7 +1355,7 @@ function createMcpDomainPorts(deps: {
             requestId,
             idempotencyScope: 'phase1:motion_edit_project',
             source: 'agent',
-            summary: typeof args.summary === 'string' ? args.summary : 'Agent project edit',
+            summary: typeof args.summary === 'string' ? args.summary : ops.length ? undefined : 'Updated project settings',
             actorKind: 'agent',
             projectUpdates: {
               ...(typeof args.requirements === 'string' ? { requirements: args.requirements } : {}),

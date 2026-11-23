@@ -1,3 +1,4 @@
+import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
@@ -170,7 +171,7 @@ export function useDomEditCommits({
             writeProjectFile,
             sourceFiles,
             async () => {
-              const atomicResult = await patchElementBatches(pid, batches);
+              const atomicResult = await patchElementBatches(pid, batches, cloudHistoryForWrite(writeProjectFile, options));
               const files = Object.fromEntries(
                 atomicResult.files
                   .filter((result) => result.changed)

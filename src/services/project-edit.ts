@@ -12,7 +12,7 @@ import { sha256Hex } from '../studio/etag.ts';
 import { normalizeSafeProjectPath, type ProjectFilesService } from './project-files-service.ts';
 
 export type EditGuard =
-  | { source: 'studio'; versions: Record<string, string | null>; writeToken: string }
+  | { source: 'studio'; versions: Record<string, string | null>; writeToken: string; windowId?: string }
   | { source: 'agent'; expectedRevision: string; expectedVersionId: string };
 
 function invalid(message: string) {
@@ -139,7 +139,7 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
     filePreconditions: Array.from(versions, ([path, version]) => version === null
       ? { path, ifNoneMatch: '*' as const } : { path, ifMatch: version }),
     source: guard.source, summary: labels.size === 1 ? [...labels][0] : 'Edit project',
-    ...(guard.source === 'studio' ? { writeToken: guard.writeToken } :
+    ...(guard.source === 'studio' ? { writeToken: guard.writeToken, windowId: guard.windowId } :
       { actorKind: 'agent', expectedRevision: guard.expectedRevision, expectedVersionId: guard.expectedVersionId }),
   });
 }

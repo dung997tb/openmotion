@@ -6,7 +6,8 @@ import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import type { PublishSdkSession } from "../utils/sdkCutover";
 import { addExternalFileReloadListener } from "./externalFileReloadBus";
-import { whenPreviewBooted } from "../player/store/playerStore";
+import { rememberCompositionPosterSource } from "../player/lib/compositionPosterSource";
+import { usePlayerStore, whenPreviewBooted } from "../player/store/playerStore";
 import { studioApiFetch } from "../utils/studioApiFetch";
 
 /**
@@ -193,6 +194,7 @@ async function readProjectFileOptional(
   // and closes the CodeQL client-side-request-forgery flag). encodeURIComponent
   // already confines both values to single segments of this same-origin URL.
   if (path.includes("\0") || path.includes("..")) return { ok: false, reason: "unsafe_path" };
+  const previewState = usePlayerStore.getState();
   let res: Response;
   const fetchStarted = performance.now();
   try {
@@ -218,7 +220,9 @@ async function readProjectFileOptional(
       contentType: res.headers.get("content-type") ?? "",
     };
   }
-  return classifyProjectFileBody(data);
+  const read = classifyProjectFileBody(data);
+  if (read.ok) rememberCompositionPosterSource(previewState, projectId, path, read.content);
+  return read;
 }
 
 /**

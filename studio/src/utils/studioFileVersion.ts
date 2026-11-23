@@ -78,8 +78,13 @@ export function createStudioWriteToken(): string {
  * match. An unmatched echo reads as an external change and costs a full preview
  * reload, which the user sees as a flash right after their own edit.
  */
-export function studioWriteHeaders(): Record<string, string> {
-  const token = createStudioWriteToken();
+export function studioWriteHeaders(history?: { label: string; windowId: string }, token = createStudioWriteToken()): Record<string, string> {
   markStudioWriteToken(token);
-  return { "X-Hyperframes-Write-Token": token };
+  return {
+    "X-Hyperframes-Write-Token": token,
+    ...(history && {
+      "X-OpenMotion-Edit-Label": encodeURIComponent(history.label),
+      "X-OpenMotion-Edit-Window": history.windowId,
+    }),
+  };
 }

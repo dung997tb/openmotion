@@ -165,7 +165,7 @@ export function useElementLifecycleOps({
           label: "Delete element",
           writeFile: writeProjectFile,
           recordEdit: editHistory.recordEdit,
-          rewrite: async (originalContent) => {
+          rewrite: async (originalContent, history) => {
             assertSafeElementDeletion(originalContent, patchTargets);
             const expected = shownVersion && isolatedEditVersion(pid, targetPath, '"sha256:' + shownVersion + '"');
             const removeResponse = await studioApiFetch(
@@ -175,7 +175,7 @@ export function useElementLifecycleOps({
               ),
               {
                 method: "POST",
-                headers: { "Content-Type": "application/json", ...studioWriteHeaders(),
+                headers: { "Content-Type": "application/json", ...studioWriteHeaders(history),
                   ...(expected && { "If-Match": expected }) },
                 body: JSON.stringify({ targets: patchTargets }),
               },

@@ -1,4 +1,5 @@
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import type { HistoryTarget } from "@hyperframes/studio-server";
 import { buildProjectApiPath } from "./projectRouting";
 import type { MutableRefObject } from "react";
@@ -27,7 +28,27 @@ export interface DomEditCommitBaseParams {
   clearDomSelection: () => void;
 }
 
-export type ProjectFileWriter = (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand) => Promise<void>;
+export type StudioWriteHistory = { label: string; windowId: string };
+export type ProjectFileWriter = (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory) => Promise<void>;
+
+const lastWindow = new WeakMap<ProjectFileWriter, { key: string | undefined; id: string; startedAt: number }>();
+
+/** A writer belongs to one Studio project. A different gesture starts a new history entry. */
+export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, key?: string, coalesceMs = 4000): StudioWriteHistory {
+  const now = Date.now();
+  const previous = lastWindow.get(writer);
+  if (key && previous?.key === key && now - previous.startedAt < coalesceMs) return { label, windowId: previous.id };
+  const id = crypto.randomUUID();
+  lastWindow.set(writer, { key, id, startedAt: now });
+  return { label, windowId: id };
+}
+
+type HistoryGesture = Pick<RecordEditInput, "label" | "coalesceKey" | "coalesceMs">;
+
+export function cloudHistoryForWrite(writer: ProjectFileWriter | undefined, gesture: HistoryGesture): StudioWriteHistory | undefined {
+  if (!writer || !getCachedCloudDisklessMode()) return undefined;
+  return studioHistoryForWrite(writer, gesture.label, gesture.coalesceKey, gesture.coalesceMs);
+}
 
 interface SaveProjectFilesWithHistoryInput {
   projectId: string;
@@ -90,19 +111,20 @@ export async function saveServerRewriteWithHistory(input: {
   coalesceMs?: number;
   writeFile: ProjectFileWriter;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
-  rewrite: (original: string) => Promise<{ disk: string; after?: string } | null>;
+  rewrite: (original: string, history?: StudioWriteHistory) => Promise<{ disk: string; after?: string } | null>;
 }): Promise<boolean> {
   const { projectId, path, writeFile } = input;
   return serializeStudioFileMutations(writeFile, [path], async () => {
     const original = await readProjectFileContent(projectId, path);
-    const result = await input.rewrite(original);
+    const history = cloudHistoryForWrite(writeFile, input);
+    const result = await input.rewrite(original, history);
     if (!result) return false;
     await writeProjectFilesWithHistoryInQueue({
       ...input,
       files: { [path]: () => result.after ?? result.disk },
       readFile: async () => original,
       diskContent: { [path]: result.disk },
-    });
+    }, history);
     return true;
   });
 }
@@ -118,7 +140,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   recordEdit,
   diskContent,
   commandForWrite,
-}: SaveProjectFilesWithHistoryInput): Promise<string[]> {
+}: SaveProjectFilesWithHistoryInput, existingHistory?: StudioWriteHistory): Promise<string[]> {
   const snapshots: Record<string, { before: string; after: string }> = {};
   for (const [path, build] of Object.entries(files)) {
     const before = await readFile(path);
@@ -131,6 +153,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   const changedPaths = Object.keys(snapshots);
   if (changedPaths.length === 0) return [];
 
+  const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs });
   if (changedPaths.length > 1 && commandForWrite) {
     const edits = changedPaths.flatMap(path => {
       const command = commandForWrite(path);
@@ -138,7 +161,7 @@ export async function writeProjectFilesWithHistoryInQueue({
     });
     if (edits.length === changedPaths.length) {
       const { commitStudioEditBatch } = await import('./projectEditBatch');
-      await commitStudioEditBatch(projectId, edits);
+      await commitStudioEditBatch(projectId, edits, history);
       await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
       return changedPaths;
     }
@@ -149,7 +172,8 @@ export async function writeProjectFilesWithHistoryInQueue({
     for (const path of changedPaths) {
       const expected = diskContent?.[path] ?? snapshots[path].before;
       const command = commandForWrite?.(path);
-      if (command) await writeFile(path, snapshots[path].after, expected, command);
+      if (history) await writeFile(path, snapshots[path].after, expected, command, history);
+      else if (command) await writeFile(path, snapshots[path].after, expected, command);
       else await writeFile(path, snapshots[path].after, expected);
       writtenPaths.push(path);
     }

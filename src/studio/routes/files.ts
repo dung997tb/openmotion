@@ -19,6 +19,7 @@ import {
   type ProjectFileOp,
 } from '../../services/project-files-service.ts';
 import {
+  studioWriteHistory,
   extractWildcardPath,
   getAuthContext,
   type DisklessStudioDeps,
@@ -216,7 +217,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
           },
         ],
         source: 'studio',
-        summary: `Saved ${safePath}`,
+        ...studioWriteHistory(c.req.raw.headers),
         writeToken,
       });
 
@@ -252,7 +253,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const versions = path ? { [path]: c.req.header('if-match') ?? (c.req.header('if-none-match') === '*' ? null : '') } : body.versions;
     try {
       const commit = await commitProjectEdit(deps.files, auth, c.req.param('id')!, edit,
-        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken });
+        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window') });
       return c.json({ ...(path && { version: commit.versionsByPath[path] ?? versions[path] }),
         versions: { ...versions, ...commit.versionsByPath }, revision: commit.revision, writeToken: commit.writeToken });
     } catch (error) {
