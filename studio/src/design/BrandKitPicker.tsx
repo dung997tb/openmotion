@@ -262,7 +262,7 @@ export function BrandKitPicker({
                   <div style={{ display: 'flex', gap: 8 }}>
                     <Button type="button" size="sm" variant="ghost" onClick={() => setDetailKit(null)}>{t('Close')}</Button>
                     <Button type="button" size="sm" variant="primary" onClick={() => { onSelect(detailKit); setDetailKit(null); }}>
-                      {t('Use this Brand Kit')}
+                      {t('Use Brand Kit')}
                     </Button>
                   </div>
                 </div>

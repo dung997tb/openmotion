@@ -1,14 +1,57 @@
-import type { Model } from './gateway.ts';
+import type { Model, Modality } from './gateway.ts';
+import type { ParameterTier, StandardParameterKey } from '../packages/multimodal-models/src/schema.ts';
+import {
+  classifyParameterTier,
+  mapWireKeyToStandard,
+  PRIMARY_STANDARD_KEYS_BY_MODALITY,
+} from '../packages/multimodal-models/src/normalize.ts';
+
+export type { ParameterTier, StandardParameterKey };
+export { classifyParameterTier, mapWireKeyToStandard, PRIMARY_STANDARD_KEYS_BY_MODALITY };
 
 export type GenerationOption = {
   key: string; label: string; kind: 'choice' | 'number' | 'boolean' | 'text';
   choices?: { value: string | number; label: string; requires?: Record<string, string | number>; previewUrl?: string }[];
   default?: string | number | boolean; min?: number; max?: number; step?: number;
   presentation?: 'ratio' | 'count'; required?: boolean;
+  /** Canonical cross-provider parameter key from `@openmotion/multimodal-models`. */
+  standardKey?: StandardParameterKey;
+  /** Display tier (`primary` quick controls vs collapsible `advanced` parameters). */
+  tier?: ParameterTier;
+  /** Stable UI ordering index. */
+  uiOrder?: number;
+  /** Optional provider parameter description for tooltips/help. */
+  description?: string;
   /** The choices are suggestions: any other non-empty string is also accepted. */
   allowCustom?: boolean;
 };
 export type GenerationOptions = { delivery: 'provider' | 'prompt'; fields: GenerationOption[] };
+
+/** Align every `GenerationOption` field with the SSOT canonical key & primary/advanced tier taxonomy. */
+export function enrichGenerationOptionsWithSSOT(modality: Modality, options: GenerationOptions): GenerationOptions {
+  return {
+    delivery: options.delivery,
+    fields: options.fields.map((field, index) => {
+      const valueType = field.kind === 'choice'
+        ? 'enum'
+        : field.kind === 'number'
+          ? (field.step !== undefined && field.step !== 1 ? 'number' : 'integer')
+          : field.kind === 'boolean'
+            ? 'boolean'
+            : 'string';
+      const standardKey = field.standardKey ?? mapWireKeyToStandard(field.key, modality, valueType);
+      const tier = field.tier ?? classifyParameterTier(modality, field.key, standardKey, valueType);
+      const uiOrder = field.uiOrder ?? index;
+      if (field.standardKey === standardKey && field.tier === tier && field.uiOrder === uiOrder) return field;
+      return {
+        ...field,
+        ...(standardKey ? { standardKey } : {}),
+        tier,
+        uiOrder,
+      };
+    }),
+  };
+}
 const choice = (key: string, label: string, values: (string | number)[], value?: string | number, presentation?: GenerationOption['presentation']): GenerationOption => ({ key, label, kind: 'choice', choices: values.map(value => ({ value, label: String(value) })), default: value, presentation });
 const number = (key: string, label: string, value?: number, min?: number, max?: number, step = 1): GenerationOption => ({ key, label, kind: 'number', default: value, min, max, step });
 const toggle = (key: string, label: string, value = false): GenerationOption => ({ key, label, kind: 'boolean', default: value });
@@ -270,10 +313,10 @@ function openDesignImageFields(model: Model): GenerationOption[] | undefined {
  * An unknown catalogue model deliberately gets no guessed schema. */
 export function generationOptions(model: Model, hasInputImage = false): GenerationOptions | undefined {
   const endpoint = `${model.provider}:${model.modelId}`;
-  if (endpoint === 'codex:image-generation' && model.modality === 'image') return { delivery: 'prompt', fields: [
+  if (endpoint === 'codex:image-generation' && model.modality === 'image') return enrichGenerationOptionsWithSSOT('image', { delivery: 'prompt', fields: [
     choice('aspect_ratio', 'Aspect ratio', ['1:1', '4:3', '3:4', '16:9', '9:16'], undefined, 'ratio'),
     choice('background', 'Background', ['opaque', 'transparent']),
-  ] };
+  ] });
   let fields: GenerationOption[] | undefined;
   if (endpoint === 'atlascloud:google/nano-banana-2/text-to-image' && model.modality === 'image') fields = [
     choice('aspect_ratio', 'Aspect ratio', ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], undefined, 'ratio'),
@@ -351,13 +394,19 @@ export function generationOptions(model: Model, hasInputImage = false): Generati
   if (cloudSpeech(model)) { const voices = checkedVoices(model); fields = [voices ? { key: 'voice', label: 'Speech voice', kind: 'choice', choices: voices, default: voices[0].value, allowCustom: true } : text('voice', 'Voice ID', true)]; }
   // The connector's `audio music --duration` takes whole seconds; music models publish no duration range.
   if (model.provider === 'account' && model.modality === 'audio' && model.mode === 'text-to-audio') fields = [number('duration', 'Duration (seconds)', undefined, 1)];
-  return fields ? { delivery: 'provider', fields } : undefined;
+  return fields ? enrichGenerationOptionsWithSSOT(model.modality, { delivery: 'provider', fields }) : undefined;
 }
 
 /** Validate maintained fields; preserve the advanced provider-native escape hatch. */
-export function validateGenerationOptions(model: Model, parameters: Record<string, unknown>, hasInputImage = false) {
+export function validateGenerationOptions(
+  model: Model,
+  parameters: Record<string, unknown>,
+  hasInputImage = false,
+  resolvedOptions?: GenerationOptions,
+) {
   const isEdit = hasInputImage || (Array.isArray(parameters.images) && parameters.images.length > 0);
-  for (const field of generationOptions(model, isEdit)?.fields ?? []) {
+  const schema = generationOptions(model, isEdit) ?? resolvedOptions ?? model.generationOptions;
+  for (const field of schema?.fields ?? []) {
     const value = parameters[field.key];
     if (value === undefined) { if (field.required) throw new Error(`${field.label} is required`); continue; }
     // fal also accepts custom dimensions; the quick picker is only a subset.

@@ -896,3 +896,51 @@ test('cloudModels populates measured maxInputImages when OpenDesign Cloud omits 
   assert.equal(byId.get('seedream-5.5'), 1);
   assert.equal(byId.get('future-unknown-image'), 1);
 });
+
+test('SSOT metadata attaches standardKey and tier to generationOptions and gateway enriches registry-backed models', () => fixture(async store => {
+  const codexImage: Model = {
+    id: 'codex:image-generation',
+    provider: 'codex',
+    modelId: 'image-generation',
+    label: 'Codex Image',
+    modality: 'image',
+    mode: 'text-to-image',
+    source: 'builtin',
+  };
+  const codexOpts = generationOptions(codexImage)!;
+  assert.equal(codexOpts.fields[0].standardKey, 'aspectRatio');
+  assert.equal(codexOpts.fields[0].tier, 'primary');
+  assert.equal(codexOpts.fields[1].standardKey, 'background');
+  assert.equal(codexOpts.fields[1].tier, 'primary');
+
+  const nano = builtinModels.find(m => m.id === 'atlascloud:google/nano-banana-2/text-to-image')!;
+  const nanoOpts = generationOptions(nano)!;
+  assert.equal(nanoOpts.fields.find(f => f.key === 'aspect_ratio')?.tier, 'primary');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'resolution')?.tier, 'primary');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'output_format')?.tier, 'advanced');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'seed')?.standardKey, 'seed');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'seed')?.tier, 'advanced');
+
+  const gateway = gatewayFor(store);
+  try {
+    await mkdir(gateway.root, { recursive: true });
+    const cachedModel: Model = {
+      id: 'fal:alibaba/wan-3.0-prime/image-to-video',
+      provider: 'fal',
+      modelId: 'alibaba/wan-3.0-prime/image-to-video',
+      label: 'Wan 3.0 Prime',
+      modality: 'video',
+      mode: 'image-to-video',
+      source: 'live',
+    };
+    await writeFile(path.join(gateway.root, 'catalog.json'), JSON.stringify([cachedModel]));
+    const models = await gateway.models();
+    const enriched = models.find(m => m.id === cachedModel.id);
+    assert.ok(enriched?.generationOptions, 'Expected ModelGateway to enrich live fal model from @openmotion/multimodal-models');
+    assert.equal(enriched!.generationOptions!.fields.find(f => f.key === 'resolution')?.tier, 'primary');
+    assert.equal(enriched!.generationOptions!.fields.find(f => f.key === 'duration')?.standardKey, 'duration');
+    assert.equal(enriched!.generationOptions!.fields.find(f => f.key === 'seed')?.tier, 'advanced');
+  } finally {
+    gateway.close();
+  }
+}));

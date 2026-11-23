@@ -55,6 +55,7 @@ export interface StudioUiPreferences {
   workspaceLayout?: { left: boolean; right: boolean; preview?: boolean; timeline: boolean; timelineHeight: number | null };
   linkedSelectionEnabled?: boolean;
   syncIndicatorsVisible?: boolean;
+  superAgentFollowUpBehavior?: 'steer' | 'queue';
 }
 
 const STUDIO_UI_PREFERENCES_KEY = "hf-studio-ui-preferences";
@@ -169,6 +170,9 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
     }
     if (typeof parsed.syncIndicatorsVisible === "boolean") {
       preferences.syncIndicatorsVisible = parsed.syncIndicatorsVisible;
+    }
+    if (parsed.superAgentFollowUpBehavior === "steer" || parsed.superAgentFollowUpBehavior === "queue") {
+      preferences.superAgentFollowUpBehavior = parsed.superAgentFollowUpBehavior;
     }
     const dockLayout = parseDockLayout(parsed.dockLayout);
     if (dockLayout) preferences.dockLayout = dockLayout;

@@ -1,3 +1,5 @@
+import { AssetLibrary } from '../gateway/asset-library.ts';
+import { mcpRegistry } from '../mcp.ts';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, writeFile, readFile, symlink, cp } from 'node:fs/promises';
@@ -37,6 +39,15 @@ test('draft lifecycle, remix, persisted local viewer and concurrent counters',()
   const { game, agentInstruction }=await service.create(brief);
   assert.equal(game.status,'draft'); assert.equal(game.maxPlayers,1);
   assert.match(agentInstruction,/pixel style, racing, space setting\. A small space racer/);
+  assert.doesNotMatch(agentInstruction,/openmotion_generate_asset/);
+  assert.doesNotMatch(agentInstruction,/openmotion_read_workflow/);
+  assert.match(agentInstruction,/openmotion:\/\/workflow\/game\/start/);
+  assert.match(agentInstruction,/openmotion_media_use/);
+  assert.match(agentInstruction,/openmotion_assets_use\(action="generate"\)/);
+  const phase1ToolNames = new Set(mcpRegistry('phase1').tools.map(tool => tool.name));
+  for (const match of agentInstruction.matchAll(/\bopenmotion_[a-z_]+\b/g)) {
+    assert.ok(phase1ToolNames.has(match[0]), `agentInstruction references hidden tool ${match[0]}`);
+  }
   assert.match(agentInstruction,/openmotion-game/); assert.match(agentInstruction,new RegExp(game.id));
   assert.match((await service.read(game.id,'index.html')).content,/requestAnimationFrame/);
   assert.equal((await service.validate(game.id)).passed,true);
@@ -1243,4 +1254,48 @@ export function tick(state){ if (state.t >= 10) throw new Error('ticked after th
 export function viewFor(state){ return state; }
 export function isGameOver(state){ return { over: state.t >= 10 }; }`}]);
   assert.deepEqual((await service.validate(game.id)).diagnostics,[]);
+}));
+
+test('validation allows SVG namespace declarations and createElementNS while rejecting external URLs on the same host',()=>fixture(async(service)=>{
+  const {game}=await service.create(brief);
+  const svg='<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></svg><script>document.createElementNS("http://www.w3.org/2000/svg","svg");</script>';
+  await service.write(game.id,[{path:'index.html',content:svg}]);
+  assert.equal((await service.validate(game.id)).passed,true);
+  await service.write(game.id,[{path:'index.html',content:svg+'<img src="http://www.w3.org/2000/svg">'}]);
+  assert.deepEqual((await service.validate(game.id)).diagnostics,[
+    {path:'index.html',message:'External network host is not allowed: www.w3.org'},
+  ]);
+}));
+
+test('headless playtest loads workspace asset versions via GET, HEAD, Range and rejects invalid ids with 404',async t=>fixture(async(service,workspace)=>{
+  if(!await browserExecutable().catch(()=>undefined)){t.skip('Local Chrome is unavailable');return;}
+  const filename=path.join(workspace,'sprite.png');
+  await writeFile(filename,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==','base64'));
+  const asset=await new AssetLibrary(new WorkspaceStore(workspace)).importFile(filename,{requestId:'playtest-sprite',name:'Sprite'});
+  const base='/motion-api/assets/'+asset.id+'/versions/'+asset.currentVersionId;
+  const {game}=await service.create(brief);
+  await service.write(game.id,[{path:'index.html',content:`<!doctype html><canvas id="game" width="1280" height="720"></canvas>
+    <script>
+      let state = null;
+      window.__omGame = {getState: () => state};
+      (async () => {
+        const results = await Promise.all(['media', 'file'].map(async endpoint => {
+          const response = await fetch(${JSON.stringify(base)} + '/' + endpoint);
+          return {status: response.status, bytes: (await response.arrayBuffer()).byteLength};
+        }));
+        const headRes = await fetch(${JSON.stringify(base)} + '/media', {method: 'HEAD'});
+        const rangeRes = await fetch(${JSON.stringify(base)} + '/media', {headers: {Range: 'bytes=0-3'}});
+        const rangeBytes = (await rangeRes.arrayBuffer()).byteLength;
+        const missingRes = await fetch('/motion-api/assets/not-a-uuid/versions/not-a-uuid/media');
+        state = {running: true, results, headStatus: headRes.status, rangeStatus: rangeRes.status, rangeBytes, missingStatus: missingRes.status};
+      })();
+    </script>`}]);
+  const {clients:[client]}=await service.playtest(game.id,{durationMs:150,scripts:[[]]});
+  assert.equal(client.failedRequests.filter(r => !r.url.includes('not-a-uuid')).length, 0);
+  const bytes=(await readFile(filename)).byteLength;
+  assert.deepEqual(client.authoritative?.state.results,[{status:200,bytes},{status:200,bytes}]);
+  assert.equal(client.authoritative?.state.headStatus,200);
+  assert.equal(client.authoritative?.state.rangeStatus,206);
+  assert.equal(client.authoritative?.state.rangeBytes,4);
+  assert.equal(client.authoritative?.state.missingStatus,404);
 }));

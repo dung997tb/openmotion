@@ -12,7 +12,7 @@ Read this after the design system and before writing code. Pick the recipe that 
 
 **Session shape.** One run lasts 30–120 s for arcade and party games (story and puzzle games may run longer but must checkpoint). Difficulty ramps on a stated curve. Death or loss to restart takes two seconds or less. Show the score and a locally stored best score at the end.
 
-**Art floor.** Use one palette with named roles from the style formula. Characters and key objects need a readable silhouette (a head, a face, a shape language), not bare circles or boxes. Prefer bundled CC0 assets (`characters/` KayKit models in 3D drafts) over primitives, and code-drawn sprites with outlines, highlights and two-tone shading over flat fills. If the user approves paid generation, use it for the cover and the 2–6 most visible sprites first. Never ship placeholder geometry as the hero.
+**Art floor.** Use one palette with named roles from the style formula. Characters and key objects need a readable silhouette (a head, a face, a shape language), not bare circles or boxes. Prefer bundled CC0 assets (`characters/` KayKit models in 3D drafts) over primitives, and code-drawn sprites with outlines, highlights and two-tone shading over flat fills. When the brief involves human or anime characters, illustration, music or voice and a fitting media model is listed, generate those assets first (see the multimodal-first trigger in `game-stylization.md`): key art and the 2–6 most visible characters or sprites, one music loop, and any spoken lines. Never ship placeholder geometry as the hero, and never hand-draw a human portrait from primitives when generation is available and approved.
 
 **Touch.** Implement touch controls that fit the genre (tap, drag, on-screen stick, big buttons at least 56 px). Portrait games must be fully playable at 390×844 with thumbs.
 
@@ -20,8 +20,9 @@ Read this after the design system and before writing code. Pick the recipe that 
 
 ## 2. Starter kits
 
-- **coop-3d**: multiplayer shooter or 3D briefs. Three.js arena, KayKit Mage/Knight, rooms, revive, waves.
-- **arcade-2d**: everything else. A full-screen canvas, fixed-step local loop over `logic.js`, keyboard, mouse, touch and one-button input, juice helpers, best score, a portrait/landscape switch and the test hook. It ships a tiny "catch sparks, dodge rocks" sample. Replace the sample rules, art and strings, but keep the loop, input layer, hook and pilot/referenceRoute pattern. For 3D single-player briefs, keep the arcade-2d input, loop and hook, and render with the vendored Three.js.
+- **coop-3d**: multiplayer `shooter`, `3d`, or unspecified-genre briefs. Three.js arena, KayKit Mage/Knight, rooms, revive, waves.
+- **generic multiplayer room starter**: other multiplayer briefs (e.g. multiplayer `racing`, `platformer`, `casual`, `story`, `horror`). Minimal deterministic `logic.js` + room-wired HTML shell that you customize for the brief.
+- **arcade-2d**: single-player briefs (`multiplayer:false`). A full-screen canvas, fixed-step local loop over `logic.js`, keyboard, mouse, touch and one-button input, juice helpers, best score, a portrait/landscape switch and the test hook. It ships a tiny "catch sparks, dodge rocks" sample. Replace the sample rules, art and strings, but keep the loop, input layer, hook and pilot/referenceRoute pattern. For 3D single-player briefs, keep the arcade-2d input, loop and hook, and render with the vendored Three.js.
 - If your draft lacks the kit you need, read it from `templates/game-kits/<kit>/` when your host can read files. Otherwise build the same structure yourself.
 
 ## 3. Recipes
@@ -32,11 +33,11 @@ Each recipe lists the core loop, the must-haves and the acceptance checks.
 
 **One-button / hypercasual.** One input (tap, click, Space, Enter) does everything. Must have: under 3 s to understand, a skill timing window that tightens over time, instant restart, score plus best, a near-miss or perfect bonus, strong juice on every input. Accept: only one input is bound; difficulty measurably ramps (log the window or speed per minute); death to restart ≤ 2 s.
 
-**Racing.** Laps or a timed course with rivals. Must have: track bounds, at least two AI racers that follow a racing line and can overtake, a position readout (1st/2nd/…), lap or checkpoint counter, boost or drift, a finish screen with place and time. Accept: reference finishes first; idle finishes last or times out; touch has steer and throttle.
+**Racing.** Laps or a timed course with rivals. Must have: track bounds, at least two AI racers that follow a racing line and can overtake, a position readout (1st/2nd/…), lap or checkpoint counter, boost or drift, a finish screen with place and time. Accept: reference finishes first; idle finishes last or loses on an in-game race/lap countdown timer (`isGameOver` terminal loss, never a simulation tick-budget timeout); touch has steer and throttle.
 
 **Horror / puzzle escape.** Explore, find clues, escape under threat. Must have: at least two chained puzzles (for example find a code → open a safe), a threat with telegraphed approach (sound or light cues), a fail state, darkness with a light source, fog and an ambient sound bed, a readable interaction prompt. Accept: reference escapes; idle is caught or runs out of time; every clue is reachable on touch.
 
-**Story / visual novel.** Read, choose, reach an ending. Must have: a portrait or background per scene in one consistent style, a typewriter text box that a tap completes and a second tap advances, at least three choices that change later text, at least two distinct endings, a chapter or scene restart, a choice log or back-log. Accept: the reference route reaches an ending; an alternate route reaches a different ending; text is readable at 390×844.
+**Story / visual novel.** Read, choose, reach an ending. Must have: a portrait or background per scene in one consistent style (generated images when a model is listed; edits of one approved character with `references` keep the cast consistent), background music, voiced key lines when a speech model is listed and approved, a typewriter text box that a tap completes and a second tap advances, at least three choices that change later text, at least two distinct endings, a chapter or scene restart, a choice log or back-log. Accept: the reference route reaches an ending; an alternate route reaches a different ending; text is readable at 390×844.
 
 **Co-op survival (zombies and friends).** The coop-3d kit's loop with enemies themed to the brief. Must have: three or more enemy types, waves with a boss, revive, ammo or resource pickups, a reason to stand together. Accept: the multiplayer checks in the flow reference plus reference-win and idle-loss with 1 and 2 players.
 

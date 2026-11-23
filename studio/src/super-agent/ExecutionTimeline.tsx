@@ -6,6 +6,7 @@ import {
   type SuperAgentApproval,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentContextTag,
   type SuperAgentFileOperation,
   type SuperAgentMessage,
   type SuperAgentResourceAttachment,
@@ -17,6 +18,7 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
 import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
+import { FilesChangedCard, UnifiedDiffView } from './ChangedFilesTree';
 import { resourceIcon, resourceKey } from './ResourcePickerDialog';
 import { SimpleMarkdown } from './SimpleMarkdown';
 
@@ -39,6 +41,15 @@ export function formatElapsedDuration(ms?: number): string {
   if (secs < 60) return `${secs.toFixed(secs < 10 ? 1 : 0)}s`;
   const mins = Math.floor(secs / 60);
   const remSecs = Math.round(secs % 60);
+  return `${mins}m ${remSecs}s`;
+}
+
+function formatWorkingDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '1s';
+  const totalSecs = Math.max(1, Math.floor(ms / 1000));
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const remSecs = totalSecs % 60;
   return `${mins}m ${remSecs}s`;
 }
 
@@ -76,7 +87,7 @@ function resolveLiveTurnStatusText(
   options: { chat: SuperAgentChat | null; sending?: boolean; engineLabel?: string },
 ): string {
   if (options.sending && options.chat?.state !== 'running' && options.chat?.state !== 'waiting') {
-    return t('Sending…');
+    return t('Starting…');
   }
   const activity = options.chat?.turnActivity;
   const phase = activity?.phase ?? 'thinking';
@@ -125,7 +136,10 @@ function collectTurnFiles(workItems: SuperAgentMessage[]): SuperAgentFileOperati
       if (!op.path || op.action === 'read') continue;
       const existing = byPath.get(op.path);
       if (!existing) {
-        byPath.set(op.path, { ...op });
+        byPath.set(op.path, {
+          ...op,
+          ...(ev.artifactId && !op.artifactId ? { artifactId: ev.artifactId } : {}),
+        });
       } else {
         byPath.set(op.path, {
           ...existing,
@@ -133,6 +147,7 @@ function collectTurnFiles(workItems: SuperAgentMessage[]): SuperAgentFileOperati
           addedLines: (existing.addedLines ?? 0) + (op.addedLines ?? 0) || existing.addedLines || op.addedLines,
           removedLines: (existing.removedLines ?? 0) + (op.removedLines ?? 0) || existing.removedLines || op.removedLines,
           diffPreview: op.diffPreview || existing.diffPreview,
+          artifactId: op.artifactId || existing.artifactId || ev.artifactId,
         });
       }
     }
@@ -183,7 +198,9 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
     const artifacts = [...artifactIds]
       .map(id => artifactsById.get(id))
       .filter((a): a is SuperAgentArtifact => Boolean(a));
-    const changedFiles = collectTurnFiles(workItems);
+    const turnId = group.user?.id ?? `turn-${idx}`;
+    const persistedFiles = chat.turnChangedFiles?.[turnId];
+    const changedFiles = persistedFiles?.length ? persistedFiles : collectTurnFiles(workItems);
     const hasRunning = workItems.some(
       m => m.status === 'streaming' || m.toolEvent?.status === 'running',
     );
@@ -201,7 +218,7 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
     }
 
     return {
-      id: group.user?.id ?? `turn-${idx}`,
+      id: turnId,
       user: group.user,
       workItems,
       assistantItems,
@@ -214,29 +231,6 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
   });
 }
 
-function UnifiedDiffView({ diff }: { diff: string }) {
-  const lines = useMemo(() => diff.split('\n').slice(0, 120), [diff]);
-  return (
-    <pre className="om-sa-diff-pre">
-      {lines.map((line, i) => {
-        const kind = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')
-          ? 'meta'
-          : line.startsWith('+')
-            ? 'add'
-            : line.startsWith('-')
-              ? 'del'
-              : 'ctx';
-        return (
-          <span key={i} className="om-sa-diff-line" data-kind={kind}>
-            {line}
-            {'\n'}
-          </span>
-        );
-      })}
-    </pre>
-  );
-}
-
 function ToolStepRow({
   message,
   onOpenArtifactId,
@@ -245,6 +239,7 @@ function ToolStepRow({
   onOpenArtifactId: (artifactId: string) => void;
 }) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   const ev = message.toolEvent;
   const isRunning = ev?.status === 'running';
   const liveElapsedMs = useLiveElapsedMs(ev?.startedAt, isRunning);
@@ -253,66 +248,87 @@ function ToolStepRow({
   const fileOp = ev.fileOp ?? ev.files?.[0];
   const diffFiles = (ev.files ?? (fileOp ? [fileOp] : [])).filter(f => f.diffPreview);
   const hasBody = Boolean(ev.command || diffFiles.length > 0 || ev.inputPreview || ev.outputPreview);
+  const isOpen = hasBody && expanded;
   const displayDurationMs = status === 'running'
     ? (liveElapsedMs >= 1000 ? liveElapsedMs : undefined)
     : ev.durationMs;
 
-  return (
-    <details className="om-sa-tool-row" open={status === 'failed' || undefined}>
-      <summary>
-        <span
-          className="om-sa-tool-status"
-          data-status={status}
-          data-category={ev.category || 'tool'}
-        >
-          <RemixIcon name={categoryIcon(ev.category, status)} size={15} />
-        </span>
-        <span className="om-sa-tool-label">{t(ev.label || message.text)}</span>
-        {ev.summary && ev.summary !== ev.label && (
-          <span className="om-sa-tool-summary" title={ev.summary}>{ev.summary}</span>
+  const headerContent = (
+    <>
+      <span
+        className="om-sa-tool-status"
+        data-status={status}
+        data-category={ev.category || 'tool'}
+      >
+        <RemixIcon name={categoryIcon(ev.category, status)} size={15} />
+      </span>
+      <span className="om-sa-tool-label">{t(ev.label || message.text)}</span>
+      {ev.summary && ev.summary !== ev.label && (
+        <span className="om-sa-tool-summary" title={ev.summary}>{ev.summary}</span>
+      )}
+      <span className="om-sa-step-trail">
+        {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
+          <span className="om-sa-diff-badges">
+            {fileOp.addedLines !== undefined && fileOp.addedLines > 0 && (
+              <span className="om-sa-diff-add">+{fileOp.addedLines}</span>
+            )}
+            {fileOp.removedLines !== undefined && fileOp.removedLines > 0 && (
+              <span className="om-sa-diff-del">-{fileOp.removedLines}</span>
+            )}
+          </span>
         )}
-        <span className="om-sa-step-trail">
-          {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
-            <span className="om-sa-diff-badges">
-              {fileOp.addedLines !== undefined && fileOp.addedLines > 0 && (
-                <span className="om-sa-diff-add">+{fileOp.addedLines}</span>
-              )}
-              {fileOp.removedLines !== undefined && fileOp.removedLines > 0 && (
-                <span className="om-sa-diff-del">-{fileOp.removedLines}</span>
-              )}
-            </span>
-          )}
-          {ev.exitCode !== undefined && (
-            <span className="om-sa-exit-pill" data-ok={ev.exitCode === 0 || undefined}>
-              {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
-            </span>
-          )}
-          {displayDurationMs !== undefined && (
-            <span className="om-sa-step-time">{formatElapsedDuration(displayDurationMs)}</span>
-          )}
-          {ev.artifactId && (
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-tool-view-btn"
-              onClick={event => {
-                event.preventDefault();
-                event.stopPropagation();
-                onOpenArtifactId(ev.artifactId!);
-              }}
-            >
-              <span>{t('View in Viewer')}</span>
-              <RemixIcon name="arrow-right-up-line" size={13} />
-            </Button>
-          )}
-          {hasBody && (
-            <span className="om-sa-step-chevron" aria-hidden="true">
-              <RemixIcon name="arrow-down-s-line" size={14} />
-            </span>
-          )}
-        </span>
-      </summary>
-      {hasBody && (
+        {ev.exitCode !== undefined && (
+          <span className="om-sa-exit-pill" data-ok={ev.exitCode === 0 || undefined}>
+            {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
+          </span>
+        )}
+        {displayDurationMs !== undefined && (
+          <span className="om-sa-step-time">{formatElapsedDuration(displayDurationMs)}</span>
+        )}
+        {hasBody && (
+          <span className="om-sa-step-chevron" aria-hidden="true">
+            <RemixIcon name="arrow-down-s-line" size={14} />
+          </span>
+        )}
+      </span>
+    </>
+  );
+
+  return (
+    <div className="om-sa-tool-row" data-open={isOpen || undefined}>
+      <div className="om-sa-tool-head">
+        {hasBody ? (
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-tool-trigger"
+            aria-expanded={isOpen}
+            onClick={() => setExpanded(prev => !prev)}
+          >
+            {headerContent}
+          </Button>
+        ) : (
+          <div className="om-sa-tool-trigger" data-static="true">
+            {headerContent}
+          </div>
+        )}
+        {ev.artifactId && (
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-tool-view-btn"
+            onClick={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenArtifactId(ev.artifactId!);
+            }}
+          >
+            <span>{t('View in Viewer')}</span>
+            <RemixIcon name="arrow-right-up-line" size={13} />
+          </Button>
+        )}
+      </div>
+      {isOpen && (
         <div className="om-sa-tool-body">
           {ev.command && (
             <div className="om-sa-cmd-block">
@@ -346,14 +362,17 @@ function ToolStepRow({
           )}
         </div>
       )}
-    </details>
+    </div>
   );
 }
 
 function ReasoningStepRow({ message }: { message: SuperAgentMessage }) {
   const { t } = useI18n();
   const isStreaming = message.status === 'streaming';
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   const liveElapsedMs = useLiveElapsedMs(message.createdAt, isStreaming);
+  const hasBody = Boolean(message.text?.trim());
+  const expanded = hasBody && (userExpanded ?? isStreaming);
   const durationLabel = !isStreaming && message.durationMs !== undefined
     ? t('Thought for {duration}', { duration: formatElapsedDuration(message.durationMs) })
     : isStreaming
@@ -362,143 +381,47 @@ function ReasoningStepRow({ message }: { message: SuperAgentMessage }) {
           : t('Thinking…'))
       : t('Reasoning');
 
-  return (
-    <details className="om-sa-reasoning-row" open={isStreaming || undefined}>
-      <summary>
-        <span className="om-sa-reasoning-icon" data-streaming={isStreaming || undefined}>
-          <RemixIcon name={isStreaming ? 'loader-4-line' : 'sparkling-line'} size={14} />
-        </span>
-        <span className="om-sa-reasoning-label">{durationLabel}</span>
-        {!isStreaming && message.text && (
-          <span className="om-sa-tool-summary">{message.text.slice(0, 120)}</span>
-        )}
+  const headerContent = (
+    <>
+      <span className="om-sa-reasoning-icon" data-streaming={isStreaming || undefined}>
+        <RemixIcon name={isStreaming ? 'loader-4-line' : 'sparkling-line'} size={14} />
+      </span>
+      <span className="om-sa-reasoning-label">{durationLabel}</span>
+      {!isStreaming && message.text && (
+        <span className="om-sa-tool-summary">{message.text.slice(0, 120)}</span>
+      )}
+      {hasBody && (
         <span className="om-sa-step-trail">
           <span className="om-sa-step-chevron" aria-hidden="true">
             <RemixIcon name="arrow-down-s-line" size={14} />
           </span>
         </span>
-      </summary>
-      {message.text && (
+      )}
+    </>
+  );
+
+  return (
+    <div className="om-sa-reasoning-row" data-open={expanded || undefined}>
+      {hasBody ? (
+        <Button
+          variant="plain"
+          type="button"
+          className="om-sa-reasoning-trigger"
+          aria-expanded={expanded}
+          onClick={() => setUserExpanded(prev => !(prev ?? isStreaming))}
+        >
+          {headerContent}
+        </Button>
+      ) : (
+        <div className="om-sa-reasoning-trigger" data-static="true">
+          {headerContent}
+        </div>
+      )}
+      {expanded && message.text && (
         <div className="om-sa-reasoning-body">
           {message.text.trim().split(/\n{2,}/).map((para, idx) => (
             <p key={idx} className="om-sa-reasoning-para">{para.trim()}</p>
           ))}
-        </div>
-      )}
-    </details>
-  );
-}
-
-function displayChangedFilePath(raw: string): string {
-  const scratchMatch = raw.match(/super-agent\/work\/[^/]+\/(.+)$/);
-  if (scratchMatch?.[1]) return scratchMatch[1];
-  return raw;
-}
-
-function FilesChangedCard({
-  files,
-  onCopyText,
-}: {
-  files: SuperAgentFileOperation[];
-  onCopyText: (text: string) => void;
-}) {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(true);
-  const [openDiffs, setOpenDiffs] = useState<Record<string, boolean>>({});
-  if (!files.length) return null;
-
-  const totalAdd = files.reduce((sum, f) => sum + (f.addedLines ?? 0), 0);
-  const totalDel = files.reduce((sum, f) => sum + (f.removedLines ?? 0), 0);
-
-  return (
-    <div className="om-sa-files-changed">
-      <Button
-        variant="plain"
-        type="button"
-        className="om-sa-files-changed-head"
-        aria-expanded={expanded}
-        onClick={() => setExpanded(v => !v)}
-      >
-        <RemixIcon name="file-code-line" size={14} />
-        <span className="om-sa-files-changed-title">
-          {t('Files changed ({count})', { count: files.length })}
-        </span>
-        {(totalAdd > 0 || totalDel > 0) && (
-          <span className="om-sa-diff-badges">
-            {totalAdd > 0 && <span className="om-sa-diff-add">+{totalAdd}</span>}
-            {totalDel > 0 && <span className="om-sa-diff-del">-{totalDel}</span>}
-          </span>
-        )}
-        <span className="om-sa-files-changed-chevron" data-open={expanded || undefined}>
-          <RemixIcon name="arrow-down-s-line" size={14} />
-        </span>
-      </Button>
-      {expanded && (
-        <div className="om-sa-files-changed-list">
-          {files.map(file => {
-            const hasDiff = Boolean(file.diffPreview);
-            const diffOpen = Boolean(openDiffs[file.path]);
-            const labelPath = displayChangedFilePath(file.path);
-            return (
-              <div key={file.path} className="om-sa-file-change-item">
-                <div className="om-sa-file-change-row">
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-file-row-trigger"
-                    aria-expanded={hasDiff ? diffOpen : undefined}
-                    title={file.path}
-                    onClick={() => {
-                      if (hasDiff) {
-                        setOpenDiffs(prev => ({ ...prev, [file.path]: !prev[file.path] }));
-                      } else {
-                        onCopyText(file.path);
-                      }
-                    }}
-                  >
-                    <span
-                      className="om-sa-file-row-chevron"
-                      data-open={diffOpen || undefined}
-                      data-hidden={!hasDiff || undefined}
-                      aria-hidden="true"
-                    >
-                      <RemixIcon name="arrow-down-s-line" size={13} />
-                    </span>
-                    <span className="om-sa-file-action-badge" data-action={file.action}>
-                      {file.action === 'create' ? 'A' : file.action === 'delete' ? 'D' : 'M'}
-                    </span>
-                    <span className="om-sa-file-path-text">{labelPath}</span>
-                    <span className="om-sa-file-row-trail">
-                      {(file.addedLines !== undefined && file.addedLines > 0) || (file.removedLines !== undefined && file.removedLines > 0) ? (
-                        <span className="om-sa-diff-badges">
-                          {file.addedLines !== undefined && file.addedLines > 0 && (
-                            <span className="om-sa-diff-add">+{file.addedLines}</span>
-                          )}
-                          {file.removedLines !== undefined && file.removedLines > 0 && (
-                            <span className="om-sa-diff-del">-{file.removedLines}</span>
-                          )}
-                        </span>
-                      ) : null}
-                    </span>
-                  </Button>
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    className="om-sa-file-copy-btn"
-                    aria-label={t('Copy path')}
-                    title={t('Copy path')}
-                    onClick={() => onCopyText(file.path)}
-                    icon={<RemixIcon name="file-copy-line" size={12} />}
-                  />
-                </div>
-                {hasDiff && diffOpen && file.diffPreview && (
-                  <div className="om-sa-file-diff-drawer">
-                    <UnifiedDiffView diff={file.diffPreview} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
       )}
     </div>
@@ -508,17 +431,19 @@ function FilesChangedCard({
 function WorkLogSection({
   turn,
   isActiveTurn,
+  hasPendingApproval = false,
   onOpenArtifactId,
 }: {
   turn: TurnGroup;
   isActiveTurn: boolean;
+  hasPendingApproval?: boolean;
   onOpenArtifactId: (artifactId: string) => void;
 }) {
   const { t } = useI18n();
   const isTurnFinished = !isActiveTurn && !turn.hasRunning && turn.assistantItems.length > 0;
   const shouldAutoExpand = !isTurnFinished;
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
-  const isRunning = isActiveTurn || turn.hasRunning;
+  const isRunning = (isActiveTurn && !hasPendingApproval) || turn.hasRunning;
   const liveStart = turn.workItems[0]?.createdAt ?? turn.user?.createdAt;
   const liveRunningMs = useLiveElapsedMs(liveStart, isRunning);
 
@@ -621,25 +546,60 @@ function LivePlanCard({ plan }: { plan: NonNullable<SuperAgentChat['turnActivity
 
 function LiveTurnStatusBar({
   chat,
+  sending,
   engineLabel,
+  stepStats,
 }: {
   chat: SuperAgentChat;
+  sending?: boolean;
   engineLabel?: string;
+  stepStats: { done: number; total: number };
 }) {
   const { t } = useI18n();
-  const startedAt = chat.turnActivity?.startedAt || chat.updatedAt;
-  const elapsedMs = useLiveElapsedMs(startedAt, true, 200);
-  const statusText = resolveLiveTurnStatusText(t, { chat, engineLabel });
+  const [mountStartedAt] = useState(() => Date.now());
+  const startedAt = chat.turnActivity?.startedAt || chat.updatedAt || mountStartedAt;
+  const elapsedMs = useLiveElapsedMs(startedAt, true, 250);
+  const statusText = resolveLiveTurnStatusText(t, { chat, sending, engineLabel });
+  const phase = sending && chat.state !== 'running' && chat.state !== 'waiting'
+    ? 'connecting'
+    : (chat.turnActivity?.phase ?? 'thinking');
+  const plan = chat.turnActivity?.plan ?? [];
+  const planTotal = plan.length;
+  const planDone = plan.filter(item => item.status === 'completed').length;
+  const stepMeta = planTotal > 0
+    ? t('{done}/{total} tasks', { done: planDone, total: planTotal })
+    : stepStats.total > 0
+      ? t('{done}/{total} steps', { done: stepStats.done, total: stepStats.total })
+      : '';
+  const phaseIcon = phase === 'streaming'
+    ? 'edit-line'
+    : phase === 'thinking'
+      ? 'sparkling-line'
+      : 'loader-4-line';
+  const spinningIcon = phaseIcon === 'loader-4-line';
 
   return (
-    <div className="om-sa-live-status-wrap">
-      <div className="om-creation-thinking om-sa-thinking om-sa-live-status" role="status">
-        <WorkingIndicator />
-        <span className="om-sa-live-status-label">{statusText}</span>
-        <span className="om-sa-live-timer">{formatElapsedDuration(elapsedMs)}</span>
+    <article
+      className="om-sa-message om-sa-live-reply"
+      data-role="assistant"
+      data-phase={phase}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="om-sa-live-reply-head">
+        <span className="om-sa-live-reply-elapsed">
+          {t('Working for {time}', { time: formatWorkingDuration(elapsedMs) })}
+        </span>
+        {stepMeta && <span className="om-sa-live-reply-steps">{stepMeta}</span>}
+      </div>
+      <div className="om-sa-live-reply-phase">
+        <span className="om-sa-live-reply-icon" data-spinning={spinningIcon || undefined} aria-hidden="true">
+          <RemixIcon name={phaseIcon} size={14} />
+        </span>
+        <span className="om-sa-live-status-label om-sa-shimmer-text">{statusText}</span>
       </div>
       <LivePlanCard plan={chat.turnActivity?.plan} />
-    </div>
+    </article>
   );
 }
 
@@ -827,14 +787,61 @@ function UserMessageBubble({ text }: { text: string }) {
   );
 }
 
+function resolveUserMessageContext(
+  userMsg: SuperAgentMessage,
+  t: (text: string) => string,
+): {
+  contextTags: SuperAgentContextTag[];
+  visibleAttachments: SuperAgentResourceAttachment[];
+} {
+  const normalizedPrompt = userMsg.text.trim();
+  const rawAttachments = userMsg.attachments ?? [];
+  const hiddenDraftGames: SuperAgentResourceAttachment[] = [];
+  const visibleAttachments: SuperAgentResourceAttachment[] = [];
+
+  for (const att of rawAttachments) {
+    const isDuplicateDraftGame =
+      att.kind === 'game-project'
+      && Boolean(normalizedPrompt)
+      && att.title.trim() === normalizedPrompt;
+    if (isDuplicateDraftGame) {
+      hiddenDraftGames.push(att);
+    } else {
+      visibleAttachments.push(att);
+    }
+  }
+
+  if (userMsg.contextTags && userMsg.contextTags.length > 0) {
+    return { contextTags: userMsg.contextTags, visibleAttachments };
+  }
+
+  if (hiddenDraftGames.length > 0) {
+    const draft = hiddenDraftGames[0];
+    const fallbackTags: SuperAgentContextTag[] = [
+      { kind: 'mode', label: t('Game'), icon: 'gamepad-line', tone: 'agent' },
+    ];
+    if (draft.subtitle) {
+      for (const part of draft.subtitle.split('·')) {
+        const clean = part.trim();
+        if (clean) fallbackTags.push({ kind: 'param', label: t(clean) });
+      }
+    }
+    return { contextTags: fallbackTags, visibleAttachments };
+  }
+
+  return { contextTags: [], visibleAttachments };
+}
+
 export function ExecutionTimeline({
   chat,
   busy,
   sending,
   hideInlineStatus,
+  hideApprovals = false,
   continueDisabled,
   engineLabel,
   onOpenArtifactId,
+  onOpenChangedFile,
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
@@ -851,9 +858,11 @@ export function ExecutionTimeline({
   busy: boolean;
   sending: boolean;
   hideInlineStatus?: boolean;
+  hideApprovals?: boolean;
   continueDisabled?: boolean;
   engineLabel?: string;
   onOpenArtifactId: (artifactId: string) => void;
+  onOpenChangedFile?: (file: SuperAgentFileOperation) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
@@ -891,54 +900,70 @@ export function ExecutionTimeline({
 
         return (
           <div key={turn.id} className="om-sa-turn" data-active={isActiveTurn || undefined}>
-            {turn.user && (
-              <article className="om-sa-message" data-role="user">
-                <div className="om-sa-message-body">
-                  {turn.user.attachments && turn.user.attachments.length > 0 && (
-                    <div className="om-sa-msg-attachments">
-                      {turn.user.attachments.map(att => {
-                        const isBrowserAnnotation = att.kind === 'browser-annotation';
-                        const chipTitle = isBrowserAnnotation
-                          ? (att.annotation?.comment || att.title)
-                          : att.title;
-                        const tooltipLabel = isBrowserAnnotation
-                          ? [
-                              att.annotation?.element?.componentName,
-                              att.annotation?.element?.selector,
-                              att.annotation?.pageUrl || att.subtitle,
-                            ].filter(Boolean).join(' · ')
-                          : '';
-                        const chip = (
-                          <Button
-                            key={resourceKey(att)}
-                            variant="plain"
-                            type="button"
-                            className="om-sa-attachment-chip"
-                            data-kind={isBrowserAnnotation ? 'browser-annotation' : undefined}
-                            onClick={() => onPreviewAttachment(att)}
+            {turn.user && (() => {
+              const { contextTags, visibleAttachments } = resolveUserMessageContext(turn.user, t);
+              const hasMetaRow = contextTags.length > 0 || visibleAttachments.length > 0;
+              return (
+                <article className="om-sa-message" data-role="user">
+                  <div className="om-sa-message-body">
+                    {hasMetaRow && (
+                      <div className="om-sa-msg-attachments">
+                        {contextTags.map((tag, tagIdx) => (
+                          <span
+                            key={`${tag.kind}:${tag.label}:${tagIdx}`}
+                            className="om-sa-context-tag"
+                            data-kind={tag.kind}
+                            data-tone={tag.tone || undefined}
                           >
-                            {isBrowserAnnotation && att.previewUrl ? (
-                              <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
-                            ) : (
-                              <RemixIcon name={resourceIcon(att)} size={13} />
-                            )}
-                            <span>{chipTitle}</span>
-                          </Button>
-                        );
-                        return isBrowserAnnotation && tooltipLabel ? (
-                          <Tooltip key={resourceKey(att)} label={tooltipLabel}>{chip}</Tooltip>
-                        ) : chip;
-                      })}
-                    </div>
-                  )}
-                  <UserMessageBubble text={turn.user.text} />
-                </div>
-              </article>
-            )}
+                            {tag.icon && <RemixIcon name={tag.icon} size={13} />}
+                            <span>{tag.label}</span>
+                          </span>
+                        ))}
+                        {visibleAttachments.map(att => {
+                          const isBrowserAnnotation = att.kind === 'browser-annotation';
+                          const chipTitle = isBrowserAnnotation
+                            ? (att.annotation?.comment || att.title)
+                            : att.title;
+                          const tooltipLabel = isBrowserAnnotation
+                            ? [
+                                att.annotation?.element?.componentName,
+                                att.annotation?.element?.selector,
+                                att.annotation?.pageUrl || att.subtitle,
+                              ].filter(Boolean).join(' · ')
+                            : '';
+                          const chip = (
+                            <Button
+                              key={resourceKey(att)}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-attachment-chip"
+                              data-kind={isBrowserAnnotation ? 'browser-annotation' : undefined}
+                              onClick={() => onPreviewAttachment(att)}
+                            >
+                              {isBrowserAnnotation && att.previewUrl ? (
+                                <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
+                              ) : (
+                                <RemixIcon name={resourceIcon(att)} size={13} />
+                              )}
+                              <span>{chipTitle}</span>
+                            </Button>
+                          );
+                          return isBrowserAnnotation && tooltipLabel ? (
+                            <Tooltip key={resourceKey(att)} label={tooltipLabel}>{chip}</Tooltip>
+                          ) : chip;
+                        })}
+                      </div>
+                    )}
+                    <UserMessageBubble text={turn.user.text} />
+                  </div>
+                </article>
+              );
+            })()}
 
             <WorkLogSection
               turn={turn}
               isActiveTurn={isActiveTurn}
+              hasPendingApproval={chat.approvals.length > 0}
               onOpenArtifactId={onOpenArtifactId}
             />
 
@@ -976,17 +1001,25 @@ export function ExecutionTimeline({
             )}
 
             {!isActiveTurn && turn.changedFiles.length > 0 && (
-              <FilesChangedCard files={turn.changedFiles} onCopyText={onCopyText} />
+              <FilesChangedCard
+                files={turn.changedFiles}
+                projectDir={chat.projectDir}
+                onCopyText={onCopyText}
+                onOpenFile={onOpenChangedFile}
+              />
             )}
 
             {!isActiveTurn && turn.assistantItems.length > 0 && (
               <div className="om-sa-turn-footer">
                 <span className="om-sa-turn-meta">
-                  {engineLabel || chat.engine}
-                  {turn.durationMs !== undefined ? ` · ${formatElapsedDuration(turn.durationMs)}` : ''}
-                  {isLastTurn && chat.lastTurnUsage?.totalTokens
-                    ? ` · ${chat.lastTurnUsage.totalTokens.toLocaleString()} ${t('tokens')}`
-                    : ''}
+                  {[
+                    engineLabel || chat.engine,
+                    turn.workItems.length > 0 ? t('{count} steps', { count: turn.workItems.length }) : '',
+                    turn.durationMs !== undefined ? formatElapsedDuration(turn.durationMs) : '',
+                    isLastTurn && chat.lastTurnUsage?.totalTokens
+                      ? `${chat.lastTurnUsage.totalTokens.toLocaleString()} ${t('tokens')}`
+                      : '',
+                  ].filter(Boolean).join(' · ')}
                 </span>
                 {combinedAssistantText && (
                   <IconButton
@@ -1004,10 +1037,20 @@ export function ExecutionTimeline({
         );
       })}
 
-      {busy && !chat.approvals.length && (
+      {(busy || sending) && !chat.approvals.length && (
         hideInlineStatus
           ? <LivePlanCard plan={chat.turnActivity?.plan} />
-          : <LiveTurnStatusBar chat={chat} engineLabel={engineLabel} />
+          : (
+            <LiveTurnStatusBar
+              chat={chat}
+              sending={sending}
+              engineLabel={engineLabel}
+              stepStats={{
+                total: lastTurn?.workItems.length ?? 0,
+                done: lastTurn ? countCompletedWorkItems(lastTurn.workItems) : 0,
+              }}
+            />
+          )
       )}
 
       {chat.error && (
@@ -1060,7 +1103,7 @@ export function ExecutionTimeline({
         </div>
       )}
 
-      {chat.approvals.map(approval => (
+      {!hideApprovals && chat.approvals.map(approval => (
         <ApprovalCard
           key={approval.id}
           approval={approval}
@@ -1085,7 +1128,7 @@ function approvalKindIcon(kind: SuperAgentApproval['kind']): string {
   }
 }
 
-function ApprovalCard({
+export function ApprovalCard({
   approval,
   sending,
   onApprove,
@@ -1145,7 +1188,7 @@ function ApprovalCard({
           disabled={sending}
           onClick={() => onApprove(approval.id, true, true)}
         >
-          <span>{t('Always allow in this task')}</span>
+          <span>{t('Always allow')}</span>
         </Button>
         <Button
           variant="plain"

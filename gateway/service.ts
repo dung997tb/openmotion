@@ -18,6 +18,7 @@ import { accountMediaState } from './account-media.ts';
 import { AssetLibrary } from './asset-library.ts';
 import { requireLibraryMediaRuntime } from './asset-probe.ts';
 import { generationOptions, resolveGenerationParameters, validateGenerationOptions } from '../shared/generation-options.ts';
+import { loadRegistry, toOpenMotionGenerationOptions } from '../packages/multimodal-models/src/query.ts';
 import { audioAssetTitle, classifyAudioKind } from '../shared/audio-kind.ts';
 import { MAX_ASSET_BYTES } from '../shared/asset-limits.ts';
 
@@ -51,6 +52,22 @@ function parameters(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || JSON.stringify(value).length > 64_000) throw new Error('parameters must be an object under 64 KB');
   if (Object.keys(value).some(key => /^(?:model|prompt|api[_-]?key|authorization|webhook_url|__proto__|constructor|prototype)$/i.test(key))) throw new Error('parameters contains a reserved field');
   return value as Record<string, unknown>;
+}
+
+function resolveRegistryGenerationOptions(model: Model) {
+  const builtinOrMeasured = generationOptions(model);
+  if (builtinOrMeasured) return builtinOrMeasured;
+  if (model.provider === 'opendesign' || model.provider === 'account') return undefined;
+  try {
+    const registry = loadRegistry();
+    const endpoint = registry.endpoints[model.id];
+    if (!endpoint || endpoint.modality !== model.modality || endpoint.schemaQuality === 'catalog-metadata' || !endpoint.parameters.length) {
+      return undefined;
+    }
+    return toOpenMotionGenerationOptions(endpoint);
+  } catch {
+    return undefined;
+  }
 }
 
 export class ModelGateway {
@@ -121,7 +138,7 @@ export class ModelGateway {
     this.cloudReads.set(context.identity, read);
     try { return await read; } finally { this.cloudReads.delete(context.identity); }
   }
-  private async models(): Promise<Model[]> {
+  async models(): Promise<Model[]> {
     const cached = await readJson<Model[]>(path.join(this.root, 'catalog.json'), []);
     const overrides = await this.connections.modelOverrides();
     const custom = (await this.config()).customModels, compatible = await this.connections.mediaModels(), account = await this.account.mediaModels();
@@ -133,7 +150,7 @@ export class ModelGateway {
       const normalized = ['opendesign', 'account'].includes(merged.provider) && merged.modality === 'image' && merged.supportsImageReference
         ? { ...merged, maxInputImages: modelReferenceLimit(merged) }
         : merged;
-      return { ...normalized, generationOptions: generationOptions(normalized) };
+      return { ...normalized, generationOptions: resolveRegistryGenerationOptions(normalized) };
     });
   }
   async listModels(input: { provider?: unknown; modality?: unknown; query?: unknown; refresh?: unknown; offset?: unknown; limit?: unknown } = {}) {
@@ -293,7 +310,7 @@ export class ModelGateway {
       if (model.provider === 'opendesign' && (await this.cloudContext()).identity !== cloudIdentity) throw new Error('Cloud configuration changed; reload models before generating');
       const referenceCount = (input.library?.references?.length ?? 0) + (input.referenceAsset ? 1 : 0);
       const resolvedParameters = resolveGenerationParameters(model, params, referenceCount > 0);
-      validateGenerationOptions(model, resolvedParameters, referenceCount > 0);
+      validateGenerationOptions(model, resolvedParameters, referenceCount > 0, model.generationOptions);
       // Video sends only a first frame; the project-direct referenceAsset route stays image-only as before.
       const referenceLimit = input.referenceAsset && input.modality !== 'image' ? 0 : modelReferenceLimit(model);
       if (referenceCount && model.provider === 'opendesign' && model.modality === 'image' && model.supportsImageReference === undefined) throw new Error('Image editing capability is unknown. Sync Cloud models before using references.');
@@ -312,7 +329,10 @@ export class ModelGateway {
         ...(model.provider === 'account' ? { providerOrigin: await this.account.identity() } : model.provider === 'opendesign' ? { providerOrigin: await this.cloudOrigin() }
           : !isGatewayProvider(model.provider) ? { providerOrigin: await this.connections.baseUrl(model.provider) } : {}),
         ...(!isGatewayProvider(model.provider) && model.provider !== 'account' ? { providerRevision: await this.connections.identity(model.provider) } : {}),
-        parameters: storedParameters, usage: input.usage, idempotencyKey: input.idempotencyKey, requestHash,
+        parameters: storedParameters,
+        ...(input.capabilityId ?? input.library?.capabilityId ? { capabilityId: input.capabilityId ?? input.library?.capabilityId } : {}),
+        ...(input.capabilityOptions ?? input.library?.capabilityOptions ? { capabilityOptions: input.capabilityOptions ?? input.library?.capabilityOptions } : {}),
+        usage: input.usage, idempotencyKey: input.idempotencyKey, requestHash,
         createdAt: Date.now(), updatedAt: Date.now(), phase: 'queued', assets: [] };
       const work = path.join(this.root, 'work', job.id);
       try {
@@ -546,7 +566,10 @@ export class ModelGateway {
             const existing = await library.get(targetId).catch(error => { if (error.message !== 'ASSET_NOT_FOUND') throw error; return undefined; });
             const asset = await library.addLocked(prepared[index], { assetId: existing?.id, createId: targetId,
               name: job.library?.title || (job.modality === 'audio' ? audioAssetTitle(job.prompt) : job.prompt.replace(/\s+/g, ' ').trim().slice(0, 80)), expectedModality: job.modality,
-              version: { source: 'generated', prompt: job.prompt, model: job.model.id, parameters: job.parameters, references: job.library?.references ?? [],
+              version: { source: 'generated', prompt: job.prompt, model: job.model.id, parameters: job.parameters,
+                ...(job.capabilityId ?? job.library?.capabilityId ? { capabilityId: job.capabilityId ?? job.library?.capabilityId } : {}),
+                ...(job.capabilityOptions ?? job.library?.capabilityOptions ? { capabilityOptions: job.capabilityOptions ?? job.library?.capabilityOptions } : {}),
+                references: job.library?.references ?? [],
                 ...(job.modality === 'audio' ? { audioKind: classifyAudioKind(job.model.id, job.model.mode, 'generated', `${job.model.modelId} ${job.model.label}`) } : {}),
                 parentVersionId: job.library?.parentVersionId, jobId: job.id, requestId: `${job.id}-${index}`, requestHash: file.sha256, conversationId: job.library?.conversationId, result: current.result } });
             const version = asset.versions.find(v => v.requestId === `${job.id}-${index}`)!;

@@ -488,10 +488,16 @@ export function RouteViewport({
             requestedDesignModule={gameStudioActive ? null : (page.superAgentDesignModule ?? null)}
             requestedGameId={gameStudioActive ? (page.gameId ?? null) : null}
             onBack={gameStudioActive ? returnToExplore : undefined}
-            onExitRequestedMode={() => {
+            onChangeRequestedMode={mode => {
               navigatePage(
-                { superAgent: true, superAgentChat: gameStudioActive ? null : page.superAgentChat, superAgentMode: null, superAgentDesignModule: null, templates: false },
-                !gameStudioActive,
+                {
+                  superAgent: true,
+                  superAgentChat: gameStudioActive ? null : page.superAgentChat,
+                  superAgentMode: mode,
+                  superAgentDesignModule: mode === 'design' ? page.superAgentDesignModule ?? null : null,
+                  templates: false,
+                },
+                !gameStudioActive && mode === null,
               );
             }}
             onChatIdChange={(chat, replace) =>

@@ -35,7 +35,7 @@ import { templateCollectionFacets, templatesInCollection, type TemplateCollectio
 import { aiTechnologyIndustry, purposeOrder } from '../motion/templateDiscoveryTaxonomy';
 import { useCoveredTemplates } from '../motion/useCoveredTemplates';
 import { designScenarioOptionsPatch, type ImageDesignScene, type ModeComposerOptions } from './ModeComposerControls';
-import { resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
+import { resourceDisplaySubtitle, resourceDisplayTitle, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import { fetchWorkspaceResources } from './superAgentClient';
 
 export type SuperAgentCreationModeId = 'coding' | 'design' | 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
@@ -245,7 +245,7 @@ const DESIGN_MODULE_QUICK_IDEAS: Record<SuperAgentDesignModuleId, readonly { tit
   ],
 };
 
-export function findSuperAgentMode(id: SuperAgentCreationModeId | null): SuperAgentModeSpec | null {
+export function findSuperAgentMode(id: string | null): SuperAgentModeSpec | null {
   return id ? SUPER_AGENT_MODES.find(item => item.id === id) ?? null : null;
 }
 
@@ -254,17 +254,18 @@ const PAGE_BATCH_SIZE = 24;
 type CuratedShowcaseCard = {
   id: string;
   title: string;
-  subtitle: string;
+  subtitle: string[];
+  seconds?: number;
   poster: string;
   posterPosition?: string;
   prompt: string;
 };
 
-function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
+function buildImageCardsByCategory(category: string, isZh: boolean): CuratedShowcaseCard[] {
   const gpt: CuratedShowcaseCard[] = gptImageStory.cases.map((item, idx) => ({
     id: `gpt-${idx}`,
     title: item.example.title,
-    subtitle: 'GPT Image 2.6 · Image',
+    subtitle: ['GPT Image 2.6', 'Image'],
     poster: item.example.poster,
     posterPosition: item.example.posterPosition,
     prompt: item.example.prompt,
@@ -272,7 +273,7 @@ function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
   const t2i: CuratedShowcaseCard[] = sceneExamples['text-to-image'].map((ex, idx) => ({
     id: `t2i-${idx}`,
     title: ex.title,
-    subtitle: 'Text to image',
+    subtitle: ['Text to image'],
     poster: ex.poster,
     posterPosition: ex.posterPosition,
     prompt: ex.prompt,
@@ -280,7 +281,7 @@ function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
   const edit: CuratedShowcaseCard[] = sceneExamples['image-edit'].map((ex, idx) => ({
     id: `edit-${idx}`,
     title: ex.title,
-    subtitle: 'Image edit',
+    subtitle: ['Image editing'],
     poster: ex.poster,
     posterPosition: ex.posterPosition,
     prompt: ex.prompt,
@@ -288,7 +289,7 @@ function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
   const bg: CuratedShowcaseCard[] = sceneExamples['remove-background'].map((ex, idx) => ({
     id: `bg-${idx}`,
     title: ex.title,
-    subtitle: 'Remove background',
+    subtitle: ['Remove background'],
     poster: ex.poster,
     posterPosition: ex.posterPosition,
     prompt: ex.prompt,
@@ -296,7 +297,7 @@ function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
   const relight: CuratedShowcaseCard[] = sceneExamples.relight.map((ex, idx) => ({
     id: `relight-${idx}`,
     title: ex.title,
-    subtitle: 'Relight',
+    subtitle: ['Relight'],
     poster: ex.poster,
     posterPosition: ex.posterPosition,
     prompt: ex.prompt,
@@ -304,24 +305,27 @@ function buildImageCardsByCategory(category: string): CuratedShowcaseCard[] {
   const char: CuratedShowcaseCard[] = sceneExamples.character.map((ex, idx) => ({
     id: `char-${idx}`,
     title: ex.title,
-    subtitle: 'Character consistency',
+    subtitle: ['Character reference'],
     poster: ex.poster,
     posterPosition: ex.posterPosition,
     prompt: ex.prompt,
   }));
 
   const cinemaStills: CuratedShowcaseCard[] = [
-    ...cinemaTemplates.map(tpl => ({
-      id: `still-cinema-${tpl.id}`,
-      title: tpl.en.title,
-      subtitle: 'Cinema still · Visual reference',
-      poster: tpl.poster,
-      prompt: tpl.en.prompt,
-    })),
+    ...cinemaTemplates.map(tpl => {
+      const copy = isZh ? tpl.zh : tpl.en;
+      return {
+        id: `still-cinema-${tpl.id}`,
+        title: copy.title,
+        subtitle: ['Cinema still', 'Visual reference'],
+        poster: tpl.poster,
+        prompt: copy.prompt,
+      };
+    }),
     ...seedanceStory.cases.map((item, idx) => ({
       id: `still-seedance-${idx}`,
       title: item.example.title,
-      subtitle: 'Key visual · Art direction',
+      subtitle: ['Key visual', 'Art direction'],
       poster: item.example.poster,
       posterPosition: item.example.posterPosition,
       prompt: item.example.prompt,
@@ -358,7 +362,8 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
     return {
       id: `cinema-${tpl.id}`,
       title: copy.title,
-      subtitle: `${tpl.model.name} · ${tpl.aspect} · ${tpl.duration}s`,
+      subtitle: [tpl.model.name, tpl.aspect],
+      seconds: tpl.duration,
       poster: tpl.poster,
       prompt: copy.prompt,
     };
@@ -366,7 +371,7 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
   const seedance: CuratedShowcaseCard[] = seedanceStory.cases.map((item, idx) => ({
     id: `seedance-${idx}`,
     title: item.example.title,
-    subtitle: 'Seedance 2.5 · Video',
+    subtitle: ['Seedance 2.5', 'Video'],
     poster: item.example.poster,
     posterPosition: item.example.posterPosition,
     prompt: item.example.prompt,
@@ -375,7 +380,7 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
     sceneExamples[sceneKey].map((ex, idx) => ({
       id: `${sceneKey}-${idx}`,
       title: ex.title,
-      subtitle: sceneKey.replace('video-', '').replaceAll('-', ' '),
+      subtitle: [sceneKey === 'video-camera-control' ? 'Camera control' : 'Multi-shot'],
       poster: ex.poster,
       posterPosition: ex.posterPosition,
       prompt: ex.prompt,
@@ -384,14 +389,15 @@ function buildCinemaCardsByCategory(category: string, isZh: boolean): CuratedSho
   const music: CuratedShowcaseCard[] = sceneExamples.music.map((ex, idx) => ({
     id: `audio-${idx}`,
     title: ex.title,
-    subtitle: [ex.kind || 'Audio', ex.model, ex.seconds ? `${ex.seconds}s` : ''].filter(Boolean).join(' · '),
+    subtitle: ex.model ? [ex.kind ?? 'Audio', ex.model] : [ex.kind ?? 'Audio'],
+    seconds: ex.seconds,
     poster: ex.poster,
     prompt: ex.prompt,
   }));
   const speech: CuratedShowcaseCard[] = sceneExamples.speech.map((ex, idx) => ({
     id: `speech-${idx}`,
     title: ex.title,
-    subtitle: 'Text to speech',
+    subtitle: ['Text to speech'],
     poster: ex.poster,
     prompt: ex.prompt,
   }));
@@ -618,7 +624,7 @@ export function ModeResourceShowcase({
       case 'design': {
         if (modeOptions?.designFormat === 'image') {
           return [
-            { id: 'all-image', label: 'All image scenes', count: buildImageCardsByCategory('all-image').length },
+            { id: 'all-image', label: 'All image scenes', count: buildImageCardsByCategory('all-image', isZh).length },
             { id: 'gpt-image', label: 'GPT Image 2.6', count: gptImageStory.cases.length },
             { id: 'text-to-image', label: 'Text to image', count: sceneExamples['text-to-image'].length },
             { id: 'image-edit', label: 'Image edit', count: sceneExamples['image-edit'].length },
@@ -701,19 +707,19 @@ export function ModeResourceShowcase({
           })),
           { id: 'ai-technology', label: aiTechnologyIndustry, count: hasFull ? templatesInCollection(motionCatalog, 'ai-technology').length : undefined },
           { id: 'black-friday', label: 'Black Friday collection' },
-          { id: 'skills', label: 'Skills', count: motionSkills.length },
+          { id: 'skills', label: 'Skill library', count: motionSkills.length },
           { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
         ];
       }
       case 'image': {
         return [
-          { id: 'all-image', label: 'All image scenes', count: buildImageCardsByCategory('all-image').length },
+          { id: 'all-image', label: 'All image scenes', count: buildImageCardsByCategory('all-image', isZh).length },
           { id: 'gpt-image', label: 'GPT Image 2.6', count: gptImageStory.cases.length },
           { id: 'text-to-image', label: 'Text to image', count: sceneExamples['text-to-image'].length },
-          { id: 'image-edit', label: 'Image edit', count: sceneExamples['image-edit'].length },
+          { id: 'image-edit', label: 'Image editing', count: sceneExamples['image-edit'].length },
           { id: 'remove-background', label: 'Remove background', count: sceneExamples['remove-background'].length },
           { id: 'relight', label: 'Relight', count: sceneExamples.relight.length },
-          { id: 'character', label: 'Character', count: sceneExamples.character.length },
+          { id: 'character', label: 'Character reference', count: sceneExamples.character.length },
           { id: 'design-template', label: 'Design templates', count: designTemplates?.length },
           { id: 'asset', label: 'Workspace Assets', count: assets ? assets.filter(a => a.modality === 'image').length : undefined },
           { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
@@ -853,16 +859,16 @@ export function ModeResourceShowcase({
   // Resolve active curated cards (Image / Cinema / Audio / AI Video).
   const curatedCards = useMemo<CuratedShowcaseCard[] | null>(() => {
     if (mode.id === 'design' && modeOptions?.designFormat === 'image' && activeFilter !== 'asset' && activeFilter !== 'brand-kit') {
-      const base = buildImageCardsByCategory(activeFilter);
+      const base = buildImageCardsByCategory(activeFilter, isZh);
       const needle = designQuery.trim().toLocaleLowerCase();
       if (!needle) return base;
       return base.filter(card =>
-        [card.title, t(card.title), card.subtitle, card.prompt]
+        [card.title, t(card.title), ...(Array.isArray(card.subtitle) ? card.subtitle : [card.subtitle]), card.prompt]
           .some(text => text.toLocaleLowerCase().includes(needle)),
       );
     }
     if (mode.id === 'image' && activeFilter !== 'asset' && activeFilter !== 'brand-kit' && activeFilter !== 'design-template') {
-      return buildImageCardsByCategory(activeFilter);
+      return buildImageCardsByCategory(activeFilter, isZh);
     }
     if ((mode.id === 'media' || mode.id === 'audio') && activeFilter !== 'asset' && activeFilter !== 'motion-video') {
       return buildCinemaCardsByCategory(activeFilter, isZh);
@@ -1118,7 +1124,7 @@ export function ModeResourceShowcase({
                     type="button"
                     className="om-sa-game-fan-card"
                     aria-pressed={isCenter ? isSelected : undefined}
-                    aria-label={isCenter ? `${t('Make one like this')}: ${title}` : title}
+                    aria-label={isCenter ? `${t('Remix')}: ${title}` : title}
                     onClick={() => {
                       if (!isCenter) {
                         setFanIndex(index);
@@ -1135,7 +1141,7 @@ export function ModeResourceShowcase({
                         aria-hidden="true"
                       >
                         <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
-                        <span>{isSelected ? t('Selected') : t('Make one like this')}</span>
+                        <span>{isSelected ? t('Selected') : t('Remix')}</span>
                       </span>
                     )}
                     <span className="om-sa-game-fan-label">{t(genreLabels[game.genre])}</span>
@@ -1147,10 +1153,10 @@ export function ModeResourceShowcase({
                           variant="plain"
                           type="button"
                           className="om-sa-game-tile-deploy"
-                          title={t('Cloud deploy')}
-                          aria-label={`${t('Cloud deploy')}: ${title}`}
+                          title={t('Share')}
+                          aria-label={`${t('Share')}: ${title}`}
                           onClick={() => onDeployGame(game)}
-                          icon={<RemixIcon name="cloud-line" size={13} />}
+                          icon={<RemixIcon name="share-forward-line" size={13} />}
                         />
                       )}
                       {onPlayGame && (
@@ -1159,12 +1165,12 @@ export function ModeResourceShowcase({
                           type="button"
                           className="om-sa-game-tile-play"
                           data-playing={isPlaying || undefined}
-                          title={t('Play {title}', { title })}
-                          aria-label={t('Play {title}', { title })}
+                          title={t('Try game: {title}', { title })}
+                          aria-label={t('Try game: {title}', { title })}
                           onClick={() => onPlayGame(game)}
                         >
                           <RemixIcon name="play-fill" size={12} />
-                          <span>{t('Play')}</span>
+                          <span>{t('Try game')}</span>
                         </Button>
                       )}
                     </div>
@@ -1393,7 +1399,7 @@ export function ModeResourceShowcase({
                     value={gameSort}
                     onCommit={next => setGameSort(next as GameSort)}
                     options={[
-                      { value: 'relevance', label: t('Relevance') },
+                      { value: 'relevance', label: t('Default sort') },
                       { value: 'plays', label: t('Most played') },
                       { value: 'newest', label: t('Newest') },
                     ]}
@@ -1527,7 +1533,7 @@ export function ModeResourceShowcase({
                       type="button"
                       className="om-sa-game-tile-cover"
                       aria-pressed={isSelected}
-                      aria-label={isMine ? `${t('Attach to Chat')}: ${title}` : `${t('Make one like this')}: ${title}`}
+                      aria-label={isMine ? `${t('Attach')}: ${title}` : `${t('Remix')}: ${title}`}
                       onClick={() => selectGameForAgent(game)}
                     >
                       {cover ? (
@@ -1544,7 +1550,7 @@ export function ModeResourceShowcase({
                         aria-hidden="true"
                       >
                         <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
-                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Make one like this')}</span>
+                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Remix')}</span>
                       </span>
                       {status && (
                         <span className="om-sa-game-status" data-tone={game.status}>
@@ -1573,10 +1579,10 @@ export function ModeResourceShowcase({
                             variant="plain"
                             type="button"
                             className="om-sa-game-tile-deploy"
-                            title={t('Cloud deploy')}
-                            aria-label={`${t('Cloud deploy')}: ${title}`}
+                            title={t('Share')}
+                            aria-label={`${t('Share')}: ${title}`}
                             onClick={() => onDeployGame(game)}
-                            icon={<RemixIcon name="cloud-line" size={13} />}
+                            icon={<RemixIcon name="share-forward-line" size={13} />}
                           />
                         )}
                         {onPlayGame && (
@@ -1585,12 +1591,12 @@ export function ModeResourceShowcase({
                             type="button"
                             className="om-sa-game-tile-play"
                             data-playing={isPlaying || undefined}
-                            title={t('Play {title}', { title })}
-                            aria-label={t('Play {title}', { title })}
+                            title={t('Try game: {title}', { title })}
+                            aria-label={t('Try game: {title}', { title })}
                             onClick={() => onPlayGame(game)}
                           >
                             <RemixIcon name="play-fill" size={12} />
-                            <span>{t('Play')}</span>
+                            <span>{t('Try game')}</span>
                           </Button>
                         )}
                       </div>
@@ -1633,7 +1639,7 @@ export function ModeResourceShowcase({
                 variant="plain"
                 type="button"
                 className="om-sa-showcase-card"
-                onClick={() => onPickPrompt(card.prompt)}
+                onClick={() => onPickPrompt(t(card.prompt))}
               >
                 <div className="om-sa-showcase-thumb" aria-hidden="true">
                   <img
@@ -1649,7 +1655,7 @@ export function ModeResourceShowcase({
                 </span>
                 <div className="om-sa-showcase-meta">
                   <strong>{t(card.title)}</strong>
-                  <small>{card.subtitle}</small>
+                  <small>{[...card.subtitle.map(label => t(label)), ...(card.seconds ? [t('{count}s', { count: card.seconds })] : [])].join(' · ')}</small>
                 </div>
               </Button>
             ))
@@ -1686,6 +1692,7 @@ export function ModeResourceShowcase({
           ) : (
             visibleResources.map(item => {
               const isSelected = selectedKeys.has(resourceKey(item));
+              const subtitle = resourceDisplaySubtitle(item, t);
               return (
                 <Button
                   key={resourceKey(item)}
@@ -1701,8 +1708,8 @@ export function ModeResourceShowcase({
                     <RemixIcon name={isSelected ? 'check-line' : 'add-line'} size={13} />
                   </span>
                   <div className="om-sa-showcase-meta">
-                    <strong>{item.title}</strong>
-                    {item.subtitle && <small>{item.subtitle}</small>}
+                    <strong>{resourceDisplayTitle(item, t)}</strong>
+                    {subtitle && <small>{subtitle}</small>}
                   </div>
                 </Button>
               );

@@ -9,8 +9,64 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 
+const TASK_STATUS_LABELS = {
+  running: 'Working…',
+  waiting: 'Approval needed',
+  completed: 'Done',
+  failed: 'Stopped',
+  cancelled: 'Cancelled',
+};
+
+function ConversationRowContent({ item, resultRead }: { item: SuperAgentChatSummary; resultRead: boolean }) {
+  const { t } = useI18n();
+  const intent = superAgentIntentMeta(item.intent);
+  const state = item.state === 'idle' && item.messageCount > 0 && !resultRead ? 'completed' : item.state;
+  const statusLabel = state === 'idle' ? undefined : t(TASK_STATUS_LABELS[state]);
+  const labelledStatus = state === 'waiting' || state === 'failed' || state === 'cancelled';
+  const leadingIcon = state === 'waiting'
+    ? 'alert-line'
+    : state === 'failed'
+      ? 'error-warning-line'
+      : intent.icon;
+
+  return (
+    <>
+      <span className="om-sa-chat-icon-wrap" aria-hidden="true">
+        <span
+          className="om-sa-chat-icon"
+          data-tone={intent.tone}
+          data-intent={item.intent ?? 'chat'}
+          data-state={state !== 'idle' ? state : undefined}
+          title={statusLabel ?? t(intent.label)}
+        >
+          <RemixIcon name={leadingIcon} size={14} />
+        </span>
+      </span>
+      <span className="om-sa-chat-title">{item.title}</span>
+      {state !== 'idle' && (
+        <span
+          className={labelledStatus ? 'om-badge om-sa-chat-status-badge' : 'om-sa-chat-status'}
+          data-state={state}
+          role={labelledStatus ? undefined : 'img'}
+          aria-label={labelledStatus ? undefined : statusLabel}
+          title={statusLabel}
+        >
+          {labelledStatus ? (
+            <span>{statusLabel}</span>
+          ) : state === 'running' ? (
+            <RemixIcon name="loader-4-line" size={14} />
+          ) : (
+            <span className="om-sa-chat-dot" aria-hidden="true" />
+          )}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function ConversationSidebar({
   conversations,
+  taskResultRead,
   activeId,
   loading,
   agentStatus,
@@ -24,6 +80,7 @@ export function ConversationSidebar({
   onOpenAgentSettings,
 }: {
   conversations: SuperAgentChatSummary[];
+  taskResultRead: (item: SuperAgentChatSummary) => boolean;
   activeId: string | null;
   loading: boolean;
   agentStatus: { label: string; detail?: string; ready: boolean; count: number; loading?: boolean };
@@ -60,15 +117,6 @@ export function ConversationSidebar({
   const renderRow = (item: SuperAgentChatSummary) => {
     const isActive = item.id === activeId;
     const isEditing = editingId === item.id;
-    const statusTone =
-      item.state === 'running'
-        ? 'running'
-        : item.state === 'waiting'
-          ? 'waiting'
-          : item.state === 'failed'
-            ? 'failed'
-            : 'idle';
-    const intentMeta = superAgentIntentMeta(item.intent);
 
     if (isEditing) {
       return (
@@ -117,25 +165,7 @@ export function ConversationSidebar({
           onFocus={() => onPrefetch?.(item.id)}
           onClick={() => onSelect(item.id)}
         >
-          <span className="om-sa-chat-icon-wrap" aria-hidden="true">
-            <span
-              className="om-sa-chat-icon"
-              data-tone={intentMeta.tone}
-              data-intent={item.intent ?? 'chat'}
-              title={t(intentMeta.label)}
-            >
-              <RemixIcon name={intentMeta.icon} size={14} />
-            </span>
-            {statusTone !== 'idle' && (
-              <span className="om-sa-chat-status-badge" data-state={statusTone} />
-            )}
-          </span>
-          <span className="om-sa-chat-title">{item.title}</span>
-          {item.artifactCount > 0 && (
-            <span className="om-sa-chat-count" title={t('{count} artifacts', { count: item.artifactCount })}>
-              {item.artifactCount}
-            </span>
-          )}
+          <ConversationRowContent item={item} resultRead={taskResultRead(item)} />
         </Button>
         <Menu
           modal={false}
@@ -145,7 +175,7 @@ export function ConversationSidebar({
           className="om-selection-panel om-menu-panel"
           trigger={
             <IconButton
-              variant="ghost"
+              variant="plain"
               size="sm"
               className="om-sa-chat-more"
               aria-label={t('Conversation actions')}
@@ -185,12 +215,20 @@ export function ConversationSidebar({
   return (
     <aside className="om-sa-sidebar" aria-label={t('Conversations')}>
       <div className="om-sa-sidebar-head">
-        <div className="om-sa-sidebar-brand">
-          <span className="om-creation-icon om-sa-brand-badge" data-tone="agent" aria-hidden="true">
-            <RemixIcon name="sparkling-fill" size={14} />
-          </span>
-          <strong>{t('Super Agent')}</strong>
-        </div>
+        <Tooltip label={t('Back to home')} side="bottom">
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-sidebar-brand"
+            aria-label={`${t('Super Agent')} · ${t('Back to home')}`}
+            onClick={onCreate}
+          >
+            <span className="om-creation-icon om-sa-brand-badge" data-tone="agent" aria-hidden="true">
+              <RemixIcon name="sparkling-fill" size={14} />
+            </span>
+            <strong>{t('Super Agent')}</strong>
+          </Button>
+        </Tooltip>
         <div className="om-sa-sidebar-head-actions">
           <Tooltip label={t('Search conversations')}>
             <IconButton
@@ -301,15 +339,6 @@ export function ConversationSidebar({
               ) : (
                 searchResults.map(item => {
                   const isActive = item.id === activeId;
-                  const statusTone =
-                    item.state === 'running'
-                      ? 'running'
-                      : item.state === 'waiting'
-                        ? 'waiting'
-                        : item.state === 'failed'
-                          ? 'failed'
-                          : 'idle';
-                  const intentMeta = superAgentIntentMeta(item.intent);
                   return (
                     <Button
                       key={item.id}
@@ -324,23 +353,7 @@ export function ConversationSidebar({
                         setSearchOpen(false);
                       }}
                     >
-                      <span className="om-sa-chat-icon-wrap" aria-hidden="true">
-                        <span
-                          className="om-sa-chat-icon"
-                          data-tone={intentMeta.tone}
-                          data-intent={item.intent ?? 'chat'}
-                          title={t(intentMeta.label)}
-                        >
-                          <RemixIcon name={intentMeta.icon} size={14} />
-                        </span>
-                        {statusTone !== 'idle' && (
-                          <span className="om-sa-chat-status-badge" data-state={statusTone} />
-                        )}
-                      </span>
-                      <span className="om-sa-chat-title">{item.title}</span>
-                      {item.artifactCount > 0 && (
-                        <span className="om-sa-chat-count">{item.artifactCount}</span>
-                      )}
+                      <ConversationRowContent item={item} resultRead={taskResultRead(item)} />
                     </Button>
                   );
                 })

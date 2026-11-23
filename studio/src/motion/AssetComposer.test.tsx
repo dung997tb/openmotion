@@ -1251,3 +1251,88 @@ it('shows reference quota counter, compact thumbnail grid, drag/paste upload, st
   />));
   expect(onInfo).not.toHaveBeenCalled();
 });
+
+it('drives relight and video feature prompts from runtime capability overrides and clamps dynamic capability maxReferences', async () => {
+  const { capabilityScene, mediaEditorDestination, sceneDestination } = await import('./creativeStudios');
+  const { defaultCapabilities, resolveCapabilityCatalog } = await import('../../../shared/capability-registry');
+  const existing = featureModels();
+  const seedance: Model = { id: 'opendesign:doubao-seedance-2-5-260628', provider: 'opendesign', modelId: 'doubao-seedance-2-5-260628', label: 'Seedance 2.5', modality: 'video', mode: 'text-to-video', source: 'live', maxInputImages: 1 };
+
+  const baseRelight = defaultCapabilities.find(c => c.id === 'relight')!;
+  const customRelightControls = baseRelight.input.controls!.map(control =>
+    control.key === 'direction'
+      ? { ...control, choices: [...control.choices, { value: 'neon-rim', label: 'Neon rim', prompt: 'crisp cyan neon rim light from behind' }] as typeof control.choices }
+      : control,
+  );
+  const baseCamera = defaultCapabilities.find(c => c.id === 'camera-control')!;
+  const customCameraControls = baseCamera.input.controls!.map(control =>
+    control.key === 'movement'
+      ? { ...control, choices: [...control.choices, { value: 'whip-pan', label: 'Whip pan', prompt: 'high-energy whip pan transition across the frame' }] as typeof control.choices }
+      : control,
+  );
+  const overriddenCapabilities = resolveCapabilityCatalog([
+    { id: 'relight', input: { ...baseRelight.input, controls: customRelightControls } },
+    { id: 'camera-control', input: { ...baseCamera.input, controls: customCameraControls } },
+    { id: 'upscale-4k', status: 'live', channels: { gui: true, mcp: true } },
+  ]);
+
+  const catalog = {
+    models: [existing.sunburst, seedance],
+    status: { routes: {}, providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: true }] },
+    capabilities: overriddenCapabilities,
+  };
+
+  // 1. Relight runtime override choice submits the overridden prompt instead of falling back to legacy left-side light
+  generate.mockReset().mockResolvedValue({ job: { id: 'relight-override-job' } });
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    draft={{ modality: 'image', prompt: 'Keep metal reflections crisp.', relight: { direction: 'neon-rim' }, capabilityOptions: { direction: 'neon-rim' }, references: [reference('product-1')] }}
+    studio={{
+      catalog: { catalog, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(), remember: vi.fn(),
+      destination: mediaEditorDestination('relight'),
+    }}
+  />));
+  await act(async () => container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.click());
+  expect(generate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    action: 'generate',
+    capabilityId: 'relight',
+    prompt: expect.stringContaining('crisp cyan neon rim light from behind'),
+  }));
+  expect(generate.mock.calls[0][0].prompt).not.toContain('key light from the left side');
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // 2. Video feature runtime override choice renders and submits the overridden movement prompt
+  generate.mockReset().mockResolvedValue({ job: { id: 'camera-override-job' } });
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    draft={{ modality: 'video', prompt: 'City skyline at dusk.', videoChoices: { movement: 'whip-pan' }, capabilityOptions: { movement: 'whip-pan' }, references: [] }}
+    studio={{
+      catalog: { catalog, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(), remember: vi.fn(),
+      destination: mediaEditorDestination('video-camera-control'),
+    }}
+  />));
+  await act(async () => container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.click());
+  expect(generate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    action: 'generate',
+    capabilityId: 'camera-control',
+    prompt: expect.stringContaining('high-energy whip pan transition across the frame'),
+  }));
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  // 3. Dynamic capability (upscale-4k, maxReferences: 1) clamps references to 1 even on a 16-ref model
+  const upscaleCap = overriddenCapabilities.find(c => c.id === 'upscale-4k')!;
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    onUploadReference={vi.fn()}
+    draft={{ modality: 'image', prompt: '', references: [reference('img-1'), reference('img-2')] }}
+    studio={{
+      catalog: { catalog, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(), remember: vi.fn(),
+      destination: sceneDestination(capabilityScene(upscaleCap)),
+    }}
+  />));
+  expect(container.querySelector('.om-source-actions')).toBeNull();
+  expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')?.disabled).toBe(true);
+});

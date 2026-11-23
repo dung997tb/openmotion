@@ -4,16 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { isDesignScenario } from '../../../shared/design-project';
 import type { GameCard } from '../../../shared/game-contract';
-import type { Model } from '../../../shared/gateway';
+import type { GatewayStatus, Model } from '../../../shared/gateway';
 import type { LocalAgent } from '../../../shared/local-agents';
 import {
   modeToSuperAgentIntent,
   superAgentIntentMeta,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentContextTag,
   type SuperAgentDesignModuleId,
   type SuperAgentEngine,
+  type SuperAgentFileOperation,
+  type SuperAgentFollowUpMode,
+  type SuperAgentMessage,
   type SuperAgentPermissionMode,
+  type SuperAgentQueuedMessage,
   type SuperAgentResourceAttachment,
   type SuperAgentResourceCounts,
 } from '../../../shared/super-agent';
@@ -33,6 +38,7 @@ import {
   rememberInstruction,
 } from '../motion/game/gameCatalog';
 import {
+  buildGameContextTags,
   buildGameHiddenInstructions,
   buildGameUserPrompt,
   localizedGameTitle,
@@ -44,7 +50,8 @@ import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
 import { WorkspaceBack } from '../motion/WorkspaceBack';
-import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
+import { compactDirLabel } from './ChangedFilesTree';
+import { ApprovalCard, ExecutionTimeline } from './ExecutionTimeline';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
   findSuperAgentMode,
@@ -52,7 +59,8 @@ import {
   type SuperAgentCreationModeId,
 } from './ModeResourceShowcase';
 import {
-  buildDesignHiddenDirective,
+  buildModeContextTags,
+  buildModeHiddenDirective,
   DEFAULT_MODE_COMPOSER_OPTIONS,
   designScenarioOptionsPatch,
   formatModePromptPrefix,
@@ -116,6 +124,10 @@ const EXTRA_STARTERS: {
   { key: 'website', id: 'design', designModule: 'prototype', tone: 'image', icon: 'layout-line', title: 'Build a website' },
 ];
 
+const COMPOSER_MODES = [...PRIMARY_STARTERS, ...EXTRA_STARTERS]
+  .map(starter => findSuperAgentMode(starter.id))
+  .filter((mode, index, all): mode is NonNullable<typeof mode> => mode !== null && all.findIndex(item => item?.id === mode.id) === index);
+
 export type AgentSelection = {
   runtimeId?: string;
   engine: SuperAgentEngine;
@@ -144,8 +156,9 @@ export function ConversationStream({
   localDirectAvailable = true,
   selection,
   permissionMode,
+  followUpBehavior = 'steer',
   onBack,
-  onExitRequestedMode,
+  onChangeRequestedMode,
   onPlayGame,
   onDeployGame,
   onRetryLoad,
@@ -154,12 +167,17 @@ export function ConversationStream({
   onRenameChat,
   onChangeSelection,
   onChangePermissionMode,
+  onChangeFollowUpBehavior,
   onSend,
+  onUpdateQueued,
+  onDeleteQueued,
+  onSendQueuedNow,
   onStop,
   onApprove,
   onResourcesUploaded,
   onAttachmentsChange,
   onOpenArtifactId,
+  onOpenChangedFile,
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
@@ -192,6 +210,7 @@ export function ConversationStream({
     id: number;
     text: string;
     hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
     mode?: SuperAgentCreationModeId;
     designModule?: SuperAgentDesignModuleId;
   } | null;
@@ -202,8 +221,9 @@ export function ConversationStream({
   localDirectAvailable?: boolean;
   selection: AgentSelection;
   permissionMode: SuperAgentPermissionMode;
+  followUpBehavior?: SuperAgentFollowUpMode;
   onBack?: () => void;
-  onExitRequestedMode?: () => void;
+  onChangeRequestedMode?: (mode: SuperAgentCreationModeId | null) => void;
   onPlayGame?: (game: GameCard) => void;
   onDeployGame?: (game: GameCard) => void;
   onRetryLoad: () => void;
@@ -212,21 +232,38 @@ export function ConversationStream({
   onRenameChat: (title: string) => Promise<void> | void;
   onChangeSelection: (next: AgentSelection) => void;
   onChangePermissionMode: (next: SuperAgentPermissionMode) => void;
+  onChangeFollowUpBehavior?: (next: SuperAgentFollowUpMode) => void;
   onSend: (
     text: string,
     meta?: {
       hiddenInstructions?: string;
+      contextTags?: SuperAgentContextTag[];
       mode?: SuperAgentCreationModeId;
       workingDir?: string;
       overrideAttachments?: SuperAgentResourceAttachment[];
       initialArtifact?: Partial<SuperAgentArtifact>;
+      followUpBehavior?: SuperAgentFollowUpMode;
     },
   ) => Promise<boolean>;
+  onUpdateQueued?: (
+    queueId: string,
+    patch: {
+      text: string;
+      attachments: SuperAgentResourceAttachment[];
+      contextTags?: SuperAgentContextTag[];
+      hiddenInstructions?: string;
+      mode?: SuperAgentCreationModeId | null;
+      workingDir?: string;
+    },
+  ) => Promise<boolean>;
+  onDeleteQueued?: (queueId: string) => Promise<void> | void;
+  onSendQueuedNow?: (queueId: string) => Promise<void> | void;
   onStop: () => void;
   onApprove: (approvalId: string, accepted: boolean, alwaysAllow?: boolean) => void;
   onResourcesUploaded?: () => void;
   onAttachmentsChange: (next: SuperAgentResourceAttachment[]) => void;
   onOpenArtifactId: (artifactId: string) => void;
+  onOpenChangedFile?: (file: SuperAgentFileOperation) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
@@ -260,13 +297,22 @@ export function ConversationStream({
   const inspectedEnginesRef = useRef<Set<SuperAgentEngine>>(new Set());
   const initialResolvedMode = resolveCreationModeEntry(requestedMode, requestedDesignModule);
   const [activeModeId, setActiveModeId] = useState<SuperAgentCreationModeId | null>(() => initialResolvedMode.modeId);
+  const previousRequestedMode = useRef(requestedMode);
   const [modeOptions, setModeOptions] = useState<ModeComposerOptions>(() => ({
     ...DEFAULT_MODE_COMPOSER_OPTIONS,
     ...initialResolvedMode.optionsPatch,
   }));
   const [scaffoldingGame, setScaffoldingGame] = useState(false);
+  const [pendingSubmission, setPendingSubmission] = useState<{
+    id: string;
+    text: string;
+    attachments: SuperAgentResourceAttachment[];
+    contextTags?: SuperAgentContextTag[];
+    startedAt: number;
+  } | null>(null);
   const [previewingChipKey, setPreviewingChipKey] = useState<string | null>(null);
   const mediaModelsRef = useRef<Model[]>([]);
+  const mediaRoutesRef = useRef<GatewayStatus['routes']>({});
   const activeMode = findSuperAgentMode(activeModeId);
   const headerIntentMeta = superAgentIntentMeta(
     chat?.intent ?? (
@@ -289,8 +335,16 @@ export function ConversationStream({
       setModeOptions(prev => ({ ...prev, ...resolved.optionsPatch }));
     }
   }, []);
-  const handleCatalogModelsChange = useCallback((models: Model[]) => {
-    mediaModelsRef.current = models;
+  useEffect(() => {
+    if (activeModeId === 'motion') {
+      updateModeOptions({ motionEngine: DEFAULT_MODE_COMPOSER_OPTIONS.motionEngine });
+    } else if (activeModeId === 'media') {
+      updateModeOptions({ mediaSubMode: DEFAULT_MODE_COMPOSER_OPTIONS.mediaSubMode });
+    }
+  }, [activeModeId, updateModeOptions]);
+  const handleCatalogChange = useCallback((cat: { models: Model[]; routes: GatewayStatus['routes'] }) => {
+    mediaModelsRef.current = cat.models;
+    mediaRoutesRef.current = cat.routes;
   }, []);
 
   useEffect(() => {
@@ -299,11 +353,13 @@ export function ConversationStream({
 
   const appliedDraftSeedRef = useRef<number | null>(null);
   const pendingHiddenInstructionsRef = useRef<string | undefined>(undefined);
+  const pendingContextTagsRef = useRef<SuperAgentContextTag[] | undefined>(undefined);
   useEffect(() => {
     if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
     appliedDraftSeedRef.current = draftSeed.id;
     setText(draftSeed.text);
     pendingHiddenInstructionsRef.current = draftSeed.hiddenInstructions?.trim() || undefined;
+    pendingContextTagsRef.current = draftSeed.contextTags?.length ? draftSeed.contextTags : undefined;
     if (draftSeed.mode && !chat?.messages.length) {
       enterMode(draftSeed.mode, draftSeed.designModule);
     } else if (!draftSeed.mode) {
@@ -332,7 +388,7 @@ export function ConversationStream({
       }));
     } else {
       const displayTitle = localizedGameTitle(picked, locale);
-      setText(prev => (prev.trim() ? prev : t('Based on {title}', { title: displayTitle })));
+      setText(prev => (prev.trim() ? prev : t('Remix · {title}', { title: displayTitle })));
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [gameTemplateSeed, chat?.messages.length, locale, t]);
@@ -374,7 +430,25 @@ export function ConversationStream({
   const activeAgent = effectiveAgents.find(item => item.id === selection.engine) ?? effectiveAgents[0];
   const selectedModelMeta = activeAgent?.models.find(m => m.id === selection.model);
   const reasoningEfforts = selectedModelMeta?.reasoning ?? [];
+  const [queueCollapsed, setQueueCollapsed] = useState(false);
+  const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
+  const pendingApprovals = chat?.approvals ?? [];
+  const hasPendingApproval = pendingApprovals.length > 0;
+  const approvalKey = pendingApprovals.map(item => item.id).join(',');
   const busy = chat?.state === 'running' || chat?.state === 'waiting';
+  const isRunning = chat?.state === 'running' && !hasPendingApproval;
+  const queuedMessages = chat?.queuedMessages ?? [];
+
+  useEffect(() => {
+    setEditingQueuedId(null);
+  }, [chat?.id]);
+
+  useEffect(() => {
+    if (editingQueuedId && !queuedMessages.some(item => item.id === editingQueuedId)) {
+      setEditingQueuedId(null);
+    }
+  }, [editingQueuedId, queuedMessages]);
+
   const hasBrowserAnnotation = attachments.some(att => att.kind === 'browser-annotation');
   const hasAttachedGameProject = attachments.some(att => att.kind === 'game-project');
   const gameBrief = activeMode?.id === 'game'
@@ -387,7 +461,8 @@ export function ConversationStream({
       })
     : '';
   const hasGameStudioBrief = activeMode?.id === 'game' && !hasAttachedGameProject && Boolean(modeOptions.gameTemplate || gameBrief);
-  const canSubmit = (Boolean(text.trim()) || hasBrowserAnnotation || hasGameStudioBrief) && !sending && !scaffoldingGame && !busy && !loading && runnableEngines.length > 0;
+  const hasDraft = Boolean(text.trim()) || hasBrowserAnnotation || hasGameStudioBrief;
+  const canSubmit = hasDraft && !sending && !scaffoldingGame && !hasPendingApproval && !loading && (Boolean(editingQueuedId) || runnableEngines.length > 0);
 
   const engineChoices = useMemo(() => {
     if (activeRuntime?.kind === 'remote-service') {
@@ -478,7 +553,7 @@ export function ConversationStream({
   const triggerPrimaryLabel = selectedModelMeta?.label
     ?? (selection.model !== 'default' ? selection.model : activeAgent?.label ?? selection.engine);
   const triggerSecondaryLabel = selection.reasoning !== 'default' && reasoningEfforts.includes(selection.reasoning)
-    ? selection.reasoning
+    ? t(selection.reasoning)
     : selection.model !== 'default'
       ? (activeAgent?.label ?? selection.engine)
       : t('Default');
@@ -486,8 +561,11 @@ export function ConversationStream({
   useEffect(() => {
     if (requestedMode && !chat?.messages.length) {
       enterMode(requestedMode, requestedDesignModule);
+    } else if (!requestedMode && previousRequestedMode.current && !chat?.id && !draftSeed?.mode) {
+      setActiveModeId(null);
     }
-  }, [requestedMode, requestedDesignModule, chat?.id, chat?.messages.length, enterMode]);
+    previousRequestedMode.current = requestedMode;
+  }, [requestedMode, requestedDesignModule, chat?.id, chat?.messages.length, draftSeed?.mode, enterMode]);
 
   useEffect(() => {
     setRenaming(false);
@@ -496,6 +574,7 @@ export function ConversationStream({
     } else if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
       setActiveModeId(null);
       pendingHiddenInstructionsRef.current = undefined;
+      pendingContextTagsRef.current = undefined;
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     followRef.current = true;
@@ -508,6 +587,10 @@ export function ConversationStream({
       onAttachmentsChange(attachments.filter(existing => resourceKey(existing) !== key));
     } else {
       onAttachmentsChange([...attachments, item].slice(0, 30));
+      if (attachments.length < 30 && item.kind === 'motion-template') {
+        if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
+        else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
+      }
     }
   };
 
@@ -519,6 +602,17 @@ export function ConversationStream({
   }, [chat?.updatedAt, chat?.messages.length, chat?.approvals.length]);
 
   useEffect(() => {
+    if (!approvalKey) return;
+    followRef.current = true;
+    const raf = window.requestAnimationFrame(() => {
+      if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [approvalKey]);
+
+  useEffect(() => {
     if (!chat?.messages.length && listRef.current) {
       listRef.current.scrollTop = 0;
     }
@@ -527,12 +621,45 @@ export function ConversationStream({
   const exitActiveMode = useCallback(() => {
     setActiveModeId(null);
     updateModeOptions({ gameTemplate: null });
-    if (requestedMode) onExitRequestedMode?.();
-  }, [requestedMode, onExitRequestedMode, updateModeOptions]);
+    if (requestedMode) onChangeRequestedMode?.(null);
+  }, [requestedMode, onChangeRequestedMode, updateModeOptions]);
 
-  const handleSubmit = async () => {
+  const switchActiveMode = (value: string) => {
+    const mode = findSuperAgentMode(value);
+    if (!mode) return;
+    setActiveModeId(mode.id);
+    onChangeRequestedMode?.(mode.id);
+  };
+
+  const handleStartEditQueued = (item: SuperAgentQueuedMessage) => {
+    setEditingQueuedId(item.id);
+    setText(item.text);
+    onAttachmentsChange(item.attachments ? [...item.attachments] : []);
+    pendingHiddenInstructionsRef.current = item.hiddenInstructions;
+    pendingContextTagsRef.current = item.contextTags;
+    if (item.mode && findSuperAgentMode(item.mode)) {
+      setActiveModeId(item.mode);
+      if (item.workingDir) {
+        updateModeOptions({ codingWorkdir: item.workingDir });
+      }
+    } else {
+      setActiveModeId(null);
+    }
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const handleCancelEditQueued = () => {
+    setEditingQueuedId(null);
+    setText('');
+    onAttachmentsChange([]);
+    pendingHiddenInstructionsRef.current = undefined;
+    pendingContextTagsRef.current = undefined;
+    setActiveModeId(null);
+  };
+
+  const handleSubmit = async (overrideBehavior?: SuperAgentFollowUpMode) => {
     if (!canSubmit) return;
-    if (activeMode?.id === 'game' && !chat?.messages.length && !attachments.some(att => att.kind === 'game-project')) {
+    if (!editingQueuedId && activeMode?.id === 'game' && !chat?.messages.length && !attachments.some(att => att.kind === 'game-project')) {
       const selectedTemplate = modeOptions.gameTemplate;
       setScaffoldingGame(true);
       try {
@@ -564,16 +691,23 @@ export function ConversationStream({
         const ready = created.game.status === 'ready' || created.game.status === 'published';
         const userVisiblePrompt = text.trim()
           || (selectedTemplate
-            ? t('Based on {title}', { title: localizedGameTitle(selectedTemplate, locale) })
+            ? t('Remix · {title}', { title: localizedGameTitle(selectedTemplate, locale) })
             : buildGameUserPrompt(created.game, locale));
         const hiddenInstructions = buildGameHiddenInstructions(
           created.game,
           created.agentInstruction,
           selectedTemplate && text.trim() ? text.trim() : undefined,
         );
+        const contextTags: SuperAgentContextTag[] = [
+          ...buildGameContextTags({ ...created.game, playableAd: isPlayableAd(modeOptions) }, t),
+          ...(selectedTemplate
+            ? [{ kind: 'param' as const, label: `${t('Remix')} · ${localizedGameTitle(selectedTemplate, locale)}` }]
+            : []),
+        ];
         const nextAttachments = [...attachments, toGameResourceAttachment(created.game, displayTitle)];
         const ok = await onSend(userVisiblePrompt, {
           hiddenInstructions,
+          contextTags,
           mode: 'game',
           overrideAttachments: nextAttachments,
           ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
@@ -581,6 +715,7 @@ export function ConversationStream({
         if (ok) {
           setText('');
           pendingHiddenInstructionsRef.current = undefined;
+          pendingContextTagsRef.current = undefined;
           setActiveModeId(null);
           updateModeOptions({ gameTemplate: null });
           followRef.current = true;
@@ -593,11 +728,16 @@ export function ConversationStream({
       }
     }
 
+    const hasInputImage = attachments.some(att => att.kind === 'asset' && att.modality === 'image');
+    const mediaExtra = {
+      routes: mediaRoutesRef.current,
+      hasInputImage,
+    };
     const prefix = activeMode
-      ? formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current)
+      ? formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current, mediaExtra)
       : '';
-    const designDirective = activeMode?.id === 'design'
-      ? buildDesignHiddenDirective(modeOptions)
+    const modeDirective = activeMode
+      ? buildModeHiddenDirective(activeMode, modeOptions, mediaModelsRef.current, mediaExtra)
       : undefined;
     const annotationSummary = attachments
       .filter(att => att.kind === 'browser-annotation')
@@ -608,22 +748,69 @@ export function ConversationStream({
     const rawBody = text.trim() || annotationSummary || prefix;
     const hiddenInstructions = [
       rawBody === prefix ? '' : prefix,
-      designDirective,
+      modeDirective,
       pendingHiddenInstructionsRef.current,
     ].filter(Boolean).join('\n\n') || undefined;
-    const ok = await onSend(rawBody, {
-      ...(hiddenInstructions ? { hiddenInstructions } : {}),
-      ...(activeMode ? { mode: activeMode.id } : {}),
-      ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
-        ? { workingDir: modeOptions.codingWorkdir.trim() }
-        : {}),
-    });
-    if (ok) {
-      setText('');
-      pendingHiddenInstructionsRef.current = undefined;
-      setActiveModeId(null);
-      updateModeOptions({ gameTemplate: null });
+    const contextTags = activeMode
+      ? buildModeContextTags(activeMode, modeOptions, mediaModelsRef.current, t, locale, mediaExtra)
+      : pendingContextTagsRef.current;
+    if (editingQueuedId && onUpdateQueued) {
+      const ok = await onUpdateQueued(editingQueuedId, {
+        text: rawBody,
+        attachments,
+        contextTags: contextTags ?? [],
+        hiddenInstructions: hiddenInstructions ?? '',
+        mode: activeMode?.id ?? null,
+        ...(activeMode?.id === 'coding' ? { workingDir: modeOptions.codingWorkdir.trim() } : {}),
+      });
+      if (ok) {
+        setEditingQueuedId(null);
+        setText('');
+        onAttachmentsChange([]);
+        pendingHiddenInstructionsRef.current = undefined;
+        pendingContextTagsRef.current = undefined;
+        setActiveModeId(null);
+        updateModeOptions({ gameTemplate: null });
+      }
+      return;
+    }
+
+    const effectiveFollowUp = isRunning ? (overrideBehavior ?? followUpBehavior) : undefined;
+    const isImmediateTurn = effectiveFollowUp !== 'queue';
+    if (isImmediateTurn) {
+      setPendingSubmission({
+        id: `optimistic-${Date.now()}`,
+        text: rawBody,
+        attachments,
+        contextTags,
+        startedAt: Date.now(),
+      });
       followRef.current = true;
+    }
+    try {
+      const ok = await onSend(rawBody, {
+        ...(hiddenInstructions ? { hiddenInstructions } : {}),
+        ...(contextTags?.length ? { contextTags } : {}),
+        ...(activeMode ? { mode: activeMode.id } : {}),
+        ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
+          ? { workingDir: modeOptions.codingWorkdir.trim() }
+          : {}),
+        ...(effectiveFollowUp ? { followUpBehavior: effectiveFollowUp } : {}),
+      });
+      if (ok) {
+        setText('');
+        pendingHiddenInstructionsRef.current = undefined;
+        pendingContextTagsRef.current = undefined;
+        setActiveModeId(null);
+        updateModeOptions({ gameTemplate: null });
+        if (effectiveFollowUp !== 'queue') {
+          followRef.current = true;
+        }
+      }
+    } finally {
+      if (isImmediateTurn) {
+        setPendingSubmission(null);
+      }
     }
   };
 
@@ -668,6 +855,7 @@ export function ConversationStream({
       data-mode={activeMode?.id || undefined}
       aria-label={t('Super Agent conversation')}
       onDragOver={event => {
+        if (hasPendingApproval) return;
         if (event.dataTransfer?.types?.includes('Files')) {
           event.preventDefault();
           setDragging(true);
@@ -681,6 +869,7 @@ export function ConversationStream({
       onDrop={event => {
         event.preventDefault();
         setDragging(false);
+        if (hasPendingApproval) return;
         void handleFilesUpload(event.dataTransfer.files);
       }}
     >
@@ -771,16 +960,42 @@ export function ConversationStream({
               {chat && <RemixIcon name="edit-line" size={12} />}
             </Button>
           )}
-          {chat && chat.state !== 'idle' && (
-            <span className="om-badge om-sa-head-status-badge" data-active={chat.state === 'running' || undefined}>
-              {chat.state === 'running' && (
-                <span className="om-sa-head-spinner" aria-hidden="true">
-                  <RemixIcon name="loader-4-line" size={12} />
-                </span>
-              )}
-              <span>{t(chat.state === 'running' ? 'Working…' : chat.state === 'waiting' ? 'Approval needed' : chat.state === 'failed' ? 'Stopped' : 'Cancelled')}</span>
-            </span>
+          {chat && !renaming && chat.projectDir && (
+            <Tooltip label={t('Project directory: {path}', { path: chat.projectDir })}>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-head-dir-btn"
+                aria-label={t('Copy project directory')}
+                onClick={() => onCopyText(chat.projectDir!)}
+              >
+                <RemixIcon name="folder-line" size={13} />
+                <span>{compactDirLabel(chat.projectDir)}</span>
+              </Button>
+            </Tooltip>
           )}
+          {chat && (chat.state !== 'idle' || hasPendingApproval) && (() => {
+            const headerState = hasPendingApproval ? 'waiting' : chat.state;
+            return (
+              <span
+                className="om-badge om-sa-head-status-badge"
+                data-active={headerState === 'running' || undefined}
+                data-state={headerState}
+              >
+                {headerState === 'running' && (
+                  <span className="om-sa-head-spinner" aria-hidden="true">
+                    <RemixIcon name="loader-4-line" size={12} />
+                  </span>
+                )}
+                {headerState === 'waiting' && (
+                  <span className="om-sa-head-status-icon" aria-hidden="true">
+                    <RemixIcon name="shield-check-line" size={12} />
+                  </span>
+                )}
+                <span>{t(headerState === 'running' ? 'Working…' : headerState === 'waiting' ? 'Approval needed' : headerState === 'failed' ? 'Stopped' : 'Cancelled')}</span>
+              </span>
+            );
+          })()}
         </div>
 
         <div className="om-sa-stream-head-actions">
@@ -821,9 +1036,57 @@ export function ConversationStream({
               <span>{t('Retry')}</span>
             </Button>
           </div>
-        ) : (
-          <div key={chat?.id ?? (activeMode?.id ?? 'welcome')} className="om-sa-stream-transition">
-            {!chat?.messages.length ? (
+        ) : (() => {
+          const optimisticMessage: SuperAgentMessage | null = pendingSubmission
+            ? {
+                id: pendingSubmission.id,
+                role: 'user',
+                text: pendingSubmission.text,
+                createdAt: pendingSubmission.startedAt,
+                ...(pendingSubmission.attachments.length ? { attachments: pendingSubmission.attachments } : {}),
+                ...(pendingSubmission.contextTags?.length ? { contextTags: pendingSubmission.contextTags } : {}),
+              }
+            : null;
+          const displayChat: SuperAgentChat | null = (() => {
+            if (!optimisticMessage) return chat;
+            if (!chat) {
+              return {
+                id: pendingSubmission!.id,
+                title: pendingSubmission!.text.slice(0, 60) || t('New conversation'),
+                engine: selection.engine,
+                model: selection.model,
+                permissionMode,
+                createdAt: pendingSubmission!.startedAt,
+                updatedAt: pendingSubmission!.startedAt,
+                state: 'running',
+                turnActivity: {
+                  phase: 'connecting',
+                  label: activeAgent?.label ?? selection.engine,
+                  startedAt: pendingSubmission!.startedAt,
+                  updatedAt: pendingSubmission!.startedAt,
+                },
+                messages: [optimisticMessage],
+                artifacts: [],
+                approvals: [],
+              };
+            }
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            const alreadyPresent = lastMsg?.role === 'user' && lastMsg.text.trim() === optimisticMessage.text.trim();
+            if (alreadyPresent) return chat;
+            return {
+              ...chat,
+              messages: [...chat.messages, optimisticMessage],
+              turnActivity: chat.turnActivity ?? {
+                phase: 'connecting',
+                label: activeAgent?.label ?? chat.engine,
+                startedAt: pendingSubmission!.startedAt,
+                updatedAt: pendingSubmission!.startedAt,
+              },
+            };
+          })();
+          return (
+          <div key={displayChat?.id ?? (activeMode?.id ?? 'welcome')} className="om-sa-stream-transition">
+            {!displayChat?.messages.length ? (
               activeMode ? (
             <ModeResourceShowcase
               active={active}
@@ -861,7 +1124,6 @@ export function ConversationStream({
                   type="button"
                   className="om-sa-starter-card"
                   data-tone={card.tone}
-                  data-featured={card.featured || undefined}
                   onClick={() => {
                     enterMode(card.id, card.designModule);
                     composerRef.current?.focus();
@@ -872,7 +1134,7 @@ export function ConversationStream({
                       <RemixIcon name={card.icon} size={20} />
                     </span>
                     {card.badge && (
-                      <span className="om-sa-starter-badge" lang="en">{card.badge}</span>
+                      <span className="om-badge" data-nav-badge={card.badge} lang="en">{card.badge}</span>
                     )}
                   </span>
                   <strong>{t(card.title)}</strong>
@@ -920,21 +1182,6 @@ export function ConversationStream({
                       <span>{t(card.title)}</span>
                     </Button>
                   ))}
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-more-item"
-                    onClick={() => {
-                      setMoreStartersOpen(false);
-                      setResourceCategory('all');
-                      setResourceMenuOpen(true);
-                    }}
-                  >
-                    <span className="om-sa-starter-icon" aria-hidden="true">
-                      <RemixIcon name="apps-2-line" size={16} />
-                    </span>
-                    <span>{t('Workspace resources')}</span>
-                  </Button>
                 </div>
               </Popover>
             </div>
@@ -942,13 +1189,14 @@ export function ConversationStream({
           )
         ) : (
           <ExecutionTimeline
-            chat={chat}
-            busy={busy}
-            sending={sending || scaffoldingGame}
-            hideInlineStatus
-            continueDisabled={sending || scaffoldingGame || busy || runnableEngines.length === 0}
-            engineLabel={effectiveAgents.find(a => a.id === chat.engine)?.label ?? chat.engine}
+            chat={displayChat}
+            busy={busy || Boolean(pendingSubmission)}
+            sending={sending || scaffoldingGame || Boolean(pendingSubmission)}
+            hideApprovals
+            continueDisabled={sending || scaffoldingGame || busy || hasPendingApproval || runnableEngines.length === 0}
+            engineLabel={effectiveAgents.find(a => a.id === displayChat.engine)?.label ?? displayChat.engine}
             onOpenArtifactId={onOpenArtifactId}
+            onOpenChangedFile={onOpenChangedFile}
             onPreviewAttachment={onPreviewAttachment}
             onOpenWebUrl={onOpenWebUrl}
             onCopyText={onCopyText}
@@ -963,16 +1211,125 @@ export function ConversationStream({
           />
             )}
           </div>
-        )}
+          );
+        })()}
       </div>
 
       <div className="om-sa-composer-wrap">
-        <SuperAgentLiveProgressDock
-          chat={chat}
-          busy={busy}
-          sending={sending || scaffoldingGame}
-          engineLabel={activeAgent?.label ?? chat?.engine}
-        />
+        {hasPendingApproval && (
+          <div className="om-sa-approval-dock" role="region" aria-label={t('Approval needed')}>
+            {pendingApprovals.map(approval => (
+              <ApprovalCard
+                key={approval.id}
+                approval={approval}
+                sending={sending || scaffoldingGame}
+                onApprove={onApprove}
+              />
+            ))}
+          </div>
+        )}
+        {queuedMessages.length > 0 && (
+          <div className="om-sa-queue-panel" role="region" aria-label={t('Queued Messages')}>
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-queue-head"
+              aria-expanded={!queueCollapsed}
+              onClick={() => setQueueCollapsed(prev => !prev)}
+            >
+              <span className="om-sa-queue-title">{t('Queued Messages')}</span>
+              <span className="om-sa-queue-count">{queuedMessages.length}</span>
+              <span className="om-sa-queue-subtitle">
+                {t(isRunning ? 'Sends after agent finishes working' : 'Waiting to send')}
+              </span>
+              <span className="om-sa-queue-chevron" data-collapsed={queueCollapsed || undefined} aria-hidden="true">
+                <RemixIcon name="arrow-down-s-line" size={16} />
+              </span>
+            </Button>
+            {!queueCollapsed && (
+              <div className="om-sa-queue-list">
+                {queuedMessages.map(item => {
+                  const isEditingThis = editingQueuedId === item.id;
+                  const hasMeta = isEditingThis || Boolean(item.contextTags?.length) || Boolean(item.attachments?.length);
+                  return (
+                    <div key={item.id} className="om-sa-queue-row" data-editing={isEditingThis || undefined}>
+                      <div className="om-sa-queue-main">
+                        <p className="om-sa-queue-text" title={item.text}>{item.text}</p>
+                        {hasMeta && (
+                          <div className="om-sa-queue-meta">
+                            {isEditingThis && (
+                              <span className="om-sa-queue-tag" data-tone="editing">
+                                <RemixIcon name="edit-line" size={11} />
+                                <span>{t('Editing')}</span>
+                              </span>
+                            )}
+                            {item.contextTags?.slice(0, 3).map((tag, idx) => (
+                              <span key={`${tag.label}-${idx}`} className="om-sa-queue-tag">
+                                {tag.icon && <RemixIcon name={tag.icon} size={11} />}
+                                <span>{tag.label}</span>
+                              </span>
+                            ))}
+                            {(item.contextTags?.length ?? 0) > 3 && (
+                              <span className="om-sa-queue-tag">+{item.contextTags!.length - 3}</span>
+                            )}
+                            {item.attachments?.slice(0, 2).map(att => (
+                              <span key={resourceKey(att)} className="om-sa-queue-tag">
+                                <RemixIcon name={resourceIcon(att)} size={11} />
+                                <span>{att.title}</span>
+                              </span>
+                            ))}
+                            {(item.attachments?.length ?? 0) > 2 && (
+                              <span className="om-sa-queue-tag">+{item.attachments!.length - 2}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="om-sa-queue-actions">
+                        <Tooltip label={t('Send Now')}>
+                          <IconButton
+                            variant="plain"
+                            className="om-sa-queue-action-btn"
+                            aria-label={t('Send Now')}
+                            disabled={sending || hasPendingApproval}
+                            onClick={() => {
+                              if (isEditingThis) setEditingQueuedId(null);
+                              void onSendQueuedNow?.(item.id);
+                            }}
+                            icon={<RemixIcon name="arrow-right-line" size={15} />}
+                          />
+                        </Tooltip>
+                        <Tooltip label={t('Edit')}>
+                          <IconButton
+                            variant="plain"
+                            className="om-sa-queue-action-btn"
+                            aria-label={t('Edit')}
+                            disabled={sending || hasPendingApproval}
+                            onClick={() => handleStartEditQueued(item)}
+                            icon={<RemixIcon name="edit-line" size={15} />}
+                          />
+                        </Tooltip>
+                        <Tooltip label={t('Delete')}>
+                          <IconButton
+                            variant="plain"
+                            className="om-sa-queue-action-btn"
+                            data-tone="danger"
+                            aria-label={t('Delete')}
+                            disabled={sending}
+                            onClick={() => {
+                              if (isEditingThis) handleCancelEditQueued();
+                              void onDeleteQueued?.(item.id);
+                            }}
+                            icon={<RemixIcon name="delete-bin-line" size={15} />}
+                          />
+                        </Tooltip>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {agentsLoaded && !runnableEngines.length && (
           <div className="om-sa-agent-banner">
             <RemixIcon name="plug-line" size={15} />
@@ -1007,9 +1364,9 @@ export function ConversationStream({
             modeId={activeMode.id}
             options={modeOptions}
             attachments={attachments}
-            disabled={busy || sending}
+            disabled={sending || hasPendingApproval}
             onChange={updateModeOptions}
-            onCatalogModelsChange={handleCatalogModelsChange}
+            onCatalogChange={handleCatalogChange}
             onOpenResourcePicker={category => {
               setResourceCategory(category);
               setResourceMenuOpen(true);
@@ -1021,13 +1378,45 @@ export function ConversationStream({
           />
         )}
 
-        <div className="om-sa-composer">
+        <div
+          className="om-sa-composer"
+          data-approval-pending={hasPendingApproval || undefined}
+          data-editing-queued={Boolean(editingQueuedId) || undefined}
+        >
+          {hasPendingApproval && (
+            <div className="om-sa-composer-approval-notice" role="status" aria-live="polite">
+              <span className="om-sa-composer-approval-icon" aria-hidden="true">
+                <RemixIcon name="error-warning-line" size={15} />
+              </span>
+              <span className="om-sa-composer-approval-text">
+                {pendingApprovals.length === 1
+                  ? t('Confirm the pending action above before sending your next message')
+                  : t('Confirm {count} pending actions above before sending your next message', { count: pendingApprovals.length })}
+              </span>
+            </div>
+          )}
+          {editingQueuedId && !hasPendingApproval && (
+            <div className="om-sa-composer-edit-banner" role="status">
+              <span className="om-sa-composer-edit-info">
+                <RemixIcon name="edit-line" size={14} />
+                <span>{t('Editing queued message')}</span>
+              </span>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-composer-edit-cancel"
+                onClick={handleCancelEditQueued}
+              >
+                {t('Cancel')}
+              </Button>
+            </div>
+          )}
           {(attachments.length > 0 || (activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate))) && (
             <div className="om-sa-composer-chips">
               {activeMode?.id === 'game' && modeOptions.gameTemplate && (
                 <span className="om-sa-attachment-chip">
                   <RemixIcon name="gamepad-line" size={13} />
-                  <span>{t('Based on {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
+                  <span>{t('Remix · {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
                   <IconButton
                     variant="plain"
                     className="om-sa-chip-remove"
@@ -1178,16 +1567,35 @@ export function ConversationStream({
             ref={composerRef}
             rows={2}
             value={text}
-            disabled={loading}
+            disabled={loading || hasPendingApproval}
             maxLength={20000}
             aria-label={t('Message Super Agent')}
-            placeholder={getModeComposerPlaceholder(activeMode, modeOptions, t)}
+            placeholder={
+              hasPendingApproval
+                ? t('Confirm or decline the pending action above to continue…')
+                : editingQueuedId
+                  ? t('Edit queued message…')
+                  : isRunning
+                    ? followUpBehavior === 'queue'
+                      ? t('Queue a follow-up message…')
+                      : t('Send a follow-up to steer the current run…')
+                    : getModeComposerPlaceholder(activeMode, modeOptions, t)
+            }
             onChange={event => setText(event.target.value)}
             onKeyDown={event => {
               if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              if (event.key === 'Escape' && editingQueuedId) {
+                event.preventDefault();
+                handleCancelEditQueued();
+                return;
+              }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                void handleSubmit();
+                const oppositeBehavior =
+                  (event.metaKey || event.ctrlKey) && isRunning && !editingQueuedId
+                    ? (followUpBehavior === 'queue' ? 'steer' : 'queue')
+                    : undefined;
+                void handleSubmit(oppositeBehavior);
               }
             }}
           />
@@ -1218,7 +1626,7 @@ export function ConversationStream({
                     className="om-sa-composer-icon-btn"
                     data-active={resourceMenuOpen || undefined}
                     aria-label={t('Attach workspace resources')}
-                    disabled={uploading}
+                    disabled={uploading || hasPendingApproval}
                     icon={<RemixIcon name={uploading ? 'loader-4-line' : 'add-line'} size={18} />}
                   />
                 }
@@ -1243,10 +1651,23 @@ export function ConversationStream({
                 />
               </Popover>
 
-              {activeMode && (
-                <span className="om-sa-active-mode-pill" data-tone={activeMode.tone}>
-                  <RemixIcon name={activeMode.icon} size={13} />
-                  <span>{t(activeMode.label)}</span>
+              {active && activeMode && (
+                <span className="om-sa-active-mode-pill" data-mode={activeMode.id}>
+                  <Select
+                    appearance="boxed"
+                    modal={false}
+                    label={t('Creation mode')}
+                    value={activeMode.id}
+                    onCommit={switchActiveMode}
+                    disabled={sending || scaffoldingGame || hasPendingApproval}
+                    className="om-sa-mode-select"
+                    popupClassName="om-sa-creation-mode-menu"
+                    options={COMPOSER_MODES.map(mode => ({
+                      value: mode.id,
+                      label: t(mode.label),
+                      icon: <RemixIcon name={mode.icon} size={13} />,
+                    }))}
+                  />
                   <IconButton
                     variant="plain"
                     className="om-sa-chip-remove"
@@ -1262,7 +1683,7 @@ export function ConversationStream({
                   active={active}
                   modeId={activeMode.id}
                   options={modeOptions}
-                  disabled={busy || sending}
+                  disabled={sending || hasPendingApproval}
                   onChange={updateModeOptions}
                 />
               )}
@@ -1295,7 +1716,7 @@ export function ConversationStream({
                     {activeRuntime && activeRuntime.kind !== 'local-direct' && (
                       <span className="om-sa-runtime-chip">
                         <RemixIcon name={activeRuntime.kind === 'local-bridge' ? 'link' : 'plug-line'} size={11} />
-                        <span>{activeRuntime.name}</span>
+                        <span>{t(activeRuntime.name)}</span>
                       </span>
                     )}
                     <RemixIcon name="arrow-down-s-line" size={15} />
@@ -1526,7 +1947,7 @@ export function ConversationStream({
                               data-active={activeLevel || undefined}
                               onClick={() => onChangeSelection({ ...selection, reasoning: level })}
                             >
-                              {level === 'default' ? t('Default') : level}
+                              {t(level === 'default' ? 'Default' : level)}
                             </Button>
                           );
                         })}
@@ -1579,9 +2000,9 @@ export function ConversationStream({
                   <IconButton
                     variant="plain"
                     className="om-sa-composer-icon-btn om-sa-settings-trigger"
-                    data-active={permissionMode === 'auto' || undefined}
+                    data-active={(permissionMode === 'auto' || followUpBehavior === 'queue') || undefined}
                     aria-label={t('Agent settings')}
-                    disabled={busy || sending}
+                    disabled={sending || hasPendingApproval}
                     icon={<RemixIcon name="shield-check-line" size={17} />}
                   />
                 }
@@ -1614,6 +2035,35 @@ export function ConversationStream({
                       </Button>
                     </div>
                   </div>
+                  {onChangeFollowUpBehavior && (
+                    <div className="om-sa-popover-field">
+                      <span className="om-sa-popover-label">{t('Follow-up behavior')}</span>
+                      <div className="om-sa-popover-segment" role="group" aria-label={t('Follow-up behavior')}>
+                        <Button
+                          variant="plain"
+                          type="button"
+                          className="om-sa-popover-seg-btn"
+                          aria-pressed={followUpBehavior === 'steer'}
+                          data-active={followUpBehavior === 'steer' || undefined}
+                          onClick={() => onChangeFollowUpBehavior('steer')}
+                        >
+                          <RemixIcon name="arrow-go-forward-line" size={14} />
+                          <span>{t('Steer current run')}</span>
+                        </Button>
+                        <Button
+                          variant="plain"
+                          type="button"
+                          className="om-sa-popover-seg-btn"
+                          aria-pressed={followUpBehavior === 'queue'}
+                          data-active={followUpBehavior === 'queue' || undefined}
+                          onClick={() => onChangeFollowUpBehavior('queue')}
+                        >
+                          <RemixIcon name="stack-line" size={14} />
+                          <span>{t('Queue after current run')}</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="om-sa-popover-links">
                     <Button
                       variant="plain"
@@ -1649,7 +2099,22 @@ export function ConversationStream({
                 </div>
               </Popover>
 
-              {busy ? (
+              {isRunning && !editingQueuedId && onChangeFollowUpBehavior && (
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-followup-pill"
+                  data-mode={followUpBehavior}
+                  aria-label={t('Follow-up behavior')}
+                  disabled={sending}
+                  onClick={() => onChangeFollowUpBehavior(followUpBehavior === 'steer' ? 'queue' : 'steer')}
+                >
+                  <RemixIcon name={followUpBehavior === 'steer' ? 'arrow-go-forward-line' : 'stack-line'} size={13} />
+                  <span>{t(followUpBehavior === 'steer' ? 'Steer' : 'Queue')}</span>
+                </Button>
+              )}
+
+              {busy && (
                 <IconButton
                   variant="plain"
                   className="om-sa-send-btn"
@@ -1659,16 +2124,35 @@ export function ConversationStream({
                   onClick={onStop}
                   icon={<RemixIcon name="checkbox-blank-fill" size={14} />}
                 />
-              ) : (
+              )}
+
+              {(!busy || Boolean(editingQueuedId) || (isRunning && hasDraft)) && (
                 <IconButton
                   variant="plain"
                   className="om-sa-send-btn"
                   data-ready={canSubmit || undefined}
                   data-sending={(sending || scaffoldingGame) || undefined}
-                  aria-label={t('Send')}
+                  aria-label={
+                    editingQueuedId
+                      ? t('Save queued message')
+                      : isRunning
+                        ? t(followUpBehavior === 'queue' ? 'Queue message' : 'Steer')
+                        : t('Send')
+                  }
                   disabled={!canSubmit}
                   onClick={() => void handleSubmit()}
-                  icon={<RemixIcon name={(sending || scaffoldingGame) ? 'loader-4-line' : 'arrow-right-line'} size={18} />}
+                  icon={
+                    <RemixIcon
+                      name={
+                        (sending || scaffoldingGame)
+                          ? 'loader-4-line'
+                          : editingQueuedId
+                            ? 'check-line'
+                            : 'arrow-right-line'
+                      }
+                      size={18}
+                    />
+                  }
                 />
               )}
             </div>

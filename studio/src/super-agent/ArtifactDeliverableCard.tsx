@@ -382,8 +382,8 @@ export function ArtifactDeliverableCard({
             filePath={cloudTarget.filePath}
             title={artifact.title}
             revisionKey={artifact.revision ?? String(artifact.updatedAt)}
-            triggerLabel={t('Cloud deploy')}
-            triggerIcon="cloud-line"
+            triggerLabel={t('Share')}
+            triggerIcon="share-forward-line"
             triggerClassName="om-sa-deliverable-btn"
             onOpenAccount={onOpenAccountSettings}
             onNotify={onNotify}

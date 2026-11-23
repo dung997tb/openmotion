@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SuperAgentChat, SuperAgentChatSummary, SuperAgentResourceCatalog } from '../../../shared/super-agent';
 import { NearScreenIntersectionObserver } from '../hooks/intersectionObserverTestUtils';
 import { I18nProvider } from '../i18n/I18n';
+import { translate } from '../i18n/messages';
 import { ApplicationHeader } from '../motion/ApplicationChrome';
 import { WorkspaceChromeContext } from '../motion/WorkspaceChromeContext';
 import { SUPER_AGENT_API } from '../../../shared/super-agent';
@@ -13,6 +14,11 @@ import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { clampSuperAgentViewerWidth, SuperAgentWorkspace } from './SuperAgentWorkspace';
 import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { SimpleMarkdown } from './SimpleMarkdown';
+import { DEFAULT_MODE_COMPOSER_OPTIONS, getModeComposerPlaceholder } from './ModeComposerControls';
+import { SUPER_AGENT_MODES } from './ModeResourceShowcase';
+import { clearSuperAgentCache, peekCachedSuperAgentChat } from './superAgentClient';
+import { setClientCacheOverrideForTest } from '../utils/clientCacheMode';
+import { setFollowUpBehavior } from '../utils/superAgentPreferences';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -323,6 +329,9 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('motion.super-agent.read-result.')) localStorage.removeItem(key);
+  }
   globalThis.fetch = originalFetch;
   (globalThis as any).EventSource = originalEventSource;
   vi.restoreAllMocks();
@@ -357,16 +366,8 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
   await flush();
 
   expect(document.body.textContent).toContain('What can I create for you?');
-  const starterLabels = [...document.querySelectorAll('.om-sa-starter-grid > .om-sa-starter-card')].map(
-    b => b.querySelector('strong')?.textContent?.trim(),
-  );
-  expect(starterLabels).toEqual([
-    'Build a game',
-    'Design Studio',
-    'Generate image',
-    'Make a video',
-    'Create audio',
-    'Explore more',
+  expect([...container.querySelectorAll('.om-sa-starter-card strong')].map(node => node.textContent)).toEqual([
+    'Build a game', 'Design Studio', 'Generate image', 'Make a video', 'Create audio', 'Explore more',
   ]);
 
   // No standalone Resources entry button in the stream header
@@ -391,20 +392,288 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
   await flush();
 
   expect(document.querySelector('.om-sa-composer-chips')?.textContent).toContain('Neon Arcade');
+});
 
-  // Secondary shortcuts (including Coding) live in Explore more
-  const moreBtn = [...document.querySelectorAll('button')].find(
-    b => b.textContent?.includes('Explore more'),
-  ) as HTMLButtonElement;
-  expect(moreBtn).toBeTruthy();
-  await act(async () => moreBtn.click());
+it('keeps background task status in one slot and shows a dot only for an unread result', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const task: SuperAgentChatSummary = {
+    id: CHAT_ID,
+    title: 'Background task',
+    intent: 'game',
+    engine: 'codex',
+    pinned: true,
+    state: 'running',
+    artifactCount: 1,
+    messageCount: 2,
+    lastTurnId: 'turn-1',
+    updatedAt: 1000,
+    createdAt: 1000,
+  };
+  const fallbackFetch = globalThis.fetch;
+  const getTask = vi.fn(() => new Response(JSON.stringify({
+    conversation: {
+      ...sampleChat, ...task, artifacts: [], approvals: [],
+      requestReceipts: [{ requestId: task.lastTurnId, inputHash: 'test' }],
+    },
+  })));
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url === `${SUPER_AGENT_API}/chats`) return new Response(JSON.stringify({ conversations: [task] }));
+    if (url === `${SUPER_AGENT_API}/chats/${task.id}`) return getTask();
+    return fallbackFetch(input, init);
+  };
+
+  const onChatIdChange = vi.fn();
+  const render = (chatId: string | null, key = 'workspace', active = true) => act(async () => {
+    root.render(
+      <I18nProvider key={key} initialLocale="en">
+        <SuperAgentWorkspace
+          active={active}
+          chatId={chatId}
+          onChatIdChange={onChatIdChange}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+
+  try {
+    clearSuperAgentCache();
+    setClientCacheOverrideForTest(true);
+    await render(null);
+    const pinnedRow = () => container.querySelector<HTMLButtonElement>('.om-sa-chat-group[aria-label="Pinned"] .om-sa-chat-row-btn')!;
+    const row = pinnedRow();
+    const status = row.lastElementChild!;
+    expect(status.matches('.om-sa-chat-status[data-state="running"]')).toBe(true);
+    expect(status.querySelector('[data-remix-icon="loader-4-line"]')).toBeTruthy();
+    expect(row.querySelector('.om-sa-chat-dot')).toBeNull();
+    expect(row.querySelector('.om-sa-chat-count')).toBeNull();
+
+    task.state = 'waiting';
+    task.updatedAt++;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(status.matches('.om-badge[data-state="waiting"]')).toBe(true);
+    expect(status.textContent).toBe('Approval needed');
+    expect(peekCachedSuperAgentChat(CHAT_ID)?.state).toBe('waiting');
+    expect(status.querySelector('svg')).toBeNull();
+    expect(row.querySelector('.om-sa-chat-dot')).toBeNull();
+
+    task.state = 'idle';
+    task.updatedAt++;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(row.lastElementChild).toBe(status);
+    expect(status.getAttribute('data-state')).toBe('completed');
+    expect(peekCachedSuperAgentChat(CHAT_ID)?.state).toBe('idle');
+    expect(status.querySelector('.om-sa-chat-dot')).toBeTruthy();
+    expect(status.querySelector('svg')).toBeNull();
+    expect(row.querySelector('.om-sa-chat-icon-wrap .om-sa-chat-dot')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(getTask).toHaveBeenCalledTimes(2);
+    await render(null, 'workspace', false);
+    await render(null);
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeTruthy();
+    expect(getTask).toHaveBeenCalledTimes(2);
+    clearSuperAgentCache();
+    setClientCacheOverrideForTest(null);
+
+    await act(async () => row.click());
+    expect(onChatIdChange).toHaveBeenCalledWith(CHAT_ID);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await render(CHAT_ID);
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeTruthy();
+    hidden.mockReturnValue(false);
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeNull();
+
+    task.title = 'Renamed task';
+    task.updatedAt++;
+    await render(null, 'reloaded');
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeNull();
+
+    task.lastTurnId = 'turn-2';
+    task.updatedAt++;
+    await render(null, 'new-result');
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeTruthy();
+
+    task.state = 'failed';
+    task.updatedAt++;
+    await render(CHAT_ID, 'stopped-result');
+    expect(pinnedRow().querySelector('.om-sa-chat-status-badge[data-state="failed"]')?.textContent).toBe('Stopped');
+    expect(container.querySelector('.om-sa-head-status-badge')?.textContent).toBe('Stopped');
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeNull();
+  } finally {
+    clearSuperAgentCache();
+    setClientCacheOverrideForTest(null);
+    vi.useRealTimers();
+  }
+});
+
+it('localizes creation mode introductions, prompt ideas, and composer guidance in Chinese', () => {
+  const t = (key: string) => translate('zh-CN', key);
+  for (const mode of SUPER_AGENT_MODES) {
+    const copy = [
+      t(mode.label),
+      t(mode.title),
+      t(mode.subtitle),
+      getModeComposerPlaceholder(mode, DEFAULT_MODE_COMPOSER_OPTIONS, t),
+      ...mode.quickIdeas.flatMap(idea => [t(idea.title), t(idea.prompt)]),
+    ];
+    for (const label of copy) expect(label).toMatch(/[\u3400-\u9fff]/u);
+  }
+});
+
+it('shows Chinese image controls and keeps the draft when switching creation modes', async () => {
+  const onChangeRequestedMode = vi.fn();
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="zh-CN">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="image"
+          onChangeRequestedMode={onChangeRequestedMode}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
   await flush();
-  const moreMenuText = document.querySelector('.om-sa-more-menu')?.textContent ?? '';
-  expect(moreMenuText).toContain('Coding');
-  expect(moreMenuText).toContain('Cinema video');
-  expect(moreMenuText).toContain('Create slides');
-  expect(moreMenuText).toContain('Build a website');
-  expect(moreMenuText).toContain('Workspace resources');
+
+  expect(container.querySelector('.om-sa-mode-hero-copy h2')?.textContent).toBe('从视觉大片到交互 HTML，一站式设计');
+  expect(container.querySelector('[role="tablist"]')?.textContent).toContain('文生图');
+  const example = container.querySelector<HTMLButtonElement>('.om-sa-showcase-card')!;
+  expect(example.textContent).toContain('GPT Image 2.6 · 图片');
+  const composer = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(composer.placeholder).toBe('描述你想生成的海报、插画、产品视觉图或参考修图需求…');
+  await act(async () => example.click());
+  expect(composer.value).toMatch(/[\u3400-\u9fff]/u);
+
+  const qualityTrigger = [...container.querySelectorAll<HTMLButtonElement>('.om-sa-composer-top-pill')].find(
+    btn => btn.textContent?.includes('1×'),
+  )!;
+  await act(async () => qualityTrigger.click());
+
+  const parameters = document.querySelector('.om-sa-mode-popover[role="dialog"]');
+  expect(parameters?.textContent).toContain('质量');
+  expect(parameters?.textContent).toContain('高');
+  expect(parameters?.textContent).toContain('生成数量');
+  expect(parameters?.textContent).toContain('高级参数');
+  const paramPills = [...(parameters?.querySelectorAll('.om-sa-popover-pill') ?? [])].map(el => el.textContent?.trim());
+  for (const count of ['1', '2', '4']) expect(paramPills).toContain(count);
+
+  await act(async () => qualityTrigger.click());
+  const draft = composer.value;
+  const modeSelect = container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="创作模式"]')!;
+  expect(modeSelect.textContent).toBe('设计工作室');
+  await act(async () => modeSelect.click());
+  const modes = [...document.querySelectorAll<HTMLElement>('.om-sa-creation-mode-menu [role="option"]')];
+  expect(modes.map(option => option.textContent)).toEqual([
+    '游戏工作室', '设计工作室', '动态视频', '音频与音效', '编程任务', '电影镜头',
+  ]);
+  const audio = modes[3];
+  await act(async () => audio.click());
+  expect(onChangeRequestedMode).toHaveBeenCalledWith('audio');
+  expect(container.querySelector('.om-sa-stream')?.getAttribute('data-mode')).toBe('audio');
+  expect(modeSelect.textContent).toBe('音频与音效');
+  expect(composer.value).toBe(draft);
+});
+
+it.each(['motion', 'media'] as const)('keeps the %s dropdown limited to video models and supports editable templates', async requestedMode => {
+  const fallbackFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url === '/motion-api/models/capabilities') {
+      return new Response(JSON.stringify({ routes: { video: 'fixture-video' }, providers: [] }));
+    }
+    if (url.startsWith('/motion-api/models?')) {
+      return new Response(JSON.stringify({
+        models: [
+          { id: 'alternate-video', modelId: 'alternate-video', label: 'Alternate Video', provider: 'fixture', modality: 'video', mode: 'text-to-video' },
+          { id: 'fixture-video', modelId: 'fixture-video', label: 'Fixture Video', provider: 'fixture', modality: 'video', mode: 'text-to-video' },
+        ],
+        nextOffset: null,
+      }));
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return new Response(JSON.stringify({
+        ...sampleResources,
+        items: [{ id: 'motion-template', kind: 'motion-template', title: 'Editable timeline' }],
+      }));
+    }
+    return fallbackFetch(input, init);
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode={requestedMode}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const bar = container.querySelector('.om-sa-composer-top-bar')!;
+  const engineTrigger = () => bar.querySelectorAll<HTMLButtonElement>('.om-sa-composer-top-pill')[0];
+  const parameters = () => container.querySelector('.om-sa-mode-param-trigger')?.textContent;
+
+  if (requestedMode === 'motion') {
+    expect(bar.querySelectorAll('.om-sa-composer-top-pill')).toHaveLength(1);
+    expect(engineTrigger().textContent).toContain('Motion graphics');
+    expect(parameters()).toContain('30fps');
+    await act(async () => engineTrigger().click());
+    await flush();
+    const aiVideoPill = [...document.querySelectorAll<HTMLButtonElement>('.om-sa-popover-pill')].find(
+      b => b.textContent?.includes('AI Video'),
+    )!;
+    expect(aiVideoPill).toBeTruthy();
+    await act(async () => aiVideoPill.click());
+    await flush();
+  }
+
+  expect(engineTrigger().textContent).toContain('AI Video');
+  const modelTrigger = () => bar.querySelectorAll<HTMLButtonElement>('.om-sa-composer-top-pill')[1];
+  const label = () => modelTrigger().querySelector('.om-sa-composer-top-pill-label')?.textContent;
+  expect(label()).toBe('Fixture Video');
+  expect(modelTrigger().hasAttribute('data-active')).toBe(true);
+  expect(modelTrigger().querySelector('.om-sa-mode-param-avatar .om-avatar')).toBeTruthy();
+
+  await act(async () => modelTrigger().click());
+  const options = [...document.querySelectorAll<HTMLButtonElement>('.om-sa-mode-model-row')];
+  expect(options.map(option => option.querySelector('strong')?.textContent)).toEqual(['Auto (Recommended)', 'Alternate Video', 'Fixture Video']);
+  expect(options[0].getAttribute('aria-selected')).toBe('true');
+
+  await act(async () => options[1].click());
+  expect(label()).toBe('Alternate Video');
+  expect(bar.textContent).toContain('5s');
+
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Attach workspace resources"]')!.click());
+  await flush();
+  await act(async () => document.querySelector<HTMLButtonElement>('.om-sa-resource-row')!.click());
+  expect(engineTrigger().textContent).toContain('Motion graphics');
+  expect(parameters()).toContain('30fps');
 });
 
 it('displays active conversation, tool steps, approvals, and multi-tab Artifact Viewer with Preview/Code switching', async () => {
@@ -434,12 +703,12 @@ it('displays active conversation, tool steps, approvals, and multi-tab Artifact 
   ) as HTMLButtonElement;
   expect(viewerToggle).toBeTruthy();
   await act(async () => viewerToggle.click());
-  for (let i = 0; i < 30 && !document.querySelector('.om-sa-viewer'); i++) {
+  await vi.waitFor(async () => {
     await flush();
-  }
+    expect(document.querySelector('.om-sa-viewer iframe')).toBeTruthy();
+  }, { timeout: 5000 });
 
   const viewer = document.querySelector('.om-sa-viewer')!;
-  expect(viewer).toBeTruthy();
   const iframe = viewer.querySelector('iframe');
   expect(iframe?.getAttribute('src')).toContain('/motion-api/design/raw/dproj-1/index.html');
 
@@ -510,6 +779,7 @@ it('renders Super Agent inside the top navigation bar beside MCP and activates i
             currentPage="agent"
             trackingPage="explore"
             onOpenPage={onOpenPage}
+            onOpenAgentStart={noop}
             destination={null}
             motionActive={false}
             onNavigate={noop}
@@ -586,8 +856,10 @@ it('suspends active viewer iframes when inactive, uses throttled thumb previews 
   ) as HTMLButtonElement;
   expect(viewerToggle).toBeTruthy();
   await act(async () => viewerToggle.click());
-  await flush();
-  expect(document.querySelector('.om-sa-viewer iframe')).toBeTruthy();
+  await vi.waitFor(async () => {
+    await flush();
+    expect(document.querySelector('.om-sa-viewer iframe')).toBeTruthy();
+  }, { timeout: 5000 });
 
   // Deactivating SuperAgentWorkspace suspends the heavy viewer iframe while preserving tabs.
   await act(async () => {
@@ -863,7 +1135,7 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(onOpenArtifactId).toHaveBeenCalledWith('design:d-99');
   const deliverableActions = document.querySelector('.om-sa-deliverable-actions');
   expect(deliverableActions?.textContent).toContain('Preview');
-  expect(deliverableActions?.textContent).toContain('Cloud deploy');
+  expect(deliverableActions?.textContent).toContain('Share');
   expect(deliverableActions?.textContent).toContain('Export');
 
   const viewerLinkBtn = document.querySelector<HTMLButtonElement>('.om-sa-link-viewer-btn')!;
@@ -974,7 +1246,7 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(document.querySelector<HTMLAnchorElement>('.om-sa-link')?.href).toBe('https://openmotion.example.com/');
 });
 
-it('enters pure Coding mode from starter card without creative templates and renders sidebar/header intent icons', async () => {
+it('enters pure Coding mode from Explore more and renders sidebar/header intent icons', async () => {
   const createdId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
   let capturedTurnBody: Record<string, any> | null = null;
 
@@ -1071,7 +1343,7 @@ it('enters pure Coding mode from starter card without creative templates and ren
     return json({});
   }) as any;
 
-  // 1. Verify starter Coding card + pure coding workspace + submit payload
+  // Verify the Coding entry, pure coding workspace, and submit payload.
   await act(async () => {
     root.render(
       <I18nProvider initialLocale="en">
@@ -1091,25 +1363,21 @@ it('enters pure Coding mode from starter card without creative templates and ren
   });
   await flush();
 
-  // Sidebar items show matched intent icons & keep badge when running/failed + pinned preserves chat icon
+  // Sidebar rows keep their intent icons and place status indicators according to the task state.
   expect(document.querySelector('.om-sa-chat-icon[data-intent="coding"][data-tone="coding"]')).toBeTruthy();
-  expect(document.querySelector('.om-sa-chat-status-badge[data-state="running"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-status[data-state="running"] svg')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-status[data-state="running"] .om-sa-chat-dot')).toBeNull();
   expect(document.querySelector('.om-sa-chat-icon[data-intent="website"][data-tone="agent"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-status[data-state="completed"] .om-sa-chat-dot')).toBeTruthy();
   expect(document.querySelector('.om-sa-chat-icon[data-intent="video"][data-tone="video"]')).toBeTruthy();
-  expect(document.querySelector('.om-sa-chat-status-badge[data-state="failed"]')).toBeTruthy();
+  expect(document.querySelector('.om-sa-chat-status-badge[data-state="failed"]')?.textContent).toBe('Stopped');
   expect(document.querySelector('.om-sa-chat-icon[data-intent="chat"][data-tone="neutral"]')).toBeTruthy();
 
-  const moreBtn = [...document.querySelectorAll('.om-sa-starter-card')].find(
-    el => el.textContent?.includes('Explore more'),
-  ) as HTMLButtonElement;
-  expect(moreBtn).toBeTruthy();
-  await act(async () => moreBtn.click());
-  await flush();
-  const codingItem = [...document.querySelectorAll('.om-sa-more-item')].find(
-    el => el.textContent?.includes('Coding'),
-  ) as HTMLButtonElement;
-  expect(codingItem).toBeTruthy();
-  await act(async () => codingItem.click());
+  const more = container.querySelector<HTMLButtonElement>('.om-sa-starter-card-more')!;
+  await act(async () => more.click());
+  const items = [...document.querySelectorAll<HTMLButtonElement>('.om-sa-more-menu .om-sa-more-item')];
+  expect(items.map(item => item.textContent)).toEqual(['Coding', 'Cinema video', 'Create slides', 'Build a website']);
+  await act(async () => items[0].click());
   await flush();
 
   expect(document.body.textContent).toContain('Code, debug & ship');
@@ -1381,9 +1649,11 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   const codeBtn = [...document.querySelectorAll('.om-sa-view-mode-popover button')].find(b => b.textContent?.trim() === 'Code') as HTMLButtonElement;
   expect(codeBtn).toBeTruthy();
   await act(async () => codeBtn.click());
-  await flush();
+  await vi.waitFor(async () => {
+    await flush();
+    expect(viewer.textContent).toContain('<canvas id="dodge"></canvas>');
+  }, { timeout: 5000 });
   expect(viewer.textContent).toContain('index.html');
-  expect(viewer.textContent).toContain('<canvas id="dodge"></canvas>');
   expect(viewer.querySelector('.om-sa-code-sidebar')).toBeTruthy();
   expect(viewer.querySelector('button[aria-label="Copy"]')).toBeTruthy();
   // vendor/ folder is collapsed by default while design/ is expanded
@@ -1534,11 +1804,13 @@ it('supports web preview device toolbar, browser options menu, and visual elemen
   await flush();
   const menu = document.querySelector('.om-sa-browser-menu')!;
   expect(menu).toBeTruthy();
+  expect(menu.parentElement?.matches('[data-menu-panel].motion-positioned-menu')).toBe(true);
+  expect(menu.matches('[data-menu-panel]')).toBe(false);
   expect(menu.textContent).toContain('Hard reload');
   expect(menu.textContent).toContain('Appearance');
   expect(menu.textContent).toContain('Clear cookies');
   expect(menu.textContent).toContain('Clear cache');
-  expect(menu.textContent).toContain('Open in new window');
+  expect(menu.textContent).toContain('Open external');
   await act(async () => menuBtn.click());
   await flush();
 
@@ -1798,10 +2070,10 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     expect(playersTrigger.getAttribute('aria-haspopup')).toBe('listbox');
     await act(async () => playersTrigger.click());
     await flush();
-    const playerRows = [...document.querySelectorAll('.om-sa-game-choice-row')];
+    const playerRows = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Players"] .om-sa-game-choice-row')];
     expect(playerRows.map(row => row.querySelector('strong')?.textContent)).toEqual(['Single player', 'Multiplayer', 'Playable ad']);
     expect(playerRows.find(row => row.textContent?.includes('Playable ad'))?.getAttribute('aria-selected')).toBe('true');
-    const multiplayerOption = [...document.querySelectorAll('.om-sa-game-choice-row')].find(b => b.textContent?.includes('Multiplayer')) as HTMLButtonElement;
+    const multiplayerOption = playerRows.find(row => row.querySelector('strong')?.textContent === 'Multiplayer')!;
     expect(multiplayerOption).toBeTruthy();
     await act(async () => multiplayerOption.click());
     await flush();
@@ -1846,6 +2118,13 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     expect(turnBody?.attachments?.some((att: any) => att.kind === 'game-project' && att.id === CREATED_GAME_ID)).toBe(true);
     expect(turnBody?.text).toBe('Co-op pixel shooter in space');
     expect(turnBody?.hiddenInstructions).toContain('openmotion_present_artifact');
+    expect(turnBody?.contextTags?.map((tag: any) => tag.label)).toEqual([
+      'Game',
+      'Shooter',
+      'Pixel art',
+      '9:16',
+      'Multiplayer',
+    ]);
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -2219,7 +2498,10 @@ it('auto-opens and re-opens the right Artifact Viewer tab whenever a game artifa
   expect(iframe?.getAttribute('src')).toContain('p=7000');
 });
 
-it('clicking New task resets to a clean draft without creating a persisted chat until submission', async () => {
+it.each([
+  ['New task', '.om-sa-new-chat-btn'],
+  ['the Super Agent sidebar title', 'button[aria-label="Super Agent · Back to home"]'],
+])('clicking %s resets to a clean draft without creating a persisted chat until submission', async (_label, selector) => {
   const onChatIdChange = vi.fn();
   const fetchSpy = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -2242,11 +2524,11 @@ it('clicking New task resets to a clean draft without creating a persisted chat 
   });
   await flush();
 
-  const newTaskBtn = document.querySelector('.om-sa-new-chat-btn') as HTMLButtonElement;
-  expect(newTaskBtn).toBeTruthy();
+  const button = document.querySelector<HTMLButtonElement>(selector)!;
+  expect(button).toBeTruthy();
 
   fetchSpy.mockClear();
-  await act(async () => newTaskBtn.click());
+  await act(async () => button.click());
   await flush();
 
   const createCalls = fetchSpy.mock.calls.filter(
@@ -2506,10 +2788,10 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   expect(viewer?.textContent).toContain('The Little Prince: Star Journey');
   expect(chatCreateCalls).toBe(0);
 
-  // Clicking "Make one like this" inside the Artifact Viewer selects the playing game into the Agent composer
+  // Clicking "Remix" inside the Artifact Viewer selects the playing game into the Agent composer
   const viewerUseBtn = viewer?.querySelector('.om-sa-game-use-btn') as HTMLButtonElement;
   expect(viewerUseBtn).toBeTruthy();
-  expect(viewerUseBtn.textContent).toContain('Make one like this');
+  expect(viewerUseBtn.textContent).toContain('Remix');
   await act(async () => viewerUseBtn.click());
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('The Little Prince: Star Journey');
@@ -2528,17 +2810,18 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   expect(fanCenterCard).toBeTruthy();
   await act(async () => fanCenterCard.click());
   await flush();
-  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Remix ·');
 
-  // Clicking a bottom masonry card cover selects it into the composer, while top-right Play opens the viewer
+  // Clicking a bottom masonry card cover selects it into the composer. The Try game button opens the viewer.
   const listCoverBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-cover') as HTMLButtonElement;
   expect(listCoverBtn).toBeTruthy();
   await act(async () => listCoverBtn.click());
   await flush();
-  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Remix ·');
 
   const listPlayBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
   expect(listPlayBtn).toBeTruthy();
+  expect(listPlayBtn.textContent).toContain('Try game');
   await act(async () => listPlayBtn.click());
   await flush();
   expect(container.querySelector('.om-sa-viewer')).toBeTruthy();
@@ -2746,6 +3029,7 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
             text: turnBody.text,
             createdAt: 2001,
             attachments: turnBody.attachments,
+            contextTags: turnBody.contextTags,
           },
         ],
         approvals: [
@@ -2773,10 +3057,16 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
   }) as any;
 
   queueSuperAgentHandoff(buildSuperAgentHandoff(
-    { kind: 'game-project', id: 'game-2024', title: '2024小游戏', genre: 'casual' },
+    { kind: 'game-project', id: 'game-2024', title: '我想做一个2024小游戏', genre: 'casual' },
     {
       prompt: '我想做一个2024小游戏',
       hiddenInstructions: 'Use the openmotion-game Skill to build game game-2024. Read openmotion://workflow/game/start.',
+      contextTags: [
+        { kind: 'mode', label: 'Game', icon: 'gamepad-line', tone: 'agent' },
+        { kind: 'param', label: 'Casual' },
+        { kind: 'param', label: '9:16' },
+        { kind: 'param', label: 'Single player' },
+      ],
       locale: 'zh-CN',
       autoSend: true,
       newChat: true,
@@ -2811,6 +3101,11 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
   expect(userBubble?.textContent).not.toContain('openmotion-game Skill');
   expect(userBubble?.textContent).not.toContain('openmotion://workflow/game/start');
 
+  // Mode + parameter tags render cleanly above the user bubble, while duplicate draft game chip is suppressed
+  const tagLabels = [...container.querySelectorAll('.om-sa-context-tag')].map(el => el.textContent?.trim());
+  expect(tagLabels).toEqual(['Game', 'Casual', '9:16', 'Single player']);
+  expect(container.querySelectorAll('.om-sa-msg-attachments .om-sa-attachment-chip').length).toBe(0);
+
   // Approval card renders plain-language summary + target chip, with technical details collapsed by default
   const approvalCard = container.querySelector('.om-sa-approval')!;
   expect(approvalCard).toBeTruthy();
@@ -2822,9 +3117,9 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
   expect(detailsEl.open).toBe(false);
   expect(detailsEl.querySelector('.om-sa-approval-pre')?.textContent).not.toContain('availableDecisions');
 
-  // Clicking "Always allow in this task" sends alwaysAllow: true and clears the card
+  // Clicking "Always allow" sends alwaysAllow: true and clears the card
   const alwaysAllowBtn = [...approvalCard.querySelectorAll('button')].find(
-    b => b.textContent?.trim() === 'Always allow in this task',
+    b => b.textContent?.trim() === 'Always allow',
   ) as HTMLButtonElement;
   expect(alwaysAllowBtn).toBeTruthy();
   await act(async () => alwaysAllowBtn.click());
@@ -2835,6 +3130,260 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
     alwaysAllow: true,
   });
   expect(container.querySelector('.om-sa-approval')).toBeNull();
+});
+
+it('FilesChangedCard renders collapsible folder tree, inline diff/image preview, and Open in Code Viewer', async () => {
+  const onCopyText = vi.fn();
+  const onOpenChangedFile = vi.fn();
+  const treeChat: SuperAgentChat = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 'Action Shooter',
+    intent: 'game',
+    engine: 'antigravity',
+    permissionMode: 'auto',
+    projectDir: '/tmp/workspace/games/game-9',
+    projectKind: 'game',
+    createdAt: 1000,
+    updatedAt: 4500,
+    state: 'idle',
+    artifacts: [
+      {
+        id: 'game:game-9',
+        kind: 'game-project',
+        title: 'Action Shooter',
+        projectId: 'game-9',
+        createdAt: 2000,
+        updatedAt: 3000,
+      },
+    ],
+    turnChangedFiles: {
+      u1: [
+        { action: 'create', path: 'design/plan.md', addedLines: 4, diffPreview: '+# Plan', artifactId: 'game:game-9' },
+        { action: 'create', path: 'design/assets.csv', addedLines: 2, diffPreview: '+name,type', artifactId: 'game:game-9' },
+        { action: 'create', path: 'design/verification.md', addedLines: 3, diffPreview: '+# Verified', artifactId: 'game:game-9' },
+        { action: 'create', path: 'assets/icon.svg', addedLines: 1, diffPreview: '+<svg/>', artifactId: 'game:game-9', previewUrl: '/motion-api/games/game-9/play/assets/icon.svg' },
+        { action: 'create', path: 'assets/cover.png', binary: true, sizeBytes: 12400, artifactId: 'game:game-9', previewUrl: '/motion-api/games/game-9/play/assets/cover.png' },
+        { action: 'create', path: 'index.html', addedLines: 10, diffPreview: '+<!doctype html>', artifactId: 'game:game-9' },
+        { action: 'create', path: 'style.css', addedLines: 8, diffPreview: '+body { margin: 0; }', artifactId: 'game:game-9' },
+        { action: 'edit', path: 'client.js', addedLines: 5, removedLines: 1, diffPreview: '-old()\n+new()', artifactId: 'game:game-9' },
+        { action: 'create', path: 'logic.js', addedLines: 12, diffPreview: '+export const meta = {};', artifactId: 'game:game-9' },
+      ],
+    },
+    approvals: [],
+    messages: [
+      { id: 'u1', role: 'user', text: 'Build action game', createdAt: 1000 },
+      { id: 'a1', role: 'assistant', text: 'Done.', createdAt: 4000, status: 'completed' },
+    ],
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={treeChat}
+          busy={false}
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={vi.fn()}
+          onOpenChangedFile={onOpenChangedFile}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={onCopyText}
+          onApprove={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const card = container.querySelector('.om-sa-files-changed')!;
+  expect(card.textContent).toContain('Files changed (9)');
+  expect(card.textContent).toContain('+45');
+  expect(card.textContent).toContain('-1');
+
+  const folderNames = [...card.querySelectorAll('.om-sa-file-folder-name')].map(el => el.textContent);
+  expect(folderNames).toEqual(['assets', 'design']);
+  expect(card.textContent).toContain('index.html');
+  expect(card.textContent).toContain('cover.png');
+  expect(card.textContent).toContain('assets.csv');
+
+  // Collapse all folders via header action, then re-expand
+  const collapseAllBtn = card.querySelector<HTMLButtonElement>('.om-sa-files-head-action-btn')!;
+  expect(collapseAllBtn.textContent).toContain('Collapse all');
+  await act(async () => collapseAllBtn.click());
+  await flush();
+  expect(card.textContent).not.toContain('cover.png');
+  expect(card.textContent).not.toContain('plan.md');
+  expect(card.querySelector('.om-sa-files-head-action-btn')?.textContent).toContain('Expand all');
+
+  await act(async () => collapseAllBtn.click());
+  await flush();
+  expect(card.textContent).toContain('cover.png');
+
+  // Collapse a single folder (assets)
+  const assetsFolderBtn = [...card.querySelectorAll<HTMLButtonElement>('.om-sa-file-folder-trigger')].find(
+    el => el.textContent?.includes('assets'),
+  )!;
+  await act(async () => assetsFolderBtn.click());
+  await flush();
+  expect(card.textContent).not.toContain('cover.png');
+  expect(card.textContent).toContain('plan.md');
+  await act(async () => assetsFolderBtn.click());
+  await flush();
+
+  // Clicking binary image opens inline preview drawer
+  const coverBtn = [...card.querySelectorAll<HTMLButtonElement>('.om-sa-file-row-trigger')].find(
+    el => el.title === 'assets/cover.png',
+  )!;
+  await act(async () => coverBtn.click());
+  await flush();
+  const imgPreview = card.querySelector<HTMLImageElement>('.om-sa-file-preview-img');
+  expect(imgPreview?.getAttribute('src')).toBe('/motion-api/games/game-9/play/assets/cover.png');
+
+  // Clicking "Open in Code Viewer" invokes callback with index.html
+  const openViewerBtn = [...card.querySelectorAll<HTMLButtonElement>('.om-sa-file-copy-btn')].find(
+    btn => btn.getAttribute('aria-label') === 'Open in Code Viewer' && btn.closest('.om-sa-file-change-row')?.textContent?.includes('index.html'),
+  )!;
+  expect(openViewerBtn).toBeTruthy();
+  await act(async () => openViewerBtn.click());
+  await flush();
+  expect(onOpenChangedFile).toHaveBeenCalledWith(expect.objectContaining({ path: 'index.html', artifactId: 'game:game-9' }));
+
+  // Project directory footer button copies canonical directory
+  const dirFootBtn = card.querySelector<HTMLButtonElement>('.om-sa-files-dir-btn')!;
+  expect(dirFootBtn.textContent).toContain('/tmp/workspace/games/game-9');
+  await act(async () => dirFootBtn.click());
+  expect(onCopyText).toHaveBeenCalledWith('/tmp/workspace/games/game-9');
+
+  // Card header toggles full collapse
+  const cardHeadBtn = card.querySelector<HTMLButtonElement>('.om-sa-files-changed-head-btn')!;
+  await act(async () => cardHeadBtn.click());
+  await flush();
+  expect(card.querySelector('.om-sa-files-changed-list')).toBeNull();
+});
+
+it('SuperAgentWorkspace shows task project directory in header and opens changed file in Code Viewer', async () => {
+  const GAME_TREE_CHAT_ID = '22222222-2222-4222-8222-222222222222';
+  const chatPayload: SuperAgentChat = {
+    id: GAME_TREE_CHAT_ID,
+    title: 'Neon Runner',
+    intent: 'game',
+    engine: 'antigravity',
+    permissionMode: 'auto',
+    projectDir: '/tmp/data/games/game-neon-1',
+    projectKind: 'game',
+    createdAt: 1000,
+    updatedAt: 5000,
+    state: 'idle',
+    artifacts: [
+      {
+        id: 'game:game-neon-1',
+        kind: 'game-project',
+        title: 'Neon Runner',
+        projectId: 'game-neon-1',
+        url: '/motion-api/games/game-neon-1/play/index.html',
+        revision: 'rev-1',
+        createdAt: 2000,
+        updatedAt: 3000,
+      },
+    ],
+    activeArtifactId: 'game:game-neon-1',
+    turnChangedFiles: {
+      u1: [
+        { action: 'create', path: 'index.html', addedLines: 5, diffPreview: '+<!doctype html>', artifactId: 'game:game-neon-1' },
+        { action: 'create', path: 'style.css', addedLines: 3, diffPreview: '+.hud { color: red; }', artifactId: 'game:game-neon-1' },
+      ],
+    },
+    approvals: [],
+    messages: [
+      { id: 'u1', role: 'user', text: 'Create Neon Runner', createdAt: 1000 },
+      { id: 'a1', role: 'assistant', text: 'Ready!', createdAt: 4000, status: 'completed' },
+    ],
+  };
+
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'antigravity', label: 'Antigravity', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({ localDirectAvailable: true, defaultRuntimeId: 'local:direct', runtimes: [] });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json({
+        counts: { assets: 0, brandKits: 0, officialBrandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, designProjects: 0, motionProjects: 0, mediaProvidersAvailable: 0, workflows: 0, models: 0, games: 1 },
+        items: [],
+        generatedAt: Date.now(),
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats`) {
+      return json({ conversations: [{ ...chatPayload, artifactCount: 1, messageCount: 2 }] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_TREE_CHAT_ID}`) {
+      return json({ conversation: chatPayload });
+    }
+    if (url.includes('/motion-api/games/catalog')) {
+      return json({ games: [{ id: 'game-neon-1', title: 'Neon Runner', status: 'ready', source: 'mine', genre: 'arcade', multiplayer: false }] });
+    }
+    if (url.includes('/motion-api/games/game-neon-1/files')) {
+      return json({ files: [{ path: 'index.html', bytes: 64 }, { path: 'style.css', bytes: 42 }] });
+    }
+    if (url.includes('/motion-api/games/game-neon-1/play/style.css')) {
+      return new Response('.hud { color: red; }', { status: 200, headers: { 'Content-Type': 'text/css' } });
+    }
+    if (url.includes('/motion-api/games/game-neon-1/play/index.html')) {
+      return new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    }
+    return json({});
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={GAME_TREE_CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  const dirHeaderBtn = container.querySelector<HTMLButtonElement>('.om-sa-head-dir-btn')!;
+  expect(dirHeaderBtn).toBeTruthy();
+  expect(dirHeaderBtn.textContent).toContain('games/game-neon-1');
+  await act(async () => dirHeaderBtn.click());
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/tmp/data/games/game-neon-1');
+
+  // Click Open in Code Viewer on style.css
+  const openStyleBtn = [...container.querySelectorAll<HTMLButtonElement>('.om-sa-file-copy-btn')].find(
+    btn => btn.getAttribute('aria-label') === 'Open in Code Viewer' && btn.closest('.om-sa-file-change-row')?.textContent?.includes('style.css'),
+  )!;
+  expect(openStyleBtn).toBeTruthy();
+  await act(async () => openStyleBtn.click());
+  await flush();
+  await flush();
+  await flush();
+
+  const selectedTab = [...container.querySelectorAll<HTMLElement>('.om-sa-code-file-row')].find(
+    el => el.getAttribute('aria-selected') === 'true',
+  );
+  expect(selectedTab?.textContent).toContain('style.css');
+  expect(container.textContent).toContain('.hud { color: red; }');
 });
 
 function setupDesignStudioMocks() {
@@ -3521,4 +4070,945 @@ it('opens Design Studio Image design directly from the primary Generate image st
 
   expect(container.querySelector('.om-sa-composer-top-bar')?.textContent).toContain('Image design');
   expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).toContain('All image scenes');
+});
+
+it('docks pending approvals above the locked composer and keeps failed tool steps collapsed by default', async () => {
+  clearSuperAgentCache();
+  const DOCK_CHAT_ID = '22222222-2222-4222-8222-222222222222';
+  let currentChat: SuperAgentChat = {
+    id: DOCK_CHAT_ID,
+    title: 'Witch Artwork',
+    intent: 'image',
+    engine: 'codex',
+    permissionMode: 'on-request',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'waiting',
+    messages: [
+      { id: 'u-1', role: 'user', text: 'Generate witch artwork', createdAt: 1001 },
+      {
+        id: 'r-1',
+        role: 'reasoning',
+        text: 'Inspecting workspace media provider configuration.',
+        durationMs: 2200,
+        createdAt: 1002,
+      },
+      {
+        id: 't-fail-1',
+        role: 'tool',
+        text: 'Generated media',
+        createdAt: 1003,
+        toolEvent: {
+          id: 'tool-fail-1',
+          category: 'tool',
+          label: 'Generated media',
+          summary: 'project',
+          status: 'failed',
+          inputPreview: '{"prompt":"Sparks and Young Witch"}',
+          outputPreview: 'Timed out',
+        },
+      },
+    ],
+    artifacts: [],
+    approvals: [
+      {
+        id: 'appr-dock-1',
+        kind: 'mcp',
+        title: 'Generate image',
+        detail: 'nano-banana-2-lite',
+      },
+      {
+        id: 'appr-dock-2',
+        kind: 'command',
+        title: 'Run verification script',
+        detail: 'npm run check',
+      },
+    ],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method || 'GET';
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({
+        localDirectAvailable: true,
+        defaultRuntimeId: 'local:direct',
+        runtimes: [{
+          id: 'local:direct',
+          kind: 'local-direct',
+          name: 'This computer',
+          status: 'online',
+          agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }],
+          runnableAgentIds: ['codex'],
+        }],
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json({
+        counts: { assets: 0, brandKits: 0, officialBrandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, designProjects: 0, motionProjects: 0, mediaProvidersAvailable: 0, workflows: 0, models: 0, games: 0 },
+        items: [],
+        generatedAt: Date.now(),
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') {
+      return json({
+        conversations: [{
+          id: currentChat.id,
+          title: currentChat.title,
+          intent: currentChat.intent,
+          engine: currentChat.engine,
+          createdAt: currentChat.createdAt,
+          updatedAt: currentChat.updatedAt,
+          state: currentChat.state,
+          messageCount: currentChat.messages.length,
+          approvalCount: currentChat.approvals.length,
+        }],
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${DOCK_CHAT_ID}` && method === 'GET') {
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${DOCK_CHAT_ID}/approve` && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      const remaining = currentChat.approvals.filter(item => item.id !== body.approvalId);
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        state: remaining.length > 0 ? 'waiting' : 'idle',
+        approvals: remaining,
+      };
+      return json({ conversation: currentChat });
+    }
+    return json({});
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={DOCK_CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await vi.waitFor(async () => {
+    await flush();
+    expect(container.querySelector('.om-sa-tool-row')).toBeTruthy();
+  }, { timeout: 5000 });
+
+  // Failed tool steps default collapsed and toggle cleanly via .om-sa-tool-trigger
+  const toolRow = container.querySelector('.om-sa-tool-row')!;
+  const toolTrigger = toolRow.querySelector<HTMLButtonElement>('.om-sa-tool-trigger')!;
+  expect(toolRow.hasAttribute('data-open')).toBe(false);
+  expect(toolRow.querySelector('.om-sa-tool-body')).toBeNull();
+  expect(toolTrigger.getAttribute('aria-expanded')).toBe('false');
+
+  await act(async () => toolTrigger.click());
+  expect(toolRow.getAttribute('data-open')).toBe('true');
+  expect(toolTrigger.getAttribute('aria-expanded')).toBe('true');
+  expect(toolRow.querySelector('.om-sa-tool-body')?.textContent).toContain('Sparks and Young Witch');
+
+  await act(async () => toolTrigger.click());
+  expect(toolRow.hasAttribute('data-open')).toBe(false);
+  expect(toolRow.querySelector('.om-sa-tool-body')).toBeNull();
+
+  // Pending approvals render inside .om-sa-composer-wrap .om-sa-approval-dock (not inside .om-sa-messages)
+  expect(container.querySelector('.om-sa-messages .om-sa-approval')).toBeNull();
+  expect(container.querySelectorAll('.om-sa-composer-wrap .om-sa-approval-dock .om-sa-approval')).toHaveLength(2);
+  expect(container.querySelector('.om-sa-head-status-badge[data-state="waiting"]')?.textContent).toBe('Approval needed');
+
+  const composer = container.querySelector('.om-sa-composer')!;
+  expect(composer.getAttribute('data-approval-pending')).toBe('true');
+  expect(composer.querySelector('.om-sa-composer-approval-notice')?.textContent).toContain(
+    'Confirm 2 pending actions above before sending your next message',
+  );
+  const textarea = composer.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(textarea.disabled).toBe(true);
+  expect(textarea.getAttribute('placeholder')).toBe('Confirm or decline the pending action above to continue…');
+  const attachBtn = composer.querySelector<HTMLButtonElement>('button[aria-label="Attach workspace resources"]')!;
+  expect(attachBtn.disabled).toBe(true);
+
+  // Approve first pending action -> 1 remaining pending approval
+  const approveFirst = [...container.querySelectorAll('.om-sa-approval-dock button')].find(
+    b => b.textContent?.trim() === 'Approve',
+  ) as HTMLButtonElement;
+  await act(async () => approveFirst.click());
+  await flush();
+
+  expect(container.querySelectorAll('.om-sa-composer-wrap .om-sa-approval-dock .om-sa-approval')).toHaveLength(1);
+  expect(composer.querySelector('.om-sa-composer-approval-notice')?.textContent).toContain(
+    'Confirm the pending action above before sending your next message',
+  );
+  expect(textarea.disabled).toBe(true);
+
+  // Approve final pending action -> returns to idle and unlocks composer
+  const approveSecond = [...container.querySelectorAll('.om-sa-approval-dock button')].find(
+    b => b.textContent?.trim() === 'Approve',
+  ) as HTMLButtonElement;
+  await act(async () => approveSecond.click());
+  await flush();
+
+  expect(container.querySelector('.om-sa-composer-wrap .om-sa-approval-dock')).toBeNull();
+  expect(container.querySelector('.om-sa-approval')).toBeNull();
+  expect(composer.hasAttribute('data-approval-pending')).toBe(false);
+  expect(composer.querySelector('.om-sa-composer-approval-notice')).toBeNull();
+  expect(textarea.disabled).toBe(false);
+  expect(textarea.getAttribute('placeholder')).not.toBe('Confirm or decline the pending action above to continue…');
+  expect(attachBtn.disabled).toBe(false);
+});
+
+async function setupMultimodalSsotMocks() {
+  const { builtinModels } = await import('../../../gateway/catalog');
+  const { generationOptions } = await import('../../../shared/generation-options');
+  const { invalidateGatewayCache } = await import('../motion/gatewayClient');
+  invalidateGatewayCache();
+
+  const models = builtinModels
+    .filter(m =>
+      [
+        'atlascloud:google/nano-banana-2/text-to-image',
+        'fal:fal-ai/flux/schnell',
+        'codex:image-generation',
+        'atlascloud:bytedance/seedance-2.0/text-to-video',
+        'fal:fal-ai/wan/v2.2-a14b/text-to-video',
+        'atlascloud:suno/chirp-v4',
+        'fal:fal-ai/kokoro/american-english',
+        'fal:fal-ai/elevenlabs/sound-effects/v2',
+      ].includes(m.id),
+    )
+    .map(m => ({ ...m, generationOptions: generationOptions(m) }));
+
+  const createdChats: Array<{ body: any; chat: SuperAgentChat }> = [];
+  const turnBodies: any[] = [];
+  let chatCounter = 0;
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method || 'GET';
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({
+        localDirectAvailable: true,
+        defaultRuntimeId: 'local:direct',
+        runtimes: [{
+          id: 'local:direct',
+          kind: 'local-direct',
+          name: 'This computer',
+          status: 'online',
+          agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }],
+          runnableAgentIds: ['codex'],
+        }],
+      });
+    }
+    if (url === '/motion-api/models/capabilities') {
+      return json({
+        providers: [
+          { id: 'atlascloud', ready: true, configured: true },
+          { id: 'fal', ready: true, configured: true },
+          { id: 'codex', ready: true, configured: true },
+        ],
+        routes: {
+          image: 'atlascloud:google/nano-banana-2/text-to-image',
+          video: 'atlascloud:bytedance/seedance-2.0/text-to-video',
+          audio: 'atlascloud:suno/chirp-v4',
+        },
+      });
+    }
+    if (url.startsWith('/motion-api/models')) {
+      return json({ models, nextOffset: null });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json({
+        counts: { assets: 0, brandKits: 0, officialBrandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, designProjects: 0, motionProjects: 0, mediaProvidersAvailable: 3, workflows: 0, models: models.length, games: 0 },
+        items: [],
+        generatedAt: Date.now(),
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') {
+      return json({ conversations: [] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      chatCounter += 1;
+      const chat: SuperAgentChat = {
+        id: `eeee0000-0000-0000-0000-00000000000${chatCounter}`,
+        title: 'SSOT Task',
+        intent: body.intent ?? 'image',
+        engine: 'codex',
+        model: 'gpt-5',
+        permissionMode: 'on-request',
+        createdAt: 1000,
+        updatedAt: 1000,
+        state: 'idle',
+        messages: [],
+        artifacts: [],
+        approvals: [],
+      };
+      createdChats.push({ body, chat });
+      return json({ conversation: chat });
+    }
+    const turnMatch = url.match(new RegExp(`^${SUPER_AGENT_API}/chats/([^/]+)/turn$`));
+    if (turnMatch && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      turnBodies.push(body);
+      const found = createdChats.find(c => c.chat.id === turnMatch[1])?.chat;
+      return json({
+        conversation: {
+          ...(found ?? { id: turnMatch[1], title: 'SSOT', intent: 'image', engine: 'codex', permissionMode: 'on-request', createdAt: 1000, updatedAt: 1000, artifacts: [], approvals: [] }),
+          state: 'running',
+          messages: [{ id: 'u-1', role: 'user', text: body.text, createdAt: 2000 }],
+        },
+      });
+    }
+    return json({});
+  }) as any;
+
+  return { createdChats, turnBodies };
+}
+
+it('drives Image SSOT model switching, collapsible advanced parameters, parameter migration, and structured Agent submission', async () => {
+  const { turnBodies } = await setupMultimodalSsotMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="design"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+  expect(topBar.textContent).toContain('Nano Banana 2');
+
+  // Switch model to FLUX Schnell and verify SSOT primary pill adapts to FLUX output count
+  const modelTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Nano Banana 2')) as HTMLButtonElement;
+  await act(async () => modelTrigger.click());
+  await flush();
+  const fluxRow = [...document.querySelectorAll('.om-sa-mode-model-row')].find(el => el.textContent?.includes('FLUX Schnell')) as HTMLButtonElement;
+  expect(fluxRow).toBeTruthy();
+  await act(async () => fluxRow.click());
+  await flushMore();
+
+  // Open FLUX Schnell Parameters popover, pick png + set Seed 123 inside collapsible Advanced parameters
+  const paramTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('1×')) as HTMLButtonElement;
+  expect(paramTrigger).toBeTruthy();
+  await act(async () => paramTrigger.click());
+  await flush();
+
+  const advDetails = document.querySelector('details.om-sa-adv-params') as HTMLDetailsElement;
+  expect(advDetails).toBeTruthy();
+  expect(advDetails.open).toBe(false);
+  const advSummary = advDetails.querySelector('summary')!;
+  await act(async () => advSummary.click());
+  await flush();
+
+  const pngPill = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.trim() === 'png') as HTMLButtonElement;
+  expect(pngPill).toBeTruthy();
+  await act(async () => pngPill.click());
+  await flush();
+
+  const seedInput = document.querySelector('input[type="number"][aria-label="Seed"]') as HTMLInputElement;
+  expect(seedInput).toBeTruthy();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(seedInput, '123');
+    seedInput.dispatchEvent(new Event('input', { bubbles: true }));
+    seedInput.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flush();
+
+  // Close Parameters popover & switch back to Nano Banana 2 -> output_format='png' & seed=123 migrate via SSOT standardKey!
+  await act(async () => paramTrigger.click());
+  await flush();
+  const fluxTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('FLUX Schnell')) as HTMLButtonElement;
+  await act(async () => fluxTrigger.click());
+  await flush();
+  const nanoRow = [...document.querySelectorAll('.om-sa-mode-model-row')].find(el => el.textContent?.includes('Nano Banana 2')) as HTMLButtonElement;
+  await act(async () => nanoRow.click());
+  await flushMore();
+
+  expect(topBar.querySelector('.om-sa-param-badge')?.textContent).toBe('+2');
+
+  const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(textarea, 'Studio lighting watch render');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flush();
+  await act(async () => (container.querySelector('button[aria-label="Send"]') as HTMLButtonElement).click());
+  await flushMore();
+
+  expect(turnBodies[0]?.hiddenInstructions).toContain('model="atlascloud:google/nano-banana-2/text-to-image"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"output_format":"png"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"seed":123');
+});
+
+it('drives AI Video SSOT engine switch, choice constraints, advanced parameters, and submission', async () => {
+  const { turnBodies } = await setupMultimodalSsotMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="media"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+  expect(topBar.textContent).toContain('AI Video');
+
+  // Switch Engine -> Motion graphics and back -> AI Video
+  const engineTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('AI Video')) as HTMLButtonElement;
+  await act(async () => engineTrigger.click());
+  await flush();
+  const motionChoice = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.includes('Motion graphics')) as HTMLButtonElement;
+  await act(async () => motionChoice.click());
+  await flushMore();
+  expect(topBar.textContent).toContain('Motion graphics');
+
+  const motionEngineTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Motion graphics')) as HTMLButtonElement;
+  await act(async () => motionEngineTrigger.click());
+  await flush();
+  const aiVideoChoice = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.includes('AI Video')) as HTMLButtonElement;
+  await act(async () => aiVideoChoice.click());
+  await flushMore();
+
+  expect(topBar.textContent).toContain('Seedance 2.0');
+  expect(topBar.textContent).toContain('First frame');
+
+  // Open Seedance Parameters popover: select 4k resolution (enforces ratio='16:9') + Advanced Bitrate='high'
+  const paramTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Audio')) as HTMLButtonElement;
+  expect(paramTrigger).toBeTruthy();
+  await act(async () => paramTrigger.click());
+  await flush();
+
+  const fourKPill = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.trim() === '4k') as HTMLButtonElement;
+  await act(async () => fourKPill.click());
+  await flush();
+
+  const advSummary = document.querySelector('details.om-sa-adv-params summary')!;
+  await act(async () => advSummary.click());
+  await flush();
+  const highBitrate = [...document.querySelectorAll('.om-sa-adv-body .om-sa-popover-pill')].find(
+    b => b.textContent?.trim().toLowerCase() === 'high',
+  ) as HTMLButtonElement;
+  expect(highBitrate).toBeTruthy();
+  await act(async () => highBitrate.click());
+  await flush();
+
+  const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(textarea, 'Aerial drone shot of ocean cliffs');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flush();
+  await act(async () => (container.querySelector('button[aria-label="Send"]') as HTMLButtonElement).click());
+  await flushMore();
+
+  expect(turnBodies[0]?.hiddenInstructions).toContain('modality="video"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('model="atlascloud:bytedance/seedance-2.0/text-to-video"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"resolution":"4k"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"ratio":"16:9"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"bitrate_mode":"high"');
+});
+
+it('drives Audio SSOT sub-type switching, speech model parameters, and Voiceover submission', async () => {
+  const { turnBodies } = await setupMultimodalSsotMocks();
+  const flushMore = async () => {
+    await flush();
+    await flush();
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="audio"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flushMore();
+
+  const topBar = container.querySelector('.om-sa-composer-top-bar')!;
+  expect(topBar.textContent).toContain('Music');
+
+  // Switch Audio type -> Voiceover (prioritizes Kokoro)
+  const audioTypeTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Music')) as HTMLButtonElement;
+  await act(async () => audioTypeTrigger.click());
+  await flush();
+  const voiceoverPill = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.includes('Voiceover')) as HTMLButtonElement;
+  await act(async () => voiceoverPill.click());
+  await flushMore();
+
+  expect(topBar.textContent).toContain('Kokoro');
+
+  // Open Voice pill and choose af_bella
+  const voiceTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Heart')) as HTMLButtonElement;
+  expect(voiceTrigger).toBeTruthy();
+  await act(async () => voiceTrigger.click());
+  await flush();
+  const bellaPill = [...document.querySelectorAll('.om-sa-popover-pill')].find(b => b.textContent?.trim() === 'Bella') as HTMLButtonElement;
+  await act(async () => bellaPill.click());
+  await flush();
+
+  // Open Parameters popover (only remaining field is advanced Speech speed -> auto-expanded)
+  const paramTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Parameters')) as HTMLButtonElement;
+  await act(async () => paramTrigger.click());
+  await flush();
+  const advDetails = document.querySelector('details.om-sa-adv-params') as HTMLDetailsElement;
+  expect(advDetails.open).toBe(true);
+
+  const speedInput = document.querySelector('input[type="number"][aria-label="Speech speed"]') as HTMLInputElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(speedInput, '1.2');
+    speedInput.dispatchEvent(new Event('input', { bubbles: true }));
+    speedInput.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flush();
+
+  const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(textarea, 'Narrate product launch opener');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flush();
+  await act(async () => (container.querySelector('button[aria-label="Send"]') as HTMLButtonElement).click());
+  await flushMore();
+
+  expect(turnBodies[0]?.hiddenInstructions).toContain('modality="audio"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('mode="text-to-speech"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('model="fal:fal-ai/kokoro/american-english"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"voice":"af_bella"');
+  expect(turnBodies[0]?.hiddenInstructions).toContain('"speed":1.2');
+});
+
+it('defaults to Steer while running and flips to Queue on Ctrl/Cmd+Enter', async () => {
+  clearSuperAgentCache();
+  localStorage.removeItem('hf-studio-ui-preferences');
+  setFollowUpBehavior('steer');
+  const STEER_CHAT_ID = '33333333-3333-4333-8333-333333333333';
+  const turnBodies: any[] = [];
+  const queueBodies: any[] = [];
+  let currentChat: SuperAgentChat = {
+    id: STEER_CHAT_ID,
+    title: 'Active Task',
+    intent: 'coding',
+    engine: 'codex',
+    permissionMode: 'on-request',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'running',
+    messages: [{ id: 'u1', role: 'user', text: 'Initial running prompt', createdAt: 1001 }],
+    artifacts: [],
+    approvals: [],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method || 'GET';
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({
+        localDirectAvailable: true,
+        defaultRuntimeId: 'local:direct',
+        runtimes: [{
+          id: 'local:direct',
+          kind: 'local-direct',
+          name: 'This computer',
+          status: 'online',
+          agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }],
+          runnableAgentIds: ['codex'],
+        }],
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json({ counts: { assets: 0, brandKits: 0, officialBrandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, designProjects: 0, motionProjects: 0, mediaProvidersAvailable: 0 }, items: [], generatedAt: Date.now() });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') {
+      return json({ conversations: [{ id: currentChat.id, title: currentChat.title, intent: currentChat.intent, engine: currentChat.engine, createdAt: 1000, updatedAt: currentChat.updatedAt, state: currentChat.state, artifactCount: 0, messageCount: currentChat.messages.length }] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${STEER_CHAT_ID}` && method === 'GET') {
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${STEER_CHAT_ID}/turn` && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      turnBodies.push(body);
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        state: 'running',
+        messages: [...currentChat.messages, { id: `u-${turnBodies.length + 1}`, role: 'user', text: body.text, createdAt: Date.now() }],
+      };
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${STEER_CHAT_ID}/queue` && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      queueBodies.push(body);
+      const qId = `q-${queueBodies.length}`;
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        queuedMessages: [
+          ...(currentChat.queuedMessages ?? []),
+          { id: qId, requestId: body.requestId, text: body.text, createdAt: Date.now(), updatedAt: Date.now() },
+        ],
+      };
+      return json({ conversation: currentChat });
+    }
+    return json({});
+  }) as any;
+
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <SuperAgentWorkspace
+            active
+            chatId={STEER_CHAT_ID}
+            onChatIdChange={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn()}
+            onOpenAsset={vi.fn()}
+            onOpenBrandKit={vi.fn()}
+            onOpenAgentSettings={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+    await vi.waitFor(async () => {
+      await flush();
+      expect(container.querySelector('.om-sa-followup-pill')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    const pill = container.querySelector('.om-sa-followup-pill')!;
+    expect(pill.textContent?.trim()).toBe('Steer');
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('.om-sa-composer textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+
+    await act(async () => {
+      setter.call(textarea, 'Redirect current task');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('button[aria-label="Stop"]')).toBeTruthy();
+    expect(container.querySelector('button[aria-label="Steer"]')).toBeTruthy();
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    await flush();
+    expect(turnBodies).toHaveLength(1);
+    expect(turnBodies[0]).toMatchObject({ text: 'Redirect current task', followUpBehavior: 'steer' });
+
+    // Ctrl+Enter sends the opposite behavior (Queue) for a single message
+    await act(async () => {
+      setter.call(textarea, 'Queue this after steer');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    });
+    await flush();
+
+    expect(queueBodies).toHaveLength(1);
+    expect(queueBodies[0].text).toBe('Queue this after steer');
+    expect(container.querySelector('.om-sa-queue-panel .om-sa-queue-count')?.textContent).toBe('1');
+    expect(container.querySelector('.om-sa-queue-panel')?.textContent).toContain('Queue this after steer');
+  } finally {
+    setFollowUpBehavior('steer');
+    localStorage.removeItem('hf-studio-ui-preferences');
+  }
+});
+
+it('queues follow-ups with attachments and supports Edit backfill, Send Now, and Delete', async () => {
+  clearSuperAgentCache();
+  localStorage.removeItem('hf-studio-ui-preferences');
+  setFollowUpBehavior('steer');
+  const QUEUE_CHAT_ID = '44444444-4444-4444-8444-444444444444';
+  const patchCalls: any[] = [];
+  let seq = 0;
+  let currentChat: SuperAgentChat = {
+    id: QUEUE_CHAT_ID,
+    title: 'Queue Task',
+    intent: 'design',
+    engine: 'codex',
+    permissionMode: 'on-request',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'running',
+    messages: [{ id: 'u1', role: 'user', text: 'Working on layout', createdAt: 1001 }],
+    artifacts: [],
+    approvals: [],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method || 'GET';
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({
+        localDirectAvailable: true,
+        defaultRuntimeId: 'local:direct',
+        runtimes: [{
+          id: 'local:direct',
+          kind: 'local-direct',
+          name: 'This computer',
+          status: 'online',
+          agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }],
+          runnableAgentIds: ['codex'],
+        }],
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json(sampleResources);
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') {
+      return json({ conversations: [{ id: currentChat.id, title: currentChat.title, intent: currentChat.intent, engine: currentChat.engine, createdAt: 1000, updatedAt: currentChat.updatedAt, state: currentChat.state, artifactCount: 0, messageCount: currentChat.messages.length }] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${QUEUE_CHAT_ID}` && method === 'GET') {
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${QUEUE_CHAT_ID}/queue` && method === 'POST') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      seq += 1;
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        queuedMessages: [
+          ...(currentChat.queuedMessages ?? []),
+          {
+            id: `q-${seq}`,
+            requestId: body.requestId,
+            text: body.text,
+            ...(body.attachments?.length ? { attachments: body.attachments } : {}),
+            ...(body.contextTags?.length ? { contextTags: body.contextTags } : {}),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+      };
+      return json({ conversation: currentChat });
+    }
+    const patchMatch = url.match(new RegExp(`^${SUPER_AGENT_API}/chats/${QUEUE_CHAT_ID}/queue/([^/]+)$`));
+    if (patchMatch && method === 'PATCH') {
+      const qId = decodeURIComponent(patchMatch[1]);
+      const body = JSON.parse(String(init?.body || '{}'));
+      patchCalls.push({ qId, body });
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        queuedMessages: (currentChat.queuedMessages ?? []).map(item =>
+          item.id === qId
+            ? { ...item, text: body.text, attachments: body.attachments, updatedAt: Date.now() }
+            : item,
+        ),
+      };
+      return json({ conversation: currentChat });
+    }
+    if (patchMatch && method === 'DELETE') {
+      const qId = decodeURIComponent(patchMatch[1]);
+      const rest = (currentChat.queuedMessages ?? []).filter(item => item.id !== qId);
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        queuedMessages: rest.length ? rest : undefined,
+      };
+      return json({ conversation: currentChat });
+    }
+    const sendMatch = url.match(new RegExp(`^${SUPER_AGENT_API}/chats/${QUEUE_CHAT_ID}/queue/([^/]+)/send$`));
+    if (sendMatch && method === 'POST') {
+      const qId = decodeURIComponent(sendMatch[1]);
+      const target = currentChat.queuedMessages?.find(item => item.id === qId);
+      const rest = (currentChat.queuedMessages ?? []).filter(item => item.id !== qId);
+      currentChat = {
+        ...currentChat,
+        updatedAt: currentChat.updatedAt + 1,
+        state: 'running',
+        queuedMessages: rest.length ? rest : undefined,
+        messages: target ? [...currentChat.messages, { id: `u-${qId}`, role: 'user', text: target.text, createdAt: Date.now() }] : currentChat.messages,
+      };
+      return json({ conversation: currentChat });
+    }
+    return json({});
+  }) as any;
+
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <SuperAgentWorkspace
+            active
+            chatId={QUEUE_CHAT_ID}
+            onChatIdChange={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn()}
+            onOpenAsset={vi.fn()}
+            onOpenBrandKit={vi.fn()}
+            onOpenAgentSettings={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+    await vi.waitFor(async () => {
+      await flush();
+      expect(container.querySelector('.om-sa-followup-pill')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    // Switch to Queue mode from the Agent settings popover
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Agent settings"]')!.click());
+    await flush();
+    const queueModeBtn = [...document.querySelectorAll<HTMLButtonElement>('.om-sa-popover-seg-btn')].find(
+      b => b.textContent?.includes('Queue after current run'),
+    )!;
+    expect(queueModeBtn).toBeTruthy();
+    await act(async () => queueModeBtn.click());
+    expect(container.querySelector('.om-sa-followup-pill')?.textContent?.trim()).toBe('Queue');
+
+    // Attach workspace asset ("Hero Backdrop" or "Neon Arcade") while agent is running & queue 1st item
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Attach workspace resources"]')!.click());
+    await flush();
+    await act(async () => document.querySelector<HTMLButtonElement>('.om-sa-resource-row')!.click());
+    await flush();
+    const chipLabel = container.querySelector('.om-sa-composer-chips')?.textContent?.trim() || '';
+    expect(chipLabel).toBeTruthy();
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('.om-sa-composer textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(textarea, 'Inspect attached resource first');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]')!.click());
+    await flush();
+
+    // Queue 2nd item
+    await act(async () => {
+      setter.call(textarea, 'Second follow-up check');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]')!.click());
+    await flush();
+
+    expect(container.querySelector('.om-sa-queue-count')?.textContent).toBe('2');
+    const firstRow = container.querySelectorAll('.om-sa-queue-row')[0];
+    expect(firstRow.textContent).toContain('Inspect attached resource first');
+
+    // Edit 1st queued item -> backfills text & attachment into composer -> save updates in place
+    await act(async () => firstRow.querySelector<HTMLButtonElement>('button[aria-label="Edit"]')!.click());
+    await flush();
+    expect(container.querySelector('.om-sa-composer')?.getAttribute('data-editing-queued')).toBe('true');
+    expect(container.querySelector('.om-sa-composer-edit-banner')?.textContent).toContain('Editing queued message');
+    expect(textarea.value).toBe('Inspect attached resource first');
+    expect(container.querySelector('.om-sa-composer-chips')?.textContent).toBeTruthy();
+
+    await act(async () => {
+      setter.call(textarea, 'Updated resource check');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Save queued message"]')!.click());
+    await flush();
+
+    expect(patchCalls).toHaveLength(1);
+    expect(patchCalls[0].body.text).toBe('Updated resource check');
+    expect(patchCalls[0].body.attachments?.length).toBeGreaterThan(0);
+    expect(container.querySelector('.om-sa-queue-panel')?.textContent).toContain('Updated resource check');
+
+    // Send Now on 1st item -> removes it from queue and starts turn immediately
+    await act(async () => container.querySelectorAll('.om-sa-queue-row')[0].querySelector<HTMLButtonElement>('button[aria-label="Send Now"]')!.click());
+    await flush();
+    expect(container.querySelector('.om-sa-queue-count')?.textContent).toBe('1');
+    expect(container.querySelector('.om-sa-queue-panel')?.textContent).not.toContain('Updated resource check');
+    expect(container.querySelector('.om-sa-queue-panel')?.textContent).toContain('Second follow-up check');
+
+    // Delete remaining queued item -> removes queue panel
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')!.click());
+    await flush();
+    expect(container.querySelector('.om-sa-queue-panel')).toBeNull();
+  } finally {
+    setFollowUpBehavior('steer');
+    localStorage.removeItem('hf-studio-ui-preferences');
+  }
 });
