@@ -436,6 +436,27 @@ function sanitizeStructuredValue(value: unknown, env: NodeJS.ProcessEnv, paths: 
   if (Array.isArray(value)) return value.slice(0, 30).map(item => sanitizeStructuredValue(item, env, paths, depth + 1));
   if (typeof value === 'object') {
     const record = value as Record<string, unknown>;
+    const fileContent = typeof record.content === 'string' ? record.content : undefined;
+    const hasFilePath = typeof record.path === 'string'
+      || typeof record.referencePath === 'string'
+      || typeof record.filename === 'string';
+    if (fileContent !== undefined && hasFilePath) {
+      const sanitizedFile: Record<string, unknown> = {};
+      for (const [key, child] of Object.entries(record).slice(0, 40)) {
+        if (key === 'content' || key === '_inlineMedia' || key === 'inlineVideo' || key === 'encrypted_content') continue;
+        if (key === 'path' || key === 'referencePath' || key === 'filename') {
+          sanitizedFile[key] = sanitizeRelativePath(child, env, paths);
+          continue;
+        }
+        sanitizedFile[key] = sanitizeStructuredValue(child, env, paths, depth + 1);
+      }
+      if (typeof sanitizedFile.bytes !== 'number') {
+        sanitizedFile.bytes = Buffer.byteLength(fileContent);
+      }
+      sanitizedFile.lines = fileContent ? fileContent.split('\n').length : 0;
+      return sanitizedFile;
+    }
+
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(record).slice(0, 40)) {
       if (key === '_inlineMedia' || key === 'inlineVideo' || key === 'encrypted_content') continue;
@@ -863,8 +884,26 @@ function readCodexThreadSnapshot(
               : parsed.status === 'completed' ? 'success' : 'unknown';
           const rawCode = errorObj?.code ?? structured?.code;
           const errorCode = typeof rawCode === 'string' && ERROR_CODE_PATTERN.test(rawCode) ? rawCode : undefined;
+          let fallbackResultPayload: unknown = resultObj?.content ?? null;
+          if (!structured && Array.isArray(resultObj?.content)) {
+            fallbackResultPayload = (resultObj.content as unknown[]).slice(0, 10).map(part => {
+              if (!part || typeof part !== 'object') return part;
+              const block = part as Record<string, unknown>;
+              if (block.type === 'text' && typeof block.text === 'string') {
+                const trimmed = block.text.trim();
+                if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                  try { return { type: 'text', json: JSON.parse(trimmed) }; } catch { /* fall through */ }
+                }
+              }
+              return part;
+            });
+          }
           const sanitizedArgs = sanitizeStructuredValue(argsObj, env, redactPaths);
-          const sanitizedOut = sanitizeStructuredValue(parsed.error ?? structured ?? resultObj?.content ?? null, env, redactPaths);
+          const rawOut = parsed.error ?? structured ?? (isOm ? fallbackResultPayload : null);
+          const nonOmOutBytes = !isOm && !parsed.error && resultObj !== undefined
+            ? Buffer.byteLength(JSON.stringify(resultObj))
+            : undefined;
+          const sanitizedOut = rawOut !== null ? sanitizeStructuredValue(rawOut, env, redactPaths) : null;
           const durationMs = typeof parsed.durationMs === 'number' && Number.isFinite(parsed.durationMs) && parsed.durationMs >= 0
             ? Math.round(parsed.durationMs)
             : itemStarted > 0 && itemCompleted >= itemStarted ? itemCompleted - itemStarted : undefined;
@@ -882,6 +921,7 @@ function readCodexThreadSnapshot(
             ...(projectId ? { project_id: projectId } : {}),
             ...(operationId ? { operation_id: operationId } : {}),
             ...(jobId ? { job_id: jobId } : {}),
+            ...(nonOmOutBytes !== undefined && nonOmOutBytes > 0 ? { output_bytes: nonOmOutBytes } : {}),
             input_summary: sanitizeMiddle(JSON.stringify(sanitizedArgs), env, redactPaths, 2000),
             ...(sanitizedOut !== null ? { output_summary: sanitizeMiddle(JSON.stringify(sanitizedOut), env, redactPaths, 2000) } : {}),
           });

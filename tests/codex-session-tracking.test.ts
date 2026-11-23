@@ -255,8 +255,54 @@ test('captures only OpenMotion-activated Codex threads, backfills pre-call turns
       },
     }),
   );
+  const secretJs = 'export const storyboardTitle = "QA_ONLY_STORYBOARD_93128";\n';
   historyDb.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    activeThreadId, 'turn_om_2', 'call_patch_1', 15, baseMs + 6100, 'fileChange', baseMs + 6100, baseMs + 6200,
+    activeThreadId, 'turn_om_2', 'call_mcp_read_file', 15, baseMs + 6050, 'mcpToolCall', baseMs + 6050, baseMs + 6090,
+    JSON.stringify({
+      type: 'mcpToolCall',
+      server: 'openmotion',
+      tool: 'openmotion_get_project',
+      status: 'completed',
+      durationMs: 40,
+      arguments: {
+        projectId,
+        file: { path: 'qa-synthetic-storyboard.js', offset: 0, length: 4096 },
+      },
+      result: {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            projectId,
+            file: { path: 'qa-synthetic-storyboard.js', content: secretJs, offset: 0, bytes: Buffer.byteLength(secretJs), totalBytes: Buffer.byteLength(secretJs), nextOffset: null },
+          }),
+        }],
+        structuredContent: {
+          projectId,
+          file: { path: 'qa-synthetic-storyboard.js', content: secretJs, offset: 0, bytes: Buffer.byteLength(secretJs), totalBytes: Buffer.byteLength(secretJs), nextOffset: null },
+        },
+      },
+    }),
+  );
+  historyDb.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    activeThreadId, 'turn_om_2', 'call_mcp_design_read', 16, baseMs + 6091, 'mcpToolCall', baseMs + 6091, baseMs + 6099,
+    JSON.stringify({
+      type: 'mcpToolCall',
+      server: 'openmotion',
+      tool: 'openmotion_design_project',
+      status: 'completed',
+      durationMs: 8,
+      arguments: { action: 'read_file', id: projectId, path: 'slides/deck.html' },
+      result: {
+        // Exercise the text-only fallback when structuredContent is absent.
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ path: 'slides/deck.html', content: '<section>QA_DESIGN_SECRET_77441</section>', revision: 'r1', size: 41, nextOffset: null }),
+        }],
+      },
+    }),
+  );
+  historyDb.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    activeThreadId, 'turn_om_2', 'call_patch_1', 17, baseMs + 6100, 'fileChange', baseMs + 6100, baseMs + 6200,
     JSON.stringify({
       type: 'fileChange',
       status: 'completed',
@@ -264,7 +310,7 @@ test('captures only OpenMotion-activated Codex threads, backfills pre-call turns
     }),
   );
   historyDb.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    activeThreadId, 'turn_om_2', 'item_a2', 16, baseMs + 6300, 'agentMessage', baseMs + 6300, baseMs + 12_200,
+    activeThreadId, 'turn_om_2', 'item_a2', 18, baseMs + 6300, 'agentMessage', baseMs + 6300, baseMs + 12_200,
     JSON.stringify({ type: 'agentMessage', text: '已创建并写入首版动画，请查看预览。' }),
   );
 
@@ -341,6 +387,8 @@ test('captures only OpenMotion-activated Codex threads, backfills pre-call turns
   assert.equal(serializedFirst.includes(unrelatedThreadId), false);
   assert.equal(serializedFirst.includes('Refactor auth middleware'), false);
   assert.equal(serializedFirst.includes('SECRET_AUTHORED_HTML_BODY_NEVER_UPLOAD'), false);
+  assert.equal(serializedFirst.includes('QA_ONLY_STORYBOARD_93128'), false);
+  assert.equal(serializedFirst.includes('QA_DESIGN_SECRET_77441'), false);
   assert.equal(serializedFirst.includes('SECRET_SHELL_STDOUT_NEVER_UPLOAD'), false);
   assert.equal(serializedFirst.includes('HEAD_MARKER_SKILL_LOADED'), false);
   assert.equal(serializedFirst.includes('SECRET_DIFF_LINE_NEVER_UPLOAD'), false);
@@ -366,11 +414,11 @@ test('captures only OpenMotion-activated Codex threads, backfills pre-call turns
   assert.equal(ev1!.properties.$ai_session_id, ev0!.properties.$ai_session_id);
   assert.deepEqual(ev1!.properties.skills_activated, ['openmotion-director']);
   assert.deepEqual(ev1!.properties.project_ids, [projectId]);
-  assert.equal(ev1!.properties.mcp_call_count, 1);
+  assert.equal(ev1!.properties.mcp_call_count, 3);
   assert.equal(ev1!.properties.skill_read_count, 1);
 
   const toolCalls1 = ev1!.properties.$ai_output_choices[0].tool_calls as Array<Record<string, any>>;
-  assert.equal(toolCalls1.length, 3);
+  assert.equal(toolCalls1.length, 5);
   assert.equal(toolCalls1[0]!.type, 'skill_read');
   assert.equal(toolCalls1[0]!.output, undefined);
   assert.equal(toolCalls1[0]!.output_bytes, Buffer.byteLength(longOutput));
@@ -381,7 +429,16 @@ test('captures only OpenMotion-activated Codex threads, backfills pre-call turns
     bytes: Buffer.byteLength(secretHtml),
     lines: secretHtml.split('\n').length,
   }]);
-  const patchSummary = JSON.parse(toolCalls1[2]!.function.arguments);
+  const readOutSummary = JSON.parse(toolCalls1[2]!.output);
+  assert.equal(readOutSummary.file.content, undefined);
+  assert.equal(readOutSummary.file.path, 'qa-synthetic-storyboard.js');
+  assert.equal(readOutSummary.file.bytes, Buffer.byteLength(secretJs));
+  assert.equal(readOutSummary.file.lines, secretJs.split('\n').length);
+  const designReadOut = JSON.parse(toolCalls1[3]!.output);
+  assert.equal(designReadOut[0].json.content, undefined);
+  assert.equal(designReadOut[0].json.path, 'slides/deck.html');
+  assert.equal(designReadOut[0].json.lines, 1);
+  const patchSummary = JSON.parse(toolCalls1[4]!.function.arguments);
   assert.equal(patchSummary.files_changed[0].diff, undefined);
   assert.ok(patchSummary.files_changed[0].diff_bytes > 0);
 
