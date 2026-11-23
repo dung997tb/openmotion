@@ -100,7 +100,7 @@ export function McpConnectionPage({
     if (onRouteChange) onRouteChange(patch);
     else setLocalRoute(previous => ({ ...previous, ...patch }));
   };
-  const setClientId = (nextClient: string) => changeRoute({ client: clients.find(item => item.id === nextClient)?.id ?? 'codex' });
+  const setClientId = (nextClient: McpClient) => changeRoute({ client: nextClient, setup: 'agent' });
   const client = clients.find(item => item.id === clientId) ?? clients[0];
   const clientKey = client.id as tracking.McpClient;
   const isClaudeGroup = client.id === 'claude' || client.id === 'desktop';
@@ -257,6 +257,7 @@ export function McpConnectionPage({
     const nextId: McpClient = target.id === 'claude'
       ? (client.id === 'desktop' ? 'desktop' : 'claude')
       : target.clientId;
+    if (client.id === nextId) return;
     setClientId(nextId);
     setNextStepVisible(false);
     setSetupCopied(false);

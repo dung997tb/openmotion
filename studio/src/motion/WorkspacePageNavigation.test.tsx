@@ -193,6 +193,10 @@ it('navigates settings, MCP tabs and history without remounting or flushing the 
   expect(breadcrumb()).toBeNull();
   await click('Claude'); await click('Manual setup');
   expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
+  await click('Cursor');
+  expect(page()).toMatchObject({ client: 'cursor', setup: 'agent' });
+  await traverse(-1);
+  expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
   await traverse(-1); expect(page().setup).toBe('agent');
   expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Claude');
   await traverse(-1); expect(page().client).toBe('codex');

@@ -78,11 +78,12 @@ it('loads Docker discovery through the real hook and enables container setup, co
   expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('existing OpenMotion Docker deployment'));
   expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('deploy/README.md'));
   expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('welcome and video cards'));
-  await act(async () => button('Manual setup').click());
-  expect([...document.querySelectorAll('a')].find(link => link.textContent?.trim() === 'Connection guide')?.href).toContain('deploy/README.md');
   for (const [client, host] of [['Codex', 'codex'], ['Claude', 'claude'], ['DeepSeek Harness', 'deepseek'], ['Other MCP clients', 'mcp']] as const) {
     await act(async () => tab(client).click());
     expect(document.body.textContent).not.toContain('Could not load settings');
+    expect(button('Manual setup').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => button('Manual setup').click());
+    expect([...document.querySelectorAll('a')].find(link => link.textContent?.trim() === 'Connection guide')?.href).toContain('deploy/README.md');
     const code = document.querySelector('.om-mcp-manual-code')!;
     expect(code.textContent).not.toContain('docker');
     const full = manualConnection(docker, host, 'en');
@@ -132,7 +133,10 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   const { openLibrary, openProviders } = await mount();
   expect(document.querySelector('h1')?.textContent).toContain('Codex');
   expect(document.querySelectorAll('.om-mcp-client-dock [role=tab]')).toHaveLength(5);
+  await act(async () => button('Manual setup').click());
+  expect(button('Manual setup').getAttribute('aria-expanded')).toBe('true');
   await act(async () => tab('Claude').click());
+  expect(button('Manual setup').getAttribute('aria-expanded')).toBe('false');
   expect(document.querySelector('h1')?.textContent).toContain('Claude');
   expect(button('Install OpenDesign in Claude Code')).toBeDefined();
   await act(async () => button('Claude Desktop').click());
@@ -142,11 +146,14 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   expect(document.querySelector('pre')?.textContent).toContain('claude mcp add');
   expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
   await act(async () => button('Claude Desktop').click());
+  expect(button('Manual setup').getAttribute('aria-expanded')).toBe('false');
+  await act(async () => button('Manual setup').click());
   expect(document.querySelector('.om-mcp-manual-title')?.textContent).toBe('Merge the JSON into MCP settings, keep the other servers, then reload.');
   expect(document.querySelector('pre')?.textContent).toContain('"mcpServers"');
   expect(document.querySelector('pre')?.textContent).not.toContain('/fixture/data');
   await act(async () => tab('DeepSeek Harness').click());
   expect(document.querySelectorAll('.om-mcp-hero-cta-row > *')).toHaveLength(2);
+  await act(async () => button('Manual setup').click());
   expect(document.querySelector('.om-mcp-manual-note a')?.getAttribute('href')).toContain('/integrations/dsh');
   await act(async () => tab('Claude').click());
   await act(async () => button('Copy example prompt').click());
