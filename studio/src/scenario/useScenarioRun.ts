@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  fillScenarioTemplate,
   findScenario,
   scenarioDefinitions,
   type ScenarioDefinition,
@@ -13,7 +12,7 @@ import type {
   ScenarioStepState,
 } from '../../../shared/scenario-runs';
 import { ScenarioApiError, scenarioClient, scenarioRequest } from './scenarioClient';
-import type { ScenarioRunApi } from './stepContract';
+import type { BriefSaveRef, ScenarioRunApi } from './stepContract';
 import type { useToast } from '../hooks/useToast';
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
@@ -60,18 +59,13 @@ export function countStepPendingJobs(state: ScenarioStepState | undefined): numb
 }
 
 export function emptyStepState(step: ScenarioStepDefinition): ScenarioStepState {
-  const draft: Record<string, unknown> = {};
-  if (step.promptTemplate) {
-    const seeded = fillScenarioTemplate(step.promptTemplate, {});
-    if (seeded) draft.prompt = seeded;
-  }
   return {
     stepId: step.id,
     status: step.type === 'brief' ? 'in-progress' : 'todo',
     iterations: [],
     activeIterationId: null,
     bindings: {},
-    draft,
+    draft: {},
     links: {},
   };
 }
@@ -85,6 +79,7 @@ export type UseScenarioRunOptions = {
   onRunCreated: (runId: string, replace?: boolean) => void;
   onToast: Pick<ReturnType<typeof useToast>, 'showToast'>['showToast'];
   onNewPoolItems?: (ids: string[]) => void;
+  briefSaveRef?: BriefSaveRef;
 };
 
 export type UseScenarioRunResult = ScenarioRunApi & {
@@ -115,6 +110,7 @@ export function useScenarioRun({
   onRunCreated,
   onToast,
   onNewPoolItems,
+  briefSaveRef,
 }: UseScenarioRunOptions): UseScenarioRunResult {
   const scenario = useMemo(
     () => findScenario(scenarioId) ?? scenarioDefinitions[0],
@@ -130,6 +126,7 @@ export function useScenarioRun({
   const runRef = useRef<ScenarioRun | null>(null);
   const mountedRef = useRef(true);
   const ensurePromiseRef = useRef<Promise<ScenarioRun> | null>(null);
+  const newRunPromiseRef = useRef<Promise<ScenarioRun> | null>(null);
   const createRequestIdRef = useRef<string>(makeScenarioRequestId('create'));
   const intentRequestsRef = useRef<Map<string, { requestId: string; signature: string }>>(new Map());
   const busyCountsRef = useRef<Map<string, number>>(new Map());
@@ -194,13 +191,14 @@ export function useScenarioRun({
     ensurePromiseRef.current = null;
   }, [scenarioId]);
 
-  const startNewRun = useCallback(async (): Promise<ScenarioRun> => {
+  const startNewRun = useCallback((): Promise<ScenarioRun> => {
+    if (newRunPromiseRef.current) return newRunPromiseRef.current;
     const intent = 'create-new-run';
     beginBusy(intent);
-    try {
-      const requestId = makeScenarioRequestId('new');
+    const create = async () => {
+      await briefSaveRef?.current?.();
       const res = await scenarioClient.create({
-        requestId,
+        requestId: makeScenarioRequestId('new'),
         scenarioId,
         locale,
       });
@@ -211,10 +209,13 @@ export function useScenarioRun({
       setError(null);
       onRunCreatedRef.current(res.run.id, false);
       return res.run;
-    } finally {
+    };
+    newRunPromiseRef.current = create().finally(() => {
+      newRunPromiseRef.current = null;
       endBusy(intent);
-    }
-  }, [applyRun, beginBusy, endBusy, locale, scenarioId]);
+    });
+    return newRunPromiseRef.current;
+  }, [applyRun, beginBusy, endBusy, briefSaveRef, locale, scenarioId]);
 
   const startNewRunRef = useRef(startNewRun);
   startNewRunRef.current = startNewRun;
@@ -260,7 +261,13 @@ export function useScenarioRun({
               key: `scenario-resumed-${res.run.id}`,
               label: tRef.current('New draft'),
               onClick: async () => {
-                await startNewRunRef.current();
+                try {
+                  await startNewRunRef.current();
+                } catch (error) {
+                  if (!(error instanceof ScenarioApiError && error.code === 'SCENARIO_CONFLICT')) {
+                    onToastRef.current(tRef.current('Could not start a new draft'), 'error', 'feedback');
+                  }
+                }
               },
             },
           );
@@ -369,7 +376,7 @@ export function useScenarioRun({
         intentRequestsRef.current.delete(intent);
         if (result && typeof result === 'object' && 'run' in result) {
           const nextRun = (result as { run?: ScenarioRun }).run;
-          if (nextRun && nextRun.id === current.id) {
+          if (nextRun && nextRun.id === current.id && nextRun.id === runRef.current?.id && nextRun.revision >= runRef.current.revision) {
             applyRun(nextRun, true);
           }
         }

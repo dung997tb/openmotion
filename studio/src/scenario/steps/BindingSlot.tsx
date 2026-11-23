@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useId, useState, type DragEvent } from 'react';
+import { useId, useState, type DragEvent, type Ref } from 'react';
 import { assetMediaUrl } from '../../../../shared/asset-library';
 import type { PoolItem } from '../../../../shared/scenario-runs';
 import type { PoolKind } from '../../../../shared/scenarios';
@@ -22,6 +22,8 @@ export type BindingSlotProps = {
   kinds: PoolKind[];
   max?: number;
   required?: boolean;
+  error?: string;
+  pickButtonRef?: Ref<HTMLButtonElement>;
   stepId: string;
   boundIds: string[];
   pool: StepProps['pool'];
@@ -87,6 +89,8 @@ export function BindingSlot({
   kinds,
   max,
   required = false,
+  error,
+  pickButtonRef,
   stepId,
   boundIds,
   pool,
@@ -97,6 +101,7 @@ export function BindingSlot({
 }: BindingSlotProps) {
   const { t } = useI18n();
   const labelId = useId();
+  const errorId = `${labelId}-error`;
   const [dragOver, setDragOver] = useState(false);
   const [picking, setPicking] = useState(false);
   const busy = disabled || picking || api.busy.has(`bind:${slot}`);
@@ -230,6 +235,7 @@ export function BindingSlot({
         className="om-step-binding-control"
         role="group"
         aria-labelledby={labelId}
+        aria-invalid={error ? true : undefined}
       >
         <div className="om-step-binding-content">
           {resolvedItems.length > 0 ? (
@@ -267,17 +273,20 @@ export function BindingSlot({
         </div>
 
         <Button
+          ref={pickButtonRef}
           variant="secondary"
           size="sm"
           className="om-step-binding-pick-btn"
           icon={<RemixIcon name="stack-line" size={14} />}
           loading={picking}
           disabled={busy}
+          aria-describedby={error ? errorId : undefined}
           onClick={() => void handlePick()}
         >
           {t('Choose assets')}
         </Button>
       </div>
+      {error && <p id={errorId} className="om-step-binding-error" role="alert">{error}</p>}
     </div>
   );
 }

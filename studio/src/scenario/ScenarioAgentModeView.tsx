@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import {
@@ -30,12 +30,11 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { AssetPoolPanel, type PoolExportOptions } from './AssetPoolPanel';
 import { scenarioCover } from './scenarioCovers';
 import { buildShowcaseSlides } from './ScenarioStage';
-import type { ScenarioRunApi } from './stepContract';
+import type { BriefSaveRef, ScenarioRunApi } from './stepContract';
 import { briefPresetsFor, type BriefPreset } from './steps/briefPresets';
 import { SocialPlatformGlyph } from './steps/SocialPlatformGlyph';
-import { stepStatusLabel } from './steps/stepUtils';
-
-const AUTOSAVE_DELAY_MS = 800;
+import { isScenarioConflictError, stepStatusLabel } from './steps/stepUtils';
+import { cleanBriefForSave, useBriefAutosave } from './useBriefAutosave';
 
 const PRIMARY_FIELDS_BY_SCENARIO: Record<ScenarioId, readonly string[]> = {
   'black-friday': ['productName', 'salePrice', 'promoCode', 'saleWindow', 'audience', 'cta'],
@@ -66,27 +65,12 @@ function initialBriefValues(
   return next;
 }
 
-function cleanBriefForSave(
-  fields: readonly ScenarioBriefField[],
-  values: Record<string, string | string[]>,
-): Record<string, string | string[]> {
-  const out: Record<string, string | string[]> = {};
-  for (const field of fields) {
-    const val = values[field.id];
-    if (field.kind === 'list' || field.kind === 'multi') {
-      out[field.id] = Array.isArray(val) ? val.map(v => v.trim()).filter(Boolean) : [];
-    } else {
-      out[field.id] = typeof val === 'string' ? val : '';
-    }
-  }
-  return out;
-}
-
 export type ScenarioAgentModeViewProps = {
   scenario: ScenarioDefinition;
   run: ScenarioRun | null;
   activeStep: ScenarioStepDefinition;
   api: ScenarioRunApi;
+  briefSaveRef: BriefSaveRef;
   integration: ScenarioPromptIntegration | null;
   toast: Pick<ReturnType<typeof useToast>, 'showToast'>;
   poolItems: PoolItem[];
@@ -122,6 +106,7 @@ export function ScenarioAgentModeView({
   run,
   activeStep,
   api,
+  briefSaveRef,
   integration,
   toast,
   poolItems,
@@ -178,7 +163,6 @@ export function ScenarioAgentModeView({
 
   const dirtyFieldsRef = useRef<Set<string>>(new Set());
   const activeFieldRef = useRef<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestValuesRef = useRef(values);
   latestValuesRef.current = values;
 
@@ -230,66 +214,9 @@ export function ScenarioAgentModeView({
     });
   }, [run?.brief, run?.revision, scenario.briefFields]);
 
-  const flushBrief = useCallback(async () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    const keysToSend = Array.from(dirtyFieldsRef.current);
-    if (!keysToSend.length) return;
-
-    const snapshot = latestValuesRef.current;
-    const fieldsById = new Map(scenario.briefFields.map(field => [field.id, field]));
-    const patch: Record<string, string | string[]> = {};
-    for (const key of keysToSend) {
-      const field = fieldsById.get(key);
-      if (!field) continue;
-      const raw = snapshot[key];
-      if (field.kind === 'list' || field.kind === 'multi') {
-        patch[key] = Array.isArray(raw) ? raw.map(v => v.trim()).filter(Boolean) : [];
-      } else {
-        patch[key] = typeof raw === 'string' ? raw : '';
-      }
-    }
-    if (!Object.keys(patch).length) return;
-
-    try {
-      await api.mutate('brief-autosave', 'update_brief', { brief: patch });
-      for (const key of Object.keys(patch)) {
-        const current = latestValuesRef.current[key];
-        const sent = patch[key];
-        const currentClean = Array.isArray(current) ? current.map(v => v.trim()).filter(Boolean) : current;
-        if (JSON.stringify(currentClean) === JSON.stringify(sent)) {
-          dirtyFieldsRef.current.delete(key);
-        }
-      }
-    } catch {
-      // Conflicts are toasted by useScenarioRun; keep dirty fields intact so edits remain recoverable.
-    }
-  }, [api, scenario.briefFields]);
-
-  const flushBriefRef = useRef(flushBrief);
-  flushBriefRef.current = flushBrief;
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      if (dirtyFieldsRef.current.size > 0) {
-        void flushBriefRef.current();
-      }
-    },
-    [],
+  const { flushBrief, scheduleAutosave } = useBriefAutosave(
+    scenario.briefFields, api.mutate, dirtyFieldsRef, latestValuesRef, briefSaveRef,
   );
-
-  const scheduleAutosave = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      void flushBrief();
-    }, AUTOSAVE_DELAY_MS);
-  }, [flushBrief]);
 
   const updateField = (fieldId: string, value: string | string[]) => {
     dirtyFieldsRef.current.add(fieldId);
@@ -405,6 +332,8 @@ export function ScenarioAgentModeView({
       const currentIdeaText =
         typeof latestValuesRef.current.idea === 'string' ? latestValuesRef.current.idea : '';
       await onCopyAgentPrompt(currentIdeaText);
+    } catch (error) {
+      if (!isScenarioConflictError(error)) toast.showToast(t('Could not save. Try again.'), 'error', 'feedback');
     } finally {
       setCopying(false);
     }
@@ -757,6 +686,7 @@ export function ScenarioAgentModeView({
         <section
           className="om-agent-composer"
           data-agent-section="composer"
+          inert={api.busy.has('create-new-run')}
           aria-label={t('Input')}
         >
           <header className="om-agent-composer-header">

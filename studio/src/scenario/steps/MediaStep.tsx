@@ -1,20 +1,22 @@
 import { Button } from 'open-design-ui/button';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { assetMediaUrl, type AssetReference, type LibraryAsset } from '../../../../shared/asset-library';
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { assetDownloadUrl, assetMediaUrl, assetUploadAccept, type AssetReference, type LibraryAsset } from '../../../../shared/asset-library';
 import { modelReferenceLimit, type Model } from '../../../../shared/gateway';
 import { generationOptions, type GenerationOption } from '../../../../shared/generation-options';
 import type { PoolItem, ScenarioRun, StepIteration } from '../../../../shared/scenario-runs';
-import { fillScenarioTemplate } from '../../../../shared/scenarios';
+import { resolveScenarioStepPrompt } from '../../../../shared/scenario-prompts';
 import { MenuItem, Select, Tab, TabPanel, Tabs, TabsList } from '../../components/ui';
 import { FilterChip } from '../../components/ui/FilterChip';
 import { FieldTextarea } from '../../components/ui/FormField';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { assetUploadFormatsHint, assetUploadMessage, recordAssetUploadFailure, type AssetUploadSummary } from '../../i18n/assetUploadMessages';
 import { useI18n } from '../../i18n/I18n';
 import { RemixIcon } from '../../icons/RemixIcons';
 import { AssetAudioPreview } from '../../motion/AssetAudioPreview';
 import { AssetPicker } from '../../motion/AssetBrowser';
 import { uploadLibraryAsset } from '../../motion/assetClient';
 import { needsImage, sceneDestination, studioScenes } from '../../motion/creativeStudios';
+import { DurationControl } from '../../motion/GenerationParameters';
 import { providerDisplayName } from '../../motion/imageMenuModels';
 import { useMediaCatalog } from '../../motion/useMediaCatalog';
 import { ScenarioApiError } from '../scenarioClient';
@@ -22,6 +24,7 @@ import type { StepProps } from '../stepContract';
 import { BindingSlot } from './BindingSlot';
 import { MotionPanel } from './MotionPanel';
 import { StepCapabilityBar, StepMediaOutputs } from './StepCapabilityBar';
+import { StepVideoPreview } from './StepVideoPreview';
 import {
   extractErrorMessage,
   isProviderLimitOrAuthError,
@@ -31,64 +34,6 @@ import {
   selectScenarioModels,
   triggerUrlDownload,
 } from './stepUtils';
-
-function OffscreenPausingVideo({ src, active }: { src: string; active: boolean }) {
-  const { t } = useI18n();
-  const ref = useRef<HTMLVideoElement>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (!active) el.pause();
-  }, [active]);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const pauseIfHidden = () => {
-      if (document.hidden) el.pause();
-    };
-    document.addEventListener('visibilitychange', pauseIfHidden);
-    let io: IntersectionObserver | undefined;
-    if (typeof IntersectionObserver !== 'undefined') {
-      io = new IntersectionObserver(
-        entries => {
-          if (!entries.some(entry => entry.isIntersecting)) {
-            el.pause();
-          }
-        },
-        { threshold: 0.1 },
-      );
-      io.observe(el);
-    }
-    return () => {
-      el.pause();
-      document.removeEventListener('visibilitychange', pauseIfHidden);
-      io?.disconnect();
-    };
-  }, [src, failed]);
-
-  if (failed) {
-    return (
-      <div className="om-step-inline-error">
-        <span>{t('Video preview unavailable.')}</span>
-        <Button variant="ghost" size="sm" onClick={() => setFailed(false)}>{t('Retry')}</Button>
-      </div>
-    );
-  }
-  return (
-    <video
-      ref={ref}
-      className="om-step-video-player"
-      src={src}
-      controls
-      playsInline
-      preload="metadata"
-      onError={() => setFailed(true)}
-    />
-  );
-}
 
 function AudioPreviewCard({ src }: { src: string }) {
   const { t } = useI18n();
@@ -118,16 +63,39 @@ function findUpstreamScript(run: ScenarioRun | null): string {
   return '';
 }
 
+const durationKeys = new Set(['duration', 'duration_seconds', 'music_length_ms']);
+const minimalFieldKeys = new Set(['aspect_ratio', 'ratio', 'image_size', 'n', 'num_images', 'voice', ...durationKeys]);
+
+function workflowMusicDurationField(model: Model | undefined) {
+  if (model?.modelId === 'elevenlabs-music-v2' && model.mode === 'text-to-audio'
+    && (model.provider === 'account' || model.provider === 'opendesign')) {
+    const account = model.provider === 'account';
+    const unit = account ? 1 : 1000;
+    // Cover the workflow's short-film durations without exposing long music results that the current account path cannot save.
+    return {
+      unit,
+      field: { key: account ? 'duration' : 'music_length_ms', label: 'Duration (seconds)', kind: 'number', min: 3 * unit, max: 60 * unit, step: unit, default: 3 * unit } as const,
+    };
+  }
+}
+
 function pickMinimalFields(model: Model | undefined, hasInputImage: boolean): GenerationOption[] {
   if (!model) return [];
   const options = generationOptions(model, hasInputImage);
   if (!options) return [];
-  const wantedKeys = new Set(['aspect_ratio', 'ratio', 'image_size', 'n', 'num_images', 'duration', 'duration_seconds', 'voice']);
   return options.fields.filter(
     field =>
-      (field.kind === 'choice' && field.choices && field.choices.length > 0 && (wantedKeys.has(field.key) || field.presentation === 'ratio' || field.presentation === 'count')) ||
-      (field.kind === 'number' && (wantedKeys.has(field.key) || field.presentation === 'count')),
+      (field.kind === 'choice' && field.choices && field.choices.length > 0 && (minimalFieldKeys.has(field.key) || field.presentation === 'ratio' || field.presentation === 'count')) ||
+      (field.kind === 'number' && (minimalFieldKeys.has(field.key) || field.presentation === 'count')),
   ).slice(0, 3);
+}
+
+function secondsDurationField(field: GenerationOption): GenerationOption | undefined {
+  if (!durationKeys.has(field.key)) return;
+  if (field.kind === 'choice' && field.choices?.every(choice => typeof choice.value === 'number')) return field;
+  if (field.kind !== 'number' || field.min === undefined || field.max === undefined || field.max <= field.min) return;
+  if (field.key !== 'music_length_ms') return field;
+  return { ...field, min: field.min / 1000, max: field.max / 1000, step: (field.step ?? 1000) / 1000 };
 }
 
 export function MediaStep(props: StepProps) {
@@ -141,15 +109,18 @@ export function MediaStep(props: StepProps) {
     pool,
     toast,
     nav,
+    validateNextRef,
     renderExportMenu,
     renderIterations,
     renderOutputPanel,
     renderCapabilityBar,
   } = props;
 
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const modality: 'image' | 'video' | 'audio' =
     step.type === 'video' ? 'video' : step.type === 'audio' ? 'audio' : 'image';
+  const uploadHintId = useId();
+  const uploadHint = assetUploadFormatsHint(t, modality);
 
   const hasMotionTab = modality === 'video' && Boolean(step.motion);
   const [videoTab, setVideoTab] = useState<'generate' | 'motion'>('generate');
@@ -180,10 +151,8 @@ export function MediaStep(props: StepProps) {
 
   const seededPrompt = useMemo(() => {
     if (isSpeechMode && upstreamScript) return upstreamScript;
-    if (typeof state.draft.prompt === 'string' && state.draft.prompt.trim()) return state.draft.prompt;
-    if (step.promptTemplate) return fillScenarioTemplate(step.promptTemplate, run?.brief ?? {});
-    return '';
-  }, [isSpeechMode, upstreamScript, state.draft.prompt, step.promptTemplate, run?.brief]);
+    return resolveScenarioStepPrompt(scenario, step, run?.brief ?? {}, state.draft, locale);
+  }, [isSpeechMode, upstreamScript, scenario, step, run?.brief, state.draft, locale]);
 
   const [prompt, setPrompt] = useState(seededPrompt);
   const promptDirtyRef = useRef(false);
@@ -233,27 +202,63 @@ export function MediaStep(props: StepProps) {
       ? (state.bindings.firstFrame ?? [])
       : [];
   const soundtrackIds = modality === 'video' ? (state.bindings.soundtrack ?? []) : [];
-  const hasInputImage = referenceIds.length > 0;
+  const hasInputImage = referenceIds.some(id => pool.byId.get(id)?.kind === 'image');
   const requiresReference = Boolean(currentScene && needsImage(currentScene));
+  const needsFirstFrame = modality === 'video' && videoTab === 'generate' && requiresReference;
+  const [firstFrameError, setFirstFrameError] = useState(false);
+  const firstFramePickRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!needsFirstFrame || hasInputImage) setFirstFrameError(false);
+  }, [needsFirstFrame, hasInputImage]);
+
+  useImperativeHandle(validateNextRef, () => () => {
+    if (!needsFirstFrame || hasInputImage) return true;
+    setFirstFrameError(true);
+    firstFramePickRef.current?.scrollIntoView({ block: 'center' });
+    firstFramePickRef.current?.focus({ preventScroll: true });
+    return false;
+  }, [needsFirstFrame, hasInputImage]);
+
   const maxReferences = modality === 'image'
     ? Math.max(1, selectedModel ? modelReferenceLimit(selectedModel) || 5 : 5)
     : 1;
 
   // Minimal parameters
-  const paramFields = useMemo(
-    () => pickMinimalFields(selectedModel, hasInputImage),
-    [selectedModel, hasInputImage],
+  const hasEditingInput = modality === 'image' && hasInputImage;
+  const musicDuration = useMemo(() => workflowMusicDurationField(selectedModel), [selectedModel]);
+  const paramFields = useMemo<GenerationOption[]>(
+    () => musicDuration ? [musicDuration.field] : pickMinimalFields(selectedModel, hasEditingInput),
+    [musicDuration, selectedModel, hasEditingInput],
   );
-  const [params, setParams] = useState<Record<string, unknown>>({});
+  const briefDuration = run?.brief.durationSeconds;
+  const briefAspect = scenario.id === 'motion-full-chain' && step.id === 'storyboard'
+    ? run?.brief.aspect || scenario.briefFields.find(field => field.id === 'aspect')?.options?.[0]?.id
+    : undefined;
+  const [paramOverrides, setParamOverrides] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
+    setParamOverrides({});
+  }, [paramFields]);
+
+  const params = useMemo(() => {
     const defaults: Record<string, unknown> = {};
     for (const field of paramFields) {
-      if (field.default !== undefined) defaults[field.key] = field.default;
-      else if (field.kind === 'choice' && field.choices?.[0]) defaults[field.key] = field.choices[0].value;
+      const briefChoice = briefAspect && field.presentation === 'ratio'
+        ? field.choices?.find(choice => choice.value === briefAspect || choice.label === briefAspect)
+        : undefined;
+      const value = briefChoice?.value ?? field.default ?? field.choices?.[0]?.value
+        ?? (durationKeys.has(field.key) ? field.min : undefined);
+      if (value !== undefined) defaults[field.key] = value;
     }
-    setParams(defaults);
-  }, [selectedModel?.id, paramFields]);
+    const seconds = typeof briefDuration === 'string' && briefDuration.trim() ? Number(briefDuration) : NaN;
+    if (musicDuration && Number.isFinite(seconds)) {
+      const { field, unit } = musicDuration;
+      const value = Math.round(seconds) * unit;
+      defaults[field.key] = Math.min(field.max, Math.max(field.min, value));
+    }
+    return { ...defaults, ...paramOverrides };
+  }, [briefAspect, briefDuration, musicDuration, paramFields, paramOverrides]);
 
   // Generation / upload / workspace picker state
   const [providerUnavailable, setProviderUnavailable] = useState(false);
@@ -272,20 +277,20 @@ export function MediaStep(props: StepProps) {
   const noProvider = (catalog !== undefined && availableModels.length === 0) || providerUnavailable;
 
   const persistDraftPrompt = async (nextPrompt: string) => {
-    if (!run || !promptDirtyRef.current) return;
-    promptDirtyRef.current = false;
+    const edited = promptDirtyRef.current;
+    if (!run || (!edited && !userSelectedModelRef.current && activeSceneId === initialScene)) return;
+    if (edited) promptDirtyRef.current = false;
     try {
       await api.mutate(`draft:${step.id}`, 'update_step', {
         stepId: step.id,
         draft: {
-          prompt: nextPrompt,
-          promptEdited: true,
+          ...(edited ? { prompt: nextPrompt, promptEdited: true } : {}),
           scene: activeSceneId,
           ...(userSelectedModelRef.current && selectedModel ? { model: selectedModel.id } : {}),
         },
       });
     } catch {
-      // Non-blocking draft persistence
+      if (edited) promptDirtyRef.current = true;
     }
   };
 
@@ -313,6 +318,7 @@ export function MediaStep(props: StepProps) {
         model: targetModel,
         ...(targetMode ? { mode: targetMode } : {}),
         prompt: targetPrompt,
+        ...(modality !== 'image' ? { locale } : {}),
         ...(Object.keys(chosenParams).length ? { parameters: chosenParams } : {}),
         ...(targetRefs.length ? { referencePoolItemIds: targetRefs } : {}),
         ...(targetScene ? { scene: targetScene } : {}),
@@ -350,13 +356,22 @@ export function MediaStep(props: StepProps) {
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = '';
-    if (!files.length) return;
+    if (uploading || !files.length) return;
     setUploading(true);
     try {
       const uploaded: LibraryAsset[] = [];
+      const summary: AssetUploadSummary = { uploaded: 0, failed: 0, unknown: 0, reasons: new Set() };
       for (const file of files) {
-        const asset = await uploadLibraryAsset(file, modality === 'video' ? { modality: 'video' } : {});
-        uploaded.push(asset);
+        try {
+          uploaded.push(await uploadLibraryAsset(file, modality === 'video' ? { modality: 'video' } : {}));
+        } catch (error) {
+          recordAssetUploadFailure(summary, file, error);
+        }
+      }
+      if (modality !== 'image') summary.imageFormatHelp = false;
+      if (!uploaded.length) {
+        toast.showToast(assetUploadMessage(summary), 'error', 'feedback');
+        return;
       }
       const addRes = await api.mutate<{ run: ScenarioRun; poolItemIds: string[] }>(
         `upload-pool:${step.id}`,
@@ -378,7 +393,12 @@ export function MediaStep(props: StepProps) {
         },
       });
       pool.highlight(addRes.poolItemIds);
-      toast.showToast(t('Uploaded {count} files', { count: uploaded.length }), 'info', 'feedback');
+      if (summary.failed || summary.unknown) {
+        summary.uploaded = uploaded.length;
+        toast.showToast(assetUploadMessage(summary), 'error', 'feedback');
+      } else {
+        toast.showToast(t('Uploaded {count} files', { count: uploaded.length }), 'info', 'feedback');
+      }
     } catch (error) {
       if (!isScenarioConflictError(error)) {
         toast.showToast(extractErrorMessage(error, t('Could not upload files.')), 'error', 'feedback');
@@ -450,7 +470,7 @@ export function MediaStep(props: StepProps) {
   const handleDownloadActiveFiles = () => {
     if (!activeDownloadableAssets.length) return;
     for (const item of activeDownloadableAssets) {
-      triggerUrlDownload(`${assetMediaUrl(item.ref.assetId, item.ref.versionId)}?download`, item.label);
+      triggerUrlDownload(assetDownloadUrl(item.ref.assetId, item.ref.versionId, item.label));
     }
     toast.showToast(t('Download started'), 'info', 'feedback');
   };
@@ -498,8 +518,6 @@ export function MediaStep(props: StepProps) {
       : modality === 'video'
         ? t('Creating video…')
         : t('Creating audio…');
-
-  const acceptMime = modality === 'image' ? 'image/*' : modality === 'video' ? 'video/*' : 'audio/*';
 
   const noModelMessage = modality === 'image'
     ? t('No image model is configured.')
@@ -624,6 +642,8 @@ export function MediaStep(props: StepProps) {
               kinds={['image']}
               max={1}
               required={requiresReference}
+              error={needsFirstFrame && !hasInputImage && firstFrameError ? t('Choose a first frame to continue.') : undefined}
+              pickButtonRef={firstFramePickRef}
               stepId={step.id}
               boundIds={referenceIds}
               pool={pool}
@@ -710,6 +730,7 @@ export function MediaStep(props: StepProps) {
                 size="sm"
                 icon={<RemixIcon name="upload-2-line" size={14} />}
                 loading={uploading}
+                aria-describedby={uploadHintId}
                 onClick={() => fileInputRef.current?.click()}
               >
                 {uploadLabel}
@@ -723,6 +744,7 @@ export function MediaStep(props: StepProps) {
                 {t('Choose from workspace')}
               </Button>
             </div>
+            <p id={uploadHintId} className="om-step-field-hint">{uploadHint}</p>
           </div>
         ) : (
           <div className="om-step-gen-controls">
@@ -730,6 +752,7 @@ export function MediaStep(props: StepProps) {
               <div className="om-step-param-field">
                 <span className="om-step-field-label">{t('Model')}</span>
                 <Select
+                  appearance="boxed"
                   label={t('Model')}
                   value={selectedModel?.id ?? ''}
                   options={availableModels.map(m => ({
@@ -745,18 +768,37 @@ export function MediaStep(props: StepProps) {
               </div>
 
               {paramFields.map(field => {
+                const duration = secondsDurationField(field);
+                if (duration) {
+                  const unit = field.key === 'music_length_ms' ? 1000 : 1;
+                  const value = params[field.key];
+                  return (
+                    <div key={`${selectedModel?.id}:${field.key}`} className="om-step-param-field om-step-param-field--duration">
+                      <span className="om-step-field-label">{t(field.label)}</span>
+                      <DurationControl
+                        field={duration}
+                        currentValue={typeof value === 'number' ? value / unit : undefined}
+                        showInput={false}
+                        onCommit={seconds => {
+                          if (seconds !== undefined) setParamOverrides(prev => ({ ...prev, [field.key]: unit === 1 ? seconds : Math.round(seconds * unit) }));
+                        }}
+                      />
+                    </div>
+                  );
+                }
                 if (field.kind === 'choice' && field.choices) {
                   const val = String(params[field.key] ?? field.default ?? field.choices[0]?.value ?? '');
                   return (
                     <div key={field.key} className="om-step-param-field">
                       <span className="om-step-field-label">{t(field.label)}</span>
                       <Select
+                        appearance="boxed"
                         label={t(field.label)}
                         value={val}
                         options={field.choices.map(ch => ({ value: String(ch.value), label: ch.label }))}
                         onCommit={next => {
                           const matched = field.choices?.find(ch => String(ch.value) === next);
-                          setParams(prev => ({ ...prev, [field.key]: matched ? matched.value : next }));
+                          setParamOverrides(prev => ({ ...prev, [field.key]: matched ? matched.value : next }));
                         }}
                       />
                     </div>
@@ -771,10 +813,11 @@ export function MediaStep(props: StepProps) {
                     <div key={field.key} className="om-step-param-field">
                       <span className="om-step-field-label">{t(field.label)}</span>
                       <Select
+                        appearance="boxed"
                         label={t(field.label)}
                         value={val}
                         options={countChoices.map(n => ({ value: String(n), label: String(n) }))}
-                        onCommit={next => setParams(prev => ({ ...prev, [field.key]: Number(next) }))}
+                        onCommit={next => setParamOverrides(prev => ({ ...prev, [field.key]: Number(next) }))}
                       />
                     </div>
                   );
@@ -790,6 +833,7 @@ export function MediaStep(props: StepProps) {
                   size="sm"
                   icon={<RemixIcon name="upload-2-line" size={14} />}
                   loading={uploading}
+                  aria-describedby={uploadHintId}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   {uploadLabel}
@@ -821,6 +865,7 @@ export function MediaStep(props: StepProps) {
                 {t('Generate')}
               </Button>
             </div>
+            <p id={uploadHintId} className="om-step-field-hint">{uploadHint}</p>
           </div>
         )}
       </section>
@@ -955,7 +1000,7 @@ export function MediaStep(props: StepProps) {
                       <img src={src} alt={item.label} loading="lazy" />
                       <figcaption className="om-step-media-caption">
                         <span>{item.label}</span>
-                        <a href={`${src}?download`} download={item.label} className="om-step-link-icon" aria-label={t('Download {label}', { label: item.label })}>
+                        <a href={assetDownloadUrl(item.ref.assetId, item.ref.versionId, item.label)} download className="om-step-link-icon" aria-label={t('Download {label}', { label: item.label })}>
                           <RemixIcon name="download-2-line" size={14} />
                         </a>
                       </figcaption>
@@ -966,10 +1011,10 @@ export function MediaStep(props: StepProps) {
                   const src = assetMediaUrl(item.ref.assetId, item.ref.versionId);
                   return (
                     <figure key={item.id} className="om-step-media-item om-step-media-item--wide">
-                      <OffscreenPausingVideo src={src} active={active} />
+                      <StepVideoPreview key={src} src={src} active={active} label={item.label} />
                       <figcaption className="om-step-media-caption">
                         <span>{item.label}</span>
-                        <a href={`${src}?download`} download={item.label} className="om-step-link-icon" aria-label={t('Download {label}', { label: item.label })}>
+                        <a href={assetDownloadUrl(item.ref.assetId, item.ref.versionId, item.label)} download className="om-step-link-icon" aria-label={t('Download {label}', { label: item.label })}>
                           <RemixIcon name="download-2-line" size={14} />
                         </a>
                       </figcaption>
@@ -983,7 +1028,7 @@ export function MediaStep(props: StepProps) {
                       <AudioPreviewCard src={src} />
                       <div className="om-step-media-caption">
                         <span>{item.label}</span>
-                        <a href={`${src}?download`} download={item.label} className="om-step-link-icon" aria-label={t('Download {label}', { label: item.label })}>
+                        <a href={assetDownloadUrl(item.ref.assetId, item.ref.versionId, item.label)} download className="om-step-link-icon" aria-label={t('Download {label}', { label: item.label })}>
                           <RemixIcon name="download-2-line" size={14} />
                         </a>
                       </div>
@@ -1023,7 +1068,7 @@ export function MediaStep(props: StepProps) {
         ref={fileInputRef}
         type="file"
         multiple
-        accept={acceptMime}
+        accept={assetUploadAccept(modality)}
         hidden
         onChange={e => void handleFileChange(e)}
       />
