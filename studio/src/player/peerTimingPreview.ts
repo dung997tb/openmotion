@@ -10,6 +10,11 @@ export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: stri
   else documents.delete(frame);
 }
 
+/** A scripted or older document can start rebuilding in parallel with the source read. */
+export function hasPeerTimingDocument(frame: HTMLIFrameElement): boolean {
+  return documents.has(frame);
+}
+
 export interface PeerTimingUpdate {
   path: string;
   previous: FileSnapshot;

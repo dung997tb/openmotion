@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
-import { knownCompositionSource, MAX_POSTER_SOURCE_LENGTH } from "../player/lib/compositionPosterSource";
+import { shareCompositionPosterRead, type KnownCompositionSource, MAX_POSTER_SOURCE_LENGTH } from "../player/lib/compositionPosterSource";
 import { beginPeerTimelineUpdate } from "../player/lib/peerTimeline";
-import { tryApplyPeerTiming } from "../player/peerTimingPreview";
+import { hasPeerTimingDocument, tryApplyPeerTiming } from "../player/peerTimingPreview";
 import { isPreviewChanging } from "../player/previewReloading";
 import { announcePreviewScenesSwapped, notePeerPreviewChange, previewSourceRevision } from "../player/sceneSwap";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -12,6 +12,7 @@ import type { RemoteFileRead } from "./remoteFileReads";
 export function syncPeerComposition(
   projectId: string, path: string | null, paths: readonly string[] | null,
   read: RemoteFileRead, frameRef: RefObject<HTMLIFrameElement | null>,
+  previous: KnownCompositionSource | null,
 ): Promise<boolean> | undefined {
   const frame = frameRef.current;
   const apply = path && (!paths || paths.includes(path)) && beginPeerTimelineUpdate(projectId, path, frame);
@@ -21,12 +22,12 @@ export function syncPeerComposition(
   }
   const file = read(projectId, path);
   if (!file) return;
+  shareCompositionPosterRead(usePlayerStore.getState(), projectId, path, file);
   const timeline = file.then(result => {
     if (!result.missing && typeof result.content === "string") apply(result.content, frameRef.current);
     return result;
   });
-  const previous = knownCompositionSource(usePlayerStore.getState(), projectId, path);
-  if (!frame || frame.contentDocument || paths?.length !== 1 || !previous || isPreviewChanging()) {
+  if (!frame || !hasPeerTimingDocument(frame) || paths?.length !== 1 || !previous || isPreviewChanging()) {
     void timeline.catch(() => {});
     return;
   }
