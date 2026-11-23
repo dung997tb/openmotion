@@ -138,6 +138,11 @@ export function useFfmpegStatus(): {
 
   useEffect(() => {
     void run();
+    const onVisibilityChange = () => {
+      if (!document.hidden) void run();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [run]);
 
   const recheck = useCallback((_retry = true) => {

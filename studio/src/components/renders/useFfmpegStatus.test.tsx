@@ -34,7 +34,12 @@ it('reads remote-worker heartbeat from /api/environment/ffmpeg and rechecks on d
   window.dispatchEvent(new Event('focus'));
   await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
   expect(fetcher).toHaveBeenCalledTimes(initialReads);
-  await act(async () => result!.recheck());
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(fetcher).toHaveBeenCalledTimes(initialReads);
+  hidden.mockReturnValue(false);
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(fetcher).toHaveBeenCalledTimes(initialReads + 1);
   expect(result!.status?.ok).toBe(true);
   expect(result!.status?.workers).toHaveLength(1);
   expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
