@@ -852,6 +852,46 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('lists the packaged registry and installs its project files atomically without replacing user changes', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const read = await env.studioApp.request('/api/registry/blocks');
+    assert.equal(read.status, 200);
+    const { blocks } = await read.json();
+    assert(blocks.some((b: { name: string }) => b.name === 'blur-in'));
+    assert(blocks.some((b: { name: string }) => b.name === 'aurora'));
+    const install = (blockName: string) => env.studioApp.request(`/api/projects/${projectId}/registry/install`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blockName }),
+    });
+    let fail = true;
+    const fetcher = t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      assert.equal(url.origin, 'https://raw.githubusercontent.com');
+      assert.match(url.pathname, /\/registry\/blocks\/aurora\//);
+      if (fail && url.pathname.endsWith('.txt')) return new Response(null, { status: 503 });
+      return new Response(url.pathname);
+    });
+    assert.equal((await install('unknown-block')).status, 404);
+    assert.equal(fetcher.mock.callCount(), 0);
+    assert.equal((await install('aurora')).status, 502);
+    assert(!(await env.files.listFiles(env.auth, projectId)).some(file => file.path.includes('aurora')));
+    fail = false;
+    const saved = await install('aurora');
+    assert.equal(saved.status, 200);
+    const { block, written } = await saved.json();
+    assert.equal(block.name, 'aurora');
+    assert.equal(written[0], 'compositions/aurora.html');
+    assert.equal(written.length, 3);
+    for (const path of written) assert((await env.files.readTextFile(env.auth, projectId, path))?.content.includes('/registry/blocks/aurora/'));
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: written[0], content: 'edited' }] });
+    const downloads = fetcher.mock.callCount();
+    const retry = await install('aurora');
+    assert.equal(retry.status, 200);
+    assert.deepEqual((await retry.json()).written, written);
+    assert.equal(fetcher.mock.callCount(), downloads);
+    assert.equal((await env.files.readTextFile(env.auth, projectId, written[0]))?.content, 'edited');
+  });
+
   it('revalidates editor lint findings independently of unrelated source changes', async () => {
     const env = createStudioTestEnv();
     const { projectId } = await env.workspace.createProject(env.auth);

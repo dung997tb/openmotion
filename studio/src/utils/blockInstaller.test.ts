@@ -61,7 +61,7 @@ describe("addBlockToProject", () => {
 
     expect(result?.block.name).toBe("camcorder-hud");
     const source = files.get(targetPath);
-    expect(source).toContain('data-composition-src="compositions/camcorder-hud.html"');
+    expect(source).toContain('data-composition-src="camcorder-hud.html"');
     expect(source).toContain('data-start="2.5"');
     expect(source).toContain('data-duration="4.25"');
     expect(source).toContain('data-track-index="3"');

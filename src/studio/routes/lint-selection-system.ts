@@ -17,7 +17,8 @@ import {
 } from '../context.ts';
 import { infoInMemory, timelineInMemory } from '../engine/inspect.ts';
 import { lintProjectInMemory } from '../engine/lint-project.ts';
-import { getMimeType } from '../etag.ts';
+import { installMotionComponent, motionComponentCards } from '../motion-component-registry.ts';
+import { createWriteToken, getMimeType } from '../etag.ts';
 
 const SAFE_VENDOR_PATH_RE = /^[a-zA-Z0-9._/@-]{1,200}$/;
 const VERSIONED_GSAP_PREFIX_RE = /^gsap@[a-zA-Z0-9._-]+\/(?:dist\/)?/;
@@ -368,12 +369,15 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
   // GET /api/registry/blocks & POST /api/projects/:id/registry/install
   app.get('/api/registry/blocks', async (c) => {
     await getAuthContext(c, deps, { scope: 'projects:read' });
-    return c.json({ blocks: [] });
+    return c.json({ blocks: motionComponentCards });
   });
 
   app.post('/api/projects/:id/registry/install', async (c) => {
-    await getAuthContext(c, deps, { scope: 'projects:write', minRole: 'editor' });
-    throw featureDeferredP2('registry_install');
+    const auth = await getAuthContext(c, deps, { scope: 'projects:write', minRole: 'editor' });
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.blockName !== 'string' || !body.blockName) return c.json({ error: 'blockName is required' }, 400);
+    return c.json(await installMotionComponent(auth, deps.files, c.req.param('id'), body.blockName,
+      createWriteToken(c.req.header('x-hyperframes-write-token'))));
   });
 
   return app;
