@@ -16,6 +16,7 @@ import {
   isBuiltinConfigFieldType,
   isBuiltinPublisherId,
   isUrlInAllowedDomainScope,
+  validateFirstPartyCommandArgvBounds,
   type TemplatePlaceholderType,
 } from './desktop-builtin-rules.ts';
 import type { BuiltinConfigFieldType, HostReleaseChannel } from './desktop-contract.ts';
@@ -249,10 +250,11 @@ export function validateSignedConfigPayloadBounds(
         message: `First-party command references unknown component: ${cmd.componentId}`,
       });
     }
-    if (!Array.isArray(cmd.argv) || cmd.argv.length === 0) {
+    const argvCheck = validateFirstPartyCommandArgvBounds(cmd.componentId, cmd.argv);
+    if (!argvCheck.ok) {
       issues.push({
         path: `firstPartyCommands.${key}.argv`,
-        message: 'First-party command argv must be a non-empty array',
+        message: argvCheck.reason,
       });
     }
   }

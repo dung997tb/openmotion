@@ -5,6 +5,7 @@ import {
   BUILTIN_TEMPLATE_MAP,
   BUILTIN_THIRD_PARTY_PROGRAMS,
   isUrlInAllowedDomainScope,
+  validateFirstPartyCommandArgvBounds,
   validateTypedPlaceholderValue,
 } from '../shared/desktop-builtin-rules.ts';
 import { isValidDesktopLoopbackRedirectUri } from '../shared/desktop-auth-handoff.ts';
@@ -152,4 +153,29 @@ test('Q1 loopback redirect URI, placeholders, and engine contract checks', () =>
   assert.equal(MURMUR_COMMAND_TEMPLATES.PROVIDER_UPSERT.stdinSecret, true);
   assert.deepEqual(hostOk({ x: 1 }), { ok: true, data: { x: 1 } });
   assert.equal(hostErr('UNSUPPORTED', 'missing').ok, false);
+});
+
+test('Q1/M9 built-in bounds allow safe murmur management commands and block launcher/exec subcommands', () => {
+  for (const tpl of Object.values(MURMUR_COMMAND_TEMPLATES)) {
+    assert.equal(
+      validateFirstPartyCommandArgvBounds(tpl.componentId, tpl.argv).ok,
+      true,
+      `Expected safe murmur contract template ${tpl.templateId} to pass`,
+    );
+  }
+
+  for (const dangerous of [
+    ['magpie', 'agy', 'run', '--prompt', 'exfiltrate'],
+    ['magpie', 'claude-code', '-p', 'rm -rf ~'],
+    ['magpie', 'claude-desktop'],
+    ['magpie', 'plugin', 'install', 'evil'],
+    ['magpie', 'daemon', 'exec'],
+    ['claude-mcp-helper'],
+  ]) {
+    assert.equal(
+      validateFirstPartyCommandArgvBounds('murmur-engine', dangerous).ok,
+      false,
+      `Expected dangerous murmur argv "${dangerous.join(' ')}" to be blocked`,
+    );
+  }
 });

@@ -22,6 +22,7 @@ import {
   BUILTIN_TEMPLATE_MAP,
   DEFAULT_MCP_SERVER_NAME,
   isBuiltinPublisherId,
+  validateFirstPartyCommandArgvBounds,
   validateTypedPlaceholderValue,
   type TemplatePlaceholderType,
 } from '../../shared/desktop-builtin-rules.ts';
@@ -448,6 +449,16 @@ export class ExecAtom {
       renderedArgv.push(rendered);
     }
 
+    if (template.source === 'signed-first-party' && template.componentId) {
+      const renderedBounds = validateFirstPartyCommandArgvBounds(template.componentId, renderedArgv);
+      if (!renderedBounds.ok) {
+        return hostErr('POLICY_DENIED', renderedBounds.reason, {
+          templateId: template.templateId,
+          componentId: template.componentId,
+        });
+      }
+    }
+
     const facts = this.buildFacts(template, renderedArgv, validatedArgs, signedConfig);
     return hostOk({
       signedConfig,
@@ -506,8 +517,12 @@ export class ExecAtom {
       );
     }
 
-    if (!Array.isArray(firstParty.argv) || firstParty.argv.length === 0) {
-      return hostErr('POLICY_DENIED', `First-party template "${templateId}" has empty argv`, { templateId });
+    const argvBounds = validateFirstPartyCommandArgvBounds(firstParty.componentId, firstParty.argv);
+    if (!argvBounds.ok) {
+      return hostErr('POLICY_DENIED', argvBounds.reason, {
+        templateId,
+        componentId: firstParty.componentId,
+      });
     }
 
     return hostOk({

@@ -204,6 +204,109 @@ export function isBuiltinConfigFieldType(value: string): value is BuiltinConfigF
   return (BUILTIN_CONFIG_FIELD_TYPES as readonly string[]).includes(value);
 }
 
+const MURMUR_FORBIDDEN_VERBS = new Set([
+  'run',
+  'exec',
+  'launch',
+  'claude-code',
+  'claude-desktop',
+  'claude-mcp-helper',
+  'claude-tui-helper',
+  'plugin',
+  'plugins',
+  'shell',
+]);
+
+const MURMUR_SAFE_DAEMON_VERBS = new Set([
+  'install',
+  'uninstall',
+  'start',
+  'stop',
+  'restart',
+  'status',
+]);
+
+/**
+ * Built-in shell bound for first-party component command templates (M9 security audit).
+ *
+ * Audit of murmurant (`pool/internal/cli/start_cli.go`) confirmed that
+ * `murmur magpie <agent> run [args...]` executes external agent binaries via
+ * `syscall.Exec`. To preserve the two-tier compromise boundary (a leaked daily
+ * signing key must never execute arbitrary agent tasks), the shell rejects any
+ * launcher/exec subcommand for `murmur-engine` and restricts it to management
+ * subcommands only.
+ */
+export function validateFirstPartyCommandArgvBounds(
+  componentId: string,
+  argv: readonly string[],
+): { ok: true } | { ok: false; reason: string } {
+  if (!Array.isArray(argv) || argv.length === 0) {
+    return { ok: false, reason: 'First-party command argv must be a non-empty array' };
+  }
+  for (const token of argv) {
+    if (typeof token !== 'string' || !token.trim() || /[\r\n\0]/.test(token)) {
+      return { ok: false, reason: 'First-party command argv contains invalid token' };
+    }
+  }
+  if (componentId !== 'murmur-engine') {
+    return { ok: true };
+  }
+
+  for (const token of argv) {
+    if (MURMUR_FORBIDDEN_VERBS.has(token.toLowerCase())) {
+      return {
+        ok: false,
+        reason: `Forbidden launcher/exec subcommand "${token}" in murmur-engine template`,
+      };
+    }
+  }
+
+  const [first, second, third] = argv;
+  if (first === '--version' || first === 'version') {
+    return argv.length === 1
+      ? { ok: true }
+      : { ok: false, reason: 'murmur version command must not take extra arguments' };
+  }
+  if (first === 'status') {
+    return argv.every(tok => tok === 'status' || tok === '--json')
+      ? { ok: true }
+      : { ok: false, reason: 'murmur status command only allows --json' };
+  }
+  if (first === 'magpie') {
+    if (second === 'daemon') {
+      return argv.length === 3 && third !== undefined && MURMUR_SAFE_DAEMON_VERBS.has(third)
+        ? { ok: true }
+        : { ok: false, reason: 'murmur magpie daemon only allows install|uninstall|start|stop|restart|status' };
+    }
+    if (second === 'provider') {
+      return argv.length >= 3
+        ? { ok: true }
+        : { ok: false, reason: 'murmur magpie provider requires a subcommand' };
+    }
+    // Agent toggle / restore: `magpie <agentId> <modelId|default>` (exactly 3 tokens, no `run`/`env`)
+    if (
+      argv.length === 3 &&
+      second !== undefined &&
+      third !== undefined &&
+      second !== 'serve' &&
+      second !== 'mcp' &&
+      second !== 'import' &&
+      third !== 'env'
+    ) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason: `Disallowed murmur magpie subcommand shape: ${argv.join(' ')}`,
+    };
+  }
+
+  return {
+    ok: false,
+    reason: `Disallowed murmur-engine root subcommand: "${first}"`,
+  };
+}
+
 export function validateTypedPlaceholderValue(
   type: TemplatePlaceholderType,
   rawValue: unknown,
