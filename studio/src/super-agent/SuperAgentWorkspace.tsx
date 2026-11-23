@@ -11,6 +11,8 @@ import {
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
+  type SuperAgentContextTag,
+  type SuperAgentFileOperation,
   type SuperAgentIntent,
   type SuperAgentPermissionMode,
   type SuperAgentResourceAttachment,
@@ -297,6 +299,7 @@ export function SuperAgentWorkspace({
     id: number;
     text: string;
     hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
     mode?: SuperAgentCreationModeId;
   } | null>(null);
   const [gameTemplateSeed, setGameTemplateSeed] = useState<{ id: number; game: GameCard } | null>(null);
@@ -326,6 +329,7 @@ export function SuperAgentWorkspace({
   const [activeTabId, setActiveTabId] = useState<string>(NEW_VIEWER_TAB_ID);
   const [previewArtifacts, setPreviewArtifacts] = useState<SuperAgentArtifact[]>([]);
   const [pendingDeployArtifactId, setPendingDeployArtifactId] = useState<string | null>(null);
+  const [pendingCodeFile, setPendingCodeFile] = useState<{ artifactId: string; filePath: string; seq: number } | null>(null);
   const handledRequestedGameRef = useRef<string | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -700,6 +704,7 @@ export function SuperAgentWorkspace({
       id: seq,
       text: payload.prompt,
       ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
+      ...(payload.contextTags?.length ? { contextTags: payload.contextTags } : {}),
       mode: payload.mode,
     });
 
@@ -825,6 +830,7 @@ export function SuperAgentWorkspace({
     text: string,
     meta?: {
       hiddenInstructions?: string;
+      contextTags?: SuperAgentContextTag[];
       mode?: SuperAgentCreationModeId;
       workingDir?: string;
       overrideAttachments?: SuperAgentResourceAttachment[];
@@ -849,6 +855,7 @@ export function SuperAgentWorkspace({
         requestId,
         text,
         ...(meta?.hiddenInstructions?.trim() ? { hiddenInstructions: meta.hiddenInstructions.trim() } : {}),
+        ...(meta?.contextTags?.length ? { contextTags: meta.contextTags } : {}),
         ...(meta?.mode ? { mode: meta.mode } : {}),
         ...(meta?.workingDir ? { workingDir: meta.workingDir } : {}),
         ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
@@ -909,6 +916,22 @@ export function SuperAgentWorkspace({
         })
         .catch(() => { /* local tab already focused */ });
     }
+  };
+
+  const handleOpenChangedFile = (file: SuperAgentFileOperation) => {
+    const inspectable = activeChat?.artifacts.filter(
+      a => a.kind === 'game-project' || a.kind === 'design-project',
+    ) ?? [];
+    const targetId =
+      (file.artifactId && inspectable.some(a => a.id === file.artifactId) ? file.artifactId : undefined)
+      ?? inspectable.find(a => a.id === activeChat?.activeArtifactId)?.id
+      ?? inspectable.at(-1)?.id;
+    if (!targetId) {
+      void handleCopyText(file.path);
+      return;
+    }
+    setPendingCodeFile({ artifactId: targetId, filePath: file.path, seq: Date.now() });
+    void handleOpenArtifactId(targetId);
   };
 
   const handleOpenWebUrl = async (url: string) => {
@@ -1053,7 +1076,7 @@ export function SuperAgentWorkspace({
     if (game && game.source !== 'mine') {
       const displayTitle = localizedGameTitle(game, locale);
       setGameTemplateSeed({ id: ++handoffSeqRef.current, game });
-      showToast(t('Based on {title}', { title: displayTitle }), 'info', 'feedback');
+      showToast(t('Remix · {title}', { title: displayTitle }), 'info', 'feedback');
       return;
     }
 
@@ -1270,6 +1293,7 @@ export function SuperAgentWorkspace({
           requestId,
           text: payload.prompt,
           ...(payload.hiddenInstructions?.trim() ? { hiddenInstructions: payload.hiddenInstructions.trim() } : {}),
+          ...(payload.contextTags?.length ? { contextTags: payload.contextTags } : {}),
           ...(payload.mode ? { mode: payload.mode } : {}),
           ...(selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
           engine: selection.engine,
@@ -1287,6 +1311,7 @@ export function SuperAgentWorkspace({
           id: ++handoffSeqRef.current,
           text: payload.prompt,
           ...(payload.hiddenInstructions ? { hiddenInstructions: payload.hiddenInstructions } : {}),
+          ...(payload.contextTags?.length ? { contextTags: payload.contextTags } : {}),
           mode: payload.mode,
         });
         showToast(error instanceof Error ? error.message : t('Could not start Super Agent'));
@@ -1460,6 +1485,7 @@ export function SuperAgentWorkspace({
             onResourcesUploaded={refreshResources}
             onAttachmentsChange={setAttachments}
             onOpenArtifactId={artifactId => void handleOpenArtifactId(artifactId)}
+            onOpenChangedFile={handleOpenChangedFile}
             onPreviewAttachment={att => void handleOpenResource(att)}
             onOpenWebUrl={url => void handleOpenWebUrl(url)}
             onCopyText={code => void handleCopyText(code)}
@@ -1539,6 +1565,8 @@ export function SuperAgentWorkspace({
               onUseGameInAgent={artifact => void handleUseGameInAgent(artifact)}
               pendingDeployArtifactId={pendingDeployArtifactId}
               onConsumeDeployRequest={() => setPendingDeployArtifactId(null)}
+              pendingCodeFile={pendingCodeFile}
+              onConsumePendingCodeFile={() => setPendingCodeFile(null)}
               onOpenAccountSettings={onOpenAccountSettings}
               onAttachBrowserAnnotation={handleAttachBrowserAnnotation}
               onNotify={(msg, tone) => showToast(msg, tone === 'error' ? 'error' : 'info', 'feedback')}

@@ -519,7 +519,19 @@
     "Export formats": "导出格式",
     "Export video": "导出视频",
     "Exported {name}": "已导出 {name}",
-    "OpenDesign ZIP": "OpenDesign 压缩包"
+    "OpenDesign ZIP": "OpenDesign 压缩包",
+    "Always allow": "始终允许",
+    "Screenshot": "截图",
+    "Open external": "外部打开",
+    "Open original": "打开原站",
+    "Remix · {title}": "复用 · {title}",
+    "Artifact": "成品",
+    "Open in browser": "在浏览器中打开",
+    "Collapse all": "全部折叠",
+    "Expand all": "全部展开",
+    "Open in Code Viewer": "在代码视图中打开",
+    "Project directory: {path}": "工程目录：{path}",
+    "Copy project directory": "复制工程目录"
   },
   "ja": {
     "All resources": "すべてのリソース",
@@ -1041,7 +1053,19 @@
     "Export formats": "書き出し形式",
     "Export video": "動画を書き出し",
     "Exported {name}": "{name} を書き出しました",
-    "OpenDesign ZIP": "OpenDesign ZIP"
+    "OpenDesign ZIP": "OpenDesign ZIP",
+    "Always allow": "常に許可",
+    "Screenshot": "スクリーンショット",
+    "Open external": "外部で開く",
+    "Open original": "元サイトを開く",
+    "Remix · {title}": "リミックス · {title}",
+    "Artifact": "成果物",
+    "Open in browser": "ブラウザで開く",
+    "Collapse all": "すべて折りたたむ",
+    "Expand all": "すべて展開",
+    "Open in Code Viewer": "コードビューアーで開く",
+    "Project directory: {path}": "プロジェクトディレクトリ: {path}",
+    "Copy project directory": "プロジェクトディレクトリをコピー"
   },
   "ko": {
     "All resources": "모든 리소스",
@@ -1563,7 +1587,19 @@
     "Export formats": "내보내기 형식",
     "Export video": "비디오 내보내기",
     "Exported {name}": "{name} 내보냄",
-    "OpenDesign ZIP": "OpenDesign ZIP"
+    "OpenDesign ZIP": "OpenDesign ZIP",
+    "Always allow": "항상 허용",
+    "Screenshot": "스크린샷",
+    "Open external": "외부에서 열기",
+    "Open original": "원본 열기",
+    "Remix · {title}": "리믹스 · {title}",
+    "Artifact": "결과물",
+    "Open in browser": "브라우저에서 열기",
+    "Collapse all": "모두 접기",
+    "Expand all": "모두 펼치기",
+    "Open in Code Viewer": "코드 뷰어에서 열기",
+    "Project directory: {path}": "프로젝트 디렉터리: {path}",
+    "Copy project directory": "프로젝트 디렉터리 복사"
   },
   "de": {
     "All resources": "Alle Ressourcen",
@@ -2085,7 +2121,19 @@
     "Export formats": "Exportformate",
     "Export video": "Video exportieren",
     "Exported {name}": "{name} exportiert",
-    "OpenDesign ZIP": "OpenDesign-ZIP"
+    "OpenDesign ZIP": "OpenDesign-ZIP",
+    "Always allow": "Immer erlauben",
+    "Screenshot": "Screenshot",
+    "Open external": "Extern öffnen",
+    "Open original": "Original öffnen",
+    "Remix · {title}": "Remix · {title}",
+    "Artifact": "Artefakt",
+    "Open in browser": "Im Browser öffnen",
+    "Collapse all": "Alle einklappen",
+    "Expand all": "Alle ausklappen",
+    "Open in Code Viewer": "Im Code-Viewer öffnen",
+    "Project directory: {path}": "Projektverzeichnis: {path}",
+    "Copy project directory": "Projektverzeichnis kopieren"
   },
   "fr": {
     "All resources": "Toutes les ressources",
@@ -2607,7 +2655,19 @@
     "Export formats": "Formats d’exportation",
     "Export video": "Exporter la vidéo",
     "Exported {name}": "{name} exporté",
-    "OpenDesign ZIP": "ZIP OpenDesign"
+    "OpenDesign ZIP": "ZIP OpenDesign",
+    "Always allow": "Toujours autoriser",
+    "Screenshot": "Capture d’écran",
+    "Open external": "Ouvrir en externe",
+    "Open original": "Ouvrir l’original",
+    "Remix · {title}": "Remix · {title}",
+    "Artifact": "Artefact",
+    "Open in browser": "Ouvrir dans le navigateur",
+    "Collapse all": "Tout réduire",
+    "Expand all": "Tout développer",
+    "Open in Code Viewer": "Ouvrir dans la vue code",
+    "Project directory: {path}": "Répertoire du projet : {path}",
+    "Copy project directory": "Copier le répertoire du projet"
   },
   "ru": {
     "All resources": "Все ресурсы",
@@ -3129,7 +3189,19 @@
     "Export formats": "Форматы экспорта",
     "Export video": "Экспорт видео",
     "Exported {name}": "Экспортировано: {name}",
-    "OpenDesign ZIP": "Архив OpenDesign ZIP"
+    "OpenDesign ZIP": "Архив OpenDesign ZIP",
+    "Always allow": "Всегда разрешать",
+    "Screenshot": "Скриншот",
+    "Open external": "Открыть вовне",
+    "Open original": "Открыть оригинал",
+    "Remix · {title}": "Ремикс · {title}",
+    "Artifact": "Артефакт",
+    "Open in browser": "Открыть в браузере",
+    "Collapse all": "Свернуть все",
+    "Expand all": "Развернуть все",
+    "Open in Code Viewer": "Открыть в просмотре кода",
+    "Project directory: {path}": "Каталог проекта: {path}",
+    "Copy project directory": "Копировать каталог проекта"
   },
   "es": {
     "All resources": "Todos los recursos",
@@ -3651,7 +3723,19 @@
     "Export formats": "Formatos de exportación",
     "Export video": "Exportar video",
     "Exported {name}": "{name} exportado",
-    "OpenDesign ZIP": "ZIP de OpenDesign"
+    "OpenDesign ZIP": "ZIP de OpenDesign",
+    "Always allow": "Permitir siempre",
+    "Screenshot": "Captura",
+    "Open external": "Abrir externo",
+    "Open original": "Abrir original",
+    "Remix · {title}": "Remix · {title}",
+    "Artifact": "Artefacto",
+    "Open in browser": "Abrir en el navegador",
+    "Collapse all": "Contraer todo",
+    "Expand all": "Expandir todo",
+    "Open in Code Viewer": "Abrir en el visor de código",
+    "Project directory: {path}": "Directorio del proyecto: {path}",
+    "Copy project directory": "Copiar directorio del proyecto"
   },
   "pt-BR": {
     "All resources": "Todos os recursos",
@@ -4173,7 +4257,19 @@
     "Export formats": "Formatos de exportação",
     "Export video": "Exportar vídeo",
     "Exported {name}": "{name} exportado",
-    "OpenDesign ZIP": "ZIP do OpenDesign"
+    "OpenDesign ZIP": "ZIP do OpenDesign",
+    "Always allow": "Permitir sempre",
+    "Screenshot": "Captura",
+    "Open external": "Abrir externo",
+    "Open original": "Abrir original",
+    "Remix · {title}": "Remix · {title}",
+    "Artifact": "Artefato",
+    "Open in browser": "Abrir no navegador",
+    "Collapse all": "Recolher tudo",
+    "Expand all": "Expandir tudo",
+    "Open in Code Viewer": "Abrir no visualizador de código",
+    "Project directory: {path}": "Diretório do projeto: {path}",
+    "Copy project directory": "Copiar diretório do projeto"
   },
   "it": {
     "All resources": "Tutte le risorse",
@@ -4695,7 +4791,19 @@
     "Export formats": "Formati di esportazione",
     "Export video": "Esporta video",
     "Exported {name}": "{name} esportato",
-    "OpenDesign ZIP": "ZIP OpenDesign"
+    "OpenDesign ZIP": "ZIP OpenDesign",
+    "Always allow": "Consenti sempre",
+    "Screenshot": "Screenshot",
+    "Open external": "Apri esterno",
+    "Open original": "Apri originale",
+    "Remix · {title}": "Remix · {title}",
+    "Artifact": "Artefatto",
+    "Open in browser": "Apri nel browser",
+    "Collapse all": "Comprimi tutto",
+    "Expand all": "Espandi tutto",
+    "Open in Code Viewer": "Apri nel visualizzatore codice",
+    "Project directory: {path}": "Directory del progetto: {path}",
+    "Copy project directory": "Copia directory del progetto"
   },
   "tr": {
     "All resources": "Tüm kaynaklar",
@@ -5217,6 +5325,18 @@
     "Export formats": "Dışa aktarma biçimleri",
     "Export video": "Video dışa aktar",
     "Exported {name}": "{name} dışa aktarıldı",
-    "OpenDesign ZIP": "OpenDesign ZIP"
+    "OpenDesign ZIP": "OpenDesign ZIP",
+    "Always allow": "Her zaman izin ver",
+    "Screenshot": "Ekran görüntüsü",
+    "Open external": "Dışarıda aç",
+    "Open original": "Kaynağı aç",
+    "Remix · {title}": "Remix · {title}",
+    "Artifact": "Çıktı",
+    "Open in browser": "Tarayıcıda aç",
+    "Collapse all": "Tümünü daralt",
+    "Expand all": "Tümünü genişlet",
+    "Open in Code Viewer": "Kod Görüntüleyicide Aç",
+    "Project directory: {path}": "Proje dizini: {path}",
+    "Copy project directory": "Proje dizinini kopyala"
   }
 }

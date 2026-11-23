@@ -6,6 +6,7 @@ import {
   type SuperAgentApproval,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentContextTag,
   type SuperAgentFileOperation,
   type SuperAgentMessage,
   type SuperAgentResourceAttachment,
@@ -17,6 +18,7 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
 import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
+import { FilesChangedCard, UnifiedDiffView } from './ChangedFilesTree';
 import { resourceIcon, resourceKey } from './ResourcePickerDialog';
 import { SimpleMarkdown } from './SimpleMarkdown';
 
@@ -125,7 +127,10 @@ function collectTurnFiles(workItems: SuperAgentMessage[]): SuperAgentFileOperati
       if (!op.path || op.action === 'read') continue;
       const existing = byPath.get(op.path);
       if (!existing) {
-        byPath.set(op.path, { ...op });
+        byPath.set(op.path, {
+          ...op,
+          ...(ev.artifactId && !op.artifactId ? { artifactId: ev.artifactId } : {}),
+        });
       } else {
         byPath.set(op.path, {
           ...existing,
@@ -133,6 +138,7 @@ function collectTurnFiles(workItems: SuperAgentMessage[]): SuperAgentFileOperati
           addedLines: (existing.addedLines ?? 0) + (op.addedLines ?? 0) || existing.addedLines || op.addedLines,
           removedLines: (existing.removedLines ?? 0) + (op.removedLines ?? 0) || existing.removedLines || op.removedLines,
           diffPreview: op.diffPreview || existing.diffPreview,
+          artifactId: op.artifactId || existing.artifactId || ev.artifactId,
         });
       }
     }
@@ -183,7 +189,9 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
     const artifacts = [...artifactIds]
       .map(id => artifactsById.get(id))
       .filter((a): a is SuperAgentArtifact => Boolean(a));
-    const changedFiles = collectTurnFiles(workItems);
+    const turnId = group.user?.id ?? `turn-${idx}`;
+    const persistedFiles = chat.turnChangedFiles?.[turnId];
+    const changedFiles = persistedFiles?.length ? persistedFiles : collectTurnFiles(workItems);
     const hasRunning = workItems.some(
       m => m.status === 'streaming' || m.toolEvent?.status === 'running',
     );
@@ -201,7 +209,7 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
     }
 
     return {
-      id: group.user?.id ?? `turn-${idx}`,
+      id: turnId,
       user: group.user,
       workItems,
       assistantItems,
@@ -212,29 +220,6 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
       durationMs,
     };
   });
-}
-
-function UnifiedDiffView({ diff }: { diff: string }) {
-  const lines = useMemo(() => diff.split('\n').slice(0, 120), [diff]);
-  return (
-    <pre className="om-sa-diff-pre">
-      {lines.map((line, i) => {
-        const kind = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')
-          ? 'meta'
-          : line.startsWith('+')
-            ? 'add'
-            : line.startsWith('-')
-              ? 'del'
-              : 'ctx';
-        return (
-          <span key={i} className="om-sa-diff-line" data-kind={kind}>
-            {line}
-            {'\n'}
-          </span>
-        );
-      })}
-    </pre>
-  );
 }
 
 function ToolStepRow({
@@ -386,122 +371,6 @@ function ReasoningStepRow({ message }: { message: SuperAgentMessage }) {
         </div>
       )}
     </details>
-  );
-}
-
-function displayChangedFilePath(raw: string): string {
-  const scratchMatch = raw.match(/super-agent\/work\/[^/]+\/(.+)$/);
-  if (scratchMatch?.[1]) return scratchMatch[1];
-  return raw;
-}
-
-function FilesChangedCard({
-  files,
-  onCopyText,
-}: {
-  files: SuperAgentFileOperation[];
-  onCopyText: (text: string) => void;
-}) {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(true);
-  const [openDiffs, setOpenDiffs] = useState<Record<string, boolean>>({});
-  if (!files.length) return null;
-
-  const totalAdd = files.reduce((sum, f) => sum + (f.addedLines ?? 0), 0);
-  const totalDel = files.reduce((sum, f) => sum + (f.removedLines ?? 0), 0);
-
-  return (
-    <div className="om-sa-files-changed">
-      <Button
-        variant="plain"
-        type="button"
-        className="om-sa-files-changed-head"
-        aria-expanded={expanded}
-        onClick={() => setExpanded(v => !v)}
-      >
-        <RemixIcon name="file-code-line" size={14} />
-        <span className="om-sa-files-changed-title">
-          {t('Files changed ({count})', { count: files.length })}
-        </span>
-        {(totalAdd > 0 || totalDel > 0) && (
-          <span className="om-sa-diff-badges">
-            {totalAdd > 0 && <span className="om-sa-diff-add">+{totalAdd}</span>}
-            {totalDel > 0 && <span className="om-sa-diff-del">-{totalDel}</span>}
-          </span>
-        )}
-        <span className="om-sa-files-changed-chevron" data-open={expanded || undefined}>
-          <RemixIcon name="arrow-down-s-line" size={14} />
-        </span>
-      </Button>
-      {expanded && (
-        <div className="om-sa-files-changed-list">
-          {files.map(file => {
-            const hasDiff = Boolean(file.diffPreview);
-            const diffOpen = Boolean(openDiffs[file.path]);
-            const labelPath = displayChangedFilePath(file.path);
-            return (
-              <div key={file.path} className="om-sa-file-change-item">
-                <div className="om-sa-file-change-row">
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-file-row-trigger"
-                    aria-expanded={hasDiff ? diffOpen : undefined}
-                    title={file.path}
-                    onClick={() => {
-                      if (hasDiff) {
-                        setOpenDiffs(prev => ({ ...prev, [file.path]: !prev[file.path] }));
-                      } else {
-                        onCopyText(file.path);
-                      }
-                    }}
-                  >
-                    <span
-                      className="om-sa-file-row-chevron"
-                      data-open={diffOpen || undefined}
-                      data-hidden={!hasDiff || undefined}
-                      aria-hidden="true"
-                    >
-                      <RemixIcon name="arrow-down-s-line" size={13} />
-                    </span>
-                    <span className="om-sa-file-action-badge" data-action={file.action}>
-                      {file.action === 'create' ? 'A' : file.action === 'delete' ? 'D' : 'M'}
-                    </span>
-                    <span className="om-sa-file-path-text">{labelPath}</span>
-                    <span className="om-sa-file-row-trail">
-                      {(file.addedLines !== undefined && file.addedLines > 0) || (file.removedLines !== undefined && file.removedLines > 0) ? (
-                        <span className="om-sa-diff-badges">
-                          {file.addedLines !== undefined && file.addedLines > 0 && (
-                            <span className="om-sa-diff-add">+{file.addedLines}</span>
-                          )}
-                          {file.removedLines !== undefined && file.removedLines > 0 && (
-                            <span className="om-sa-diff-del">-{file.removedLines}</span>
-                          )}
-                        </span>
-                      ) : null}
-                    </span>
-                  </Button>
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    className="om-sa-file-copy-btn"
-                    aria-label={t('Copy path')}
-                    title={t('Copy path')}
-                    onClick={() => onCopyText(file.path)}
-                    icon={<RemixIcon name="file-copy-line" size={12} />}
-                  />
-                </div>
-                {hasDiff && diffOpen && file.diffPreview && (
-                  <div className="om-sa-file-diff-drawer">
-                    <UnifiedDiffView diff={file.diffPreview} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -827,6 +696,51 @@ function UserMessageBubble({ text }: { text: string }) {
   );
 }
 
+function resolveUserMessageContext(
+  userMsg: SuperAgentMessage,
+  t: (text: string) => string,
+): {
+  contextTags: SuperAgentContextTag[];
+  visibleAttachments: SuperAgentResourceAttachment[];
+} {
+  const normalizedPrompt = userMsg.text.trim();
+  const rawAttachments = userMsg.attachments ?? [];
+  const hiddenDraftGames: SuperAgentResourceAttachment[] = [];
+  const visibleAttachments: SuperAgentResourceAttachment[] = [];
+
+  for (const att of rawAttachments) {
+    const isDuplicateDraftGame =
+      att.kind === 'game-project'
+      && Boolean(normalizedPrompt)
+      && att.title.trim() === normalizedPrompt;
+    if (isDuplicateDraftGame) {
+      hiddenDraftGames.push(att);
+    } else {
+      visibleAttachments.push(att);
+    }
+  }
+
+  if (userMsg.contextTags && userMsg.contextTags.length > 0) {
+    return { contextTags: userMsg.contextTags, visibleAttachments };
+  }
+
+  if (hiddenDraftGames.length > 0) {
+    const draft = hiddenDraftGames[0];
+    const fallbackTags: SuperAgentContextTag[] = [
+      { kind: 'mode', label: t('Game'), icon: 'gamepad-line', tone: 'agent' },
+    ];
+    if (draft.subtitle) {
+      for (const part of draft.subtitle.split('·')) {
+        const clean = part.trim();
+        if (clean) fallbackTags.push({ kind: 'param', label: t(clean) });
+      }
+    }
+    return { contextTags: fallbackTags, visibleAttachments };
+  }
+
+  return { contextTags: [], visibleAttachments };
+}
+
 export function ExecutionTimeline({
   chat,
   busy,
@@ -835,6 +749,7 @@ export function ExecutionTimeline({
   continueDisabled,
   engineLabel,
   onOpenArtifactId,
+  onOpenChangedFile,
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
@@ -854,6 +769,7 @@ export function ExecutionTimeline({
   continueDisabled?: boolean;
   engineLabel?: string;
   onOpenArtifactId: (artifactId: string) => void;
+  onOpenChangedFile?: (file: SuperAgentFileOperation) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
@@ -891,50 +807,65 @@ export function ExecutionTimeline({
 
         return (
           <div key={turn.id} className="om-sa-turn" data-active={isActiveTurn || undefined}>
-            {turn.user && (
-              <article className="om-sa-message" data-role="user">
-                <div className="om-sa-message-body">
-                  {turn.user.attachments && turn.user.attachments.length > 0 && (
-                    <div className="om-sa-msg-attachments">
-                      {turn.user.attachments.map(att => {
-                        const isBrowserAnnotation = att.kind === 'browser-annotation';
-                        const chipTitle = isBrowserAnnotation
-                          ? (att.annotation?.comment || att.title)
-                          : att.title;
-                        const tooltipLabel = isBrowserAnnotation
-                          ? [
-                              att.annotation?.element?.componentName,
-                              att.annotation?.element?.selector,
-                              att.annotation?.pageUrl || att.subtitle,
-                            ].filter(Boolean).join(' · ')
-                          : '';
-                        const chip = (
-                          <Button
-                            key={resourceKey(att)}
-                            variant="plain"
-                            type="button"
-                            className="om-sa-attachment-chip"
-                            data-kind={isBrowserAnnotation ? 'browser-annotation' : undefined}
-                            onClick={() => onPreviewAttachment(att)}
+            {turn.user && (() => {
+              const { contextTags, visibleAttachments } = resolveUserMessageContext(turn.user, t);
+              const hasMetaRow = contextTags.length > 0 || visibleAttachments.length > 0;
+              return (
+                <article className="om-sa-message" data-role="user">
+                  <div className="om-sa-message-body">
+                    {hasMetaRow && (
+                      <div className="om-sa-msg-attachments">
+                        {contextTags.map((tag, tagIdx) => (
+                          <span
+                            key={`${tag.kind}:${tag.label}:${tagIdx}`}
+                            className="om-sa-context-tag"
+                            data-kind={tag.kind}
+                            data-tone={tag.tone || undefined}
                           >
-                            {isBrowserAnnotation && att.previewUrl ? (
-                              <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
-                            ) : (
-                              <RemixIcon name={resourceIcon(att)} size={13} />
-                            )}
-                            <span>{chipTitle}</span>
-                          </Button>
-                        );
-                        return isBrowserAnnotation && tooltipLabel ? (
-                          <Tooltip key={resourceKey(att)} label={tooltipLabel}>{chip}</Tooltip>
-                        ) : chip;
-                      })}
-                    </div>
-                  )}
-                  <UserMessageBubble text={turn.user.text} />
-                </div>
-              </article>
-            )}
+                            {tag.icon && <RemixIcon name={tag.icon} size={13} />}
+                            <span>{tag.label}</span>
+                          </span>
+                        ))}
+                        {visibleAttachments.map(att => {
+                          const isBrowserAnnotation = att.kind === 'browser-annotation';
+                          const chipTitle = isBrowserAnnotation
+                            ? (att.annotation?.comment || att.title)
+                            : att.title;
+                          const tooltipLabel = isBrowserAnnotation
+                            ? [
+                                att.annotation?.element?.componentName,
+                                att.annotation?.element?.selector,
+                                att.annotation?.pageUrl || att.subtitle,
+                              ].filter(Boolean).join(' · ')
+                            : '';
+                          const chip = (
+                            <Button
+                              key={resourceKey(att)}
+                              variant="plain"
+                              type="button"
+                              className="om-sa-attachment-chip"
+                              data-kind={isBrowserAnnotation ? 'browser-annotation' : undefined}
+                              onClick={() => onPreviewAttachment(att)}
+                            >
+                              {isBrowserAnnotation && att.previewUrl ? (
+                                <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
+                              ) : (
+                                <RemixIcon name={resourceIcon(att)} size={13} />
+                              )}
+                              <span>{chipTitle}</span>
+                            </Button>
+                          );
+                          return isBrowserAnnotation && tooltipLabel ? (
+                            <Tooltip key={resourceKey(att)} label={tooltipLabel}>{chip}</Tooltip>
+                          ) : chip;
+                        })}
+                      </div>
+                    )}
+                    <UserMessageBubble text={turn.user.text} />
+                  </div>
+                </article>
+              );
+            })()}
 
             <WorkLogSection
               turn={turn}
@@ -976,7 +907,12 @@ export function ExecutionTimeline({
             )}
 
             {!isActiveTurn && turn.changedFiles.length > 0 && (
-              <FilesChangedCard files={turn.changedFiles} onCopyText={onCopyText} />
+              <FilesChangedCard
+                files={turn.changedFiles}
+                projectDir={chat.projectDir}
+                onCopyText={onCopyText}
+                onOpenFile={onOpenChangedFile}
+              />
             )}
 
             {!isActiveTurn && turn.assistantItems.length > 0 && (
@@ -1145,7 +1081,7 @@ function ApprovalCard({
           disabled={sending}
           onClick={() => onApprove(approval.id, true, true)}
         >
-          <span>{t('Always allow in this task')}</span>
+          <span>{t('Always allow')}</span>
         </Button>
         <Button
           variant="plain"

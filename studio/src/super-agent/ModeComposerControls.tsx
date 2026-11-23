@@ -10,6 +10,7 @@ import {
   type GameStyle,
 } from '../../../shared/game-contract';
 import type { Modality, Model } from '../../../shared/gateway';
+import type { SuperAgentContextTag } from '../../../shared/super-agent';
 import { Popover } from '../components/ui/Popover';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
@@ -282,6 +283,115 @@ export function formatModePromptPrefix(
   }
 
   return `[${parts.join(' | ')}]`;
+}
+
+export function buildModeContextTags(
+  mode: SuperAgentModeSpec,
+  options: ModeComposerOptions,
+  mediaModels: Model[],
+  t: (text: string) => string,
+  locale = 'en',
+): SuperAgentContextTag[] {
+  const findModelLabel = (id: string) => {
+    if (!id || id === 'auto') return null;
+    const found = mediaModels.find(item => item.id === id);
+    return found ? found.label : id;
+  };
+  const tags: SuperAgentContextTag[] = [];
+
+  if (mode.id === 'game') {
+    tags.push({ kind: 'mode', label: t('Game'), icon: 'gamepad-line', tone: 'agent' });
+    if (options.gameGenre) tags.push({ kind: 'param', label: t(genreLabels[options.gameGenre]) });
+    if (options.gameStyle) tags.push({ kind: 'param', label: t(styleLabels[options.gameStyle]) });
+    if (options.gameSetting) tags.push({ kind: 'param', label: t(settingLabels[options.gameSetting]) });
+    tags.push({ kind: 'param', label: options.gameOrientation === 'portrait' ? '9:16' : '16:9' });
+    tags.push({
+      kind: 'param',
+      label: t(isPlayableAd(options) ? 'Playable ad' : options.gameMultiplayer ? 'Multiplayer' : 'Single player'),
+    });
+    if (options.gameTemplate) {
+      const tplTitle = options.gameTemplate.i18n?.[locale]?.title || options.gameTemplate.title;
+      tags.push({ kind: 'param', label: `${t('Remix')} · ${tplTitle}` });
+    }
+    return tags;
+  }
+
+  if (mode.id === 'image') {
+    tags.push({ kind: 'mode', label: t('Image'), icon: 'image-line', tone: 'image' });
+    const modelLabel = findModelLabel(options.imageModelId);
+    if (modelLabel) tags.push({ kind: 'param', label: modelLabel });
+    if (options.imageAspect !== 'auto') tags.push({ kind: 'param', label: options.imageAspect });
+    if (options.imageQuality === 'high') tags.push({ kind: 'param', label: '2K' });
+    if (options.imageCount > 1) tags.push({ kind: 'param', label: `${options.imageCount}×` });
+    return tags;
+  }
+
+  if (mode.id === 'media' || mode.id === 'motion') {
+    const useVideoModel = (mode.id === 'media' && options.mediaSubMode === 'video')
+      || (mode.id === 'motion' && options.motionEngine === 'video-model');
+    if (useVideoModel) {
+      tags.push({ kind: 'mode', label: t('Video'), icon: 'clapperboard-line', tone: 'video' });
+      const modelLabel = findModelLabel(options.videoModelId);
+      if (modelLabel) tags.push({ kind: 'param', label: modelLabel });
+      tags.push({ kind: 'param', label: options.videoAspect });
+      tags.push({ kind: 'param', label: options.videoDuration });
+      tags.push({ kind: 'param', label: t(VIDEO_SPEED_LABELS[options.videoSpeed]) });
+    } else {
+      tags.push({ kind: 'mode', label: t('Motion'), icon: 'movie-line', tone: 'video' });
+      tags.push({ kind: 'param', label: options.motionAspect });
+      tags.push({ kind: 'param', label: options.motionDuration });
+      tags.push({ kind: 'param', label: options.motionFps });
+      tags.push({ kind: 'param', label: t(MOTION_STYLE_LABELS[options.motionStyle]) });
+    }
+    return tags;
+  }
+
+  if (mode.id === 'audio') {
+    tags.push({ kind: 'mode', label: t('Audio'), icon: 'music-2-line', tone: 'audio' });
+    const modelLabel = findModelLabel(options.audioModelId);
+    if (modelLabel) tags.push({ kind: 'param', label: modelLabel });
+    tags.push({ kind: 'param', label: t(AUDIO_TYPE_LABELS[options.audioType]) });
+    tags.push({ kind: 'param', label: options.audioDuration });
+    return tags;
+  }
+
+  if (mode.id === 'deck') {
+    tags.push({ kind: 'mode', label: t('Slides & Docs'), icon: 'slideshow-line', tone: 'audio' });
+    tags.push({ kind: 'param', label: t(DECK_FORMAT_LABELS[options.deckFormat]) });
+    if (options.deckSlides !== 'auto') tags.push({ kind: 'param', label: options.deckSlides });
+    tags.push({ kind: 'param', label: t(DECK_DENSITY_LABELS[options.deckDensity]) });
+    return tags;
+  }
+
+  if (mode.id === 'website') {
+    tags.push({ kind: 'mode', label: t('Website & App'), icon: 'layout-line', tone: 'agent' });
+    tags.push({ kind: 'param', label: t(WEB_TARGET_LABELS[options.webTarget]) });
+    if (options.webReferenceUrl.trim()) {
+      try {
+        const host = new URL(options.webReferenceUrl.trim()).hostname;
+        if (host) tags.push({ kind: 'param', label: host });
+      } catch {
+        tags.push({ kind: 'param', label: options.webReferenceUrl.trim().slice(0, 40) });
+      }
+    }
+    return tags;
+  }
+
+  if (mode.id === 'coding') {
+    tags.push({ kind: 'mode', label: t('Coding'), icon: 'code-s-slash-line', tone: 'coding' });
+    if (options.codingFocus !== 'general') {
+      tags.push({ kind: 'param', label: t(CODING_FOCUS_LABELS[options.codingFocus]) });
+    }
+    if (options.codingWorkdir.trim()) {
+      const clean = options.codingWorkdir.trim().replace(/[\\/]+$/, '');
+      const base = clean.split(/[\\/]/).pop();
+      if (base) tags.push({ kind: 'param', label: base });
+    }
+    return tags;
+  }
+
+  tags.push({ kind: 'mode', label: t(mode.label), icon: mode.icon, tone: mode.tone });
+  return tags;
 }
 
 function modelShortDescription(model: Model, t: (text: string) => string): string {
