@@ -3,6 +3,8 @@ import { designSystemAsset } from '../../../packages/design-system/index.js';
 import facelessExplainerPoster from './mcp-gallery/faceless_explainer.webp';
 import studioEditingPoster from './mcp-gallery/studio-editing.jpg';
 import studioEditingVideo from './mcp-gallery/studio-editing.mp4';
+import templateBriefPoster from './mcp-gallery/template-brief.jpg';
+import templateBriefVideo from './mcp-gallery/template-brief.mp4';
 import { motionSkills } from './skillCatalog';
 
 export type LocalizedPair<T> = { en: T; 'zh-CN': T };
@@ -131,8 +133,9 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
   {
     id: 'brief',
     num: '01',
-    image: TEMPLATE_MEDIA.figmaMotion.cover,
-    video: TEMPLATE_MEDIA.figmaMotion.preview,
+    image: templateBriefPoster,
+    video: templateBriefVideo,
+    loop: false,
     target: {
       kind: 'template',
       templateId: TEMPLATE_MEDIA.figmaMotion.id,
@@ -144,14 +147,14 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
       en: {
         title: 'Choose a template and write your brief',
         desc: 'Give your Agent the feature to show and the screens to use.',
-        prompt: `Use OpenMotion template "Config 2026 · Figma Motion" to build our feature launch film with synchronized UI interactions and deliver HTML + MP4.`,
-        alt: 'Config 2026 Figma Motion product launch showcase',
+        prompt: 'Use "Config 2026 · Figma Motion" as a reference for a 20-second launch video about our new timeline. Use the two product screenshots I provided to show keyframes and easing, and deliver an editable project and MP4.',
+        alt: 'Selecting the Figma Motion template and writing a product launch brief',
       },
       'zh-CN': {
         title: '选模板，写创作需求',
         desc: '告诉 Agent 要讲哪个功能、用哪些产品截图。',
-        prompt: `基于模板「Config 2026 发布 Figma Motion」制作我们的新功能发布片，保留时间线与界面同步动效并交付 HTML 与 MP4。`,
-        alt: 'Config 2026 发布 Figma Motion 产品发布动效',
+        prompt: '参考「Config 2026 发布 Figma Motion」，为新版时间轴制作一支 20 秒功能发布片。用我提供的两张界面截图演示关键帧和缓动，交付可编辑工程和 MP4。',
+        alt: '选择 Figma Motion 模板并撰写功能发布片的创作需求',
       },
     },
   },

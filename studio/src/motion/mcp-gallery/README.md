@@ -9,3 +9,6 @@ and Brand Kit catalog (`/motion-api/brand-kits/catalog`).
 - `studio-editing.mp4` and `studio-editing.jpg`: a muted capture of the current Studio
   build playing the bundled [OpenMotion example](../../../../template-library/openmotion-welcome)
   and opening the export panel, with a poster from that capture.
+- `template-brief.mp4` and `template-brief.jpg`: a muted walkthrough using captures of
+  the current template library and its Config 2026 Figma Motion reference, followed by
+  an animated example of the brief to give an agent. The poster shows the template selection.

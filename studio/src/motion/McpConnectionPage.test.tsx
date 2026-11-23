@@ -341,7 +341,7 @@ it('uses a different case for every workflow step and feature slide', () => {
   expect(new Set(media).size).toBe(cases.length);
 });
 
-it('plays the product and Studio clips through, then resumes rotation after manual selection', async () => {
+it('plays the workflow clips through, then resumes rotation after manual selection', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   vi.useFakeTimers();
   try {
@@ -359,8 +359,11 @@ it('plays the product and Studio clips through, then resumes rotation after manu
 
     await act(async () => { video().dispatchEvent(new Event('ended')); });
     expect(steps[0].getAttribute('aria-pressed')).toBe('true');
-    await act(async () => { vi.advanceTimersByTime(5500); });
+    expect(video().getAttribute('aria-label')).toBe('Selecting the Figma Motion template and writing a product launch brief');
+    await act(async () => { video().dispatchEvent(new Event('ended')); });
     expect(steps[1].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { vi.advanceTimersByTime(5500); });
+    expect(steps[2].getAttribute('aria-pressed')).toBe('true');
   } finally {
     vi.useRealTimers();
   }
