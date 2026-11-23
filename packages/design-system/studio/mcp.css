@@ -159,8 +159,7 @@
   background: var(--motion-mcp-gallery-panel);
   border: 1px solid var(--motion-mcp-gallery-border);
 }
-.om-mcp-manual-head .om-mcp-manual-title { margin: 0; font-size: var(--motion-text-heading); line-height: 1.35; letter-spacing: normal; color: var(--motion-strong); font-weight: var(--motion-weight-semibold); }
-.om-mcp-manual-head .om-mcp-manual-instructions { margin: 4px 0 0; font-size: var(--motion-text-sm); line-height: 1.45; color: var(--motion-muted); }
+.om-mcp-manual-head .om-mcp-manual-title { margin: 0; font-size: var(--motion-text-body); line-height: 1.4; letter-spacing: normal; color: var(--motion-strong); font-weight: var(--motion-weight-semibold); }
 [data-motion-studio] .om-mcp-manual-copy {
   border-radius: var(--motion-radius-full);
   background: var(--motion-brand);

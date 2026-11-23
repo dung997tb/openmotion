@@ -129,11 +129,11 @@ export function McpHeroShowcaseStage({
               <span className="om-mcp-at-brand">@OpenDesign</span>
               {currentText.prompt}
             </span>
-            <Tooltip label={t(copied ? 'Copied' : 'Copy')}>
+            <Tooltip label={t(copied ? 'Copied' : 'Copy prompt')}>
               <IconButton
                 type="button"
                 className="om-mcp-stage-prompt-copy"
-                aria-label={t('Copy')}
+                aria-label={t('Copy prompt')}
                 icon={<RemixIcon name={copied ? 'check-line' : 'file-copy-line'} size={16} />}
                 onClick={() => void handleCopy()}
               />

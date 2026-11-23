@@ -4,18 +4,11 @@ import type { IntegrationHost } from '../../../shared/integration';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 
-const destination = {
-  codex: 'Copy to your local terminal',
-  claude: 'Copy to your local terminal',
-  deepseek: 'Copy to your Harness configuration',
-  mcp: 'Copy to your MCP settings',
-};
-
 const instructions = {
-  codex: 'Run this command in a local terminal, then reload the Agent connection.',
-  claude: 'Run this command in a local terminal, then reload the Agent connection.',
-  deepseek: 'Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.',
-  mcp: 'Merge this configuration into your client’s local MCP settings. Preserve your other servers, then reload the connection.',
+  codex: 'Run the command in your local terminal, then reload the Agent connection.',
+  claude: 'Run the command in your local terminal, then reload the Agent connection.',
+  deepseek: 'Merge the YAML into Harness, keep your other plugins, then reload the session.',
+  mcp: 'Merge the JSON into MCP settings, keep the other servers, then reload.',
 };
 
 export function McpManualConfiguration({ host, value, onCopy, children }: {
@@ -48,10 +41,7 @@ export function McpManualConfiguration({ host, value, onCopy, children }: {
   return (
     <>
       <div className="om-mcp-manual-head">
-        <div>
-          <h2 className="om-mcp-manual-title">{t(destination[host])}</h2>
-          <p className="om-mcp-manual-instructions">{t(instructions[host])}</p>
-        </div>
+        <h2 className="om-mcp-manual-title">{t(instructions[host])}</h2>
         <Button
           type="button"
           variant="plain"

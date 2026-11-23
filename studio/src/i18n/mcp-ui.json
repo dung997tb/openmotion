@@ -1,9 +1,8 @@
 {
   "zh-CN": {
-    "Copy to your local terminal": "复制到本机终端",
-    "Copy to your MCP settings": "复制到 MCP 设置",
-    "Copy to your Harness configuration": "复制到 Harness 配置",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "将这段 YAML 合并到 Harness 配置，保留其他插件，然后重新加载会话。",
+    "Run the command in your local terminal, then reload the Agent connection.": "复制到本机终端运行，再重新加载 Agent 连接。",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "将 JSON 合并到 MCP 设置，保留其他服务器，再重载连接。",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "将 YAML 合并到 Harness 配置，保留其他插件，再重载会话。",
     "View full configuration": "查看完整配置",
     "Hide full configuration": "收起完整配置",
     "E-commerce marketing": "电商营销",
@@ -40,8 +39,6 @@
     "Copy template prompt": "复制模板指令",
     "Start creating in {agent}": "在 {agent} 里开始创作",
     "Ask your Agent to read the workspace, then start with a template, an idea or your own material. Open the same project to preview, refine and export.": "让 Agent 读取工作区，再从模板、想法或素材开始创作。打开同一工程即可预览、调整和导出。",
-    "Merge this configuration into your client’s local MCP settings. Preserve your other servers, then reload the connection.": "将配置合并到客户端的本地 MCP 设置，保留其他服务器配置，然后重新加载连接。",
-    "Run this command in a local terminal, then reload the Agent connection.": "在本机终端运行命令，然后在 Agent 中重新加载连接。",
     "Explore templates": "探索模板",
     "Give your Agent a workspace worth keeping": "让每次创作，都留下可复用的工程",
     "Your visual MCP guide": "MCP 创作手册",
@@ -360,10 +357,9 @@
     "Open Brand Kits": "查看官方品牌包"
   },
   "ja": {
-    "Copy to your local terminal": "ローカル端末にコピー",
-    "Copy to your MCP settings": "MCP 設定にコピー",
-    "Copy to your Harness configuration": "Harness の設定にコピー",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "この YAML を Harness の設定にマージし、ほかのプラグインを保持してからセッションを再読み込みしてください。",
+    "Run the command in your local terminal, then reload the Agent connection.": "ローカル端末でコマンドを実行し、Agent の接続を再読み込みしてください。",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "JSON を MCP 設定に追加し、ほかのサーバー設定を保持して再読み込みしてください。",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "YAML を Harness に追加し、ほかのプラグインを保持してセッションを再読み込みしてください。",
     "View full configuration": "設定の全文を表示",
     "Hide full configuration": "設定の全文を隠す",
     "E-commerce marketing": "ECマーケティング",
@@ -509,10 +505,9 @@
     "Open Brand Kits": "ブランドキットを開く"
   },
   "ko": {
-    "Copy to your local terminal": "로컬 터미널에 복사",
-    "Copy to your MCP settings": "MCP 설정에 복사",
-    "Copy to your Harness configuration": "Harness 구성에 복사",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "이 YAML을 Harness 구성에 병합하고 다른 플러그인을 유지한 다음 세션을 다시 불러오세요.",
+    "Run the command in your local terminal, then reload the Agent connection.": "로컬 터미널에서 명령을 실행한 뒤 Agent 연결을 다시 불러오세요.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "JSON을 MCP 설정에 병합하고 다른 서버를 유지한 뒤 연결을 다시 불러오세요.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "YAML을 Harness에 병합하고 다른 플러그인을 유지한 뒤 세션을 다시 불러오세요.",
     "View full configuration": "전체 구성 보기",
     "Hide full configuration": "전체 구성 접기",
     "E-commerce marketing": "이커머스 마케팅",
@@ -658,10 +653,9 @@
     "Open Brand Kits": "브랜드 키트 열기"
   },
   "de": {
-    "Copy to your local terminal": "In das lokale Terminal kopieren",
-    "Copy to your MCP settings": "In die MCP-Einstellungen kopieren",
-    "Copy to your Harness configuration": "In die Harness-Konfiguration kopieren",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Füge dieses YAML in deine Harness-Konfiguration ein, behalte die anderen Plug-ins bei und lade dann die Sitzung neu.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Führe den Befehl im lokalen Terminal aus und lade die Agent-Verbindung neu.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "Füge das JSON zu den MCP-Einstellungen hinzu, behalte andere Server bei und lade die Verbindung neu.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "Füge das YAML zu Harness hinzu, behalte die anderen Plug-ins bei und lade die Sitzung neu.",
     "View full configuration": "Vollständige Konfiguration anzeigen",
     "Hide full configuration": "Vollständige Konfiguration ausblenden",
     "E-commerce marketing": "E-Commerce-Marketing",
@@ -807,10 +801,9 @@
     "Open Brand Kits": "Brand Kits öffnen"
   },
   "fr": {
-    "Copy to your local terminal": "Copier dans le terminal local",
-    "Copy to your MCP settings": "Copier dans les paramètres MCP",
-    "Copy to your Harness configuration": "Copier dans la configuration de Harness",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Intégrez ce YAML à votre configuration Harness en conservant les autres extensions, puis rechargez la session.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Exécutez la commande dans le terminal local, puis rechargez la connexion de l’agent.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "Fusionnez le JSON avec les paramètres MCP, conservez les autres serveurs et rechargez la connexion.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "Fusionnez le YAML avec la configuration Harness, conservez les autres extensions et rechargez la session.",
     "View full configuration": "Voir la configuration complète",
     "Hide full configuration": "Masquer la configuration complète",
     "E-commerce marketing": "Marketing e-commerce",
@@ -956,10 +949,9 @@
     "Open Brand Kits": "Ouvrir les Brand Kits"
   },
   "ru": {
-    "Copy to your local terminal": "Скопировать в локальный терминал",
-    "Copy to your MCP settings": "Скопировать в настройки MCP",
-    "Copy to your Harness configuration": "Скопировать в конфигурацию Harness",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Объедините этот YAML с конфигурацией Harness, сохранив другие плагины, затем перезагрузите сеанс.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Выполните команду в локальном терминале и перезагрузите подключение агента.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "Добавьте JSON в настройки MCP, сохраните остальные серверы и перезагрузите подключение.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "Добавьте YAML в Harness, сохраните другие плагины и перезагрузите сеанс.",
     "View full configuration": "Показать всю конфигурацию",
     "Hide full configuration": "Скрыть полную конфигурацию",
     "E-commerce marketing": "Маркетинг для интернет-магазинов",
@@ -1105,10 +1097,9 @@
     "Open Brand Kits": "Открыть бренд-киты"
   },
   "es": {
-    "Copy to your local terminal": "Copiar en el terminal local",
-    "Copy to your MCP settings": "Copiar en los ajustes de MCP",
-    "Copy to your Harness configuration": "Copiar en la configuración de Harness",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Integra este YAML en la configuración de Harness, conserva los demás complementos y vuelve a cargar la sesión.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Ejecuta el comando en el terminal local y recarga la conexión del agente.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "Integra el JSON en los ajustes de MCP, conserva los demás servidores y recarga la conexión.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "Integra el YAML en Harness, conserva los demás complementos y recarga la sesión.",
     "View full configuration": "Ver la configuración completa",
     "Hide full configuration": "Ocultar la configuración completa",
     "E-commerce marketing": "Marketing de comercio electrónico",
@@ -1254,10 +1245,9 @@
     "Open Brand Kits": "Abrir Brand Kits"
   },
   "pt-BR": {
-    "Copy to your local terminal": "Copiar para o terminal local",
-    "Copy to your MCP settings": "Copiar para as configurações de MCP",
-    "Copy to your Harness configuration": "Copiar para a configuração do Harness",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Mescle este YAML à configuração do Harness, preserve os outros plug-ins e recarregue a sessão.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Execute o comando no terminal local e recarregue a conexão do agente.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "Mescle o JSON às configurações de MCP, mantenha os outros servidores e recarregue a conexão.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "Mescle o YAML à configuração do Harness, mantenha os outros plug-ins e recarregue a sessão.",
     "View full configuration": "Ver configuração completa",
     "Hide full configuration": "Ocultar configuração completa",
     "E-commerce marketing": "Marketing para e-commerce",
@@ -1403,10 +1393,9 @@
     "Open Brand Kits": "Abrir Brand Kits"
   },
   "it": {
-    "Copy to your local terminal": "Copia nel terminale locale",
-    "Copy to your MCP settings": "Copia nelle impostazioni MCP",
-    "Copy to your Harness configuration": "Copia nella configurazione di Harness",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Integra questo YAML nella configurazione di Harness, mantieni gli altri plug-in e ricarica la sessione.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Esegui il comando nel terminale locale, poi ricarica la connessione dell’agente.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "Integra il JSON nelle impostazioni MCP, mantieni gli altri server e ricarica la connessione.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "Integra lo YAML in Harness, mantieni gli altri plug-in e ricarica la sessione.",
     "View full configuration": "Mostra la configurazione completa",
     "Hide full configuration": "Nascondi la configurazione completa",
     "E-commerce marketing": "Marketing e-commerce",
@@ -1552,10 +1541,9 @@
     "Open Brand Kits": "Apri Brand Kit"
   },
   "tr": {
-    "Copy to your local terminal": "Yerel terminale kopyala",
-    "Copy to your MCP settings": "MCP ayarlarına kopyala",
-    "Copy to your Harness configuration": "Harness yapılandırmasına kopyala",
-    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Bu YAML içeriğini Harness yapılandırmanla birleştir, diğer eklentileri koru ve oturumu yeniden yükle.",
+    "Run the command in your local terminal, then reload the Agent connection.": "Komutu yerel terminalde çalıştır, sonra Agent bağlantısını yeniden yükle.",
+    "Merge the JSON into MCP settings, keep the other servers, then reload.": "JSON içeriğini MCP ayarlarıyla birleştir, diğer sunucuları koru ve bağlantıyı yeniden yükle.",
+    "Merge the YAML into Harness, keep your other plugins, then reload the session.": "YAML içeriğini Harness ile birleştir, diğer eklentileri koru ve oturumu yeniden yükle.",
     "View full configuration": "Tam yapılandırmayı göster",
     "Hide full configuration": "Tam yapılandırmayı gizle",
     "E-commerce marketing": "E-ticaret pazarlaması",

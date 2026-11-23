@@ -142,7 +142,7 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   expect(document.querySelector('pre')?.textContent).toContain('claude mcp add');
   expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
   await act(async () => button('Claude Desktop').click());
-  expect(document.querySelector('.om-mcp-manual-title')?.textContent).toBe('Copy to your MCP settings');
+  expect(document.querySelector('.om-mcp-manual-title')?.textContent).toBe('Merge the JSON into MCP settings, keep the other servers, then reload.');
   expect(document.querySelector('pre')?.textContent).toContain('"mcpServers"');
   expect(document.querySelector('pre')?.textContent).not.toContain('/fixture/data');
   await act(async () => tab('DeepSeek Harness').click());
@@ -386,7 +386,7 @@ it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ an
   const step2 = document.querySelectorAll<HTMLButtonElement>('.om-mcp-stage-step')[1];
   await act(async () => step2.click());
   expect(document.querySelector('.om-mcp-stage-prompt-text')?.textContent).toContain('Framer 3.0');
-  await act(async () => document.querySelector<HTMLButtonElement>('.om-mcp-stage-prompt-copy')!.click());
+  await act(async () => button('复制 prompt').click());
   expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 基于「Framer 3.0 品牌与产品发布」'));
 
   const modules = document.querySelectorAll('#showcase .om-mcp-carousel-module');
