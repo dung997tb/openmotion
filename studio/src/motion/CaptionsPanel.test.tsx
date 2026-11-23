@@ -248,8 +248,8 @@ it('keeps existing cloud tracks editable and imports SRT without discovering spe
   await act(async () => button('Paper card').click());
   expect(button('Paper card').getAttribute('aria-pressed')).toBe('true');
 
-  await act(async () => button('Auto captions').click());
-  expect(document.querySelector('[data-deferred-p2]')?.textContent).toContain('import SRT or VTT');
+  expect(button('Auto captions')).toBeUndefined();
+  await act(async () => button('Add captions').click());
   expect(button('Import SRT / VTT').disabled).toBe(false);
   expect(button('Connect speech model')).toBeUndefined();
   const subtitles = '1\n00:00:00,000 --> 00:00:02,000\nCloud subtitle';
