@@ -37,7 +37,7 @@ import { dismissBannerToday, shouldShowBlackFridayBanner, useMinuteCondition } f
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
 import { Skeleton } from '../components/ui/Skeleton';
-import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type SettingsSection, type WorkspacePage } from './workspacePageRouting';
+import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type SettingsSection, type SuperAgentRouteMode, type WorkspacePage } from './workspacePageRouting';
 import type { SoundTabId } from './soundTabs';
 import { WORKSPACE_LOCATION_CHANGED, initializeWorkspaceHistory, navigateWorkspaceHistory, readLocationWorkspaceSource, restoreWorkspaceSource, workspaceHistoryIndex, workspaceHistorySource, workspaceSettingsSource, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { useToast } from '../hooks/useToast';
@@ -442,6 +442,9 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     }
     openMcp(client, example);
   };
+  const openAgentStart = (mode: SuperAgentRouteMode | null) => {
+    navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: mode, settings: null, templates: false });
+  };
   const desktopMenuHandlerRef = useRef<(action: DesktopMenuAction) => void>(() => {});
   desktopMenuHandlerRef.current = action => {
     if (action === 'open-settings') openSettings('general');
@@ -527,6 +530,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
         specialty={navPage.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
         openAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion, templates: false })}
         onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={navCurrentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={navSettings} destination={navTemplatesPage ? null : navPage.studio} soundTab={navTemplatesPage ? null : navPage.soundTab ?? null} motionActive={!navTemplatesPage && (navPage.motion || navEditorActive)}
+        onOpenAgentStart={openAgentStart}
         designActive={!navTemplatesPage && Boolean(navPage.designScene)} cinemaActive={!navTemplatesPage && navPage.cinemaLanding}
         scenarioActive={!navTemplatesPage && !navSettings ? (navPage.scenario ?? (navPage.scenarioHub ? 'hub' : null)) : null}
         onOpenScenario={(id, runId) => openScenario(id, runId)}

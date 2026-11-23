@@ -97,6 +97,7 @@ function getReverseIndex(locale: Locale): Map<string, string> | undefined {
 const singular: Record<string, string> = {
   '{count} renders': '{count} render', '{count} layers': '{count} layer',
   '{count} works': '{count} work',
+  '{count} images': '{count} image',
   '{count} effects': '{count} effect', '{count} elements': '{count} element',
   '{count} errors': '{count} error', '{count} warnings': '{count} warning',
   ' and its {count} slides': ' and its {count} slide', '{count} lint findings': '{count} lint finding',

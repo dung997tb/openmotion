@@ -261,9 +261,29 @@ export type SuperAgentChatSummary = {
   state: SuperAgentChat['state'];
   artifactCount: number;
   messageCount: number;
+  lastTurnId?: string;
   updatedAt: number;
   createdAt: number;
 };
+
+export function summarizeSuperAgentChat(chat: SuperAgentChat): SuperAgentChatSummary {
+  const messages = chat.messages.filter(message => message.role !== 'tool' && message.role !== 'reasoning');
+  const lastTurnId = chat.requestReceipts?.at(-1)?.requestId ?? messages.at(-1)?.id;
+  return {
+    id: chat.id,
+    title: chat.title,
+    intent: chat.intent,
+    ...(chat.pinned ? { pinned: true } : {}),
+    ...(chat.runtimeId ? { runtimeId: chat.runtimeId } : {}),
+    engine: chat.engine,
+    state: chat.state,
+    artifactCount: chat.artifacts.length,
+    messageCount: messages.length,
+    ...(lastTurnId ? { lastTurnId } : {}),
+    updatedAt: chat.updatedAt,
+    createdAt: chat.createdAt,
+  };
+}
 
 export type SuperAgentTurnInput = {
   requestId: string;

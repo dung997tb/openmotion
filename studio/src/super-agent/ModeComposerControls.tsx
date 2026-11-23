@@ -285,19 +285,19 @@ export function formatModePromptPrefix(
 }
 
 function modelShortDescription(model: Model, t: (text: string) => string): string {
-  if (model.description?.trim()) return model.description.trim();
+  if (model.description?.trim()) return t(model.description.trim());
   const hints: string[] = [];
   if (model.modality === 'image' && model.supportsImageReference) hints.push(t('Supports image reference & edit'));
   if (model.modality === 'video' && (model.maxInputImages ?? 0) > 0) hints.push(t('Supports start-frame reference'));
-  if (model.modality === 'audio' && model.mode) hints.push(model.mode);
+  if (model.modality === 'audio') {
+    hints.push(t(model.mode === 'text-to-speech' ? 'Text to speech' : 'Audio'));
+  }
   if (hints.length) return hints.join(' · ');
   return model.provider;
 }
 
 /**
- * Floating pill bar placed cleanly ABOVE the composer box (Manus-style),
- * keeping model / pipeline switches (`Seedance`, `Motion graphics`, `Audio`, `Import from…`)
- * accessible without crowding the composer's bottom toolbar.
+ * Keeps model, generation route, and reference choices above the composer.
  */
 export function ModeComposerTopBar({
   active = true,
@@ -378,7 +378,7 @@ export function ModeComposerTopBar({
     menuKey,
     modality,
     selectedId,
-    isActiveEngine,
+    modelsActive = true,
     fallbackLabel,
     title,
     onSelect,
@@ -386,7 +386,7 @@ export function ModeComposerTopBar({
     menuKey: 'video-model' | 'image-model' | 'audio-model';
     modality: Modality;
     selectedId: string;
-    isActiveEngine: boolean;
+    modelsActive?: boolean;
     fallbackLabel: string;
     title: string;
     onSelect: (id: string) => void;
@@ -397,6 +397,7 @@ export function ModeComposerTopBar({
     const selectedModel = selectedId !== 'auto' ? list.find(item => item.id === selectedId) : undefined;
     const displayModel = selectedModel ?? defaultRouteModel;
     const label = displayModel?.label ?? fallbackLabel;
+    const autoSelected = modelsActive && selectedId === 'auto';
 
     return (
       <Popover
@@ -411,9 +412,8 @@ export function ModeComposerTopBar({
             variant="plain"
             type="button"
             className="om-sa-composer-top-pill"
-            data-active={isActiveEngine || undefined}
+            data-active
             data-open={openMenu === menuKey || undefined}
-            aria-pressed={isActiveEngine}
             disabled={disabled}
           >
             {displayModel ? (
@@ -423,6 +423,10 @@ export function ModeComposerTopBar({
                   modelId={displayModel.modelId}
                   provider={{ id: displayModel.provider, custom: false }}
                 />
+              </span>
+            ) : modality === 'video' ? (
+              <span className="om-sa-mode-param-avatar" aria-hidden="true">
+                <RemixIcon name="movie-line" size={14} />
               </span>
             ) : (
               <RemixIcon name="add-line" size={13} />
@@ -442,8 +446,8 @@ export function ModeComposerTopBar({
               variant="plain"
               type="button"
               role="option"
-              aria-selected={isActiveEngine && selectedId === 'auto'}
-              data-active={(isActiveEngine && selectedId === 'auto') || undefined}
+              aria-selected={autoSelected}
+              data-active={autoSelected || undefined}
               className="om-sa-mode-model-row"
               onClick={() => {
                 onSelect('auto');
@@ -455,13 +459,13 @@ export function ModeComposerTopBar({
               </span>
               <span className="om-sa-mode-model-copy">
                 <strong>{t('Auto (Recommended)')}</strong>
-                <span>{defaultRouteModel ? `${t('Uses')} ${defaultRouteModel.label}` : t('Pick best configured model automatically')}</span>
+                <span>{defaultRouteModel ? t('Uses {model}', { model: defaultRouteModel.label }) : t('Pick best configured model automatically')}</span>
               </span>
-              {isActiveEngine && selectedId === 'auto' && <RemixIcon name="check-line" size={15} />}
+              {autoSelected && <RemixIcon name="check-line" size={15} />}
             </Button>
 
             {list.map(model => {
-              const isSelected = isActiveEngine && selectedId === model.id;
+              const isSelected = modelsActive && selectedId === model.id;
               const ready = providerReady(providers, model.provider);
               return (
                 <Button
@@ -509,7 +513,7 @@ export function ModeComposerTopBar({
               }}
             >
               <RemixIcon name="settings-3-line" size={15} />
-              <span>{t('Manage Model Providers')}</span>
+              <span>{t('Manage providers')}</span>
               <RemixIcon name="arrow-right-up-line" size={14} />
             </Button>
           </div>
@@ -519,47 +523,19 @@ export function ModeComposerTopBar({
   };
 
   if (modeId === 'motion' || modeId === 'media') {
-    const isVideoActive = modeId === 'motion'
-      ? options.motionEngine === 'video-model'
-      : options.mediaSubMode === 'video';
-    const isMotionActive = modeId === 'motion'
-      ? options.motionEngine === 'motion'
-      : options.mediaSubMode === 'motion';
-
     return (
       <div className="om-sa-composer-top-bar" role="group" aria-label={t('Video generation options')}>
         {renderFloatingModelPill({
           menuKey: 'video-model',
           modality: 'video',
           selectedId: options.videoModelId,
-          isActiveEngine: isVideoActive,
-          fallbackLabel: t('AI Video model'),
+          fallbackLabel: t('Auto'),
           title: t('Video model'),
-          onSelect: id => {
-            if (modeId === 'motion') {
-              onChange({ motionEngine: 'video-model', videoModelId: id });
-            } else {
-              onChange({ mediaSubMode: 'video', videoModelId: id });
-            }
-          },
+          modelsActive: modeId === 'motion' ? options.motionEngine === 'video-model' : options.mediaSubMode === 'video',
+          onSelect: id => onChange(modeId === 'motion'
+            ? { motionEngine: 'video-model', videoModelId: id }
+            : { mediaSubMode: 'video', videoModelId: id }),
         })}
-
-        <Button
-          variant="plain"
-          type="button"
-          className="om-sa-composer-top-pill"
-          data-active={isMotionActive || undefined}
-          aria-pressed={isMotionActive}
-          disabled={disabled}
-          onClick={() => {
-            setOpenMenu(null);
-            if (modeId === 'motion') onChange({ motionEngine: 'motion' });
-            else onChange({ mediaSubMode: 'motion' });
-          }}
-        >
-          <RemixIcon name={isMotionActive ? 'check-line' : 'add-line'} size={13} />
-          <span>{t('Motion graphics')}</span>
-        </Button>
       </div>
     );
   }
@@ -571,7 +547,6 @@ export function ModeComposerTopBar({
           menuKey: 'audio-model',
           modality: 'audio',
           selectedId: options.audioModelId,
-          isActiveEngine: true,
           fallbackLabel: t('Audio model'),
           title: t('Audio model'),
           onSelect: id => onChange({ audioModelId: id }),
@@ -587,7 +562,6 @@ export function ModeComposerTopBar({
           menuKey: 'image-model',
           modality: 'image',
           selectedId: options.imageModelId,
-          isActiveEngine: true,
           fallbackLabel: t('Image model'),
           title: t('Image model'),
           onSelect: id => onChange({ imageModelId: id }),
@@ -1131,8 +1105,10 @@ export function ModeComposerControls({
     setOpenMenu(null);
   }, [modeId]);
 
+  const durationLabel = (duration: string) => t('{count}s', { count: Number.parseInt(duration, 10) });
+
   const renderVideoParamsPopover = () => {
-    const paramSummary = `${options.videoAspect} · ${options.videoDuration} · ${t(VIDEO_SPEED_LABELS[options.videoSpeed])}`;
+    const paramSummary = `${options.videoAspect} · ${durationLabel(options.videoDuration)} · ${t(VIDEO_SPEED_LABELS[options.videoSpeed])}`;
     return (
       <Popover
         open={openMenu === 'params'}
@@ -1187,7 +1163,7 @@ export function ModeComposerControls({
                   data-active={options.videoDuration === dur || undefined}
                   onClick={() => onChange({ videoDuration: dur })}
                 >
-                  {dur}
+                  {durationLabel(dur)}
                 </Button>
               ))}
             </div>
@@ -1216,7 +1192,7 @@ export function ModeComposerControls({
   };
 
   const renderMotionParamsPopover = () => {
-    const motionSummary = `${options.motionAspect} · ${options.motionDuration} · ${options.motionFps}`;
+    const motionSummary = `${options.motionAspect} · ${durationLabel(options.motionDuration)} · ${options.motionFps}`;
     return (
       <Popover
         open={openMenu === 'params'}
@@ -1271,7 +1247,7 @@ export function ModeComposerControls({
                   data-active={options.motionDuration === dur || undefined}
                   onClick={() => onChange({ motionDuration: dur })}
                 >
-                  {dur}
+                  {durationLabel(dur)}
                 </Button>
               ))}
             </div>
@@ -1392,7 +1368,7 @@ export function ModeComposerControls({
                     data-active={options.imageCount === count || undefined}
                     onClick={() => onChange({ imageCount: count })}
                   >
-                    {`${count} ${count === 1 ? t('image') : t('images')}`}
+                    {t('{count} images', { count })}
                   </Button>
                 ))}
               </div>
@@ -1412,7 +1388,7 @@ export function ModeComposerControls({
   }
 
   if (modeId === 'audio') {
-    const audioSummary = `${t(AUDIO_TYPE_LABELS[options.audioType])} · ${options.audioDuration}`;
+    const audioSummary = `${t(AUDIO_TYPE_LABELS[options.audioType])} · ${durationLabel(options.audioDuration)}`;
     return (
       <div className="om-sa-mode-controls" role="group" aria-label={t('Audio & Sound options')}>
         <Popover
@@ -1468,7 +1444,7 @@ export function ModeComposerControls({
                     data-active={options.audioDuration === dur || undefined}
                     onClick={() => onChange({ audioDuration: dur })}
                   >
-                    {dur}
+                    {durationLabel(dur)}
                   </Button>
                 ))}
               </div>

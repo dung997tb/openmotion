@@ -27,6 +27,7 @@ import {
 } from '../../../shared/super-agent';
 import { OpenDesignLoadingMark } from '../components/ui/OpenDesignLoadingMark';
 import { Popover } from '../components/ui/Popover';
+import { MenuPanel } from '../components/ui/MenuPanel';
 import { WebPublishPopover } from '../components/WebPublishPopover';
 import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -2427,7 +2428,8 @@ export function ArtifactBrowserPane({
               align="end"
               initialFocus={false}
               aria-label={t('Browser options')}
-              className="om-sa-browser-menu-popover"
+              renderPanel={<MenuPanel data-menu-layout="custom" />}
+              className="motion-positioned-menu om-sa-browser-menu-popover"
               trigger={
                 <IconButton
                   variant="ghost"
@@ -2525,7 +2527,7 @@ export function ArtifactBrowserPane({
                 {activeArtifact.kind !== 'web' && (
                   <>
                     {(supportsAnnotate || externalHref || downloadHref) && (
-                      <div className="om-sa-browser-menu-sep" role="separator" />
+                      <div role="separator" />
                     )}
 
                     {['game-project', 'asset-image', 'asset-video', 'asset-audio', 'brand-kit'].includes(activeArtifact.kind) && (
@@ -2632,7 +2634,7 @@ export function ArtifactBrowserPane({
 
                 {activeArtifact.kind === 'web' && (
                   <>
-                    <div className="om-sa-browser-menu-sep" role="separator" />
+                    <div role="separator" />
 
                     <div className="om-sa-browser-menu-row">
                       <span className="om-sa-browser-menu-label">{t('Appearance')}</span>
@@ -2685,7 +2687,7 @@ export function ArtifactBrowserPane({
                       </div>
                     </div>
 
-                    <div className="om-sa-browser-menu-sep" role="separator" />
+                    <div role="separator" />
 
                     <Button
                       variant="plain"
