@@ -1079,6 +1079,8 @@ it('resumes the project from the Explore spotlight without remounting its editor
   const draft = container.querySelector('[aria-label="Editor draft"]');
   expect(draft?.getAttribute('data-project')).toBe(second);
   await click('Explore');
+  expect(container.querySelector('.om-feature-slide:not([inert]) h2')?.textContent).toBe('Game Studio');
+  await act(async () => container.querySelectorAll<HTMLButtonElement>('.om-media-segments button')[1]!.click());
   expect(container.querySelector('.om-feature-slide:not([inert]) h2')?.textContent).toBe('Motion Studio');
   await click('Open in Motion Editor');
   expect(page()).toMatchObject({ explore: false, motion: false });
@@ -1182,17 +1184,17 @@ it('rotates the visible Explore spotlight and plays visible Skill previews witho
   vi.useFakeTimers();
   try {
     await act(async () => { observed.get(hero)!(true); cards.forEach(card => observed.get(card)!(true)); });
+    expect(hero.dataset.scene).toBe('game');
+    for (const card of cards) expect(card.querySelector('video[src]')).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(6000); });
     expect(hero.dataset.scene).toBe('motion');
     expect(hero.querySelector('video[src]')?.getAttribute('src')).toMatch(/^blob:/);
-    for (const card of cards) expect(card.querySelector('video[src]')).toBeTruthy();
-    act(() => { vi.advanceTimersByTime(6000); });
-    expect(hero.dataset.scene).toBe('game');
     expect(hero.querySelectorAll('.om-feature-slide:not([inert])')).toHaveLength(1);
     act(() => { vi.advanceTimersByTime(2500); });
     const segment = hero.querySelector<HTMLButtonElement>('.om-media-segments [aria-current]')!;
     act(() => segment.focus());
     act(() => { vi.advanceTimersByTime(6000); });
-    expect(hero.dataset.scene).toBe('game');
+    expect(hero.dataset.scene).toBe('motion');
     act(() => segment.blur());
     act(() => { vi.advanceTimersByTime(3500); });
     expect(hero.dataset.scene).toBe('black-friday');
