@@ -352,7 +352,7 @@ export function McpConnectionPage({
             <RemixIcon name="arrow-right-s-line" size={15} aria-hidden="true" />
           </Button>
           <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources')}>
-            {t('Already have an API key? Use BYOK')}
+            {t('Already have an API key? Connect directly')}
           </Button>
         </div>
       )}
