@@ -417,6 +417,7 @@ function BlockCard({
       <div className="aspect-video w-full overflow-hidden relative">
         {video && (hovered || !poster) ? (
           <video
+            draggable={false}
             src={video}
             autoPlay={hovered}
             preload="metadata"
@@ -427,7 +428,7 @@ function BlockCard({
             className="w-full h-full object-cover"
           />
         ) : poster ? (
-          <img src={poster} alt={title} loading="lazy" onError={() => setFailedPoster(poster)} className="w-full h-full object-cover" />
+          <img draggable={false} src={poster} alt={title} loading="lazy" onError={() => setFailedPoster(poster)} className="w-full h-full object-cover" />
         ) : (
           <div className="motion-composition-placeholder absolute inset-0 flex items-center justify-center" data-testid="catalog-cover-placeholder" aria-hidden="true">
             <span className="motion-composition-placeholder-mark" />

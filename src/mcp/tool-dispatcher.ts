@@ -710,7 +710,7 @@ export class McpToolDispatcher {
       requireToolScopes(auth, ['projects:write']);
       if (!hasMinRole(auth, 'editor')) throw new CloudError('FORBIDDEN', 'Editor access is required to install components', { status: 403 });
       if (!this.ports.componentFiles) throw new CloudError('SERVICE_UNAVAILABLE', 'Project file service is not wired', { status: 503 });
-      return installMotionComponent(auth, this.ports.componentFiles, String(args.projectId), String(args.name), { requestId: String(args.requestId) });
+      return installMotionComponent(auth, this.ports.componentFiles, String(args.projectId), String(args.name), { requestId: String(args.requestId), hostFile: args.hostFile });
     }
 
     // P2 explicit gating for headless Brand Kit website capture.

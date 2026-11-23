@@ -8,7 +8,7 @@ import templateUi from './template-ui.json';
 import mcpUi from './mcp-ui.json';
 import studioNavigationUi from './studio-navigation-ui.json';
 import editorLoadingUi from './editor-loading-ui.json';
-import { mcpFaq } from '../motion/mcpCapabilities';
+import { mcpCapabilities, mcpFaq } from '../motion/mcpCapabilities';
 import { creativeStudios } from '../../../shared/studio-catalog';
 import { errorNoticeMessage } from '../components/ui/errorNoticeMessage';
 import { historyEntryLabel } from './historyMessages';
@@ -68,6 +68,15 @@ describe('editor language resources', () => {
       }
       // Verify prompt-only history action resolves to studio-navigation-ui rather than a dead Sound Studio override.
       expect(translate(locale, 'Reuse prompt'), `${locale}: Reuse prompt`).toBe(entries['Reuse prompt']);
+    }
+  });
+
+  it('localizes the component placement example and preserves the public field names', () => {
+    const prompt = mcpCapabilities.find(item => item.id === 'motion-components')!.prompt;
+    for (const { locale } of languages.filter(language => language.locale !== 'en')) {
+      const translation = translate(locale, prompt);
+      expect(translation, locale).not.toBe(prompt);
+      for (const field of ['hostFile', 'baseVersion', 'compositionFile']) expect(translation, locale).toContain(field);
     }
   });
 

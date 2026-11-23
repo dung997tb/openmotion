@@ -49,3 +49,7 @@ Exercise a migrated action through Studio and remote MCP on identical input. Com
 After a file commit, the receiving Studio reads the changed composition it is displaying. Its timeline, SDK session and open source editor share that read. The file source supplies authored clip timing and track placement. The preview refresh proceeds independently so a slow media load cannot delay the timeline update. The outgoing player may still report playback data. Its old manifest cannot replace a newer authored timeline. Switching projects or compositions invalidates outstanding reads.
 
 A supported isolated preview can apply numeric timing changes to the live document. It acknowledges only an exact match for the project, document, file version and affected nodes. Scripted compositions, structural edits and version mismatches refresh through the existing preview replacement flow. The timeline remains usable during that refresh.
+
+### Placing a catalog component
+
+A Studio drop submits the host composition edit and its catalog component name in one request. Missing dependencies and the host share a project version and undo entry. A stale host or failed download leaves the project unchanged. An existing dependency retains the user's edits. Remote callers can supply an edited `hostFile` to `openmotion_assets_use.install_component` for the same transaction. Omitting it deliberately installs the component for later use.

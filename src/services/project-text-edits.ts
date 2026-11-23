@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
+import { componentOverlaySource } from '../../shared/registry-material-compat.ts';
 import { MAX_PATCH_BYTES, type TextPatch } from '../../shared/text-patch.ts';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
@@ -13,6 +14,8 @@ import {
   canonicalInputHash, loadProjectOrThrow, MAX_TEXT_FILE_BYTES, normalizeSafeProjectPath, readCommitReceipt,
   type CommitProjectFilesResult, type ProjectFileOp, type ProjectFilesService,
 } from './project-files-service.ts';
+import { primaryFile } from './motion-component-source.ts';
+import { getMotionComponent, prepareMotionComponent } from './motion-component-registry.ts';
 import { validateTextPatch } from './text-patch-boundaries.ts';
 
 const version = z.string().regex(/^"(?:sha256|patch):[a-f0-9]{64}"$/);
@@ -27,6 +30,7 @@ const batchSchema = z.strictObject({
   dependencies: z.record(z.string(), version.nullable()).optional(),
   label: z.string().trim().min(1).max(256).optional(),
   undoGroup: z.uuid().optional(),
+  installComponent: z.string().min(1).max(200).optional(),
 });
 
 function invalid(message: string) {
@@ -60,6 +64,10 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
   const parsed = batchSchema.safeParse(body);
   if (!parsed.success || !identity.requestId || identity.requestId.length > 100) throw invalid('Supply a valid text edit and request ID');
   const input = parsed.data;
+  if (input.installComponent && (input.files.length !== 1 || input.files[0].baseVersion === null ||
+      (!files.textPatchWrites && 'patch' in input.files[0]))) {
+    throw invalid('Place a component by editing one existing host composition');
+  }
   if (input.undoGroup && identity.source !== 'studio') throw invalid('Only continuous Studio edits can share an undo step');
   const targets = new Set<string>();
   const guards = new Map(Object.entries(input.dependencies ?? {}));
@@ -75,8 +83,13 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
   const scope = identity.command?.scope ?? `project:${projectId}:${identity.source}:text-edits`;
   const hash = identity.command?.hash ?? canonicalInputHash(input);
   await loadProjectOrThrow(db, ctx.workspaceId, projectId, {auth: ctx, allowTrashed: false});
+  const item = input.installComponent ? getMotionComponent(input.installComponent) : undefined;
+  const catalogPaths = item?.files.map(file => file.target) ?? [];
+  if (catalogPaths.some(path => guards.has(path)) || guards.size + catalogPaths.length > 256) {
+    throw invalid('Component dependencies must fit this edit and be separate from its text files');
+  }
   const observed = await db.select().from(projectFiles).where(and(eq(projectFiles.workspaceId, ctx.workspaceId),
-    eq(projectFiles.projectId, projectId), inArray(projectFiles.path, [...guards.keys()])));
+    eq(projectFiles.projectId, projectId), inArray(projectFiles.path, [...guards.keys(), ...catalogPaths])));
   const replay = await readCommitReceipt(db, ctx.workspaceId, scope, identity.requestId, hash);
   if (replay) return replay;
   const rows = new Map(observed.map(row => [row.path, row]));
@@ -122,6 +135,18 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
     }
     revisions.push({path: item.path, parentScope: parent.blobScope, parentId: parent.sha256, sizeBytes,
       mimeType: parent.mimeType, depth, chainPatchBytes, patch: item.patch});
+  }
+  if (item) {
+    for (const path of catalogPaths) {
+      const row = rows.get(path);
+      guards.set(path, row ? formatFileVersion(row.blobScope, row.sha256) : null);
+    }
+    ops.push(...await prepareMotionComponent(item, new Set(rows.keys()), true));
+    const installed = rows.get(primaryFile(item).target);
+    if (installed && installed.blobScope !== 'patch' && installed.sha256 === item.opaqueSourceSha256) {
+      const source = await files.readTextBlob(ctx.workspaceId, installed.blobScope, installed.sha256);
+      ops.push({ op: 'upsert_text', path: installed.path, content: componentOverlaySource(source), mimeType: installed.mimeType });
+    }
   }
   return files.commitChanges(ctx, {
     projectId, requestId: identity.requestId, idempotencyScope: scope, source: identity.source,

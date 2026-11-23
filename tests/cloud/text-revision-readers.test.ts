@@ -78,6 +78,33 @@ async function fixture() {
   };
 }
 
+it('commits missing dependencies and the host patch as one collaborative catalog placement', { skip: !connectionString }, async t => {
+  const { events, auth, workspace, files, history, cleanup } = await fixture();
+  try {
+    const host = 'intro.html', child = 'compositions/components/blur-in.html';
+    const original = '<main><h1>Hello</h1></main>', insert = '<div data-composition-src="' + child + '"></div>';
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path: host, content: original }] });
+    const read = (path: string) => files.readTextFile(auth, projectId, path);
+    const before = (await read(host))!;
+    t.mock.method(globalThis, 'fetch', async () => new Response('<div>Blur</div>'));
+    events.length = 0;
+    const input = { installComponent: 'blur-in', files: [{ path: host, baseVersion: before.version,
+      patch: [[before.content.indexOf('</main>'), 0, insert]] }] };
+    const receipt = await files.commitTextEdits(auth, projectId, input, { source: 'studio', requestId: randomUUID() });
+    assert.match(receipt.versionsByPath[host], /^"patch:/);
+    assert.deepEqual(events.flatMap(event => 'paths' in event ? event.paths ?? [] : []).sort(), [child, host].sort());
+    assert.equal(events.filter(event => event.type === 'history-changed').length, 1);
+    assert.equal((await read(host))?.content, before.content.replace('</main>', insert + '</main>'));
+    assert.match((await read(child))!.content, /Blur/);
+    await history.step(auth, projectId, 'back');
+    assert.equal((await read(host))?.version, before.version);
+    assert.equal(await read(child), null);
+    await history.step(auth, projectId, 'forward');
+    assert.equal((await read(host))?.version, receipt.versionsByPath[host]);
+    assert.equal((await read(child))?.version, receipt.versionsByPath[child]);
+  } finally { await cleanup(); }
+});
+
 it('publishes one exact file version and one history change for a patch, undo, redo and deletion', { skip: !connectionString }, async () => {
   const { events, auth, workspace, files, history, cleanup } = await fixture();
   try {
