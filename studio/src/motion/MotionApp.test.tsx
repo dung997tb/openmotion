@@ -66,8 +66,12 @@ it.each([false, true])('prepares only existing projects while browsing, and crea
     expect(posts().map(([url]) => url.split('?')[0])).toEqual([
       '/motion-api/sessions', `/motion-api/sessions/${preparedSessionId}/artifacts`, `/motion-api/projects/${preparedId}/open`,
     ]);
-    expect(JSON.parse(String(posts()[0][1]!.body)).templateId).toBe('product-promo');
-    expect(JSON.parse(String(posts()[1][1]!.body))).toEqual({ templateId: 'product-promo', expectedRevision: 'original-revision', expectedProjectId: existing ? id : 'project' });
+    const sessionBody = JSON.parse(String(posts()[0][1]!.body));
+    expect(sessionBody).toMatchObject({ templateId: 'product-promo', id: expect.any(String) });
+    expect(JSON.parse(String(posts()[1][1]!.body))).toEqual({
+      templateId: 'product-promo', projectType: 'template', requestId: sessionBody.id,
+      expectedRevision: 'original-revision', expectedProjectId: existing ? id : 'project',
+    });
     expect(posts()[2][0]).toBe(`/motion-api/projects/${preparedId}/open${existing ? `?projectId=${id}` : ''}`);
     expect(JSON.parse(String(posts()[2][1]!.body))).toEqual({ expectedRevision: existing ? 'original-revision' : 'new-revision', expectedProjectId: existing ? id : preparedId });
     expect(assign).not.toHaveBeenCalled();
