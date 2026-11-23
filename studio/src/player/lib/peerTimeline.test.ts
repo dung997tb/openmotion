@@ -7,7 +7,7 @@ import { createPreviewMessageHandler } from "../hooks/previewMessageRouter";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { hasPendingHistoryTimeline } from "../timelineRestorePending";
 import { parseAuthoredTimeline } from "./authoredTimeline";
-import { beginPeerTimelineUpdate, beginTimelineSourceRead, openTimelineSource } from "./peerTimeline";
+import { beginPeerTimelineUpdate, beginTimelineSourceRead, openTimelineSource, projectLocalTimelineEdit } from "./peerTimeline";
 
 const path = "index.html";
 const audio = (id: string, start: number, duration: number, offset: number, track: number) =>
@@ -174,4 +174,26 @@ it("reuses root startup rows and parses each following version exactly once", ()
     beginPeerTimelineUpdate("p", path, frame)!(last, frame);
     expect(parse.mock.calls.map(call => call[0])).toEqual([next, last]);
   } finally { parse.mockRestore(); }
+});
+
+it("projects both split halves before the write and restores only that split on rejection", () => {
+  const after = page(audio("a", 0, 4, 0, 0), audio("a-split", 4, 6, 4, 0));
+  const rollback = projectLocalTimelineEdit("p", path, { before: original, after }, frame)!;
+  const rows = () => usePlayerStore.getState().elements.map(e => [e.domId, e.duration]);
+  expect(rows()).toEqual(expect.arrayContaining([["a", 4], ["a-split", 6], ["generated", 10]]));
+  expect(hasPendingHistoryTimeline(frame)).toBe(true);
+  rollback();
+  expect(rows()).toEqual(expect.arrayContaining([["a", 10], ["generated", 10]]));
+  expect(rows().some(([id]) => id === "a-split")).toBe(false);
+  expect(hasPendingHistoryTimeline(frame)).toBe(false);
+});
+
+it("a late rejected cut cannot undo a newer peer projection or release its preview guard", () => {
+  const after = page(audio("a", 0, 4, 0, 0), audio("a-split", 4, 6, 4, 0));
+  const rollback = projectLocalTimelineEdit("p", path, { before: original, after }, frame)!;
+  expect(beginPeerTimelineUpdate("p", path, frame)!(page(audio("a", 0, 7, 0, 0)), frame)).toBe(true);
+  rollback();
+  expect(usePlayerStore.getState().elements.find(e => e.domId === "a")?.duration).toBe(7);
+  expect(usePlayerStore.getState().elements.some(e => e.domId === "a-split")).toBe(false);
+  expect(hasPendingHistoryTimeline(frame)).toBe(true);
 });
