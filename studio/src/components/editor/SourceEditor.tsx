@@ -6,7 +6,7 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
 } from "@codemirror/view";
-import { EditorState, Annotation } from "@codemirror/state";
+import { EditorState, Annotation, type Text } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
@@ -80,6 +80,7 @@ export const SourceEditor = memo(function SourceEditor({
   revealOffset,
 }: SourceEditorProps) {
   const editorRef = useRef<EditorView | null>(null);
+  const composition = useRef<{ view: EditorView; before: Text; deferredSync?: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -92,6 +93,7 @@ export const SourceEditor = memo(function SourceEditor({
   // fallow-ignore-next-line complexity
   const mountEditor = useCallback(
     (node: HTMLDivElement | null) => {
+      composition.current = null;
       if (editorRef.current) {
         editorRef.current.destroy();
         editorRef.current = null;
@@ -101,7 +103,6 @@ export const SourceEditor = memo(function SourceEditor({
 
       const lang = language ?? (filePath ? detectLanguage(filePath) : "html");
 
-      let composing = false;
       let lastEmitted = contentRef.current;
       function notify(text: string) {
         if (lastEmitted === text) return;
@@ -109,17 +110,21 @@ export const SourceEditor = memo(function SourceEditor({
         onChangeRef.current?.(text);
       }
       const typingEvents = EditorView.domEventHandlers({
-        compositionstart() { composing = true; },
+        compositionstart(_, view) { composition.current = { view, before: view.state.doc }; },
         compositionend(_, view) {
-          composing = false;
+          const input = composition.current;
           // CodeMirror processes the native final input before this microtask.
           queueMicrotask(() => {
-            if (editorRef.current !== view) return;
-            notify(view.state.doc.toString());
+            if (!input || composition.current !== input || editorRef.current !== view) return;
+            composition.current = null;
+            // A confirmed candidate supersedes the earlier receipt; cancelling the
+            // candidate lets a deferred update reconcile normally.
+            if (input.before.eq(view.state.doc)) input.deferredSync?.();
+            else notify(view.state.doc.toString());
             if (!view.hasFocus) onFlushRef.current?.();
           });
         },
-        blur() { if (!composing) onFlushRef.current?.(); },
+        blur() { if (!composition.current) onFlushRef.current?.(); },
       });
       const updateListener = EditorView.updateListener.of((update) => {
         if (!update.docChanged || !onChangeRef.current) return;
@@ -128,7 +133,7 @@ export const SourceEditor = memo(function SourceEditor({
           lastEmitted = update.state.doc.toString();
           return;
         }
-        if (!composing) notify(update.state.doc.toString());
+        if (!composition.current) notify(update.state.doc.toString());
       });
 
       const state = EditorState.create({
@@ -144,7 +149,7 @@ export const SourceEditor = memo(function SourceEditor({
           closeBrackets(),
           highlightSelectionMatches(),
           typingEvents,
-          keymap.of([{ key: "Mod-s", run: () => { if (!composing) onFlushRef.current?.(); return true; } }]),
+          keymap.of([{ key: "Mod-s", run: () => { if (!composition.current) onFlushRef.current?.(); return true; } }]),
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap]),
           getLanguageExtension(lang),
           studioCodeTheme,
@@ -164,15 +169,19 @@ export const SourceEditor = memo(function SourceEditor({
   useEffect(() => {
     const view = editorRef.current;
     if (!view) return;
-    const current = view.state.doc.toString();
-    if (current === content) return;
-    // An old receipt must never replace newer typing. Once that draft is
-    // discarded after a conflict, the authoritative content must also reach a focused editor.
-    if (view.hasFocus && current !== submitted && (hasPendingChange?.() ?? true)) return;
-    view.dispatch({
-      changes: { from: 0, to: current.length, insert: content },
-      annotations: [ExternalSync.of(true)],
-    });
+    const sync = () => {
+      const current = view.state.doc.toString();
+      if (current === content) return;
+      // Once a conflicted draft has been discarded, even a focused editor must
+      // receive the authoritative content.
+      if (view.hasFocus && current !== submitted && (hasPendingChange?.() ?? true)) return;
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: content },
+        annotations: [ExternalSync.of(true)],
+      });
+    };
+    if (composition.current?.view === view) composition.current.deferredSync = sync;
+    else sync();
   }, [content, submitted]);
 
   useEffect(() => {
