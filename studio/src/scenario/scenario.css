@@ -5380,3 +5380,25 @@ div.om-studio-output:hover {
   gap: var(--motion-space-4);
   white-space: nowrap;
 }
+
+/* A post with several images pages through them with dots. */
+.om-studio-output-post-pager {
+  display: flex;
+  justify-content: center;
+  gap: var(--motion-space-6);
+  padding-top: var(--motion-space-8);
+}
+
+.om-studio-output-post-dot {
+  width: 8px;
+  height: 8px;
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--motion-radius-full);
+  background: var(--motion-border-strong);
+}
+
+.om-studio-output-post-dot[aria-pressed="true"] {
+  width: 18px;
+  background: var(--motion-accent);
+}
