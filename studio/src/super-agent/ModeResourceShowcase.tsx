@@ -868,6 +868,7 @@ export function ModeResourceShowcase({
             gameSetting: game.setting,
             gameOrientation: game.orientation ?? 'landscape',
             gameMultiplayer: game.multiplayer,
+            gamePlayableAd: Boolean(game.playableAd),
           }
         : {}),
     });
@@ -1064,6 +1065,7 @@ export function ModeResourceShowcase({
                     gameSetting: idea.setting,
                     gameOrientation: idea.orientation,
                     gameMultiplayer: idea.multiplayer,
+                    gamePlayableAd: Boolean(idea.playableAd),
                     gameTemplate: null,
                   });
                   onPickPrompt(t(idea.prompt));
