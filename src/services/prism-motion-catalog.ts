@@ -5,7 +5,7 @@ import { isSha256Hex, isUuid, projectPath } from '../../shared/project-validatio
 import { boundedMediaBody, cmsUrl } from '../../shared/repository-media.ts';
 import { maxLfsAssetBytes } from '../../shared/repository-template-catalog.ts';
 import { BUILTIN_TEMPLATES, mimeTypeForPath, validateTemplateId } from './catalog-service.ts';
-import type { PreparedCatalogFile, PreparedCatalogTemplate } from '../../scripts/sync-catalog-cas.ts';
+import type { PreparedCatalogFile, PreparedCatalogTemplate } from './catalog-template-source.ts';
 
 export type { PreparedCatalogFile, PreparedCatalogTemplate };
 export type PrismEnvironment = 'dev' | 'prod';

@@ -1,5 +1,5 @@
 import type { PrismMotionCatalog, PreparedCatalogTemplate } from './prism-motion-catalog.ts';
-import { builtinTemplateMetadata, getBuiltinTemplateSource } from './builtin-template-source.ts';
+import { BUILTIN_TEMPLATES, builtinTemplateMetadata, getBuiltinTemplateSource } from './builtin-template-source.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { mimeTypeForPath, normalizeCatalogAssetPath } from './catalog-template-source.ts';
 import { and, asc, eq } from 'drizzle-orm';
@@ -1079,7 +1079,7 @@ export class CatalogService implements CatalogPort {
         );
       }
 
-      const validatedFiles: ClonedProjectFile[] = fileRows.map((file) => {
+      const validatedFiles = fileRows.map((file): ClonedProjectFile => {
         let normalized: string;
         try {
           normalized = projectPath(file.path, true);
