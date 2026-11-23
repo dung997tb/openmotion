@@ -36,7 +36,7 @@ async function maybeCompressRasterForPublish(
     if (!encoded) {
       const { ffmpeg } = verificationBinaries();
       const ffmpegArgs = isPng
-        ? ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-c:v', 'libwebp', '-lossless', '1', '-compression_level', '6', outputPath]
+        ? ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-pix_fmt', 'bgra', '-c:v', 'libwebp', '-lossless', '1', '-compression_level', '6', outputPath]
         : ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-c:v', 'libwebp', '-quality', '82', outputPath];
       const ffmpegRes = await execute(ffmpeg, ffmpegArgs, tempDir, 15_000).catch(() => null);
       encoded = ffmpegRes?.code === 0;

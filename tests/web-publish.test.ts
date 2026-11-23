@@ -609,10 +609,17 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
         for (let x = 0; x < w; x++) {
           seed = (seed * 1664525 + 1013904223) >>> 0;
           const off = row + 1 + x * 4;
-          raw[off] = (x + (seed & 0x3f)) & 0xff;
-          raw[off + 1] = (y + ((seed >>> 8) & 0x3f)) & 0xff;
-          raw[off + 2] = ((x ^ y) + ((seed >>> 16) & 0x3f)) & 0xff;
-          raw[off + 3] = x < 32 ? 0 : 255;
+          if (x < 32) {
+            raw[off] = 0;
+            raw[off + 1] = 0;
+            raw[off + 2] = 0;
+            raw[off + 3] = 0;
+          } else {
+            raw[off] = (x + (seed & 0x3f)) & 0xff;
+            raw[off + 1] = (y + ((seed >>> 8) & 0x3f)) & 0xff;
+            raw[off + 2] = ((x ^ y) + ((seed >>> 16) & 0x3f)) & 0xff;
+            raw[off + 3] = x < 64 ? 128 : 255;
+          }
         }
       }
       const idat = zlib.deflateSync(raw, { level: 1 });
