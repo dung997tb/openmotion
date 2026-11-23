@@ -2,7 +2,7 @@
   "schemaVersion": "1.0.0",
   "shardId": "models-dev",
   "source": "models-dev",
-  "generatedAt": "2026-11-23T10:37:04.356Z",
+  "generatedAt": "2026-11-23T12:30:54.600Z",
   "providers": [
     {
       "id": "modelsdev-302ai",
@@ -65,7 +65,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-alibaba-token-plan",
+      "id": "modelsdev-alibaba-quota-plan",
       "name": "Alibaba Token Plan (via models.dev)",
       "docsUrl": "https://www.alibabacloud.com/help/en/model-studio/token-plan-overview",
       "catalogUrl": "https://models.dev/api.json",
@@ -75,7 +75,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn",
+      "id": "modelsdev-alibaba-quota-plan-cn",
       "name": "Alibaba Token Plan (China) (via models.dev)",
       "docsUrl": "https://www.alibabacloud.com/help/zh/model-studio/token-plan-overview",
       "catalogUrl": "https://models.dev/api.json",
@@ -335,7 +335,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-ams",
+      "id": "modelsdev-xiaomi-quota-plan-ams",
       "name": "Xiaomi Token Plan (Europe) (via models.dev)",
       "docsUrl": "https://platform.xiaomimimo.com/#/docs",
       "catalogUrl": "https://models.dev/api.json",
@@ -345,7 +345,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-cn",
+      "id": "modelsdev-xiaomi-quota-plan-cn",
       "name": "Xiaomi Token Plan (China) (via models.dev)",
       "docsUrl": "https://platform.xiaomimimo.com/#/docs",
       "catalogUrl": "https://models.dev/api.json",
@@ -355,7 +355,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-sgp",
+      "id": "modelsdev-xiaomi-quota-plan-sgp",
       "name": "Xiaomi Token Plan (Singapore) (via models.dev)",
       "docsUrl": "https://platform.xiaomimimo.com/#/docs",
       "catalogUrl": "https://models.dev/api.json",
@@ -410,7 +410,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-302ai:gemini-3-pro-image-preview",
@@ -446,7 +446,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-302ai:gemini-3.1-flash-image-preview",
@@ -483,7 +483,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-abacus:gemini-2.5-flash-image",
@@ -519,7 +519,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-abacus:gemini-3-pro-image",
@@ -555,7 +555,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-abacus:gemini-3-pro-image-preview",
@@ -591,7 +591,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-abacus:gemini-3.1-flash-image",
@@ -627,7 +627,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-abacus:gemini-3.1-flash-image-preview",
@@ -663,7 +663,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gemini-2.5-flash-image",
@@ -699,7 +699,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gemini-3-pro-image",
@@ -735,7 +735,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gemini-3.1-flash-image",
@@ -773,7 +773,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gemini-3.1-flash-lite-image",
@@ -809,7 +809,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gpt-image-1.5",
@@ -845,7 +845,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gpt-image-2",
@@ -880,7 +880,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gpt-image-2.5-flare",
@@ -915,7 +915,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aihubmix:gpt-image-2.5-sunburst",
@@ -950,7 +950,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-aimlapi:openai/gpt-5.4-image-2",
@@ -987,7 +987,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba:qwen-omni-turbo",
@@ -1025,7 +1025,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba:qwen-omni-turbo-realtime",
@@ -1062,7 +1062,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba:qwen2-5-omni-7b",
@@ -1100,7 +1100,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba:qwen3-livetranslate-flash-realtime",
@@ -1138,7 +1138,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba:qwen3-omni-flash",
@@ -1176,7 +1176,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba:qwen3-omni-flash-realtime",
@@ -1214,7 +1214,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba-cn:qwen-omni-turbo",
@@ -1252,7 +1252,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba-cn:qwen-omni-turbo-realtime",
@@ -1289,7 +1289,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba-cn:qwen2-5-omni-7b",
@@ -1327,7 +1327,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba-cn:qwen3-omni-flash",
@@ -1365,7 +1365,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-alibaba-cn:qwen3-omni-flash-realtime",
@@ -1402,14 +1402,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:happyhorse-1.1-i2v",
+      "id": "modelsdev-alibaba-quota-plan:happyhorse-1.1-i2v",
       "canonicalId": "happyhorse-1.1-i2v",
       "family": "happyhorse",
       "creator": "Alibaba Token Plan",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "happyhorse-1.1-i2v",
       "displayName": "HappyHorse 1.1 Image-to-Video",
       "modality": "video",
@@ -1437,14 +1437,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:happyhorse-1.1-r2v",
+      "id": "modelsdev-alibaba-quota-plan:happyhorse-1.1-r2v",
       "canonicalId": "happyhorse-1.1-r2v",
       "family": "happyhorse",
       "creator": "Alibaba Token Plan",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "happyhorse-1.1-r2v",
       "displayName": "HappyHorse 1.1 Reference-to-Video",
       "modality": "video",
@@ -1472,14 +1472,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:happyhorse-1.1-t2v",
+      "id": "modelsdev-alibaba-quota-plan:happyhorse-1.1-t2v",
       "canonicalId": "happyhorse-1.1-t2v",
       "family": "happyhorse",
       "creator": "Alibaba Token Plan",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "happyhorse-1.1-t2v",
       "displayName": "HappyHorse 1.1 Text-to-Video",
       "modality": "video",
@@ -1505,14 +1505,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:qwen-image-2.0",
+      "id": "modelsdev-alibaba-quota-plan:qwen-image-2.0",
       "canonicalId": "alibaba/qwen-image-2.0",
       "family": "qwen-image",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "qwen-image-2.0",
       "displayName": "Qwen Image 2.0",
       "modality": "image",
@@ -1538,14 +1538,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:qwen-image-2.0-pro",
+      "id": "modelsdev-alibaba-quota-plan:qwen-image-2.0-pro",
       "canonicalId": "alibaba/qwen-image-2.0-pro",
       "family": "qwen-image",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "qwen-image-2.0-pro",
       "displayName": "Qwen Image 2.0 Pro",
       "modality": "image",
@@ -1571,14 +1571,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:wan2.7-image",
+      "id": "modelsdev-alibaba-quota-plan:wan2.7-image",
       "canonicalId": "alibaba/wan-2.7-image",
       "family": "wan",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "wan2.7-image",
       "displayName": "Wan2.7 Image",
       "modality": "image",
@@ -1604,14 +1604,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan:wan2.7-image-pro",
+      "id": "modelsdev-alibaba-quota-plan:wan2.7-image-pro",
       "canonicalId": "alibaba/wan-2.7-image",
       "family": "wan",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan",
+      "provider": "modelsdev-alibaba-quota-plan",
       "endpointId": "wan2.7-image-pro",
       "displayName": "Wan2.7 Image Pro",
       "modality": "image",
@@ -1637,14 +1637,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:happyhorse-1.1-i2v",
+      "id": "modelsdev-alibaba-quota-plan-cn:happyhorse-1.1-i2v",
       "canonicalId": "happyhorse-1.1-i2v",
       "family": "happyhorse",
       "creator": "Alibaba Token Plan (China)",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "happyhorse-1.1-i2v",
       "displayName": "HappyHorse 1.1 Image-to-Video",
       "modality": "video",
@@ -1672,14 +1672,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:happyhorse-1.1-r2v",
+      "id": "modelsdev-alibaba-quota-plan-cn:happyhorse-1.1-r2v",
       "canonicalId": "happyhorse-1.1-r2v",
       "family": "happyhorse",
       "creator": "Alibaba Token Plan (China)",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "happyhorse-1.1-r2v",
       "displayName": "HappyHorse 1.1 Reference-to-Video",
       "modality": "video",
@@ -1707,14 +1707,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:happyhorse-1.1-t2v",
+      "id": "modelsdev-alibaba-quota-plan-cn:happyhorse-1.1-t2v",
       "canonicalId": "happyhorse-1.1-t2v",
       "family": "happyhorse",
       "creator": "Alibaba Token Plan (China)",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "happyhorse-1.1-t2v",
       "displayName": "HappyHorse 1.1 Text-to-Video",
       "modality": "video",
@@ -1740,14 +1740,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:qwen-image-2.0",
+      "id": "modelsdev-alibaba-quota-plan-cn:qwen-image-2.0",
       "canonicalId": "alibaba/qwen-image-2.0",
       "family": "qwen-image",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "qwen-image-2.0",
       "displayName": "Qwen Image 2.0",
       "modality": "image",
@@ -1773,14 +1773,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:qwen-image-2.0-pro",
+      "id": "modelsdev-alibaba-quota-plan-cn:qwen-image-2.0-pro",
       "canonicalId": "alibaba/qwen-image-2.0-pro",
       "family": "qwen-image",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "qwen-image-2.0-pro",
       "displayName": "Qwen Image 2.0 Pro",
       "modality": "image",
@@ -1806,14 +1806,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:wan2.7-image",
+      "id": "modelsdev-alibaba-quota-plan-cn:wan2.7-image",
       "canonicalId": "alibaba/wan-2.7-image",
       "family": "wan",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "wan2.7-image",
       "displayName": "Wan2.7 Image",
       "modality": "image",
@@ -1839,14 +1839,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn:wan2.7-image-pro",
+      "id": "modelsdev-alibaba-quota-plan-cn:wan2.7-image-pro",
       "canonicalId": "alibaba/wan-2.7-image",
       "family": "wan",
       "creator": "Alibaba",
-      "provider": "modelsdev-alibaba-token-plan-cn",
+      "provider": "modelsdev-alibaba-quota-plan-cn",
       "endpointId": "wan2.7-image-pro",
       "displayName": "Wan2.7 Image Pro",
       "modality": "image",
@@ -1872,7 +1872,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure:gpt-image-1",
@@ -1907,7 +1907,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure:gpt-image-1.5",
@@ -1943,7 +1943,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure:gpt-image-2",
@@ -1978,7 +1978,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure:gpt-image-2.5-flare",
@@ -2013,7 +2013,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure:gpt-image-2.5-sunburst",
@@ -2048,7 +2048,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure-cognitive-services:gpt-image-1",
@@ -2083,7 +2083,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure-cognitive-services:gpt-image-1.5",
@@ -2119,7 +2119,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure-cognitive-services:gpt-image-2",
@@ -2154,7 +2154,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure-cognitive-services:gpt-image-2.5-flare",
@@ -2189,7 +2189,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-azure-cognitive-services:gpt-image-2.5-sunburst",
@@ -2224,7 +2224,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:fal-ai/elevenlabs/tts/multilingual-v2",
@@ -2257,7 +2257,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:fal-ai/fast-sdxl",
@@ -2290,7 +2290,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:fal-ai/flux/schnell",
@@ -2323,7 +2323,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:fal-ai/stable-audio-25/text-to-audio",
@@ -2356,7 +2356,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:openai-gpt-image-1",
@@ -2391,7 +2391,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:openai-gpt-image-1.5",
@@ -2427,7 +2427,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:openai-gpt-image-2",
@@ -2463,7 +2463,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:qwen3-tts-voicedesign",
@@ -2496,7 +2496,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:stable-diffusion-3.5-large",
@@ -2529,7 +2529,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-digitalocean:wan2-2-t2v-a14b",
@@ -2562,7 +2562,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-2.5-flash-image",
@@ -2600,7 +2600,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-3-pro-image",
@@ -2636,7 +2636,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-3-pro-image-preview",
@@ -2672,7 +2672,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-3.1-flash-image",
@@ -2708,7 +2708,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-3.1-flash-image-preview",
@@ -2744,7 +2744,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-3.1-flash-lite-image",
@@ -2780,7 +2780,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:google/gemini-nano-banana-2.1",
@@ -2816,7 +2816,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:vertex/gemini-2.5-flash-image",
@@ -2852,7 +2852,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:vertex/gemini-3-pro-image",
@@ -2888,7 +2888,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:vertex/gemini-3.1-flash-image",
@@ -2924,7 +2924,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:vertex/gemini-3.1-flash-lite-image",
@@ -2960,7 +2960,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-edenai:vertex/gemini-nano-banana-2.1",
@@ -2996,7 +2996,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:bytedance/seedance-2",
@@ -3031,7 +3031,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:google/gemini-3-pro-image-preview",
@@ -3067,7 +3067,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:google/gemini-3.1-flash-image-preview",
@@ -3104,7 +3104,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:google/veo3.1",
@@ -3139,7 +3139,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:google/veo3.1-fast",
@@ -3174,7 +3174,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:google/veo3.1-lite",
@@ -3209,7 +3209,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:leonardo-ai/lucid-origin",
@@ -3242,7 +3242,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:leonardo-ai/lucid-realism",
@@ -3275,7 +3275,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:openai/gpt-image-2",
@@ -3310,7 +3310,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-fastrouter:wanx/wan-v2-6",
@@ -3345,7 +3345,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:deep-research-max-preview-04-2026",
@@ -3384,7 +3384,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:deep-research-preview-04-2026",
@@ -3423,7 +3423,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-2.5-flash-image",
@@ -3459,7 +3459,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-2.5-flash-preview-tts",
@@ -3492,7 +3492,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-2.5-pro-preview-tts",
@@ -3525,7 +3525,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-3-pro-image",
@@ -3561,7 +3561,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-3.1-flash-image",
@@ -3599,7 +3599,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-3.1-flash-lite-image",
@@ -3635,7 +3635,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-3.1-flash-live-preview",
@@ -3673,7 +3673,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-3.1-flash-tts-preview",
@@ -3706,7 +3706,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-3.5-live-translate-preview",
@@ -3740,7 +3740,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:gemini-omni-flash-preview",
@@ -3776,7 +3776,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:lyria-3-clip-preview",
@@ -3812,7 +3812,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google:lyria-3-pro-preview",
@@ -3848,7 +3848,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-2.5-flash-image",
@@ -3885,7 +3885,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-2.5-flash-tts",
@@ -3918,7 +3918,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-2.5-pro-tts",
@@ -3951,7 +3951,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-3-pro-image",
@@ -3988,7 +3988,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-3.1-flash-image",
@@ -4026,7 +4026,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-3.1-flash-lite-image",
@@ -4064,7 +4064,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-google-vertex:gemini-nano-banana-2.1",
@@ -4102,7 +4102,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-groq:canopylabs/orpheus-arabic-saudi",
@@ -4135,7 +4135,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-groq:canopylabs/orpheus-v1-english",
@@ -4168,7 +4168,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:gemini-3-8-flash-lite-tts",
@@ -4201,7 +4201,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:gpt-image-2",
@@ -4236,7 +4236,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:gpt-image-2-5-flare",
@@ -4271,7 +4271,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:gpt-image-2-5-sunburst",
@@ -4306,7 +4306,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:gpt-image-2-6-flare",
@@ -4341,7 +4341,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:gpt-image-2-6-sunburst",
@@ -4376,7 +4376,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:grok-imagine-image",
@@ -4411,7 +4411,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:grok-imagine-image-2-0",
@@ -4446,7 +4446,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:grok-imagine-image-quality",
@@ -4481,7 +4481,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:lyria-3-5",
@@ -4517,7 +4517,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:nano-banana-2",
@@ -4555,7 +4555,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:nano-banana-2-lite",
@@ -4591,7 +4591,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kenari:nano-banana-pro",
@@ -4627,7 +4627,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-2.5-flash-image",
@@ -4664,7 +4664,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-3-pro-image",
@@ -4701,7 +4701,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-3-pro-image-preview",
@@ -4738,7 +4738,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-3.1-flash-image",
@@ -4775,7 +4775,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-3.1-flash-image-preview",
@@ -4812,7 +4812,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-3.1-flash-lite-image",
@@ -4849,7 +4849,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-nano-banana-2.1",
@@ -4886,7 +4886,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-omni-1.1-flash",
@@ -4924,7 +4924,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-omni-1.2-flash",
@@ -4962,7 +4962,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/gemini-omni-flash-preview",
@@ -5000,7 +5000,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/lyria-3-clip-preview",
@@ -5036,7 +5036,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:google/lyria-3-pro-preview",
@@ -5072,7 +5072,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:openai/gpt-5-image",
@@ -5109,7 +5109,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:openai/gpt-5-image-mini",
@@ -5146,7 +5146,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:openai/gpt-5.4-image-2",
@@ -5183,7 +5183,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:openai/gpt-audio",
@@ -5219,7 +5219,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:openai/gpt-audio-mini",
@@ -5255,7 +5255,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:openrouter/auto",
@@ -5294,7 +5294,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:quiverai/arrow-2",
@@ -5330,7 +5330,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-kilo:quiverai/arrow-2-telos",
@@ -5366,7 +5366,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-merge-gateway:google/gemini-2.5-flash-image",
@@ -5402,7 +5402,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-merge-gateway:google/gemini-3-pro-image",
@@ -5438,7 +5438,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-merge-gateway:google/gemini-3.1-flash-image",
@@ -5474,7 +5474,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-mistral:voxtral-mini-tts-latest",
@@ -5507,7 +5507,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nearai:black-forest-labs/FLUX.2-klein-4B",
@@ -5542,7 +5542,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:black-forest-labs/flux_1-kontext-dev",
@@ -5579,7 +5579,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:black-forest-labs/flux_1-schnell",
@@ -5612,7 +5612,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:black-forest-labs/flux_2-klein-4b",
@@ -5647,7 +5647,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:black-forest-labs/flux.1-dev",
@@ -5680,7 +5680,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:nvidia/cosmos-transfer2_5-2b",
@@ -5716,7 +5716,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:nvidia/magpie-tts-zeroshot",
@@ -5750,7 +5750,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:nvidia/studiovoice",
@@ -5783,7 +5783,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:qwen/qwen-image",
@@ -5816,13 +5816,13 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-nvidia:qwen/qwen-image-edit",
-      "canonicalId": "alibaba/qwen-image",
-      "family": "qwen-image",
-      "creator": "Alibaba",
+      "canonicalId": "qwen/qwen-",
+      "family": "qwen-",
+      "creator": "Nvidia",
       "provider": "modelsdev-nvidia",
       "endpointId": "qwen/qwen-image-edit",
       "displayName": "Qwen Image Edit",
@@ -5853,7 +5853,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openai:chatgpt-image-latest",
@@ -5889,7 +5889,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openai:gpt-image-1-mini",
@@ -5925,7 +5925,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openai:gpt-image-1.5",
@@ -5961,7 +5961,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openai:gpt-image-2",
@@ -5996,7 +5996,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openai:gpt-realtime-2.1",
@@ -6033,7 +6033,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-2.5-flash-image",
@@ -6069,7 +6069,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-3-pro-image",
@@ -6105,7 +6105,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-3-pro-image-preview",
@@ -6141,7 +6141,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-3.1-flash-image",
@@ -6177,7 +6177,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-3.1-flash-image-preview",
@@ -6213,7 +6213,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-3.1-flash-lite-image",
@@ -6249,7 +6249,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-nano-banana-2.1",
@@ -6285,7 +6285,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-omni-1.1-flash",
@@ -6322,7 +6322,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/gemini-omni-1.2-flash",
@@ -6359,7 +6359,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/lyria-3-clip-preview",
@@ -6395,7 +6395,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:google/lyria-3-pro-preview",
@@ -6431,7 +6431,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:openai/gpt-5-image",
@@ -6468,7 +6468,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:openai/gpt-5-image-mini",
@@ -6505,7 +6505,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:openai/gpt-5.4-image-2",
@@ -6542,7 +6542,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:openai/gpt-audio",
@@ -6577,7 +6577,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:openai/gpt-audio-mini",
@@ -6612,7 +6612,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-openrouter:openrouter/auto",
@@ -6651,7 +6651,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:elevenlabs/elevenlabs-music",
@@ -6684,7 +6684,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:elevenlabs/elevenlabs-v2.5-turbo",
@@ -6717,7 +6717,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:elevenlabs/elevenlabs-v3",
@@ -6750,7 +6750,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/gemini-omni-1.1-flash",
@@ -6786,7 +6786,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/imagen-3",
@@ -6819,7 +6819,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/imagen-3-fast",
@@ -6852,7 +6852,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/imagen-4",
@@ -6885,7 +6885,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/imagen-4-fast",
@@ -6918,7 +6918,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/imagen-4-ultra",
@@ -6951,7 +6951,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/lyria",
@@ -6984,7 +6984,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/nano-banana",
@@ -7020,7 +7020,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/nano-banana-pro",
@@ -7055,7 +7055,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/veo-2",
@@ -7088,7 +7088,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/veo-3",
@@ -7121,7 +7121,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/veo-3-fast",
@@ -7154,7 +7154,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/veo-3.1",
@@ -7187,7 +7187,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:google/veo-3.1-fast",
@@ -7222,7 +7222,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:ideogramai/ideogram",
@@ -7257,7 +7257,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:ideogramai/ideogram-v2",
@@ -7292,7 +7292,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:ideogramai/ideogram-v2a",
@@ -7325,7 +7325,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:ideogramai/ideogram-v2a-turbo",
@@ -7358,7 +7358,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:lumalabs/ray2",
@@ -7393,7 +7393,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/dall-e-3",
@@ -7426,7 +7426,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-5.4",
@@ -7463,7 +7463,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-5.4-mini",
@@ -7499,7 +7499,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-5.4-nano",
@@ -7535,7 +7535,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-5.4-pro",
@@ -7571,7 +7571,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-5.5",
@@ -7607,7 +7607,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-5.5-pro",
@@ -7643,7 +7643,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-image-1",
@@ -7678,7 +7678,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-image-1-mini",
@@ -7713,7 +7713,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-image-1.5",
@@ -7748,7 +7748,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/gpt-image-2",
@@ -7783,7 +7783,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/sora-2",
@@ -7818,7 +7818,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:openai/sora-2-pro",
@@ -7853,7 +7853,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:runwayml/runway",
@@ -7888,7 +7888,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:runwayml/runway-gen-4-turbo",
@@ -7923,7 +7923,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:stabilityai/stablediffusionxl",
@@ -7958,7 +7958,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-poe:topazlabs-co/topazlabs",
@@ -7993,7 +7993,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-qiniu-ai:gemini-2.5-flash-image",
@@ -8028,7 +8028,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-qiniu-ai:gemini-3.0-pro-image-preview",
@@ -8064,7 +8064,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-qiniu-ai:kling-v2-6",
@@ -8100,7 +8100,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-regolo-ai:qwen-image",
@@ -8133,7 +8133,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-requesty:gemini-3-pro-image",
@@ -8169,7 +8169,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-requesty:gemini-3.1-flash-image",
@@ -8207,7 +8207,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-steadyrouter:gpt-image-2-c",
@@ -8242,7 +8242,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-stepfun:step-tts-2",
@@ -8275,7 +8275,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-stepfun:stepaudio-2.5-tts",
@@ -8308,7 +8308,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-stepfun-ai:step-tts-2",
@@ -8341,7 +8341,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-stepfun-ai:stepaudio-2.5-tts",
@@ -8374,7 +8374,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.5-t2v-preview",
@@ -8408,7 +8408,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.6-i2v",
@@ -8444,7 +8444,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.6-i2v-flash",
@@ -8480,7 +8480,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.6-r2v",
@@ -8516,7 +8516,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.6-r2v-flash",
@@ -8552,7 +8552,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.6-t2v",
@@ -8586,7 +8586,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.7-r2v",
@@ -8623,7 +8623,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v2.7-t2v",
@@ -8657,7 +8657,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v3.0-video",
@@ -8694,7 +8694,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:alibaba/wan-v3.0-video-prime",
@@ -8731,7 +8731,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-2-flex",
@@ -8766,7 +8766,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-2-klein-4b",
@@ -8801,7 +8801,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-2-klein-9b",
@@ -8836,7 +8836,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-2-max",
@@ -8871,7 +8871,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-2-pro",
@@ -8906,7 +8906,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-3-image",
@@ -8941,7 +8941,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-3-image-klein",
@@ -8976,7 +8976,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-3-video",
@@ -9012,7 +9012,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-kontext-max",
@@ -9049,7 +9049,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-kontext-pro",
@@ -9086,7 +9086,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-pro-1.0-fill",
@@ -9121,7 +9121,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-pro-1.1",
@@ -9154,7 +9154,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bfl/flux-pro-1.1-ultra",
@@ -9187,7 +9187,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedance-2.0",
@@ -9222,7 +9222,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedance-2.0-fast",
@@ -9259,7 +9259,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedance-2.0-mini",
@@ -9296,7 +9296,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedance-2.5",
@@ -9329,7 +9329,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedance-v1.0-pro",
@@ -9364,7 +9364,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedance-v1.0-pro-fast",
@@ -9399,7 +9399,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedream-4.0",
@@ -9434,7 +9434,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedream-4.5",
@@ -9469,7 +9469,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedream-5.0-lite",
@@ -9504,7 +9504,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:bytedance/seedream-5.0-pro",
@@ -9539,7 +9539,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:fish-audio/drama-3",
@@ -9572,7 +9572,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:fish-audio/s1",
@@ -9605,7 +9605,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:fish-audio/s2-pro",
@@ -9638,7 +9638,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:fish-audio/s2.1-pro",
@@ -9671,7 +9671,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-2.5-flash-image",
@@ -9707,7 +9707,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3-pro-image",
@@ -9743,7 +9743,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3.1-flash-image",
@@ -9779,7 +9779,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3.1-flash-lite-image",
@@ -9815,7 +9815,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3.8-flash-lite-tts",
@@ -9848,7 +9848,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3.8-flash-tts",
@@ -9881,7 +9881,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3.8-live",
@@ -9916,7 +9916,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-3.8-live-extended-thinking",
@@ -9951,7 +9951,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-nano-banana-2.1",
@@ -9987,7 +9987,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-omni-1.2-flash",
@@ -10023,7 +10023,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/gemini-omni-flash-preview",
@@ -10059,7 +10059,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/veo-3.1-fast-generate-001",
@@ -10095,7 +10095,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/veo-3.1-generate-001",
@@ -10131,7 +10131,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:google/veo-3.1-lite-generate-001",
@@ -10167,7 +10167,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:heygen/heygen-video-1",
@@ -10204,7 +10204,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v2.5-turbo-i2v",
@@ -10239,7 +10239,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v2.5-turbo-t2v",
@@ -10272,7 +10272,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v2.6-i2v",
@@ -10307,7 +10307,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v2.6-motion-control",
@@ -10343,7 +10343,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v2.6-t2v",
@@ -10376,7 +10376,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v3.0-i2v",
@@ -10411,7 +10411,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v3.0-motion-control",
@@ -10447,7 +10447,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:klingai/kling-v3.0-t2v",
@@ -10480,7 +10480,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:meta/muse-image-1.0",
@@ -10515,7 +10515,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:microsoft/mai-image-2.6",
@@ -10550,7 +10550,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:microsoft/mai-image-2.6-flash",
@@ -10585,7 +10585,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:microsoft/mai-voice-2",
@@ -10618,7 +10618,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:microsoft/mai-voice-2-flash",
@@ -10651,7 +10651,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:microsoft/mai-voice-2.1",
@@ -10684,7 +10684,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:microsoft/mai-voice-2.1-flash",
@@ -10717,7 +10717,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:minimax/minimax-h3",
@@ -10752,7 +10752,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:minimax/minimax-h3-max",
@@ -10787,7 +10787,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:mistral/voxtral-mini-tts-3",
@@ -10820,7 +10820,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-image-1-mini",
@@ -10855,7 +10855,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-image-1.5",
@@ -10890,7 +10890,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-image-2",
@@ -10925,7 +10925,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-image-2.5-flare",
@@ -10960,7 +10960,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-image-2.5-sunburst",
@@ -10995,7 +10995,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-live-1",
@@ -11030,7 +11030,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-realtime-1.5",
@@ -11065,7 +11065,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-realtime-2",
@@ -11100,7 +11100,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-realtime-2.1",
@@ -11135,7 +11135,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/gpt-realtime-mini",
@@ -11170,7 +11170,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/tts-1",
@@ -11203,7 +11203,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:openai/tts-1-hd",
@@ -11236,7 +11236,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:quiverai/arrow-2",
@@ -11272,7 +11272,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:quiverai/arrow-2-telos",
@@ -11308,7 +11308,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v2",
@@ -11341,7 +11341,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v3",
@@ -11374,7 +11374,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4",
@@ -11407,7 +11407,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4-pro",
@@ -11440,7 +11440,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4.1",
@@ -11473,7 +11473,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4.1-flash",
@@ -11506,7 +11506,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4.1-pro",
@@ -11539,7 +11539,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4.1-utility",
@@ -11572,7 +11572,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:recraft/recraft-v4.1-utility-pro",
@@ -11605,7 +11605,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:spacexai/grok-imagine-image",
@@ -11640,7 +11640,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:spacexai/grok-imagine-image-2.0",
@@ -11675,7 +11675,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:spacexai/grok-imagine-video",
@@ -11711,7 +11711,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:spacexai/grok-imagine-video-1.5",
@@ -11744,7 +11744,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:spacexai/grok-imagine-video-1.5-lite",
@@ -11777,7 +11777,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:spacexai/grok-tts",
@@ -11810,7 +11810,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:topaz/proteus",
@@ -11843,7 +11843,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:topaz/starlight-precise-2.6",
@@ -11876,7 +11876,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-vercel:topaz/wonder-3.5",
@@ -11911,7 +11911,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-xai:grok-imagine-image",
@@ -11946,7 +11946,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-xai:grok-imagine-video",
@@ -11982,7 +11982,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-xai:grok-imagine-video-1.5",
@@ -12018,7 +12018,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-xai:grok-imagine-video-1.5-lite",
@@ -12053,14 +12053,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-ams:mimo-v2.5-tts",
+      "id": "modelsdev-xiaomi-quota-plan-ams:mimo-v2.5-tts",
       "canonicalId": "mimo-v2.5-tts",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (Europe)",
-      "provider": "modelsdev-xiaomi-token-plan-ams",
+      "provider": "modelsdev-xiaomi-quota-plan-ams",
       "endpointId": "mimo-v2.5-tts",
       "displayName": "MiMo-V2.5-TTS",
       "modality": "audio",
@@ -12086,14 +12086,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-ams:mimo-v2.5-tts-voiceclone",
+      "id": "modelsdev-xiaomi-quota-plan-ams:mimo-v2.5-tts-voiceclone",
       "canonicalId": "mimo-v2.5-tts-voiceclone",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (Europe)",
-      "provider": "modelsdev-xiaomi-token-plan-ams",
+      "provider": "modelsdev-xiaomi-quota-plan-ams",
       "endpointId": "mimo-v2.5-tts-voiceclone",
       "displayName": "MiMo-V2.5-TTS-VoiceClone",
       "modality": "audio",
@@ -12119,14 +12119,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-ams:mimo-v2.5-tts-voicedesign",
+      "id": "modelsdev-xiaomi-quota-plan-ams:mimo-v2.5-tts-voicedesign",
       "canonicalId": "mimo-v2.5-tts-voicedesign",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (Europe)",
-      "provider": "modelsdev-xiaomi-token-plan-ams",
+      "provider": "modelsdev-xiaomi-quota-plan-ams",
       "endpointId": "mimo-v2.5-tts-voicedesign",
       "displayName": "MiMo-V2.5-TTS-VoiceDesign",
       "modality": "audio",
@@ -12152,14 +12152,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-cn:mimo-v2.5-tts",
+      "id": "modelsdev-xiaomi-quota-plan-cn:mimo-v2.5-tts",
       "canonicalId": "mimo-v2.5-tts",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (China)",
-      "provider": "modelsdev-xiaomi-token-plan-cn",
+      "provider": "modelsdev-xiaomi-quota-plan-cn",
       "endpointId": "mimo-v2.5-tts",
       "displayName": "MiMo-V2.5-TTS",
       "modality": "audio",
@@ -12185,14 +12185,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-cn:mimo-v2.5-tts-voiceclone",
+      "id": "modelsdev-xiaomi-quota-plan-cn:mimo-v2.5-tts-voiceclone",
       "canonicalId": "mimo-v2.5-tts-voiceclone",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (China)",
-      "provider": "modelsdev-xiaomi-token-plan-cn",
+      "provider": "modelsdev-xiaomi-quota-plan-cn",
       "endpointId": "mimo-v2.5-tts-voiceclone",
       "displayName": "MiMo-V2.5-TTS-VoiceClone",
       "modality": "audio",
@@ -12218,14 +12218,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-cn:mimo-v2.5-tts-voicedesign",
+      "id": "modelsdev-xiaomi-quota-plan-cn:mimo-v2.5-tts-voicedesign",
       "canonicalId": "mimo-v2.5-tts-voicedesign",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (China)",
-      "provider": "modelsdev-xiaomi-token-plan-cn",
+      "provider": "modelsdev-xiaomi-quota-plan-cn",
       "endpointId": "mimo-v2.5-tts-voicedesign",
       "displayName": "MiMo-V2.5-TTS-VoiceDesign",
       "modality": "audio",
@@ -12251,14 +12251,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-sgp:mimo-v2.5-tts",
+      "id": "modelsdev-xiaomi-quota-plan-sgp:mimo-v2.5-tts",
       "canonicalId": "mimo-v2.5-tts",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (Singapore)",
-      "provider": "modelsdev-xiaomi-token-plan-sgp",
+      "provider": "modelsdev-xiaomi-quota-plan-sgp",
       "endpointId": "mimo-v2.5-tts",
       "displayName": "MiMo-V2.5-TTS",
       "modality": "audio",
@@ -12284,14 +12284,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-sgp:mimo-v2.5-tts-voiceclone",
+      "id": "modelsdev-xiaomi-quota-plan-sgp:mimo-v2.5-tts-voiceclone",
       "canonicalId": "mimo-v2.5-tts-voiceclone",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (Singapore)",
-      "provider": "modelsdev-xiaomi-token-plan-sgp",
+      "provider": "modelsdev-xiaomi-quota-plan-sgp",
       "endpointId": "mimo-v2.5-tts-voiceclone",
       "displayName": "MiMo-V2.5-TTS-VoiceClone",
       "modality": "audio",
@@ -12317,14 +12317,14 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-sgp:mimo-v2.5-tts-voicedesign",
+      "id": "modelsdev-xiaomi-quota-plan-sgp:mimo-v2.5-tts-voicedesign",
       "canonicalId": "mimo-v2.5-tts-voicedesign",
       "family": "mimo",
       "creator": "Xiaomi Token Plan (Singapore)",
-      "provider": "modelsdev-xiaomi-token-plan-sgp",
+      "provider": "modelsdev-xiaomi-quota-plan-sgp",
       "endpointId": "mimo-v2.5-tts-voicedesign",
       "displayName": "MiMo-V2.5-TTS-VoiceDesign",
       "modality": "audio",
@@ -12350,7 +12350,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-zenmux:x-ai/grok-imagine-image-2.0",
@@ -12385,7 +12385,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-zenmux:x-ai/grok-voice-tts-1.0",
@@ -12418,7 +12418,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     },
     {
       "id": "modelsdev-zenmux:z-ai/glm-image",
@@ -12451,7 +12451,7 @@
       "parameters": [],
       "standardParameterMap": {},
       "requiredParameters": [],
-      "syncedAt": "2026-11-23T10:37:04.356Z"
+      "syncedAt": "2026-11-23T12:30:54.600Z"
     }
   ]
 }

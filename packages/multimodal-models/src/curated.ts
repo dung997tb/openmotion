@@ -1,7 +1,21 @@
+import type { Model } from '../../../shared/gateway.ts';
+import {
+  defaultVideoAudioEnabled,
+  generationOptions,
+  videoAudioAlwaysOn,
+  type GenerationOption,
+} from '../../../shared/generation-options.ts';
+import {
+  openDesignImageReferenceCap,
+  openDesignModels,
+} from '../../../shared/opendesign-models.ts';
+import { openDesignVideoModels } from '../../../shared/video-features.ts';
 import {
   buildStandardParamMap,
   choiceField,
   inferCapabilitiesFromParameters,
+  mapWireKeyToStandard,
+  resolveCanonicalIdentity,
 } from './normalize.ts';
 import {
   REGISTRY_SCHEMA_VERSION,
@@ -198,238 +212,243 @@ const seedParam = (defaultValue?: number): ParameterFieldSchema => ({
   description: 'Random seed for reproducible generation.',
 });
 
-export const CURATED_ENDPOINTS: readonly ModelEndpointEntry[] = [
-  // ── OpenDesign Cloud / OpenMotion verified models (aligned with shared/generation-options.ts & shared/opendesign-models.ts) ──
-  makeCurated({
-    canonicalId: 'openai/gpt-image-2.6-sunburst',
-    family: 'gpt-image',
-    creator: 'OpenAI',
-    provider: 'opendesign',
-    endpointId: 'gpt-image-2.6-sunburst',
-    displayName: 'GPT Image 2.6 Sunburst',
-    modality: 'image',
-    primaryTask: 'text-to-image',
-    tasks: ['text-to-image', 'image-edit', 'remove-background'],
-    description: 'High-fidelity image generation and multi-reference editing served via OpenDesign Cloud (supports up to 16 reference images).',
-    parameters: [
-      promptParam(),
-      choiceField('quality', 'Quality', ['low', 'medium', 'high'], { standardKey: 'quality', default: 'low' }),
-      choiceField('background', 'Background', ['opaque', 'transparent'], { standardKey: 'background', default: 'opaque' }),
-      { key: 'images', standardKey: 'referenceImages', label: 'Reference Images', type: 'array', itemType: 'string', required: false, maxItems: 16, description: 'Up to 16 reference images accepted on /images/edits (measured 2026-11-20).' },
-    ],
-    capabilityOverrides: { maxReferenceImages: 16, supportsTransparentBackground: true },
-    tags: ['opendesign', 'verified', 'multi-reference'],
-  }),
-  makeCurated({
-    canonicalId: 'openai/gpt-image-2.6-flare',
-    family: 'gpt-image',
-    creator: 'OpenAI',
-    provider: 'opendesign',
-    endpointId: 'gpt-image-2.6-flare',
-    displayName: 'GPT Image 2.6 Flare',
-    modality: 'image',
-    primaryTask: 'text-to-image',
-    tasks: ['text-to-image', 'image-edit', 'remove-background'],
-    description: 'Fast GPT Image 2.6 generation and multi-reference editing served via OpenDesign Cloud (supports up to 16 reference images).',
-    parameters: [
-      promptParam(),
-      choiceField('quality', 'Quality', ['low', 'medium', 'high'], { standardKey: 'quality', default: 'low' }),
-      choiceField('background', 'Background', ['opaque', 'transparent'], { standardKey: 'background', default: 'opaque' }),
-      { key: 'images', standardKey: 'referenceImages', label: 'Reference Images', type: 'array', itemType: 'string', required: false, maxItems: 16 },
-    ],
-    capabilityOverrides: { maxReferenceImages: 16, supportsTransparentBackground: true },
-    tags: ['opendesign', 'verified', 'fast'],
-  }),
-  makeCurated({
-    canonicalId: 'bytedance/seedream-5.5',
-    family: 'seedream',
-    creator: 'ByteDance',
-    provider: 'opendesign',
-    endpointId: 'seedream-5.5',
-    displayName: 'Seedream 5.5',
-    modality: 'image',
-    primaryTask: 'text-to-image',
-    tasks: ['text-to-image', 'image-edit'],
-    description: 'ByteDance Seedream 5.5 served via OpenDesign Cloud (1K/2K resolution tiers; single reference image on edits).',
-    parameters: [
-      promptParam(),
-      choiceField('size', 'Resolution', ['1K', '2K'], { standardKey: 'size', default: '1K' }),
-      { key: 'images', standardKey: 'referenceImages', label: 'Reference Image', type: 'array', itemType: 'string', required: false, maxItems: 1, description: 'OpenDesign Cloud Seedream 5.5 accepts 1 reference image on /images/edits.' },
-    ],
-    capabilityOverrides: { maxReferenceImages: 1, resolutions: ['1K', '2K'] },
-    tags: ['opendesign', 'verified'],
-  }),
-  makeCurated({
-    canonicalId: 'bytedance/seedream-5.0-flash',
-    family: 'seedream',
-    creator: 'ByteDance',
-    provider: 'opendesign',
-    endpointId: 'seedream-5.0-flash',
-    displayName: 'Seedream 5.0 Flash',
-    modality: 'image',
-    primaryTask: 'text-to-image',
-    tasks: ['text-to-image', 'image-edit'],
-    description: 'Fast ByteDance Seedream 5.0 Flash served via OpenDesign Cloud (1K/1.5K/2K tiers; up to 10 reference images).',
-    parameters: [
-      promptParam(),
-      choiceField('size', 'Resolution', ['1K', '1.5K', '2K'], { standardKey: 'size', default: '1K' }),
-      { key: 'images', standardKey: 'referenceImages', label: 'Reference Images', type: 'array', itemType: 'string', required: false, maxItems: 10 },
-    ],
-    capabilityOverrides: { maxReferenceImages: 10, resolutions: ['1K', '1.5K', '2K'] },
-    tags: ['opendesign', 'verified', 'fast'],
-  }),
-  makeCurated({
-    canonicalId: 'bytedance/seedance-2.5',
-    family: 'seedance',
-    creator: 'ByteDance',
-    provider: 'opendesign',
-    endpointId: 'doubao-seedance-2-5-260628',
-    displayName: 'Seedance 2.5',
-    modality: 'video',
-    primaryTask: 'text-to-video',
-    tasks: ['text-to-video', 'image-to-video', 'reference-to-video'],
-    description: 'Flagship ByteDance Seedance 2.5 video model on OpenDesign Cloud with native synchronized audio and adaptive first-frame geometry.',
-    parameters: [
-      promptParam('Text prompt directing shot, motion, camera, and audio.'),
-      choiceField('ratio', 'Aspect Ratio', ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], { standardKey: 'aspectRatio', default: '16:9', description: 'First-frame video follows the input image ratio ("adaptive").' }),
-      choiceField('resolution', 'Resolution', ['480p', '720p', '1080p'], { standardKey: 'resolution', default: '720p' }),
-      { key: 'duration', standardKey: 'duration', label: 'Duration (seconds)', type: 'integer', required: false, default: 5, min: 4, max: 30, step: 1 },
-      { key: 'generate_audio', standardKey: 'generateAudio', label: 'Generate Audio', type: 'boolean', required: false, default: true },
-      { key: 'images', standardKey: 'referenceImages', label: 'First Frame / Reference Images', type: 'array', itemType: 'string', required: false, maxItems: 10 },
-    ],
-    capabilityOverrides: { supportsNativeAudio: true },
-    tags: ['opendesign', 'verified', 'native-audio'],
-  }),
-  makeCurated({
-    canonicalId: 'bytedance/seedance-2.5-flash',
-    family: 'seedance',
-    creator: 'ByteDance',
-    provider: 'opendesign',
-    endpointId: 'doubao-seedance-2-5-flash-261115',
-    displayName: 'Seedance 2.5 Flash',
-    modality: 'video',
-    primaryTask: 'text-to-video',
-    tasks: ['text-to-video', 'image-to-video', 'reference-to-video'],
-    description: 'High-speed ByteDance Seedance 2.5 Flash video generation on OpenDesign Cloud with synchronized audio.',
-    parameters: [
-      promptParam(),
-      choiceField('ratio', 'Aspect Ratio', ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], { standardKey: 'aspectRatio', default: '16:9' }),
-      choiceField('resolution', 'Resolution', ['480p', '720p'], { standardKey: 'resolution', default: '720p' }),
-      { key: 'duration', standardKey: 'duration', label: 'Duration (seconds)', type: 'integer', required: false, default: 5, min: 4, max: 30, step: 1 },
-      { key: 'generate_audio', standardKey: 'generateAudio', label: 'Generate Audio', type: 'boolean', required: false, default: true },
-      { key: 'images', standardKey: 'referenceImages', label: 'First Frame / Reference Images', type: 'array', itemType: 'string', required: false, maxItems: 10 },
-    ],
-    capabilityOverrides: { supportsNativeAudio: true },
-    tags: ['opendesign', 'verified', 'fast'],
-  }),
-  makeCurated({
-    canonicalId: 'alibaba/wan-2.7',
-    family: 'wan',
-    creator: 'Alibaba',
-    provider: 'opendesign',
-    endpointId: 'wan-2.7',
-    displayName: 'Wan 2.7',
-    modality: 'video',
-    primaryTask: 'text-to-video',
-    tasks: ['text-to-video', 'image-to-video'],
-    description: 'Alibaba Wan 2.7 video generation on OpenDesign Cloud with always-on native synchronized audio.',
-    parameters: [
-      promptParam(),
-      choiceField('ratio', 'Aspect Ratio', ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4'], { standardKey: 'aspectRatio', default: '16:9' }),
-      choiceField('resolution', 'Resolution', ['480p', '720p', '1080p'], { standardKey: 'resolution', default: '720p' }),
-      { key: 'duration', standardKey: 'duration', label: 'Duration (seconds)', type: 'integer', required: false, default: 5, min: 5, max: 15, step: 1 },
-      { key: 'generate_audio', standardKey: 'generateAudio', label: 'Generate Audio', type: 'boolean', required: false, default: true, description: 'Always enabled on OpenDesign Cloud Wan 2.7.' },
-    ],
-    capabilityOverrides: { supportsNativeAudio: true, nativeAudioAlwaysOn: true },
-    tags: ['opendesign', 'verified', 'native-audio'],
-  }),
-  makeCurated({
-    canonicalId: 'elevenlabs/v3',
-    family: 'elevenlabs',
-    creator: 'ElevenLabs',
-    provider: 'opendesign',
-    endpointId: 'elevenlabs-v3',
-    displayName: 'Eleven v3',
-    modality: 'audio',
-    primaryTask: 'text-to-speech',
-    tasks: ['text-to-speech'],
-    description: 'ElevenLabs v3 expressive multilingual text-to-speech on OpenDesign Cloud.',
-    parameters: [
-      promptParam('Spoken script text (supports inline audio tags such as [whispers] or [laughs]).'),
-      choiceField('voice', 'Speech Voice', ['21m00Tcm4TlvDq8ikWAM', 'JBFqnCBsd6RMkjVDRZzb', 'EXAVITQu4vr4xnSDxMaL', 'pNInz6obpgDQGcFmaJgB', 'nPczCjzI2devNBz1zQrb', 'pFZP5JQG7iQjIQuC4Bku'], {
-        standardKey: 'voice',
-        default: '21m00Tcm4TlvDq8ikWAM',
-        allowCustom: true,
-        choices: [
-          { value: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel · Female' },
-          { value: 'JBFqnCBsd6RMkjVDRZzb', label: 'George · Male' },
-          { value: 'EXAVITQu4vr4xnSDxMaL', label: 'Sarah · Female' },
-          { value: 'pNInz6obpgDQGcFmaJgB', label: 'Adam · Male' },
-          { value: 'nPczCjzI2devNBz1zQrb', label: 'Brian · Male' },
-          { value: 'pFZP5JQG7iQjIQuC4Bku', label: 'Lily · Female' },
+function generationOptionToParameterField(option: GenerationOption, modality: MultimodalModality): ParameterFieldSchema {
+  const standardKey = mapWireKeyToStandard(option.key, modality);
+  if (option.kind === 'choice') {
+    const choices = option.choices ?? [];
+    return {
+      key: option.key,
+      ...(standardKey ? { standardKey } : {}),
+      label: option.label,
+      type: 'enum',
+      required: Boolean(option.required),
+      ...(option.default !== undefined ? { default: option.default } : {}),
+      enum: choices.map(c => c.value),
+      choices: choices.map(c => ({
+        value: c.value,
+        label: c.label,
+        ...(c.requires
+          ? { requires: Object.entries(c.requires).map(([field, value]) => ({ field, values: [value] })) }
+          : {}),
+      })),
+      ...(option.allowCustom ? { allowCustom: true } : {}),
+    };
+  }
+  if (option.kind === 'boolean') {
+    return {
+      key: option.key,
+      ...(standardKey ? { standardKey } : {}),
+      label: option.label,
+      type: 'boolean',
+      required: Boolean(option.required),
+      ...(option.default !== undefined ? { default: option.default } : {}),
+    };
+  }
+  if (option.kind === 'number') {
+    const isInteger = option.step === undefined || option.step === 1;
+    return {
+      key: option.key,
+      ...(standardKey ? { standardKey } : {}),
+      label: option.label,
+      type: isInteger ? 'integer' : 'number',
+      required: Boolean(option.required),
+      ...(option.default !== undefined ? { default: option.default } : {}),
+      ...(option.min !== undefined ? { min: option.min } : {}),
+      ...(option.max !== undefined ? { max: option.max } : {}),
+      ...(option.step !== undefined ? { step: option.step } : {}),
+    };
+  }
+  return {
+    key: option.key,
+    ...(standardKey ? { standardKey } : {}),
+    label: option.label,
+    type: 'string',
+    required: Boolean(option.required),
+    ...(option.default !== undefined ? { default: option.default } : {}),
+  };
+}
+
+const openDesignVideoById = new Map(openDesignVideoModels.map(entry => [entry.modelId, entry]));
+
+const OPENDESIGN_VIDEO_RATIOS: Record<string, readonly string[]> = {
+  'doubao-seedance-2-5-260628': ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  'doubao-seedance-2-5-flash-261115': ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  'wan-2.7': ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4'],
+};
+
+function buildOpenDesignCuratedEndpoints(): ModelEndpointEntry[] {
+  const entries: ModelEndpointEntry[] = [];
+
+  for (const model of openDesignModels) {
+    const identity = resolveCanonicalIdentity(model.modelId, model.label);
+    const videoMeta = openDesignVideoById.get(model.modelId);
+    const durationValues = videoMeta
+      ? Array.from({ length: videoMeta.durations.max - videoMeta.durations.min + 1 }, (_, i) => videoMeta.durations.min + i)
+      : undefined;
+
+    const syntheticModel: Model = {
+      id: `opendesign:${model.modelId}`,
+      provider: 'opendesign',
+      modelId: model.modelId,
+      label: model.label,
+      modality: model.modality,
+      source: 'builtin',
+      mode: model.mode,
+      defaults: {},
+      ...(videoMeta
+        ? {
+            nativeOptions: {
+              ratios: {
+                values: [...(OPENDESIGN_VIDEO_RATIOS[model.modelId] ?? ['adaptive', '16:9', '9:16', '1:1'])],
+                default: '16:9',
+              },
+              resolutions: {
+                values: [...videoMeta.resolutions],
+                default: videoMeta.resolutions.includes('720p') ? '720p' : videoMeta.resolutions[0],
+              },
+              durations: {
+                values: durationValues,
+                default: videoMeta.durations.default,
+              },
+            },
+          }
+        : {}),
+    };
+
+    const sharedOpts = generationOptions(syntheticModel)
+      ?? (model.modality === 'audio' && model.mode === 'text-to-audio'
+        ? generationOptions({ ...syntheticModel, provider: 'account' })
+        : undefined);
+    const derivedParams = (sharedOpts?.fields ?? []).map(opt => generationOptionToParameterField(opt, model.modality));
+    const refCap = model.modality === 'image' ? openDesignImageReferenceCap(model.modelId) : undefined;
+
+    const parameters: ParameterFieldSchema[] = [
+      promptParam(
+        model.modality === 'video'
+          ? 'Text prompt directing shot, motion, camera, and audio.'
+          : model.mode === 'text-to-speech'
+            ? 'Script text to synthesize.'
+            : model.mode === 'text-to-audio'
+              ? 'Music style, instrumentation, mood, and tempo description.'
+              : 'Text prompt describing what to generate.',
+      ),
+      ...derivedParams,
+    ];
+
+    if (refCap !== undefined) {
+      parameters.push({
+        key: 'images',
+        standardKey: 'referenceImages',
+        label: refCap === 1 ? 'Reference Image' : 'Reference Images',
+        type: 'array',
+        itemType: 'string',
+        required: false,
+        maxItems: refCap,
+        description: `Up to ${refCap} reference ${refCap === 1 ? 'image' : 'images'} accepted on /images/edits.`,
+      });
+    } else if (model.modality === 'video' && model.modelId.startsWith('doubao-seedance-')) {
+      parameters.push({
+        key: 'images',
+        standardKey: 'referenceImages',
+        label: 'First Frame / Reference Images',
+        type: 'array',
+        itemType: 'string',
+        required: false,
+        maxItems: 10,
+      });
+    }
+
+    const alwaysOnAudio = videoAudioAlwaysOn(syntheticModel);
+    const nativeAudio = defaultVideoAudioEnabled(syntheticModel);
+    const primaryTask: MultimodalTask = model.modality === 'video'
+      ? 'text-to-video'
+      : model.modality === 'audio'
+        ? (model.mode === 'text-to-audio' ? 'text-to-music' : 'text-to-speech')
+        : 'text-to-image';
+    const tasks: MultimodalTask[] = model.modality === 'video'
+      ? (model.modelId.startsWith('doubao-seedance-')
+          ? ['text-to-video', 'image-to-video', 'reference-to-video']
+          : ['text-to-video', 'image-to-video'])
+      : model.modality === 'image'
+        ? (derivedParams.some(p => p.key === 'background')
+            ? ['text-to-image', 'image-edit', 'remove-background']
+            : ['text-to-image', 'image-edit'])
+        : [primaryTask];
+
+    const sizeParam = derivedParams.find(p => p.key === 'size');
+    const sizeResolutions = sizeParam?.enum?.filter((v): v is string => typeof v === 'string');
+
+    entries.push(
+      makeCurated({
+        canonicalId: identity.canonicalId,
+        family: identity.family,
+        creator: identity.creator,
+        provider: 'opendesign',
+        endpointId: model.modelId,
+        displayName: model.label,
+        modality: model.modality,
+        primaryTask,
+        tasks,
+        description: videoMeta?.tagline
+          ?? `${model.label} served via OpenDesign Cloud${refCap !== undefined ? ` (up to ${refCap} reference ${refCap === 1 ? 'image' : 'images'} on edits)` : ''}.`,
+        parameters,
+        capabilityOverrides: {
+          ...(refCap !== undefined ? { maxReferenceImages: refCap } : {}),
+          ...(sizeResolutions?.length ? { resolutions: sizeResolutions } : {}),
+          ...(nativeAudio ? { supportsNativeAudio: true } : {}),
+          ...(alwaysOnAudio ? { nativeAudioAlwaysOn: true } : {}),
+        },
+        tags: [
+          'opendesign',
+          'verified',
+          ...(videoMeta?.badge === 'New' ? ['fast'] : []),
+          ...(nativeAudio ? ['native-audio'] : []),
+          ...(primaryTask === 'text-to-speech' ? ['tts'] : []),
+          ...(primaryTask === 'text-to-music' ? ['music'] : []),
         ],
       }),
-    ],
-    tags: ['opendesign', 'verified', 'tts'],
-  }),
-  makeCurated({
-    canonicalId: 'bytedance/seed-tts-2',
-    family: 'seed-tts',
-    creator: 'ByteDance',
-    provider: 'opendesign',
-    endpointId: 'byteplus-tts-2',
-    displayName: 'BytePlus TTS 2.0 (Seed TTS 2.0)',
-    modality: 'audio',
-    primaryTask: 'text-to-speech',
-    tasks: ['text-to-speech'],
-    description: 'ByteDance Seed TTS 2.0 on OpenDesign Cloud (requires *_uranus_bigtts 2.0 speaker IDs).',
-    parameters: [
-      promptParam('Script text to synthesize.'),
-      choiceField('voice', 'Speech Voice', ['zh_female_vv_uranus_bigtts'], {
-        standardKey: 'voice',
-        default: 'zh_female_vv_uranus_bigtts',
-        allowCustom: true,
-        choices: [{ value: 'zh_female_vv_uranus_bigtts', label: 'Vivi · Chinese female' }],
-      }),
-    ],
-    tags: ['opendesign', 'verified', 'tts'],
-  }),
-  makeCurated({
-    canonicalId: 'elevenlabs/music-v2',
-    family: 'elevenlabs',
-    creator: 'ElevenLabs',
-    provider: 'opendesign',
-    endpointId: 'elevenlabs-music-v2',
-    displayName: 'Eleven Music v2',
-    modality: 'audio',
-    primaryTask: 'text-to-music',
-    tasks: ['text-to-music'],
-    description: 'ElevenLabs Music v2 soundtrack generation on OpenDesign Cloud.',
-    parameters: [
-      promptParam('Music style, instrumentation, mood, and tempo description.'),
-      { key: 'duration', standardKey: 'duration', label: 'Duration (seconds)', type: 'integer', required: false, min: 1, step: 1 },
-    ],
-    tags: ['opendesign', 'verified', 'music'],
-  }),
-  makeCurated({
-    canonicalId: 'openai/codex-image-generation',
-    family: 'gpt-image',
-    creator: 'OpenAI',
+    );
+  }
+
+  // Codex local agent image generation — derived directly from shared/generation-options.ts (`delivery: 'prompt'`).
+  const codexModel: Model = {
+    id: 'codex:image-generation',
     provider: 'codex',
-    endpointId: 'image-generation',
-    displayName: 'Codex Local Image Generation',
+    modelId: 'image-generation',
+    label: 'Codex Local Image Generation',
     modality: 'image',
-    primaryTask: 'text-to-image',
-    tasks: ['text-to-image', 'image-edit'],
-    description: 'Image generation via local Codex CLI agent (preferences are passed via instruction prompt).',
-    parameters: [
-      promptParam(),
-      choiceField('aspect_ratio', 'Aspect Ratio', ['1:1', '4:3', '3:4', '16:9', '9:16'], { standardKey: 'aspectRatio' }),
-      choiceField('background', 'Background', ['opaque', 'transparent'], { standardKey: 'background' }),
-    ],
-    capabilityOverrides: { maxReferenceImages: 1, supportsTransparentBackground: true },
-    tags: ['local-agent', 'verified'],
-  }),
+    source: 'builtin',
+    mode: 'text-to-image',
+    defaults: {},
+  };
+  const codexOpts = generationOptions(codexModel);
+  entries.push(
+    makeCurated({
+      canonicalId: 'openai/codex-image-generation',
+      family: 'gpt-image',
+      creator: 'OpenAI',
+      provider: 'codex',
+      endpointId: 'image-generation',
+      displayName: 'Codex Local Image Generation',
+      modality: 'image',
+      primaryTask: 'text-to-image',
+      tasks: ['text-to-image', 'image-edit'],
+      description: 'Image generation via local Codex CLI agent (preferences are passed via instruction prompt).',
+      parameters: [
+        promptParam(),
+        ...(codexOpts?.fields ?? []).map(opt => generationOptionToParameterField(opt, 'image')),
+      ],
+      capabilityOverrides: { maxReferenceImages: 1, supportsTransparentBackground: true },
+      tags: ['local-agent', 'verified', ...(codexOpts?.delivery === 'prompt' ? ['prompt-delivery'] : [])],
+    }),
+  );
+
+  return entries;
+}
+
+export const CURATED_ENDPOINTS: readonly ModelEndpointEntry[] = [
+  // ── OpenDesign Cloud & Codex verified models (derived directly from shared/opendesign-models.ts, shared/video-features.ts, and shared/generation-options.ts) ──
+  ...buildOpenDesignCuratedEndpoints(),
 
   // ── Direct First-Party Official API Specs (OpenAI, Google, ByteDance, Kling, BFL, Ideogram, Recraft, ElevenLabs, Suno) ──
   makeCurated({

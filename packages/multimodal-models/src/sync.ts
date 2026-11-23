@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCuratedShard } from './curated.ts';
@@ -60,6 +60,17 @@ function fitShardBudget(shard: ProviderCatalogShard): ProviderCatalogShard {
   return compact;
 }
 
+async function loadPreviousShard(outputDir: string, shardId: string): Promise<ProviderCatalogShard | null> {
+  try {
+    const raw = await readFile(path.join(outputDir, 'providers', `${shardId}.json`), 'utf8');
+    const parsed = JSON.parse(raw) as ProviderCatalogShard;
+    assertValidShard(parsed);
+    return parsed.endpoints.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runSync(options: RunSyncOptions = {}): Promise<{
   manifest: RegistryIndexManifest;
   shards: ProviderCatalogShard[];
@@ -97,12 +108,27 @@ export async function runSync(options: RunSyncOptions = {}): Promise<{
   if (wanted.has('replicate')) tasks.push(syncReplicateSource({ scope, fetcher: options.fetcher }));
 
   const settled = await Promise.all(tasks);
+  const removedShardIds: string[] = [];
   for (const res of settled) {
     if (!res) continue;
-    reports.push(res.report);
     if (res.shard.endpoints.length > 0) {
+      reports.push(res.report);
       shards.push(fitShardBudget(res.shard));
+      continue;
     }
+    if (res.report.status === 'error') {
+      const previous = await loadPreviousShard(outputDir, res.shard.shardId);
+      if (previous) {
+        shards.push(previous);
+        reports.push({
+          ...res.report,
+          note: `${res.report.note ? `${res.report.note} ` : ''}(preserved previous on-disk shard with ${previous.endpoints.length} endpoints)`,
+        });
+        continue;
+      }
+    }
+    reports.push(res.report);
+    removedShardIds.push(res.shard.shardId);
   }
 
   for (const shard of shards) {
@@ -142,6 +168,9 @@ export async function runSync(options: RunSyncOptions = {}): Promise<{
       } else {
         await writeFile(target, text, 'utf8');
       }
+    }
+    for (const staleId of removedShardIds) {
+      await rm(path.join(providersDir, `${staleId}.json`), { force: true });
     }
     await writeFile(path.join(outputDir, 'index.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
     await writeFile(

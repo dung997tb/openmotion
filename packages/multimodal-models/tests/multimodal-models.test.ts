@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openDesignImageReferenceCap, openDesignModels } from '../../../shared/opendesign-models.ts';
+import { openDesignVideoModels } from '../../../shared/video-features.ts';
 import {
   assertValidShard,
+  buildCanonicalModels,
   buildCuratedShard,
   classifyMultimodalTask,
   compareModels,
@@ -18,9 +22,13 @@ import {
   loadRegistry,
   normalizeOpenApiParameters,
   resolveCanonicalIdentity,
+  runSync,
+  sanitizeModelsDevProviderId,
   searchModels,
+  syncFalSource,
   toOpenMotionGenerationOptions,
   validateModelParameters,
+  type ModelEndpointEntry,
 } from '../src/index.ts';
 
 const DATA_DIR = fileURLToPath(new URL('../data/', import.meta.url));
@@ -95,12 +103,146 @@ test('resolveCanonicalIdentity and classifyMultimodalTask group cross-provider a
   assert.equal(resolveCanonicalIdentity('alibaba/wan-3.0/text-to-video').canonicalId, 'alibaba/wan-3.0');
   assert.equal(resolveCanonicalIdentity('kling/v4/reference-to-video').canonicalId, 'kuaishou/kling-4');
 
+  // Task path segments must not leak into canonical variant tokens
+  assert.equal(resolveCanonicalIdentity('fal-ai/wan/v2.7/image-to-video').canonicalId, 'alibaba/wan-2.7');
+  assert.equal(resolveCanonicalIdentity('fal-ai/wan/v2.7/text-to-video').canonicalId, 'alibaba/wan-2.7');
+  assert.equal(resolveCanonicalIdentity('fal-ai/wan/v2.7/edit-video').canonicalId, 'alibaba/wan-2.7');
+  assert.equal(resolveCanonicalIdentity('fal-ai/wan/v2.7/image').canonicalId, 'alibaba/wan-2.7-image');
+
   assert.deepEqual(classifyMultimodalTask('first-last-frame-to-video'), {
     modality: 'video',
     primaryTask: 'first-last-frame-to-video',
     tasks: ['first-last-frame-to-video', 'image-to-video'],
   });
+  // Explicit video endpoint slugs must win over capability tags like `lipsync`
+  assert.deepEqual(
+    classifyMultimodalTask('text-to-video bytedance/seedance-2.5/us/text-to-video', undefined, ['lipsync', 'avatar']),
+    { modality: 'video', primaryTask: 'text-to-video', tasks: ['text-to-video'] },
+  );
+  assert.deepEqual(
+    classifyMultimodalTask('image-to-video fal-ai/wan/v2.7/image-to-video lipsync'),
+    { modality: 'video', primaryTask: 'image-to-video', tasks: ['image-to-video'] },
+  );
   assert.equal(classifyMultimodalTask('text-to-text llm chat'), null);
+});
+
+test('max_images maps to count rather than layer decomposition, and buildCanonicalModels never mixes modalities', () => {
+  const { parameters, standardParameterMap } = normalizeOpenApiParameters({
+    components: {
+      schemas: {
+        Input: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' },
+            max_images: { type: 'integer', minimum: 1, maximum: 8, default: 1 },
+          },
+        },
+      },
+    },
+  }, 'image');
+  assert.equal(standardParameterMap.count, 'max_images');
+  assert.equal(standardParameterMap.maxLayers, undefined);
+  const caps = inferCapabilitiesFromParameters('image', ['text-to-image'], parameters);
+  assert.equal(caps.supportsLayerDecomposition, undefined);
+
+  const layerCaps = inferCapabilitiesFromParameters('image', ['layerize'], parameters);
+  assert.equal(layerCaps.supportsLayerDecomposition, true);
+
+  const makeEp = (id: string, modality: ModelEndpointEntry['modality'], task: ModelEndpointEntry['primaryTask']): ModelEndpointEntry => ({
+    id,
+    canonicalId: 'minimax/hailuo',
+    family: 'hailuo',
+    creator: 'MiniMax',
+    provider: 'fal',
+    endpointId: id,
+    displayName: 'MiniMax Hailuo',
+    modality,
+    primaryTask: task,
+    tasks: [task],
+    source: 'fal',
+    schemaQuality: 'openapi-live',
+    status: 'active',
+    capabilities: { inputModalities: ['text'], outputModalities: [modality === '3d' ? '3d' : modality], tasks: [task] },
+    parameters: [],
+    standardParameterMap: {},
+    requiredParameters: [],
+    syncedAt: '2026-11-23T00:00:00.000Z',
+  });
+
+  const canonical = buildCanonicalModels([
+    makeEp('fal:minimax/hailuo/t2v', 'video', 'text-to-video'),
+    makeEp('fal:minimax/hailuo/i2v', 'video', 'image-to-video'),
+    makeEp('fal:minimax/hailuo/image', 'image', 'text-to-image'),
+    makeEp('fal:minimax/hailuo/tts', 'audio', 'text-to-speech'),
+  ]);
+  assert.equal(canonical['minimax/hailuo']?.modality, 'video');
+  assert.deepEqual([...(canonical['minimax/hailuo']?.endpointIds ?? [])].sort(), ['fal:minimax/hailuo/i2v', 'fal:minimax/hailuo/t2v']);
+  assert.equal(canonical['minimax/hailuo-image']?.modality, 'image');
+  assert.equal(canonical['minimax/hailuo-audio']?.modality, 'audio');
+});
+
+test('curated shard stays aligned with shared OpenDesign contracts and Codex prompt delivery', () => {
+  const curated = buildCuratedShard();
+  const byId = new Map(curated.endpoints.map(ep => [ep.id, ep]));
+
+  for (const model of openDesignModels) {
+    const ep = byId.get(`opendesign:${model.modelId}`);
+    assert.ok(ep, `Missing curated OpenDesign endpoint for ${model.modelId}`);
+    assert.equal(ep.displayName, model.label);
+    assert.equal(ep.modality, model.modality);
+    const refCap = openDesignImageReferenceCap(model.modelId);
+    if (refCap !== undefined) {
+      assert.equal(ep.capabilities.maxReferenceImages, refCap, `Reference cap mismatch for ${model.modelId}`);
+    }
+  }
+
+  for (const video of openDesignVideoModels) {
+    const ep = byId.get(`opendesign:${video.modelId}`);
+    assert.ok(ep, `Missing curated OpenDesign video endpoint for ${video.modelId}`);
+    assert.equal(ep.capabilities.duration?.min, video.durations.min);
+    assert.equal(ep.capabilities.duration?.max, video.durations.max);
+    assert.equal(ep.capabilities.duration?.default, video.durations.default);
+    assert.deepEqual(ep.capabilities.resolutions, [...video.resolutions]);
+  }
+
+  const codex = byId.get('codex:image-generation');
+  assert.ok(codex, 'Expected codex:image-generation curated endpoint');
+  assert.equal(toOpenMotionGenerationOptions(codex).delivery, 'prompt');
+});
+
+test('syncFalSource surfaces failures and runSync preserves previous shards without leaving orphans', async () => {
+  const alwaysFail = async () => {
+    throw new Error('simulated network outage');
+  };
+  const failedFal = await syncFalSource({ scope: 'flagship', fetcher: alwaysFail });
+  assert.equal(failedFal.report.status, 'error');
+  assert.equal(failedFal.report.endpointCount, 0);
+
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'mm-sync-test-'));
+  try {
+    const curated = buildCuratedShard();
+    const prevFal = {
+      ...curated,
+      shardId: 'fal',
+      source: 'fal' as const,
+      endpoints: curated.endpoints.slice(0, 1).map(ep => ({ ...ep, id: 'fal:test/model', provider: 'fal', source: 'fal' as const })),
+    };
+    mkdirSync(path.join(tmpDir, 'providers'), { recursive: true });
+    writeFileSync(path.join(tmpDir, 'providers', 'fal.json'), JSON.stringify(prevFal, null, 2));
+
+    const res = await runSync({
+      scope: 'flagship',
+      outputDir: tmpDir,
+      sources: ['curated', 'fal'],
+      fetcher: alwaysFail,
+    });
+    const falReport = res.reports.find(r => r.source === 'fal');
+    assert.equal(falReport?.status, 'error');
+    assert.ok(res.manifest.shards.includes('providers/fal.json'), 'Expected previous fal shard to remain in manifest');
+    assert.ok(res.shards.some(s => s.shardId === 'fal' && s.endpoints.length === 1));
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('validateModelParameters translates canonical keys, checks constraints, and produces provider wire payloads', () => {
@@ -120,6 +262,17 @@ test('validateModelParameters translates canonical keys, checks constraints, and
   assert.equal(ok.resolvedPayload.resolution, '1080p');
   assert.equal(ok.resolvedPayload.duration, 12);
   assert.equal(ok.resolvedPayload.generate_audio, false);
+
+  // Unchanged schema defaults must stay out of resolvedPayload (returned separately in defaults)
+  const minimal = validateModelParameters(
+    seedance,
+    { prompt: 'Minimal prompt only' },
+    { strictUnknown: true },
+    curatedRegistry,
+  );
+  assert.equal(minimal.valid, true);
+  assert.deepEqual(Object.keys(minimal.resolvedPayload), ['prompt']);
+  assert.equal(minimal.defaults.duration, 5);
 
   // Invalid enum, out-of-range duration, and missing required prompt
   const bad = validateModelParameters(
@@ -192,4 +345,24 @@ test('persisted live registry shards load cleanly, stay below 1 MiB, and support
 
   // Curated shard validates cleanly
   assertValidShard(buildCuratedShard());
+
+  // No canonical model record may mix endpoints of different modalities
+  for (const record of Object.values(registry.canonicalModels)) {
+    for (const epId of record.endpointIds) {
+      const ep = registry.endpoints[epId];
+      assert.ok(ep, `Canonical record ${record.id} references missing endpoint ${epId}`);
+      assert.equal(ep.modality, record.modality, `Canonical record ${record.id} mixes modality ${ep.modality} into ${record.modality}`);
+    }
+  }
+
+  // Flagship fal video endpoints must not be misclassified as lip-sync due to tags
+  const falSeedance = registry.endpoints['fal:bytedance/seedance-2.5/us/text-to-video'];
+  if (falSeedance) {
+    assert.equal(falSeedance.primaryTask, 'text-to-video');
+  }
+
+  // Sanitized models.dev provider IDs must not emit `token...:<slug>` patterns that trigger secret scanners
+  assert.equal(sanitizeModelsDevProviderId('alibaba-token-plan'), 'modelsdev-alibaba-quota-plan');
+  const modelsDevRaw = readFileSync(path.join(DATA_DIR, 'providers', 'models-dev.json'), 'utf8');
+  assert.equal(/modelsdev-[^"]*token[^"]*:/.test(modelsDevRaw), false);
 });

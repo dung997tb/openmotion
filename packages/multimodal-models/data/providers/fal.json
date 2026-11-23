@@ -2,7 +2,7 @@
   "schemaVersion": "1.0.0",
   "shardId": "fal",
   "source": "fal",
-  "generatedAt": "2026-11-23T10:37:04.335Z",
+  "generatedAt": "2026-11-23T12:30:54.580Z",
   "providers": [
     {
       "id": "fal",
@@ -221,7 +221,7 @@
         "image",
         "video"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:alibaba/wan-3.0-prime/reference-to-video",
@@ -460,7 +460,7 @@
         "reference",
         "video"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:alibaba/wan-3.0-prime/text-to-video",
@@ -643,20 +643,20 @@
         "text",
         "video"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:alibaba/wan-3.0/image-to-video",
-      "canonicalId": "alibaba/wan-3.0-image",
+      "canonicalId": "alibaba/wan-3.0",
       "family": "wan",
       "creator": "Alibaba",
       "provider": "fal",
       "endpointId": "alibaba/wan-3.0/image-to-video",
       "displayName": "Wan 3.0",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "image-to-video",
       "tasks": [
-        "lip-sync"
+        "image-to-video"
       ],
       "description": "Wan 3.0 is the latest generation AI video model, delivering enhanced motion smoothness, superior scene fidelity, and greater visual coherence.",
       "source": "fal",
@@ -674,7 +674,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "image-to-video"
         ],
         "maxReferenceImages": 2,
         "supportsImageInput": true,
@@ -830,17 +830,17 @@
         }
       ],
       "standardParameterMap": {
-        "safetyChecker": "enable_safety_checker",
-        "endImage": "end_image_url",
-        "generateAudio": "audio",
+        "aspectRatio": "aspect_ratio",
         "inputImage": "start_image_url",
-        "resolution": "resolution",
+        "prompt": "prompt",
         "seed": "seed",
         "thinkingLevel": "enable_thinking",
-        "aspectRatio": "aspect_ratio",
-        "prompt": "prompt",
         "promptExtend": "enable_prompt_expansion",
-        "duration": "duration"
+        "duration": "duration",
+        "safetyChecker": "enable_safety_checker",
+        "resolution": "resolution",
+        "generateAudio": "audio",
+        "endImage": "end_image_url"
       },
       "requiredParameters": [
         "start_image_url"
@@ -850,7 +850,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:alibaba/wan-3.0/reference-to-video",
@@ -1071,18 +1071,18 @@
         }
       ],
       "standardParameterMap": {
+        "prompt": "prompt",
+        "referenceVideos": "reference_video_urls",
         "referenceAudios": "reference_audio_urls",
-        "safetyChecker": "enable_safety_checker",
-        "aspectRatio": "aspect_ratio",
-        "generateAudio": "audio",
-        "duration": "duration",
+        "referenceImages": "reference_image_urls",
         "seed": "seed",
         "thinkingLevel": "enable_thinking",
-        "resolution": "resolution",
-        "prompt": "prompt",
         "promptExtend": "enable_prompt_expansion",
-        "referenceVideos": "reference_video_urls",
-        "referenceImages": "reference_image_urls"
+        "duration": "duration",
+        "safetyChecker": "enable_safety_checker",
+        "resolution": "resolution",
+        "generateAudio": "audio",
+        "aspectRatio": "aspect_ratio"
       },
       "requiredParameters": [],
       "tags": [
@@ -1090,7 +1090,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:alibaba/wan-3.0/text-to-video",
@@ -1101,9 +1101,9 @@
       "endpointId": "alibaba/wan-3.0/text-to-video",
       "displayName": "Wan Text to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "text-to-video",
       "tasks": [
-        "lip-sync"
+        "text-to-video"
       ],
       "description": "Wan 3.0 is the latest generation AI video model, delivering enhanced motion smoothness, superior scene fidelity, and greater visual coherence.",
       "source": "fal",
@@ -1120,7 +1120,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "text-to-video"
         ],
         "supportsNativeAudio": true,
         "supportsPromptExpansion": true,
@@ -1256,15 +1256,15 @@
         }
       ],
       "standardParameterMap": {
-        "safetyChecker": "enable_safety_checker",
-        "aspectRatio": "aspect_ratio",
-        "generateAudio": "audio",
-        "resolution": "resolution",
-        "promptExtend": "enable_prompt_expansion",
-        "thinkingLevel": "enable_thinking",
-        "seed": "seed",
         "prompt": "prompt",
-        "duration": "duration"
+        "seed": "seed",
+        "thinkingLevel": "enable_thinking",
+        "promptExtend": "enable_prompt_expansion",
+        "duration": "duration",
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution",
+        "generateAudio": "audio",
+        "safetyChecker": "enable_safety_checker"
       },
       "requiredParameters": [
         "prompt"
@@ -1274,7 +1274,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.0/fast/image-to-video",
@@ -1285,9 +1285,9 @@
       "endpointId": "bytedance/seedance-2.0/fast/image-to-video",
       "displayName": "Seedance 2.0 Fast Image to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "image-to-video",
       "tasks": [
-        "lip-sync"
+        "image-to-video"
       ],
       "description": "ByteDance's most advanced image-to-video model, fast tier. Lower latency and cost with synchronized audio, start and end frame control, and motion prompts.",
       "source": "fal",
@@ -1305,7 +1305,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "image-to-video"
         ],
         "maxReferenceImages": 2,
         "supportsImageInput": true,
@@ -1481,15 +1481,15 @@
         }
       ],
       "standardParameterMap": {
-        "codec": "codec",
-        "returnLastFrame": "return_last_frame",
-        "prompt": "prompt",
-        "bitrateMode": "bitrate_mode",
         "generateAudio": "generate_audio",
+        "returnLastFrame": "return_last_frame",
         "inputImage": "image_url",
-        "resolution": "resolution",
-        "endImage": "end_image_url",
+        "bitrateMode": "bitrate_mode",
+        "codec": "codec",
         "duration": "duration",
+        "endImage": "end_image_url",
+        "resolution": "resolution",
+        "prompt": "prompt",
         "aspectRatio": "aspect_ratio"
       },
       "requiredParameters": [
@@ -1501,7 +1501,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.0/fast/reference-to-video",
@@ -1726,17 +1726,17 @@
         }
       ],
       "standardParameterMap": {
-        "codec": "codec",
-        "prompt": "prompt",
-        "returnLastFrame": "return_last_frame",
-        "bitrateMode": "bitrate_mode",
         "generateAudio": "generate_audio",
-        "resolution": "resolution",
-        "referenceImages": "image_urls",
         "referenceVideos": "video_urls",
-        "duration": "duration",
+        "referenceImages": "image_urls",
+        "bitrateMode": "bitrate_mode",
+        "codec": "codec",
         "referenceAudios": "audio_urls",
-        "aspectRatio": "aspect_ratio"
+        "returnLastFrame": "return_last_frame",
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "duration": "duration"
       },
       "requiredParameters": [
         "prompt"
@@ -1746,7 +1746,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.5/flash/image-to-video",
@@ -1757,9 +1757,9 @@
       "endpointId": "bytedance/seedance-2.5/flash/image-to-video",
       "displayName": "Seedance 2.5 Flash Image to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "image-to-video",
       "tasks": [
-        "lip-sync"
+        "image-to-video"
       ],
       "description": "Dreamina Seedance 2.5 Flash is the fast tier of Seedance 2.5. It animates a still image into a 4 to 30 second clip with native audio at 480p or 720p, with optional end-frame control.",
       "source": "fal",
@@ -1777,7 +1777,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "image-to-video"
         ],
         "maxReferenceImages": 2,
         "supportsImageInput": true,
@@ -1983,17 +1983,17 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "duration": "duration",
-        "inputImage": "image_url",
-        "generateAudio": "generate_audio",
-        "prompt": "prompt",
         "codec": "codec",
-        "aspectRatio": "aspect_ratio",
+        "returnLastFrame": "return_last_frame",
+        "generateAudio": "generate_audio",
         "bitrateMode": "bitrate_mode",
-        "endImage": "end_image_url",
+        "prompt": "prompt",
         "resolution": "resolution",
-        "returnLastFrame": "return_last_frame"
+        "inputImage": "image_url",
+        "outputFormat": "output_format",
+        "endImage": "end_image_url",
+        "duration": "duration",
+        "aspectRatio": "aspect_ratio"
       },
       "requiredParameters": [
         "image_url"
@@ -2003,7 +2003,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.5/flash/reference-to-video",
@@ -2296,19 +2296,19 @@
         }
       ],
       "standardParameterMap": {
-        "prompt": "prompt",
-        "referenceAudios": "audio_urls",
         "returnLastFrame": "return_last_frame",
-        "referenceVideos": "video_urls",
         "seed": "seed",
-        "outputFormat": "output_format",
-        "aspectRatio": "aspect_ratio",
-        "duration": "duration",
-        "generateAudio": "generate_audio",
-        "codec": "codec",
-        "referenceImages": "image_urls",
         "bitrateMode": "bitrate_mode",
-        "resolution": "resolution"
+        "prompt": "prompt",
+        "referenceVideos": "video_urls",
+        "duration": "duration",
+        "referenceAudios": "audio_urls",
+        "aspectRatio": "aspect_ratio",
+        "codec": "codec",
+        "generateAudio": "generate_audio",
+        "resolution": "resolution",
+        "outputFormat": "output_format",
+        "referenceImages": "image_urls"
       },
       "requiredParameters": [],
       "tags": [
@@ -2316,7 +2316,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.5/flash/text-to-video",
@@ -2327,9 +2327,9 @@
       "endpointId": "bytedance/seedance-2.5/flash/text-to-video",
       "displayName": "Seedance 2.5 Flash Text to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "text-to-video",
       "tasks": [
-        "lip-sync"
+        "text-to-video"
       ],
       "description": "Dreamina Seedance 2.5 Flash is the fast tier of Seedance 2.5. It generates 4 to 30 second video with native audio from a text prompt at 480p or 720p.",
       "source": "fal",
@@ -2346,7 +2346,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "text-to-video"
         ],
         "supportsNativeAudio": true,
         "aspectRatios": [
@@ -2549,15 +2549,15 @@
         }
       ],
       "standardParameterMap": {
+        "codec": "codec",
+        "returnLastFrame": "return_last_frame",
+        "generateAudio": "generate_audio",
+        "bitrateMode": "bitrate_mode",
+        "prompt": "prompt",
+        "resolution": "resolution",
         "outputFormat": "output_format",
         "duration": "duration",
-        "aspectRatio": "aspect_ratio",
-        "generateAudio": "generate_audio",
-        "prompt": "prompt",
-        "codec": "codec",
-        "bitrateMode": "bitrate_mode",
-        "resolution": "resolution",
-        "returnLastFrame": "return_last_frame"
+        "aspectRatio": "aspect_ratio"
       },
       "requiredParameters": [
         "prompt"
@@ -2567,7 +2567,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.5/us/image-to-video",
@@ -2578,9 +2578,9 @@
       "endpointId": "bytedance/seedance-2.5/us/image-to-video",
       "displayName": "Seedance 2.5 US Image to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "image-to-video",
       "tasks": [
-        "lip-sync"
+        "image-to-video"
       ],
       "description": "US-hosted ByteDance Seedance 2.5 animates still images with synchronized audio and optional end-frame control. Generate videos up to 30 seconds at 480p, 720p, 1080p or 4K.",
       "source": "fal",
@@ -2598,7 +2598,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "image-to-video"
         ],
         "maxReferenceImages": 2,
         "supportsImageInput": true,
@@ -2821,18 +2821,18 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "duration": "duration",
-        "inputImage": "image_url",
-        "generateAudio": "generate_audio",
-        "prompt": "prompt",
         "codec": "codec",
-        "aspectRatio": "aspect_ratio",
-        "draftMode": "draft",
+        "returnLastFrame": "return_last_frame",
+        "generateAudio": "generate_audio",
         "bitrateMode": "bitrate_mode",
-        "endImage": "end_image_url",
+        "prompt": "prompt",
         "resolution": "resolution",
-        "returnLastFrame": "return_last_frame"
+        "draftMode": "draft",
+        "outputFormat": "output_format",
+        "inputImage": "image_url",
+        "endImage": "end_image_url",
+        "duration": "duration",
+        "aspectRatio": "aspect_ratio"
       },
       "requiredParameters": [
         "image_url"
@@ -2842,7 +2842,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.5/us/reference-to-video",
@@ -3152,20 +3152,20 @@
         }
       ],
       "standardParameterMap": {
-        "prompt": "prompt",
-        "referenceAudios": "audio_urls",
         "returnLastFrame": "return_last_frame",
-        "referenceVideos": "video_urls",
         "seed": "seed",
-        "outputFormat": "output_format",
-        "aspectRatio": "aspect_ratio",
-        "duration": "duration",
-        "generateAudio": "generate_audio",
-        "codec": "codec",
-        "referenceImages": "image_urls",
-        "draftMode": "draft",
         "bitrateMode": "bitrate_mode",
-        "resolution": "resolution"
+        "prompt": "prompt",
+        "draftMode": "draft",
+        "referenceVideos": "video_urls",
+        "duration": "duration",
+        "referenceAudios": "audio_urls",
+        "aspectRatio": "aspect_ratio",
+        "codec": "codec",
+        "generateAudio": "generate_audio",
+        "resolution": "resolution",
+        "outputFormat": "output_format",
+        "referenceImages": "image_urls"
       },
       "requiredParameters": [],
       "tags": [
@@ -3173,7 +3173,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedance-2.5/us/text-to-video",
@@ -3184,9 +3184,9 @@
       "endpointId": "bytedance/seedance-2.5/us/text-to-video",
       "displayName": "Seedance 2.5 US Text to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "text-to-video",
       "tasks": [
-        "lip-sync"
+        "text-to-video"
       ],
       "description": "US-hosted ByteDance Seedance 2.5 generates cinematic video from text with synchronized audio, up to 30-second duration, and 480p, 720p, 1080p or 4K output.",
       "source": "fal",
@@ -3203,7 +3203,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "text-to-video"
         ],
         "supportsNativeAudio": true,
         "aspectRatios": [
@@ -3423,16 +3423,16 @@
         }
       ],
       "standardParameterMap": {
+        "codec": "codec",
+        "returnLastFrame": "return_last_frame",
+        "generateAudio": "generate_audio",
+        "bitrateMode": "bitrate_mode",
+        "prompt": "prompt",
+        "resolution": "resolution",
+        "draftMode": "draft",
         "outputFormat": "output_format",
         "duration": "duration",
-        "aspectRatio": "aspect_ratio",
-        "generateAudio": "generate_audio",
-        "prompt": "prompt",
-        "codec": "codec",
-        "draftMode": "draft",
-        "bitrateMode": "bitrate_mode",
-        "resolution": "resolution",
-        "returnLastFrame": "return_last_frame"
+        "aspectRatio": "aspect_ratio"
       },
       "requiredParameters": [
         "prompt"
@@ -3442,7 +3442,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5.5/edit",
@@ -3637,7 +3637,7 @@
         "multi-reference",
         "transparent-background"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5.5/layerize",
@@ -3726,7 +3726,7 @@
         },
         {
           "key": "max_images",
-          "standardKey": "maxLayers",
+          "standardKey": "count",
           "label": "Max Images",
           "type": "integer",
           "required": false,
@@ -3794,7 +3794,7 @@
         "syncMode": "sync_mode",
         "prompt": "prompt",
         "watermark": "watermark",
-        "maxLayers": "max_images",
+        "count": "max_images",
         "inputImage": "image_url",
         "safetyChecker": "enable_safety_checker",
         "outputFormat": "output_format",
@@ -3808,7 +3808,7 @@
         "image-decomposition",
         "transparency"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5.5/text-to-image",
@@ -3986,7 +3986,7 @@
         "text-to-image",
         "transparent-background"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5/flash/edit",
@@ -4180,7 +4180,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5/pro/edit",
@@ -4390,7 +4390,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5/pro/text-to-image",
@@ -4567,7 +4567,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5/pro/us/edit",
@@ -4777,7 +4777,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:bytedance/seedream/v5/pro/us/text-to-image",
@@ -4954,7 +4954,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-1/schnell",
@@ -5132,21 +5132,21 @@
         }
       ],
       "standardParameterMap": {
-        "prompt": "prompt",
-        "acceleration": "acceleration",
         "cfg": "guidance_scale",
-        "seed": "seed",
-        "count": "num_images",
-        "syncMode": "sync_mode",
-        "outputFormat": "output_format",
         "safetyChecker": "enable_safety_checker",
+        "syncMode": "sync_mode",
+        "steps": "num_inference_steps",
+        "prompt": "prompt",
+        "outputFormat": "output_format",
         "size": "image_size",
-        "steps": "num_inference_steps"
+        "count": "num_images",
+        "seed": "seed",
+        "acceleration": "acceleration"
       },
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-1/schnell/redux",
@@ -5317,20 +5317,20 @@
         }
       ],
       "standardParameterMap": {
-        "seed": "seed",
-        "acceleration": "acceleration",
-        "count": "num_images",
-        "syncMode": "sync_mode",
-        "inputImage": "image_url",
         "safetyChecker": "enable_safety_checker",
+        "syncMode": "sync_mode",
+        "steps": "num_inference_steps",
         "outputFormat": "output_format",
         "size": "image_size",
-        "steps": "num_inference_steps"
+        "count": "num_images",
+        "seed": "seed",
+        "acceleration": "acceleration",
+        "inputImage": "image_url"
       },
       "requiredParameters": [
         "image_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2",
@@ -5536,7 +5536,7 @@
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2-pro",
@@ -5691,7 +5691,7 @@
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2-pro/edit",
@@ -5866,7 +5866,7 @@
         "prompt",
         "image_urls"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2/edit",
@@ -6088,7 +6088,7 @@
         "prompt",
         "image_urls"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2/flash",
@@ -6265,7 +6265,7 @@
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2/flash/edit",
@@ -6459,7 +6459,7 @@
         "prompt",
         "image_urls"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2/klein/9b",
@@ -6624,7 +6624,7 @@
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-2/klein/9b/edit",
@@ -6805,7 +6805,7 @@
         "prompt",
         "image_urls"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-kontext-lora",
@@ -7015,7 +7015,7 @@
         "image-editing",
         "image-to-image"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-kontext/dev",
@@ -7211,7 +7211,7 @@
         "prompt",
         "image_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-pro/kontext",
@@ -7392,22 +7392,22 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "count": "num_images",
-        "cfg": "guidance_scale",
-        "aspectRatio": "aspect_ratio",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt",
-        "syncMode": "sync_mode",
         "promptExtend": "enhance_prompt",
+        "seed": "seed",
+        "cfg": "guidance_scale",
+        "prompt": "prompt",
         "inputImage": "image_url",
-        "seed": "seed"
+        "outputFormat": "output_format",
+        "aspectRatio": "aspect_ratio",
+        "syncMode": "sync_mode",
+        "safetyTolerance": "safety_tolerance",
+        "count": "num_images"
       },
       "requiredParameters": [
         "prompt",
         "image_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-pro/kontext/max",
@@ -7588,22 +7588,22 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "count": "num_images",
-        "cfg": "guidance_scale",
-        "aspectRatio": "aspect_ratio",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt",
-        "syncMode": "sync_mode",
         "promptExtend": "enhance_prompt",
+        "seed": "seed",
+        "cfg": "guidance_scale",
+        "prompt": "prompt",
         "inputImage": "image_url",
-        "seed": "seed"
+        "outputFormat": "output_format",
+        "aspectRatio": "aspect_ratio",
+        "syncMode": "sync_mode",
+        "safetyTolerance": "safety_tolerance",
+        "count": "num_images"
       },
       "requiredParameters": [
         "prompt",
         "image_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-pro/kontext/max/multi",
@@ -7784,22 +7784,22 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "count": "num_images",
-        "cfg": "guidance_scale",
-        "referenceImages": "image_urls",
-        "aspectRatio": "aspect_ratio",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt",
-        "syncMode": "sync_mode",
         "promptExtend": "enhance_prompt",
-        "seed": "seed"
+        "seed": "seed",
+        "cfg": "guidance_scale",
+        "prompt": "prompt",
+        "referenceImages": "image_urls",
+        "outputFormat": "output_format",
+        "aspectRatio": "aspect_ratio",
+        "syncMode": "sync_mode",
+        "safetyTolerance": "safety_tolerance",
+        "count": "num_images"
       },
       "requiredParameters": [
         "prompt",
         "image_urls"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-pro/kontext/max/text-to-image",
@@ -7970,20 +7970,20 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "cfg": "guidance_scale",
-        "seed": "seed",
-        "aspectRatio": "aspect_ratio",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt",
-        "syncMode": "sync_mode",
         "promptExtend": "enhance_prompt",
+        "seed": "seed",
+        "cfg": "guidance_scale",
+        "prompt": "prompt",
+        "outputFormat": "output_format",
+        "aspectRatio": "aspect_ratio",
+        "syncMode": "sync_mode",
+        "safetyTolerance": "safety_tolerance",
         "count": "num_images"
       },
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-pro/kontext/multi",
@@ -8164,22 +8164,22 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "count": "num_images",
-        "cfg": "guidance_scale",
-        "referenceImages": "image_urls",
-        "aspectRatio": "aspect_ratio",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt",
-        "syncMode": "sync_mode",
         "promptExtend": "enhance_prompt",
-        "seed": "seed"
+        "seed": "seed",
+        "cfg": "guidance_scale",
+        "prompt": "prompt",
+        "referenceImages": "image_urls",
+        "outputFormat": "output_format",
+        "aspectRatio": "aspect_ratio",
+        "syncMode": "sync_mode",
+        "safetyTolerance": "safety_tolerance",
+        "count": "num_images"
       },
       "requiredParameters": [
         "prompt",
         "image_urls"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux-pro/kontext/text-to-image",
@@ -8350,20 +8350,20 @@
         }
       ],
       "standardParameterMap": {
-        "outputFormat": "output_format",
-        "cfg": "guidance_scale",
-        "seed": "seed",
-        "aspectRatio": "aspect_ratio",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt",
-        "syncMode": "sync_mode",
         "promptExtend": "enhance_prompt",
+        "seed": "seed",
+        "cfg": "guidance_scale",
+        "prompt": "prompt",
+        "outputFormat": "output_format",
+        "aspectRatio": "aspect_ratio",
+        "syncMode": "sync_mode",
+        "safetyTolerance": "safety_tolerance",
         "count": "num_images"
       },
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux/schnell",
@@ -8541,21 +8541,21 @@
         }
       ],
       "standardParameterMap": {
-        "prompt": "prompt",
-        "acceleration": "acceleration",
         "cfg": "guidance_scale",
-        "seed": "seed",
-        "count": "num_images",
-        "syncMode": "sync_mode",
-        "outputFormat": "output_format",
         "safetyChecker": "enable_safety_checker",
+        "syncMode": "sync_mode",
+        "steps": "num_inference_steps",
+        "prompt": "prompt",
+        "outputFormat": "output_format",
         "size": "image_size",
-        "steps": "num_inference_steps"
+        "count": "num_images",
+        "seed": "seed",
+        "acceleration": "acceleration"
       },
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/flux/schnell/redux",
@@ -8726,15 +8726,15 @@
         }
       ],
       "standardParameterMap": {
-        "seed": "seed",
-        "acceleration": "acceleration",
-        "count": "num_images",
-        "syncMode": "sync_mode",
-        "inputImage": "image_url",
         "safetyChecker": "enable_safety_checker",
+        "syncMode": "sync_mode",
+        "steps": "num_inference_steps",
         "outputFormat": "output_format",
         "size": "image_size",
-        "steps": "num_inference_steps"
+        "count": "num_images",
+        "seed": "seed",
+        "acceleration": "acceleration",
+        "inputImage": "image_url"
       },
       "requiredParameters": [
         "image_url"
@@ -8742,7 +8742,94 @@
       "tags": [
         "style transfer"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
+    },
+    {
+      "id": "fal:fal-ai/kling-video/ai-avatar/v2/standard",
+      "canonicalId": "kling-video/ai-avatar",
+      "family": "ai-avatar",
+      "creator": "Kling Video",
+      "provider": "fal",
+      "endpointId": "fal-ai/kling-video/ai-avatar/v2/standard",
+      "displayName": "Kling AI Avatar v2 Standard",
+      "modality": "video",
+      "primaryTask": "image-to-video",
+      "tasks": [
+        "image-to-video"
+      ],
+      "description": "Kling AI Avatar v2 Standard: Endpoint for creating avatar videos with realistic humans, animals, cartoons, or stylized characters",
+      "source": "fal",
+      "schemaUrl": "https://api.fal.ai/v1/models?endpoint_id=fal-ai%2Fkling-video%2Fai-avatar%2Fv2%2Fstandard&expand=openapi-3.0",
+      "docsUrl": "https://fal.run/fal-ai/kling-video/ai-avatar/v2/standard",
+      "schemaQuality": "openapi-live",
+      "status": "active",
+      "capabilities": {
+        "inputModalities": [
+          "text",
+          "image",
+          "audio"
+        ],
+        "outputModalities": [
+          "video"
+        ],
+        "tasks": [
+          "image-to-video"
+        ],
+        "maxReferenceImages": 1,
+        "maxReferenceAudios": 1,
+        "supportsImageInput": true
+      },
+      "parameters": [
+        {
+          "key": "enable_safety_checker",
+          "standardKey": "safetyChecker",
+          "label": "Enable Safety Checker",
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "uiOrder": 0,
+          "description": "Disabling safety checks requires account authorization; unauthorized requests are always checked."
+        },
+        {
+          "key": "image_url",
+          "standardKey": "inputImage",
+          "label": "Image Url",
+          "type": "string",
+          "required": true,
+          "uiOrder": 1,
+          "description": "The URL of the image to use as your avatar"
+        },
+        {
+          "key": "audio_url",
+          "standardKey": "inputAudio",
+          "label": "Audio Url",
+          "type": "string",
+          "required": true,
+          "uiOrder": 2,
+          "description": "The URL of the audio file."
+        },
+        {
+          "key": "prompt",
+          "standardKey": "prompt",
+          "label": "Prompt",
+          "type": "string",
+          "required": false,
+          "default": ".",
+          "uiOrder": 3,
+          "description": "The prompt to use for the video generation."
+        }
+      ],
+      "standardParameterMap": {
+        "inputAudio": "audio_url",
+        "inputImage": "image_url",
+        "prompt": "prompt",
+        "safetyChecker": "enable_safety_checker"
+      },
+      "requiredParameters": [
+        "image_url",
+        "audio_url"
+      ],
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1",
@@ -8911,19 +8998,19 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
         "negativePrompt": "negative_prompt",
-        "resolution": "resolution",
         "aspectRatio": "aspect_ratio",
-        "seed": "seed",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/fast",
@@ -9092,19 +9179,19 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
         "negativePrompt": "negative_prompt",
-        "resolution": "resolution",
         "aspectRatio": "aspect_ratio",
-        "seed": "seed",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/fast/first-last-frame-to-video",
@@ -9299,23 +9386,23 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "endImage": "last_frame_url",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
         "negativePrompt": "negative_prompt",
-        "endImage": "last_frame_url",
-        "resolution": "resolution",
-        "aspectRatio": "aspect_ratio",
         "inputImage": "first_frame_url",
-        "seed": "seed",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "aspectRatio": "aspect_ratio",
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt",
         "first_frame_url",
         "last_frame_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/fast/image-to-video",
@@ -9498,21 +9585,21 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
-        "negativePrompt": "negative_prompt",
-        "resolution": "resolution",
-        "aspectRatio": "aspect_ratio",
-        "seed": "seed",
         "inputImage": "image_url",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "negativePrompt": "negative_prompt",
+        "aspectRatio": "aspect_ratio",
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt",
         "image_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/first-last-frame-to-video",
@@ -9707,23 +9794,23 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "endImage": "last_frame_url",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
         "negativePrompt": "negative_prompt",
-        "endImage": "last_frame_url",
-        "resolution": "resolution",
-        "aspectRatio": "aspect_ratio",
         "inputImage": "first_frame_url",
-        "seed": "seed",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "aspectRatio": "aspect_ratio",
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt",
         "first_frame_url",
         "last_frame_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/image-to-video",
@@ -9906,21 +9993,21 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
-        "negativePrompt": "negative_prompt",
-        "resolution": "resolution",
-        "aspectRatio": "aspect_ratio",
-        "seed": "seed",
         "inputImage": "image_url",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "negativePrompt": "negative_prompt",
+        "aspectRatio": "aspect_ratio",
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt",
         "image_url"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/lite",
@@ -9931,9 +10018,9 @@
       "endpointId": "fal-ai/veo3.1/lite",
       "displayName": "Veo3.1 Lite Text to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "text-to-video",
       "tasks": [
-        "lip-sync"
+        "text-to-video"
       ],
       "description": "Veo 3.1 Lite balances practical utility with professional capabilities, supporting Text-to-Video and Image-to-Video",
       "source": "fal",
@@ -9950,7 +10037,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "text-to-video"
         ],
         "supportsNativeAudio": true,
         "supportsSeed": true,
@@ -10084,14 +10171,14 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
         "negativePrompt": "negative_prompt",
-        "resolution": "resolution",
         "aspectRatio": "aspect_ratio",
-        "seed": "seed",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt"
@@ -10101,7 +10188,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/veo3.1/lite/image-to-video",
@@ -10112,9 +10199,9 @@
       "endpointId": "fal-ai/veo3.1/lite/image-to-video",
       "displayName": "Veo3.1 Lite Image to Video",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "image-to-video",
       "tasks": [
-        "lip-sync"
+        "image-to-video"
       ],
       "description": "Veo 3.1 Lite balances practical utility with professional capabilities, supporting Text-to-Video and Image-to-Video",
       "source": "fal",
@@ -10132,7 +10219,7 @@
           "audio"
         ],
         "tasks": [
-          "lip-sync"
+          "image-to-video"
         ],
         "maxReferenceImages": 1,
         "supportsImageInput": true,
@@ -10279,15 +10366,15 @@
         }
       ],
       "standardParameterMap": {
+        "resolution": "resolution",
+        "prompt": "prompt",
+        "safetyTolerance": "safety_tolerance",
         "duration": "duration",
         "generateAudio": "generate_audio",
-        "negativePrompt": "negative_prompt",
-        "resolution": "resolution",
-        "aspectRatio": "aspect_ratio",
-        "seed": "seed",
         "inputImage": "image_url",
-        "safetyTolerance": "safety_tolerance",
-        "prompt": "prompt"
+        "negativePrompt": "negative_prompt",
+        "aspectRatio": "aspect_ratio",
+        "seed": "seed"
       },
       "requiredParameters": [
         "prompt",
@@ -10298,7 +10385,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/wan/v2.7/edit-video",
@@ -10309,9 +10396,9 @@
       "endpointId": "fal-ai/wan/v2.7/edit-video",
       "displayName": "Wan",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "video-edit",
       "tasks": [
-        "lip-sync"
+        "video-edit"
       ],
       "description": "Wan 2.7 is the latest generation AI video model, delivering enhanced motion smoothness, superior scene fidelity, and greater visual coherence.",
       "source": "fal",
@@ -10328,7 +10415,7 @@
           "video"
         ],
         "tasks": [
-          "lip-sync"
+          "video-edit"
         ],
         "maxReferenceVideos": 1,
         "supportsSeed": true,
@@ -10473,13 +10560,13 @@
         }
       ],
       "standardParameterMap": {
-        "inputVideo": "video_url",
-        "safetyChecker": "enable_safety_checker",
-        "aspectRatio": "aspect_ratio",
         "resolution": "resolution",
-        "prompt": "prompt",
+        "safetyChecker": "enable_safety_checker",
         "duration": "duration",
-        "seed": "seed"
+        "inputVideo": "video_url",
+        "aspectRatio": "aspect_ratio",
+        "seed": "seed",
+        "prompt": "prompt"
       },
       "requiredParameters": [
         "prompt",
@@ -10490,20 +10577,20 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:fal-ai/wan/v2.7/image-to-video",
-      "canonicalId": "alibaba/wan-2.7-image",
+      "canonicalId": "alibaba/wan-2.7",
       "family": "wan",
       "creator": "Alibaba",
       "provider": "fal",
       "endpointId": "fal-ai/wan/v2.7/image-to-video",
       "displayName": "Wan",
       "modality": "video",
-      "primaryTask": "lip-sync",
+      "primaryTask": "image-to-video",
       "tasks": [
-        "lip-sync"
+        "image-to-video"
       ],
       "description": "Wan 2.7 is the latest generation AI video model, delivering enhanced motion smoothness, superior scene fidelity, and greater visual coherence.",
       "source": "fal",
@@ -10522,7 +10609,7 @@
           "video"
         ],
         "tasks": [
-          "lip-sync"
+          "image-to-video"
         ],
         "maxReferenceImages": 2,
         "maxReferenceVideos": 1,
@@ -10701,7 +10788,7 @@
         "transform",
         "lipsync"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/flash/image-to-video",
@@ -10806,186 +10893,7 @@
         "image-to-video",
         "audio"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
-    },
-    {
-      "id": "fal:kling/v4/flash/reference-to-video",
-      "canonicalId": "kuaishou/kling-4",
-      "family": "kling",
-      "creator": "Kuaishou",
-      "provider": "fal",
-      "endpointId": "kling/v4/flash/reference-to-video",
-      "displayName": "Kling 4.0 Flash Reference to Video",
-      "modality": "video",
-      "primaryTask": "reference-to-video",
-      "tasks": [
-        "reference-to-video"
-      ],
-      "description": "Kling 4.0 Flash generates 720p videos from text prompts and image or video references, with durations from 3 to 20 seconds.",
-      "source": "fal",
-      "schemaUrl": "https://api.fal.ai/v1/models?endpoint_id=kling%2Fv4%2Fflash%2Freference-to-video&expand=openapi-3.0",
-      "docsUrl": "https://fal.run/kling/v4/flash/reference-to-video",
-      "schemaQuality": "openapi-live",
-      "status": "active",
-      "capabilities": {
-        "inputModalities": [
-          "text",
-          "image",
-          "video"
-        ],
-        "outputModalities": [
-          "video"
-        ],
-        "tasks": [
-          "reference-to-video"
-        ],
-        "maxReferenceImages": 10,
-        "maxReferenceVideos": 5,
-        "supportsImageInput": true,
-        "aspectRatios": [
-          "auto",
-          "16:9",
-          "9:16",
-          "1:1",
-          "4:3",
-          "3:4",
-          "21:9"
-        ],
-        "resolutions": [
-          "720p"
-        ],
-        "duration": {
-          "min": 3,
-          "max": 20,
-          "default": 5
-        }
-      },
-      "parameters": [
-        {
-          "key": "prompt",
-          "standardKey": "prompt",
-          "label": "Prompt",
-          "type": "string",
-          "required": true,
-          "maxLength": 26000,
-          "uiOrder": 0,
-          "description": "Text prompt. Reference inputs as @Image1, @Video1, @Element1, etc."
-        },
-        {
-          "key": "duration",
-          "standardKey": "duration",
-          "label": "Duration",
-          "type": "integer",
-          "required": false,
-          "default": 5,
-          "min": 3,
-          "max": 20,
-          "uiOrder": 1,
-          "description": "Video duration in seconds (3-20)."
-        },
-        {
-          "key": "start_image_url",
-          "standardKey": "inputImage",
-          "label": "Start Image Url",
-          "type": "string",
-          "required": false,
-          "uiOrder": 2,
-          "description": "Optional image to use as the first frame. Counts toward the image reference limit."
-        },
-        {
-          "key": "image_urls",
-          "standardKey": "referenceImages",
-          "label": "Image Urls",
-          "type": "array",
-          "required": false,
-          "maxItems": 10,
-          "itemType": "string",
-          "uiOrder": 3,
-          "description": "Reference images, referenced as @Image1, @Image2, ... (max 10)."
-        },
-        {
-          "key": "video_urls",
-          "standardKey": "referenceVideos",
-          "label": "Video Urls",
-          "type": "array",
-          "required": false,
-          "maxItems": 5,
-          "itemType": "string",
-          "uiOrder": 4,
-          "description": "Reference videos (3-20s each, 20s combined with element videos), referenced as @Video1, @Video2, ... (max 5)."
-        },
-        {
-          "key": "elements",
-          "label": "Elements",
-          "type": "array",
-          "required": false,
-          "maxItems": 7,
-          "itemType": "object",
-          "uiOrder": 5,
-          "description": "Characters/objects, referenced as @Element1, @Element2, ... (max 7). Up to 3 may be video elements. Flash does not accept voices."
-        },
-        {
-          "key": "keep_audio",
-          "label": "Keep Audio",
-          "type": "boolean",
-          "required": false,
-          "default": false,
-          "uiOrder": 6,
-          "description": "Keep the original audio of the first reference video (@Video1) instead of generating new audio. Cannot be combined with voices."
-        },
-        {
-          "key": "resolution",
-          "standardKey": "resolution",
-          "label": "Resolution",
-          "type": "enum",
-          "required": false,
-          "default": "720p",
-          "enum": [
-            "720p"
-          ],
-          "uiOrder": 7,
-          "description": "Output resolution. Flash is 720p only."
-        },
-        {
-          "key": "aspect_ratio",
-          "standardKey": "aspectRatio",
-          "label": "Aspect Ratio",
-          "type": "enum",
-          "required": false,
-          "default": "16:9",
-          "enum": [
-            "auto",
-            "16:9",
-            "9:16",
-            "1:1",
-            "4:3",
-            "3:4",
-            "21:9"
-          ],
-          "uiOrder": 8,
-          "description": "Aspect ratio of the generated video. 'auto' adapts it to the references."
-        }
-      ],
-      "standardParameterMap": {
-        "duration": "duration",
-        "referenceImages": "image_urls",
-        "referenceVideos": "video_urls",
-        "inputImage": "start_image_url",
-        "aspectRatio": "aspect_ratio",
-        "prompt": "prompt",
-        "resolution": "resolution"
-      },
-      "requiredParameters": [
-        "prompt"
-      ],
-      "tags": [
-        "kling",
-        "v4",
-        "flash",
-        "reference-to-video",
-        "audio"
-      ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/image-to-image",
@@ -11176,7 +11084,7 @@
       "tags": [
         "image-to-image"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/image-to-video",
@@ -11336,7 +11244,7 @@
         "cinematic",
         "kling"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/long-image",
@@ -11483,7 +11391,7 @@
         "webpage",
         "ecommerce"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/reference-to-video",
@@ -11728,7 +11636,7 @@
         "video-reference",
         "kling"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/text-to-video",
@@ -11877,7 +11785,7 @@
         "cinematic",
         "kling"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:kling/v4/video-to-video/edit",
@@ -12117,7 +12025,7 @@
         "image-reference",
         "kling"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.5/flare/edit",
@@ -12353,7 +12261,7 @@
         "transform",
         "editing"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.5/flare/text-to-image",
@@ -12560,7 +12468,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.5/sunburst/edit",
@@ -12796,7 +12704,7 @@
         "transform",
         "editing"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.5/sunburst/text-to-image",
@@ -13003,7 +12911,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.6/flare/edit",
@@ -13296,7 +13204,7 @@
         "transform",
         "editing"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.6/flare/text-to-image",
@@ -13571,7 +13479,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.6/sunburst/edit",
@@ -13864,7 +13772,7 @@
         "transform",
         "editing"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     },
     {
       "id": "fal:openai/gpt-image-2.6/sunburst/text-to-image",
@@ -14139,7 +14047,7 @@
         "typography",
         "stylized"
       ],
-      "syncedAt": "2026-11-23T10:37:04.335Z"
+      "syncedAt": "2026-11-23T12:30:54.580Z"
     }
   ]
 }

@@ -37,7 +37,9 @@ const WIRE_TO_STANDARD_KEY: Record<string, StandardParameterKey> = {
   num_images: 'count',
   n: 'count',
   num_outputs: 'count',
-  max_images: 'maxLayers',
+  max_images: 'count',
+  num_layers: 'maxLayers',
+  max_layers: 'maxLayers',
   output_format: 'outputFormat',
   format: 'outputFormat',
   output_mime_type: 'outputFormat',
@@ -639,12 +641,14 @@ export function inferCapabilitiesFromParameters(
 
 /**
  * Classify a provider category / endpoint slug into normalized modality + tasks.
+ * Evaluates explicit endpoint/category signals before optional capability tags so
+ * tags such as `lipsync` never override an explicit `text-to-video` or `image-to-video` slug.
  */
-export function classifyMultimodalTask(
-  categoryOrSlug: string,
+function classifyMultimodalText(
+  text: string,
   explicitModality?: string,
 ): { modality: MultimodalModality; primaryTask: MultimodalTask; tasks: MultimodalTask[] } | null {
-  const s = `${categoryOrSlug} ${explicitModality ?? ''}`.toLowerCase().replace(/_/g, '-');
+  const s = `${text} ${explicitModality ?? ''}`.toLowerCase().replace(/_/g, '-');
 
   // Exclude pure LLM / text / embedding / training endpoints
   if (/\b(?:to-text|llm|chat|embedding|rerank|training|lora-train|detection|segmentation|ocr|caption)\b/.test(s) && !/speech-to-text|image-to-image|text-to-image|text-to-video|image-to-video|text-to-audio|text-to-speech|text-to-music/.test(s)) {
@@ -657,27 +661,30 @@ export function classifyMultimodalTask(
     return { modality: '3d', primaryTask: task, tasks: [task] };
   }
 
-  // Video
+  // Video — check explicit task slugs/categories BEFORE capability tags like `lipsync`/`avatar`.
   if (/first-last-frame|start-end-frame/.test(s)) {
     return { modality: 'video', primaryTask: 'first-last-frame-to-video', tasks: ['first-last-frame-to-video', 'image-to-video'] };
   }
   if (/reference-to-video|\br2v\b/.test(s)) {
     return { modality: 'video', primaryTask: 'reference-to-video', tasks: ['reference-to-video'] };
   }
-  if (/lip-?sync|avatar|talking/.test(s) && /video|sync|avatar/.test(s)) {
-    return { modality: 'video', primaryTask: 'lip-sync', tasks: ['lip-sync'] };
-  }
-  if (/video-to-video|video-edit|\/edit/.test(s) && /video|kling|seedance|veo|wan|runway|luma|sora|hailuo|vidu|pixverse/.test(s)) {
+  if (/video-to-video|video-edit|edit-video|\/edit\b/.test(s) && /video|kling|seedance|veo|wan|runway|luma|sora|hailuo|vidu|pixverse/.test(s) && !/image-to-image|text-to-image|edit-image|image-edit|edit-sequential/.test(s)) {
     const isEdit = /edit/.test(s);
     return { modality: 'video', primaryTask: isEdit ? 'video-edit' : 'video-to-video', tasks: [isEdit ? 'video-edit' : 'video-to-video'] };
   }
-  if (/video-extend|extend/.test(s) && /video|veo|kling|seedance|luma|runway/.test(s)) {
+  if (/video-extend|extend-video|\bextend\b/.test(s) && /video|veo|kling|seedance|luma|runway/.test(s)) {
     return { modality: 'video', primaryTask: 'video-extend', tasks: ['video-extend'] };
   }
   if (/image-to-video|\bi2v\b/.test(s)) {
     return { modality: 'video', primaryTask: 'image-to-video', tasks: ['image-to-video'] };
   }
-  if (/text-to-video|\bt2v\b|video-generation|\bvideo\b/.test(s) && !/image-to-image|text-to-image|text-to-speech|text-to-audio/.test(s)) {
+  if (/text-to-video|\bt2v\b/.test(s)) {
+    return { modality: 'video', primaryTask: 'text-to-video', tasks: ['text-to-video'] };
+  }
+  if (/lip-?sync|avatar|talking/.test(s) && /video|sync|avatar|lip/.test(s)) {
+    return { modality: 'video', primaryTask: 'lip-sync', tasks: ['lip-sync'] };
+  }
+  if (/video-generation|\bvideo\b/.test(s) && !/image-to-image|text-to-image|text-to-speech|text-to-audio/.test(s)) {
     return { modality: 'video', primaryTask: 'text-to-video', tasks: ['text-to-video'] };
   }
 
@@ -729,7 +736,7 @@ export function classifyMultimodalTask(
   if (/outpaint/.test(s)) {
     return { modality: 'image', primaryTask: 'outpainting', tasks: ['outpainting', 'image-edit'] };
   }
-  if (/\/edit\b|image-edit|kontext/.test(s)) {
+  if (/\/edit\b|image-edit|edit-image|edit-sequential|kontext/.test(s)) {
     return { modality: 'image', primaryTask: 'image-edit', tasks: ['image-edit', 'image-to-image'] };
   }
   if (/image-to-image|\bi2i\b/.test(s)) {
@@ -739,6 +746,19 @@ export function classifyMultimodalTask(
     return { modality: 'image', primaryTask: 'text-to-image', tasks: ['text-to-image'] };
   }
 
+  return null;
+}
+
+export function classifyMultimodalTask(
+  categoryOrSlug: string,
+  explicitModality?: string,
+  tags?: readonly string[],
+): { modality: MultimodalModality; primaryTask: MultimodalTask; tasks: MultimodalTask[] } | null {
+  const primary = classifyMultimodalText(categoryOrSlug, explicitModality);
+  if (primary) return primary;
+  if (tags?.length) {
+    return classifyMultimodalText(`${categoryOrSlug} ${tags.join(' ')}`, explicitModality);
+  }
   return null;
 }
 
@@ -805,7 +825,7 @@ const CANONICAL_RULES: readonly CanonicalRule[] = [
     canonical: (m) => `google/lyria${m[1] ? `-${m[1].replace('-', '.')}` : ''}`,
   },
   {
-    pattern: /wan[-_/]?v?(\d+(?:[.-]\d+)?)(?:[-_/]?(prime|pro|turbo|flash|a14b|image))?/i,
+    pattern: /wan[-_/]?v?(\d+(?:[.-]\d+)?)(?:[-_/]?(prime|pro|turbo|flash|a14b|image)(?=$|[\s/_.-]))?/i,
     creator: 'Alibaba',
     family: 'wan',
     canonical: (m) => `alibaba/wan-${m[1].replace('-', '.')}${m[2] ? `-${m[2].toLowerCase()}` : ''}`,
@@ -914,12 +934,25 @@ const CANONICAL_RULES: readonly CanonicalRule[] = [
   },
 ];
 
+const TASK_PATH_SEGMENT_RE = /\/(?:first-last-frame-to-video|start-end-frame-to-video|reference-to-video|text-to-video|image-to-video|video-to-video|video-edit|edit-video|video-extend|extend-video|text-to-image|image-to-image|image-edit|edit-image|edit-sequential|sequential|text-to-speech|text-to-audio|text-to-music|speech-to-text|text-to-3d|image-to-3d|lip-sync|lipsync|upscale|inpaint|outpaint|remove-background|layerize|edit|us|t2v|i2v|r2v|v2v|t2i|i2i)(?=\/|$)/gi;
+const TASK_NAME_PHRASE_RE = /\b(?:first[- ]last[- ]frame[- ]to[- ]video|reference[- ]to[- ]video|text[- ]to[- ]video|image[- ]to[- ]video|video[- ]to[- ]video|video[- ]edit|edit[- ]video|text[- ]to[- ]image|image[- ]to[- ]image|image[- ]edit|edit[- ]image|text[- ]to[- ]speech|text[- ]to[- ]audio|text[- ]to[- ]music|speech[- ]to[- ]text|text[- ]to[- ]3d|image[- ]to[- ]3d)\b/gi;
+
+function stripTaskSegments(input: string): string {
+  return input
+    .replace(TASK_PATH_SEGMENT_RE, '')
+    .replace(TASK_NAME_PHRASE_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function resolveCanonicalIdentity(
   endpointId: string,
   displayName?: string,
   organization?: string,
 ): { canonicalId: string; family: string; creator: string } {
-  const probe = `${endpointId} ${displayName ?? ''}`;
+  const strippedEndpoint = stripTaskSegments(endpointId);
+  const strippedDisplay = displayName ? stripTaskSegments(displayName) : '';
+  const probe = `${strippedEndpoint} ${strippedDisplay}`.trim();
   const lower = probe.toLowerCase();
 
   for (const rule of CANONICAL_RULES) {
@@ -933,9 +966,8 @@ export function resolveCanonicalIdentity(
     }
   }
 
-  const clean = endpointId
+  const clean = strippedEndpoint
     .replace(/^fal-ai\//i, '')
-    .replace(/\/(?:text-to-image|image-to-image|image-edit|edit|text-to-video|image-to-video|reference-to-video|video-to-video|first-last-frame-to-video|text-to-speech|text-to-audio|text-to-music|speech-to-text)$/i, '')
     .replace(/\/us$/i, '')
     .toLowerCase();
   const segments = clean.split('/').filter(Boolean);
@@ -981,24 +1013,58 @@ function mergeDuration(durations: (DurationCapability | undefined)[]): DurationC
 
 /**
  * Aggregate provider endpoints into canonical cross-provider `CanonicalModelRecord`s.
+ * Endpoints are always grouped by `(canonicalId, modality)` so a single canonical record
+ * never mixes modalities. When a canonical family spans multiple modalities, the dominant
+ * modality keeps `canonicalId` and secondary modalities are disambiguated as
+ * `${canonicalId}-${modality}` (unless `canonicalId` already ends with that suffix).
  */
 export function buildCanonicalModels(
   endpoints: readonly ModelEndpointEntry[],
 ): Record<string, CanonicalModelRecord> {
-  const grouped = new Map<string, ModelEndpointEntry[]>();
+  const byCanonical = new Map<string, Map<MultimodalModality, ModelEndpointEntry[]>>();
   for (const ep of endpoints) {
-    const list = grouped.get(ep.canonicalId) ?? [];
+    let byModality = byCanonical.get(ep.canonicalId);
+    if (!byModality) {
+      byModality = new Map<MultimodalModality, ModelEndpointEntry[]>();
+      byCanonical.set(ep.canonicalId, byModality);
+    }
+    const list = byModality.get(ep.modality) ?? [];
     list.push(ep);
-    grouped.set(ep.canonicalId, list);
+    byModality.set(ep.modality, list);
   }
 
-  const records: Record<string, CanonicalModelRecord> = {};
-  for (const canonicalId of [...grouped.keys()].sort()) {
-    const group = grouped.get(canonicalId)!.slice().sort((a, b) => {
+  const grouped = new Map<string, ModelEndpointEntry[]>();
+  const sortGroup = (items: readonly ModelEndpointEntry[]) =>
+    items.slice().sort((a, b) => {
       const qr = qualityRank(b.schemaQuality) - qualityRank(a.schemaQuality);
       if (qr !== 0) return qr;
       return b.parameters.length - a.parameters.length || a.id.localeCompare(b.id);
     });
+
+  for (const [baseId, modalityMap] of [...byCanonical.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const buckets = [...modalityMap.entries()]
+      .map(([modality, items]) => ({ modality, items: sortGroup(items) }))
+      .sort((a, b) => {
+        const qr = qualityRank(b.items[0].schemaQuality) - qualityRank(a.items[0].schemaQuality);
+        if (qr !== 0) return qr;
+        return b.items.length - a.items.length || a.modality.localeCompare(b.modality);
+      });
+
+    for (let i = 0; i < buckets.length; i++) {
+      const { modality, items } = buckets[i];
+      let recordKey = baseId;
+      if (buckets.length > 1 && i > 0) {
+        const suffix = `-${modality}`;
+        recordKey = baseId.endsWith(suffix) ? baseId : `${baseId}${suffix}`;
+      }
+      const existing = grouped.get(recordKey);
+      grouped.set(recordKey, existing ? sortGroup([...existing, ...items]) : items);
+    }
+  }
+
+  const records: Record<string, CanonicalModelRecord> = {};
+  for (const canonicalId of [...grouped.keys()].sort()) {
+    const group = grouped.get(canonicalId)!;
     const best = group[0];
 
     const inputModalities = mergeStringUnions(...group.map(g => g.capabilities.inputModalities)) as IoModality[];

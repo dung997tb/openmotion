@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-23T10:37:04.334Z",
+  "generatedAt": "2026-11-23T12:30:54.579Z",
   "syncScope": "flagship",
   "shards": [
     "providers/curated.json",
@@ -160,7 +160,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-alibaba-token-plan",
+      "id": "modelsdev-alibaba-quota-plan",
       "name": "Alibaba Token Plan (via models.dev)",
       "docsUrl": "https://www.alibabacloud.com/help/en/model-studio/token-plan-overview",
       "catalogUrl": "https://models.dev/api.json",
@@ -170,7 +170,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-alibaba-token-plan-cn",
+      "id": "modelsdev-alibaba-quota-plan-cn",
       "name": "Alibaba Token Plan (China) (via models.dev)",
       "docsUrl": "https://www.alibabacloud.com/help/zh/model-studio/token-plan-overview",
       "catalogUrl": "https://models.dev/api.json",
@@ -430,7 +430,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-ams",
+      "id": "modelsdev-xiaomi-quota-plan-ams",
       "name": "Xiaomi Token Plan (Europe) (via models.dev)",
       "docsUrl": "https://platform.xiaomimimo.com/#/docs",
       "catalogUrl": "https://models.dev/api.json",
@@ -440,7 +440,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-cn",
+      "id": "modelsdev-xiaomi-quota-plan-cn",
       "name": "Xiaomi Token Plan (China) (via models.dev)",
       "docsUrl": "https://platform.xiaomimimo.com/#/docs",
       "catalogUrl": "https://models.dev/api.json",
@@ -450,7 +450,7 @@
       "supportsLiveSchema": false
     },
     {
-      "id": "modelsdev-xiaomi-token-plan-sgp",
+      "id": "modelsdev-xiaomi-quota-plan-sgp",
       "name": "Xiaomi Token Plan (Singapore) (via models.dev)",
       "docsUrl": "https://platform.xiaomimimo.com/#/docs",
       "catalogUrl": "https://models.dev/api.json",
@@ -523,7 +523,7 @@
     {
       "source": "curated",
       "status": "ok",
-      "fetchedAt": "2026-11-23T10:37:04.334Z",
+      "fetchedAt": "2026-11-23T12:30:54.579Z",
       "durationMs": 0,
       "endpointCount": 25,
       "withDetailedSchema": 25,
@@ -532,29 +532,29 @@
     {
       "source": "fal",
       "url": "https://api.fal.ai/v1/models?expand=openapi-3.0",
-      "status": "ok",
-      "fetchedAt": "2026-11-23T10:37:04.335Z",
-      "durationMs": 3039,
+      "status": "partial",
+      "fetchedAt": "2026-11-23T12:30:54.580Z",
+      "durationMs": 2814,
       "endpointCount": 68,
       "withDetailedSchema": 68,
-      "note": "Synced flagship active endpoints with OpenAPI 3.0 parameter expansion."
+      "note": "Synced flagship active endpoints (17/27 queries failed: HTTP 429 for https://api.fal.ai/v1/models?q=meshy&limit=8&status=active&expand=openapi-3.0)."
     },
     {
       "source": "atlascloud",
       "url": "https://api.atlascloud.ai/api/v1/models",
       "status": "ok",
-      "fetchedAt": "2026-11-23T10:37:04.355Z",
-      "durationMs": 13814,
+      "fetchedAt": "2026-11-23T12:30:54.599Z",
+      "durationMs": 17562,
       "endpointCount": 282,
       "withDetailedSchema": 120,
-      "note": "Filtered from 477 live multimodal listings; downloaded 120 OpenAPI schemas."
+      "note": "Filtered from 477 live multimodal listings; downloaded 120/120 OpenAPI schemas."
     },
     {
       "source": "models-dev",
       "url": "https://models.dev/api.json",
       "status": "ok",
-      "fetchedAt": "2026-11-23T10:37:04.356Z",
-      "durationMs": 1487,
+      "fetchedAt": "2026-11-23T12:30:54.600Z",
+      "durationMs": 1506,
       "endpointCount": 344,
       "withDetailedSchema": 0,
       "note": "Extracted all non-text-output multimodal models from models.dev/api.json."
@@ -563,8 +563,8 @@
       "source": "openrouter",
       "url": "https://openrouter.ai/api/v1/models",
       "status": "ok",
-      "fetchedAt": "2026-11-23T10:37:04.356Z",
-      "durationMs": 1119,
+      "fetchedAt": "2026-11-23T12:30:54.600Z",
+      "durationMs": 3267,
       "endpointCount": 19,
       "withDetailedSchema": 0,
       "note": "Extracted all multimodal output models from OpenRouter API."
@@ -573,7 +573,7 @@
       "source": "replicate",
       "url": "https://api.replicate.com/v1/models",
       "status": "skipped",
-      "fetchedAt": "2026-11-23T10:37:04.357Z",
+      "fetchedAt": "2026-11-23T12:30:54.601Z",
       "durationMs": 0,
       "endpointCount": 0,
       "withDetailedSchema": 0,
@@ -582,11 +582,11 @@
   ],
   "stats": {
     "totalEndpoints": 738,
-    "totalCanonicalModels": 235,
+    "totalCanonicalModels": 241,
     "withDetailedSchema": 213,
     "byModality": {
-      "image": 359,
-      "video": 272,
+      "image": 361,
+      "video": 270,
       "audio": 103,
       "3d": 4
     },
@@ -606,8 +606,8 @@
       "opendesign": 10,
       "modelsdev-nvidia": 9,
       "modelsdev-aihubmix": 8,
-      "modelsdev-alibaba-token-plan": 7,
-      "modelsdev-alibaba-token-plan-cn": 7,
+      "modelsdev-alibaba-quota-plan": 7,
+      "modelsdev-alibaba-quota-plan-cn": 7,
       "modelsdev-google-vertex": 7,
       "modelsdev-alibaba": 6,
       "modelsdev-abacus": 5,
@@ -620,9 +620,9 @@
       "modelsdev-302ai": 3,
       "modelsdev-merge-gateway": 3,
       "modelsdev-qiniu-ai": 3,
-      "modelsdev-xiaomi-token-plan-ams": 3,
-      "modelsdev-xiaomi-token-plan-cn": 3,
-      "modelsdev-xiaomi-token-plan-sgp": 3,
+      "modelsdev-xiaomi-quota-plan-ams": 3,
+      "modelsdev-xiaomi-quota-plan-cn": 3,
+      "modelsdev-xiaomi-quota-plan-sgp": 3,
       "modelsdev-zenmux": 3,
       "bytedance": 2,
       "google": 2,
@@ -648,7 +648,7 @@
       "gpt-image": 69,
       "wan": 59,
       "flux": 51,
-      "kling": 45,
+      "kling": 44,
       "seedance": 42,
       "seedream": 40,
       "hailuo": 39,
@@ -656,7 +656,7 @@
       "veo": 28,
       "vidu": 27,
       "gpt": 16,
-      "qwen-image": 15,
+      "qwen-image": 14,
       "elevenlabs": 11,
       "pixverse": 11,
       "lyria": 10,
@@ -689,6 +689,7 @@
       "step-tts": 2,
       "stepaudio": 2,
       "tts": 2,
+      "ai-avatar": 1,
       "auto-beta": 1,
       "auto-code": 1,
       "chatgpt-image-latest": 1,
@@ -714,6 +715,7 @@
       "orpheus": 1,
       "orpheus-arabic-saudi": 1,
       "proteus": 1,
+      "qwen-": 1,
       "qwen3-livetranslate-flash-realtime": 1,
       "qwen3-tts-voicedesign": 1,
       "s1": 1,

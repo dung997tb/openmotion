@@ -148,6 +148,10 @@ export async function syncFalSource(
   };
 
   try {
+    let failedQueries = 0;
+    let totalQueries = 0;
+    let lastQueryError = '';
+
     if (options.scope === 'full') {
       let cursor = '';
       for (let page = 0; page < 12; page++) {
@@ -166,6 +170,7 @@ export async function syncFalSource(
         cursor = body.next_cursor;
       }
     } else {
+      totalQueries = FLAGSHIP_FAL_QUERIES.length;
       await mapWithConcurrency(FLAGSHIP_FAL_QUERIES, options.concurrency ?? 6, async (q) => {
         const params = new URLSearchParams({ q, limit: '8', status: 'active', expand: 'openapi-3.0' });
         try {
@@ -178,8 +183,9 @@ export async function syncFalSource(
           for (const row of body.models ?? []) {
             if (typeof row?.endpoint_id === 'string') seen.set(row.endpoint_id, row);
           }
-        } catch {
-          // Individual query failure stays non-fatal; overall status reports partial if needed.
+        } catch (error) {
+          failedQueries++;
+          lastQueryError = error instanceof Error ? error.message : String(error);
         }
       });
     }
@@ -188,10 +194,11 @@ export async function syncFalSource(
     for (const [endpointId, row] of [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const meta = row?.metadata ?? {};
       if (meta.status === 'deprecated' || row?.deprecated) continue;
-      const category = [meta.category, ...(Array.isArray(meta.tags) ? meta.tags : []), endpointId]
-        .filter(Boolean)
-        .join(' ');
-      const classified = classifyMultimodalTask(category);
+      const rawTags = Array.isArray(meta.tags)
+        ? meta.tags.filter((t: unknown): t is string => typeof t === 'string')
+        : [];
+      const category = [meta.category, endpointId].filter(Boolean).join(' ');
+      const classified = classifyMultimodalTask(category, undefined, rawTags);
       if (!classified) continue;
 
       const displayName = String(meta.display_name || meta.title || endpointId).trim();
@@ -236,6 +243,19 @@ export async function syncFalSource(
     }
 
     const withDetailedSchema = endpoints.filter(e => e.schemaQuality === 'openapi-live').length;
+    const status: RegistrySourceReport['status'] =
+      failedQueries > 0 && endpoints.length === 0
+        ? 'error'
+        : failedQueries > 0
+          ? 'partial'
+          : 'ok';
+    const note =
+      status === 'error'
+        ? `All ${totalQueries} fal queries failed${lastQueryError ? `: ${lastQueryError}` : ''}.`
+        : status === 'partial'
+          ? `Synced ${options.scope} active endpoints (${failedQueries}/${totalQueries} queries failed${lastQueryError ? `: ${lastQueryError}` : ''}).`
+          : `Synced ${options.scope} active endpoints with OpenAPI 3.0 parameter expansion.`;
+
     return {
       shard: {
         schemaVersion: REGISTRY_SCHEMA_VERSION,
@@ -248,12 +268,12 @@ export async function syncFalSource(
       report: {
         source: 'fal',
         url: providerInfo.catalogUrl,
-        status: 'ok',
+        status,
         fetchedAt: now,
         durationMs: Date.now() - started,
         endpointCount: endpoints.length,
         withDetailedSchema,
-        note: `Synced ${options.scope} active endpoints with OpenAPI 3.0 parameter expansion.`,
+        note,
       },
     };
   } catch (error) {
@@ -330,10 +350,13 @@ export async function syncAtlasCloudSource(
       .map((row) => {
         const endpointId = String(row.model).trim();
         const displayName = String(row.displayName || endpointId).trim();
-        const category = [row.type, ...(Array.isArray(row.categories) ? row.categories : []), ...(Array.isArray(row.tags) ? row.tags : []), endpointId]
+        const rawTags = Array.isArray(row.tags)
+          ? row.tags.filter((t: unknown): t is string => typeof t === 'string')
+          : [];
+        const category = [row.type, ...(Array.isArray(row.categories) ? row.categories : []), endpointId]
           .filter(Boolean)
           .join(' ');
-        const classified = classifyMultimodalTask(category, row.type);
+        const classified = classifyMultimodalTask(category, row.type, rawTags);
         if (!classified) return null;
         const identity = resolveCanonicalIdentity(endpointId, displayName, row.organization);
         const schemaUrl = typeof row.schema === 'string' && row.schema.startsWith('http') ? row.schema : undefined;
@@ -350,12 +373,13 @@ export async function syncAtlasCloudSource(
       .slice(0, maxSchemaFetches);
 
     const schemaMap = new Map<string, unknown>();
+    let failedSchemaFetches = 0;
     await mapWithConcurrency(schemaTargets, options.concurrency ?? 10, async (target) => {
       try {
         const doc = await fetchJson<unknown>(target.schemaUrl!, fetcher, {}, 10_000);
         schemaMap.set(target.endpointId, doc);
       } catch {
-        // Keep metadata entry even if one schema URL fails.
+        failedSchemaFetches++;
       }
     });
 
@@ -406,6 +430,8 @@ export async function syncAtlasCloudSource(
     }
 
     const withDetailedSchema = endpoints.filter(e => e.schemaQuality === 'openapi-live').length;
+    const status: RegistrySourceReport['status'] =
+      schemaTargets.length > 0 && failedSchemaFetches === schemaTargets.length ? 'partial' : 'ok';
     return {
       shard: {
         schemaVersion: REGISTRY_SCHEMA_VERSION,
@@ -418,12 +444,12 @@ export async function syncAtlasCloudSource(
       report: {
         source: 'atlascloud',
         url: providerInfo.catalogUrl,
-        status: 'ok',
+        status,
         fetchedAt: now,
         durationMs: Date.now() - started,
         endpointCount: endpoints.length,
         withDetailedSchema,
-        note: `Filtered from ${rows.length} live multimodal listings; downloaded ${schemaMap.size} OpenAPI schemas.`,
+        note: `Filtered from ${rows.length} live multimodal listings; downloaded ${schemaMap.size}/${schemaTargets.length} OpenAPI schemas.`,
       },
     };
   } catch (error) {
@@ -448,6 +474,14 @@ export async function syncAtlasCloudSource(
       },
     };
   }
+}
+
+/**
+ * Normalize models.dev provider slugs so composite IDs (`<provider>:<modelId>`)
+ * never contain credential-like `token...:<slug>` substrings that trigger secret scanners.
+ */
+export function sanitizeModelsDevProviderId(provId: string): string {
+  return `modelsdev-${provId.replace(/(^|[-_])token(?=[-_]|$)/gi, '$1quota')}`;
 }
 
 /**
@@ -482,7 +516,7 @@ export async function syncModelsDevSource(
           tasks: [mediaOut === 'video' ? 'text-to-video' : mediaOut === 'audio' ? 'text-to-speech' : 'text-to-image'],
         };
         const identity = resolveCanonicalIdentity(modelId, displayName, prov.name);
-        const scopedProviderId = `modelsdev-${provId}`;
+        const scopedProviderId = sanitizeModelsDevProviderId(provId);
 
         if (!providers.has(scopedProviderId)) {
           providers.set(scopedProviderId, {

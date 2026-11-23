@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { GenerationOption, GenerationOptions } from '../../../shared/generation-options.ts';
 import { buildCanonicalModels, computeRegistryStats } from './normalize.ts';
 import {
   assertValidShard,
@@ -344,7 +345,9 @@ export function validateModelParameters(
   const defaults = extractEndpointDefaults(endpoint);
   const byWireKey = new Map(endpoint.parameters.map(p => [p.key, p]));
   const issues: ParameterValidationIssue[] = [];
-  const resolvedPayload: Record<string, unknown> = { ...defaults };
+  // Keep schema defaults out of `resolvedPayload` so unchanged fields stay omitted
+  // and inherit saved/provider defaults (`defaults` is returned separately).
+  const resolvedPayload: Record<string, unknown> = {};
 
   // Translate canonical standard keys -> provider-native wire keys when wire key isn't directly provided.
   for (const [rawKey, value] of Object.entries(input)) {
@@ -476,7 +479,7 @@ export function validateModelParameters(
     const choiceMeta = field.choices?.find(c => c.value === val);
     if (choiceMeta?.requires?.length) {
       for (const req of choiceMeta.requires) {
-        const siblingVal = resolvedPayload[req.field];
+        const siblingVal = resolvedPayload[req.field] ?? defaults[req.field];
         if (!req.values.includes(siblingVal as string | number | boolean)) {
           issues.push({
             key: field.key,
@@ -610,25 +613,10 @@ export function formatComparisonMarkdown(comparison: ModelComparisonResult): str
 }
 
 /**
- * Bridge helper: convert a registry `ModelEndpointEntry` into OpenMotion's `GenerationOptions` UI contract.
+ * Bridge helper: convert a registry `ModelEndpointEntry` into OpenMotion's shared `GenerationOptions` UI contract.
  */
-export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): {
-  delivery: 'provider';
-  fields: {
-    key: string;
-    label: string;
-    kind: 'choice' | 'number' | 'boolean' | 'text';
-    choices?: { value: string | number; label: string }[];
-    default?: string | number | boolean;
-    min?: number;
-    max?: number;
-    step?: number;
-    presentation?: 'ratio' | 'count';
-    required?: boolean;
-    allowCustom?: boolean;
-  }[];
-} {
-  const fields: ReturnType<typeof toOpenMotionGenerationOptions>['fields'] = [];
+export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): GenerationOptions {
+  const fields: GenerationOption[] = [];
 
   for (const p of endpoint.parameters) {
     if (p.standardKey === 'prompt' || p.type === 'array' || p.type === 'object') continue;
@@ -639,12 +627,26 @@ export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): {
     if (p.type === 'enum' && p.enum?.length) {
       const primitiveChoices = p.enum.filter((v): v is string | number => typeof v === 'string' || typeof v === 'number');
       if (!primitiveChoices.length) continue;
-      const choiceMap = new Map(p.choices?.map(c => [c.value, c.label]) ?? []);
+      const choiceMetaByValue = new Map(p.choices?.map(c => [c.value, c]) ?? []);
       fields.push({
         key: p.key,
         label: p.label,
         kind: 'choice',
-        choices: primitiveChoices.map(value => ({ value, label: choiceMap.get(value) ?? String(value) })),
+        choices: primitiveChoices.map((value) => {
+          const meta = choiceMetaByValue.get(value);
+          const requires = meta?.requires?.length
+            ? Object.fromEntries(
+                meta.requires
+                  .filter(r => r.values.length > 0 && (typeof r.values[0] === 'string' || typeof r.values[0] === 'number'))
+                  .map(r => [r.field, r.values[0] as string | number]),
+              )
+            : undefined;
+          return {
+            value,
+            label: meta?.label ?? String(value),
+            ...(requires && Object.keys(requires).length ? { requires } : {}),
+          };
+        }),
         ...(typeof p.default === 'string' || typeof p.default === 'number' ? { default: p.default } : {}),
         ...(p.standardKey === 'aspectRatio' ? { presentation: 'ratio' as const } : {}),
         ...(p.required ? { required: true } : {}),
@@ -681,5 +683,8 @@ export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): {
     }
   }
 
-  return { delivery: 'provider', fields };
+  const delivery: GenerationOptions['delivery'] =
+    endpoint.provider === 'codex' || endpoint.tags?.includes('prompt-delivery') ? 'prompt' : 'provider';
+
+  return { delivery, fields };
 }
