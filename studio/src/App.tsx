@@ -68,6 +68,7 @@ import { useStudioSessionStart } from "./hooks/useStudioSessionStart";
 import { useTimelineAddAtPlayhead } from "./hooks/useTimelineAddAtPlayhead";
 import { readStudioUrlStateFromWindow, resolveMasterCompositionPath } from "./utils/studioUrlState";
 import { useActiveComposition } from "./hooks/useActiveComposition";
+import { forgetPreviewHtmlSources } from "./player/lib/previewHtmlSources";
 import { requestPreviewReload } from "./player/previewReloading";
 import { useStudioHost } from "./motion/StudioHost";
 import { preloadFontLists } from "./components/editor/propertyPanelFont";
@@ -123,6 +124,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const isGestureRecordingRef = useRef(false);
   const invalidateGsapCacheRef = useRef<(path?: string | readonly string[]) => void>(() => {});
   const refreshPreviewFrame = useCallback((next: SetStateAction<number>) => {
+    forgetPreviewHtmlSources(previewIframeRef.current);
     requestPreviewReload();
     setRefreshKeyState(next);
   }, []);
