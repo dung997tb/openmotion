@@ -575,6 +575,74 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     const designHtml = designBundle.files.find(f => f.file === 'index.html');
     assert.ok(designHtml);
     assert.match(designHtml.data.toString('utf8'), /src="\.\/app\.js\?v=1"/);
+
+    // Large >=256 KiB PNG assets are automatically transcoded to WebP when cwebp/ffmpeg is available,
+    // keeping bundle payload small and rewriting HTML references to the compressed .webp path.
+    const zlib = await import('node:zlib');
+    const makeLargePng = (w: number, h: number): Buffer => {
+      const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+      const crcTable = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        crcTable[i] = c >>> 0;
+      }
+      const crc32 = (buf: Buffer) => {
+        let c = 0xffffffff;
+        for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+        return (c ^ 0xffffffff) >>> 0;
+      };
+      const chunk = (type: string, data: Buffer) => {
+        const t = Buffer.from(type, 'ascii');
+        const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0);
+        const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
+        return Buffer.concat([len, t, data, crc]);
+      };
+      const ihdr = Buffer.alloc(13);
+      ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+      ihdr[8] = 8; ihdr[9] = 6; // 8-bit RGBA
+      const raw = Buffer.alloc((w * 4 + 1) * h);
+      let seed = 1337;
+      for (let y = 0; y < h; y++) {
+        const row = y * (w * 4 + 1);
+        raw[row] = 0;
+        for (let x = 0; x < w; x++) {
+          seed = (seed * 1664525 + 1013904223) >>> 0;
+          const off = row + 1 + x * 4;
+          raw[off] = (x + (seed & 0x3f)) & 0xff;
+          raw[off + 1] = (y + ((seed >>> 8) & 0x3f)) & 0xff;
+          raw[off + 2] = ((x ^ y) + ((seed >>> 16) & 0x3f)) & 0xff;
+          raw[off + 3] = x < 32 ? 0 : 255;
+        }
+      }
+      const idat = zlib.deflateSync(raw, { level: 1 });
+      return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
+    };
+    const bigPng = makeLargePng(384, 384);
+    assert.ok(bigPng.length >= 256 * 1024, `expected fixture PNG >= 256 KiB, got ${bigPng.length}`);
+    const bigPath = path.join(store.directory, 'big-sky.png');
+    await writeFile(bigPath, bigPng);
+    const bigAsset = await new AssetLibrary(store).importFile(bigPath, { requestId: 'big-sky-1', name: 'Big Sky' });
+    const bigUrl = `/motion-api/assets/${bigAsset.id}/versions/${bigAsset.currentVersionId!}/media`;
+    const bigGame = (await games.create({ prompt: 'Big Asset Compression Test', multiplayer: false })).game;
+    const bigLoc = await games.locate(bigGame.id);
+    await writeFile(path.join(bigLoc.dir, 'index.html'), `<!doctype html><html><body><img src="${bigUrl}"></body></html>`);
+    const bigBundle = await buildPublishBundle({
+      dataDirectory: store.directory,
+      kind: 'game',
+      targetId: bigGame.id,
+      sourcePath: bigLoc.dir,
+      entryPath: 'index.html',
+    });
+    const bigBundled = bigBundle.files.find(f => f.file.startsWith('_shared-assets/'));
+    assert.ok(bigBundled);
+    const bigHtml = bigBundle.files.find(f => f.file === 'index.html')!.data.toString('utf8');
+    if (bigBundled.file.endsWith('.webp')) {
+      assert.ok(bigBundled.data.length < bigPng.length * 0.85, 'compressed WebP must be meaningfully smaller');
+      assert.match(bigHtml, /\.webp/);
+    } else {
+      assert.equal(bigBundled.data.length, bigPng.length);
+    }
   }));
 
 test('WebPublishService migrates legacy cloud-shares records and preserves cloudProjectId/slug', () =>

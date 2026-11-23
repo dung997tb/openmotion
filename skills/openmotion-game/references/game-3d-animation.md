@@ -56,9 +56,16 @@ only from geometry. Within the performance budget in `game-flow.md`:
   formula block 4, a hemisphere fill, `ACESFilmicToneMapping`, sRGB output,
   fog matched to the sky. Add bloom or vignette only when the frame budget
   allows on the weakest target.
-- **Silhouettes:** bevelled edges, extruded profiles instead of raw
+- **Silhouettes & combat readability:** bevelled edges, extruded profiles instead of raw
   boxes, a rim or outline pass for readability, contact shadows (a blurred
-  decal under characters) instead of realtime shadow maps.
+  decal under characters) instead of realtime shadow maps. In top-down or
+  isometric 3D action/defense games, keep camera distance tight enough that
+  players, enemies and projectiles are immediately unmistakable in playtest
+  screenshots: size every enemy silhouette generously relative to the player
+  (never tiny sub-pixel specks; fast/runner enemies should stay ≥ 0.85× standard
+  enemy scale and ≥ ~60% of hero height) and give enemies high-contrast
+  emissive accents, bright eyes/cores or ground target rings so they never
+  vanish into dark arenas or nebula skyboxes.
 
 ## Discovery contract for future 3D models
 

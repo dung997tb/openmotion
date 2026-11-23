@@ -1,12 +1,61 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { WebPublishTargetKind } from '../shared/web-publish.ts';
 import { WorkspaceStore } from '../workspace.ts';
 import { AssetLibrary } from './asset-library.ts';
 
+const execFileAsync = promisify(execFile);
+
 export const MAX_PUBLISH_FILES = 500;
 export const MAX_PUBLISH_BYTES = 50 * 1024 * 1024;
+const WEBP_COMPRESS_MIN_BYTES = 256 * 1024;
+
+async function maybeCompressRasterForPublish(
+  sourcePath: string,
+  originalBytes: Buffer,
+  ext: string,
+  mimeType?: string,
+): Promise<{ data: Buffer; ext: string }> {
+  const isCompressible =
+    originalBytes.length >= WEBP_COMPRESS_MIN_BYTES
+    && (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || mimeType === 'image/png' || mimeType === 'image/jpeg');
+  if (!isCompressible) return { data: originalBytes, ext };
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'openmotion-publish-webp-'));
+  const outputPath = path.join(tempDir, 'out.webp');
+  try {
+    let encoded = false;
+    try {
+      await execFileAsync('cwebp', ['-quiet', '-q', '82', '-alpha_q', '90', sourcePath, '-o', outputPath], {
+        timeout: 15_000,
+      });
+      encoded = true;
+    } catch {
+      try {
+        await execFileAsync(
+          'ffmpeg',
+          ['-y', '-loglevel', 'error', '-i', sourcePath, '-c:v', 'libwebp', '-quality', '82', outputPath],
+          { timeout: 15_000 },
+        );
+        encoded = true;
+      } catch {
+        encoded = false;
+      }
+    }
+    if (!encoded) return { data: originalBytes, ext };
+    const compressed = await readFile(outputPath).catch(() => null);
+    if (compressed && compressed.length > 0 && compressed.length < originalBytes.length * 0.85) {
+      return { data: compressed, ext: '.webp' };
+    }
+    return { data: originalBytes, ext };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 const EXCLUDED_NAMES = new Set([
   'node_modules',
@@ -188,16 +237,25 @@ export async function buildPublishBundle(input: {
     } catch {
       return null;
     }
-    const bytes = await readFile(resolved.filename).catch(() => null);
-    if (!bytes) return null;
+    const rawBytes = await readFile(resolved.filename).catch(() => null);
+    if (!rawBytes) return null;
+
+    const rawExt = path.extname(resolved.version.filename || '') || MIME_EXTENSIONS[resolved.version.mimeType || ''] || '';
+    const safeRawExt = /^\.[A-Za-z0-9]{1,10}$/.test(rawExt) ? rawExt.toLowerCase() : '';
+    const optimized = await maybeCompressRasterForPublish(
+      resolved.filename,
+      rawBytes,
+      safeRawExt,
+      resolved.version.mimeType,
+    );
+    const bytes = optimized.data;
+    const safeExt = optimized.ext;
 
     totalBytes += bytes.length;
     if (rawFiles.length + bundledAssets.size >= MAX_PUBLISH_FILES || totalBytes > MAX_PUBLISH_BYTES) {
       throw new Error(`INVALID_ARGUMENT: Bundled publication exceeds ${MAX_PUBLISH_BYTES / (1024 * 1024)} MiB limit`);
     }
 
-    const rawExt = path.extname(resolved.version.filename || '') || MIME_EXTENSIONS[resolved.version.mimeType || ''] || '';
-    const safeExt = /^\.[A-Za-z0-9]{1,10}$/.test(rawExt) ? rawExt.toLowerCase() : '';
     let targetPath = `_shared-assets/${assetId}-${versionId}${safeExt}`;
     let collisionIndex = 1;
     while (knownPaths.has(targetPath)) {
