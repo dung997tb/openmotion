@@ -199,3 +199,29 @@ test("Studio whole-path drags and headless deltas translate every keyframe witho
   assert.throws(()=>applyCanvasCommand(html,{...shift,x:30} as never),/either/);
   assert.match(applyCanvasCommand(source,{kind:"moveCanvasElement",target,delta:{x:10,y:-3}}), /translate:\s*13px 1px/);
 });
+
+
+test("dragging an instantaneous animation preserves zero duration while omitted duration uses the GSAP default", () => {
+  const scene = (call: string) => '<html><body><div id="a"></div><script>const tl=gsap.timeline();tl.' + call + ';</script></body></html>';
+  const shift = (html: string) => parseGsapAnimationsFromHtml(
+    applyCanvasCommand(html, {kind:"moveCanvasElement",target,delta:{x:2,y:3}})
+  ).animations;
+  const [hold] = shift(scene('to("#a",{x:12,y:15,duration:0,immediateRender:true},2)'));
+  assert.equal(hold.method, "to");
+  assert.equal(hold.position, 2);
+  assert.equal(hold.duration, 0);
+  assert.equal(hold.keyframes, undefined);
+  assert.deepEqual(hold.properties, {x:14,y:18});
+  assert.equal(hold.extras?.immediateRender, "__raw:true");
+
+  const [instant] = shift(scene('fromTo("#a",{x:0,y:1},{x:12,y:15,duration:0},2)'));
+  assert.equal(instant.duration,0);
+  assert.deepEqual(instant.fromProperties,{x:2,y:4});
+  assert.deepEqual(instant.properties,{x:14,y:18});
+
+  const implicit = shift(scene('to("#a",{x:12,y:15},2)')).find(anim => anim.keyframes)!;
+  assert.equal(implicit.duration, 0.5);
+  assert.equal(implicit.position, 2);
+  const zeroKeys = shift(scene('to("#a",{duration:0,keyframes:{"0%":{x:1,y:2},"100%":{x:12,y:15}}},2)')).find(anim => anim.keyframes)!;
+  assert.equal(zeroKeys.duration, 0);
+});

@@ -75,6 +75,23 @@ export function planWholePathOffset(anim: GsapAnimation, deltaX: number, deltaY:
     throw new Error("Cannot translate an unresolved animation path" + (refusal ? ": " + refusal : "."));
   const ts = resolveTweenStart(anim)!;
   const td = resolveTweenDuration(anim);
+  // A hold has no path to rebuild. Keep its method, timing and immediateRender semantics.
+  if (!anim.keyframes && (anim.method === "set" || td === 0)) {
+    const translate = (props: GsapAnimation["properties"]) => {
+      const x = props.x ?? 0;
+      const y = props.y ?? 0;
+      if (typeof x !== "number" || typeof y !== "number") throw new Error("Cannot offset a non-numeric hold.");
+      return { ...props, x: roundTo3(x + deltaX), y: roundTo3(y + deltaY) };
+    };
+    return {
+      type: "update-meta",
+      animationId: anim.id,
+      updates: {
+        properties: translate(anim.properties),
+        ...(anim.fromProperties && { fromProperties: translate(anim.fromProperties) }),
+      },
+    };
+  }
 
   let kfs = anim.keyframes?.keyframes ?? [];
   if (kfs.length === 0) {
@@ -106,7 +123,7 @@ export function planWholePathOffset(anim: GsapAnimation, deltaX: number, deltaY:
     animationId: anim.id,
     targetSelector: anim.targetSelector,
     position: roundTo3(ts),
-    duration: roundTo3(td || 1),
+    duration: roundTo3(td),
     keyframes: shifted,
     ...(anim.keyframes
       ? { ease: keyframedTweenEases(anim).run, easeEach: anim.keyframes.easeEach }
