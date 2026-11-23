@@ -1,6 +1,6 @@
 import { parseAuthoredTimeline } from "./authoredTimeline";
 import type { RestoreFiles } from "../../utils/gsapUndoRestore";
-import { normalizeToZones } from "../components/timelineZones";
+import { displayAuthoredTimelineLanes } from "../components/timelineZones";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { getTimelineElementIdentity } from "./timelineDOM";
 
@@ -45,7 +45,7 @@ export function syncHistoryTimelineFromFiles(activePath: string | null, files: R
   }
   const durationChanged = before.duration !== after.duration && after.duration !== state.duration;
   if (changed || durationChanged) usePlayerStore.setState({
-    ...(changed ? { elements: normalizeToZones(elements.map(element => ({ ...element, track: element.authoredTrack ?? element.track }))) } : {}),
+    ...(changed ? { elements: displayAuthoredTimelineLanes(elements) } : {}),
     ...(durationChanged ? { duration: after.duration } : {}),
   });
   return changed || durationChanged;

@@ -1,3 +1,4 @@
+import { implicitTextLane } from "../store/timelineElement";
 import { isImplicitRootText } from "./timelineText";
 /**
  * Higher-level timeline DOM operations: element factories, DOM-to-element
@@ -186,7 +187,7 @@ export function createTimelineElementFromManifestClip(params: {
     entry.zIndex = readTimelineElementZIndex(hostEl);
     if (isImplicitRootText(hostEl)) {
       entry.implicitTextTiming = true;
-      entry.track = -100000 + fallbackIndex;
+      entry.track = implicitTextLane(fallbackIndex);
       entry.authoredTrack = 0;
     }
   }
@@ -350,7 +351,7 @@ function scanTimelineFromDOM(
 
     if (isImplicitRootText(el)) {
       entry.implicitTextTiming = true;
-      entry.track = -100000 + els.length;
+      entry.track = implicitTextLane(els.length);
       entry.authoredTrack = 0;
     }
 

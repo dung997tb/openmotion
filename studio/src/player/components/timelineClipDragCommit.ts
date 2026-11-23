@@ -6,7 +6,7 @@ import type { DraggedClipState } from "./useTimelineClipDrag";
 // Type-only: erased at runtime, so the timelineZMirror → timelineClipDragCommit
 // value-import edge stays acyclic.
 import type { ZMirrorLaneMove } from "./timelineZMirror";
-import { classifyZone } from "./timelineZones";
+import { classifyZone, displayAuthoredTimelineLanes } from "./timelineZones";
 import { findBlockedTrackInsert, layoutAfterTrackInsert } from "./timelineDragLanding";
 import type { TimelineTrackInsertLayout } from "./timelineTrackInsertLayout";
 import { computeStackingPatches, type StackingPatch } from "./timelineStackingSync";
@@ -138,6 +138,11 @@ export function persistMoveEdits(
         : `[Timeline] persistMoveEdits: no move persist handler wired, so ${edits.length} edit(s) applied to the store only, not saved`,
     );
   }
+  const laneChanged = edits.some(e => e.updates.track !== e.element.track ||
+    (e.persistTrack != null && e.persistTrack !== (e.element.authoredTrack ?? e.element.track)));
+  // Persist only the affected source clips. Recompute every display row in the
+  // same store notification so audio and neighboring compositions shift together.
+  const layout = laneChanged ? displayAuthoredTimelineLanes : undefined;
   const prev = edits.map((e) => ({
     key: keyOf(e.element),
     updates: {
@@ -185,7 +190,7 @@ export function persistMoveEdits(
     if (Object.keys(updates).length) updateElement(key, updates);
   };
   const applyEdits = (reassert = false) =>
-    batchElementUpdates(() => edits.forEach((e) => applyEdit(e, reassert)));
+    batchElementUpdates(() => edits.forEach((e) => applyEdit(e, reassert)), layout);
   applyEdits();
   // The store above gets DISPLAY lanes; the file below gets the authored-space
   // track when one was resolved (see TimelineMoveEdit.persistTrack).
@@ -208,7 +213,7 @@ export function persistMoveEdits(
           updates.audioGroup = audioGroup;
         if (Object.keys(updates).length) updateElement(p.key, updates);
       }
-    });
+    }, layout);
   // Cmd+Z while the save is in flight shows the old lanes at once; the returned fn re-applies the move.
   const saving = onMoveElements
     ? beginStudioPendingEdit(() => {
@@ -450,6 +455,7 @@ function buildTrackInsertEdits(
     else if (multi?.keys.has(normKey)) start = multi.movedStart(src);
     edits.push({
       element: src,
+      ...(src.authoredTrack != null && src.authoredTrack !== norm.track ? { persistTrack: norm.track } : {}),
       updates: {
         start,
         track: norm.track,
