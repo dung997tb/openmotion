@@ -19,7 +19,6 @@ vi.mock('./useWorkspace', () => ({ motionApi: async (path: string, options: Requ
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const info = { name: 'OpenMotion', version: '1.2.3', previewUrl: 'http://127.0.0.1:4567', dataDirectory: '/fixture/data', templateSource: 'repository',
   transport: { type: 'stdio', command: 'node', args: ['/fixture/mcp.ts'], cwd: '/fixture', env: { MOTION_DATA_DIR: '/fixture/data' } }, tools: [{ name: 'openmotion_media_use', description: 'Media Use' }] };
-const template = { id: 'fixture-film', title: 'Fixture film', description: 'Editable typography', subtitle: 'Launch', posterUrl: '/poster.png' };
 let root: Root | undefined;
 afterEach(() => { act(() => root?.unmount()); root = undefined; document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => (node.getAttribute('aria-label') || node.textContent?.trim()) === name)!;
@@ -107,7 +106,7 @@ it.each(['en', 'zh-CN'] as const)('explains bundled project-preview delivery ind
 });
 
 it.each(['zh-CN', 'en', 'ja'] as const)('links the FAQ and footer to the README community for %s', async locale => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [template] } : info)));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   await mount(locale);
   const readme = locale === 'zh-CN' ? chineseReadme : englishReadme;
   const channel = locale === 'zh-CN' ? '飞书群' : 'Discord';
@@ -119,9 +118,9 @@ it.each(['zh-CN', 'en', 'ja'] as const)('links the FAQ and footer to the README 
   }
 });
 
-it('switches client-specific setup, copies exact template instructions and performs no mutations', async () => {
+it('switches client-specific setup, copies example prompts and performs no mutations', async () => {
   await (await import('./reporting')).loadReportingTransport();
-  const fetcher = vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [template] } : info));
+  const fetcher = vi.fn(async () => Response.json(info));
   vi.stubGlobal('fetch', fetcher);
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   const { openLibrary, openProviders } = await mount();
@@ -131,35 +130,39 @@ it('switches client-specific setup, copies exact template instructions and perfo
   await act(async () => tab('Manual setup').click());
   expect(document.querySelector('pre')?.textContent).toContain('claude mcp add');
   expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
-  await act(async () => button('Copy template prompt').click());
-  expect(copy).toHaveBeenCalledWith(expect.stringContaining('fixture-film'));
-  expect(copy.mock.calls[0][0]).toContain('Claude Code');
-  expect(copy.mock.calls[0][0]).toContain('https://github.com/nexu-io/openmotion#quick-start');
-  expect(copy.mock.calls[0][0]).not.toContain('127.0.0.1');
+  await act(async () => button('Copy example prompt').click());
+  const example = copy.mock.calls[0][0];
+  expect(example).toMatch(/^@OpenDesign Turn this bottled drink image/);
+  await act(async () => button('Try in Claude Code').click());
+  expect(copy.mock.calls[1][0]).toContain('Claude Code');
+  expect(copy.mock.calls[1][0]).toContain('https://github.com/nexu-io/openmotion#quick-start');
+  expect(copy.mock.calls[1][0]).not.toContain('127.0.0.1');
+  expect(copy.mock.calls[1][0]).toContain(example);
   expect(document.querySelector('.motion-feedback-layer [role=status]')?.textContent).toContain('Copied to clipboard');
   expect(document.querySelector('.om-mcp-content [role=status]')).toBeNull();
-  await act(async () => button('View all templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
+  await act(async () => button('Browse all 30+ templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
   await act(async () => button('Manage providers').click()); expect(openProviders).toHaveBeenCalledOnce();
   expect(tab('ChatGPT')).toBeUndefined();
   expect(document.querySelectorAll('.om-mcp-client-row [role=tab]')).toHaveLength(6);
-  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher).toHaveBeenCalledOnce();
   for (const [, init] of fetcher.mock.calls as unknown as [string, RequestInit][]) expect(init?.method ?? 'GET').toBe('GET');
 });
 
 it('explains unavailable remote connections for existing ChatGPT links', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [template] } : info)));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   const previousUrl = location.href;
   history.replaceState(null, '', '?page=mcp&host=chatgpt');
   try { await mount(); } finally { history.replaceState(null, '', previousUrl); }
   expect(document.body.textContent).toContain('Remote connection unavailable');
-  expect(button('Copy template prompt').disabled).toBe(true);
+  expect(button('Copy example prompt').disabled).toBe(false);
+  expect(document.querySelector<HTMLButtonElement>('.om-mcp-demo-try')?.disabled).toBe(true);
   expect(document.querySelector('a[download]')).toBeNull();
 
 });
 
-it('contains unavailable setup and catalogue independently, retries and reserves failed poster geometry', async () => {
+it('keeps example prompts available while setup discovery is unavailable and can retry', async () => {
   let broken = true;
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => broken ? Response.json({}, { status: 503 }) : Response.json(url.includes('template-catalog') ? { items: [template] } : info)));
+  vi.stubGlobal('fetch', vi.fn(async () => broken ? Response.json({}, { status: 503 }) : Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount();
   expect(button('Copy connection instruction').disabled).toBe(false);
@@ -169,20 +172,16 @@ it('contains unavailable setup and catalogue independently, retries and reserves
   await act(async () => tab('Manual setup').click());
   expect(document.body.textContent).toContain('Could not load settings');
   expect(document.querySelector('a[download]')).toBeNull();
-  expect(document.body.textContent).toContain('Templates could not be loaded');
+  expect(document.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
   expect(document.body.textContent).toContain('Your visual MCP guide');
   broken = false;
   for (const retry of [...document.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent === 'Retry')) await act(async () => retry.click());
   await act(async () => tab('Let your Agent set it up').click());
   expect(button('Copy connection instruction').disabled).toBe(false);
-  expect(document.body.textContent).toContain('Fixture film');
-  const poster = document.querySelector('.om-gallery-poster')!;
-  act(() => poster.querySelector('img')!.dispatchEvent(new Event('error')));
-  expect(poster.querySelector('img')).toBeNull();
-  expect(poster.textContent).toBe('Fixture film');
+  expect(document.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
 });
 
-it('aborts pending setup and template reads when leaving the page', async () => {
+it('aborts pending setup discovery when leaving the page', async () => {
   const reads: { path: string; signal: AbortSignal | null | undefined }[] = [];
   vi.stubGlobal('fetch', vi.fn((url: string, init: RequestInit) => {
     const path = new URL(url, 'http://localhost').pathname;
@@ -193,7 +192,7 @@ it('aborts pending setup and template reads when leaving the page', async () => 
   }));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount();
-  expect(reads.map(read => read.path).sort()).toEqual(['/motion-api/integration', '/motion-api/template-catalog']);
+  expect(reads.map(read => read.path)).toEqual(['/motion-api/integration']);
   for (const { path, signal } of reads) expect(signal?.aborted, path).toBe(false);
   expect(button('Copy connection instruction').disabled).toBe(false);
   await act(async () => button('Copy connection instruction').click());
@@ -203,43 +202,24 @@ it('aborts pending setup and template reads when leaving the page', async () => 
   for (const { path, signal } of reads) expect(signal?.aborted, path).toBe(true);
 });
 
-class PreviewObserver {
-  static latest: PreviewObserver;
-  elements: Element[] = [];
-  constructor(private callback: IntersectionObserverCallback) { PreviewObserver.latest = this; }
-  observe(element: Element) { this.elements.push(element); }
-  disconnect() {}
-  emit(ratio: number) { this.callback(this.elements.map(target => ({ target, isIntersecting: ratio > 0, intersectionRatio: ratio }) as IntersectionObserverEntry), this as unknown as IntersectionObserver); }
-}
-
-it('filters the full catalogue, autoplays only visible cards and hands off the exact template', async () => {
-  const first = { ...template, author: 'Designer', previewUrl: '/first.mp4', uses: ['Product launch'] };
-  const second = { ...first, id: 'brand-film', title: 'Brand film', previewUrl: '/second.mp4', uses: ['Brand promotion'] };
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(!url.includes('template-catalog') ? info : url.includes('offset=60') ? { items: [second], next: null } : { items: [first], next: 60 })));
-  vi.stubGlobal('IntersectionObserver', PreviewObserver);
-  const preference = Object.assign(new EventTarget(), { matches: false });
-  vi.stubGlobal('matchMedia', () => preference);
-  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
-  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
-  vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
-  const { openLibrary } = await mount();
-  expect(document.querySelectorAll('video[src]')).toHaveLength(0);
-  await act(async () => PreviewObserver.latest.emit(1));
-  expect(document.querySelectorAll('video[src]')).toHaveLength(2);
-  await act(async () => { preference.matches = true; preference.dispatchEvent(new Event('change')); });
-  expect(document.querySelectorAll('video[src]')).toHaveLength(0);
-  await act(async () => { preference.matches = false; preference.dispatchEvent(new Event('change')); });
-  expect(document.querySelectorAll('video[src]')).toHaveLength(2);
-  await act(async () => tab('Brand & company films').click());
-  expect(document.querySelectorAll('[data-template-id]')).toHaveLength(1);
-  expect(document.querySelector('[data-template-id]')?.getAttribute('data-template-id')).toBe('brand-film');
-  await act(async () => PreviewObserver.latest.emit(1));
-  expect(document.querySelector('video[src]')?.getAttribute('src')).toBe('/second.mp4');
-  await act(async () => button('Preview template Brand film').click());
-  expect(openLibrary).toHaveBeenCalledWith(expect.any(HTMLButtonElement), expect.objectContaining({ id: 'brand-film' }));
-  await act(async () => PreviewObserver.latest.emit(0));
-  expect(document.querySelectorAll('video[src]')).toHaveLength(0);
-  expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+it('shows all twelve examples, filters by section and previews the selected cover and prompt', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('Clipboard unavailable'));
+  await mount();
+  const gallery = document.querySelector('#gallery')!;
+  expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
+  for (const [label, count] of [['E-commerce marketing (5)', 5], ['Brand & intros (3)', 3], ['Talking-head & editing (2)', 2], ['Creative styles (2)', 2]] as const) {
+    await act(async () => tab(label).click());
+    expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(count);
+  }
+  await act(async () => button('Preview template Felt stop-motion explainer').click());
+  const preview = document.querySelector('[role=dialog]')!;
+  expect(preview.textContent).toContain('Felt stop-motion explainer');
+  expect(preview.querySelector('img')?.getAttribute('src')).toContain('felt_stop.webp');
+  await act(async () => [...preview.querySelectorAll('button')].find(node => node.textContent === 'Copy Prompt')!.click());
+  expect(preview.querySelector('textarea')?.value).toBe(copy.mock.calls[0][0]);
+  await act(async () => button('Close').click());
+  expect(document.querySelector('[role=dialog]')).toBeNull();
 });
 
 it.each(['en', 'zh-CN'] as const)('copies the complete media onboarding flow in %s', async locale => {

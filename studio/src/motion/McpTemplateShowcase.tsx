@@ -1,39 +1,134 @@
-import { Button } from "open-design-ui/button";
-import { IconButton } from "open-design-ui/icon-button";
-import { Tooltip } from "../components/ui/Tooltip";
-import { useMemo, useState, type RefObject } from 'react';
-import { isEditableTemplate, type GalleryTemplate } from '../../../shared/catalog';
+import { Dialog } from '@base-ui/react/dialog';
+import { Button } from 'open-design-ui/button';
+import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { Tabs, TabsList, Tab, TabPanel } from '../components/ui/Tabs';
-import { Skeleton } from '../components/ui/Skeleton';
 import { RemixIcon } from '../icons/RemixIcons';
-import { TemplateGalleryCard } from './TemplateGalleryCard';
-import { purposeOrder, discoveryPurposes } from './templateDiscoveryTaxonomy';
-import { useTemplatePlayback } from './useTemplatePlayback';
-import { useCoveredTemplates } from './useCoveredTemplates';
+import { mcpGalleryCards, mcpGalleryCategories, mcpGalleryPreview, type McpGalleryCard, type McpGalleryCategory } from './mcpGallery';
 
-export function McpTemplateShowcase({ scroller, enabled, canCopy, onCopy, openLibrary, onCategory }: {
-  scroller: RefObject<HTMLElement | null>; enabled: boolean; canCopy: boolean;
-  onCategory?: (category: string) => void;
-  onCopy: (template: GalleryTemplate) => void;
-  openLibrary: (trigger?: HTMLElement, template?: GalleryTemplate) => void;
+export function McpTemplateShowcase({ client, enabled, canTry, onCopy, openLibrary, onCategory, onPreview }: {
+  client: string;
+  enabled: boolean;
+  canTry: boolean;
+  onCopy: (id: string, prompt: string, includeSetup: boolean) => Promise<string | undefined>;
+  openLibrary: (trigger: HTMLElement) => void;
+  onCategory: (category: McpGalleryCategory) => void;
+  onPreview: (id: string) => void;
 }) {
   const { t, locale } = useI18n();
-  const { catalog, failed, retry } = useCoveredTemplates(locale);
-  const [category, setCategory] = useState('all');
-  const [priority, setPriority] = useState<string | null>(null);
-  const categories = useMemo(() => ['all', ...purposeOrder.filter(purpose => catalog?.some(item => discoveryPurposes(item).includes(purpose)))], [catalog]);
-  const selected = categories.includes(category) ? category : 'all';
-  const visible = useMemo(() => (catalog ?? []).filter(item => selected === 'all' || discoveryPurposes(item).includes(selected)).slice(0, 6), [catalog, selected]);
-  const active = useTemplatePlayback(scroller, `${selected}:${visible.map(item => item.id).join(',')}`, enabled, true, priority);
-  return <section className="om-mcp-section" aria-labelledby="mcp-templates" id="mcp-template-section">
-    <div className="om-mcp-section-heading"><div><p className="om-mcp-eyebrow">{t('Start with something you can build on')}</p><h2 id="mcp-templates">{t('Bring a template into your Agent')}</h2><p className="om-muted">{t('Use an editable template or ask your Agent to recreate a reference. Preview here, copy the instruction, or open the full library.')}</p></div><Button variant="ghost" className="om-button h-auto" onClick={event => openLibrary(event.currentTarget)}>{t('View all templates')}<RemixIcon name="arrow-right-line" size={16} /></Button></div>
-    <Tabs value={selected} onValueChange={value => { setCategory(String(value)); setPriority(null); onCategory?.(String(value)); }}>
-      <div className="om-mcp-template-toolbar"><TabsList className="om-mcp-category-tabs" aria-label={t('Template categories')}>{categories.map(value => <Tab key={value} value={value}>{t(value === 'all' ? 'Featured' : value)}</Tab>)}</TabsList></div>
-      <TabPanel value={selected}>
-        {failed ? <div className="om-card om-mcp-unavailable"><p>{t('Templates could not be loaded.')}</p><Button variant="ghost" className="om-button h-auto" onClick={retry}>{t('Retry')}</Button></div> : <div className="om-mcp-template-grid">{catalog === null ? [1, 2, 3, 4, 5, 6].map(key => <Skeleton key={key} className="om-mcp-template-skeleton" />) : visible.map(template => <TemplateGalleryCard key={template.id} template={template} active={active.has(template.id)} onPriority={setPriority} onSelect={(item, trigger) => openLibrary(trigger, item)} footer={<div className="om-mcp-template-caption"><div><h3>{template.title}</h3><span>{t(isEditableTemplate(template) ? 'Ready to edit' : 'Reference · Agent recreation')}</span></div><Tooltip label={t('Copy template prompt')} wrap><IconButton variant="plain" className="om-button" disabled={!canCopy} aria-label={t('Copy template prompt')} onClick={() => onCopy(template)} icon={<RemixIcon name="file-copy-line" size={16} />} /></Tooltip></div>} />)}</div>}
-        {catalog?.length === 0 && <div className="om-mcp-unavailable"><p className="om-muted">{t('No templates available. Open the library or try again later.')}</p><Button variant="ghost" className="om-button h-auto" onClick={event => openLibrary(event.currentTarget)}>{t('Explore templates')}</Button></div>}
+  const [category, setCategory] = useState<McpGalleryCategory>('all');
+  const [preview, setPreview] = useState<McpGalleryCard | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [manualCopy, setManualCopy] = useState<{ id: string; instruction: string } | null>(null);
+  const previewTrigger = useRef<HTMLButtonElement>(null);
+  const latestCopy = useRef(0);
+  const content = (card: McpGalleryCard) => card.content[locale] ?? card.content.en;
+  const previewContent = mcpGalleryPreview[locale === 'zh-CN' ? 'zh-CN' : 'en'];
+  const visible = mcpGalleryCards.filter(card => category === 'all' || card.category === category);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  useEffect(() => {
+    if (!enabled) setPreview(null);
+  }, [enabled]);
+
+  async function copyPrompt(card: McpGalleryCard, includeSetup = false) {
+    const attempt = ++latestCopy.current;
+    setCopied(null);
+    setManualCopy(null);
+    const failedInstruction = await onCopy(card.id, content(card).prompt, includeSetup);
+    if (attempt !== latestCopy.current) return;
+    if (failedInstruction) setManualCopy({ id: card.id, instruction: failedInstruction });
+    else setCopied(card.id);
+  }
+
+  const copyFallback = (card: McpGalleryCard) => manualCopy?.id === card.id &&
+    <textarea className="om-field w-full" aria-label={t('Creation instruction')} readOnly rows={5}
+      value={manualCopy.instruction} onFocus={event => event.currentTarget.select()} />;
+
+  return <section className="om-mcp-section om-mcp-demo-gallery" aria-labelledby="mcp-templates" id="gallery">
+    <h2 id="mcp-templates">{t('Explore more scene templates')}</h2>
+    <Tabs value={category} onValueChange={value => {
+      const selected = mcpGalleryCategories.find(([key]) => key === value)?.[0];
+      if (!selected) return;
+      setCategory(selected);
+      onCategory(selected);
+    }}>
+      <TabsList className="om-mcp-category-tabs" aria-label={t('Template categories')}>
+        {mcpGalleryCategories.map(([value, label]) => <Tab key={value} value={value}>
+          {t(label)}{' '}{value === 'all' ? mcpGalleryCards.length : '(' + mcpGalleryCards.filter(card => card.category === value).length + ')'}
+        </Tab>)}
+      </TabsList>
+      <TabPanel value={category}>
+        <div className="om-mcp-template-grid">
+          {visible.map(card => <article key={card.id} className="om-mcp-demo-card" data-mcp-gallery-card={card.id}>
+            <Button variant="plain" className="om-mcp-demo-cover" aria-label={t('Preview template {title}', { title: content(card).title })}
+              onClick={event => {
+                previewTrigger.current = event.currentTarget;
+                setPreview(card);
+                onPreview(card.id);
+              }}>
+              <img src={card.image} alt="" loading="lazy" decoding="async" />
+              <span className="om-mcp-demo-shade" />
+              <span className="om-mcp-demo-kind">{t(card.kind === 'editable' ? 'Editable project' : 'MCP recreation')}</span>
+              <span className="om-mcp-demo-duration">{card.duration}</span>
+              <span className="om-mcp-demo-play" aria-hidden="true">▶</span>
+            </Button>
+            <div className="om-mcp-template-caption">
+              <h3>{content(card).title}</h3>
+              <p title={content(card).prompt}>{content(card).prompt}</p>
+              <div className="om-mcp-demo-actions">
+                <Button variant="plain" className="om-mcp-demo-copy" data-copied={copied === card.id || undefined} onClick={() => void copyPrompt(card)}>
+                  {t(copied === card.id ? 'Copied' : 'Copy example prompt')}
+                </Button>
+                <Button variant="plain" className="om-mcp-demo-try" disabled={!canTry} onClick={() => void copyPrompt(card, true)}>
+                  {t('Try in {client}', { client })}
+                </Button>
+              </div>
+              {!preview && copyFallback(card)}
+            </div>
+          </article>)}
+        </div>
       </TabPanel>
     </Tabs>
+    <div className="om-mcp-gallery-more">
+      <Button variant="plain" className="om-mcp-demo-library" onClick={event => openLibrary(event.currentTarget)}>
+        {t('Browse all 30+ templates')}<RemixIcon name="arrow-right-line" size={16} />
+      </Button>
+    </div>
+    <Dialog.Root open={enabled && preview !== null} onOpenChange={open => { if (!open) setPreview(null); }}>
+      <Dialog.Portal>
+        <Dialog.Backdrop forceRender className="hf-overlay-backdrop om-settings-backdrop" />
+        <Dialog.Popup data-feedback-modal className="om-dialog om-mcp-demo-dialog" finalFocus={previewTrigger} onKeyDown={event => event.stopPropagation()}>
+          {preview && <>
+            <header>
+              <Dialog.Title>{content(preview).title}</Dialog.Title>
+              <Dialog.Close render={<Button variant="plain" className="om-mcp-demo-dismiss" />} aria-label={t('Close')}><RemixIcon name="close-line" size={18} /></Dialog.Close>
+            </header>
+            <div className="om-mcp-demo-preview"><img src={preview.image} alt="" /></div>
+            <div className="om-mcp-demo-timeline" role="img" aria-label={t('Studio timeline example')}>
+              {previewContent.tracks.map(([track, ...clips], index) => <div key={track} data-track={index}>
+                <span>{track}</span><div>{clips.map(clip => <span key={clip}>{clip}</span>)}</div>
+              </div>)}
+            </div>
+            <div className="om-mcp-demo-prompt">
+              <div><span>{t('Copy for Agent')}</span><span>{previewContent.pasteHint}</span></div>
+              <Dialog.Description>{content(preview).prompt}</Dialog.Description>
+            </div>
+            {copyFallback(preview)}
+            <footer>
+              <Dialog.Close render={<Button variant="plain" className="om-mcp-demo-copy" />}>{t('Close')}</Dialog.Close>
+              <Button variant="plain" className="om-mcp-demo-copy om-mcp-demo-confirm" data-copied={copied === preview.id || undefined} onClick={() => void copyPrompt(preview)}>
+                {t(copied === preview.id ? 'Copied' : 'Copy Prompt')}
+              </Button>
+            </footer>
+          </>}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   </section>;
 }

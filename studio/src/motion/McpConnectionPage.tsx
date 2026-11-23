@@ -9,7 +9,7 @@ import { platformExportTargets } from '../../../shared/platform-export';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { brand, designSystemAsset } from '../../../packages/design-system/index.js';
 import { BrandLogo } from '../../../packages/design-system/react/BrandLogo';
-import { manualConnection, setupPrompt, setupGuideUrl, templatePrompt, transcriptExamplePrompt } from '../../../shared/integration';
+import { manualConnection, setupPrompt, setupGuideUrl, transcriptExamplePrompt } from '../../../shared/integration';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { Tabs, TabsList, Tab, TabPanel } from '../components/ui/Tabs';
@@ -58,6 +58,11 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
   const heading = useRef<HTMLHeadingElement>(null);
   const example = (route ?? localRoute).mcpExample;
   useEffect(() => {
+    const gallery = location.hash === '#gallery' && page.current?.querySelector<HTMLElement>('#mcp-templates');
+    if (gallery) {
+      gallery.scrollIntoView({ block: 'start' });
+      return;
+    }
     const card = example && document.getElementById('mcp-example-' + example);
     if (card && page.current?.contains(card)) {
       card.focus({ preventScroll: true });
@@ -72,8 +77,8 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
   type CopyReport = { kind: Parameters<typeof tracking.reportMcpCopyResult>[0]; capability?: string; template?: string; includesSetup?: boolean };
   async function copy(text: string, report: CopyReport) {
     const extra = { setup: setupMode, capability: report.capability, template: report.template, includesSetup: report.includesSetup };
-    try { await navigator.clipboard.writeText(text); toast.showToast(t('Copied to clipboard'), 'info', 'feedback'); tracking.reportMcpCopyResult(report.kind, 'clipboard_written', clientKey, extra); }
-    catch { toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback'); tracking.reportMcpCopyResult(report.kind, 'failed', clientKey, extra); }
+    try { await navigator.clipboard.writeText(text); toast.showToast(t('Copied to clipboard'), 'info', 'feedback'); tracking.reportMcpCopyResult(report.kind, 'clipboard_written', clientKey, extra); return true; }
+    catch { toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback'); tracking.reportMcpCopyResult(report.kind, 'failed', clientKey, extra); return false; }
   }
   const copyCreation = (text: string, includeSetup: boolean, kind: 'starter' | 'capability_example', capability: string) =>
     copy(includeSetup ? `${prompt}\n\n${t(text)}` : t(text), { kind, capability, includesSetup: includeSetup });
@@ -166,7 +171,13 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
         )}
       </section>
 
-      <McpTemplateShowcase scroller={page} enabled={previewsEnabled} canCopy={Boolean(info && supported)} openLibrary={openLibrary('mcp_templates')} onCategory={value => click('mcp_templates', 'category_select', { option: value })} onCopy={template => { if (info) void copy(`${prompt}\n\n${templatePrompt(info, client.host, template, locale)}`, { kind: 'template', template: template.id, includesSetup: true }); }} />
+      <McpTemplateShowcase client={t(client.name)} enabled={previewsEnabled} canTry={supported}
+        openLibrary={openLibrary('mcp_templates')} onCategory={value => click('mcp_templates', 'category_select', { option: value })}
+        onPreview={id => click('mcp_templates', 'open_detail', { capability: id })}
+        onCopy={async (id, examplePrompt, includeSetup) => {
+          const instruction = includeSetup ? `${prompt}\n\n${examplePrompt}` : examplePrompt;
+          if (!await copy(instruction, { kind: 'capability_example', capability: id, includesSetup: includeSetup })) return instruction;
+        }} />
 
       <section className="om-mcp-section"><h2>{t('Give your Agent a workspace worth keeping')}</h2><div className="om-mcp-benefit-grid">{mcpBenefits.map((item, index) => <article key={item.title} className="om-mcp-feature" data-featured={index === 0}><RemixIcon name={item.icon} size={26} /><h3>{t(item.title)}</h3><p>{t(item.description)}</p></article>)}</div></section>
       <section className="om-mcp-section" id="mcp-capabilities"><h2>{t('Your visual MCP guide')}</h2><p className="om-muted">{t('Choose a task and copy its example into your connected Agent. Projects and assets stay in your workspace; media generation uses your configured providers.')}</p><div className="om-mcp-capability-grid">{[...mcpCapabilities, ...mcpScenarios].map(item => <article className="om-mcp-feature" key={item.id} id={'mcp-example-' + item.id} tabIndex={-1} data-mcp-scenario={item.id}><RemixIcon name={item.icon} size={24} /><h3>{t(item.title)}</h3>{item.id === 'platform-export' && <div className="flex flex-wrap gap-1.5">{platformExportTargets.map(platform => <span key={platform.id} title={t(platform.label)}><PlatformIcon platform={platform.id} /></span>)}</div>}<p>{t(item.description)}</p>{item.id === 'canvas-captions' && <p className="om-muted">{t('Aspect ratio')}: {canvasPresets.map(item => item.ratio).join(' · ')}</p>}{item.id === 'review-comments' && <details className="om-mcp-tool-details w-full" data-review-guide><summary>{t('Review data and Agent actions')}</summary><div className="flex flex-col gap-3 pb-4"><div><h4>{t('Annotation tools')}</h4><p>{['Freehand pen', 'Rectangle', 'Ellipse', 'Arrow', 'Text label'].map(label => t(label)).join(' · ')}</p></div>{mcpReviewGuide.map(([title, description]) => <div key={title}><h4>{t(title)}</h4><p>{t(description)}</p></div>)}</div></details>}{item.id === 'review-comments' && failed && <SettingsError retry={retry} />}<Button variant="plain" className="om-text-link" disabled={!supported || (item.id === 'review-comments' && !info)} onClick={() => void copyCapability(item)}>{t('Copy an example')}<RemixIcon name="file-copy-line" size={14} /></Button>{manualScenario?.id === item.id && <textarea className="om-field w-full" aria-label={t(item.id === 'search-recovery' ? 'Creation instruction' : item.id === 'review-comments' ? 'Review instruction' : item.id === 'platform-export' ? 'Platform export instruction' : 'Complete workflow instruction')} readOnly rows={6} value={manualScenario.text} onFocus={event => event.currentTarget.select()} />}</article>)}</div>
