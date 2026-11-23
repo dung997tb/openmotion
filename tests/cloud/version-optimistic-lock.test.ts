@@ -1142,6 +1142,9 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     assert.equal((await h.files.readTextFile(h.authA, created.projectId, 'index.html'))?.content, v2Html);
 
     const offered = await h.history.listHistory(h.authA, created.projectId);
+    const window = await h.history.listHistory(h.authA, created.projectId, {});
+    assert.deepEqual(afterUndo.navigation, { currentSeq: offered.currentSeq, back: offered.back, forward: offered.forward });
+    assert.deepEqual(window.entries, offered.entries.filter(row => row.seq >= 2));
     assert.deepEqual(offered.back?.paths, ['index.html']);
     assert.deepEqual(offered.forward?.paths, ['index.html']);
     assert.ok(Number.isFinite(offered.back?.endedAt));

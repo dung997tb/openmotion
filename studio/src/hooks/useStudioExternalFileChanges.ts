@@ -38,7 +38,7 @@ interface UseStudioExternalFileChangesOptions {
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
   reloadPreview: (path?: string) => void;
   onOutsideChange?: () => void;
-  onHistoryChanged?: () => void | Promise<void>;
+  onHistoryChanged?: (writeToken?: string) => void | Promise<void>;
 }
 
 /** Connects the app's save queues, recovery storage, and reload surfaces to one owner. */
