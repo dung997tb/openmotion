@@ -149,6 +149,9 @@ else if (args[1] === 'get') {
   // Media commands report service failures as `<text> (code, HTTP status)`; the leading text stands in for private detail.
   const failures = { 'media-invalid': 'invalid_request, HTTP 400', 'media-plan': 'model_access_denied, HTTP 403', 'media-401': 'unauthorized, HTTP 401', 'media-unknown-code': 'new_service_code, HTTP 409', 'media-empty-code': ', HTTP 502' };
   if (failures[mode()]) { console.error(`Error: private request detail for fixture-user-id (${failures[mode()]})`); process.exit(1); }
+  writeFileSync(path.join(home, 'last-generation-source.json'), JSON.stringify({
+    product: process.env.VELA_SOURCE_PRODUCT, jobId: process.env.VELA_OPENMOTION_JOB_ID,
+  }));
   const file = path.join(home, 'submissions.json');
   const calls = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
   calls.push(args); writeFileSync(file, JSON.stringify(calls));

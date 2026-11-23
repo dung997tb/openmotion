@@ -1186,6 +1186,7 @@ it('rotates the visible Explore spotlight and plays visible Skill previews witho
   try {
     await act(async () => { observed.get(hero)!(true); cards.forEach(card => observed.get(card)!(true)); });
     expect(hero.dataset.scene).toBe('game');
+    expect(hero.querySelector('video[src]')).toBeNull();
     for (const card of cards) expect(card.querySelector('video[src]')).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(6000); });
     expect(hero.dataset.scene).toBe('motion');
