@@ -187,7 +187,7 @@ CMD ["node", "--experimental-strip-types", "src/entrypoints/worker.ts"]
 FROM prod-base AS catalog-sync
 COPY --chown=node:node template-library/ ./template-library/
 COPY --chown=node:node library/templates/catalog/ ./library/templates/catalog/
-COPY --chown=node:node scripts/sync-catalog-cas.ts ./scripts/sync-catalog-cas.ts
+COPY --chown=node:node scripts/sync-catalog-cas.ts scripts/prism-motion-publication.ts ./scripts/
 
 ENV NODE_ENV=production \
     HOME=/tmp \

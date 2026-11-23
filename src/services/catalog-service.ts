@@ -546,6 +546,7 @@ function projectRowToGalleryTemplate(
     );
 
   const parsedDuration = Number(original.durationSeconds);
+  const published = row.catalogVersion.startsWith('prism:');
 
   return {
     id: row.id,
@@ -560,8 +561,12 @@ function projectRowToGalleryTemplate(
     sourceUrl: original.sourceUrl || undefined,
     previewUrl,
     posterUrl,
-    motionDocumentUrl: `/api/template-source/${encodeURIComponent(row.id)}/motion.md`,
-    motionGuideUrl: `/api/template-source/${encodeURIComponent(row.id)}/preview.html`,
+    motionDocumentUrl: published
+      ? localized?.motionDocumentUrl ?? entry.motionDocumentUrl ?? undefined
+      : `/api/template-source/${encodeURIComponent(row.id)}/motion.md`,
+    motionGuideUrl: published
+      ? localized?.motionGuideUrl ?? entry.motionGuideUrl ?? undefined
+      : `/api/template-source/${encodeURIComponent(row.id)}/preview.html`,
     projectFileUrl: typeof entry.projectFileUrl === 'string' ? entry.projectFileUrl : undefined,
     authorAvatarUrl: typeof entry.authorAvatarUrl === 'string' ? entry.authorAvatarUrl : undefined,
     styleDescription: original.styleDescription || undefined,

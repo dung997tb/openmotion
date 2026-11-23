@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { eq } from 'drizzle-orm';
+import { and, eq, like, ne, sql } from 'drizzle-orm';
+import { loadPrismMotionTemplates, type PrismEnvironment } from './prism-motion-publication.ts';
 import { isMain } from '../shared/entry.ts';
 import { boundedMediaBody, downloadMedia, validateMediaLock } from '../shared/repository-media.ts';
 import {
@@ -13,7 +14,7 @@ import {
   readRepositoryFile,
 } from '../shared/repository-template-catalog.ts';
 import type { BlobMetadata, StoragePort } from '../src/contracts/storage.ts';
-import { createDbHandle, type Database } from '../src/db/client.ts';
+import { createDbHandle, type Database, type DbTransaction } from '../src/db/client.ts';
 import { asInsert, asUpdate } from '../src/db/helpers.ts';
 import {
   catalogTemplateFiles,
@@ -227,10 +228,12 @@ export interface PreparedCatalogTemplate {
 }
 
 export interface SyncCatalogOptions {
+  prismEnvironment?: PrismEnvironment;
   dryRun?: boolean;
   limit?: number;
   builtinOnly?: boolean;
   repoOnly?: boolean;
+  prismOnly?: boolean;
   templateIds?: readonly string[];
   concurrency?: number;
   fetchRemote?: boolean;
@@ -253,6 +256,7 @@ export interface SyncCatalogSummary {
   templatesProcessed: number;
   builtinTemplatesProcessed: number;
   repositoryTemplatesProcessed: number;
+  prismTemplatesProcessed: number;
   filesProcessed: number;
   uniqueBlobsSeen: number;
   blobsUploaded: number;
@@ -276,6 +280,8 @@ export function parseSyncCatalogArgs(argv: readonly string[]): SyncCatalogOption
       options.dryRun = true;
     } else if (arg === '--builtin-only') {
       options.builtinOnly = true;
+    } else if (arg === '--prism-only') {
+      options.prismOnly = true;
     } else if (arg === '--repo-only') {
       options.repoOnly = true;
     } else if (arg === '--fetch-remote') {
@@ -305,8 +311,8 @@ export function parseSyncCatalogArgs(argv: readonly string[]): SyncCatalogOption
     }
   }
 
-  if (options.builtinOnly && options.repoOnly) {
-    throw new Error('Cannot combine --builtin-only and --repo-only');
+  if ([options.builtinOnly, options.prismOnly, options.repoOnly].filter(Boolean).length > 1) {
+    throw new Error('Cannot combine --builtin-only, --repo-only or --prism-only');
   }
   if (templateIds.length > 0) {
     options.templateIds = [...new Set(templateIds)];
@@ -510,7 +516,7 @@ async function fetchVerifiedCatalogRemoteBytes(
       throw error;
     }
   }
-  if (parsed.hostname === 'r.open-design.ai' && parsed.pathname === `/files/${expectedSha256}`) {
+  if (['https://r.open-design.ai', 'https://r.powerformer.net'].includes(parsed.origin) && parsed.pathname === `/files/${expectedSha256}` && !parsed.search && !parsed.hash) {
     const response = await fetchImpl(parsed, {
       redirect: 'error',
       signal: AbortSignal.timeout(60_000),
@@ -764,6 +770,20 @@ async function runWithConcurrency<T>(
   await Promise.all(runners);
 }
 
+async function writeCatalogTemplate(tx: DbTransaction, template: PreparedCatalogTemplate): Promise<void> {
+  const { files, id, ...data } = template;
+  const row = { ...data, updatedAt: new Date() };
+  await tx.insert(catalogTemplates).values(asInsert(catalogTemplates, { id, ...row }))
+    .onConflictDoUpdate({ target: catalogTemplates.id, set: asUpdate(catalogTemplates, row) });
+  await tx.delete(catalogTemplateFiles).where(eq(catalogTemplateFiles.templateId, id));
+  if (files.length) {
+    await tx.insert(catalogTemplateFiles).values(files.map(file => asInsert(catalogTemplateFiles, {
+      templateId: id, path: file.path, sha256: file.sha256, sizeBytes: file.sizeBytes, mimeType: file.mimeType,
+      metadata: file.metadata, isProjectFile: file.isProjectFile, isAvailable: file.isAvailable,
+    })));
+  }
+}
+
 /**
  * Idempotently ingest built-in and repository catalog templates into:
  * - S3 `catalog/blobs/{sha256}` (skipping already-present keys via `headObject` + in-run SHA dedup)
@@ -778,7 +798,8 @@ export async function syncCatalogCas(
   const repoRoot = path.resolve(options.repoRoot ?? DEFAULT_REPO_ROOT);
   const runtimeRoot = path.resolve(options.runtimeRoot ?? repoRoot);
   const catalogRoot = path.resolve(options.catalogRoot ?? path.join(repoRoot, 'library/templates/catalog'));
-  const includeBuiltin = !options.repoOnly;
+  if (options.prismOnly && !options.prismEnvironment) throw new Error('--prism-only requires PRISM_CONTENT_ENV=dev or prod');
+  const includeBuiltin = !options.repoOnly && !options.prismOnly;
   const includeRepo = !options.builtinOnly;
   const filterIds = options.templateIds ? new Set(options.templateIds) : null;
   const maxTemplates = options.limit ?? Number.POSITIVE_INFINITY;
@@ -787,6 +808,7 @@ export async function syncCatalogCas(
   const prepared: PreparedCatalogTemplate[] = [];
   let builtinCount = 0;
   let repoCount = 0;
+  let publication: PreparedCatalogTemplate[] = [];
 
   // Phase 1: Built-in templates (`template-library/*`)
   if (includeBuiltin) {
@@ -801,7 +823,21 @@ export async function syncCatalogCas(
 
   // Phase 2: Repository catalog templates (`library/templates/catalog/`)
   const fetchImpl = options.fetchImpl ?? fetch;
-  if (includeRepo && prepared.length < maxTemplates) {
+  if (includeRepo && options.prismEnvironment && prepared.length < maxTemplates) {
+    const publishedVersionMatches = async (version: string) => {
+      const [status] = await deps.db.select({
+        complete: sql<boolean>`bool_and(${catalogTemplates.catalogVersion} = ${version})
+          and count(*) = max((${catalogTemplates.metadata}->>'publicationSize')::integer)`,
+      }).from(catalogTemplates).where(eq(catalogTemplates.kind, 'prism'));
+      return status?.complete === true;
+    };
+    const checkCurrent = options.prismOnly && !dryRun && !filterIds && !options.limit;
+    publication = await loadPrismMotionTemplates(options.prismEnvironment, fetchImpl, checkCurrent ? publishedVersionMatches : undefined);
+    for (const item of publication) {
+      if (prepared.length >= maxTemplates) break;
+      if (!filterIds || filterIds.has(item.id)) prepared.push(item);
+    }
+  } else if (includeRepo && prepared.length < maxTemplates) {
     const repo = await loadRepositoryCatalog(catalogRoot);
     const allRepoIds = [...repo.records.keys()];
     for (const id of allRepoIds) {
@@ -860,7 +896,7 @@ export async function syncCatalogCas(
     file: PreparedCatalogFile,
     existingMetadataByKey: ReadonlyMap<string, BlobMetadata>,
   ): Promise<void> => {
-    const canFetchRemote = Boolean(options.fetchRemote && !file.isAvailable && file.bytes === null && file.remoteUrl);
+    const canFetchRemote = Boolean((options.fetchRemote || options.prismEnvironment) && !file.isAvailable && file.bytes === null && file.remoteUrl);
     if ((!file.isAvailable || file.bytes === null) && !canFetchRemote) {
       unavailableFiles++;
       return;
@@ -913,7 +949,7 @@ export async function syncCatalogCas(
             hydratedMetadataBySha.set(file.sha256, file.metadata);
           }
         } catch (error) {
-          if (error instanceof CatalogRemoteIntegrityError || options.strictRemote) {
+          if (error instanceof CatalogRemoteIntegrityError || options.strictRemote || options.prismEnvironment) {
             throw error;
           }
           logger?.warn('Catalog remote asset fetch unavailable; marking file unavailable', {
@@ -969,63 +1005,26 @@ export async function syncCatalogCas(
       }
     }
     await runWithConcurrency(template.files, concurrency, (file) => ensureBlobInS3(file, existingMetadataByKey));
-
-    if (!dryRun) {
-      const now = new Date();
-      await deps.db.transaction(async (tx) => {
-        await tx
-          .insert(catalogTemplates)
-          .values(
-            asInsert(catalogTemplates, {
-              id: template.id,
-              kind: template.kind,
-              catalogVersion: template.catalogVersion,
-              sortOrder: template.sortOrder,
-              featuredOrder: template.featuredOrder,
-              hasHtmlProject: template.hasHtmlProject,
-              metadata: template.metadata,
-              instructionsMd: template.instructionsMd,
-              motionMd: template.motionMd,
-              updatedAt: now,
-            }),
-          )
-          .onConflictDoUpdate({
-            target: catalogTemplates.id,
-            set: asUpdate(catalogTemplates, {
-              kind: template.kind,
-              catalogVersion: template.catalogVersion,
-              sortOrder: template.sortOrder,
-              featuredOrder: template.featuredOrder,
-              hasHtmlProject: template.hasHtmlProject,
-              metadata: template.metadata,
-              instructionsMd: template.instructionsMd,
-              motionMd: template.motionMd,
-              updatedAt: now,
-            }),
-          });
-
-        await tx
-          .delete(catalogTemplateFiles)
-          .where(eq(catalogTemplateFiles.templateId, template.id));
-
-        if (template.files.length > 0) {
-          await tx.insert(catalogTemplateFiles).values(
-            template.files.map((file) =>
-              asInsert(catalogTemplateFiles, {
-                templateId: template.id,
-                path: file.path,
-                sha256: file.sha256,
-                sizeBytes: file.sizeBytes,
-                mimeType: file.mimeType,
-                metadata: file.metadata,
-                isProjectFile: file.isProjectFile,
-                isAvailable: file.isAvailable,
-              }),
-            ),
-          );
-        }
-      });
+    if (!dryRun && !publication.length) {
+      await deps.db.transaction(tx => writeCatalogTemplate(tx, template));
     }
+  }
+
+  if (!dryRun && prepared.length && publication.length) {
+    await deps.db.transaction(async tx => {
+      // Upload immutable blobs first. Publish the whole directory in one transaction,
+      // including withdrawals, so a failed import leaves the previous catalog usable.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('openmotion-prism-motion'))`);
+      const [newer] = await tx.select({ id: catalogTemplates.id }).from(catalogTemplates)
+          .where(and(like(catalogTemplates.catalogVersion, `prism:${options.prismEnvironment}:%`),
+            sql`(${catalogTemplates.metadata}->>'generation')::bigint > ${Number(publication[0].metadata.generation)}`)).limit(1);
+      if (newer) throw new Error('A newer Prism publication was already imported.');
+      for (const template of prepared) await writeCatalogTemplate(tx, template);
+      if (!filterIds && !options.limit) {
+        await tx.delete(catalogTemplates).where(and(eq(catalogTemplates.kind, 'prism'),
+          ne(catalogTemplates.catalogVersion, publication[0].catalogVersion)));
+      }
+    });
   }
 
   const summary: SyncCatalogSummary = {
@@ -1033,6 +1032,7 @@ export async function syncCatalogCas(
     templatesProcessed: prepared.length,
     builtinTemplatesProcessed: builtinCount,
     repositoryTemplatesProcessed: repoCount,
+    prismTemplatesProcessed: prepared.length - builtinCount - repoCount,
     filesProcessed,
     uniqueBlobsSeen: uploadedShas.size,
     blobsUploaded,
@@ -1056,6 +1056,10 @@ export async function runSyncCatalogCli(
 ): Promise<SyncCatalogSummary> {
   const logger = createLogger({ bindings: { service: 'catalog-sync' } });
   const options = parseSyncCatalogArgs(argv);
+  if (env.PRISM_CONTENT_ENV) {
+    if (env.PRISM_CONTENT_ENV !== 'dev' && env.PRISM_CONTENT_ENV !== 'prod') throw new Error('PRISM_CONTENT_ENV must be dev or prod.');
+    options.prismEnvironment = env.PRISM_CONTENT_ENV;
+  }
   if (options.fetchRemote === undefined && envBoolean(env.CATALOG_SYNC_FETCH_REMOTE, false)) {
     options.fetchRemote = true;
   }
