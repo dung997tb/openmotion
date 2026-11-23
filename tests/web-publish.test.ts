@@ -643,6 +643,35 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     } else {
       assert.equal(bigBundled.data.length, bigPng.length);
     }
+
+    // Verify configured HYPERFRAMES_FFMPEG_PATH fallback via execute() when cwebp is unavailable.
+    if (process.platform !== 'win32') {
+      const { chmod } = await import('node:fs/promises');
+      const fakeFfmpeg = path.join(store.directory, 'fake-ffmpeg.sh');
+      await writeFile(fakeFfmpeg, '#!/bin/sh\nfor last; do :; done\nprintf "RIFF\\x10\\x00\\x00\\x00WEBPVP8 " > "$last"\n');
+      await chmod(fakeFfmpeg, 0o755);
+      const prevCwebp = process.env.CWEBP_PATH;
+      const prevFfmpeg = process.env.HYPERFRAMES_FFMPEG_PATH;
+      process.env.CWEBP_PATH = path.join(store.directory, 'missing-cwebp-binary');
+      process.env.HYPERFRAMES_FFMPEG_PATH = fakeFfmpeg;
+      try {
+        const ffmpegBundle = await buildPublishBundle({
+          dataDirectory: store.directory,
+          kind: 'game',
+          targetId: bigGame.id,
+          sourcePath: bigLoc.dir,
+          entryPath: 'index.html',
+        });
+        const ffmpegAsset = ffmpegBundle.files.find(f => f.file.startsWith('_shared-assets/'));
+        assert.ok(ffmpegAsset && ffmpegAsset.file.endsWith('.webp'), 'HYPERFRAMES_FFMPEG_PATH fallback must produce .webp');
+        assert.ok(ffmpegAsset.data.length < bigPng.length * 0.85);
+        const ffmpegHtml = ffmpegBundle.files.find(f => f.file === 'index.html')!.data.toString('utf8');
+        assert.match(ffmpegHtml, /\.webp/);
+      } finally {
+        if (prevCwebp === undefined) delete process.env.CWEBP_PATH; else process.env.CWEBP_PATH = prevCwebp;
+        if (prevFfmpeg === undefined) delete process.env.HYPERFRAMES_FFMPEG_PATH; else process.env.HYPERFRAMES_FFMPEG_PATH = prevFfmpeg;
+      }
+    }
   }));
 
 test('WebPublishService migrates legacy cloud-shares records and preserves cloudProjectId/slug', () =>

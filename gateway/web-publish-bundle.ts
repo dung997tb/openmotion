@@ -1,14 +1,12 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { execute } from '../hyperframes.ts';
+import { verificationBinaries } from '../scripts/verify-export.ts';
 import type { WebPublishTargetKind } from '../shared/web-publish.ts';
 import { WorkspaceStore } from '../workspace.ts';
 import { AssetLibrary } from './asset-library.ts';
-
-const execFileAsync = promisify(execFile);
 
 export const MAX_PUBLISH_FILES = 500;
 export const MAX_PUBLISH_BYTES = 50 * 1024 * 1024;
@@ -28,23 +26,23 @@ async function maybeCompressRasterForPublish(
   const tempDir = await mkdtemp(path.join(tmpdir(), 'openmotion-publish-webp-'));
   const outputPath = path.join(tempDir, 'out.webp');
   try {
-    let encoded = false;
-    try {
-      await execFileAsync('cwebp', ['-quiet', '-q', '82', '-alpha_q', '90', sourcePath, '-o', outputPath], {
-        timeout: 15_000,
-      });
-      encoded = true;
-    } catch {
-      try {
-        await execFileAsync(
-          'ffmpeg',
-          ['-y', '-loglevel', 'error', '-i', sourcePath, '-c:v', 'libwebp', '-quality', '82', outputPath],
-          { timeout: 15_000 },
-        );
-        encoded = true;
-      } catch {
-        encoded = false;
-      }
+    const cwebpBin = process.env.CWEBP_PATH || 'cwebp';
+    const cwebpRes = await execute(
+      cwebpBin,
+      ['-quiet', '-q', '82', '-alpha_q', '90', sourcePath, '-o', outputPath],
+      tempDir,
+      15_000,
+    ).catch(() => null);
+    let encoded = cwebpRes?.code === 0;
+    if (!encoded) {
+      const { ffmpeg } = verificationBinaries();
+      const ffmpegRes = await execute(
+        ffmpeg,
+        ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-c:v', 'libwebp', '-quality', '82', outputPath],
+        tempDir,
+        15_000,
+      ).catch(() => null);
+      encoded = ffmpegRes?.code === 0;
     }
     if (!encoded) return { data: originalBytes, ext };
     const compressed = await readFile(outputPath).catch(() => null);
