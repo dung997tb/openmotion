@@ -195,6 +195,7 @@ export function useDomEditWiring(params: UseDomEditWiringParams) {
     // Pass the preview iframe so class/selector tweens (e.g. `.dot`) resolve to
     // the live element and surface in the inspector — not just by #id match.
     previewIframeRef,
+    gsapChangedPath,
   );
 
   // ── Telemetry & fallback ──
