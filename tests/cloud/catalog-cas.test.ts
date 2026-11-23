@@ -42,7 +42,8 @@ import {
   syncCatalogCas,
 } from '../../scripts/sync-catalog-cas.ts';
 import { RuntimeTemplateAssets } from '../../src/services/runtime-template-assets.ts';
-import type { PreparedCatalogTemplate } from '../../src/services/prism-motion-catalog.ts';
+import { PrismMotionCatalog, type PreparedCatalogTemplate } from '../../src/services/prism-motion-catalog.ts';
+import { setImmediate } from 'node:timers/promises';
 import { computeProjectRevision } from '../../shared/project-validation.ts';
 
 const WID_A = '11111111-1111-4111-8111-111111111111';
@@ -1187,6 +1188,50 @@ describe('Runtime template clones', () => {
     const storage = new MockStorage();
     return { pg, storage, catalog: new CatalogService({ db: pg.db, storage, prismCatalog: { getTemplates } }) };
   }
+
+  it('answers exact lookups immediately during the first load and distinguishes absence after publication', async () => {
+    const resourceId = '1500c9af-186b-457f-b74d-a58113f657d8';
+    const versionPath = '/resources/' + resourceId + '/channels/default/versions/v1';
+    const published = JSON.stringify({ templates: [{
+      templateId: 'published', sortOrder: 1, original: { templateName: 'Published' },
+    }] });
+    const manifest = {
+      resourceId, environment: 'dev', defaultLocale: 'en', channel: 'default', manifestVersion: 'v4',
+      publicationId: randomUUID(), contentPublicationId: randomUUID(), versionId: 'ver_' + 'a'.repeat(32),
+      version: 'v1', generation: 1, mainUrl: versionPath + '/main.json',
+      contents: [{ locale: 'en', contentUrl: versionPath + '/en.json', byteLength: Buffer.byteLength(published),
+        sha256: createHash('sha256').update(published).digest('hex') }],
+    };
+    const gate = Promise.withResolvers<void>();
+    let requests = 0;
+    let offline = true;
+    const prismCatalog = new PrismMotionCatalog('dev', {
+      publicOrigin: 'https://cms-test.example', retryMs: 0,
+      fetchImpl: async input => {
+        requests++;
+        await gate.promise;
+        if (offline) return new Response(null, { status: 503 });
+        return String(input).endsWith('/manifest.json') ? Response.json(manifest) : new Response(published);
+      },
+    });
+    const pg = new MockPgHarness();
+    pg.seedWorkspace(WID_A, USER_A);
+    const catalog = new CatalogService({ db: pg.db, storage: new MockStorage(), prismCatalog });
+    const unavailable = { code: 'SERVICE_UNAVAILABLE', status: 503 };
+    await assert.rejects(catalog.getTemplate('published'), unavailable);
+    await assert.rejects(catalog.cloneTemplateToProject(ctx, { templateId: 'published' }), unavailable);
+    await assert.rejects(catalog.headTemplateAsset('published', 'index.html'), unavailable);
+    assert.equal((await catalog.listTemplates()).catalogTotal, BUILTIN_TEMPLATES.length);
+    assert.equal((await catalog.getTemplate(WELCOME_TEMPLATE_ID)).id, WELCOME_TEMPLATE_ID);
+    assert.equal(requests, 1);
+    gate.resolve();
+    await setImmediate();
+    offline = false;
+    await assert.rejects(catalog.getTemplate('published'), unavailable);
+    await setImmediate();
+    assert.equal((await catalog.getTemplate('published')).id, 'published');
+    await assert.rejects(catalog.getTemplate('absent'), { code: 'NOT_FOUND', status: 404 });
+  });
 
   it('materializes only the selected files, keeps projects independent across publications and replays after withdrawal', async t => {
     const first = publishedTemplate('chosen', 'first source');

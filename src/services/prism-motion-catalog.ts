@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { CloudError } from '../contracts/errors.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { isSha256Hex, isUuid, projectPath } from '../../shared/project-validation.ts';
@@ -178,6 +179,8 @@ interface PrismMotionCatalogOptions {
   onRefreshError?: (error: unknown) => void;
 }
 
+const emptyCatalog: readonly PreparedCatalogTemplate[] = [];
+
 /** Per API instance and environment. Access triggers checks; no timer runs between requests. */
 export class PrismMotionCatalog {
   private readonly environment: PrismEnvironment;
@@ -187,7 +190,7 @@ export class PrismMotionCatalog {
   private readonly ttlMs: number;
   private readonly retryMs: number;
   private readonly onRefreshError?: (error: unknown) => void;
-  private cached: readonly PreparedCatalogTemplate[] = [];
+  private cached?: readonly PreparedCatalogTemplate[];
   private pending?: Promise<void>;
   private checkAfter = 0;
 
@@ -207,11 +210,14 @@ export class PrismMotionCatalog {
     this.onRefreshError = options.onRefreshError;
   }
 
-  async getTemplates(): Promise<readonly PreparedCatalogTemplate[]> {
+  async getTemplates({ requirePublication = false } = {}): Promise<readonly PreparedCatalogTemplate[]> {
     if (!this.pending && this.now() >= this.checkAfter) {
       this.pending = this.refresh();
     }
-    return this.cached;
+    if (requirePublication && !this.cached) {
+      throw new CloudError('SERVICE_UNAVAILABLE', 'Motion template catalog is not ready yet. Retry shortly.', { status: 503 });
+    }
+    return this.cached ?? emptyCatalog;
   }
 
   private async refresh(): Promise<void> {
