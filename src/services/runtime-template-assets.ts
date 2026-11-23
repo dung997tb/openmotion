@@ -7,7 +7,7 @@ import type { PreparedCatalogFile, PreparedCatalogTemplate } from './prism-motio
 /** Copies source bytes to immutable catalog CAS only when someone opens a published project. */
 export class RuntimeTemplateAssets {
   private readonly ready = new WeakMap<PreparedCatalogTemplate, Promise<void>>();
-  private readonly pending = new Map<string, Promise<void>>();
+  private readonly pending = new Map<string, { sizeBytes: number; task: Promise<void> }>();
   // Each remote file is already bounded by the publication schema. Limit buffered downloads across all callers.
   private readonly lanes: Promise<void>[] = [Promise.resolve(), Promise.resolve()];
 
@@ -55,7 +55,10 @@ export class RuntimeTemplateAssets {
   private ensureFile(file: PreparedCatalogFile): Promise<void> {
     const key = catalogBlobKey(file.sha256);
     const existing = this.pending.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.sizeBytes !== file.sizeBytes) throw new Error('Conflicting sizes for one source digest');
+      return existing.task;
+    }
     const task = this.lanes.shift()!.then(async () => {
       const stored = await this.storage.headObject(key);
       if (stored?.contentLength === file.sizeBytes) return;
@@ -69,7 +72,7 @@ export class RuntimeTemplateAssets {
       if (bytes.length !== file.sizeBytes || mediaDigest(bytes) !== file.sha256) throw new Error('Source size or SHA-256 mismatch');
       await this.storage.putBlobIfAbsent(key, bytes, file.mimeType);
     }).finally(() => this.pending.delete(key));
-    this.pending.set(key, task);
+    this.pending.set(key, { sizeBytes: file.sizeBytes, task });
     this.lanes.push(task.catch(() => {}));
     return task;
   }

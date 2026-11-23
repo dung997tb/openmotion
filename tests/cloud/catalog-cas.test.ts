@@ -1241,7 +1241,10 @@ describe('Runtime template clones', () => {
     const storage = new MockStorage();
     let count = 0;
     const assets = new RuntimeTemplateAssets(storage, async () => { count++; return new Response('overlap'); });
-    await Promise.all([assets.ensure(first), assets.ensure(first), assets.ensure(other)]);
+    const wrongSize = publishedTemplate('wrong', 'overlap');
+    wrongSize.files[0]!.sizeBytes += 1;
+    await Promise.all([assets.ensure(first), assets.ensure(first), assets.ensure(other),
+      assert.rejects(() => assets.ensure(wrongSize), { code: 'TEMPLATE_MEDIA_UNAVAILABLE' })]);
     assert.equal(count, 1);
     assert.equal(storage.putCalls, 1);
     const coldInstance = new RuntimeTemplateAssets(storage, async () => { throw new Error('No download expected'); });
