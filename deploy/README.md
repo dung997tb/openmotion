@@ -157,6 +157,14 @@ kubectl -n openmotion wait --for=condition=complete job/openmotion-db-migrate --
 kubectl -n openmotion wait --for=condition=complete job/openmotion-catalog-sync --timeout=900s
 ```
 
+#### Cloud Motion templates
+
+Configure the API with `PRISM_CONTENT_ENV=dev` for test and `prod` for production. Set `PRISM_PUBLIC_ORIGIN` to the public dev delivery origin in the test environment. Production defaults to the public Prism origin. Disable the repository catalog import job for this mode. Contributor checkouts, hosted npm template catalogs and the main-branch publishing workflow retain their existing source selection.
+
+The API loads the published Motion directory on the first catalog read. Subsequent reads use the in-memory snapshot immediately. At most once per five minutes of activity, one background request per API process checks the manifest. An unchanged publication keeps the current snapshot. A failed refresh keeps serving it and allows a retry after 30 seconds. Studio requests a page of localized cards. Covers and reference media use the published CDN URLs.
+
+The directory does not use PostgreSQL template rows. The four built-in templates are packaged with the API. On an editable template's first clone, its verified files are copied to content-addressed storage and the usual project/version rows are created. Existing projects keep the files they were created from. To roll back to the database-backed catalog, restore its import job and clear the API's Prism settings.
+
 ### 3. Autoscaling & Graceful Export Drain
 
 - **`api`**: Managed by `HorizontalPodAutoscaler` (`api-hpa.yaml`, 2–20 replicas) and `PodDisruptionBudget` (`minAvailable: 1`). Ingress disables proxy buffering (`proxy-buffering: "off"`) with 3600s read/send timeouts for SSE (`/api/events`, `/api/render/:id/progress`) and Streamable HTTP `/mcp`.

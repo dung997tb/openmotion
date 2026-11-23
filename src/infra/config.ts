@@ -31,6 +31,8 @@ const rawConfigSchema = z.object({
   // Core service
   APP_PUBLIC_ORIGIN: z.string().url().default('http://127.0.0.1:4173'),
   PREVIEW_PUBLIC_ORIGIN: optionalUrl,
+  PRISM_CONTENT_ENV: z.preprocess(value => value === '' ? undefined : value, z.enum(['dev', 'prod']).optional()),
+  PRISM_PUBLIC_ORIGIN: optionalUrl,
   PREVIEW_TOKEN_TTL_SEC: z.coerce.number().int().positive().default(900),
   PORT: z.coerce.number().int().min(1).max(65535).default(4173),
   BIND_HOST: z.string().min(1).default('0.0.0.0'),

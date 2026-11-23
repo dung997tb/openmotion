@@ -1,5 +1,7 @@
+import type { PrismMotionCatalog, PreparedCatalogTemplate } from './prism-motion-catalog.ts';
+import { BUILTIN_TEMPLATES, builtinTemplateMetadata, getBuiltinTemplateSource } from './builtin-template-source.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import path from 'node:path';
+import { mimeTypeForPath, normalizeCatalogAssetPath } from './catalog-template-source.ts';
 import { and, asc, eq } from 'drizzle-orm';
 import {
   hasMinRole,
@@ -11,6 +13,7 @@ import type { BlobMetadata, StoragePort } from '../contracts/storage.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { workspaces } from '../db/schema/auth.ts';
+import { idempotencyReceipts as receipts } from '../db/schema/jobs.ts';
 import {
   catalogTemplateFiles,
   catalogTemplates,
@@ -49,184 +52,25 @@ import {
   upgradeTemplateGuidePage,
 } from '../../shared/template-guide.ts';
 import { catalogLocale } from '../../shared/template-locale.ts';
+import { RuntimeTemplateAssets } from './runtime-template-assets.ts';
 
-// ---------------------------------------------------------------------------
-// Canonical Built-in Template & Welcome Definitions (Zero Legacy FS Coupling)
-// ---------------------------------------------------------------------------
-
-export const WELCOME_TEMPLATE_ID = 'openmotion-welcome';
-export const WELCOME_PROJECT_TITLE = 'OpenMotion 示例短片';
-export const WELCOME_PROJECT_TITLE_KEY = 'OpenMotion Sample Video' as const;
-export const GSAP_CDN_URL = 'https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js';
-
-export const NATIVE_PROJECT_CONFIG = {
-  $schema: 'https://hyperframes.heygen.com/schema/hyperframes.json',
-  paths: { blocks: 'compositions', components: 'compositions/components', assets: 'assets' },
-} as const;
-
-export const WELCOME_SHARED_ASSETS: readonly (readonly [string, string])[] = [
-  ['packages/design-system/brand/loading-mark.svg', 'assets/brand-mark.svg'],
-  ['packages/design-system/fonts/AlbertSans-VariableFont_wght.ttf', 'assets/fonts/AlbertSans.ttf'],
-  ['packages/design-system/fonts/Albert-Sans-OFL.txt', 'assets/fonts/Albert-Sans-OFL.txt'],
-  ['packages/design-system/opendesign-logo-SOURCE.md', 'assets/brand-NOTICE.md'],
-  ['library/skills/openmotion-design-remix/vendor/fonts/libre-baskerville-f5bc4341f15d.ttf', 'assets/fonts/serif.ttf'],
-  ['library/skills/openmotion-design-remix/vendor/fonts/libre-baskerville-OFL.txt', 'assets/fonts/Libre-Baskerville-OFL.txt'],
-  ['library/skills/openmotion-design-remix/vendor/three-0.147.0/build/three.min.js', 'assets/three.min.js'],
-  ['library/skills/openmotion-design-remix/vendor/three-0.147.0/LICENSE', 'assets/three-LICENSE.txt'],
-] as const;
-
-export interface BuiltinTemplateDefinition {
-  readonly id: string;
-  readonly sortOrder: number;
-  readonly title: string;
-  readonly label: string;
-  readonly description: string;
-  readonly duration: number;
-  readonly width: number;
-  readonly height: number;
-  readonly posterTime: number;
-  readonly author: string;
-  readonly sourceUrl: string;
-}
-
-/**
- * Built-in templates ordered with `openmotion-welcome` first so even `--limit 1`
- * sync runs always ingest the welcome template required by workspace bootstrap.
- */
-export const BUILTIN_TEMPLATES: readonly BuiltinTemplateDefinition[] = [
-  {
-    id: WELCOME_TEMPLATE_ID,
-    sortOrder: 0,
-    title: 'OpenMotion Welcome',
-    label: 'Official welcome',
-    description:
-      'An editable brand welcome with kinetic typography, a motion gallery and a three-dimensional closing mark.',
-    duration: 37.3,
-    width: 1920,
-    height: 1080,
-    posterTime: 3.8,
-    author: 'OpenMotion',
-    sourceUrl: 'https://github.com/nexu-io/openmotion/tree/main/template-library/openmotion-welcome',
-  },
-  {
-    id: 'product-promo',
-    sortOrder: 1,
-    title: 'Product Promo',
-    label: '产品宣传',
-    description: '从图标开场到多人协作，查看多场景动画与字幕编排。',
-    duration: 20,
-    width: 1920,
-    height: 1080,
-    posterTime: 7,
-    author: 'Hyperframes',
-    sourceUrl:
-      'https://github.com/heygen-com/hyperframes/tree/3baf81f9a92615507f76fe8de33e489034ee77ec/registry/examples/product-promo',
-  },
-  {
-    id: 'nyt-graph',
-    sortOrder: 2,
-    title: 'NYT Graph',
-    label: '数据叙事',
-    description: '报刊风格的动态图表，查看数据、标注与图形的节奏。',
-    duration: 15,
-    width: 1920,
-    height: 1080,
-    posterTime: 9,
-    author: 'Hyperframes',
-    sourceUrl:
-      'https://github.com/heygen-com/hyperframes/tree/3baf81f9a92615507f76fe8de33e489034ee77ec/registry/examples/nyt-graph',
-  },
-  {
-    id: 'decision-tree',
-    sortOrder: 3,
-    title: 'Decision Tree',
-    label: '流程动画',
-    description: '逐步展开的决策树，查看节点、连线与分支动画。',
-    duration: 10,
-    width: 1920,
-    height: 1080,
-    posterTime: 7,
-    author: 'Hyperframes',
-    sourceUrl:
-      'https://github.com/heygen-com/hyperframes/tree/3baf81f9a92615507f76fe8de33e489034ee77ec/registry/examples/decision-tree',
-  },
-] as const;
-
-const MIME_BY_EXT: Readonly<Record<string, string>> = {
-  '.html': 'text/html; charset=utf-8',
-  '.htm': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.md': 'text/markdown; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-  '.vtt': 'text/vtt; charset=utf-8',
-  '.srt': 'text/plain; charset=utf-8',
-  '.glsl': 'text/plain; charset=utf-8',
-  '.vert': 'text/plain; charset=utf-8',
-  '.frag': 'text/plain; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.gif': 'image/gif',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.woff': 'font/woff',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.mp4': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.m4v': 'video/mp4',
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.ogg': 'audio/ogg',
-  '.m4a': 'audio/mp4',
-  '.aac': 'audio/aac',
-  '.flac': 'audio/flac',
-};
+export {
+  BUILTIN_TEMPLATES, GSAP_CDN_URL, NATIVE_PROJECT_CONFIG, WELCOME_PROJECT_TITLE,
+  WELCOME_PROJECT_TITLE_KEY, WELCOME_SHARED_ASSETS, WELCOME_TEMPLATE_ID,
+  type BuiltinTemplateDefinition,
+} from './builtin-template-source.ts';
+export { mimeTypeForPath, normalizeCatalogAssetPath } from './catalog-template-source.ts';
 
 const TEMPLATE_ID_REGEX = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
 const DEFAULT_PRESIGN_GET_TTL_SEC = 300;
 const REDIRECT_CACHE_CONTROL = 'private, max-age=60';
 const REDIRECT_VARY = 'Origin, Cookie';
 
-export function mimeTypeForPath(filePath: string): string {
-  const ext = path.posix.extname(filePath).toLowerCase();
-  return MIME_BY_EXT[ext] ?? 'application/octet-stream';
-}
-
 export function validateTemplateId(value: string): string {
   if (typeof value !== 'string' || !TEMPLATE_ID_REGEX.test(value)) {
     throw new CloudError('INVALID_ARGUMENT', 'Invalid template ID', { status: 400, applied: false });
   }
   return value;
-}
-
-export function normalizeCatalogAssetPath(rawPath: string): string {
-  if (
-    typeof rawPath !== 'string' ||
-    !rawPath ||
-    rawPath.length > 240 ||
-    rawPath.startsWith('/') ||
-    rawPath.includes('\\') ||
-    rawPath.includes(':') ||
-    /[\x00-\x1f]/.test(rawPath)
-  ) {
-    throw new CloudError('INVALID_PATH', 'Invalid catalog asset path', { status: 400, applied: false });
-  }
-  const parts = rawPath.split('/');
-  if (parts.some((part) => !part || part === '.' || part === '..')) {
-    throw new CloudError('INVALID_PATH', 'Catalog asset path contains invalid segments or traversal', {
-      status: 400,
-      applied: false,
-    });
-  }
-  return rawPath;
 }
 
 export function formatStrongShaEtag(sha256: string): string {
@@ -289,7 +133,7 @@ export interface CatalogListOptions {
 }
 
 export interface CatalogListResult extends TemplatePage {
-  source: 'catalog-cas';
+  source: 'catalog-cas' | 'prism';
 }
 
 export interface CatalogFileSummary {
@@ -346,6 +190,8 @@ export type ResolvedCatalogAsset =
       contentDisposition?: string;
     };
 
+export type CatalogHead = CatalogAssetHead | Extract<ResolvedCatalogAsset, { kind: 'redirect' }>;
+
 export interface ResolveSourceAssetOptions {
   raw?: boolean;
   stage?: boolean;
@@ -381,6 +227,7 @@ export interface ClonedProjectFile {
 }
 
 export interface CloneTemplateResult {
+  replayed?: true;
   projectId: string;
   sessionId: string;
   artifactId: string;
@@ -396,15 +243,57 @@ export interface CloneTemplateResult {
   files: ClonedProjectFile[];
 }
 
+function cloneReceipt(ctx: AuthContext, options: CloneTemplateOptions, requestId: string) {
+  const key = { workspaceId: ctx.workspaceId, scope: 'template:clone', requestId };
+  const inputHash = createHash('sha256').update(JSON.stringify([
+    ctx.userId, options.templateId.trim(), options.sessionId, options.title?.trim(), options.titleKey,
+    options.requirements, options.namingLanguage, options.locale, Boolean(options.activateWorkspace),
+  ])).digest('hex');
+  const where = and(eq(receipts.workspaceId, key.workspaceId), eq(receipts.scope, key.scope), eq(receipts.requestId, requestId));
+  return { key, inputHash, where };
+}
+
+async function replayClone(db: DbExecutor, { key, inputHash, where }: ReturnType<typeof cloneReceipt>): Promise<CloneTemplateResult | null> {
+  const [prior] = await db.select().from(receipts).where(where);
+  if (!prior) return null;
+  if (prior.inputHash !== inputHash) {
+    throw new CloudError('REQUEST_ID_CONFLICT', 'This request already belongs to a different template clone', { status: 409, applied: false });
+  }
+  if (!prior.responsePayload) return null;
+  const result = prior.responsePayload as unknown as Omit<CloneTemplateResult, 'files'>;
+  const files = await db.select({
+    path: projectVersionFiles.path, sha256: projectVersionFiles.sha256,
+    sizeBytes: projectVersionFiles.sizeBytes, mimeType: projectVersionFiles.mimeType,
+  }).from(projectVersionFiles).where(and(eq(projectVersionFiles.workspaceId, key.workspaceId),
+    eq(projectVersionFiles.versionId, result.versionId))).orderBy(asc(projectVersionFiles.path));
+  return { ...result, replayed: true, files: files.map(file => ({ ...file, blobScope: 'catalog', isText: isTextProjectPath(file.path) })) };
+}
+
+/** The unique insert waits for a competing transaction before the receipt is read. */
+async function cloneOnce(
+  tx: DbExecutor, request: ReturnType<typeof cloneReceipt>, clone: (tx: DbExecutor) => Promise<CloneTemplateResult>,
+): Promise<CloneTemplateResult> {
+  await tx.insert(receipts).values(asInsert(receipts, { ...request.key, inputHash: request.inputHash, state: 'pending' }))
+    .onConflictDoNothing({ target: [receipts.workspaceId, receipts.scope, receipts.requestId] });
+  const replayed = await replayClone(tx, request);
+  if (replayed) return replayed;
+  const result = await clone(tx);
+  const { files: _files, ...responsePayload } = result;
+  await tx.update(receipts).set(asUpdate(receipts, {
+    state: 'completed', resourceId: result.projectId, responsePayload, updatedAt: new Date(),
+  })).where(request.where);
+  return result;
+}
+
 export interface CatalogPort {
   listTemplates(options?: CatalogListOptions): Promise<CatalogListResult>;
   listBuiltinTemplates(locale?: string): Promise<GalleryTemplate[]>;
   getTemplate(templateId: string, options?: { locale?: string }): Promise<CatalogTemplateDetail>;
-  headPosterAsset(templateId: string): Promise<CatalogAssetHead>;
+  headPosterAsset(templateId: string): Promise<CatalogHead>;
   resolvePosterAsset(templateId: string, options?: { presignTtlSec?: number }): Promise<ResolvedCatalogAsset>;
-  headPreviewAsset(templateId: string): Promise<CatalogAssetHead>;
+  headPreviewAsset(templateId: string): Promise<CatalogHead>;
   resolvePreviewAsset(templateId: string, options?: { presignTtlSec?: number }): Promise<ResolvedCatalogAsset>;
-  headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogAssetHead>;
+  headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogHead>;
   resolveSourceAsset(
     templateId: string,
     assetPath: string,
@@ -479,7 +368,7 @@ interface StoredCatalogMetadata {
   remoteAssets?: StoredRemoteAsset[];
 }
 
-type CatalogTemplateRow = typeof catalogTemplates.$inferSelect;
+type CatalogTemplateRow = Omit<typeof catalogTemplates.$inferSelect, 'updatedAt'>;
 type CatalogTemplateFileRow = typeof catalogTemplateFiles.$inferSelect;
 
 function projectRowToGalleryTemplate(
@@ -546,6 +435,7 @@ function projectRowToGalleryTemplate(
     );
 
   const parsedDuration = Number(original.durationSeconds);
+  const published = row.catalogVersion.startsWith('prism:');
 
   return {
     id: row.id,
@@ -560,8 +450,12 @@ function projectRowToGalleryTemplate(
     sourceUrl: original.sourceUrl || undefined,
     previewUrl,
     posterUrl,
-    motionDocumentUrl: `/api/template-source/${encodeURIComponent(row.id)}/motion.md`,
-    motionGuideUrl: `/api/template-source/${encodeURIComponent(row.id)}/preview.html`,
+    motionDocumentUrl: published
+      ? localized?.motionDocumentUrl ?? entry.motionDocumentUrl ?? undefined
+      : `/api/template-source/${encodeURIComponent(row.id)}/motion.md`,
+    motionGuideUrl: published
+      ? localized?.motionGuideUrl ?? entry.motionGuideUrl ?? undefined
+      : `/api/template-source/${encodeURIComponent(row.id)}/preview.html`,
     projectFileUrl: typeof entry.projectFileUrl === 'string' ? entry.projectFileUrl : undefined,
     authorAvatarUrl: typeof entry.authorAvatarUrl === 'string' ? entry.authorAvatarUrl : undefined,
     styleDescription: original.styleDescription || undefined,
@@ -615,6 +509,7 @@ function deriveDefaultProjectTitle(row: CatalogTemplateRow, locale = 'en'): stri
 // ---------------------------------------------------------------------------
 
 export interface CatalogServiceDeps {
+  prismCatalog?: Pick<PrismMotionCatalog, 'getTemplates'>;
   db: Database;
   storage: StoragePort;
   textCache?: HotTextCache;
@@ -631,7 +526,13 @@ export class CatalogService implements CatalogPort {
   private readonly defaultLocale: string;
   private readonly presignGetTtlSec: number;
 
+  private readonly publishedCards = new WeakMap<readonly PreparedCatalogTemplate[], Map<string, GalleryTemplate[]>>();
+  private readonly prismCatalog?: Pick<PrismMotionCatalog, 'getTemplates'>;
+  private readonly runtimeAssets: RuntimeTemplateAssets;
+
   constructor(deps: CatalogServiceDeps) {
+    this.prismCatalog = deps.prismCatalog;
+    this.runtimeAssets = new RuntimeTemplateAssets(deps.storage);
     this.db = deps.db;
     this.storage = deps.storage;
     this.textCache = deps.textCache;
@@ -641,6 +542,22 @@ export class CatalogService implements CatalogPort {
   }
 
   private async loadTemplateIndex(options: Pick<CatalogListOptions, 'kind' | 'locale'>) {
+    if (this.prismCatalog) {
+      const cms = options.kind === 'builtin' ? [] : await this.prismCatalog.getTemplates();
+      const first = cms[0];
+      const locale = catalogLocale(Object.keys(first?.metadata.locales ?? {}), options.locale ?? this.defaultLocale, this.defaultLocale);
+      const key = (options.kind ?? 'all') + '/' + locale;
+      const cards = this.publishedCards.get(cms) ?? new Map<string, GalleryTemplate[]>();
+      let items = cards.get(key);
+      if (!items) {
+        const builtins = options.kind === 'prism' ? [] : BUILTIN_TEMPLATES.map(builtinTemplateMetadata);
+        const rows = [...cms].sort((a, b) => a.sortOrder - b.sortOrder).concat(builtins);
+        items = rows.map(row => projectRowToGalleryTemplate(row, locale));
+        cards.set(key, items);
+        this.publishedCards.set(cms, cards);
+      }
+      return { items, catalogVersion: first?.catalogVersion ?? 'builtin' };
+    }
     const baseQuery = this.db.select().from(catalogTemplates);
     const rows = options.kind
       ? await baseQuery
@@ -663,7 +580,8 @@ export class CatalogService implements CatalogPort {
 
   async listAllTemplates() {
     const { items, catalogVersion } = await this.loadTemplateIndex({});
-    return { templates: items.sort(compareFeaturedTemplates), catalogVersion, total: items.length };
+    return { templates: items.toSorted(compareFeaturedTemplates), catalogVersion, total: items.length,
+      source: this.prismCatalog ? 'prism' : 'cloud-catalog-cas' };
   }
 
   async listTemplates(options: CatalogListOptions = {}): Promise<CatalogListResult> {
@@ -691,11 +609,12 @@ export class CatalogService implements CatalogPort {
       ...page,
       catalogTotal: items.length,
       catalogVersion,
-      source: 'catalog-cas',
+      source: this.prismCatalog ? 'prism' : 'catalog-cas',
     };
   }
 
   async listBuiltinTemplates(locale?: string): Promise<GalleryTemplate[]> {
+    if (this.prismCatalog) return (await this.loadTemplateIndex({ kind: 'builtin', locale })).items;
     const rows = await this.db
       .select()
       .from(catalogTemplates)
@@ -705,22 +624,20 @@ export class CatalogService implements CatalogPort {
     return rows.map((row) => projectRowToGalleryTemplate(row, resolvedLocale));
   }
 
+  private async getPreparedTemplateForClone(id: string): Promise<PreparedCatalogTemplate> {
+    const builtin = await getBuiltinTemplateSource(id);
+    if (builtin) return builtin;
+    const template = (await this.prismCatalog!.getTemplates()).find(item => item.id === id);
+    if (!template) throw new CloudError('NOT_FOUND', `Template '${id}' not found`, { status: 404, applied: false });
+    return template;
+  }
+
   async getTemplate(templateId: string, options: { locale?: string } = {}): Promise<CatalogTemplateDetail> {
     const id = validateTemplateId(templateId);
-    const rows = await this.db
-      .select()
-      .from(catalogTemplates)
-      .where(eq(catalogTemplates.id, id));
-    const row = rows[0];
-    if (!row) {
-      throw new CloudError('NOT_FOUND', `Template '${id}' not found`, { status: 404, applied: false });
-    }
-
-    const fileRows = await this.db
-      .select()
-      .from(catalogTemplateFiles)
-      .where(eq(catalogTemplateFiles.templateId, id))
-      .orderBy(asc(catalogTemplateFiles.path));
+    const source = this.prismCatalog ? await this.getPreparedTemplateForClone(id) : undefined;
+    const row = source ?? await this.requireTemplateRow(id);
+    const fileRows = source?.files ?? await this.db.select().from(catalogTemplateFiles)
+      .where(eq(catalogTemplateFiles.templateId, id)).orderBy(asc(catalogTemplateFiles.path));
 
     const gallery = projectRowToGalleryTemplate(row, options.locale ?? this.defaultLocale);
     const instructions = row.instructionsMd ?? buildTemplateRecipe(gallery);
@@ -731,7 +648,7 @@ export class CatalogService implements CatalogPort {
       mimeType: file.mimeType,
       metadata: file.metadata ?? null,
       isProjectFile: file.isProjectFile,
-      isAvailable: file.isAvailable,
+      isAvailable: source ? true : file.isAvailable,
     }));
 
     return {
@@ -755,8 +672,37 @@ export class CatalogService implements CatalogPort {
     };
   }
 
-  async headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogAssetHead> {
+  private async publishedAsset(id: string, path: string, locale?: string): Promise<ResolvedCatalogAsset> {
+    const template = await this.getPreparedTemplateForClone(id);
+    const file = template.files.find(item => item.path === path);
+    const headers = { cacheControl: REDIRECT_CACHE_CONTROL, vary: REDIRECT_VARY };
+    if (file?.bytes) return {
+      ...headers, kind: 'inline', body: file.bytes, sizeBytes: file.sizeBytes, sha256: file.sha256,
+      etag: formatStrongShaEtag(file.sha256), mimeType: file.mimeType, metadata: file.metadata,
+    };
+    const card = projectRowToGalleryTemplate(template, locale ?? this.defaultLocale);
+    const links: Record<string, string | undefined> = template.kind === 'prism' ? {
+      'poster.jpg': card.posterUrl, 'preview.webm': card.previewUrl,
+      'motion.md': card.motionDocumentUrl, 'preview.html': card.motionGuideUrl,
+    } : {};
+    const location = file?.remoteUrl ?? links[path];
+    if (location) return {
+      ...headers, kind: 'redirect', location, mimeType: file?.mimeType ?? mimeTypeForPath(path),
+      metadata: file?.metadata ?? null,
+    };
+    throw new CloudError('NOT_FOUND', `No published '${path}' for template '${id}'`, { status: 404, applied: false });
+  }
+
+  private async publishedHead(id: string, path: string): Promise<CatalogHead> {
+    const asset = await this.publishedAsset(id, path);
+    if (asset.kind === 'redirect') return asset;
+    return { templateId: id, path, sha256: asset.sha256, sizeBytes: asset.sizeBytes, mimeType: asset.mimeType,
+      etag: asset.etag, metadata: asset.metadata, isAvailable: true };
+  }
+
+  async headTemplateAsset(templateId: string, assetPath: string): Promise<CatalogHead> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedHead(id, normalizeCatalogAssetPath(assetPath));
     const normalizedPath = normalizeCatalogAssetPath(assetPath);
     const rows = await this.db
       .select()
@@ -788,8 +734,9 @@ export class CatalogService implements CatalogPort {
     };
   }
 
-  async headPosterAsset(templateId: string): Promise<CatalogAssetHead> {
+  async headPosterAsset(templateId: string): Promise<CatalogHead> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedHead(id, 'poster.jpg');
     const row = await this.requireTemplateRow(id);
     const posterPath = resolvePosterPathForRow(row);
     return this.headTemplateAsset(id, posterPath);
@@ -800,6 +747,7 @@ export class CatalogService implements CatalogPort {
     options: { presignTtlSec?: number } = {},
   ): Promise<ResolvedCatalogAsset> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedAsset(id, 'poster.jpg');
     const row = await this.requireTemplateRow(id);
     const posterPath = resolvePosterPathForRow(row);
 
@@ -847,8 +795,9 @@ export class CatalogService implements CatalogPort {
     throw new CloudError('NOT_FOUND', `Poster not found for template '${id}'`, { status: 404, applied: false });
   }
 
-  async headPreviewAsset(templateId: string): Promise<CatalogAssetHead> {
+  async headPreviewAsset(templateId: string): Promise<CatalogHead> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedHead(id, 'preview.webm');
     const row = await this.requireTemplateRow(id);
     const previewPath = resolvePreviewPathForRow(row);
     if (!previewPath) {
@@ -865,6 +814,7 @@ export class CatalogService implements CatalogPort {
     options: { presignTtlSec?: number } = {},
   ): Promise<ResolvedCatalogAsset> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedAsset(id, 'preview.webm');
     const row = await this.requireTemplateRow(id);
     const previewPath = resolvePreviewPathForRow(row);
 
@@ -917,6 +867,7 @@ export class CatalogService implements CatalogPort {
     options: ResolveSourceAssetOptions = {},
   ): Promise<ResolvedCatalogAsset> {
     const id = validateTemplateId(templateId);
+    if (this.prismCatalog) return this.publishedAsset(id, normalizeCatalogAssetPath(assetPath), options.locale);
     const normalizedPath = normalizeCatalogAssetPath(assetPath);
     const row = await this.requireTemplateRow(id);
 
@@ -1016,7 +967,8 @@ export class CatalogService implements CatalogPort {
    * initial `project_versions` (v1 baseline), `project_version_files` (`blob_scope = 'catalog'`),
    * and `project_history_entries` (seq 1).
    *
-   * NEVER copies bytes in S3 and NEVER reads/writes `workspace_blobs` refcounts.
+   * Published source files are prepared in catalog CAS before the project transaction.
+   * Each project references those immutable bytes directly, including its initial history snapshot.
    */
   async cloneTemplateToProject(
     ctx: AuthContext,
@@ -1075,29 +1027,34 @@ export class CatalogService implements CatalogPort {
       }
     }
 
-    const executeClone = async (tx: DbExecutor): Promise<CloneTemplateResult> => {
-      const templateRows = await tx
-        .select()
-        .from(catalogTemplates)
-        .where(eq(catalogTemplates.id, templateId));
-      const templateRow = templateRows[0];
-      if (!templateRow) {
-        throw new CloudError('NOT_FOUND', `Template '${templateId}' not found`, {
-          status: 404,
-          applied: false,
+    const request = validatedRequestId ? cloneReceipt(ctx, options, validatedRequestId) : null;
+    const prepareSource = async () => {
+      const template = await this.getPreparedTemplateForClone(templateId);
+      await this.runtimeAssets.ensure(template);
+      // Only immutable bytes were touched so far. A withdrawal or a newer publication
+      // seen while they were loading must not silently produce the older project.
+      if ((await this.getPreparedTemplateForClone(templateId)).catalogVersion !== template.catalogVersion) {
+        throw new CloudError('REVISION_CONFLICT', 'The selected template was republished. Retry to open its current version.', {
+          status: 409, applied: false,
         });
       }
-
-      const fileRows = await tx
-        .select()
-        .from(catalogTemplateFiles)
-        .where(
-          and(
-            eq(catalogTemplateFiles.templateId, templateId),
-            eq(catalogTemplateFiles.isProjectFile, true),
-          ),
-        )
-        .orderBy(asc(catalogTemplateFiles.path));
+      return template;
+    };
+    if (this.prismCatalog && request) {
+      // Retrying an acknowledged clone must work even if its source has since been withdrawn.
+      const replay = await replayClone(options.tx ?? this.db, request);
+      if (replay) return replay;
+    }
+    const source = this.prismCatalog ? await prepareSource() : null;
+    const executeClone = async (tx: DbExecutor): Promise<CloneTemplateResult> => {
+      const templateRow = source ?? (await tx.select().from(catalogTemplates).where(eq(catalogTemplates.id, templateId)))[0];
+      if (!templateRow) {
+        throw new CloudError('NOT_FOUND', `Template '${templateId}' not found`, { status: 404, applied: false });
+      }
+      const fileRows = source ? source.files.filter(file => file.isProjectFile).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+        : await tx.select().from(catalogTemplateFiles).where(and(
+          eq(catalogTemplateFiles.templateId, templateId), eq(catalogTemplateFiles.isProjectFile, true),
+        )).orderBy(asc(catalogTemplateFiles.path));
 
       if (fileRows.length === 0 || !fileRows.some((file) => file.path === 'index.html')) {
         throw new CloudError(
@@ -1107,7 +1064,7 @@ export class CatalogService implements CatalogPort {
         );
       }
 
-      const unavailable = fileRows.filter((file) => !file.isAvailable);
+      const unavailable = source ? [] : fileRows.filter(file => !file.isAvailable);
       if (unavailable.length > 0) {
         throw new CloudError(
           'TEMPLATE_MEDIA_UNAVAILABLE',
@@ -1122,7 +1079,7 @@ export class CatalogService implements CatalogPort {
         );
       }
 
-      const validatedFiles: ClonedProjectFile[] = fileRows.map((file) => {
+      const validatedFiles = fileRows.map((file): ClonedProjectFile => {
         let normalized: string;
         try {
           normalized = projectPath(file.path, true);
@@ -1364,7 +1321,8 @@ export class CatalogService implements CatalogPort {
       };
     };
 
-    const result = options.tx ? await executeClone(options.tx) : await this.db.transaction(executeClone);
+    const run = (tx: DbExecutor) => request ? cloneOnce(tx, request, executeClone) : executeClone(tx);
+    const result = options.tx ? await run(options.tx) : await this.db.transaction(run);
     this.logger?.info('Cloned catalog template zero-copy into workspace', {
       workspaceId: ctx.workspaceId,
       projectId: result.projectId,

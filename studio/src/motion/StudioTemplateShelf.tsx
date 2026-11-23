@@ -23,7 +23,7 @@ export function StudioTemplateShelf({ studio, root, active, navigation }: {
   const { locale, t } = useI18n();
   const { openLibrary } = useWorkspaceChrome();
   const query = studio === '3d' ? '3D' : studio === 'explainer' ? explainerTerms[locale] : '';
-  const templates = useExploreTemplates(collections[studio], locale, query);
+  const templates = useExploreTemplates(collections[studio], locale, { search: query, covered: studio !== 'motion' });
   const items = templates.pages.flatMap(page => page.items);
   const [priority, setPriority] = useState<string | null>(null);
   const playing = useTemplatePlayback(root, items.map(item => item.id).join('|'), active, true, priority, true);
@@ -39,7 +39,7 @@ export function StudioTemplateShelf({ studio, root, active, navigation }: {
     </div>
     {templates.loading && <div className="om-studio-template-grid" role="status" aria-label={t('Loading templates…')}>{[0, 1, 2, 3].map(n => <Skeleton key={n} />)}</div>}
     {templates.error ? <div className="om-discovery-empty"><span>{t('Templates could not be loaded.')}</span><Button variant="ghost" className="om-button h-auto" onClick={templates.retry}>{t('Retry')}</Button></div>
-      : !templates.loading && (templates.hasMore ? studio !== 'motion' && <Button variant="plain" className="om-button om-shelf-more" onClick={templates.loadMore}>{t('More templates')}<RemixIcon name="arrow-down-line" size={16} /></Button>
+      : !templates.loading && (templates.hasMore ? <Button variant="plain" className="om-button om-shelf-more" onClick={templates.loadMore}>{t('More templates')}<RemixIcon name="arrow-down-line" size={16} /></Button>
       : !items.length && <p className="om-muted">{t('No templates available. Open the library or try again later.')}</p>)}
   </section>;
 }

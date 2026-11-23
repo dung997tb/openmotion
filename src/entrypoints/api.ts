@@ -1,3 +1,4 @@
+import { PrismMotionCatalog } from '../services/prism-motion-catalog.ts';
 import { commitCaptionCommand } from '../mcp/caption-mutations.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -1595,7 +1596,7 @@ function createMcpDomainPorts(deps: {
 
     catalog: {
       async listTemplates(_auth, _args) {
-        return { source: 'cloud-catalog-cas', ...await deps.catalog.listAllTemplates() };
+        return deps.catalog.listAllTemplates();
       },
 
       async getTemplate(_auth, args) {
@@ -1860,6 +1861,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     });
 
   const catalog = new CatalogService({
+    prismCatalog: config.PRISM_CONTENT_ENV ? new PrismMotionCatalog(config.PRISM_CONTENT_ENV, {
+      publicOrigin: config.PRISM_PUBLIC_ORIGIN, onRefreshError: error => logger.warn('Prism catalog refresh failed', { error }),
+    }) : undefined,
     db,
     storage,
     textCache: deps.hotTextCache instanceof HotTextCache ? deps.hotTextCache : undefined,

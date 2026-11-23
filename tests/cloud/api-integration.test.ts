@@ -2144,11 +2144,13 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     );
 
     // Subsequent artifact with explicit templateId (Studio createArtifact / templateHandoff flow).
-    const explicitArtifactRes = await app.request(`/motion-api/sessions/${tplSessionId}/artifacts`, {
+    const cloneRequestId = randomUUID();
+    const createExplicitArtifact = () => app.request(`/motion-api/sessions/${tplSessionId}/artifacts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId: 'studio-smoke-tpl', title: 'Custom Template Copy' }),
+      body: JSON.stringify({ templateId: 'studio-smoke-tpl', projectType: 'template', requestId: cloneRequestId, title: 'Custom Template Copy' }),
     });
+    const explicitArtifactRes = await createExplicitArtifact();
     assert.equal(explicitArtifactRes.status, 201);
     const explicitArtifact = (await explicitArtifactRes.json()) as {
       projectId: string;
@@ -2157,12 +2159,27 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     };
     assert.equal(explicitArtifact.templateId, 'studio-smoke-tpl');
     assert.equal(explicitArtifact.projectTitle, 'Custom Template Copy');
+    const repeated = await createExplicitArtifact();
+    assert.equal(repeated.status, 200);
+    const replay = await repeated.json();
+    assert.equal(replay.projectId, explicitArtifact.projectId);
+    assert.equal(replay.replayed, true);
     const explicitIndexRes = await app.request(`/api/projects/${explicitArtifact.projectId}/files/index.html`);
     assert.equal(explicitIndexRes.status, 200);
     assert.equal(
       ((await explicitIndexRes.json()) as { content: string }).content,
       '<div data-composition-id="main">Template</div>',
     );
+
+    // An editor asking to open an editable project must never receive a blank copy.
+    const projectsBeforeRefusal = pgClient.tables.get('projects')!.length;
+    const refused = await app.request(`/motion-api/sessions/${tplSessionId}/artifacts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateId: 'studio-ref-only-tpl', projectType: 'template', requestId: randomUUID() }),
+    });
+    assert.equal(refused.status, 400);
+    assert.equal((await refused.json()).code, 'TEMPLATE_NOT_COPYABLE');
+    assert.equal(pgClient.tables.get('projects')!.length, projectsBeforeRefusal);
 
     // Reference-only template falls back cleanly to a blank project inside the session.
     const refArtifactRes = await app.request(`/motion-api/sessions/${tplSessionId}/artifacts`, {

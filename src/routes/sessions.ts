@@ -192,6 +192,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps): Hono<{ Variables
     const body = (await c.req.json().catch(() => ({}))) as {
       title?: string;
       templateId?: string;
+      projectType?: string;
       locale?: string;
       requirements?: string;
       namingLanguage?: string;
@@ -220,6 +221,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps): Hono<{ Variables
         sessionId,
         title,
         templateId: effectiveTemplateId,
+        projectType: body.projectType === 'template' ? 'template' : undefined,
         templateInherited: Boolean(inheritedTemplateId),
         locale: body.locale,
         requirements: body.requirements,

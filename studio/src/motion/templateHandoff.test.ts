@@ -1,14 +1,15 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { setCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { motionApi } from './useWorkspace';
-import { findPreparedTemplate, prepareTemplateProject, preparedTemplateProjects, pendingTemplateProjects, rememberTemplateRequest, forgetTemplateRequest, templateHandoffPrompt, templateHandoffEnabled } from './templateHandoff';
+import { TemplatePreparationBlockedError, findPreparedTemplate, prepareTemplateProject, preparedTemplateProjects, pendingTemplateProjects, rememberTemplateRequest, forgetTemplateRequest, templateHandoffPrompt, templateHandoffEnabled } from './templateHandoff';
 
 vi.mock('./useWorkspace', () => ({ motionApi: vi.fn() }));
 const api = vi.mocked(motionApi);
 const template = { id: 'product-promo', title: 'Product Promo', hasHtmlProject: true, tags: [], kind: 'prism' } as unknown as GalleryTemplate;
 const catalog = (id = 'operation-one', source = template.id) => ({ projects: [{ id: 'original-A', title: 'Original' }, { id: 'new-P', title: 'Product Promo' }], sessions: [{ id, templateId: source, activeArtifactId: 'artifact-one', artifacts: [{ id: 'artifact-one', projectId: 'new-P' }] }] });
-afterEach(() => { api.mockReset(); sessionStorage.clear(); });
+afterEach(() => { setCachedCloudDisklessMode(null); api.mockReset(); sessionStorage.clear(); });
 
 it('refuses to create a project from reference-only guidance', async () => {
   await expect(prepareTemplateProject({ ...template, hasHtmlProject: false }, 'original-A', 'operation-one')).rejects.toThrow('只有参考说明');
@@ -29,8 +30,29 @@ it('keeps the explicit session identity and save guard when creating an independ
   const result = await prepareTemplateProject(template, 'original-A', 'operation-one');
   expect(JSON.parse(api.mock.calls[1][1]!.body as string)).toMatchObject({ id: 'operation-one', templateId: 'product-promo' });
   expect(api.mock.calls[3][0]).toBe('/sessions/operation-one/artifacts');
-  expect(JSON.parse(api.mock.calls[3][1]!.body as string)).toEqual({ templateId: 'product-promo', expectedRevision: 'revision-A', expectedProjectId: 'original-A' });
+  expect(JSON.parse(api.mock.calls[3][1]!.body as string)).toEqual({ templateId: 'product-promo', projectType: 'template', requestId: 'operation-one', expectedRevision: 'revision-A', expectedProjectId: 'original-A' });
   expect(result.projectId).not.toBe(result.originalProjectId);
+});
+it('clones the exact cloud template without loading the current project', async () => {
+  setCachedCloudDisklessMode(true);
+  const editable = { ...template, id: 'motion-cms-id' };
+  api.mockResolvedValueOnce({ projects: [], sessions: [] })
+    .mockResolvedValueOnce({ sessionId: 'operation-one' })
+    .mockResolvedValueOnce({ projectId: 'new-P', projectTitle: 'CMS template' });
+  const result = await prepareTemplateProject(editable, 'original-A', 'operation-one');
+  expect(api.mock.calls.map(([url]) => url)).toEqual(['/projects', '/sessions', '/sessions/operation-one/artifacts']);
+  expect(JSON.parse(api.mock.calls[2][1]!.body as string)).toEqual({
+    templateId: editable.id, projectType: 'template', requestId: 'operation-one',
+  });
+  expect(result).toMatchObject({ templateId: editable.id, projectId: 'new-P' });
+});
+it('reports a refused clone as a known failure so the dialog can show the catalog error', async () => {
+  api.mockResolvedValueOnce({ projects: [], sessions: [] })
+    .mockResolvedValueOnce({ sessionId: 'operation-one' })
+    .mockResolvedValueOnce({ projectId: '', revision: '' })
+    .mockRejectedValueOnce(Object.assign(new Error('Source files unavailable'), { code: 'TEMPLATE_MEDIA_UNAVAILABLE' }));
+  await expect(prepareTemplateProject(template, undefined, 'operation-one')).rejects.toBeInstanceOf(TemplatePreparationBlockedError);
+  expect(preparedTemplateProjects()).toEqual([]);
 });
 it('does not guess a result from another operation or another selected source', async () => {
   api.mockResolvedValueOnce(catalog('a-newer-operation')).mockResolvedValueOnce(catalog('operation-one', 'nyt-graph'));
@@ -111,6 +133,6 @@ it('resumes an acknowledged empty session without resubmitting a changed display
     .mockResolvedValueOnce({ revision: 'revision-A', projectId: 'original-A' })
     .mockResolvedValueOnce({ projectId: 'new-P', projectTitle: 'Product Promo' });
   await prepareTemplateProject({ ...template, title: '不同语言的标题' }, 'original-A', 'operation-one');
-  expect(api.mock.calls.map(([url]) => url)).toEqual(['/projects', '/project/status', '/sessions/operation-one/artifacts']);
+  expect(api.mock.calls.map(([url]) => url)).toEqual(['/projects', '/project/status?view=summary', '/sessions/operation-one/artifacts']);
   expect(pendingTemplateProjects()).toEqual([]);
 });
