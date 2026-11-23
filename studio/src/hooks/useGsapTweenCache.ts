@@ -242,9 +242,11 @@ export function useGsapAnimationsForElement(
 }
 
 export function useGsapCacheVersion() {
-  const [version, setVersion] = useState(0);
-  const bump = useCallback(() => setVersion((v) => v + 1), []);
-  return { version, bump };
+  const [change, setChange] = useState<{ version: number; changedPath?: string }>({ version: 0 });
+  const bump = useCallback((changedPath?: string) => {
+    setChange(previous => ({ version: previous.version + 1, changedPath }));
+  }, []);
+  return { ...change, bump };
 }
 
 /**
@@ -258,6 +260,7 @@ export function usePopulateKeyframeCacheForFile(
   sourceFile: string,
   version: number,
   iframeRef?: React.RefObject<HTMLIFrameElement | null>,
+  changedPath?: string,
 ): void {
   const elementCount = usePlayerStore((s) => s.elements.length);
   // Every sub-composition file the timeline shows rows for. The cache is loaded
@@ -293,7 +296,13 @@ export function usePopulateKeyframeCacheForFile(
     if (source.current?.projectId !== projectId || source.current?.version !== version) {
       // A request started before a write (or before leaving and reopening a
       // project) must not satisfy the new generation, even if still in flight.
-      source.current = { projectId, version, fresh: source.current !== null, reads: new Map() };
+      const previous = source.current;
+      const path = typeof changedPath === "string" && projectCompositionPath(changedPath, projectId);
+      // Reuse other files only when the entire change since our last read is known.
+      const scoped = path && previous?.projectId === projectId && previous.version + 1 === version;
+      const reads = scoped ? previous.reads : new Map();
+      if (scoped) reads.delete(path);
+      source.current = { projectId, version, fresh: previous !== null, reads };
     }
     if (!projectId) return;
     const { reads, fresh } = source.current;
@@ -320,7 +329,7 @@ export function usePopulateKeyframeCacheForFile(
       });
     }
     return () => { active = false; };
-  }, [projectId, sourceFile, version, compositionSrcKey, projected, iframeRef]);
+  }, [projectId, sourceFile, version, changedPath, compositionSrcKey, projected, iframeRef]);
 
   // Separate effect for runtime keyframe discovery — polls until the iframe
   // has loaded GSAP timelines, independent of the AST fetch lifecycle.

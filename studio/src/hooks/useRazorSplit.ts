@@ -20,7 +20,7 @@ interface UseRazorSplitOptions {
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   observeProjectFileVersion?: (path: string, version: string | null) => void;
   recordEdit: (input: RecordEditInput) => Promise<void>;
-  reloadPreview: () => void;
+  reloadPreview: (path?: string) => void;
   forceReloadSdkSession?: () => void;
   isRecordingRef?: React.RefObject<boolean>;
 }
@@ -40,7 +40,7 @@ export function useRazorSplit({
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
-  const synchronize = useCallback(() => {
+  const synchronize = useCallback((path?: string) => {
     let failure: unknown;
     try {
       forceReloadSdkSession?.();
@@ -48,7 +48,7 @@ export function useRazorSplit({
       failure = error;
     }
     try {
-      reloadPreview();
+      reloadPreview(path);
     } catch (error) {
       failure ??= error;
     }
@@ -73,7 +73,7 @@ export function useRazorSplit({
         writeProjectFile,
         recordEdit,
         observeProjectFileVersion,
-        synchronize,
+        synchronize: () => synchronize(intents.length === 1 ? intents[0].path : undefined),
       });
       trackStudioRazorSplit({ mode, count: result.splitCount });
       if (result.syncFailed) {
