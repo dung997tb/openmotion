@@ -1,3 +1,4 @@
+import { holdIsolatedTrims } from "../player/lib/isolatedTrimPreview";
 import { previewTimelinePaint } from "./timelinePaintPreview";
 import { saveCloudTimeline, timelineTimingEdits } from "../utils/cloudTimelineEdit";
 import { planClipMove } from "../../../packages/edit-core";
@@ -283,6 +284,7 @@ export function useTimelineClipTimingEditing({
       patchIframeDomTiming(previewIframeRef.current, element, liveAttrs, activeCompPath);
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
+      const releaseTrim = holdIsolatedTrims(previewIframeRef.current, [{element, ...updates}]);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // Read before the readout sync below: the SDK path (setTiming) can't grow the root duration.
       const needsExtension = extendRootDurationIfNeeded(updates.start + updates.duration);
@@ -350,6 +352,7 @@ export function useTimelineClipTimingEditing({
           : resizeFallback();
       return persistDone.then(() => syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument)).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root.
+        releaseTrim();
         rollbackDuration();
         showToast(getStudioSaveErrorMessage(error), "error");
         throw error;

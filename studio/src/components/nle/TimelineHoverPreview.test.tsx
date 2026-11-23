@@ -7,6 +7,9 @@ import { useTimelineHoverStore } from '../../player/store/timelineHoverStore';
 import { usePlayerStore } from '../../player/store/playerStore';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+vi.mock('../../player/components/IsolatedHoverPlayer', () => ({
+  IsolatedHoverPlayer: () => <iframe title="Isolated hover fixture" />,
+}));
 const context = vi.hoisted(() => ({ iframeRef: { current: null as HTMLIFrameElement | null },
   projectId: 'p', timelineSessionEpoch: 4, timelineDisabled: false,
   previewCompositionSize: null as { width: number; height: number } | null }));
@@ -54,6 +57,21 @@ it('bounds a slow load and releases the runtime with a recoverable reserved erro
   act(() => vi.advanceTimersByTime(10000));
   expect(host.querySelector('[data-hover-preview-status=error]')).not.toBeNull();
   expect(player.stopMedia).toHaveBeenCalled(); expect(player.isConnected).toBe(false);
+});
+it('keeps a loaded isolated hover frame while thumbnails refresh for a pending timeline edit', async () => {
+  const origin = document.createElement('meta');
+  origin.name = 'openmotion-preview-origin';
+  origin.content = 'https://preview.example';
+  document.head.append(origin);
+  try {
+    await act(async () => root.render(<TimelineHoverPreview />));
+    const frame = host.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    act(() => usePlayerStore.setState({ thumbnailRevisions: { 'index.html': 2 } }));
+    expect(host.querySelector('iframe')).toBe(frame);
+  } finally {
+    origin.remove();
+  }
 });
 it('does not mount previews from another project session or while playing', async () => {
   useTimelineHoverStore.getState().setHover(5, 3);
