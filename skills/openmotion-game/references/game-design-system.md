@@ -1,13 +1,13 @@
 > See [source and execution notes](../PROVENANCE.md).
 
 # GAME CREATION SYSTEM
-### Plan → Build → Deliver — the compressed operating core
+### Brief → Graybox → Slice → Content → Deliver — the compressed operating core
 
 > **Skill integration (read first, then apply the system below):**
 >
-> - **Read order: this file is the FIRST reference of any game-creation run** — open it before all other references and before any code, and **read it whole, top to bottom, in one pass** — never by sections, never partially. The closing reference is `game-flow.md` (OpenMotion starter and numeric budget appendix): read last of all, after the plan and the asset references, but strictly before generating any game code.
-> - **One pipeline, one speed — and it is the floor.** Every request runs the same lean pipeline; there are no heavier or lighter modes. Feeling that it is overkill for the request never waives the plan phase (§§1–5), the STYLE FORMULA or the asset manifest; cutting a step needs the user's explicit confirmation, and a brief referencing an existing game ("like X") waives nothing — the reference only pre-fills answers. Lean means: resolve routine decisions in reasoning and write their acceptance contract in `design/plan.md` and `design/assets.csv`; measured results and known gaps go in `design/verification.md`.
-> - **Three phases, merged work inside each.** PLAN (think §§1–5 through, write `design/plan.md` and `design/assets.csv`, derive the STYLE FORMULA; `game-flow.md` (room protocol) when Players ≠ solo) → BUILD (fire **all** asset generation jobs, then write the game code *while they run*, wire assets in as they land) → DELIVER (publish, hand over the URL). Inside a phase, parallelize what is genuinely independent (asset jobs run while game code is written; independent generations submit together) — and keep sequential what feeds on a prior result; don't force parallelism onto dependent steps. The phases themselves never interleave — no game code before PLAN closes. Post **1–3 plain sentences in natural language after each phase** (not after every internal step); never expose pipeline machinery — no phases/gates/modes/§-numbers, no checkmarks. Blocking points: STYLE FORMULA approval (only when the style is not explicit in the brief) and any cutting of pipeline steps.
+> - **Read order: read [the brief standard](game-brief.md) and [staged gates](game-gates.md) first, then this file whole, top to bottom, in one pass** — never by sections, never partially, and before any code. The closing reference is `game-flow.md` (OpenMotion starter and numeric budget appendix): read last of all, after the plan and the asset references, but strictly before generating any game code.
+> - **One pipeline, scaled to the request.** Every request writes the brief (§§1–5 thought through, the STYLE FORMULA and the asset manifest) before game code; a brief referencing an existing game ("like X") only pre-fills answers and is rewritten as an original theme. Lean means: resolve routine decisions in reasoning and write their acceptance contract in `design/plan.md` and `design/assets.csv`; measured results and known gaps go in `design/verification.md`.
+> - **Staged build with two gates** ([details](game-gates.md)). BRIEF (think §§1–5 through, write `design/plan.md` and `design/assets.csv`, derive the STYLE FORMULA; `game-flow.md` (room protocol) when Players ≠ solo) → GRAYBOX (the core loop on placeholders; cheap and style-defining assets run in parallel) → gate 1 → SLICE (one scene at final quality; costly or gameplay-dependent assets such as generated 3D and rigs start here) → gate 2 → CONTENT (parallel where files are independent) → DELIVER (publish, hand over the URL). Keep sequential what feeds on a prior result; don't force parallelism onto dependent steps. No game code before the brief exists. Post **1–3 plain sentences in natural language after each phase** (not after every internal step); never expose pipeline machinery — no phases/gates/modes/§-numbers, no checkmarks. Blocking points: STYLE FORMULA approval (only when the style is not explicit in the brief) and any cutting of pipeline steps.
 > - **Asset manifest — required alongside plan and verification**: planning emits `design/assets.csv` (in the game project under `design/` — it ships with the game) listing every visual/audio asset the build needs. Required columns: `asset`, `source`, `license`, `cost`. Retain useful detail columns such as `id`, `role` (how the build consumes it), `type`, `description`, `size/ratio`, `style line ref`. Sources distinguish generated, supplied references, bundled assets and authored code; costs distinguish actual authorized spend, zero-cost local work and unknown estimates. It is the contract between asset generation and assembly.
 
 The system: §0 execution → §1 profile → §2 laws → §§3–5 design → §§6–8 implementation → §§9–11 tuning → §12 determinism & debugging → §13 limits. The engine of all of it is the **iterative loop**: nothing is designed until thought through against its gate.
@@ -17,17 +17,17 @@ The system: §0 execution → §1 profile → §2 laws → §§3–5 design → 
 ## 0. EXECUTION RULES
 
 1. **Artifacts.** Write `design/plan.md` (experience, metrics/thresholds, reference-win and idle-loss contract, wave/difficulty plan), `design/assets.csv` (asset/source/license/cost) and `design/verification.md` (actual tests/results/gaps). Do not claim a starter draft is an acceptance result.
-2. **Each phase closes with its gate**, walked in reasoning at the transition. An unmet item blocks the move — there is no "fails, but moving on".
+2. **Each gate checks its own scope.** P0 blocking issues and in-scope P1 issues block the move; P2 polish is logged in `design/verification.md` and reported, not fixed inside the loop ([stop-loss rules](game-gates.md#stop-loss-rules)).
 3. **The game tolerates hostile input by design**: spam, mid-action cancel, boundary violations, doing it "the wrong way", conflicting simultaneous inputs (opposite directions held, multi-key chords, two input methods at once, switching method mid-action), losing focus / disconnecting mid-action.
 4. **Diagnose from observed behavior** (state, logs, console) — not impressions.
 5. **One meaningful change at a time** when tuning or hunting a failure.
 6. **Numbers before code.** Any numeric criterion (budget, window, limit) is fixed before building the thing it judges, and never softened in the same iteration that failed against it. The canonical numeric defaults live in `game-flow.md` (OpenMotion starter and numeric budget appendix).
-7. **Code permission is bound to phases** — no game code until PLAN closes (its sections thought through, `assets.csv` written, FORMULA derived). A one-paragraph "plan" followed by code is a failed run.
+7. **Code permission is bound to stages** — no game code until the brief exists (its sections thought through, `assets.csv` written, FORMULA derived). A one-paragraph "plan" followed by code is a failed run. The graybox then comes first: prove the core loop before polishing art or content.
 
 | Phase | Code |
 |---|---|
-| PLAN (§§1–5) | ❌ none |
-| BUILD (§§6–8) | ✅ game code, from the `game-flow.md` (OpenMotion starter and numeric budget appendix) skeletons; §§9–11 as data/config |
+| BRIEF (§§1–5) | ❌ none |
+| GRAYBOX → SLICE → CONTENT (§§6–8) | ✅ game code, from the `game-flow.md` (OpenMotion starter and numeric budget appendix) skeletons; §§9–11 as data/config |
 | DELIVER | ❌ publish only |
 
 ---
@@ -95,7 +95,7 @@ Think through a point on every axis — the profile decides the shape every late
 
 ## 6. CODE
 
-Game code starts **only after PLAN closes** (§0.7), from the `game-flow.md` (OpenMotion starter and numeric budget appendix) skeletons — never from scratch.
+Game code starts **only after the brief exists** (§0.7), from the `game-flow.md` (OpenMotion starter and numeric budget appendix) skeletons — never from scratch.
 
 - **6.1** Architecture = minimizing the cost of change: decouple what will change; don't abstract what won't.
 - **6.2 By symptom**: behavior depends on frame rate → fixed-timestep simulation, render separate · class explosion ("FlyingShootingMerchant") → entity = components · need replay/undo/multi-source input → **input as command objects** (also carries the player id for multiplayer) · boolean-flag forest → state machine · gameplay pokes audio/UI directly → events/subscription · object churn eats the budget (profiler-proven) → pools / spatial index / dirty flags — never pre-emptively.

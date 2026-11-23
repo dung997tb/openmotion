@@ -15,3 +15,9 @@ This file is a starter checklist, not a record of completed checks. Replace pend
 | Human play | understandable goals, meaningful choices, fair difficulty | Unverified |
 
 If Chrome/loopback is blocked, state the actual error. Do not substitute the user's desktop browser or upgrade simulation evidence to visual, audio, mobile or human acceptance. Keep this record aligned with the latest authored game files.
+
+## Known gaps (P2)
+
+Polish found during gates but not fixed inside the loop. Keep the highest-impact items first; the final message lists at most five.
+
+- None recorded yet.
