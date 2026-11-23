@@ -80,6 +80,17 @@ it("rolls back only properties still owned by the failed gesture and permits a r
 });
 
 
+it("returns a whole-path delta when auto-keyframe is off, independently of the current tween translation", () => {
+  const { gesture } = createScene();
+  vi.stubGlobal("gsap", { getProperty: () => 80 });
+  try {
+    expect(gesture("start","path")).toBeTruthy();
+    expect(gesture("finish","path",{wholePath:true})).toMatchObject({position:{time:0,delta:{x:25,y:50}}});
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("resizes the selected corner and rolls back a rejected gesture", () => {
   const { one, gesture } = createScene();
   expect(gesture("start", "s", {corner:"se"})).toBeTruthy();
