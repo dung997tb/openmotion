@@ -89,7 +89,7 @@ export const webPublishRoutes = {
 } as const;
 
 export const webPublishToolDescription =
-  ' Use action=web_publish with webPublish={command:"publish"|"status"|"unpublish"|"list", targetKind:"design"|"game"|"html"|"motion", ...} to bundle local referenced assets and publish any HTML-expressed project, playable game, or standalone HTML file/folder to a unique Open Design Cloud share link.';
+  ' Use action=web_publish with webPublish={command:"publish"|"status"|"unpublish"|"list", targetKind:"design"|"game"|"html"|"motion", ...} to bundle local referenced assets and publish any HTML-expressed project, playable game (including embedUrl for community HTTPS games), or standalone HTML file/folder to a unique Open Design Cloud share link.';
 
 export const webPublishToolArguments = {
   type: 'object',
@@ -115,6 +115,12 @@ export const webPublishToolArguments = {
       minLength: 1,
       maxLength: 4096,
       description: 'Local HTML file or static directory path when targetKind is "html".',
+    },
+    embedUrl: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 2048,
+      description: 'Public HTTPS URL to wrap and publish as an embeddable community game when targetKind is "game".',
     },
     filePath: {
       type: 'string',

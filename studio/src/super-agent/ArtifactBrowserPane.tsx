@@ -1451,7 +1451,8 @@ export function ArtifactBrowserPane({
   onClosePane,
   onAttachArtifact,
   onUseGameInAgent,
-  deployOpenSeq,
+  pendingDeployArtifactId,
+  onConsumeDeployRequest,
   onOpenAccountSettings,
   onAttachBrowserAnnotation,
   onNotify,
@@ -1478,7 +1479,8 @@ export function ArtifactBrowserPane({
   onClosePane: () => void;
   onAttachArtifact: (artifact: SuperAgentArtifact) => void;
   onUseGameInAgent?: (artifact: SuperAgentArtifact) => void;
-  deployOpenSeq?: number;
+  pendingDeployArtifactId?: string | null;
+  onConsumeDeployRequest?: () => void;
   onOpenAccountSettings?: () => void;
   onAttachBrowserAnnotation?: (attachment: SuperAgentResourceAttachment, sendImmediately?: boolean) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
@@ -2378,7 +2380,8 @@ export function ArtifactBrowserPane({
                     filePath={activeArtifact.entry}
                     title={activeArtifact.title}
                     triggerLabel={activeArtifact.kind === 'game-project' ? t('Cloud deploy') : undefined}
-                    autoOpenSeq={activeArtifact.kind === 'game-project' ? deployOpenSeq : undefined}
+                    autoOpen={activeArtifact.kind === 'game-project' && pendingDeployArtifactId === activeArtifact.id}
+                    onAutoOpenConsumed={onConsumeDeployRequest}
                     revisionKey={activeArtifact.revision ?? String(activeArtifact.updatedAt)}
                     onOpenAccount={onOpenAccountSettings}
                     onNotify={onNotify}

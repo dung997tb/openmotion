@@ -2479,3 +2479,131 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   await flush();
   expect(container.querySelector('.om-sa-viewer')).toBeTruthy();
 });
+
+it('consumes Cloud deploy requests across viewer remounts and aborts deploy when opening a game fails', async () => {
+  let failPatch = false;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/motion-api/web-publish/')) {
+      return new Response(
+        JSON.stringify({
+          targetKind: 'game',
+          targetId: 'community-little-prince',
+          projectId: 'community-little-prince',
+          accountSignedIn: false,
+          accountState: 'signed-out',
+          publications: [],
+          deployments: [],
+          active: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.includes('/motion-api/settings/account')) {
+      return new Response(JSON.stringify({ state: 'signed-out' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}` && init?.method === 'PATCH' && failPatch) {
+      return new Response(JSON.stringify({ error: 'Network unavailable' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+    return origFetch(input, init);
+  }) as any;
+
+  // 1) Deploy once, close viewer (unmounts WebPublishPopover), then Play another game -> popover must NOT auto-open again
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="game"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  const deployBtn = container.querySelector('.om-sa-game-fan-actions .om-sa-game-tile-deploy') as HTMLButtonElement;
+  expect(deployBtn).toBeTruthy();
+  await act(async () => deployBtn.click());
+  await flush();
+  expect(document.querySelector('.om-web-publish-popover')).toBeTruthy();
+
+  // Close the viewer so WebPublishPopover unmounts
+  const closeViewerBtn = container.querySelector('button[aria-label="Close viewer"]') as HTMLButtonElement;
+  expect(closeViewerBtn).toBeTruthy();
+  await act(async () => closeViewerBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-viewer')).toBeNull();
+  expect(document.querySelector('.om-web-publish-popover')).toBeNull();
+
+  // Click Play on a masonry game card -> viewer remounts, but Cloud share popover must stay closed
+  const playBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
+  expect(playBtn).toBeTruthy();
+  await act(async () => playBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-viewer')).toBeTruthy();
+  expect(document.querySelector('.om-web-publish-popover')).toBeNull();
+
+  // 2) With an active chat that has game A selected, failing PATCH on Cloud deploy for game B must NOT open game A's popover
+  const emptyGameChat: SuperAgentChat = {
+    ...sampleChat,
+    messages: [],
+    artifacts: [
+      {
+        id: 'game:game-a',
+        kind: 'game-project',
+        title: 'Game A',
+        projectId: 'game-a',
+        url: '/motion-api/games/game-a/play/index.html',
+        createdAt: 1000,
+        updatedAt: 1000,
+      },
+    ],
+    activeArtifactId: 'game:game-a',
+  };
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}` && (!init?.method || init.method === 'GET')) {
+      return new Response(JSON.stringify({ conversation: emptyGameChat }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return prevFetch(input, init);
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={CHAT_ID}
+          requestedMode="game"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  failPatch = true;
+  const deployGameBBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-deploy') as HTMLButtonElement;
+  expect(deployGameBBtn).toBeTruthy();
+  await act(async () => deployGameBBtn.click());
+  await flush();
+  expect(document.querySelector('.om-web-publish-popover')).toBeNull();
+});

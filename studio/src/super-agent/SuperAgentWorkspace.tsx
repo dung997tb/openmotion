@@ -311,7 +311,7 @@ export function SuperAgentWorkspace({
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>(NEW_VIEWER_TAB_ID);
   const [previewArtifacts, setPreviewArtifacts] = useState<SuperAgentArtifact[]>([]);
-  const [deployOpenSeq, setDeployOpenSeq] = useState(0);
+  const [pendingDeployArtifactId, setPendingDeployArtifactId] = useState<string | null>(null);
   const handledRequestedGameRef = useRef<string | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -982,10 +982,10 @@ export function SuperAgentWorkspace({
         const res = await updateSuperAgentChat(activeChat.id, { addArtifact: patch });
         applyChatSnapshot(res.conversation, false);
         setViewerOpen(true);
-        return;
+        return artifactId;
       } catch (error) {
         showToast(error instanceof Error ? error.message : t('Could not preview resource'));
-        return;
+        return null;
       }
     }
 
@@ -997,11 +997,14 @@ export function SuperAgentWorkspace({
     setOpenTabIds(prev => (prev.includes(fullArtifact.id) ? prev : [...prev, fullArtifact.id]));
     setActiveTabId(fullArtifact.id);
     setViewerOpen(true);
+    return fullArtifact.id;
   }, [activeChat, applyChatSnapshot, locale, showToast, t]);
 
   const handleDeployGame = useCallback(async (game: GameCard) => {
-    await handlePlayGame(game);
-    setDeployOpenSeq(seq => seq + 1);
+    const openedArtifactId = await handlePlayGame(game);
+    if (openedArtifactId) {
+      setPendingDeployArtifactId(openedArtifactId);
+    }
   }, [handlePlayGame]);
 
   const handleUseGameInAgent = useCallback(async (artifact: SuperAgentArtifact) => {
@@ -1484,12 +1487,14 @@ export function SuperAgentWorkspace({
               onOpenResource={item => void handleOpenResource(item)}
               onToggleExpand={() => setViewerExpanded(v => !v)}
               onClosePane={() => {
+                setPendingDeployArtifactId(null);
                 setViewerExpanded(false);
                 setViewerOpen(false);
               }}
               onAttachArtifact={handleAttachArtifact}
               onUseGameInAgent={artifact => void handleUseGameInAgent(artifact)}
-              deployOpenSeq={deployOpenSeq}
+              pendingDeployArtifactId={pendingDeployArtifactId}
+              onConsumeDeployRequest={() => setPendingDeployArtifactId(null)}
               onOpenAccountSettings={onOpenAccountSettings}
               onAttachBrowserAnnotation={handleAttachBrowserAnnotation}
               onNotify={(msg, tone) => showToast(msg, tone === 'error' ? 'error' : 'info', 'feedback')}

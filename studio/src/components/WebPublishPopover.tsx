@@ -28,7 +28,8 @@ export interface WebPublishPopoverProps {
   compact?: boolean;
   disabled?: boolean;
   triggerLabel?: string;
-  autoOpenSeq?: number;
+  autoOpen?: boolean;
+  onAutoOpenConsumed?: () => void;
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
   onNotify?: (message: string, variant?: 'info' | 'error') => void;
@@ -82,7 +83,8 @@ export function WebPublishPopover({
   compact = false,
   disabled = false,
   triggerLabel,
-  autoOpenSeq,
+  autoOpen = false,
+  onAutoOpenConsumed,
   side = 'bottom',
   align = 'end',
   onNotify,
@@ -101,7 +103,6 @@ export function WebPublishPopover({
   const [prepublishEnabled, setPrepublishEnabled] = useState(true);
   const deployAfterSignInRef = useRef(false);
   const prevAccountStateRef = useRef<AccountSummary['state'] | undefined>(undefined);
-  const lastAutoOpenSeqRef = useRef<number | undefined>(undefined);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -113,10 +114,10 @@ export function WebPublishPopover({
   }, [targetKind, targetId, filePath]);
 
   useEffect(() => {
-    if (!autoOpenSeq || lastAutoOpenSeqRef.current === autoOpenSeq) return;
-    lastAutoOpenSeqRef.current = autoOpenSeq;
+    if (!autoOpen) return;
     setOpen(true);
-  }, [autoOpenSeq, targetId]);
+    onAutoOpenConsumed?.();
+  }, [autoOpen, onAutoOpenConsumed]);
 
   useEffect(() => () => {
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
