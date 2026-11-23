@@ -83,8 +83,15 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
     }
     case "moveCanvasElement": {
       checkCanvasTargets(source, [command.target]);
-      if (!Number.isFinite(command.x) || !Number.isFinite(command.y))
-        throw new Error("Invalid canvas position.");
+      const delta = command.delta;
+      const point = { x: delta?.x ?? command.x!, y: delta?.y ?? command.y! };
+      if (
+        delta &&
+        (command.x !== undefined || command.y !== undefined || String(command.mode) === "playhead")
+      )
+        throw new Error("Choose either an absolute playhead position or a whole-path delta.");
+      if (command.mode === "wholePath" && !delta) throw new Error("Whole-path moves require delta.");
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error("Invalid canvas position.");
       const { document } = parseSourceDocument(source);
       const el = findTargetElement(document, command.target) as HTMLElement | null;
       if (!el?.style || el.closest("[data-timeline-locked]"))
@@ -124,7 +131,7 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
         return true;
       });
       if (candidates.length) {
-        if (command.time === undefined)
+        if (command.time === undefined && !(delta && candidates.length === 1))
           throw new Error("Specify the composition time for the animated layer.");
         const active = candidates.filter((anim) => {
           const start = resolveTweenStart(anim);
@@ -135,10 +142,24 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
         const owner = active.length === 1 ? active[0] : candidates.length === 1 ? candidates[0] : undefined;
         if (!owner)
           throw new Error("Multiple position tweens could own this move. Select the animation explicitly.");
+        if (delta && owner.method !== "set")
+          return applyCanvasCommand(source, {
+            kind: "editAnimation",
+            mutations: [
+              { type: "shift-animation-path", animationId: owner.id, deltaX: delta.x, deltaY: delta.y },
+            ],
+          });
+        if (delta && owner.method === "set") {
+          for (const axis of ["x", "y"] as const) {
+            const before = owner.properties[axis] ?? 0;
+            if (typeof before !== "number") throw new Error("Cannot offset this non-numeric position.");
+            point[axis] = before + delta[axis];
+          }
+        }
         if (owner.arcPath?.enabled) {
-          const mutation = planArcDrag(owner, command.time, {
-            x: command.x,
-            y: command.y,
+          const mutation = planArcDrag(owner, command.time!, {
+            x: point.x,
+            y: point.y,
           });
           if (!mutation) throw new Error("Cannot resolve the motion path at this composition time.");
           return applyCanvasCommand(source, {
@@ -153,16 +174,16 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
               {
                 type: "update-properties",
                 animationId: owner.id,
-                properties: { x: command.x, y: command.y },
+                properties: point,
               },
             ],
           });
         return applyCanvasCommand(source, {
           kind: "setAnimatedValues",
           animationId: owner.id,
-          at: { time: command.time },
+          at: { time: command.time! },
           samples: command.samples,
-          values: { x: command.x, y: command.y },
+          values: point,
         });
       }
       if (command.staticBox)
@@ -171,7 +192,17 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
           target: command.target,
           box: command.staticBox,
         });
-      const operations = writePlainMove(el, command);
+      if (delta) {
+        const raw = el.style.getPropertyValue("translate")?.trim();
+        if (!raw && /(?:^|[;{])\s*translate\s*:/i.test(source))
+          throw new Error("Use measured x/y for an inherited CSS translate.");
+        const tokens = raw && raw !== "none" ? raw.split(/\s+/) : [];
+        if (tokens.length > 2 || tokens.some((t) => !/^[-+]?(?:\d+\.?\d*|\.\d+)(?:px)?$/.test(t)))
+          throw new Error("Use measured x/y for a non-pixel CSS translate.");
+        point.x = Number.parseFloat(tokens[0] || "0") + delta.x;
+        point.y = Number.parseFloat(tokens[1] || "0") + delta.y;
+      }
+      const operations = writePlainMove(el, point);
       return applyCanvasCommand(source, {
         kind: "editElements",
         patches: [{ target: command.target, operations }],

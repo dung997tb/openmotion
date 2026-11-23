@@ -4,7 +4,7 @@ import type { ImportedFontAsset } from "../components/editor/fontAssets";
 import type { PatchOperation, PatchTarget } from "../utils/sourcePatcher";
 
 export interface DomEditPatchBatch {
-  position?: {time:number; x:number; y:number};
+  position?: import("../../../packages/edit-core/canvas-box").MeasuredCanvasPosition;
   box?: import("../../../packages/edit-core/canvas-box").CanvasBox;
   ifMatch?: string;
   sourceFile: string;

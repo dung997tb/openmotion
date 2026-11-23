@@ -16,5 +16,8 @@ export async function loadCaptionSourceOperations(runtimeRoot: string) {
   // Resolve the native parser's DOM dependency from its own installation.
   const nativeRequire = createRequire(manifest);
   const { parseHTML } = nativeRequire('linkedom') as typeof import('linkedom');
-  return { parseHTML, ...createCaptionSourceOperations(parser), exportCaptionSource: (html: string, format: 'srt' | 'vtt', trackId?: string) => exportCaptionSource(html, format, parseHTML, trackId) };
+  // linkedom already uses htmlparser2; source offsets let edits preserve the surrounding authored HTML.
+  const domRequire = createRequire(nativeRequire.resolve('linkedom'));
+  const { parseDocument } = domRequire('htmlparser2') as typeof import('htmlparser2');
+  return { parseHTML, ...createCaptionSourceOperations(parser, parseDocument), exportCaptionSource: (html: string, format: 'srt' | 'vtt', trackId?: string) => exportCaptionSource(html, format, parseHTML, trackId) };
 }

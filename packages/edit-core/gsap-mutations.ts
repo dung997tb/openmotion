@@ -1,3 +1,4 @@
+import { planWholePathOffset } from './animation-path.ts';
 import { planAuthoredAnimatedValues } from './playhead-edit.ts';
 import { extractGsapScriptBlock as readGsapBlock } from './gsap-block.ts';
 export type { ExtractedGsapBlock } from './gsap-block.ts';
@@ -341,6 +342,15 @@ export function applyGsapMutationsInMemory(
         } catch {
           return {ok:false,status:400,error:'Cannot resolve the animation target while layers are locked.'};
         }
+      }
+    }
+    if (body.type === 'shift-animation-path') {
+      const found = requireAnim(previousScript, String(body.animationId));
+      if ('err' in found) return found.err;
+      try {
+        body = planWholePathOffset(found.anim,body.deltaX,body.deltaY);
+      } catch (error) {
+        return {ok:false,status:400,error:error instanceof Error ? error.message : 'Invalid path offset.'};
       }
     }
     if (body.type === 'set-animated-values') {

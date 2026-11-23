@@ -1,6 +1,6 @@
 import { applyCanvasCommand, patchCanvasElement } from '../../../packages/edit-core/canvas-commands.ts';
 import { groupCanvasElements } from '../../../packages/edit-core/canvas-source.ts';
-import type { CanvasBox } from '../../../packages/edit-core/canvas-box.ts';
+import type { CanvasBox, MeasuredCanvasPosition } from '../../../packages/edit-core/canvas-box.ts';
 import { readCompositionDependencies } from '../engine/composition-dependencies.ts';
 import { randomUUID } from 'node:crypto';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
@@ -155,7 +155,7 @@ export function createStudioFileMutationsRoutes(
         sourceFile?: string;
         path?: string;
         ifMatch?: string;
-        geometry?: { target: SourceMutationTarget; box: CanvasBox; position?: { x: number; y: number; time: number } };
+        geometry?: { target: SourceMutationTarget; box: CanvasBox; position?: MeasuredCanvasPosition };
         patches?: Array<{ target: SourceMutationTarget; operations: PatchOperation[] }>;
         edits?: Array<{ target: SourceMutationTarget; ops: PatchOperation[]; fontFaceCss?: string }>;
         target?: SourceMutationTarget;
@@ -225,7 +225,7 @@ export function createStudioFileMutationsRoutes(
         }
         try {
           after = applyCanvasCommand(before, position
-            ? { kind: 'moveCanvasElement', target, x: position.x, y: position.y, time: position.time, staticBox: box }
+            ? { kind: 'moveCanvasElement', target, time: position.time, staticBox: box, ...(position.delta ? { delta: position.delta } : { x: position.x, y: position.y }) }
             : { kind: 'setCanvasBox', target, box });
           matched.push(true);
         } catch (error) {

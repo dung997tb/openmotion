@@ -1,3 +1,8 @@
+/** New bridges can express a whole-path translation. Older frames return absolute playhead values. */
+export type MeasuredCanvasPosition = {time:number} & (
+  {x:number;y:number;delta?:never} | {delta:{x:number;y:number};x?:never;y?:never}
+);
+
 export interface CanvasBox {
   left: number;
   top: number;

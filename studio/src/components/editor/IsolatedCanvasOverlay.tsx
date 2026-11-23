@@ -9,7 +9,7 @@ import { useI18n } from "../../i18n/I18n";
 import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/previewAdapter";
 import { projectPreviewAdapter } from "../../player/lib/projectPreviewAdapter";
 import { usePlayerStore } from "../../player/store/playerStore";
-import { canvasBoxOperations } from "../../../../packages/edit-core/canvas-box";
+import { canvasBoxOperations, type MeasuredCanvasPosition } from "../../../../packages/edit-core/canvas-box";
 
 interface Drag {
   pointer: number;
@@ -31,7 +31,7 @@ interface DragResult extends IsolatedSourceTarget {
   left: number;
   top: number;
   makeRelative: boolean;
-  position?: {time:number; x:number; y:number};
+  position?: MeasuredCanvasPosition;
   corner?: Corner;
   width?: number;
   height?: number;
@@ -142,7 +142,8 @@ export function IsolatedCanvasOverlay() {
     active.finishing = true;
     let committed = false;
     let changed = false;
-    void active.adapter.request<DragResult | null>("canvas-drag", payload).then(async result => {
+    const wholePath = event.altKey || !usePlayerStore.getState().autoKeyframeEnabled;
+    void active.adapter.request<DragResult | null>("canvas-drag", { ...payload, wholePath }).then(async result => {
       if (drag.current !== active || previewIframeRef.current !== active.adapter.iframe) return;
       if (createPreviewAdapter({ iframe: active.adapter.iframe }).token !== active.adapter.token) return;
       if (!validResult(result) || result.corner !== active.corner || (active.corner &&

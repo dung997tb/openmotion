@@ -1,3 +1,4 @@
+import type { parseDocument as parseMarkup } from 'htmlparser2';
 import type * as HtmlParser from '@hyperframes/parsers/html-attribute-spans';
 import { placeTranscriptSegments, timedSegment, parseTranscriptSubtitles, type TranscriptDocument, type TranscriptPlacement, type TranscriptSegment } from '../../shared/transcript.ts';
 import { captionArtwork, captionSettings, type CaptionSettings } from '../../shared/caption-style.ts';
@@ -5,7 +6,7 @@ import { captionArtwork, captionSettings, type CaptionSettings } from '../../sha
 export type CaptionPlacement = TranscriptPlacement;
 export type CaptionTrack = { id: string; kind: 'text' | 'caption'; track: number; label: string; cueCount: number; settings: CaptionSettings; locked: boolean };
 
-export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtmlOpeningTags }: typeof HtmlParser) {
+export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtmlOpeningTags }: typeof HtmlParser, parseDocument: typeof parseMarkup) {
   const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const number = (value: number) => String(Math.round(value * 1000) / 1000);
   type Tag = ReturnType<typeof scanHtmlOpeningTags>[number];
@@ -14,14 +15,59 @@ export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtm
   const trackKind = (tag: Tag) => value(tag, 'data-timeline-role') === 'text' || value(tag, 'id')?.startsWith('text-') ? 'text' : 'caption';
   const styleText = (style: Record<string, string>) => Object.entries(style).map(([key, value]) => `${key}:${value}`).join(';');
   const baseSize = (tags: Tag[]) => { const root = tags.find(tag => value(tag, 'data-composition-id')); return Math.round(Math.min((Number(root && value(root, 'data-width')) || 1920) * 0.055, (Number(root && value(root, 'data-height')) || 1080) * 0.045)); };
+  function compositionScope(html: string) {
+    const document = parseDocument(html, { withStartIndices: true, withEndIndices: true });
+    type Node = (typeof document.children)[number];
+    const owned = new Set<number>();
+    const markers = new Map<string, number[]>();
+    let found = false;
+    function visit(node: Node, inside: boolean) {
+      const at = node.startIndex;
+      if (inside && node.type === 'comment' && at != null) {
+        const marker = html.slice(at, (node.endIndex ?? at) + 1);
+        if (marker.startsWith('<!-- openmotion-transcript:')) markers.set(marker, [...(markers.get(marker) ?? []), at]);
+      }
+      if (node.type !== 'tag') return;
+      if (['head', 'svg', 'math'].includes(node.name)) return;
+      const composition = Object.hasOwn(node.attribs, 'data-composition-id');
+      if (composition && !inside) {
+        if (found) return;
+        if (!node.attribs['data-composition-id']?.trim() || Object.hasOwn(node.attribs, 'data-composition-src') ||
+            !['div', 'main', 'section', 'article'].includes(node.name)) throw new Error('Choose a native HTML composition container');
+        const end = node.endIndex;
+        const close = end == null ? '' : html.slice(html.lastIndexOf('</', end), end + 1);
+        if (end == null || end >= html.length || !new RegExp(`^</${node.name}\\s*>$`, 'i').test(close)) {
+          throw new Error('Choose a native HTML composition with a closing tag');
+        }
+        found = true;
+      }
+      if ((inside || composition) && at != null) owned.add(at);
+      // A child host is a layer in the parent; its tracks and markers belong to the child.
+      if (composition && inside) return;
+      for (const child of node.children) visit(child, inside || composition);
+    }
+    for (const node of document.children) visit(node, false);
+    return { tags: scanHtmlOpeningTags(html).filter(tag => owned.has(tag.start)), markers };
+  }
+  function captionBlock(scope: ReturnType<typeof compositionScope>, id: string) {
+    const begin = `<!-- openmotion-transcript:${id}:start -->`, end = `<!-- openmotion-transcript:${id}:end -->`;
+    const starts = scope.markers.get(begin) ?? [], ends = scope.markers.get(end) ?? [];
+    if (!starts.length && !ends.length) return null;
+    const start = starts[0]!, last = ends[0]!;
+    if (starts.length !== 1 || ends.length !== 1 || start >= last ||
+        scope.tags.some(tag => tag.start > start && tag.start < last && value(tag, 'data-composition-id') !== undefined)) {
+      throw new Error('Caption markers changed; restore the caption layer before replacing it');
+    }
+    return { start, end: last + end.length };
+  }
   function settingsFor(tag: Tag): CaptionSettings {
     const text = trackKind(tag) === 'text';
     return captionSettings({ preset: (value(tag, 'data-caption-preset') || (text ? 'clean' : 'bar')) as CaptionSettings['preset'], position: (value(tag, 'data-caption-position') || (text ? 'center' : 'bottom')) as CaptionSettings['position'], scale: Number(value(tag, 'data-caption-scale') || 1), pacing: (value(tag, 'data-caption-pacing') || 'sentence') as CaptionSettings['pacing'], visible: !tag.attributes.some(a => a.name === 'data-hidden') });
   }
   function settingsAttributes(settings: CaptionSettings) { return `data-caption-preset="${settings.preset}" data-caption-position="${settings.position}" data-caption-scale="${settings.scale}" data-caption-pacing="${settings.pacing}"${settings.visible ? '' : ' data-hidden'}`; }
-  function captionTracks(html: string): CaptionTrack[] {
+  function captionTracks(html: string, tags = compositionScope(html).tags): CaptionTrack[] {
     const found = new Map<string, CaptionTrack>();
-    for (const tag of scanHtmlOpeningTags(html)) {
+    for (const tag of tags) {
       const id = trackId(tag); if (!id) continue;
       const empty = value(tag, 'data-timeline-role') === 'caption-empty';
       const previous = found.get(id), settings = settingsFor(tag), locked = tag.attributes.some(a => a.name === 'data-timeline-locked');
@@ -33,13 +79,13 @@ export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtm
 
   /** Change appearance in place: preserve authored cue timing, text, IDs and track keys. */
   function updateCaptionTrackSource(html: string, id: string, patch: Partial<CaptionSettings>, remove = false) {
-    const tags = scanHtmlOpeningTags(html), selected = tags.filter(tag => trackId(tag) === id);
+    const scope = compositionScope(html), tags = scope.tags, selected = tags.filter(tag => trackId(tag) === id);
     if (!selected.length) throw new Error('Caption track no longer exists');
     if (selected.some(tag => tag.attributes.some(a => a.name === 'data-timeline-locked'))) throw new Error('Unlock the caption track before changing it');
     if (remove) {
-      const begin = `<!-- openmotion-transcript:${id}:start -->`, end = `<!-- openmotion-transcript:${id}:end -->`, a = html.indexOf(begin), b = html.indexOf(end);
-      if (a < 0 || b <= a || selected.some(tag => tag.start < a || tag.end > b) || html.indexOf(begin, a + 1) >= 0 || html.indexOf(end, b + 1) >= 0) throw new Error('Caption markers changed; remove individual clips in the timeline');
-      return { content: html.slice(0, a) + html.slice(b + end.length), count: 0 };
+      const block = captionBlock(scope, id);
+      if (!block || selected.some(tag => tag.start < block.start || tag.end > block.end)) throw new Error('Caption markers changed; remove individual clips in the timeline');
+      return { content: html.slice(0, block.start) + html.slice(block.end), count: selected.length };
     }
     for (const tag of [...selected].reverse()) {
       const previous = settingsFor(tag), settings = captionSettings({ ...previous, ...patch });
@@ -79,19 +125,19 @@ export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtm
 
   function timedTextSource(html: string, id: string, label: string, mapped: TranscriptSegment[], options?: Partial<CaptionSettings>, kind: 'text' | 'caption' = 'caption') {
     const doc = { id };
-    const existing = captionTracks(html);
+    const scope = compositionScope(html);
+    const existing = captionTracks(html, scope.tags);
     const previous = existing.find(track => track.id === doc.id) ?? (kind === 'caption' ? existing.find(track => track.kind === 'caption' && track.cueCount === 0 && !track.locked) : undefined);
     if (previous?.locked) throw new Error('Unlock the caption track before changing it');
     const settings = captionSettings({ ...previous?.settings, ...options });
     const begin = `<!-- openmotion-transcript:${doc.id}:start -->`, end = `<!-- openmotion-transcript:${doc.id}:end -->`;
-    const previousBegin = `<!-- openmotion-transcript:${previous?.id ?? id}:start -->`, previousEnd = `<!-- openmotion-transcript:${previous?.id ?? id}:end -->`;
-    const a = html.indexOf(previousBegin), b = html.indexOf(previousEnd);
-    if ((a >= 0) !== (b >= 0) || (previous && a < 0) || (a >= 0 && (b < a || html.indexOf(previousBegin, a + 1) >= 0 || html.indexOf(previousEnd, b + 1) >= 0))) throw new Error('Caption markers changed; restore the caption layer before replacing it');
-    if (a >= 0) html = html.slice(0, a) + html.slice(b + previousEnd.length);
+    const blockToReplace = captionBlock(scope, previous?.id ?? doc.id);
+    if (previous && !blockToReplace) throw new Error('Caption markers changed; restore the caption layer before replacing it');
+    if (blockToReplace) html = html.slice(0, blockToReplace.start) + html.slice(blockToReplace.end);
     // Overlay tracks sit above existing video and audio. Appending below video
     // would make a title the magnetic main track in the editor's lane topology.
     if (!previous) {
-      for (const tag of [...scanHtmlOpeningTags(html)].reverse()) {
+      for (const tag of [...(blockToReplace ? compositionScope(html).tags : scope.tags)].reverse()) {
         const trackAttr = tag.attributes.find(attr => attr.name === 'data-track-index');
         const isClip = (value(tag, 'class') || '').split(/\s+/).includes('clip');
         if (!trackAttr && !isClip) continue;
@@ -106,8 +152,8 @@ export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtm
         } else throw new Error('Invalid authored track index');
       }
     }
-    const tags = scanHtmlOpeningTags(html), root = tags.find(tag => tag.attributes.some(attr => attr.name === 'data-composition-id'));
-    if (!root || root.name !== 'div') throw new Error('Choose a native composition with a div root');
+    const tags = compositionScope(html).tags, root = tags[0];
+    if (!root || !root.closed) throw new Error('Choose a native HTML composition container');
     const attr = (name: string) => root.attributes.find(attr => attr.name === name);
     const duration = attr('data-duration');
     if (!duration || duration.kind !== 'value' || !Number.isFinite(Number(duration.value))) throw new Error('Composition requires an explicit duration');
@@ -149,7 +195,7 @@ export function createCaptionSourceOperations({ decodeAuthoredAttribute, scanHtm
     if (tracks.some(track => track.locked && track.settings.visible !== visible)) throw new Error('Unlock the caption track before changing it');
     if (!tracks.length && visible) {
       const created = timedTextSource(html, id, 'Captions', [{ id: 'empty', text: '', start: 0, end: 0.01 }], { visible });
-      const marker = scanHtmlOpeningTags(created.content).find(tag => value(tag, 'id') === `transcript-${id}-empty`)!;
+      const marker = compositionScope(created.content).tags.find(tag => value(tag, 'id') === `transcript-${id}-empty`)!;
       const overlayZ = value(marker, 'style')?.match(/z-index:(\d+)/)?.[1];
       const opening = created.content.slice(marker.start, marker.end).replace('data-timeline-role="caption"', 'data-timeline-role="caption-empty"').replace('data-label=""', 'data-label="Captions"').replace(/style="[^"]*"/, `style="position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;clip-path:inset(100%);z-index:${overlayZ}"`);
       return { content: created.content.slice(0, marker.start) + opening + created.content.slice(marker.end), count: 0, trackId: id };

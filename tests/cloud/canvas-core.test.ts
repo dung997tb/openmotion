@@ -183,3 +183,19 @@ test("canvas deletion of a mixed selection updates timeline length and the remai
   assert.match(result, /<audio/);
   assert.throws(()=>applyCanvasCommand(source.replace('<audio','<audio data-timeline-locked'), {kind:"deleteCanvasElements",targets}),/unlock/i);
 });
+
+test("Studio whole-path drags and headless deltas translate every keyframe without changing playhead mode", () => {
+  const html = '<html><body><div id="a">A</div><script>const tl=gsap.timeline();tl.fromTo("#a",{x:0,y:0},{x:130,y:32,duration:7,ease:"none"},0);</script></body></html>';
+  const delta = {x:34.767,y:20.664};
+  const before = parseGsapAnimationsFromHtml(html).animations[0]!;
+  const ui = applyCanvasCommand(html,{kind:"editAnimation",mutations:[{type:"shift-animation-path",animationId:before.id,deltaX:delta.x,deltaY:delta.y}]});
+  const shift = {kind:"moveCanvasElement",target,delta} as const;
+  assert.equal(applyCanvasCommand(html,shift),ui);
+  assert.equal(applyCanvasCommand(html,{...shift,mode:"wholePath",time:0}),ui);
+  const frames = (s:string) => parseGsapAnimationsFromHtml(s).animations.find(a=>a.keyframes)?.keyframes?.keyframes.map(k=>k.properties);
+  assert.deepEqual(frames(ui),[delta,{x:164.767,y:52.664}]);
+  const playhead = applyCanvasCommand(html,{kind:"moveCanvasElement",mode:"playhead",target,time:0,...delta});
+  assert.deepEqual(frames(playhead),[delta,{x:130,y:32}]);
+  assert.throws(()=>applyCanvasCommand(html,{...shift,x:30} as never),/either/);
+  assert.match(applyCanvasCommand(source,{kind:"moveCanvasElement",target,delta:{x:10,y:-3}}), /translate:\s*13px 1px/);
+});

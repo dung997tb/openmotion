@@ -116,7 +116,9 @@ export const PREVIEW_CANVAS_DRAG = `
     if (message.phase !== 'finish') return null;
     const { sourceFile, elementId, hfId } = drag.selection;
     const { makeRelative, startPosition } = drag;
-    const position = {time:startPosition.time, x:round(startPosition.x + offsetX), y:round(startPosition.y + offsetY)};
+    const position = message.wholePath
+      ? { time:startPosition.time, delta:{x:round(offsetX), y:round(offsetY)} }
+      : { time:startPosition.time, x:round(startPosition.x + offsetX), y:round(startPosition.y + offsetY) };
     const sha256 = sourceVersions[sourceFile];
     // A second edit of this source needs a confirmed base. Other source files remain editable.
     delete sourceVersions[sourceFile];

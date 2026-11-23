@@ -14,15 +14,16 @@ export interface CanvasElementPatch {
 }
 export type CanvasCommand =
   | { kind: "setCanvasBox"; target: SourceMutationTarget; box: CanvasBox }
-  | {
+  | ({
       kind: "moveCanvasElement";
       target: SourceMutationTarget;
-      x: number;
-      y: number;
       time?: number;
       staticBox?: CanvasBox;
       samples?: PlayheadSamples;
-    }
+    } & (
+      | { mode?: "playhead"; x: number; y: number; delta?: never }
+      | { mode?: "wholePath"; delta: { x: number; y: number }; x?: never; y?: never }
+    ))
   | { kind: "editElements"; patches: CanvasElementPatch[] }
   | {
       kind: "setAnimatedValues";
@@ -131,18 +132,28 @@ const samples = obj(
 );
 export const canvasCommandSchemas = [
   schema("setCanvasBox", { target, box }),
-  schema(
-    "moveCanvasElement",
-    {
-      target,
-      x: number,
-      y: number,
-      time: { type: "number", minimum: 0 },
-      staticBox: box,
-      samples,
-    },
-    ["target", "x", "y"],
-  ),
+  {
+    ...schema(
+      "moveCanvasElement",
+      {
+        target,
+        mode: { enum: ["playhead", "wholePath"] },
+        delta: obj({ x: number, y: number }),
+        x: number,
+        y: number,
+        time: { type: "number", minimum: 0 },
+        staticBox: box,
+        samples,
+      },
+      ["target"],
+    ),
+    anyOf: [
+      { required: ["delta"], properties: { mode: { enum: ["wholePath"] } } },
+      { required: ["x", "y"], properties: { mode: { enum: ["playhead"] } } },
+    ],
+    description:
+      "Drag an element. Use delta for the default Studio gesture (translate the whole path). Use x and y at a composition time for an absolute playhead edit; mode may explicitly be wholePath or playhead.",
+  },
   schema("editElements", {
     patches: array(
       obj(

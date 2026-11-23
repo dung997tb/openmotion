@@ -50,7 +50,13 @@ export async function commitCaptionCommand(
   if (current.kind === 'replay') {
     return { projectId, compositionPath, ...current.commit.commandResult, revision: current.commit.revision };
   }
-  const { content, count, trackId } = editCaptions(ops, current.content, command, args);
+  let edited: ReturnType<typeof editCaptions>;
+  try {
+    edited = editCaptions(ops, current.content, command, args);
+  } catch (error) {
+    throw new CloudError('INVALID_ARGUMENT', error instanceof Error ? error.message : 'Invalid caption edit', {status: 400, applied: false});
+  }
+  const { content, count, trackId } = edited;
   const commit = await files.commitChanges(auth, {
     projectId, expectedRevision, expectedVersionId, requestId, idempotencyScope: scope,
     commandReceipt: { inputHash, result: { trackId, count } },
