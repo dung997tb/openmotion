@@ -11,7 +11,7 @@ A single multi-target [Dockerfile](Dockerfile) (`node:26.11.1-bookworm-slim`, ma
 | `api` | Node.js + Studio SPA + `/app/fonts/` (**no Chromium, no FFmpeg**) | Stateless HTTP/SSE Studio server, Motion API, and Streamable HTTP `/mcp` endpoint (`read_only` rootfs). |
 | `worker-media` | Node.js + `ffmpeg` / `ffprobe` (**no Chromium**) | BullMQ `media-ingest`, `media-generate`, and two-phase `blob-gc` worker (`WORKER_ROLE=media`). |
 | `worker-render` | Node.js + `chromium` + `ffmpeg` + Noto fonts + `/app/fonts/` | Isolated BullMQ `render-export` worker (`WORKER_ROLE=render`) with ephemeral `/tmp` hydration and strict env stripping. |
-| `catalog-sync` | Node.js + `template-library/` + `library/templates/catalog/` | Job syncing built-in templates and the configured Motion catalog into S3 CAS (`catalog/blobs/{sha256}`) and PostgreSQL. |
+| `catalog-sync` | Node.js + `template-library/` + `library/templates/catalog/` | One-shot Job syncing built-in and repository templates into S3 CAS (`catalog/blobs/{sha256}`) and PostgreSQL. |
 
 Both `api` and `worker-render` bake the exact same `/app/fonts/` catalog (bundled Studio/template fonts and Noto Core/CJK/Color Emoji) so preview typography matches headless Chromium exports without placing browser or media binaries on `api`.
 
@@ -156,14 +156,6 @@ Wait for pre-release schema migration and template catalog sync jobs:
 kubectl -n openmotion wait --for=condition=complete job/openmotion-db-migrate --timeout=300s
 kubectl -n openmotion wait --for=condition=complete job/openmotion-catalog-sync --timeout=900s
 ```
-
-#### Motion catalog source
-
-Set `PRISM_CONTENT_ENV=dev` in the test catalog job and `prod` in the production job to consume the corresponding published Prism Motion directory. Without this setting the job uses the repository catalog. The npm package and contributor checkout keep their own source configuration and the existing main-branch publication workflow.
-
-The deployment job imports the four built-ins and the published CMS catalog. The periodic job uses `scripts/sync-catalog-cas.ts --prism-only` with the same environment, database and object store. An unchanged directory requires a single public manifest request. A new publication verifies the locale files and imports editable project files by hash before replacing catalog metadata in one database transaction. Studio and remote MCP read that catalog. Existing projects continue to reference their original files when a template is withdrawn. Reference-only entries expose the published guides and preview media.
-
-Deploy the compatible catalog-sync image before scheduling `--prism-only`. Pause the schedule before reverting that image. To verify an import, check the job summary and `/motion-api/template-catalog?category=all&limit=1`: the version has the form `prism:<environment>:<publicationId>`. To test cloning, use an entry from `category=builtin`, which contains the editable templates.
 
 ### 3. Autoscaling & Graceful Export Drain
 

@@ -722,8 +722,6 @@ describe('Catalog Sync CLI Args & Media Metadata Sniffing', () => {
     assert.equal(parsed.concurrency, 4);
     assert.deepEqual(parsed.templateIds, ['openmotion-welcome', 'product-promo']);
 
-    assert.equal(parseSyncCatalogArgs(['--prism-only']).prismOnly, true);
-    assert.throws(() => parseSyncCatalogArgs(['--prism-only', '--repo-only']), /Cannot combine/);
     assert.throws(() => parseSyncCatalogArgs(['--builtin-only', '--repo-only']), /Cannot combine/);
     assert.throws(() => parseSyncCatalogArgs(['--limit', '0']), /Invalid --limit/);
     assert.throws(() => parseSyncCatalogArgs(['--bogus']), /Unknown CLI argument/);
