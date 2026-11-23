@@ -176,7 +176,7 @@ export function McpConnectionPage({
 
   const supported = supportsLocalConnection(client);
   const language = locale === 'zh-CN' ? 'zh-CN' : 'en';
-  const prompt = setupPrompt(info, client.host, language).replace('MCP / CLI', client.name);
+  const prompt = setupPrompt(info, client.host, language, t).replace('MCP / CLI', agent);
   const manual = info ? manualConnection(info, client.host, language) : '';
   const cursorDeeplink = client.id === 'cursor' ? buildCursorDeeplink(info) : null;
 
@@ -296,7 +296,6 @@ export function McpConnectionPage({
         : t('Copy setup instructions for {agent}', { agent });
   const primaryCtaIcon = desktop ? 'arrow-down-s-line' : cursorDeeplink ? 'arrow-right-up-line' : 'file-copy-line';
 
-  const galleryClientLabel = (client.id === 'mcp' || t(client.name).length > 11) ? t('Agent') : t(client.name);
   const [heroLine1Before, heroLine1After = ''] = t('In {agent}', { agent: '__AGENT__' }).split('__AGENT__');
   const [heroLine2Before, heroLine2After = ''] = t('Create editable videos with {brand}', { brand: '__BRAND__' }).split('__BRAND__');
   const [entitlementBefore, entitlementAfter] = t('Sign in with OpenDesign to view {details}.', { details: '__DETAILS__' }).split('__DETAILS__');
@@ -497,9 +496,8 @@ export function McpConnectionPage({
 
         {/* 12-Card Scenario Template Gallery */}
         <McpTemplateShowcase
-          client={galleryClientLabel}
           enabled={previewsEnabled}
-          canTry={supported}
+          canCopySetup={supported && !desktop}
           openLibrary={openLibrary('mcp_templates')}
           onOpenTarget={openCaseTarget}
           onCategory={value => click('mcp_templates', 'category_select', { option: value })}

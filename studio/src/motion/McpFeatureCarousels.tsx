@@ -1,8 +1,9 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useState } from 'react';
+import { Tab, TabPanel, Tabs, TabsList } from '../components/ui/Tabs';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { formatMcpAgentPrompt, mcpShowcaseModules, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
+import { formatMcpAgentPrompt, localizedMcpExample, mcpShowcaseModules, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
 
 function FeatureModuleCarousel({
   module,
@@ -16,9 +17,10 @@ function FeatureModuleCarousel({
   onCopy: (slideId: string, prompt: string) => Promise<boolean>;
 }) {
   const { t, locale } = useI18n();
-  const lang = locale === 'zh-CN' ? 'zh-CN' : 'en';
+  const moduleTitle = locale === 'zh-CN' ? module.title['zh-CN'] : t(module.title.en);
   const [index, setIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
+  const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
   const slides = module.slides;
@@ -26,12 +28,12 @@ function FeatureModuleCarousel({
   const current: McpShowcaseSlide = slides[index];
   const prevSlide = slides[(index - 1 + total) % total];
   const nextSlide = slides[(index + 1) % total];
-  const currentText = current.content[lang];
+  const currentText = localizedMcpExample(current.content, locale, t);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const playVideo = enabled && !reducedMotion && Boolean(current.video) && !videoErrors[current.id];
 
   useEffect(() => {
-    if (!enabled || hovered || reducedMotion) return;
+    if (!enabled || hovered || keyboardFocus || reducedMotion) return;
     let intervalId = 0;
     const delayId = window.setTimeout(() => {
       intervalId = window.setInterval(() => {
@@ -42,7 +44,7 @@ function FeatureModuleCarousel({
       window.clearTimeout(delayId);
       window.clearInterval(intervalId);
     };
-  }, [enabled, hovered, moduleIndex, reducedMotion, total]);
+  }, [enabled, hovered, keyboardFocus, moduleIndex, reducedMotion, total]);
 
   useEffect(() => {
     if (!copiedId) return;
@@ -58,36 +60,32 @@ function FeatureModuleCarousel({
   }
 
   return (
-    <div
+    <Tabs
+      value={current.id}
+      onValueChange={value => {
+        const next = slides.findIndex(slide => slide.id === value);
+        if (next >= 0) setIndex(next);
+      }}
       className="om-mcp-carousel-module"
       id={module.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocus={event => setKeyboardFocus(event.target.matches(':focus-visible'))}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setKeyboardFocus(false); }}
     >
       <div className="om-mcp-carousel-head" id={module.anchorId}>
-        <h2>{module.title[lang]}</h2>
+        <h2>{moduleTitle}</h2>
       </div>
 
-      <div className="om-mcp-carousel-tabs" role="tablist" aria-label={module.title[lang]}>
-        {slides.map((slide, slideIdx) => {
-          const isActive = slideIdx === index;
-          return (
-            <Button
-              key={slide.id}
-              variant="plain"
-              role="tab"
-              aria-selected={isActive}
-              className="om-mcp-carousel-tab"
-              data-active={isActive || undefined}
-              onClick={() => setIndex(slideIdx)}
-            >
-              <span>{slide.content[lang].tabLabel}</span>
-            </Button>
-          );
-        })}
-      </div>
+      <TabsList className="om-mcp-carousel-tabs bg-transparent p-0" aria-label={moduleTitle}>
+        {slides.map(slide => (
+          <Tab key={slide.id} value={slide.id} className="om-mcp-carousel-tab" data-active={slide.id === current.id || undefined}>
+            <span>{locale === 'zh-CN' ? slide.content['zh-CN'].tabLabel : t(slide.content.en.tabLabel)}</span>
+          </Tab>
+        ))}
+      </TabsList>
 
-      <div className="om-mcp-carousel-viewport">
+      <TabPanel value={current.id} className="om-mcp-carousel-viewport">
         <Button
           variant="plain"
           className="om-mcp-carousel-peek om-mcp-carousel-peek-prev"
@@ -176,8 +174,8 @@ function FeatureModuleCarousel({
         >
           <img key={nextSlide.id} src={nextSlide.image} alt="" decoding="async" />
         </Button>
-      </div>
-    </div>
+      </TabPanel>
+    </Tabs>
   );
 }
 

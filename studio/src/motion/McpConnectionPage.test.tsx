@@ -4,10 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import englishReadme from '../../../README.md?raw';
 import chineseReadme from '../../../README.zh-CN.md?raw';
-import { I18nProvider, type Locale } from '../i18n/I18n';
+import { I18nProvider, languages, translate, type Locale } from '../i18n/I18n';
 import { McpConnectionPage } from './McpConnectionPage';
-import { formatMcpAgentPrompt, mcpHeroBeats, mcpShowcaseModules } from './mcpShowcaseData';
-import { containerIntegration, manualConnection, type IntegrationInfo } from '../../../shared/integration';
+import { formatMcpAgentPrompt, localizedMcpExample, mcpHeroBeats, mcpShowcaseModules } from './mcpShowcaseData';
+import { mcpGalleryCards } from './mcpGallery';
+import { containerIntegration, manualConnection, setupPrompt, type IntegrationInfo } from '../../../shared/integration';
 
 // Reporting is covered separately. Its lazy initialization/retries must not
 // add transport requests to this page's discovery and read-only assertions.
@@ -30,6 +31,30 @@ async function mount(locale: Locale = 'en', projectId?: string) {
   await act(async () => root!.render(<I18nProvider initialLocale={locale}><McpConnectionPage projectId={projectId} openLibrary={openLibrary} openProviders={openProviders} /></I18nProvider>));
   return { openLibrary, openProviders };
 }
+
+it.each(languages.filter(({ locale }) => locale !== 'en'))('localizes MCP copy in $label without changing setup targets', ({ locale }) => {
+  const t = (message: string) => translate(locale, message);
+  expect(t('Manual setup')).not.toBe('Manual setup');
+  const examples = [
+    ...mcpHeroBeats,
+    ...mcpShowcaseModules.flatMap(module => module.slides),
+    ...mcpGalleryCards,
+  ];
+  for (const { content } of examples) {
+    const localized = localizedMcpExample(content, locale, t);
+    expect(localized.title, content.en.title).not.toBe(content.en.title);
+    expect(localized.prompt, content.en.title).not.toBe(content.en.prompt);
+  }
+
+  const copyLanguage = locale === 'zh-CN' ? 'zh-CN' : 'en';
+  for (const discovery of [info, containerIntegration(info as IntegrationInfo, 'openmotion')]) {
+    const prompt = setupPrompt(discovery as IntegrationInfo, 'codex', copyLanguage, (message, values) => translate(locale, message, values));
+    expect(prompt).not.toBe(setupPrompt(discovery as IntegrationInfo, 'codex', 'en'));
+    expect(prompt).toContain('Codex');
+    expect(prompt).toContain('https://github.com/nexu-io/openmotion#quick-start');
+    expect(prompt).toContain('openmotion_get_project');
+  }
+});
 
 it.each(['en', 'zh-CN'] as const)('copies a workspace-bound review read plan and exposes raw-data/action guidance in %s', async locale => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : info)));
@@ -165,7 +190,7 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   await act(async () => button('Copy example prompt').click());
   const example = copy.mock.calls[0][0];
   expect(example).toMatch(/^@OpenDesign Adapt template "Glean Agents Launch"/);
-  await act(async () => button('Try in Claude Code').click());
+  await act(async () => button('Copy setup and prompt').click());
   expect(copy.mock.calls[1][0]).toContain('Claude Code');
   expect(copy.mock.calls[1][0]).toContain('https://github.com/nexu-io/openmotion#quick-start');
   expect(copy.mock.calls[1][0]).not.toContain('127.0.0.1');
@@ -189,7 +214,7 @@ it('explains unavailable remote connections for existing ChatGPT links', async (
   try { await mount(); } finally { history.replaceState(null, '', previousUrl); }
   expect(document.body.textContent).toContain('Remote connection unavailable');
   expect(button('Copy example prompt').disabled).toBe(false);
-  expect(document.querySelector<HTMLButtonElement>('.om-mcp-demo-try')?.disabled).toBe(true);
+  expect(document.querySelector('.om-mcp-demo-try')).toBeNull();
   expect(document.querySelector('a[download]')).toBeNull();
 
 });
@@ -260,14 +285,14 @@ it('shows all twelve curated examples, filters by section and previews video, br
     await act(async () => tab(label).click());
     expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(count);
   }
-  await act(async () => button('Preview template Apple official Brand Kit').click());
+  await act(async () => button('Preview Apple official Brand Kit').click());
   const brandPreview = document.querySelector('[role=dialog]')!;
   expect(brandPreview.textContent).toContain('Apple official Brand Kit');
   expect(brandPreview.querySelector('iframe')?.getAttribute('src')).toContain('/motion-api/brand-kits/catalog/apple/showcase');
   await act(async () => button('Close').click());
 
   await act(async () => tab('Product & AI launches (4)').click());
-  await act(async () => button('Preview template Glean Agents · Enterprise workflow launch').click());
+  await act(async () => button('Preview Glean Agents · Enterprise workflow launch').click());
   const preview = document.querySelector('[role=dialog]')!;
   expect(preview.textContent).toContain('Glean Agents · Enterprise workflow launch');
   expect(preview.querySelector('video')?.getAttribute('src')).toContain('https://r.open-design.ai/files/');

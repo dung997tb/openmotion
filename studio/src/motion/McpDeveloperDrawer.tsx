@@ -4,6 +4,7 @@ import { canvasPresets } from '../../../shared/composition-canvas';
 import { platformExportTargets } from '../../../shared/platform-export';
 import type { IntegrationInfo } from '../../../shared/integration';
 import { PlatformIcon } from '../../../packages/design-system/react/PlatformIcon';
+import { Tab, TabPanel, Tabs, TabsList } from '../components/ui/Tabs';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { GITHUB_REPOSITORY } from './githubRepository';
@@ -112,23 +113,23 @@ export function McpDeveloperDrawer({
           </span>
         </Button>
 
-        <div className="om-mcp-dev-body" data-open={open || undefined}>
-          <div className="om-mcp-dev-tabs" role="tablist" aria-label={t('Developer technical reference')}>
-            <Button variant="plain" role="tab" aria-selected={tab === 'tools'} className="om-mcp-dev-tab" data-active={tab === 'tools' || undefined} onClick={() => setTab('tools')}>
+        <Tabs value={tab} onValueChange={value => setTab(value as DevTab)} className="om-mcp-dev-body" data-open={open || undefined}>
+          <TabsList className="om-mcp-dev-tabs bg-transparent" aria-label={t('Developer technical reference')}>
+            <Tab value="tools" className="om-mcp-dev-tab" data-active={tab === 'tools' || undefined}>
               {t('MCP tool catalog')}
-            </Button>
-            <Button variant="plain" role="tab" aria-selected={tab === 'compat'} className="om-mcp-dev-tab" data-active={tab === 'compat' || undefined} onClick={() => setTab('compat')}>
+            </Tab>
+            <Tab value="compat" className="om-mcp-dev-tab" data-active={tab === 'compat' || undefined}>
               {t('Client compatibility')}
-            </Button>
-            <Button variant="plain" role="tab" aria-selected={tab === 'privacy'} className="om-mcp-dev-tab" data-active={tab === 'privacy' || undefined} onClick={() => setTab('privacy')}>
+            </Tab>
+            <Tab value="privacy" className="om-mcp-dev-tab" data-active={tab === 'privacy' || undefined}>
               {t('Costs & local permissions')}
-            </Button>
-            <Button variant="plain" role="tab" aria-selected={tab === 'faq'} className="om-mcp-dev-tab" data-active={tab === 'faq' || undefined} onClick={() => setTab('faq')}>
+            </Tab>
+            <Tab value="faq" className="om-mcp-dev-tab" data-active={tab === 'faq' || undefined}>
               {t('More troubleshooting Q&A')}
-            </Button>
-          </div>
+            </Tab>
+          </TabsList>
 
-          <div className="om-mcp-dev-pane" data-active={tab === 'tools' || undefined} id="mcp-capabilities">
+          <TabPanel value="tools" keepMounted className="om-mcp-dev-pane" data-active={tab === 'tools' || undefined} id="mcp-capabilities">
             {info?.tools.length ? (
               <div className="om-mcp-tool-grid">
                 {info.tools.map(tool => (
@@ -212,9 +213,9 @@ export function McpDeveloperDrawer({
                 </article>
               ))}
             </div>
-          </div>
+          </TabPanel>
 
-          <div className="om-mcp-dev-pane" data-active={tab === 'compat' || undefined} id="mcp-clients">
+          <TabPanel value="compat" keepMounted className="om-mcp-dev-pane" data-active={tab === 'compat' || undefined} id="mcp-clients">
             <ComparisonTable
               label="Client compatibility"
               columns={['Capability', 'Codex / Claude Code / Cursor / DeepSeek', 'Desktop / other MCP clients', 'ChatGPT Cloud']}
@@ -230,9 +231,9 @@ export function McpDeveloperDrawer({
               rows={mcpWorkflowComparison}
               featured
             />
-          </div>
+          </TabPanel>
 
-          <div className="om-mcp-dev-pane" data-active={tab === 'privacy' || undefined}>
+          <TabPanel value="privacy" keepMounted className="om-mcp-dev-pane" data-active={tab === 'privacy' || undefined}>
             <div className="om-mcp-policy-grid">
               <div>
                 <h3>{t('Costs & limits')}</h3>
@@ -283,9 +284,9 @@ export function McpDeveloperDrawer({
                 </article>
               ))}
             </div>
-          </div>
+          </TabPanel>
 
-          <div className="om-mcp-dev-pane om-mcp-faq" data-active={tab === 'faq' || undefined}>
+          <TabPanel value="faq" keepMounted className="om-mcp-dev-pane om-mcp-faq" data-active={tab === 'faq' || undefined}>
             <div className="om-mcp-dev-faq-list">
               {mcpFaq.map(([question, answer], index) => (
                 <details
@@ -303,8 +304,8 @@ export function McpDeveloperDrawer({
                 </details>
               ))}
             </div>
-          </div>
-        </div>
+          </TabPanel>
+        </Tabs>
       </div>
     </section>
   );

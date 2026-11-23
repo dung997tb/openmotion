@@ -9,6 +9,16 @@ import { motionSkills } from './skillCatalog';
 
 export type LocalizedPair<T> = { en: T; 'zh-CN': T };
 
+export function localizedMcpExample<T extends Record<string, string>>(
+  copy: LocalizedPair<T>,
+  locale: string,
+  t: (message: string) => string,
+): T {
+  if (locale === 'zh-CN') return copy['zh-CN'];
+  if (locale === 'en') return copy.en;
+  return Object.fromEntries(Object.entries(copy.en).map(([key, value]) => [key, t(value)])) as T;
+}
+
 export type McpCaseTarget =
   | { kind: 'template'; templateId: string; title: string; posterUrl: string; previewUrl: string }
   | { kind: 'skill'; skillId: string }

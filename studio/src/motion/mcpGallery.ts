@@ -1,4 +1,5 @@
 import { brandCatalogFile } from '../../../shared/brand-catalog';
+import type { LocalizedPair } from './mcpShowcaseData';
 import { motionSkills } from './skillCatalog';
 
 export const mcpGalleryCategories = [
@@ -22,27 +23,8 @@ export type McpGalleryCard = {
   templateId?: string;
   skillId?: string;
   brandKitId?: string;
-  content: Record<string, { title: string; prompt: string }> & { en: { title: string; prompt: string } };
+  content: LocalizedPair<{ title: string; prompt: string }>;
 };
-
-export const mcpGalleryPreview = {
-  en: {
-    pasteHint: 'Paste directly into your Agent',
-    tracks: [
-      ['Video', 'Scene 1 · Hook & hero UI', 'Scene 2 · Product motion', 'End card'],
-      ['Captions & text', 'Headline entrance', 'Key highlights', 'CTA & mark'],
-      ['Voice & music', 'Synced narration and soundtrack (edit any track independently)'],
-    ],
-  },
-  'zh-CN': {
-    pasteHint: '可直接粘贴给你的 Agent',
-    tracks: [
-      ['视频主轨', '镜头 1 · 开场视觉钩子', '镜头 2 · 核心界面与动效', '结尾定版'],
-      ['字幕与花字', '主标题入场', '核心亮点信息卡', '品牌收尾'],
-      ['配音与音乐', '旁白与节奏配乐（哪里不满意只改这一轨，画面不动）'],
-    ],
-  },
-} as const;
 
 function skillAsset(id: string) {
   const skill = motionSkills.find(item => item.id === id);

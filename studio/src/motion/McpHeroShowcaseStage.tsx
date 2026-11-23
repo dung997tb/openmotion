@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { formatMcpAgentPrompt, mcpHeroBeats } from './mcpShowcaseData';
+import { formatMcpAgentPrompt, localizedMcpExample, mcpHeroBeats } from './mcpShowcaseData';
 
 function nextBeat(index: number) {
   return (index + 1) % mcpHeroBeats.length;
@@ -22,9 +22,9 @@ export function McpHeroShowcaseStage({
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
-  const lang = locale === 'zh-CN' ? 'zh-CN' : 'en';
+
   const current = mcpHeroBeats[activeBeat];
-  const currentText = current.content[lang];
+  const currentText = localizedMcpExample(current.content, locale, t);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const waitsForVideo = current.loop === false && Boolean(current.video) && !videoErrors[current.id];
 
@@ -52,7 +52,7 @@ export function McpHeroShowcaseStage({
       <div className="om-mcp-stage-layout">
         <div className="om-mcp-stage-steps">
           {mcpHeroBeats.map((beat, index) => {
-            const copy = beat.content[lang];
+            const copy = localizedMcpExample(beat.content, locale, t);
             const isActive = index === activeBeat;
             return (
               <Button
@@ -94,7 +94,7 @@ export function McpHeroShowcaseStage({
                     <video
                       src={beat.video}
                       poster={beat.image}
-                      aria-label={beat.content[lang].alt}
+                      aria-label={localizedMcpExample(beat.content, locale, t).alt}
                       autoPlay
                       muted
                       loop={beat.loop !== false}
@@ -104,7 +104,7 @@ export function McpHeroShowcaseStage({
                       onError={() => setVideoErrors(prev => ({ ...prev, [beat.id]: true }))}
                     />
                   ) : (
-                    <img src={beat.image} alt={beat.content[lang].alt} decoding="async" />
+                    <img src={beat.image} alt={localizedMcpExample(beat.content, locale, t).alt} decoding="async" />
                   )}
                 </div>
               );

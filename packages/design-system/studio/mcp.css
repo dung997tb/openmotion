@@ -284,13 +284,8 @@
 .om-mcp-demo-dialog h2 { margin: 0; font-size: 18px; color: var(--motion-strong); }
 [data-motion-studio] .om-mcp-demo-dismiss { width: var(--motion-space-32); height: var(--motion-space-32); padding: 0; border-radius: var(--motion-radius-full); border: 1px solid var(--motion-mcp-gallery-border); color: var(--motion-mcp-gallery-muted); }
 [data-motion-studio] .om-mcp-demo-dismiss:hover { background: var(--motion-raised); color: var(--motion-strong); }
-.om-mcp-demo-preview, .om-mcp-demo-timeline, .om-mcp-demo-prompt { border: 1px solid var(--motion-mcp-gallery-border); border-radius: var(--motion-radius-md); }
-.om-mcp-demo-preview, .om-mcp-demo-timeline { background: var(--motion-inset); }
-.om-mcp-demo-timeline { padding: 14px var(--motion-space-16); color: var(--motion-mcp-gallery-muted); font-size: var(--motion-text-xs); }
-.om-mcp-demo-timeline > div > div { background: var(--motion-mcp-gallery-panel); border-radius: var(--motion-radius-sm); }
-.om-mcp-demo-timeline > div > div > span { padding-inline: var(--motion-space-8); border-radius: var(--motion-radius-sm); background: var(--motion-mcp-gallery-video); color: var(--motion-video-ink); font-size: 11px; font-weight: var(--motion-weight-semibold); }
-.om-mcp-demo-timeline [data-track="1"] > div > span { background: var(--motion-mcp-gallery-text); }
-.om-mcp-demo-timeline [data-track="2"] > div > span { background: var(--motion-mcp-gallery-audio); }
+.om-mcp-demo-preview, .om-mcp-demo-prompt { border: 1px solid var(--motion-mcp-gallery-border); border-radius: var(--motion-radius-md); }
+.om-mcp-demo-preview { background: var(--motion-inset); }
 .om-mcp-demo-prompt { padding: var(--motion-space-20); background: var(--motion-mcp-gallery-panel); }
 .om-mcp-demo-prompt > div { margin-bottom: var(--motion-space-8); color: var(--motion-mcp-gallery-muted); font-size: var(--motion-text-xs); }
 .om-mcp-demo-prompt > p { margin: 0; color: var(--motion-strong); font-size: 15px; line-height: 1.7; }
