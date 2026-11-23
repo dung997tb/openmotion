@@ -1,6 +1,6 @@
 # OpenMotion Product Architecture
 
-Updated: 2026-11-20. This document describes the container-first cloud architecture of OpenMotion (Phase 1 implementation and Phase 2 roadmap). Every capability marked **Implemented (Phase 1)** runs in this repository today; items marked **Planned (Phase 2)** return structured `501 FEATURE_DEFERRED_P2` responses and render graceful coming-soon states in Studio.
+Updated: 2026-11-23. This document describes the container-first cloud architecture of OpenMotion (Phase 1 implementation and Phase 2 roadmap). Every capability marked **Implemented (Phase 1)** runs in this repository today; items marked **Planned (Phase 2)** return structured `501 FEATURE_DEFERRED_P2` responses from backend endpoints and are hidden in Cloud Phase 1 Studio via `CLOUD_P1_FEATURES` (`studio/src/utils/cloudFeatures.ts`) with safe route redirects.
 
 Related references: [Documentation index](../README.md) · [Discovery site map](discovery-site-map.md) · [Public MCP Phase 1 contract](../mcp-phase1-tools.md) · [Skill routing](../skills.md) · [Shared design system](../design-system.md) · [Template repository workflow](../template-repository.md) · [Deployment guide](../../deploy/README.md) · [Migration guide](../repository-migration.md).
 
@@ -23,10 +23,10 @@ Core product principles:
 | --- | --- | --- |
 | **Explore** | `/` or `?page=explore` | Featured templates, highlights rail, Studio collections, model hubs, Skills index, and creators |
 | **Motion Editor** | `?page=editor` / `?page=motion` | Diskless Hyperframes timeline & DOM editor backed by Postgres + S3 CAS, composition switcher, caption tracks, version history, remote-worker MP4 export |
-| **Assets & Media Studios** | `?page=assets`, `?page=design`, `?page=cinema`, `?page=sound`, `?page=create&scene=<id>` | Presigned S3 upload flow, unified OpenDesign Model Gateway generation, async job tracking, version inspection, zero-copy project import |
-| **MCP · Connect Agent** | `?page=mcp` | Product-wide capability handbook, Streamable HTTP `/mcp` setup (OAuth 2.1 + PAT), client-specific configs (including ChatGPT Cloud on HTTPS), copyable workflow prompts |
-| **Settings** | `?page=settings&section=<id>` | Account (OIDC sign-in/out, workspace switcher, PAT management, `AUTH_MODE=dev` banner), Subscription & usage, Model gateway (`MODEL_GATEWAY_MODE=mock` banner + live catalog), Default models, General, Appearance, Privacy & data, Help, About |
-| **Phase 2 Surfaces** | Design Studio, Brand Kit capture, ASR Transcription, Review Comments | Graceful `501 FEATURE_DEFERRED_P2` empty/coming-soon states without crashing or blocking Phase 1 workflows |
+| **Assets & Media Studios** | `/assets`, `/create/<scene>`, `/cinema`, `/sound` (and legacy `?page=assets`, `?page=cinema`, `?page=sound`, `?page=create&scene=<id>`) | Presigned S3 upload flow, unified OpenDesign Model Gateway generation (Image, Video, Audio), async job tracking, version inspection, zero-copy project import |
+| **MCP · Connect Agent** | `/mcp-setup` (`?page=mcp`) | Product-wide capability handbook, Streamable HTTP `/mcp` setup (OAuth 2.1 + PAT), client-specific configs (including ChatGPT Cloud on HTTPS), copyable workflow prompts |
+| **Settings** | `/settings/<id>` (`?page=settings&section=<id>`) | Account (OIDC sign-in/out, workspace switcher, PAT management, `AUTH_MODE=dev` banner), Subscription & usage, Model gateway (`MODEL_GATEWAY_MODE=mock` banner + live catalog), Default models, General, Appearance, Privacy & data, Help, About |
+| **Phase 2 Surfaces (Gated in Cloud P1)** | Design Studio, Game Studio, Workflows, Brand Kit, ASR Transcription, Review Comments, Local Agents | Hidden in Cloud Phase 1 via `CLOUD_P1_FEATURES` (`studio/src/utils/cloudFeatures.ts`) with safe `replace` redirects (`/settings/local` -> `/settings/providers`, others -> `/explore`); backend endpoints return `501 FEATURE_DEFERRED_P2` without crashing or blocking Phase 1 workflows |
 
 ---
 
@@ -174,10 +174,11 @@ The following host-local features from the legacy desktop runtime have been remo
 | **Template Catalog & Production Skills** | **Implemented (P1)** | Postgres + S3 / `catalog-sync` + `skills/` | Shared discovery across Explore, Studio, and MCP tools/resources |
 | **Auth, Workspaces, Preview Isolation, OAuth 2.1 & PAT** | **Implemented (P1)** | OpenDesign OIDC / `AUTH_MODE=dev` + Postgres + cookie-less `PREVIEW_PUBLIC_ORIGIN` | Browser OIDC + workspace switcher + PAT CRUD; isolated preview subdomain with scoped HS256 tokens (`403 PREVIEW_ORIGIN_ISOLATED`); `/mcp` OAuth 2.1 & PAT Bearer isolation |
 | **Manual Captions & SRT/VTT Import/Export** | **Implemented (P1)** | Project composition files + Studio Captions panel | Canvas aspect presets, CC toggle, manual cue edits, SRT/VTT import & export |
-| **Cloud HTML Design Studio (`openmotion_design_*`)** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Tools remain registered in the 22-tool contract; Studio renders a non-crashing Phase 2 notice |
-| **Automated Website Brand Kit Capture** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Official catalog stays browsable; custom capture renders a Phase 2 notice and stops background polling |
-| **Cloud Speech Recognition (ASR Jobs)** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Transcript panel displays a Phase 2 notice for automated ASR while keeping SRT/VTT import & Captions usable |
-| **Frame-Anchored Review Comments & Markup** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Review panel stops polling and renders a clean Phase 2 empty state |
+| **Cloud HTML Design Studio (`openmotion_design_*`)** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Tools remain registered in the 22-tool contract; Studio hides HTML Design Studio entries behind `CLOUD_P1_FEATURES.designStudio` (preserving the Image media studio) and redirects `/design*` to `/explore` |
+| **Game Studio & Multi-Step Workflows** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Studio hides Game Studio (`CLOUD_P1_FEATURES.gameStudio`) and Workflows (`CLOUD_P1_FEATURES.workflows`), redirects `/studios/game` and `/scenarios*` to `/explore`, and Cloud Docker images exclude `templates/games` and `templates/game-kits` |
+| **Brand Kit** | **Planned (Phase 2)** | `/motion-api/brand-kits/*` capture/import returns `501 FEATURE_DEFERRED_P2` | Studio hides Brand Kit entries behind `CLOUD_P1_FEATURES.brandKit` and redirects `/brand-kit*` to `/explore` (importing official catalog cards depends on the deferred capture/import backend) |
+| **Cloud Speech Recognition (ASR Jobs)** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Studio hides the Transcript dock panel, `Open transcript` button, and `Auto captions` tab behind `CLOUD_P1_FEATURES.asr` while keeping manual captions, styling, and SRT/VTT import/export in Captions |
+| **Frame-Anchored Review Comments & Markup** | **Planned (Phase 2)** | Returns `501 FEATURE_DEFERRED_P2` | Studio hides the Comments dock panel and player review controls behind `CLOUD_P1_FEATURES.reviewComments` and suppresses comment polling |
 | **Live Real-Time Multi-User Co-Editing** | **Planned (Phase 2+)** | Not implemented in P1 | Phase 1 provides multi-user RBAC with optimistic revision conflict protection |
 
 ---

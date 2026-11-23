@@ -236,6 +236,12 @@ describe('Cloud Phase 1 feature gates', () => {
     expect(scenarioIds.some(id => id?.startsWith('design-'))).toBe(false);
     expect(scenarioIds.some(id => id?.startsWith('scenario-'))).toBe(false);
     expect(scenarioIds).not.toContain('review-comments');
+
+    const faqText = container.querySelector('#mcp-faq')?.textContent ?? '';
+    expect(faqText).toContain('Can I transcribe recordings and make multilingual platform videos?');
+    expect(faqText).not.toContain('How is a Brand Kit different from a Template?');
+    expect(faqText).not.toContain('How does Design Studio work in Cloud Phase 1?');
+    expect(faqText).not.toContain('How does my Agent run a workflow and save results to Assets?');
   });
 
   it('hides the Games tab and makes zero /games API calls in AssetsPage', async () => {
