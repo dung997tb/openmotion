@@ -218,6 +218,10 @@ test('automatic step prompts localize instructions and options while preserving 
   assert.match(resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: chinese, promptLocale: 'zh-CN' }, 'fr'), /^Créez une image de storyboard\./);
   assert.equal(resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: legacy, promptEdited: true }, 'zh-CN'), legacy);
   assert.equal(resolveScenarioStepPrompt(motion, storyboard, brief, { prompt: 'Custom storyboard' }, 'zh-CN'), 'Custom storyboard');
+
+  const blackFriday = findScenario('black-friday')!;
+  const productImages = blackFriday.steps.find(step => step.id === 'product-images')!;
+  assert.match(scenarioStepPrompt(blackFriday, productImages, { productDescription: '방수 소재' }, 'ko-KR'), /^제품 상세 정보: 방수 소재$/m);
 });
 
 test('empty saved motion-film prompts use the current brief and interface language', () => {

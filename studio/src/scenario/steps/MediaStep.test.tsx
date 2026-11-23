@@ -167,7 +167,7 @@ describe('MediaStep', () => {
     }
   });
 
-  it.each(['account', 'opendesign'] as const)('submits the %s soundtrack slider value with the current prompt', async provider => {
+  it.each(['account', 'opendesign'] as const)('uses the brief for the %s soundtrack default and submits manual overrides with the current prompt', async provider => {
     const musicModel: Model = {
       id: `${provider}:elevenlabs-music-v2`,
       provider,
@@ -190,8 +190,14 @@ describe('MediaStep', () => {
       failed: false,
       retry: vi.fn(),
     });
-    const { props, mocks } = createStepProps('motion-full-chain', 'soundtrack');
-    const mounted = await mountStep(<I18nProvider initialLocale="zh-CN"><MediaStep {...props} /></I18nProvider>);
+    const run = makeBaseRun('motion-full-chain');
+    const { props, mocks } = createStepProps('motion-full-chain', 'soundtrack', { run });
+    const render = (durationSeconds?: string) => (
+      <I18nProvider initialLocale="zh-CN">
+        <MediaStep {...props} run={{ ...run, brief: durationSeconds ? { durationSeconds } : {} }} />
+      </I18nProvider>
+    );
+    const mounted = await mountStep(render());
 
     try {
       const duration = mounted.container.querySelector<HTMLInputElement>('.om-duration-track input[type="range"]')!;
@@ -213,6 +219,17 @@ describe('MediaStep', () => {
       await act(async () => { generate.click(); });
       expectSubmission(3, '创作一段配乐。');
 
+      for (const seconds of [15, 30, 60]) {
+        await mounted.rerender(render(String(seconds)));
+        expect(readout.textContent).toBe(`${seconds}秒`);
+        await act(async () => { generate.click(); });
+        expectSubmission(seconds, `创作一段配乐。\n时长：${seconds} 秒`);
+      }
+      await mounted.rerender(render('180'));
+      expect(readout.textContent).toBe('60秒');
+      await mounted.rerender(render('1'));
+      expect(readout.textContent).toBe('3秒');
+
       const customPrompt = '轻快的钢琴配乐';
       await act(async () => { setFieldValue(prompt, customPrompt); });
       for (const seconds of [4, 5, 6, 7]) {
@@ -223,6 +240,8 @@ describe('MediaStep', () => {
       }
       const tenSeconds = [...mounted.container.querySelectorAll<HTMLButtonElement>('.om-duration-tick')].find(button => button.textContent === '10')!;
       await act(async () => { tenSeconds.click(); });
+      await mounted.rerender(render('30'));
+      expect(readout.textContent).toBe('10秒');
       await act(async () => { generate.click(); });
       expectSubmission(10, customPrompt);
     } finally {

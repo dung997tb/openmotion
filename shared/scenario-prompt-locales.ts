@@ -144,7 +144,7 @@ export const scenarioPromptLocales: Record<string, { actions: Record<string, str
       "Code animation style": "코드 애니메이션 스타일",
       "Product name": "제품명",
       "Key value props": "핵심 가치 제안",
-      "Product details": "产상품细节",
+      "Product details": "제품 상세 정보",
       "Sale price": "할인가",
       "Promo code": "프로모션 코드",
       "Sale window": "세일 기간",

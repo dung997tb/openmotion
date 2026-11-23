@@ -66,15 +66,21 @@ function findUpstreamScript(run: ScenarioRun | null): string {
 const durationKeys = new Set(['duration', 'duration_seconds', 'music_length_ms']);
 const minimalFieldKeys = new Set(['aspect_ratio', 'ratio', 'image_size', 'n', 'num_images', 'voice', ...durationKeys]);
 
-function pickMinimalFields(model: Model | undefined, hasInputImage: boolean): GenerationOption[] {
-  if (!model) return [];
-  if (model.modelId === 'elevenlabs-music-v2' && model.mode === 'text-to-audio'
+function workflowMusicDurationField(model: Model | undefined) {
+  if (model?.modelId === 'elevenlabs-music-v2' && model.mode === 'text-to-audio'
     && (model.provider === 'account' || model.provider === 'opendesign')) {
     const account = model.provider === 'account';
     const unit = account ? 1 : 1000;
     // Cover the workflow's short-film durations without exposing long music results that the current account path cannot save.
-    return [{ key: account ? 'duration' : 'music_length_ms', label: 'Duration (seconds)', kind: 'number', min: 3 * unit, max: 60 * unit, step: unit, default: 3 * unit }];
+    return {
+      unit,
+      field: { key: account ? 'duration' : 'music_length_ms', label: 'Duration (seconds)', kind: 'number', min: 3 * unit, max: 60 * unit, step: unit, default: 3 * unit } as const,
+    };
   }
+}
+
+function pickMinimalFields(model: Model | undefined, hasInputImage: boolean): GenerationOption[] {
+  if (!model) return [];
   const options = generationOptions(model, hasInputImage);
   if (!options) return [];
   return options.fields.filter(
@@ -220,10 +226,12 @@ export function MediaStep(props: StepProps) {
 
   // Minimal parameters
   const hasEditingInput = modality === 'image' && hasInputImage;
-  const paramFields = useMemo(
-    () => pickMinimalFields(selectedModel, hasEditingInput),
-    [selectedModel, hasEditingInput],
+  const musicDuration = useMemo(() => workflowMusicDurationField(selectedModel), [selectedModel]);
+  const paramFields = useMemo<GenerationOption[]>(
+    () => musicDuration ? [musicDuration.field] : pickMinimalFields(selectedModel, hasEditingInput),
+    [musicDuration, selectedModel, hasEditingInput],
   );
+  const briefDuration = run?.brief.durationSeconds;
   const briefAspect = scenario.id === 'motion-full-chain' && step.id === 'storyboard'
     ? run?.brief.aspect || scenario.briefFields.find(field => field.id === 'aspect')?.options?.[0]?.id
     : undefined;
@@ -243,8 +251,14 @@ export function MediaStep(props: StepProps) {
         ?? (durationKeys.has(field.key) ? field.min : undefined);
       if (value !== undefined) defaults[field.key] = value;
     }
+    const seconds = typeof briefDuration === 'string' && briefDuration.trim() ? Number(briefDuration) : NaN;
+    if (musicDuration && Number.isFinite(seconds)) {
+      const { field, unit } = musicDuration;
+      const value = Math.round(seconds) * unit;
+      defaults[field.key] = Math.min(field.max, Math.max(field.min, value));
+    }
     return { ...defaults, ...paramOverrides };
-  }, [briefAspect, paramFields, paramOverrides]);
+  }, [briefAspect, briefDuration, musicDuration, paramFields, paramOverrides]);
 
   // Generation / upload / workspace picker state
   const [providerUnavailable, setProviderUnavailable] = useState(false);
