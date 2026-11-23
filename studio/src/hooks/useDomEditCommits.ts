@@ -1,3 +1,4 @@
+import { submitStudioCommands } from "../utils/projectEditBatch";
 import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
@@ -22,6 +23,7 @@ import {
   batchesAreInlineStyleOnly,
   formatUnsafeFieldList,
   patchElementBatches,
+  isolatedCanvasCommands,
 } from "./useDomEditCommitsHelpers";
 import type { CutoverResult } from "../utils/sdkCutover";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
@@ -167,11 +169,19 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changed } = await serializeStudioFileMutations(
+          const { allMatched, changed, reconcileFromServer } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
-              const atomicResult = await patchElementBatches(pid, batches, cloudHistoryForWrite(writeProjectFile, options));
+              const history = cloudHistoryForWrite(writeProjectFile, options);
+              const intent = history && isolatedCanvasCommands(batches);
+              if (intent) {
+                const result = await submitStudioCommands(pid, intent.commands, intent.versions, history);
+                const changed = result.changedPaths.length > 0;
+                if (changed) await editHistory.recordEdit({ ...options, files: {} });
+                return { allMatched: true, changed, reconcileFromServer: result.divergent.length > 0 };
+              }
+              const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
                 atomicResult.files
                   .filter((result) => result.changed)
@@ -206,9 +216,11 @@ export function useDomEditCommits({
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
                 changed: anyChanged,
+                reconcileFromServer: false,
               };
             },
           );
+          if (reconcileFromServer) return { durable: true, allMatched, changed };
           if (changed) forceReloadSdkSession?.();
           const durable = allMatched;
           // A z-only reorder already applied its inline styles to the live iframe

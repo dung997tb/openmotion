@@ -27,6 +27,8 @@ vi.mock("./useEditorSave", () => ({
 
 import { useFileManager } from "./useFileManager";
 import { resetStudioWriteTokens, studioFileContentVersion } from "../utils/studioFileVersion";
+import { isolatedEditVersion } from "../utils/isolatedEditVersions";
+import { onRebasedFileEdit } from "../utils/rebasedFileEdit";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -78,6 +80,46 @@ describe("useFileManager project ownership", () => {
     resetStudioWriteTokens();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("reconciles a human → Agent → human edit against the merged bytes without adopting a stale frame", async () => {
+    const path = "intro.html";
+    const base = '<h1 style="color:red">Hi</h1>';
+    const human = base.replace("red", "blue");
+    const predicted = human.replace("blue", "green");
+    const merged = predicted.replace("Hi", "Agent");
+    const [v0, v1, v3] = await Promise.all([base, human, merged].map(studioFileContentVersion));
+    const command = { kind: "editElements" as const, patches: [] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ version: v1, changedPaths: [path] }))
+      .mockResolvedValueOnce(Response.json({ version: v3, rebased: true, changedPaths: [path] }))
+      .mockResolvedValueOnce(Response.json({ version: v3, content: merged }));
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountTestFileManager();
+    const { manager, root } = mounted;
+    const listener = vi.fn();
+    const stop = onRebasedFileEdit(listener);
+    try {
+      await act(async () => { manager.setEditingFile({ path, content: base }); });
+      await act(async () => { await manager.writeProjectFile(path, human, base, command); });
+      expect(isolatedEditVersion("project-a", path, v0)).toBe(v1);
+      expect(listener).not.toHaveBeenCalled();
+      await act(async () => {
+        expect(await manager.writeProjectFile(path, predicted, human, command)).toEqual({ path, changed: true, version: v3 });
+      });
+      expect(listener).toHaveBeenCalledOnce();
+      expect(isolatedEditVersion("project-a", path, v0)).toBe(v0);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await act(async () => { manager.refreshOpenSource(path); });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[2]![0]).toBe("/api/projects/project-a/files/intro.html");
+      // The live manager can now use both the Agent's text and the human's new color.
+      expect(mounted.manager.editingFile?.content).toBe(merged);
+      const next = merged.replace("green", "lime");
+      fetchMock.mockResolvedValueOnce(Response.json({ version: await studioFileContentVersion(next) }));
+      await act(async () => { await manager.writeProjectFile(path, next); });
+      expect(new Headers(fetchMock.mock.calls[3]![1].headers).get("If-Match")).toBe(v3);
+    } finally { stop(); await act(async () => root.unmount()); }
   });
 
   it("keeps delayed callbacks bound to the project that created them", async () => {

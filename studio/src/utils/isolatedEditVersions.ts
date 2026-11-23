@@ -23,3 +23,7 @@ export function acknowledgeFileEdit(
   chains.set(key, chain);
   if (chains.size > 128) chains.delete(chains.keys().next().value!);
 }
+
+export function forgetFileEditChain(project: string, path: string): void {
+  chains.delete(JSON.stringify([project, path]));
+}

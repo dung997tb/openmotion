@@ -21,6 +21,7 @@ type FileManager = Pick<
   | "overwriteExternalConflict"
   | "readProjectFile"
   | "updateEditingFileContent"
+  | "refreshOpenSource"
   | "refreshFileTree"
 >;
 
@@ -85,6 +86,7 @@ export function useStudioExternalFileChanges({
     discardPendingChanges,
     reloadPreview,
     reloadSdkSession: notifyExternalFileReload,
+    refreshOpenSource: fileManager.refreshOpenSource,
     persistConflictSnapshot: persistExternalConflictSnapshot,
     persistFailureSnapshot: persistExternalFailureSnapshot,
     loadConflictSnapshot: loadExternalConflictSnapshot,

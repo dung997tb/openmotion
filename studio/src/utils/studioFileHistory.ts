@@ -1,3 +1,4 @@
+import type { RebasedFileEdit } from "./rebasedFileEdit";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import type { HistoryTarget } from "@hyperframes/studio-server";
@@ -29,7 +30,10 @@ export interface DomEditCommitBaseParams {
 }
 
 export type StudioWriteHistory = { label: string; windowId: string };
-export type ProjectFileWriter = (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory) => Promise<void>;
+export interface ProjectFileWriter {
+  (path: string, content: string, expectedContent?: string): Promise<void>;
+  (path: string, content: string, expectedContent: string | undefined, command: ProjectEditCommand | undefined, history?: StudioWriteHistory): Promise<void | RebasedFileEdit>;
+}
 
 const lastWindow = new WeakMap<ProjectFileWriter, { key: string | undefined; id: string; startedAt: number }>();
 

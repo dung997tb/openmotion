@@ -1,3 +1,4 @@
+import type { CompositionEdit } from "../../../packages/edit-core/commands";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
@@ -98,6 +99,22 @@ function isAtomicElementPatchFile(value: unknown): value is AtomicElementPatchFi
     typeof value.after === "string" &&
     value.changed === (value.before !== value.after)
   );
+}
+
+/** Isolated frames report their source hash alongside the gesture. */
+export function isolatedCanvasCommands(batches: DomEditPatchBatch[]) {
+  const commands: CompositionEdit[] = [];
+  const versions: Record<string, string> = {};
+  for (const {sourceFile, ifMatch, patches, box, position} of batches) {
+    if (!ifMatch || !patches.length || Object.hasOwn(versions, sourceFile)) return null;
+    versions[sourceFile] = ifMatch;
+    const target = patches[0]!.target;
+    if (box && patches.length !== 1) return null;
+    if (!box) commands.push({ kind: "editElements", compositionPath: sourceFile, patches });
+    else if (!position) commands.push({ kind: "setCanvasBox", compositionPath: sourceFile, target, box });
+    else commands.push({ kind: "moveCanvasElement", compositionPath: sourceFile, target, staticBox: box, ...position });
+  }
+  return commands.length ? { commands, versions } : null;
 }
 
 // This is the single client owner for dispatching and validating the aggregate
