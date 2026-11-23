@@ -355,7 +355,7 @@ export function ScenarioHeader({
             data-scenario-mode-tab="studio"
             onClick={() => onModeChange('studio')}
           >
-            {t('Studio mode')}
+            {t('One-click mode')}
           </Button>
           <Button
             variant={mode === 'manual' ? 'primary' : 'ghost'}

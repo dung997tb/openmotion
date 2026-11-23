@@ -1002,7 +1002,7 @@
     "Drag to resize · double-click to reset": "拖动调整宽度 · 双击恢复默认",
     "Open in a new window": "在新窗口打开",
     "Full screen": "全屏",
-    "Studio mode": "工作室"
+    "One-click mode": "一键模式"
   },
   "ja": {
     "Supported formats \u00b7 {formats}": "対応形式 · {formats}",
@@ -2007,7 +2007,7 @@
     "Drag to resize · double-click to reset": "ドラッグで調整 · ダブルクリックで元に戻す",
     "Open in a new window": "新しいウィンドウで開く",
     "Full screen": "全画面",
-    "Studio mode": "スタジオ"
+    "One-click mode": "ワンクリックモード"
   },
   "ko": {
     "Supported formats \u00b7 {formats}": "지원 형식 · {formats}",
@@ -3012,7 +3012,7 @@
     "Drag to resize · double-click to reset": "드래그로 조절 · 더블클릭으로 초기화",
     "Open in a new window": "새 창에서 열기",
     "Full screen": "전체 화면",
-    "Studio mode": "스튜디오"
+    "One-click mode": "원클릭 모드"
   },
   "de": {
     "Supported formats \u00b7 {formats}": "Unterstützte Formate · {formats}",
@@ -4017,7 +4017,7 @@
     "Drag to resize · double-click to reset": "Ziehen zum Ändern · Doppelklick zum Zurücksetzen",
     "Open in a new window": "In neuem Fenster öffnen",
     "Full screen": "Vollbild",
-    "Studio mode": "Studio"
+    "One-click mode": "Ein-Klick-Modus"
   },
   "fr": {
     "Supported formats \u00b7 {formats}": "Formats pris en charge · {formats}",
@@ -5022,7 +5022,7 @@
     "Drag to resize · double-click to reset": "Glissez pour redimensionner · double-cliquez pour réinitialiser",
     "Open in a new window": "Ouvrir dans une nouvelle fenêtre",
     "Full screen": "Plein écran",
-    "Studio mode": "Studio"
+    "One-click mode": "Mode en un clic"
   },
   "ru": {
     "Supported formats \u00b7 {formats}": "Поддерживаемые форматы · {formats}",
@@ -6027,7 +6027,7 @@
     "Drag to resize · double-click to reset": "Перетащите для изменения · двойной щелчок для сброса",
     "Open in a new window": "Открыть в новом окне",
     "Full screen": "Полный экран",
-    "Studio mode": "Студия"
+    "One-click mode": "Режим в один клик"
   },
   "es": {
     "Supported formats \u00b7 {formats}": "Formatos compatibles · {formats}",
@@ -7032,7 +7032,7 @@
     "Drag to resize · double-click to reset": "Arrastra para ajustar · doble clic para restablecer",
     "Open in a new window": "Abrir en una ventana nueva",
     "Full screen": "Pantalla completa",
-    "Studio mode": "Estudio"
+    "One-click mode": "Modo de un clic"
   },
   "pt-BR": {
     "Supported formats \u00b7 {formats}": "Formatos compatíveis · {formats}",
@@ -8037,7 +8037,7 @@
     "Drag to resize · double-click to reset": "Arraste para ajustar · clique duplo para redefinir",
     "Open in a new window": "Abrir em nova janela",
     "Full screen": "Tela cheia",
-    "Studio mode": "Estúdio"
+    "One-click mode": "Modo de um clique"
   },
   "it": {
     "Supported formats \u00b7 {formats}": "Formati supportati · {formats}",
@@ -9042,7 +9042,7 @@
     "Drag to resize · double-click to reset": "Trascina per ridimensionare · doppio clic per ripristinare",
     "Open in a new window": "Apri in una nuova finestra",
     "Full screen": "Schermo intero",
-    "Studio mode": "Studio"
+    "One-click mode": "Modalità un clic"
   },
   "tr": {
     "Supported formats \u00b7 {formats}": "Desteklenen biçimler · {formats}",
@@ -10047,6 +10047,6 @@
     "Drag to resize · double-click to reset": "Boyutlandırmak için sürükle · sıfırlamak için çift tıkla",
     "Open in a new window": "Yeni pencerede aç",
     "Full screen": "Tam ekran",
-    "Studio mode": "Stüdyo"
+    "One-click mode": "Tek tık modu"
   }
 }
