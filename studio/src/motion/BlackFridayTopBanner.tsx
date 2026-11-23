@@ -7,21 +7,23 @@ import { BLACK_FRIDAY_CAMPAIGN, BLACK_FRIDAY_ENDS_AT, blackFridayActive, campaig
 import type { CreativePage } from './exploreTracking';
 import { trackMotion } from './tracking';
 
-const COUNTDOWN_CYCLE_SECONDS = 259200; // 72h rolling cycle
+export const COUNTDOWN_CYCLE_SECONDS = 24 * 60 * 60; // 24h rolling cycle
 
-function readCountdown(now = Date.now()) {
-  const diffSec = Math.max(0, Math.floor((BLACK_FRIDAY_ENDS_AT - now) / 1000));
-  const remaining = diffSec > 0 ? (diffSec % COUNTDOWN_CYCLE_SECONDS || COUNTDOWN_CYCLE_SECONDS) : 0;
-  const days = Math.floor(remaining / 86400);
-  const hours = Math.floor((remaining % 86400) / 3600);
+export function readBlackFridayCountdown(now = Date.now()) {
+  const remainingMs = Math.max(0, BLACK_FRIDAY_ENDS_AT - now);
+  const diffSec = remainingMs > 0 ? Math.floor((remainingMs - 1) / 1000) : 0;
+  const remaining = remainingMs > 0 ? diffSec % COUNTDOWN_CYCLE_SECONDS : 0;
+  const hours = Math.floor(remaining / 3600);
   const minutes = Math.floor((remaining % 3600) / 60);
   const seconds = remaining % 60;
+  const hh = String(hours).padStart(2, '0');
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
   return {
-    days,
-    hours: String(hours).padStart(2, '0'),
-    minutes: String(minutes).padStart(2, '0'),
-    seconds: String(seconds).padStart(2, '0'),
-    datetime: `P${days}DT${hours}H${minutes}M${seconds}S`,
+    hours: hh,
+    minutes: mm,
+    seconds: ss,
+    datetime: `PT${hh}H${mm}M${ss}S`,
   };
 }
 
@@ -33,7 +35,7 @@ export function resetBlackFridayImpression() { impressionReported = false; }
 /** `onClose` is the visitor's dismissal; `onExpire` hides the banner when the campaign window ends while the page is open. */
 export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onClose: () => void; onExpire?: () => void; trackingPage: CreativePage }) {
   const { locale, t } = useI18n();
-  const [time, setTime] = useState(() => readCountdown());
+  const [time, setTime] = useState(() => readBlackFridayCountdown());
 
   // The link's entry id is reported with the click and replaced afterwards, so each click is its own Pricing entry.
   const [entryId, setEntryId] = useState(newCampaignEntryId);
@@ -46,7 +48,7 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!blackFridayActive()) { window.clearInterval(timer); onExpire?.(); return; }
-      setTime(readCountdown());
+      setTime(readBlackFridayCountdown());
     }, 1000);
     return () => window.clearInterval(timer);
   }, [onExpire]);
@@ -70,9 +72,7 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   const copy = {
     aria: t('Black Friday campaign banner'),
     timerLabel: t('Ends in'),
-    // English keeps the short unit; other languages translate a descriptive key, never a one-letter message.
-    dayUnit: locale === 'en' ? 'd' : t('Countdown day unit'),
-    offerBefore: t("Black Friday lowest of the year! DeepSeek V4.1 Flash Eco, DeepSeek V4.1 Flash & more "),
+    offerBefore: t('Black Friday lowest of the year! DeepSeek V4.1 Flash & Eco '),
     offerHighlight: t('7-day unlimited'),
     offerAfter: t(', up to 50% off annual'),
     bfCta: t('Claim offer'),
@@ -85,12 +85,6 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
         <div className={styles.countdown} role="timer" aria-live="off">
           <span className={styles.timerLabel}>{copy.timerLabel}</span>
           <time className={styles.timer} dateTime={time.datetime}>
-            {time.days > 0 && (
-              <span className={`${styles.timerSeg} ${styles.timerSegDay}`}>
-                <b>{time.days}</b>
-                <i>{copy.dayUnit}</i>
-              </span>
-            )}
             <span className={styles.timerSeg}>{time.hours}</span>
             <span className={styles.timerSep} aria-hidden="true">:</span>
             <span className={styles.timerSeg}>{time.minutes}</span>

@@ -198,9 +198,10 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   }, [page.templateCollection, page.skill]);
   const [narrow, setNarrow] = useState(() => window.innerWidth < 768);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
-  // Shown inside the campaign window unless dismissed today; re-checked each minute for the end and the next day.
+  // Shown inside the campaign window on non-Explore tabs unless dismissed today; re-checked each minute for the end and the next day.
   const [bfBannerShown, setBfBannerShown] = useMinuteCondition(shouldShowBlackFridayBanner);
-  const bfBannerVisible = !hostChrome && bfBannerShown;
+  const onExploreTab = page.explore && !templatesPage && !settings;
+  const bfBannerVisible = !hostChrome && !onExploreTab && bfBannerShown;
   const closeBfBanner = useCallback(() => { dismissBannerToday(); setBfBannerShown(false); }, [setBfBannerShown]);
   const expireBfBanner = useCallback(() => setBfBannerShown(false), [setBfBannerShown]);
   const [projectQuery, setProjectQuery] = useState('');
