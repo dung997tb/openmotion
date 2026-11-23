@@ -1,6 +1,8 @@
 import { brandCatalogFile } from '../../../shared/brand-catalog';
 import { designSystemAsset } from '../../../packages/design-system/index.js';
 import facelessExplainerPoster from './mcp-gallery/faceless_explainer.webp';
+import studioEditingPoster from './mcp-gallery/studio-editing.jpg';
+import studioEditingVideo from './mcp-gallery/studio-editing.mp4';
 import { motionSkills } from './skillCatalog';
 
 export type LocalizedPair<T> = { en: T; 'zh-CN': T };
@@ -24,7 +26,7 @@ export type McpHeroBeat = {
   num: string;
   image: string;
   video?: string;
-  target: McpCaseTarget;
+  target?: McpCaseTarget;
   content: LocalizedPair<{ title: string; desc: string; prompt: string; alt: string }>;
 };
 
@@ -91,12 +93,6 @@ const TEMPLATE_MEDIA = {
     title: 'Framer 3.0',
     cover: 'https://r.open-design.ai/files/7db8691e31ddc65e9e5475f170fd4e006cdca967682ff7e42ce95b74c40f071d',
     preview: 'https://r.open-design.ai/files/ba8da3f154c37fb36463089b4644efa497e9a22ed90f3d656399942dea4b9c53',
-  },
-  jitterAgents: {
-    id: 'motion-f53dad52-9f20-42c5-b5c3-00743ea475b3',
-    title: 'Jitter Superagents',
-    cover: 'https://r.open-design.ai/files/f7178106d35ee0aadc3e3f1f4f8018186a6b9a986d2b2a5e489b335304195eb4',
-    preview: 'https://r.open-design.ai/files/a2d2f2556b68cb578fa536f26b9c42a1506ef920135fbb0ec097d91b62e0eaff',
   },
   harvey: {
     id: 'motion-4cab572a-4d2a-4058-8a06-84cf3fda0df0',
@@ -208,27 +204,20 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
   {
     id: 'studio',
     num: '04',
-    image: TEMPLATE_MEDIA.jitterAgents.cover,
-    video: TEMPLATE_MEDIA.jitterAgents.preview,
-    target: {
-      kind: 'template',
-      templateId: TEMPLATE_MEDIA.jitterAgents.id,
-      title: TEMPLATE_MEDIA.jitterAgents.title,
-      posterUrl: TEMPLATE_MEDIA.jitterAgents.cover,
-      previewUrl: TEMPLATE_MEDIA.jitterAgents.preview,
-    },
+    image: studioEditingPoster,
+    video: studioEditingVideo,
     content: {
       en: {
         title: 'Fine-tune in Studio and export',
         desc: 'Adjust text and track timing, then export landscape and portrait versions.',
-        prompt: `Use template "Jitter Superagents" to turn our workflow prompt into an editable multi-track Studio project, then adapt it for 16:9 and 9:16 exports.`,
-        alt: 'Agent-assisted canvas editing and Studio multi-track refinement',
+        prompt: 'Read my current OpenMotion project and version. Confirm the text and timing edits with me, then make editable 16:9 and 9:16 versions while preserving the original. Review both in Studio before exporting MP4.',
+        alt: 'OpenMotion Studio composition preview and timeline',
       },
       'zh-CN': {
         title: '在 Studio 微调并导出',
         desc: '改文字、调轨道时序，分别导出横版和竖版。',
-        prompt: `参考「Jitter Superagents 产品能力展示」生成可编辑 Studio 多轨工程，把对话需求直接映射到画布变化并分别导出横竖版 MP4。`,
-        alt: '对话驱动画布与 Studio 多轨精调',
+        prompt: '读取我当前的 OpenMotion 工程和版本。和我确认文字与轨道时序的修改后，保留原工程，另做 16:9 和 9:16 两份可编辑版本。在 Studio 预览确认后，分别导出 MP4。',
+        alt: 'OpenMotion Studio 的成片预览和时间轴',
       },
     },
   },

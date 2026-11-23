@@ -150,7 +150,8 @@ export function McpTemplateShowcase({ client, enabled, canTry, onCopy, openLibra
     </Tabs>
     <div className="om-mcp-gallery-more">
       <Button variant="plain" className="om-mcp-demo-library" onClick={event => openLibrary(event.currentTarget)}>
-        {t('Browse all 30+ templates')}<RemixIcon name="arrow-right-line" size={16} />
+        <span>{t('All 30+ templates')}</span>
+        <RemixIcon name="arrow-right-line" size={16} />
       </Button>
     </div>
     <Dialog.Root open={enabled && preview !== null} onOpenChange={open => { if (!open) setPreview(null); }}>

@@ -158,7 +158,7 @@ it('reports the MCP page entry, client and setup choices, and each copy result w
   expect(of('mcp_copy_result').at(-1)?.properties).toMatchObject({ copy_kind: 'manual_config', copy_status: 'failed' });
   await act(async () => tracking.reportMcpClick('mcp_templates', 'category_select', { mcp_client: 'claude', option: 'Product launch films' }));
   expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_templates', element: 'category_select', filter_value: 'product-launch-films' });
-  await act(async () => button('Browse all 30+ templates').click());
+  await act(async () => button('All 30+ templates').click());
   expect(openLibrary).toHaveBeenCalled();
   expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_templates', element: 'open_library' });
   await act(async () => button('Already have an API key? Use BYOK').click());

@@ -268,7 +268,7 @@ it('uses browser history across settings, reloads and new navigation branches', 
 
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
   const detail = 'dialog[aria-label="Template preview"]';
-  await mount(); await openMcp(); await click('Browse all 30+ templates');
+  await mount(); await openMcp(); await click('All 30+ templates');
   const header = container.querySelector('dialog[aria-label="Template library"] header')!;
   expect(header.querySelector('button[aria-label="Back"], button[aria-label="Forward"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
@@ -283,7 +283,7 @@ it('uses browser history between the template gallery, its preview and the origi
 });
 
 it('restores template details from a copied link and closes back to the originating MCP page', async () => {
-  await mount(); await openMcp(); await click('Claude'); await click('Browse all 30+ templates');
+  await mount(); await openMcp(); await click('Claude'); await click('All 30+ templates');
   expect(page()).toMatchObject({ templates: true, settings: 'mcp' });
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(page().template).toBe('product-promo');
@@ -300,7 +300,7 @@ it('restores template details from a copied link and closes back to the originat
 it('keeps an MCP showcase selection in the URL through history and reloads', async () => {
   await mount(); await openMcp(); await click('Claude');
   const draft = container.querySelector<HTMLInputElement>('[aria-label="Editor draft"]');
-  await click('Browse all 30+ templates');
+  await click('All 30+ templates');
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(page()).toMatchObject({ templates: true, template: 'product-promo', settings: 'mcp', client: 'claude' });
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');

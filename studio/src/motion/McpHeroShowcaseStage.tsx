@@ -1,6 +1,9 @@
 import { Button } from 'open-design-ui/button';
+import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useState } from 'react';
+import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
+import { RemixIcon } from '../icons/RemixIcons';
 import { formatMcpAgentPrompt, mcpHeroBeats } from './mcpShowcaseData';
 
 export function McpHeroShowcaseStage({
@@ -119,14 +122,15 @@ export function McpHeroShowcaseStage({
               <span className="om-mcp-at-brand">@OpenDesign</span>
               {currentText.prompt}
             </span>
-            <Button
-              variant="plain"
-              className="om-mcp-stage-prompt-copy"
-              data-copied={copied || undefined}
-              onClick={() => void handleCopy()}
-            >
-              {t(copied ? 'Copied' : 'Copy')}
-            </Button>
+            <Tooltip label={t(copied ? 'Copied' : 'Copy')}>
+              <IconButton
+                type="button"
+                className="om-mcp-stage-prompt-copy"
+                aria-label={t('Copy')}
+                icon={<RemixIcon name={copied ? 'check-line' : 'file-copy-line'} size={16} />}
+                onClick={() => void handleCopy()}
+              />
+            </Tooltip>
           </div>
         </div>
       </div>

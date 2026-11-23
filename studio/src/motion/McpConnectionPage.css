@@ -97,15 +97,14 @@
 .om-mcp-beat-dot[data-active] { width: 38px; }
 .om-mcp-stage-prompt-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px 10px 16px; }
 .om-mcp-stage-prompt-text { min-width: 0; flex: 1; }
-.om-mcp-stage-prompt-copy { height: 30px; padding-inline: 12px; flex: none; white-space: nowrap; }
+.om-mcp-stage-prompt-copy { flex: none; }
 
 /* 3 Higgsfield-style centered cinematic feature carousels */
 .om-mcp-carousel-modules { display: flex; flex-direction: column; gap: 100px; }
 .om-mcp-carousel-module { scroll-margin-top: 84px; display: flex; flex-direction: column; align-items: center; }
 .om-mcp-carousel-head { text-align: center; margin-bottom: 20px; }
 .om-mcp-carousel-tabs { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
-.om-mcp-carousel-tab { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 15px 0 8px; white-space: nowrap; }
-.om-mcp-carousel-thumb { width: 22px; height: 22px; object-fit: cover; flex: none; }
+.om-mcp-carousel-tab { display: inline-flex; align-items: center; height: 38px; padding-inline: 15px; white-space: nowrap; }
 .om-mcp-carousel-viewport {
   position: relative;
   width: 100cqi;
@@ -159,6 +158,9 @@
 .om-mcp-demo-actions { margin-top: var(--motion-space-8); padding-top: var(--motion-space-12); display: flex; align-items: center; flex-wrap: wrap; gap: var(--motion-space-8); }
 .om-mcp-demo-actions .om-mcp-demo-copy { flex: 1; }
 .om-mcp-gallery-more { display: flex; justify-content: center; margin-top: 44px; }
+.om-mcp-demo-library { display: inline-flex; align-items: center; gap: var(--motion-space-8); max-inline-size: 100%; white-space: nowrap; }
+.om-mcp-demo-library span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.om-mcp-demo-library svg { flex: none; }
 .om-mcp-demo-dialog { position: fixed; z-index: 201; top: 50%; left: 50%; translate: -50% -50%; width: min(800px, calc(100vw - 32px)); max-height: 90dvh; overflow: auto; display: flex; flex-direction: column; gap: var(--motion-space-16); }
 .om-mcp-demo-dialog > * { flex: none; }
 .om-mcp-demo-dialog > header, .om-mcp-demo-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: var(--motion-space-8); }

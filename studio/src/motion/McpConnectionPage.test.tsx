@@ -150,7 +150,7 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   expect(copy.mock.calls[1][0]).toContain(example);
   expect(document.querySelector('.motion-feedback-layer [role=status]')?.textContent).toContain('Copied to clipboard');
   expect(document.querySelector('.om-mcp-content [role=status]')).toBeNull();
-  await act(async () => button('Browse all 30+ templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
+  await act(async () => button('All 30+ templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
   await act(async () => button('Already have an API key? Use BYOK').click()); expect(openProviders).toHaveBeenCalledOnce();
   expect(tab('ChatGPT')).toBeUndefined();
   expect(document.querySelectorAll('#showcase .om-mcp-carousel-module')).toHaveLength(3);

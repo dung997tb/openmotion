@@ -95,7 +95,6 @@ function FeatureModuleCarousel({
               data-active={isActive || undefined}
               onClick={() => setIndex(slideIdx)}
             >
-              <img className="om-mcp-carousel-thumb" src={slide.image} alt="" decoding="async" />
               <span>{slide.content[lang].tabLabel}</span>
             </Button>
           );

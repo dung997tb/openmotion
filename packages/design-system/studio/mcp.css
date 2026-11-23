@@ -200,15 +200,6 @@
   line-height: 1.55;
   color: var(--motion-text);
 }
-[data-motion-studio] .om-mcp-stage-prompt-copy {
-  border-radius: var(--motion-radius-full);
-  background: var(--motion-mcp-dock-active);
-  color: var(--motion-strong);
-  font-size: 12.5px;
-  font-weight: var(--motion-weight-medium);
-}
-[data-motion-studio] .om-mcp-stage-prompt-copy:hover { background: var(--motion-hover); }
-[data-motion-studio] .om-mcp-stage-prompt-copy[data-copied] { background: var(--motion-brand); color: var(--motion-mcp-stage-on-action); font-weight: var(--motion-weight-semibold); }
 
 /* 3 Higgsfield-style centered cinematic feature carousels */
 [data-motion-studio] .om-mcp-carousel-tab {
@@ -224,7 +215,6 @@
   font-weight: var(--motion-weight-semibold);
   background: var(--motion-mcp-dock-active);
 }
-.om-mcp-carousel-thumb { border-radius: var(--motion-radius-full); background: var(--motion-mcp-gallery-panel); }
 [data-motion-studio] .om-mcp-carousel-peek {
   border-radius: 22px;
   background: var(--motion-mcp-stage-bg);
