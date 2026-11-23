@@ -138,7 +138,9 @@
     "Agent instruction": "给 Agent 的指令",
     "Loading instruction…": "正在加载指令…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。",
-    "Playable ad": "广告游戏"
+    "Playable ad": "广告游戏",
+    "Continue in Super Agent": "在 Super Agent 中继续",
+    "Edit & optimize in Super Agent": "在 Super Agent 中二创与优化"
   },
   "ja": {
     "3D": "3D",
@@ -279,7 +281,9 @@
     "Agent instruction": "エージェントへの指示",
     "Loading instruction…": "指示を読み込み中…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。",
-    "Playable ad": "プレイアブル広告"
+    "Playable ad": "プレイアブル広告",
+    "Continue in Super Agent": "Super Agent で続ける",
+    "Edit & optimize in Super Agent": "Super Agent で編集・最適化"
   },
   "ko": {
     "3D": "3D",
@@ -420,7 +424,9 @@
     "Agent instruction": "Agent 지시",
     "Loading instruction…": "지시를 불러오는 중…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다.",
-    "Playable ad": "플레이어블 광고"
+    "Playable ad": "플레이어블 광고",
+    "Continue in Super Agent": "Super Agent에서 계속하기",
+    "Edit & optimize in Super Agent": "Super Agent에서 편집 및 최적화"
   },
   "de": {
     "3D": "3D",
@@ -561,7 +567,9 @@
     "Agent instruction": "Anweisung für den Agent",
     "Loading instruction…": "Anweisung wird geladen…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst.",
-    "Playable ad": "Playable Ad"
+    "Playable ad": "Playable Ad",
+    "Continue in Super Agent": "In Super Agent fortfahren",
+    "Edit & optimize in Super Agent": "In Super Agent bearbeiten & optimieren"
   },
   "fr": {
     "3D": "3D",
@@ -702,7 +710,9 @@
     "Agent instruction": "Instruction pour l’agent",
     "Loading instruction…": "Chargement de l’instruction…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même.",
-    "Playable ad": "Publicité jouable"
+    "Playable ad": "Publicité jouable",
+    "Continue in Super Agent": "Continuer dans Super Agent",
+    "Edit & optimize in Super Agent": "Modifier et optimiser dans Super Agent"
   },
   "ru": {
     "3D": "3D",
@@ -843,7 +853,9 @@
     "Agent instruction": "Инструкция для агента",
     "Loading instruction…": "Загрузка инструкции…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами.",
-    "Playable ad": "Играбельная реклама"
+    "Playable ad": "Играбельная реклама",
+    "Continue in Super Agent": "Продолжить в Super Agent",
+    "Edit & optimize in Super Agent": "Редактировать и улучшать в Super Agent"
   },
   "es": {
     "3D": "3D",
@@ -984,7 +996,9 @@
     "Agent instruction": "Instrucción para el agente",
     "Loading instruction…": "Cargando instrucción…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú.",
-    "Playable ad": "Anuncio jugable"
+    "Playable ad": "Anuncio jugable",
+    "Continue in Super Agent": "Continuar en Super Agent",
+    "Edit & optimize in Super Agent": "Editar y optimizar en Super Agent"
   },
   "pt-BR": {
     "3D": "3D",
@@ -1125,7 +1139,9 @@
     "Agent instruction": "Instrução para o agente",
     "Loading instruction…": "Carregando instrução…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo.",
-    "Playable ad": "Anúncio jogável"
+    "Playable ad": "Anúncio jogável",
+    "Continue in Super Agent": "Continuar no Super Agent",
+    "Edit & optimize in Super Agent": "Editar e otimizar no Super Agent"
   },
   "it": {
     "3D": "3D",
@@ -1266,7 +1282,9 @@
     "Agent instruction": "Istruzione per l’agente",
     "Loading instruction…": "Caricamento istruzione…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu.",
-    "Playable ad": "Annuncio giocabile"
+    "Playable ad": "Annuncio giocabile",
+    "Continue in Super Agent": "Continua in Super Agent",
+    "Edit & optimize in Super Agent": "Modifica e ottimizza in Super Agent"
   },
   "tr": {
     "3D": "3D",
@@ -1407,6 +1425,8 @@
     "Agent instruction": "Agent talimatı",
     "Loading instruction…": "Talimat yükleniyor…",
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın.",
-    "Playable ad": "Oynanabilir reklam"
+    "Playable ad": "Oynanabilir reklam",
+    "Continue in Super Agent": "Super Agent'ta devam et",
+    "Edit & optimize in Super Agent": "Super Agent'ta düzenle ve iyileştir"
   }
 }

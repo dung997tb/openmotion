@@ -340,7 +340,13 @@
     "Batch": "批量生成",
     "Multi-shot": "多镜头",
     "Extend": "视频续写",
-    "Lip sync": "口型同步"
+    "Lip sync": "口型同步",
+    "Playable web games": "可玩网页游戏",
+    "Build with Super Agent": "用 Super Agent 创作",
+    "Open Game Studio": "打开游戏工作室",
+    "Explore games": "浏览全部游戏",
+    "Build, play, and deploy multiplayer web games with your Agent": "用 Agent 一句话构建、试玩并部署可联机网页游戏",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "一句话描述你的游戏创意，在 Super Agent 中实时对话打磨，支持单人或多人联机并部署可分享的线上链接。"
   },
   "ja": {
     "Open Motion Editor": "Motion エディターを開く",
@@ -683,7 +689,13 @@
     "Batch": "一括生成",
     "Multi-shot": "マルチショット",
     "Extend": "動画を延長",
-    "Lip sync": "リップシンク"
+    "Lip sync": "リップシンク",
+    "Playable web games": "プレイ可能な Web ゲーム",
+    "Build with Super Agent": "Super Agent で作成",
+    "Open Game Studio": "ゲームスタジオを開く",
+    "Explore games": "ゲームを探す",
+    "Build, play, and deploy multiplayer web games with your Agent": "Agent でマルチプレイ Web ゲームを作成・試遊・公開",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "ゲームを一行で説明するだけで、Super Agent とライブで磨き上げ、ソロやマルチプレイで遊び、共有リンクを公開できます。"
   },
   "ko": {
     "Open Motion Editor": "Motion 편집기 열기",
@@ -1026,7 +1038,13 @@
     "Batch": "일괄 생성",
     "Multi-shot": "멀티샷",
     "Extend": "영상 연장",
-    "Lip sync": "립싱크"
+    "Lip sync": "립싱크",
+    "Playable web games": "플레이 가능한 웹 게임",
+    "Build with Super Agent": "Super Agent로 만들기",
+    "Open Game Studio": "게임 스튜디오 열기",
+    "Explore games": "게임 둘러보기",
+    "Build, play, and deploy multiplayer web games with your Agent": "Agent로 멀티플레이어 웹 게임을 만들고 플레이·배포하세요",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "게임을 한 줄로 설명하면 Super Agent와 실시간으로 다듬고, 싱글·멀티플레이로 즐기며 공유 링크를 배포할 수 있습니다."
   },
   "de": {
     "Open Motion Editor": "Motion-Editor öffnen",
@@ -1369,7 +1387,13 @@
     "Batch": "Stapelgenerierung",
     "Multi-shot": "Multi-Shot",
     "Extend": "Erweitern",
-    "Lip sync": "Lippensynchronisation"
+    "Lip sync": "Lippensynchronisation",
+    "Playable web games": "Spielbare Web-Games",
+    "Build with Super Agent": "Mit Super Agent erstellen",
+    "Open Game Studio": "Spielestudio öffnen",
+    "Explore games": "Spiele entdecken",
+    "Build, play, and deploy multiplayer web games with your Agent": "Multiplayer-Webspiele mit deinem Agent erstellen, spielen und veröffentlichen",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Beschreibe dein Spiel in einem Satz, verfeinere es live mit dem Super Agent, spiele allein oder im Multiplayer und veröffentliche einen teilbaren Link."
   },
   "fr": {
     "Open Motion Editor": "Ouvrir l’éditeur Motion",
@@ -1712,7 +1736,13 @@
     "Batch": "Génération par lot",
     "Multi-shot": "Multi-plans",
     "Extend": "Prolonger",
-    "Lip sync": "Synchronisation labiale"
+    "Lip sync": "Synchronisation labiale",
+    "Playable web games": "Jeux web jouables",
+    "Build with Super Agent": "Créer avec Super Agent",
+    "Open Game Studio": "Ouvrir Studio de jeux",
+    "Explore games": "Explorer les jeux",
+    "Build, play, and deploy multiplayer web games with your Agent": "Créez, jouez et déployez des jeux web multijoueurs avec votre Agent",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Décrivez un jeu en une ligne, affinez-le en direct avec Super Agent, jouez en solo ou en multijoueur et déployez un lien partageable."
   },
   "ru": {
     "Open Motion Editor": "Открыть редактор Motion",
@@ -2055,7 +2085,13 @@
     "Batch": "Серия кадров",
     "Multi-shot": "Мультикадр",
     "Extend": "Продлить",
-    "Lip sync": "Синхронизация губ"
+    "Lip sync": "Синхронизация губ",
+    "Playable web games": "Браузерные игры",
+    "Build with Super Agent": "Создать в Super Agent",
+    "Open Game Studio": "Открыть игровую студию",
+    "Explore games": "Все игры",
+    "Build, play, and deploy multiplayer web games with your Agent": "Создавайте, запускайте и публикуйте многопользовательские веб-игры с помощью Agent",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Опишите игру одной строкой, дорабатывайте её вживую в Super Agent, играйте в одиночку или по сети и публикуйте ссылку для друзей."
   },
   "es": {
     "Open Motion Editor": "Abrir el editor de Motion",
@@ -2398,7 +2434,13 @@
     "Batch": "Generación en lote",
     "Multi-shot": "Multiplano",
     "Extend": "Extender",
-    "Lip sync": "Sincronización labial"
+    "Lip sync": "Sincronización labial",
+    "Playable web games": "Juegos web jugables",
+    "Build with Super Agent": "Crear con Super Agent",
+    "Open Game Studio": "Abrir Estudio de juegos",
+    "Explore games": "Explorar juegos",
+    "Build, play, and deploy multiplayer web games with your Agent": "Crea, juega y publica juegos web multijugador con tu Agent",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Describe un juego en una línea, perfecciónalo en vivo con Super Agent, juega en solitario o en multijugador y publica un enlace compartible."
   },
   "pt-BR": {
     "Open Motion Editor": "Abrir o editor do Motion",
@@ -2741,7 +2783,13 @@
     "Batch": "Geração em lote",
     "Multi-shot": "Multiplano",
     "Extend": "Estender",
-    "Lip sync": "Sincronização labial"
+    "Lip sync": "Sincronização labial",
+    "Playable web games": "Jogos web jogáveis",
+    "Build with Super Agent": "Criar com Super Agent",
+    "Open Game Studio": "Abrir Estúdio de jogos",
+    "Explore games": "Explorar jogos",
+    "Build, play, and deploy multiplayer web games with your Agent": "Crie, jogue e publique jogos web multijogador com seu Agent",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Descreva um jogo em uma linha, refine ao vivo com o Super Agent, jogue solo ou em multijogador e publique um link compartilhável."
   },
   "it": {
     "Open Motion Editor": "Apri l’editor di Motion",
@@ -3084,7 +3132,13 @@
     "Batch": "Generazione in serie",
     "Multi-shot": "Multi-piano",
     "Extend": "Estendi",
-    "Lip sync": "Sincronizzazione labiale"
+    "Lip sync": "Sincronizzazione labiale",
+    "Playable web games": "Giochi web giocabili",
+    "Build with Super Agent": "Crea con Super Agent",
+    "Open Game Studio": "Apri Studio giochi",
+    "Explore games": "Esplora i giochi",
+    "Build, play, and deploy multiplayer web games with your Agent": "Crea, gioca e pubblica giochi web multigiocatore con il tuo Agent",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Descrivi un gioco in una riga, perfezionalo dal vivo con Super Agent, gioca in singolo o multigiocatore e pubblica un link condivisibile."
   },
   "tr": {
     "Open Motion Editor": "Motion düzenleyicisini aç",
@@ -3427,6 +3481,12 @@
     "Batch": "Toplu üretim",
     "Multi-shot": "Çoklu çekim",
     "Extend": "Uzat",
-    "Lip sync": "Dudak senkronizasyonu"
+    "Lip sync": "Dudak senkronizasyonu",
+    "Playable web games": "Oynanabilir web oyunları",
+    "Build with Super Agent": "Super Agent ile Oluştur",
+    "Open Game Studio": "Oyun Stüdyosu’nu Aç",
+    "Explore games": "Oyunları keşfet",
+    "Build, play, and deploy multiplayer web games with your Agent": "Agent ile çok oyunculu web oyunları oluştur, oyna ve yayınla",
+    "Describe a game in one line, iterate live with Super Agent, play solo or multiplayer, and deploy a shareable link.": "Oyunu tek satırda tarif et, Super Agent ile canlı olarak geliştir, tek veya çok oyunculu oyna ve paylaşılabilir bir bağlantı yayınla."
   }
 }

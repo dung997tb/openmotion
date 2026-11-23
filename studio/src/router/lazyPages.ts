@@ -8,6 +8,7 @@ import { lazyWithChunkReload } from '../utils/chunkReload';
  */
 export const LAZY_PAGE_MODULE_PATHS = [
   'motion/ExploreStudios.tsx',
+  'super-agent/SuperAgentWorkspace.tsx',
   'motion/MotionStudioPage.tsx',
   'motion/CinemaStudioPage.tsx',
   'motion/CreativeWorkspace.tsx',
@@ -28,6 +29,7 @@ export const LAZY_PAGE_MODULE_PATHS = [
 
 export type LazyPageKey =
   | 'explore'
+  | 'agent'
   | 'motion'
   | 'cinema'
   | 'creative'
@@ -78,10 +80,11 @@ export function preloadWorkspacePage(key: LazyPageKey): void {
 /** Map a top-bar studio or navigation id to its lazy chunk(s) and warm them. */
 export function preloadStudioRoute(target: string): void {
   if (target === 'explore') { preloadWorkspacePage('explore'); return; }
+  if (target === 'agent') { preloadWorkspacePage('agent'); return; }
   if (target === 'design') { preloadWorkspacePage('design'); return; }
   if (target === 'motion') { preloadWorkspacePage('motion'); return; }
   if (target === 'cinema') { preloadWorkspacePage('cinema'); return; }
-  if (target === 'game') { preloadWorkspacePage('game'); return; }
+  if (target === 'game') { preloadWorkspacePage('agent'); return; }
   if (target === 'workflows') { preloadWorkspacePage('scenarioHub'); preloadWorkspacePage('scenario'); return; }
   if (target === 'mcp') { preloadWorkspacePage('mcp'); return; }
   if (target === 'assets') { preloadWorkspacePage('assets'); return; }
@@ -98,6 +101,10 @@ export function preloadAllWorkspacePages(): Promise<unknown[]> {
 
 export const LazyExploreStudios = lazyPage('explore', () =>
   import('../motion/ExploreStudios').then(module => ({ default: module.ExploreStudios })),
+);
+
+export const LazySuperAgentWorkspace = lazyPage('agent', () =>
+  import('../super-agent/SuperAgentWorkspace').then(module => ({ default: module.SuperAgentWorkspace })),
 );
 
 export const LazyMotionStudioPage = lazyPage('motion', () =>
