@@ -149,7 +149,7 @@ export function useWorkspace(
         if (!controller.signal.aborted) setCheckingConnection(false);
       }
       if (!controller.signal.aborted && (typeof document === 'undefined' || !document.hidden)) {
-        const pollDelayMs = isStandaloneSpaPath(location.pathname, location.search, location.hash) || (!projectId && !sessionId)
+        const pollDelayMs = !projectId && !sessionId
           ? 4500
           : 1800;
         timer = setTimeout(poll, pollDelayMs);
