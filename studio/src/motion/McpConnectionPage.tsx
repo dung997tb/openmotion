@@ -1,6 +1,5 @@
 import { clipMoveExample, projectEditExample } from '../../../shared/clip-move-guide.ts';
 import { McpClientAvatar } from './McpClientAvatar';
-import { WorkspaceBack } from './WorkspaceBack';
 import { Button } from 'open-design-ui/button';
 import type { GalleryTemplate } from '../../../shared/catalog';
 import type { WorkspaceChrome } from './WorkspaceChromeContext';
@@ -8,7 +7,7 @@ import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { canvasPresets } from '../../../shared/composition-canvas';
 import { PlatformIcon } from '../../../packages/design-system/react/PlatformIcon';
 import { platformExportTargets } from '../../../shared/platform-export';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { brand, designSystemAsset } from '../../../packages/design-system/index.js';
 import { BrandLogo } from '../../../packages/design-system/react/BrandLogo';
 import {
@@ -25,12 +24,14 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { Tabs, TabsList, Tab, TabPanel } from '../components/ui/Tabs';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
-import { ProviderAvatar, SettingsError, SettingsLoading } from './settingsPrimitives';
+import { SettingsError, SettingsLoading } from './settingsPrimitives';
 import { useIntegrationInfo } from './useIntegrationInfo';
 import { GITHUB_REPOSITORY } from './githubRepository';
 import { McpTemplateShowcase } from './McpTemplateShowcase';
+import { HorizontalRail } from './HorizontalRail';
 import { useCommunityLink } from './CommunityLink';
 import { findTechniqueStudio } from '../../../shared/studio-catalog';
+import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
 import { studioSkillDefaults, skillShotPrompt, localizedSkillPrompt, motionSkills } from './skillCatalog';
 import { mcpCapabilities, mcpScenarios, searchRecoveryExample, platformExportExample, mcpBenefits, mcpReviewGuide, mcpFaq, mcpWorkflowComparison, mcpClientComparison } from './mcpCapabilities';
 import { mcpClients as clients, supportsConnection } from './mcpClients';
@@ -39,7 +40,6 @@ import * as tracking from './pageTracking';
 import './McpConnectionPage.css';
 
 export function McpConnectionPage({
-  onBack,
   openLibrary: openLibraryRaw,
   openProviders: openProvidersRaw,
   openAccount,
@@ -49,8 +49,9 @@ export function McpConnectionPage({
   entry = 'direct_link',
   hasProject = false,
   projectId,
+  breadcrumb,
+  inSettings = false,
 }: {
-  onBack?: () => void;
   openLibrary: WorkspaceChrome['openLibrary'];
   openProviders: () => void;
   openAccount?: () => void;
@@ -60,12 +61,14 @@ export function McpConnectionPage({
   entry?: tracking.McpEntry;
   hasProject?: boolean;
   projectId?: string;
+  breadcrumb?: ReactNode;
+  inSettings?: boolean;
 }) {
   const { t, locale } = useI18n(), toast = useToast();
   const community = useCommunityLink();
   const { info, failed, retry } = useIntegrationInfo();
   const [manualScenario, setManualScenario] = useState<{ id: string; text: string } | null>(null);
-  const [localRoute, setLocalRoute] = useState(() => readWorkspacePage(location.search, location.hash));
+  const [localRoute, setLocalRoute] = useState(() => readWorkspacePage(location.search, location.hash, location.pathname));
   const { client: clientId, setup: setupMode } = route ?? localRoute;
   const changeRoute = (patch: Partial<WorkspacePage>) => {
     if (onRouteChange) onRouteChange(patch);
@@ -91,8 +94,8 @@ export function McpConnectionPage({
     if (card && page.current?.contains(card)) {
       card.focus({ preventScroll: true });
       card.scrollIntoView({ block: 'center' });
-    } else heading.current?.focus({ preventScroll: true });
-  }, [example]);
+    } else if (!inSettings) heading.current?.focus({ preventScroll: true });
+  }, [example, inSettings]);
   const scrollTo = (id: string) => { click('mcp_footer', 'scroll_to_section', { section_id: id }); page.current?.querySelector<HTMLElement>(`#${id}`)?.scrollIntoView({ block: 'start' }); };
 
   const isHttp = isStreamableHttpTransport(info?.transport);
@@ -131,6 +134,8 @@ export function McpConnectionPage({
     } else if (item.id === 'review-comments') instruction = reviewCommentsPrompt({ projectId, dataDirectory: info?.dataDirectory, previewUrl: info?.previewUrl });
     else if (item.id === 'clip-move' || item.id === 'project-edit') instruction = [prompt, t(item.prompt), item.id === 'clip-move' ? clipMoveExample : projectEditExample].join('\n\n');
     else if (item.id === 'transcript') instruction = `${prompt}\n\n${transcriptExamplePrompt(info, locale)}`;
+    else if (item.id === 'scenario-black-friday') instruction = `${prompt}\n\n${scenarioAgentPrompt(findScenario('black-friday')!, { locale, integration: info })}`;
+    else if (item.id === 'scenario-workflows' || item.id === 'scenario-agent-writeback') instruction = `${prompt}\n\n${t(item.prompt)}`;
     else if (item.id === 'anime-opening') instruction = [prompt, t(item.prompt)].join('\n\n');
     else if (item.id === 'search-recovery') instruction = `${prompt}\n\n${searchRecoveryExample(t)}`;
     else if (item.id === 'platform-export') instruction = platformExportExample(locale, info ?? undefined);
@@ -139,25 +144,26 @@ export function McpConnectionPage({
     try { await navigator.clipboard.writeText(instruction); toast.showToast(t('Copied. Paste into your Agent.'), 'info', 'feedback'); tracking.reportMcpCopyResult('capability_example', 'clipboard_written', clientKey, { capability: item.id, includesSetup: item.id !== 'platform-export' && item.id !== 'review-comments' }); }
     catch { setManualScenario({ id: item.id, text: instruction }); toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback'); tracking.reportMcpCopyResult('capability_example', 'failed', clientKey, { capability: item.id, includesSetup: item.id !== 'platform-export' && item.id !== 'review-comments' }); }
   };
-
+  const Container = inSettings ? 'section' : 'main';
   return <Tabs value={client.id} onValueChange={value => {
     const selected = clients.find(item => item.id === value);
     if (!selected) return;
     setClientId(selected.id);
     click('mcp_client', 'client_tab', { mcp_client: selected.id });
-  }} render={<main ref={page} className="om-mcp-page" aria-labelledby="mcp-title" onKeyDown={event => event.stopPropagation()} />}>
+  }} render={<Container ref={page} className="om-mcp-page" data-in-settings={inSettings || undefined} aria-labelledby="mcp-title" onKeyDown={event => event.stopPropagation()} />}>
+    {breadcrumb}
     <div className="om-page-back-row om-mcp-client-row">
-      {onBack && <WorkspaceBack fallback={onBack} inline />}
-      <TabsList className="om-mcp-client-tabs" aria-label={t('Agent client')}>
-        {clients.map(item => <Tab value={item.id} key={item.id}><McpClientAvatar client={item} /><span>{t(item.name)}</span></Tab>)}
-      </TabsList>
+      <HorizontalRail label="Agent client" viewportClassName="om-mcp-client-viewport" selection={client.id} plainArrows>
+        <TabsList className="om-mcp-client-tabs" aria-label={t('Agent client')}>
+          {clients.map(item => <Tab value={item.id} key={item.id}><McpClientAvatar client={item} /><span>{t(item.name)}</span></Tab>)}
+        </TabsList>
+      </HorizontalRail>
     </div>
     <div className="om-mcp-content">
       <section className="om-mcp-hero om-mcp-section">
         <div className="om-mcp-art" aria-hidden="true">
-          <div className="om-mcp-art-tile om-mcp-art-left"><ProviderAvatar name="ChatGPT" provider={{ id: 'openai', custom: false }} /></div>
-          <div className="om-mcp-art-tile om-mcp-art-center"><img src={designSystemAsset(brand.loadingMark)} alt="" /></div>
-          <div className="om-mcp-art-tile om-mcp-art-right"><McpClientAvatar client={client} /></div>
+          <div className="om-mcp-art-tile om-mcp-art-left"><McpClientAvatar key={client.id} client={client} /></div>
+          <div className="om-mcp-art-tile om-mcp-art-center"><img key={client.id} src={designSystemAsset(brand.loadingMark)} alt="" /></div>
         </div>
         <p className="om-mcp-eyebrow">OPENMOTION × STREAMABLE HTTP MCP</p>
         <h1 id="mcp-title" ref={heading} tabIndex={-1}>{t('Create in {agent}', { agent: t(client.name) })}<br /><span>{t('Make it move with OpenMotion.')}</span></h1>
@@ -189,6 +195,29 @@ export function McpConnectionPage({
               </div>}
             </div>
           </TabPanel>)}
+        {info?.httpTransport && (
+          <div className="om-card om-mcp-http-card">
+            <div className="om-mcp-http-meta">
+              <RemixIcon name="plug-line" size={18} />
+              <div>
+                <strong>{t('Remote MCP (Streamable HTTP)')}</strong>
+                <p className="om-muted"><code>{info.httpTransport.url}</code> · {t(info.httpTransport.authRequired ? 'Bearer token required' : 'Bearer or local access')}</p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              className="om-button h-auto"
+              onClick={() => {
+                void navigator.clipboard.writeText(info.httpTransport!.url)
+                  .then(() => toast.showToast(t('Copied endpoint URL'), 'info', 'feedback'))
+                  .catch(() => toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback'));
+              }}
+            >
+              <RemixIcon name="file-copy-line" size={14} />
+              {t('Copy endpoint URL')}
+            </Button>
+          </div>
+        )}
       </section>
 
       <McpTemplateShowcase scroller={page} enabled={previewsEnabled} canCopy={Boolean(info && supported)} openLibrary={openLibrary('mcp_templates')} onCategory={value => click('mcp_templates', 'category_select', { option: value })} onCopy={template => { if (info) void copy(`${prompt}\n\n${templatePrompt(info, client.host, template, locale)}`, { kind: 'template', template: template.id, includesSetup: true }); }} />

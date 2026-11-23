@@ -17,6 +17,9 @@ import {
   supportsChatgptCloud,
   type IntegrationInfo,
 } from '../shared/integration.ts';
+import { imageFeaturePrompt } from '../shared/image-features.ts';
+import { videoFeatureParameters, videoFeaturePrompt } from '../shared/video-features.ts';
+import { findScenario, scenarioAgentPrompt, scenarioRecipeTools } from '../shared/scenarios.ts';
 
 test('MCP onboarding covers every public domain tool (22 registered) and scenarios only compose real tools', () => {
   const described = mcpCapabilities.flatMap(capability => [...capability.tools]);
@@ -148,6 +151,12 @@ test('reference-image and audio guidance is translated in every interface langua
   for (const locale of Object.values(translations) as Record<string, string>[]) {
     for (const [question, answer] of mcpFaq.slice(0, 2)) { assert.ok(locale[question]); assert.ok(locale[answer]); }
   }
+  const refAnswer = mcpFaq.find(([question]) => question === 'Can I generate from a reference image?')![1];
+  assert.match(refAnswer, /OpenDesign Cloud and account video models with first-frame support can animate one image/);
+  assert.match(refAnswer, /2 MiB/);
+  const mediaTool = phase1Tools.find(tool => tool.name === 'openmotion_media_use')!;
+  assert.match(mediaTool.description, /2 MiB for OpenDesign account\/Cloud.*20 MB/);
+  assert.match((mediaTool.inputSchema.properties as Record<string, { description: string }>).referenceAsset.description, /2 MiB for OpenDesign account\/Cloud.*20 MB/);
 });
 
 test('cloud Streamable HTTP and legacy connection guidance expose the maintained media workflow and 3-way cloud import', () => {
@@ -182,6 +191,9 @@ test('cloud Streamable HTTP and legacy connection guidance expose the maintained
   for (const operation of ['openmotion_media_use', 'inspect', 'reference', 'models', 'schema', 'generate', 'status', 'cancel', 'requestId', 'jobId']) assert.ok(guide.includes(operation), operation);
   assert.doesNotMatch(guide, /不公开生成/);
   assert.match(guide, /openmotion_assets_use generate/);
+  for (const scenarioToken of ['action=scenario', 'add_pool', 'recordIteration=true', 'link_design', 'link_motion']) {
+    assert.ok(guide.includes(scenarioToken), scenarioToken);
+  }
 });
 
 test('media example uses unified OpenDesign Model Gateway and preserves setup continuation across languages', async () => {
@@ -190,8 +202,6 @@ test('media example uses unified OpenDesign Model Gateway and preserves setup co
   const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
   assert.match(media.prompt, /inspect/);
   assert.match(media.prompt, /Plus or above/);
-  assert.match(media.prompt, /not-included.*openmotion_open_preview with target=providers.*page handoff/);
-  assert.match(media.prompt, /Only when signed in.*unknown, continue model discovery/);
   assert.match(media.prompt, /mediaEntitlement/);
   assert.match(media.prompt, /OpenDesign Cloud/);
   assert.match(media.prompt, /OpenDesign Model Gateway/);
@@ -202,15 +212,15 @@ test('media example uses unified OpenDesign Model Gateway and preserves setup co
   assert.match(assets.description, /prepare_upload \+ upload_ticket.*HTTPS URL.*library_asset/);
   assert.ok(translations['zh-CN'][media.prompt]);
   assert.ok(translations['zh-CN'][assets.description]);
-
   const skill = readFileSync(new URL('../skills/openmotion-media/SKILL.md', import.meta.url), 'utf8');
   const setupLink = skill.match(/\[Discovery and setup\]\(([^)]+)\)/);
   assert.ok(setupLink, 'Media entry must expose provider setup');
   const setup = readFileSync(new URL(setupLink[1], new URL('../skills/openmotion-media/SKILL.md', import.meta.url)), 'utf8');
   assert.match(setup, /target: "providers"/);
   assert.match(setup, /## Media handbook handoff/);
-  assert.match(setup, /not-included.*openmotion_open_preview.*target: "providers".*page handoff/);
-  assert.match(setup, /Signed-in account.*available: true.*unknown/);
+  assert.match(setup, /settingsHandoff.*openmotion_open_preview.*target: "providers".*page handoff/);
+  assert.match(setup, /signed-in account.*available: true.*unknown/);
+  assert.match(setup, /not-included.*agent_media_upgrade_go.*agent_media_upgrade_free.*Upgrade to Plus.*directly/);
   assert.match(setup, /MCP handbook media-generation example/);
   assert.match(setup, /read-only `inspect`/);
   assert.match(skill, /MCP handbook example \| \[Discovery and setup\]/);
@@ -274,5 +284,96 @@ test('timeline hover inspection remains a localized, non-mutating preview scenar
   const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/timeline-hover-ui.json', import.meta.url), 'utf8'));
   for (const [language, values] of Object.entries(translations) as [string, Record<string, string>][]) {
     for (const key of [capability.title, capability.description, capability.prompt]) assert.ok(values[key]?.trim() && values[key] !== key, `${language}: missing hover guidance`);
+  }
+});
+
+test('image feature handbook scenarios cover background removal, relight and character consistency with limits and recovery', () => {
+  const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
+  const removeBg = mcpScenarios.find(item => item.id === 'image-remove-background')!;
+  const relight = mcpScenarios.find(item => item.id === 'image-relight')!;
+  const character = mcpScenarios.find(item => item.id === 'image-character')!;
+  assert.ok(removeBg.prompt.includes(imageFeaturePrompt('remove-background', '')));
+  assert.match(removeBg.prompt, /"background":"transparent"/);
+  assert.match(removeBg.prompt, /gpt-image-2\.6-sunburst/);
+  assert.ok(relight.prompt.includes(imageFeaturePrompt('relight', 'Keep the logo sharp.', { direction: 'left', temperature: 'warm', mood: 'golden-hour' })));
+  assert.match(relight.prompt, /seedream-5\.5/);
+  assert.ok(character.prompt.includes(imageFeaturePrompt('character', 'Show the character walking through a sunlit café.')));
+  assert.match(character.prompt, /drop seedream-5\.5 when using 2 or more references/);
+  for (const scenario of [removeBg, relight, character]) {
+    assert.match(scenario.prompt, /target=providers/);
+    assert.match(scenario.prompt, /action=resume/);
+    assert.match(scenario.prompt, /2 MiB/);
+    for (const locale of Object.values(translations) as Record<string, string>[]) {
+      assert.ok(locale[scenario.title]?.trim());
+      assert.ok(locale[scenario.description]?.trim());
+    }
+  }
+});
+
+test('video feature handbook scenarios cover camera control and multi-shot with limits and recovery', () => {
+  const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
+  const camera = mcpScenarios.find(item => item.id === 'video-camera-control')!;
+  const multiShot = mcpScenarios.find(item => item.id === 'video-multi-shot')!;
+  assert.ok(camera.prompt.includes(videoFeaturePrompt('camera-control', 'A vintage camera on dark stone with warm rim lighting.', { movement: 'orbit', pace: 'slow' })));
+  assert.ok(multiShot.prompt.includes(videoFeaturePrompt('multi-shot', 'An astronaut crossing a silver lunar ridge.', { shots: '3', style: 'narrative' })));
+  assert.ok(multiShot.prompt.includes(JSON.stringify(videoFeatureParameters('multi-shot', { provider: 'opendesign', modelId: 'doubao-seedance-2-5-260628' }))));
+  for (const scenario of [camera, multiShot]) {
+    assert.match(scenario.prompt, /target=providers/);
+    assert.match(scenario.prompt, /2 MiB/);
+    assert.match(scenario.prompt, /omit fixed ratio/i);
+    for (const locale of Object.values(translations) as Record<string, string>[]) {
+      assert.ok(locale[scenario.title]?.trim());
+      assert.ok(locale[scenario.description]?.trim());
+    }
+  }
+});
+
+test('Workflows capability, Black Friday recipe and design asset embedding stay aligned and localized', () => {
+  const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
+  const capability = mcpCapabilities.find(item => item.id === 'scenario-workflows')!;
+  const blackFriday = mcpScenarios.find(item => item.id === 'scenario-black-friday')!;
+  const writeback = mcpScenarios.find(item => item.id === 'scenario-agent-writeback')!;
+  const embedAssets = mcpScenarios.find(item => item.id === 'design-embed-assets')!;
+  const writebackFaq = mcpFaq.find(([question]) => question === 'How does my Agent run a workflow and save results to Assets?')!;
+
+  assert.ok(capability);
+  assert.equal(capability.title, 'Run a workflow end to end');
+  assert.deepEqual([...capability.tools], ['openmotion_assets_use', 'openmotion_design_edit', 'openmotion_design_project']);
+  assert.match(capability.prompt, /openmotion_get_skill/);
+  assert.match(capability.prompt, /openmotion:\/\/workflow\/\*/);
+  for (const tool of capability.tools) assert.ok(capability.prompt.includes(tool), tool);
+  assert.equal(blackFriday.title, 'Run the Black Friday campaign workflow');
+  assert.equal(blackFriday.prompt, scenarioAgentPrompt(findScenario('black-friday')!));
+  assert.deepEqual([...blackFriday.tools], [...scenarioRecipeTools]);
+  for (const tool of scenarioRecipeTools) assert.ok(blackFriday.prompt.includes(tool), tool);
+  assert.ok(writeback);
+  assert.equal(writeback.title, 'Run a workflow and save back to Assets');
+  assert.deepEqual([...writeback.tools], [...scenarioRecipeTools]);
+  assert.match(writeback.prompt, /recordIteration=true/);
+  assert.match(writeback.prompt, /openmotion_get_skill/);
+  for (const tool of scenarioRecipeTools) assert.ok(writeback.prompt.includes(tool), tool);
+  assert.ok(writebackFaq);
+  assert.match(writebackFaq[1], /Copy for Agent/);
+  assert.match(writebackFaq[1], /Copy MCP prompt/);
+  assert.match(writebackFaq[1], /openmotion_get_skill/);
+  assert.match(writebackFaq[1], /action=scenario/);
+  assert.match(writebackFaq[1], /recordIteration=true/);
+  assert.match(writebackFaq[1], /Sync/);
+  assert.deepEqual([...embedAssets.tools], ['openmotion_assets_use', 'openmotion_design_edit']);
+  assert.ok(embedAssets.prompt.includes('openmotion_assets_use'));
+  assert.ok(embedAssets.prompt.includes('openmotion_design_edit'));
+  assert.ok(embedAssets.prompt.includes('import_asset'));
+
+  for (const [locale, values] of Object.entries(translations) as [string, Record<string, string>][]) {
+    for (const key of [
+      capability.title, capability.description, capability.prompt,
+      blackFriday.title, blackFriday.description,
+      writeback.title, writeback.description, writeback.prompt,
+      writebackFaq[0], writebackFaq[1],
+      embedAssets.title, embedAssets.description, embedAssets.prompt,
+    ]) {
+      assert.ok(values[key]?.trim(), `${locale}: missing ${key}`);
+      assert.notEqual(values[key], key, `${locale}: untranslated ${key}`);
+    }
   }
 });

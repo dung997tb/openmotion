@@ -48,7 +48,7 @@ export const workflowRegistry = {
       examples: 'skills/openmotion-director/references/examples.md',
     },
   },
-  template: { status: 'ready', sections: { start: 'skills/openmotion-template-to-video/SKILL.md', unchanged: 'skills/openmotion-template-to-video/references/unchanged-export.md', firstuse: 'skills/openmotion-template-to-video/references/first-use.md', recipes: 'skills/openmotion-template-to-video/references/recipes.md' } },
+  template: { status: 'ready', sections: { start: 'skills/openmotion-template-to-video/SKILL.md', unchanged: 'skills/openmotion-template-to-video/references/unchanged-export.md', firstuse: 'skills/openmotion-template-to-video/references/first-use.md', recipes: 'skills/openmotion-template-to-video/references/recipes.md', adaptation: 'skills/openmotion-template-to-video/references/adaptation.md' } },
   recreate: {
     status: 'ready',
     sections: {
@@ -85,8 +85,10 @@ export const workflowRegistry = {
       opendesign: 'skills/openmotion-media/references/providers/opendesign.md',
       atlascloud: 'skills/openmotion-media/references/providers/atlascloud.md',
       wavespeed: 'skills/openmotion-media/references/providers/wavespeed.md',
+      codex: 'skills/openmotion-media/references/providers/codex.md',
     },
   },
+  game: { status: 'ready', sections: { start: 'skills/openmotion-game/SKILL.md', provenance: 'skills/openmotion-game/PROVENANCE.md', genres: 'skills/openmotion-game/references/game-genres.md', playable: 'skills/openmotion-game/references/game-playable-ad.md', flow: 'skills/openmotion-game/references/game-flow.md', design: 'skills/openmotion-game/references/game-design-system.md', style: 'skills/openmotion-game/references/game-stylization.md', sprites: 'skills/openmotion-game/references/game-2d-animation.md', animation: 'skills/openmotion-game/references/game-3d-animation.md', procedural: 'skills/openmotion-game/references/game-procedural-animation.md', audio: 'skills/openmotion-game/references/game-audio.md', textures: 'skills/openmotion-game/references/game-textures.md', review: 'skills/openmotion-game/references/review-rubric.md' } },
   design: {
     status: 'ready',
     sections: {

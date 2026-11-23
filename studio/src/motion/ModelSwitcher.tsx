@@ -9,7 +9,7 @@ import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { gatewayRequest } from './gatewayClient';
 import { useProviderDirectory, notifyProvidersChanged } from './useProviderDirectory';
-import { kindLabels, typeIcons } from './ModelEditor';
+import { modelKindLabel, typeIcons } from './ModelEditor';
 import { ModelAvatar, SettingsError, SettingsLoading } from './settingsPrimitives';
 import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
 
@@ -25,7 +25,7 @@ export function ModelSwitcher({ openSettings, capability, label }: { openSetting
 }
 
 function ModelChoices({ capability, close, openSettings }: { capability?: ModelKind; close: () => void; openSettings: () => void }) {
-  const { t } = useI18n(), directory = useProviderDirectory(), toast = useToast();
+  const { t, locale } = useI18n(), directory = useProviderDirectory(), toast = useToast();
   const initialKind: CloudModelKind = capability === 'video' || capability === 'audio' ? capability : 'image';
   const [query, setQuery] = useState(''), [kind, setKind] = useState<CloudModelKind>(initialKind), [busy, setBusy] = useState(false);
   const available = directory.data?.providers.filter(provider => provider.available) ?? [];
@@ -52,13 +52,12 @@ function ModelChoices({ capability, close, openSettings }: { capability?: ModelK
       setBusy(false);
     }
   }
-
   return <>
     <h2 className="om-subtitle">{t('Select model')}</h2>
     <label className="om-field"><RemixIcon name="search-line" size={16} /><input type="search" aria-label={t('Search models')} placeholder={t('Search models…')} value={query} onChange={event => setQuery(event.target.value)} /></label>
     {!capability && <div className="om-settings-actions">
-      <Menu modal={false} trigger={<Button variant="ghost" className="om-button h-auto"><RemixIcon name={typeIcons[kind]} size={15} />{t(kindLabels[kind])}<RemixIcon name="arrow-down-s-line" size={14} /></Button>}>
-        <MenuRadioGroup value={kind} onValueChange={value => setKind(value as CloudModelKind)}>{cloudModelKinds.map(value => <MenuRadioItem closeOnClick key={value} value={value}><RemixIcon name={typeIcons[value]} size={15} />{t(kindLabels[value])}</MenuRadioItem>)}</MenuRadioGroup>
+      <Menu modal={false} trigger={<Button variant="ghost" className="om-button h-auto"><RemixIcon name={typeIcons[kind]} size={15} />{modelKindLabel(kind, t, locale)}<RemixIcon name="arrow-down-s-line" size={14} /></Button>}>
+        <MenuRadioGroup value={kind} onValueChange={value => setKind(value as CloudModelKind)}>{cloudModelKinds.map(value => <MenuRadioItem closeOnClick key={value} value={value}><RemixIcon name={typeIcons[value]} size={15} />{modelKindLabel(value, t, locale)}</MenuRadioItem>)}</MenuRadioGroup>
       </Menu>
     </div>}
     {directory.error ? <SettingsError retry={directory.refresh} /> : !directory.data ? <SettingsLoading /> : <div className="om-model-choice-list">

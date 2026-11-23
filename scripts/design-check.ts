@@ -67,11 +67,13 @@ export async function checkDesign() {
     const textPairs = [
       ['text', 'shell'], ['text', 'workspace'], ['text', 'panel'], ['text', 'inset'],
       ['muted', 'panel'], ['muted', 'workspace'], ['dim', 'panel'], ['dim', 'bg'], ['dim', 'raised'],
+      ['attribution-link', 'panel'], ['attribution-link', 'workspace'],
       ['accent', 'accent-soft'], ['on-action', 'action'], ['on-action', 'action-hover'], ['text', 'accent-soft'],
       ['danger', 'danger-soft'], ['on-danger', 'danger'], ['warning', 'warning-soft'], ['strong', 'highlight'],
       ['creative-image', 'raised'], ['creative-video', 'raised'], ['creative-audio', 'raised'], ['creative-agent', 'raised'],
     ];
     if (theme === 'dark') textPairs.push(['accent', 'chrome-active'], ['video-ink', 'accent'], ['placeholder', 'panel']);
+    if (theme === 'light') textPairs.push(['accent', 'hover']);
     for (const [ink, surface] of textPairs) {
       const a = luminance(values[ink]), b = luminance(values[surface]);
       assert.ok((Math.max(a, b) + .05) / (Math.min(a, b) + .05) >= 4.5, `${theme}: ${ink} on ${surface} needs 4.5:1 contrast.`);

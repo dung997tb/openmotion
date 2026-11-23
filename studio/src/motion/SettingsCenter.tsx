@@ -1,13 +1,13 @@
 import { Button } from 'open-design-ui/button';
 import * as tracking from './pageTracking';
 import type { McpEntry } from './pageTracking';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ModelKind } from '../../../shared/provider-directory';
 import { RemixIcon } from '../icons/RemixIcons';
 import { languages, useI18n, type Locale } from '../i18n/I18n';
 import { Select } from '../components/ui/Select';
 import { AppearanceSettings } from './AppearanceSettings';
-import { ModelSettings, kindLabels } from './ModelSettings';
+import { ModelSettings, modelKindLabel } from './ModelSettings';
 import { AccountSettings } from './AccountSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { clickMethod, clickOption, trackStudioClick } from './editorTracking';
@@ -15,41 +15,37 @@ import { ModelSwitcher } from './ModelSwitcher';
 import { useProviderDirectory } from './useProviderDirectory';
 import { gatewayRequest } from './gatewayClient';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
+import { AgentSettings } from './AgentSettings';
+import { DiagnosticExport } from './DiagnosticExport';
 import { discord, feishu } from './CommunityLink';
 import { GITHUB_REPOSITORY, repositorySupportLinks } from './githubRepository';
+import { SettingsSurfaceBoundary } from './SettingsSurfaceBoundary';
+import { getDesktopBridge, isDesktopApp, useDesktopUpdateState } from '../utils/platformHost';
 
 import type { SettingsSection } from './workspacePageRouting';
 export type { SettingsSection } from './workspacePageRouting';
+import { settingsCenterSections as sections, settingsSectionLabel } from './settingsMeta';
 
 const cloudModelKinds: ModelKind[] = ['image', 'video', 'audio'];
-
-const sections: { id: SettingsSection; label: string; icon: string; group: string }[] = [
-  { id: 'account', label: 'Account', icon: 'user-3-line', group: 'Personal' },
-  { id: 'subscription', label: 'Subscription & usage', icon: 'bank-card-line', group: 'Personal' },
-  { id: 'providers', label: 'Model gateway', icon: 'brain-line', group: 'Models & connections' },
-  { id: 'models', label: 'Default models', icon: 'box-3-line', group: 'Models & connections' },
-  { id: 'mcp', label: 'MCP · Connect Agent', icon: 'plug-line', group: 'Models & connections' },
-  { id: 'general', label: 'General', icon: 'equalizer-line', group: 'Preferences' },
-  { id: 'appearance', label: 'Appearance', icon: 'palette-line', group: 'Preferences' },
-  { id: 'privacy', label: 'Privacy & data', icon: 'shield-check-line', group: 'Preferences' },
-  { id: 'help', label: 'Help', icon: 'question-line', group: 'Resources' },
-  { id: 'about', label: 'About OpenMotion', icon: 'information-line', group: 'Resources' },
-];
 
 export function SettingsCenter({
   section,
   onSection: onSectionRaw,
+  onBack,
   openConnections,
   providerId,
   onProviderChange,
+  mcp,
   hasProject = false,
 }: {
   hasProject?: boolean;
   section: SettingsSection;
   onSection: (section: SettingsSection) => void;
+  onBack?: () => void;
   openConnections: (entry: McpEntry) => void;
   providerId?: string | null;
   onProviderChange?: (id: string | null) => void;
+  mcp?: ReactNode;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
@@ -65,7 +61,19 @@ export function SettingsCenter({
       <div className="om-settings-navigation-slot">
         <div className="om-settings-navigation-clip">
           <aside className="om-settings-navigation">
-            <h1 className="om-navigation-title">{t('Settings')}</h1>
+            <div className="om-settings-heading">
+              {onBack
+                ? <Button variant="plain" type="button" className="om-nav-item" onClick={onBack}><RemixIcon name="arrow-left-line" size={16} />{t('Go back')}</Button>
+                : <h1 className="om-navigation-title">{t('Settings')}</h1>}
+              <div className="om-settings-mobile-navigation">
+                <Select
+                  label={t('Settings')}
+                  value={section}
+                  onCommit={value => onSection(value as SettingsSection)}
+                  options={sections.map(item => ({ value: item.id, label: t(item.label), icon: <RemixIcon name={item.icon} size={16} /> }))}
+                />
+              </div>
+            </div>
             <label className="om-field">
               <RemixIcon name="search-line" size={16} />
               <input
@@ -76,14 +84,6 @@ export function SettingsCenter({
                 aria-label={t('Search settings')}
               />
             </label>
-            <div className="om-settings-mobile-navigation">
-              <Select
-                label={t('Settings')}
-                value={section}
-                onCommit={value => onSection(value as SettingsSection)}
-                options={sections.map(item => ({ value: item.id, label: t(item.label), icon: <RemixIcon name={item.icon} size={16} /> }))}
-              />
-            </div>
             <nav aria-label={t('Settings')} className="om-settings-sections">
               {filtered.map((item, index) => (
                 <div key={item.id}>
@@ -107,29 +107,31 @@ export function SettingsCenter({
           </aside>
         </div>
       </div>
-      <main className="om-settings-main" aria-label={t(sections.find(item => item.id === section)?.label || 'Settings')}>
-        {section === 'providers' ? (
-          <ModelSettings key={section} openAccount={() => onSection('account')} providerId={providerId} onProviderChange={onProviderChange} />
-        ) : section === 'account' || section === 'subscription' ? (
-          <AccountSettings key={section} subscription={section === 'subscription'} openProviders={() => onSection('providers')} />
-        ) : section === 'models' ? (
-          <DefaultModels openProviders={() => onSection('providers')} />
-        ) : section === 'appearance' ? (
-          <AppearanceSettings />
-        ) : section === 'privacy' ? (
-          <div className="om-settings-page"><h1 className="om-title">{t('Privacy & data')}</h1><PrivacySettings embedded onClose={() => {}} /></div>
-        ) : section === 'general' ? (
-          <GeneralSettings openConnections={() => openConnections('settings_general')} />
-        ) : (
-          <ResourceSettings about={section === 'about'} openConnections={() => openConnections('settings_resources')} />
-        )}
+      <main key={section} className="om-settings-main" aria-label={t(settingsSectionLabel(section))}>
+        <SettingsSurfaceBoundary>
+          {section === 'mcp' ? mcp : section === 'local' ? <AgentSettings /> : section === 'providers' ? (
+            <ModelSettings key={section} openAccount={() => onSection('account')} providerId={providerId} onProviderChange={onProviderChange} />
+          ) : section === 'account' || section === 'subscription' ? (
+            <AccountSettings key={section} subscription={section === 'subscription'} openProviders={() => onSection('providers')} />
+          ) : section === 'models' ? (
+            <DefaultModels openProviders={() => onSection('providers')} />
+          ) : section === 'appearance' ? (
+            <AppearanceSettings />
+          ) : section === 'privacy' ? (
+            <div className="om-settings-page"><h1 className="om-title">{t('Privacy & data')}</h1><PrivacySettings embedded onClose={() => {}} /></div>
+          ) : section === 'general' ? (
+            <GeneralSettings openConnections={() => openConnections('settings_general')} />
+          ) : (
+            <ResourceSettings about={section === 'about'} openConnections={() => openConnections('settings_resources')} />
+          )}
+        </SettingsSurfaceBoundary>
       </main>
     </div>
   );
 }
 
 function DefaultModels({ openProviders }: { openProviders: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const directory = useProviderDirectory();
   return (
     <div className="om-settings-page">
@@ -143,7 +145,7 @@ function DefaultModels({ openProviders }: { openProviders: () => void }) {
             return (
               <div className="om-preference-row" key={kind}>
                 <div>
-                  <h2 className="om-subtitle">{t(kindLabels[kind])}</h2>
+                  <h2 className="om-subtitle">{modelKindLabel(kind, t, locale)}</h2>
                   <p className="om-muted">
                     {model
                       ? `${provider?.label ?? 'OpenDesign'} · ${model.label}${!provider?.available || !model.enabled ? ' · ' + t('Unavailable') : ''}`
@@ -204,25 +206,48 @@ function GeneralSettings({ openConnections }: { openConnections: () => void }) {
 
 function ResourceSettings({ about, openConnections }: { about: boolean; openConnections: () => void }) {
   const { t, locale } = useI18n();
+  const desktopApp = isDesktopApp();
+  const updater = useDesktopUpdateState();
   const communityLinks = locale === 'zh-CN' ? [feishu, discord] : [discord, feishu];
   const [version, setVersion] = useState<string>();
   useEffect(() => {
     let active = true;
+    if (desktopApp) {
+      void getDesktopBridge()?.getAppInfo()
+        .then(info => { if (active && info?.appVersion) setVersion(info.appVersion); })
+        .catch(() => {});
+    }
     void fetch('/api/health')
       .then(async res => {
         if (!res.ok) throw new Error('unavailable');
         return (await res.json()) as { version?: string };
       })
       .catch(() => gatewayRequest<{ version?: string }>('health'))
-      .then(data => { if (active && data?.version) setVersion(data.version); })
+      .then(data => { if (active && data?.version) setVersion(current => current || data.version); })
       .catch(() => {});
     return () => { active = false; };
-  }, []);
+  }, [desktopApp]);
   const links = [
     { label: 'Documentation', href: `${GITHUB_REPOSITORY}/tree/main/docs`, icon: 'file-text-line' },
     ...repositorySupportLinks,
     { label: 'View source code', href: GITHUB_REPOSITORY, icon: 'code-s-slash-line' },
   ];
+  const updateStatusLabel =
+    updater.state?.status === 'available'
+      ? t('Update available: {version}', { version: updater.state.availableVersion || '' })
+      : updater.state?.status === 'downloading'
+        ? t('Downloading update… {progress}%', { progress: updater.state.progress ?? 0 })
+        : updater.state?.status === 'downloaded'
+          ? t('Update {version} ready to install', { version: updater.state.availableVersion || '' })
+          : updater.state?.status === 'up-to-date'
+            ? t('You are on the latest version')
+            : updater.state?.status === 'checking'
+              ? t('Checking for updates…')
+              : updater.state?.status === 'unsupported'
+                ? t('Auto-update applies to packaged desktop releases.')
+                : updater.state?.status === 'error'
+                  ? updater.state.message || t('Update check failed')
+                  : t('Desktop updates keep OpenMotion and local MCP tools current.');
   return (
     <div className="om-settings-page">
       <h1 className="om-title">{t(about ? 'About OpenMotion' : 'Help')}</h1>
@@ -231,6 +256,29 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
           <h2 className="om-product-brand" aria-label="OpenMotion" />
           <p className="om-muted">{t('An editable cloud workspace for AI video and motion.')}</p>
           <span className="om-badge">{version ? `${t('Version')} ${version}` : t('Version unavailable')}</span>
+        </section>
+      )}
+      {about && desktopApp && (
+        <section className="om-card om-card-stack">
+          <div className="om-runtime-card-head">
+            <h2 className="om-subtitle">{t('Desktop updates')}</h2>
+            <div className="om-runtime-row-actions">
+              {updater.state?.status === 'available' && (
+                <Button variant="ghost" className="om-button h-auto" data-primary disabled={updater.busy} onClick={() => void updater.downloadUpdate()}>
+                  <RemixIcon name="download-2-line" size={14} />{t('Download update')}
+                </Button>
+              )}
+              {updater.state?.status === 'downloaded' && (
+                <Button variant="ghost" className="om-button h-auto" data-primary disabled={updater.busy} onClick={() => void updater.installUpdateNow()}>
+                  <RemixIcon name="refresh-line" size={14} />{t('Restart to update')}
+                </Button>
+              )}
+              <Button variant="ghost" className="om-button h-auto" disabled={updater.busy} onClick={() => void updater.checkForUpdates()}>
+                <RemixIcon name="refresh-line" size={14} />{t('Check for updates')}
+              </Button>
+            </div>
+          </div>
+          <p className="om-muted">{updateStatusLabel}</p>
         </section>
       )}
       <div className="om-card om-resource-links">
@@ -268,6 +316,20 @@ function ResourceSettings({ about, openConnections }: { about: boolean; openConn
               <RemixIcon name="external-link-line" size={16} />
             </a>
           ))}
+        </section>
+      )}
+      {!about && (
+        <section className="om-card om-card-stack">
+          <div className="om-runtime-card-head">
+            <h2 className="om-subtitle">{t('Diagnostics & logs')}</h2>
+            {desktopApp && (
+              <Button variant="ghost" className="om-button h-auto" onClick={() => void getDesktopBridge()?.openLogsFolder()}>
+                <RemixIcon name="folder-open-line" size={15} />
+                {t('Open logs folder')}
+              </Button>
+            )}
+          </div>
+          <DiagnosticExport />
         </section>
       )}
       {about && (

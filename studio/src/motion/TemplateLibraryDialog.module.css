@@ -201,6 +201,18 @@
 .mediaProgress { composes: om-media-detail-progress from global; }
 .visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+.creatorIntro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min(42%, 448px);
+  column-gap: var(--motion-space-16);
+  align-items: center;
+}
+.creatorIntro > :global(.om-gallery-header-actions) { grid-column: 2; grid-row: 1 / span 2; }
+:is(.creatorGrid, .creatorWorks) { margin-top: var(--motion-space-12); }
+@media (max-width: 699px) {
+  .creatorIntro { grid-template-columns: minmax(0, 1fr); }
+  .creatorIntro > :global(.om-gallery-header-actions) { grid-column: 1; grid-row: 3; margin-top: var(--motion-space-12); }
+}
 .creatorGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: var(--motion-space-16); }
 .creatorPoster { display: block; position: relative; overflow: hidden; width: 100%; aspect-ratio: 16/9; background: var(--motion-inset); border-radius: var(--motion-radius-md); }
 .creatorPoster img { width: 100%; height: 100%; object-fit: cover; }

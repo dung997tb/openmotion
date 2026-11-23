@@ -5,7 +5,7 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ModelAvatar } from './settingsPrimitives';
-import { sceneDestination, type StudioScene, studioScenes, supportsScene, modelDestination, type StudioDestination } from './creativeStudios';
+import { modelsForScenes, sceneDestination, type StudioScene, studioScenes, supportsScene, modelDestination, type StudioDestination } from './creativeStudios';
 import type { useMediaCatalog } from './useMediaCatalog';
 
 export function MediaModelChoices({ kind, scene, destination, onModel, onNavigate, openProviders, catalog, failed, retry }: ReturnType<typeof useMediaCatalog> & {
@@ -16,9 +16,8 @@ export function MediaModelChoices({ kind, scene, destination, onModel, onNavigat
   const providers = new Map(catalog?.status.providers.map(provider => [provider.id, provider]));
   const matchingScenes = scene ? [scene] : studioScenes.filter(item => item.modality === kind);
   const available = (model: Model) => Boolean(providers.get(model.provider)?.available);
-  const models = (catalog?.models ?? []).filter(model => model.modality === kind && matchingScenes.some(scene => supportsScene(model, scene))
-    && (model.label + ' ' + (providers.get(model.provider)?.label ?? model.provider)).toLowerCase().includes(query.trim().toLowerCase()))
-    .sort((a, b) => Number(available(b)) - Number(available(a)));
+  const models = modelsForScenes(catalog, kind, matchingScenes)
+    .filter(model => (model.label + ' ' + (providers.get(model.provider)?.label ?? model.provider)).toLowerCase().includes(query.trim().toLowerCase()));
   function selectModel(model: Model) {
     if (scene && onNavigate) onNavigate(sceneDestination(scene, destination, model.id));
     else if (destination && onNavigate) onNavigate(modelDestination(model, destination));

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DesignComment, DesignEditorApp, DesignProjectDetail, DesignVersion } from '../../../shared/design-project';
 import { isDeferredP2Error } from '../motion/p2Deferred';
+import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
 import { designClient } from './designClient';
 
 export type DesignProjectState = {
@@ -66,27 +67,22 @@ export function useDesignProject(projectId: string): DesignProjectState {
     designClient.detectEditors().then(res => setEditors(res.editors)).catch(() => setEditors([]));
   }, [loadAll]);
 
-  useEffect(() => {
-    if (deferred) return;
-    let active = true;
-    const tick = async () => {
-      if (!active || document.visibilityState !== 'visible') return;
+  useVisibilityPolling(
+    async signal => {
       try {
         const state = await designClient.getState(projectId);
-        if (!active) return;
+        if (signal.aborted) return;
         if (state.revision !== revRef.current || state.openComments !== commentsCountRef.current) {
           await loadAll(true);
         }
       } catch (err) {
-        if (active && isDeferredP2Error(err)) {
+        if (!signal.aborted && isDeferredP2Error(err)) {
           setDeferred(true);
-          active = false;
         }
       }
-    };
-    const timer = window.setInterval(tick, 2500);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [projectId, loadAll, deferred]);
+    },
+    { enabled: Boolean(projectId) && !deferred, intervalMs: 2500, immediate: false, resetKey: projectId },
+  );
 
   return {
     project, versions, currentVersionId, comments, editors, loading, error, deferred,

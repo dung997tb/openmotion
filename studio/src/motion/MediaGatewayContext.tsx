@@ -1,13 +1,20 @@
-import { IconButton } from 'open-design-ui/icon-button';
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, Suspense, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ModelSettings } from './ModelSettings';
-import { MediaGenerator } from './MediaGenerator';
+import { StudioToastViewport } from '../components/StudioToastViewport';
+import { useToast } from '../hooks/useToast';
+import { lazyWithChunkReload } from '../utils/chunkReload';
+import { isStudioSaveErrorAlreadyToasted } from '../utils/studioSaveDiagnostics';
 import { useArtifactViewActive } from './ArtifactViewState';
-import { useI18n } from '../i18n/I18n';
 import type { GenerateInput, GenerationJob, Modality } from './gatewayClient';
 import type { MediaPopoverAnchor } from './mediaPopoverPosition';
 import './media-gateway.css';
+
+const ModelSettings = lazyWithChunkReload(() =>
+  import('./ModelSettings').then(m => ({ default: m.ModelSettings })),
+);
+const MediaGenerator = lazyWithChunkReload(() =>
+  import('./MediaGenerator').then(m => ({ default: m.MediaGenerator })),
+);
 
 export type MediaPlacement = { start: number; duration: number; track: number };
 export type SelectedMedia = { key: string; elementId: string; path: string; src: string; sourceFile?: string; modality: Modality; label: string };
@@ -21,13 +28,12 @@ const MediaGatewayContext = createContext<GatewayUI | null>(null);
 export const useMediaGateway = () => useContext(MediaGatewayContext);
 
 export function MediaGatewayProvider({ children }: { children: ReactNode }) {
-  const { t } = useI18n();
   const active = useArtifactViewActive();
+  const toast = useToast();
   const [settings, setSettings] = useState(false);
   const [request, setRequest] = useState<MediaRequest | null>(null);
   const timeline = useRef<TimelineMediaTarget | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
-  const [importError, setImportError] = useState('');
   const bindTimeline = useCallback((target: TimelineMediaTarget | null) => { timeline.current = target; }, []);
   const openSettings = useCallback(() => setSettings(true), []);
   const openGenerator = useCallback((input: Omit<MediaRequest, 'id' | 'target'> = {}) => {
@@ -38,13 +44,25 @@ export function MediaGatewayProvider({ children }: { children: ReactNode }) {
   return <MediaGatewayContext.Provider value={value}>
     {children}
     <input ref={importInput} type="file" accept="image/*,video/*,audio/*" multiple hidden onChange={event => {
-      const files = Array.from(event.target.files ?? []); event.target.value = '';
-      if (files.length && timeline.current) { setImportError(''); void timeline.current.importFiles(files).catch(error => setImportError(error.message)); }
+      const files = Array.from(event.target.files ?? []);
+      event.target.value = '';
+      if (!files.length || !timeline.current) return;
+      void timeline.current.importFiles(files).catch(error => {
+        if (!isStudioSaveErrorAlreadyToasted(error)) toast.showToast(error instanceof Error ? error.message : 'Action not completed. Please try again.', 'error');
+      });
     }} />
-    {active && settings && <ModelSettings onClose={() => setSettings(false)} />}
+    {active && <StudioToastViewport {...toast} />}
+    {active && settings && (
+      <Suspense fallback={null}>
+        <ModelSettings onClose={() => setSettings(false)} />
+      </Suspense>
+    )}
     {createPortal(<div hidden={!active} inert={!active}>
-      {importError && <div className="motion-media-notice" role="alert">{importError}<IconButton variant="plain" aria-label={t('Dismiss error')} onClick={() => setImportError('')} icon="×" /></div>}
-      {request && <MediaGenerator key={request.id} request={request} onClose={() => setRequest(null)} onSettings={openSettings} />}
+      {request && (
+        <Suspense fallback={null}>
+          <MediaGenerator key={request.id} request={request} onClose={() => setRequest(null)} onSettings={openSettings} />
+        </Suspense>
+      )}
     </div>, document.body)}
   </MediaGatewayContext.Provider>;
 }

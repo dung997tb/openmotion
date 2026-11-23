@@ -13,17 +13,25 @@ import type { SkillCategory } from './skillCategories';
 export { skillCategories, type SkillCategory } from './skillCategories';
 
 const previewDirectory = 'studio/src/motion/skill-covers/';
-const previewPosters = import.meta.glob<string>('./skill-covers/*.webp', { eager: true, query: '?url', import: 'default' });
 const hostedPreviews = new Map(repositoryMedia.files.filter(file => file.path.startsWith(previewDirectory)).map(file => [file.path, file.url]));
 
 // Existing preview bytes remain available at this public source snapshot.
 export const skillPreviewSnapshot = 'https://raw.githubusercontent.com/nexu-io/openmotion/242dbd99d41e349ea43c3d8d48a1e06f6cece81a/' + previewDirectory;
+// Existing WebP posters remain available at this public source snapshot.
+export const skillPosterSnapshot = 'https://raw.githubusercontent.com/nexu-io/openmotion/008e46e896a72f4e5bd743fe1c4a5752240d2e8f/' + previewDirectory;
+
+export function archivedSkillPoster(name: string) {
+  const filename = name + '.webp';
+  return hostedPreviews.get(previewDirectory + filename) ?? skillPosterSnapshot + filename;
+}
 
 function skillCover(name: string, format: 'mp4' | 'webm' | 'gif' = 'mp4', snapshot = false) {
   const filename = name + '.' + format;
+  const posterFilename = name + '.webp';
   const animation = hostedPreviews.get(previewDirectory + filename)
     ?? (snapshot ? skillPreviewSnapshot + filename : import.meta.env.DEV ? '/src/motion/skill-covers/' + filename : undefined);
-  const poster = previewPosters['./skill-covers/' + name + '.webp'];
+  const poster = hostedPreviews.get(previewDirectory + posterFilename)
+    ?? (snapshot ? skillPosterSnapshot + posterFilename : import.meta.env.DEV ? '/src/motion/skill-covers/' + posterFilename : undefined);
   return format === 'gif' ? { gif: animation, poster } : { video: animation, poster };
 }
 
@@ -348,6 +356,8 @@ const promptText = (locale: string) => (key: PromptKey, values: Record<string, s
 };
 
 export const defaultSkillParameters: SkillParameters = { subject: '', duration: 10, aspect: '16:9', style: '' };
+
+export const motionStudioCover = motionSkills.find(skill => skill.id === 'openmotion-bubble-field')?.cover;
 
 export function studioSkillDefaults(studioId?: string): SkillParameters {
   return studioId === 'shorts' ? { ...defaultSkillParameters, aspect: '9:16' } : defaultSkillParameters;

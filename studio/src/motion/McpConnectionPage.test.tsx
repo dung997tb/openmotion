@@ -263,7 +263,13 @@ it.each(['en', 'zh-CN'] as const)('copies the complete media onboarding flow in 
   const card = [...document.querySelectorAll('article')].find(node => node.querySelector('h3')?.textContent === (locale === 'en' ? 'Generate images, video, music and voice' : '生成图片、视频、音乐与配音'))!;
   await act(async () => card.querySelector('button')!.click());
   const instruction = copy.mock.calls[0][0];
+  expect(instruction).toContain('entry=agent_media_handbook');
+  for (const entry of ['agent_media_handbook', 'agent_media_upgrade_go', 'agent_media_upgrade_free', 'agent_media_signed_out']) {
+    expect(instruction).toContain(entry);
+  }
+  expect(instruction).not.toContain('agent_media_key_rejected');
   expect(instruction).toContain('target=providers');
+  expect(instruction).toContain(locale === 'en' ? 'Subscription & usage > Manage subscription for OpenDesign Plus or above' : '订阅与用量 > 管理订阅');
   expect(instruction).not.toContain('install.md');
   expect(instruction).not.toContain('quick-start');
   expect(instruction).toContain(locale === 'en' ? 'inspect again' : '重新 inspect');
@@ -316,4 +322,25 @@ it.each([
   expect(faq.textContent).toContain(exclusive);
   expect(faq.textContent).toContain('Codex');
   expect(faq.textContent).toContain('OpenMotion');
+});
+
+it.each(['en', 'zh-CN'] as const)('copies the Black Friday campaign workflow handoff with workspace context in %s', async locale => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : info)));
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await mount(locale);
+  expect(document.querySelector('[data-mcp-scenario="scenario-workflows"]')).not.toBeNull();
+  expect(document.querySelector('[data-mcp-scenario="design-embed-assets"]')).not.toBeNull();
+  const card = document.querySelector('[data-mcp-scenario="scenario-black-friday"]')!;
+  expect(card).not.toBeNull();
+  expect(card.querySelector('h3')?.textContent).toBe(locale === 'en' ? 'Run the Black Friday campaign workflow' : '运行黑五电商活动工作流');
+  await act(async () => card.querySelector('button')!.click());
+  expect(copy).toHaveBeenCalledOnce();
+  const instruction = copy.mock.calls[0][0];
+  for (const token of ['openmotion_assets_use', 'action=scenario', 'openmotion_design_project', 'openmotion_design_edit', 'import_asset', 'openmotion_create_project', 'openmotion_open_preview', info.dataDirectory, info.previewUrl, `Reply and write visible copy in: ${locale}`]) {
+    expect(instruction).toContain(token);
+  }
+  expect(document.querySelector('.motion-feedback-layer [role=status]')?.textContent).toContain(locale === 'en' ? 'Copied' : '已复制');
+  copy.mockRejectedValue(new Error('Clipboard blocked'));
+  await act(async () => card.querySelector('button')!.click());
+  expect(card.querySelector('textarea')?.value).toBe(instruction);
 });

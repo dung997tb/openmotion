@@ -314,7 +314,7 @@ export function useProjectArchives(
       returnFocus={grantsTarget.returnFocus}
     />}
   </>;
-  return { ...actions, busy, showManager, chooseImport, manager };
+  return { ...actions, open: opened, busy, showManager, chooseImport, manager };
 }
 
 export type ProjectArchiveActions = ReturnType<typeof useProjectArchives>;

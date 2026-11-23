@@ -4,6 +4,23 @@
 .om-gallery-cover { display: block; width: 100%; position: relative; padding: 0; text-align: left; cursor: pointer; }
 .om-gallery-poster, .om-gallery-cover > video { display: block; width: 100%; height: 100%; position: absolute; inset: 0; object-fit: cover; }
 .om-gallery-poster { overflow: hidden; }
+.om-cover-placeholder {
+  --cover-placeholder-surface: color-mix(in srgb, var(--motion-inset) 45%, var(--motion-border));
+  display: grid;
+  place-items: center;
+  background: var(--cover-placeholder-surface);
+  color: color-mix(in srgb, var(--motion-muted) 30%, var(--cover-placeholder-surface));
+  border-radius: inherit;
+  pointer-events: none;
+}
+.om-cover-placeholder::before {
+  content: "";
+  width: var(--motion-space-40);
+  height: var(--motion-space-40);
+  background: currentColor;
+  mask: url("../brand/loading-mark.svg") center / contain no-repeat;
+}
+.om-cover-placeholder--fill { position: absolute; inset: 0; }
 .om-gallery-poster img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* Transparent website artwork needs the same neutral backing as brand avatars. */
 .om-gallery-poster-cover { position: absolute; inset: 0; background: var(--motion-asset-logo-bg); }

@@ -10,7 +10,6 @@ import { TemplateCreators } from './TemplateCreators';
 import { templateCredit } from './templateCredits';
 import { GalleryIntro } from './GalleryIntro';
 import { BrandLogo } from "../../../packages/design-system/react/BrandLogo";
-import { GitHubLink } from './GitHubLink';
 import { GithubLogo } from '@phosphor-icons/react';
 import { templateRepositoryUrl } from './githubRepository';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
@@ -18,10 +17,13 @@ import { BrandSeriesCard, BrandStoriesDialog } from './BrandStories';
 import { discoveryInsertions, groupBrandSeries, type BrandSeries } from './brandStoryData';
 import { seriesId, seriesContext, reportSeriesCard, openSeriesView, type SeriesView } from './brandStoryTracking';
 import storyStyles from './BrandStories.module.css';
-import { isEditableTemplate, matchesTemplateCategory, type GalleryTemplate, type TemplatePage } from '../../../shared/catalog';
+import { isEditableTemplate, matchesTemplateCategory, templateWorkflow, type GalleryTemplate, type TemplatePage } from '../../../shared/catalog';
+import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
 import { templatePrompt, type IntegrationInfo } from '../../../shared/integration';
 import { useI18n } from '../i18n/I18n';
+import { RemixIcon } from '../icons/RemixIcons';
 import { motionApi } from './useWorkspace';
+import { useOptionalWorkspaceChrome } from './WorkspaceChromeContext';
 import { MotionIcon } from './icons';
 import { GalleryFilterPopover, GallerySortMenu, matchesGalleryFilters } from './GalleryFilters';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -29,6 +31,7 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { Popover } from '../components/ui/Popover';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
+import { releaseMediaElement } from '../utils/releaseMediaElement';
 import { orderedPurposes } from './templateDiscoveryTaxonomy';
 import { templateContributionUrl, templateSubmissionPrompt } from './templateContribution';
 import styles from './TemplateLibraryDialog.module.css';
@@ -73,9 +76,14 @@ function DetailMedia({ template }: { template: GalleryTemplate }) {
   const { t } = useI18n();
   const [ready, setReady] = useState(false), [waiting, setWaiting] = useState(true), [failed, setFailed] = useState(false);
   const [attempt, retry] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const element = videoRef.current;
+    return () => releaseMediaElement(element);
+  }, [template.previewUrl, attempt, failed]);
   return <div className={styles.stageMedia} style={{ aspectRatio: templateAspect(template), width: `min(100%, calc(var(--stage-media-height) * ${templateAspect(template)}))` }} aria-busy={Boolean(template.previewUrl && waiting && !failed)}>
     <TemplatePoster template={template} eager />
-    {template.previewUrl && !failed && <video key={attempt} src={template.previewUrl} controls autoPlay muted playsInline loop preload="metadata"
+    {template.previewUrl && !failed && <video ref={videoRef} key={attempt} src={template.previewUrl} controls autoPlay muted playsInline loop preload="metadata"
       style={{ opacity: ready ? 1 : 0 }} onLoadedData={() => { setReady(true); setWaiting(false); }} onPlaying={() => setWaiting(false)} onCanPlay={() => setWaiting(false)} onWaiting={() => setWaiting(true)} onStalled={() => setWaiting(true)} onPause={() => setWaiting(false)} onError={() => { setFailed(true); setWaiting(false); }} />}
     {template.previewUrl && waiting && !failed && <div className={styles.mediaLoading} role="status"><span>{t('Loading preview…')}</span><Skeleton className={styles.mediaProgress} /></div>}
     {failed && <div className={styles.mediaFailure} role="status"><span>{t('Preview unavailable. Try again.')}</span><Button variant="plain" onClick={() => { setReady(false); setWaiting(true); setFailed(false); retry(value => value + 1); }}>{t('Retry')}</Button></div>}
@@ -83,7 +91,7 @@ function DetailMedia({ template }: { template: GalleryTemplate }) {
 }
 
 
-type Props = { detailOnly?: boolean; initialTemplate?: GalleryTemplate; collection?: TemplateCollection | null; onCollectionChange?: (value: TemplateCollection | null) => void; collectionSkillOpen?: boolean; onBrowseTemplates?: () => void; onOpenSkill?: (id: string, trigger: HTMLButtonElement) => void; inWorkspace?: boolean; navigation?: ReactNode; returnFocus?: HTMLElement | null; open: boolean; busy: boolean; openingDisabled?: boolean; error: string; onClose: () => void; onOpen: (id: string) => void; creators?: boolean; creator?: string | null; onCreatorChange?: (creator: string | null) => void; templateId?: string | null; onTemplateChange?: (id: string | null) => void; projectId?: string; onPrepareTemplate?: (template: GalleryTemplate, requestId: string) => Promise<PreparedTemplateProject>; onOpenProject?: (id: string) => Promise<boolean> };
+type Props = { detailOnly?: boolean; initialTemplate?: GalleryTemplate; collection?: TemplateCollection | null; onCollectionChange?: (value: TemplateCollection | null) => void; collectionSkillOpen?: boolean; onBrowseTemplates?: () => void; onOpenSkill?: (id: string, trigger: HTMLButtonElement) => void; onStartScenario?: () => void; inWorkspace?: boolean; returnFocus?: HTMLElement | null; open: boolean; busy: boolean; openingDisabled?: boolean; error: string; onClose: () => void; onOpen: (id: string) => void; creators?: boolean; creator?: string | null; onCreatorChange?: (creator: string | null) => void; templateId?: string | null; onTemplateChange?: (id: string | null) => void; projectId?: string; onPrepareTemplate?: (template: GalleryTemplate, requestId: string) => Promise<PreparedTemplateProject>; onOpenProject?: (id: string) => Promise<boolean> };
 
 /** Full-window discovery using the existing catalog and guarded editable-project actions. */
 function DetailScroll({ enabled, container, children }: { enabled: boolean; container: RefObject<HTMLDivElement | null>; children: ReactNode }) {
@@ -92,6 +100,7 @@ function DetailScroll({ enabled, container, children }: { enabled: boolean; cont
 
 export function TemplateLibraryDialog(props: Props) {
   const { t, locale } = useI18n();
+  const chrome = useOptionalWorkspaceChrome();
   const { detailOnly = false, initialTemplate } = props;
   const [storiesPreview] = useState(() => new URLSearchParams(location.search).get('brandStoriesPreview') === '1');
   const [discoverySeed] = useState(() => Math.floor(Math.random() * 4294967296));
@@ -687,19 +696,22 @@ export function TemplateLibraryDialog(props: Props) {
       onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) confirmSearch(); }} />
     <kbd>{searchShortcut}</kbd>
   </label>;
+  const closeLabel = t(props.creators ? 'Close' : 'Close template library');
+  const searchActions = <div className="om-control-row om-gallery-header-actions">
+    {searchField}
+    <Tooltip label={closeLabel}><IconButton variant="ghost" ref={libraryClose} className="om-button om-icon-button" disabled={props.busy} onClick={props.onClose} aria-label={closeLabel} icon={<MotionIcon name="close" size={16} />} /></Tooltip>
+  </div>;
   const gallery = !detailOnly && <>
-    {(!blackFriday || props.navigation) && <div className={styles.stickyHeader}>
+    {!blackFriday && !props.creators && <div className={styles.stickyHeader}>
       <header className={styles.header}>
-        {!blackFriday && <div className="om-gallery-wordmark">{!props.inWorkspace && <BrandLogo compact />}<span className="om-gallery-page-label">{t(props.creators ? 'Creators' : 'Template library')}</span></div>}
-        {props.navigation && <fieldset className="contents" disabled={props.busy}>{props.navigation}</fieldset>}
-        {!blackFriday && <div className="om-control-row om-gallery-header-actions">
-          {searchField}
-          <GitHubLink className="om-button" />
-          <Tooltip label={t('Close template library')}><IconButton variant="ghost" ref={libraryClose} className="om-button om-icon-button" disabled={props.busy} onClick={props.onClose} aria-label={t('Close template library')} icon={<MotionIcon name="close" size={16} />} /></Tooltip>
-        </div>}
+        <div className="om-gallery-wordmark">
+          {!props.inWorkspace && <BrandLogo compact />}
+          <span className={`om-gallery-page-label${props.inWorkspace ? ' om-gallery-title' : ''}`}>{t('Template library')}</span>
+        </div>
+        {searchActions}
       </header>
-      {!props.creators && !blackFriday && <div className={styles.toolbar}>
-        <CategoryStrip label="Video purpose" selection={brandsOnly ? 'top-100-brands' : selected.uses?.join('|')}>
+      <div className={styles.toolbar}>
+        <CategoryStrip label="Video purpose" selection={brandsOnly ? 'top-100-brands' : selected.uses?.join('|')} plainArrows>
           <Button type="button" variant="ghost" className="om-button om-filter-pill" aria-pressed={!brandsOnly && !selected.uses?.length} onClick={() => chooseCategory('uses', undefined)}>{t('All')}</Button>
           <Button type="button" variant="ghost" className="om-button om-filter-pill" aria-label={t('TOP 100 brands')} aria-pressed={brandsOnly} onClick={() => chooseBrands(true)}><TopBrandsLabel /></Button>
           {categories.map(value => <Button type="button" variant="ghost" className="om-button om-filter-pill" key={value} aria-pressed={selected.uses?.includes(value) ?? false} onClick={() => chooseCategory('uses', value)}>{t(value)}</Button>)}
@@ -715,8 +727,8 @@ export function TemplateLibraryDialog(props: Props) {
             renderValue={(key, value) => key === 'brand' ? <Identity template={catalog.find(item => item.brand === value)!} brand /> : null} />
           <GallerySortMenu value={sort} options={sortOptions} onChange={changeSort} />
         </div>
-      </div>}
-      {!props.creators && !blackFriday && hasFilters && <div className={styles.chips}>{format && <Button variant="plain" onClick={() => props.onCollectionChange?.(null)} aria-label={t('Remove filter {value}', { value: t(formatCategories[format]) })}>{t(formatCategories[format])}<MotionIcon name="close" size={12} /></Button>}{brandsOnly && <Button variant="plain" onClick={() => chooseBrands(false)} aria-label={t('Remove filter {value}', { value: t('TOP 100 brands') })}>{t('TOP 100 brands')}<MotionIcon name="close" size={12} /></Button>}{query && <Button variant="plain" onClick={clearSearch} aria-label={t('Remove filter {value}', { value: query })}><MotionIcon name="search" size={12} />{query}<MotionIcon name="close" size={12} /></Button>}{facets.flatMap(([key]) => (selected[key] ?? []).map(value => <Button variant="plain" key={key + value} onClick={() => toggle(key, value)} aria-label={t('Remove filter {value}', { value: t(value) })}>{key === 'brand' ? value : t(value)}<MotionIcon name="close" size={12} /></Button>))}{compareWithout && <Button variant="plain" onClick={() => setCompareWithout('')}>{t('Excluding {brand}', { brand: compareWithout })}<MotionIcon name="close" size={12} /></Button>}{editableOnly && <Button variant="plain" onClick={() => toggleEditable(false)}>{t('Ready to edit')}<MotionIcon name="close" size={12} /></Button>}{hasAppliedFilters && <Button variant="plain" onClick={reset}>{t('Clear filters')}</Button>}<span>{t('{count} templates', { count: visible.length })}</span></div>}
+      </div>
+      {hasFilters && <div className={styles.chips}>{format && <Button variant="plain" onClick={() => props.onCollectionChange?.(null)} aria-label={t('Remove filter {value}', { value: t(formatCategories[format]) })}>{t(formatCategories[format])}<MotionIcon name="close" size={12} /></Button>}{brandsOnly && <Button variant="plain" onClick={() => chooseBrands(false)} aria-label={t('Remove filter {value}', { value: t('TOP 100 brands') })}>{t('TOP 100 brands')}<MotionIcon name="close" size={12} /></Button>}{query && <Button variant="plain" onClick={clearSearch} aria-label={t('Remove filter {value}', { value: query })}><MotionIcon name="search" size={12} />{query}<MotionIcon name="close" size={12} /></Button>}{facets.flatMap(([key]) => (selected[key] ?? []).map(value => <Button variant="plain" key={key + value} onClick={() => toggle(key, value)} aria-label={t('Remove filter {value}', { value: t(value) })}>{key === 'brand' ? value : t(value)}<MotionIcon name="close" size={12} /></Button>))}{compareWithout && <Button variant="plain" onClick={() => setCompareWithout('')}>{t('Excluding {brand}', { brand: compareWithout })}<MotionIcon name="close" size={12} /></Button>}{editableOnly && <Button variant="plain" onClick={() => toggleEditable(false)}>{t('Ready to edit')}<MotionIcon name="close" size={12} /></Button>}{hasAppliedFilters && <Button variant="plain" onClick={reset}>{t('Clear filters')}</Button>}<span>{t('{count} templates', { count: visible.length })}</span></div>}
     </div>}
     {blackFriday && !props.creators ? <BlackFridayCollection templates={campaignItems}
       featuredPreviewsEnabled={props.open && !preview && !props.collectionSkillOpen} onBack={props.onClose}
@@ -725,13 +737,13 @@ export function TemplateLibraryDialog(props: Props) {
         <TemplateSearchRecovery visible expanded query={campaignQuery} context={listContext()} reason="no_results"
           onExpand={expandSearchRecovery} onActivity={searchRecoveryActivity} showToast={(message, kind) => showToast(message, kind, 'feedback')} />
       </div>}
-      active={active} onPreview={openCard} onPriority={setPriority} onOpenSkill={props.onOpenSkill} />
-    : props.creators ? <TemplateCreators catalog={catalog} creator={props.creator ?? null} query={query} works={visible} loading={loading}
+      active={active} onPreview={openCard} onPriority={setPriority} onOpenSkill={props.onOpenSkill} onStartScenario={props.onStartScenario} />
+    : props.creators ? <TemplateCreators catalog={catalog} creator={props.creator ?? null} query={query} searchActions={searchActions} works={visible} loading={loading}
       error={error} retry={() => retry(value => value + 1)} choose={chooseCreator} open={openCard} active={active} onPriority={setPriority} /> :
     <main className={styles.results} aria-busy={loading}>
       {missingTemplate && <div className={styles.empty} role="alert"><p>{t('This template is no longer available.')}</p><Button variant="plain" onClick={closeDetail}>{t('View all templates')}</Button></div>}
       <div className={storiesPreview && brandsOnly ? storyStyles.brandGrid : styles.grid}>
-        {!showEmptyRecovery && <GalleryIntro eyebrow={storiesPreview && brandsOnly ? t('TOP 100 / Brand series') : t('Made to move.')} title={storiesPreview && brandsOnly ? t('Find ideas for your next launch.') : t('Find your next motion.')} description={storiesPreview && brandsOnly ? t('Browse by brand and follow their launches over time. Pick a video and make it your own.') : t('Explore the details. Find a direction. Make it your own.')} count={loading && !catalog.length ? t('Loading templates…') : storiesPreview && brandsOnly ? t('{brands} brands · {works} works', { brands: visibleBrandGroups.length, works: visible.length }) : t('{count} templates', { count: visible.length })} disabled={!visible.length || loading} onSurprise={surprise} submitLabel={t('Submit video')} submitUrl={templateContributionUrl} onSubmit={() => tracking.reportDiscoveryClick('submit_video', listContext())}
+        {!showEmptyRecovery && <GalleryIntro eyebrow={storiesPreview && brandsOnly ? t('TOP 100 / Brand series') : t('Made to move.')} title={storiesPreview && brandsOnly ? t('Find ideas for your next launch.') : t('Find your next motion.')} description={storiesPreview && brandsOnly ? t('Browse by brand and follow their launches over time. Pick a video and make it your own.') : t('Explore the details. Find a direction. Make it your own.')} count={loading && !catalog.length ? t('Loading templates…') : storiesPreview && brandsOnly ? t('{brands} brands · {works} works', { brands: visibleBrandGroups.length, works: visible.length }) : t('{count} templates', { count: visible.length })} disabled={!visible.length || loading} onSurprise={surprise} submitLabel={t('Submit template')} submitUrl={templateContributionUrl} onSubmit={() => tracking.reportDiscoveryClick('submit_video', listContext())}
           afterActions={!query.trim() && <div className={`om-media-detail-actions ${styles.referenceEntry}`}>
             <span className={styles.referenceEntryLabel}>{t('Nothing suitable?')}</span>
             <Button variant="ghost" type="button" className="om-button h-auto" data-reference-entry="library_home" aria-haspopup="dialog" aria-label={t('Paste a video link to make your own')} onClick={event => {
@@ -826,6 +838,7 @@ export function TemplateLibraryDialog(props: Props) {
             </header>{(manualCopy ? <textarea className={styles.manualCopy} readOnly rows={8} value={manualCopy} aria-label={t('Content to copy')} onFocus={event => event.currentTarget.select()} /> : prompt ? <p className={promptExpanded ? styles.fullInstruction : styles.shortInstruction}>{prompt}</p> : promptError ? <div className={styles.promptFailure} role="status">{t('Could not load the instruction.')}<Button variant="plain" onClick={() => retryPrompt(value => value + 1)}>{t('Retry')}</Button></div> : <div className={styles.promptSkeleton} role="status" aria-label={t('Loading instruction…')}>{[100, 94, 100, 86, 62].map((width, index) => <Skeleton key={index} style={{ width: `${width}%`, height: 10 }} />)}</div>)}<Button variant="plain" disabled={!prompt} className={`om-text-link ${styles.expandInstruction}`} data-quiet aria-expanded={promptExpanded} onClick={() => { tracking.reportInstructionExpanded(preview, !promptExpanded, detailView.current); setPromptExpanded(!promptExpanded); }}>{t(promptExpanded ? 'Show less' : 'Show instruction')}<MotionIcon name="chevron-down" size={14} /></Button></section>
             {!handoffPreview && <div className={styles.actions}>
               {isEditableTemplate(preview) && <Button variant="ghost" className="om-button h-auto" data-primary disabled={props.busy || props.openingDisabled} onClick={() => { tracking.reportUseClicked(preview, 'open_edit', detailView.current); closeDetail(); props.onOpen(preview.id); }}>{t('Open and edit')}<MotionIcon name="arrow-up-right" size={16} /></Button>}
+              {chrome?.openInSuperAgent && <Button variant="ghost" className="om-button h-auto" onClick={() => { openLatest.current = false; detail.current?.close(); dialog.current?.close(); chrome.openInSuperAgent!(buildSuperAgentHandoff({ kind: 'motion-template', id: preview.id, title: preview.title, subtitle: preview.subtitle || preview.collection, previewUrl: preview.posterUrl, workflow: templateWorkflow(preview), tags: preview.tags }, { prompt: prompt || undefined, locale })); }}><RemixIcon name="sparkling-line" size={16} />{t('Run in Super Agent')}</Button>}
               <div className={styles.recreateActions}>
                 <Button variant="ghost" className="om-button h-auto" data-primary disabled={!prompt} onClick={() => void copy()}>{t('Recreate template')}<MotionIcon name="sparkles" size={16} /></Button>
                 <Tooltip withinDialog wrap label={t('Recreate and submit')}><IconButton variant="plain" className={`om-button ${styles.submitTemplate}`} disabled={!prompt} onClick={() => void copy(true)} aria-label={t('Recreate and submit')} icon={<MotionIcon name="git-branch" size={17} />} /></Tooltip>
@@ -852,6 +865,7 @@ export function TemplateLibraryDialog(props: Props) {
           {handoffPreview && <div ref={reviewFooter} className={styles.reviewFooter} role="group" aria-label={t('Template actions')}>
               <div className={styles.handoffActions}>
                 {isEditableTemplate(preview) && <><p>{t('A separate project keeps your current work intact. Replace the sample content after opening.')}</p><Button variant="ghost" className="om-button h-auto" data-primary disabled={props.busy || props.openingDisabled || ['creating', 'opening', 'unknown'].includes(projectProgress[preview.id]?.state)} onClick={() => void prepareProject(preview)}>{t(projectProgress[preview.id]?.state === 'creating' ? 'Creating project…' : projectProgress[preview.id]?.state === 'opening' ? 'Opening project…' : projectProgress[preview.id]?.result ? 'Continue editing this project' : 'Open and edit')}<MotionIcon name="arrow-up-right" size={16} /></Button></>}
+                {chrome?.openInSuperAgent && <Button variant="ghost" className="om-button h-auto" onClick={() => { openLatest.current = false; detail.current?.close(); dialog.current?.close(); chrome.openInSuperAgent!(buildSuperAgentHandoff({ kind: 'motion-template', id: preview.id, title: preview.title, subtitle: preview.subtitle || preview.collection, previewUrl: preview.posterUrl, workflow: templateWorkflow(preview), tags: preview.tags }, { prompt: prompt || undefined, locale })); }}><RemixIcon name="sparkling-line" size={16} />{t('Run in Super Agent')}</Button>}
                 <div className={styles.recreateActions}>
                   <Button variant="ghost" className="om-button h-auto" data-primary={!isEditableTemplate(preview) || undefined} disabled={!prompt} onClick={() => void copy()}>{t('Recreate this template')}<MotionIcon name="sparkles" size={16} /></Button>
                   <Tooltip withinDialog wrap label={t('Contribute a template')} description={t('Copy contribution instructions for source, a preview and credits.')}>
@@ -872,7 +886,7 @@ export function TemplateLibraryDialog(props: Props) {
     {props.open && <StudioToastViewport toasts={toasts} dismissToast={dismissToast} />}
   </>;
   if (detailOnly) return <div className={styles.library} style={{ display: 'contents' }} data-motion-template-detail="">{previewDialog}</div>;
-  return <dialog ref={dialog} open={props.inWorkspace ? props.open : undefined} role={props.inWorkspace ? "region" : undefined} className={styles.library} data-workspace-gallery={props.inWorkspace || undefined} data-motion-template-library="" aria-label={t('Template library')} onKeyDown={event => {
+  return <dialog ref={dialog} open={props.inWorkspace ? props.open : undefined} role={props.inWorkspace ? "region" : undefined} className={styles.library} data-workspace-gallery={props.inWorkspace || undefined} data-motion-template-library="" aria-label={t(props.creators ? 'Creators' : 'Template library')} onKeyDown={event => {
     event.stopPropagation();
     if (props.inWorkspace && event.key === 'Escape' && !event.defaultPrevented && !props.busy && !preview && !filtersOpen && event.target instanceof Element && event.target.closest('dialog') === dialog.current) {
       event.preventDefault();

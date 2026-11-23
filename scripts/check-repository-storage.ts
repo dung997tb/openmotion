@@ -46,7 +46,7 @@ export function checkRepositoryStorage(cwd: string, base?: string, options: { fi
   for (const entry of entries) {
     const size = sizes.get(entry.oid)!;
     gitBytes += size;
-    if (skillPreviewMedia.test(entry.name)) errors.push(`${entry.name}: Skill previews are hosted. Use Prepare and merge PR to transfer the animation, or ship a WebP poster by itself.`);
+    if (skillPreviewMedia.test(entry.name)) errors.push(`${entry.name}: Skill previews are hosted. Use Prepare and merge PR to transfer skill cover media.`);
     if (size > maxGitFileBytes && changed.has(entry.name)) errors.push(`${entry.name}: staged ordinary Git file exceeds 1 MiB; use LFS or Prepare and merge PR`);
     const bytes = contents.get(entry.oid), pointer = bytes && lfsPointer(bytes);
     if (filters.get(entry.name) !== 'lfs' && !pointer && !bytes?.toString().startsWith('version https://git-lfs.github.com/spec/v1')) continue;

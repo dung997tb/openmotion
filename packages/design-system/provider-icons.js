@@ -280,6 +280,7 @@ export function modelBrandId(modelId) {
 /** @type {Array<[RegExp, string]>} */
 const mediaFamilies = [
   [/^(?:bytedance\/|doubao-)?seedance(?:[-/.]|$)/, 'bytedance'],
+  [/^(?:bytedance\/|doubao-)?seedream(?:[-/.]|$)/, 'bytedance'],
   [/^(?:google\/)?nano-banana(?:[-/.]|$)/, 'nano-banana'],
   [/^(?:google\/)?veo(?:[-/.0-9]|$)/, 'google'],
   [/^(?:fal-ai\/)?flux(?:[-/.]|$)/, 'flux'],

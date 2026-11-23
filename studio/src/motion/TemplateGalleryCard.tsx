@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isEditableTemplate, type GalleryTemplate } from '../../../shared/catalog';
 import { useI18n } from '../i18n/I18n';
 import { Skeleton } from '../components/ui/Skeleton';
+import { CoverPlaceholder } from '../components/ui/CoverPlaceholder';
 import { MotionIcon } from './icons';
 import { BrandArtworkImage } from './BrandArtworkImage';
 import { templateAspect } from './templateDiscovery';
@@ -49,21 +50,23 @@ export function TemplateSourceLink({ template, className }: { template: GalleryT
   </a>;
 }
 
-export function TemplatePoster({ template, eager = false, coverUrl }: { template: Pick<GalleryTemplate, 'posterUrl' | 'title'>; eager?: boolean; coverUrl?: string }) {
+export function TemplatePoster({ template, eager = false, coverUrl, brandedFallback = false }: { template: Pick<GalleryTemplate, 'posterUrl' | 'title'>; eager?: boolean; coverUrl?: string; brandedFallback?: boolean }) {
   const [loaded, setLoaded] = useState(false), [failed, setFailed] = useState(false);
   const [loadedCover, setLoadedCover] = useState<string>(), [failedCover, setFailedCover] = useState<string>();
   const usingCover = Boolean(coverUrl && coverUrl !== failedCover);
   const coverLoaded = Boolean(usingCover && loadedCover === coverUrl);
-  return <div className="om-gallery-poster" data-loaded={usingCover ? coverLoaded : loaded}>
-    {usingCover ? (!coverLoaded && <Skeleton className="om-gallery-poster-skeleton" />) : (!loaded && !failed && template.posterUrl && <Skeleton className="om-gallery-poster-skeleton" animated={false} />)}
-    {!usingCover && (!template.posterUrl || failed) && <div className="om-gallery-poster-fallback"><MotionIcon name="film" size={26} /><span>{template.title}</span></div>}
+  const posterReady = usingCover ? coverLoaded : loaded;
+  return <div className="om-gallery-poster" data-loaded={posterReady}>
+    {brandedFallback && !posterReady && <CoverPlaceholder fill />}
+    {!brandedFallback && (usingCover ? (!coverLoaded && <Skeleton className="om-gallery-poster-skeleton" />) : (!loaded && !failed && template.posterUrl && <Skeleton className="om-gallery-poster-skeleton" animated={false} />))}
+    {!brandedFallback && !usingCover && (!template.posterUrl || failed) && <div className="om-gallery-poster-fallback"><MotionIcon name="film" size={26} /><span>{template.title}</span></div>}
     {!usingCover && template.posterUrl && !failed && <img src={template.posterUrl} alt="" loading={eager ? 'eager' : 'lazy'} decoding="async" onLoad={() => setLoaded(true)} onError={() => setFailed(true)} style={{ opacity: loaded ? 1 : 0 }} />}
     {usingCover && coverUrl && <BrandArtworkImage className="om-gallery-poster-cover" channel="cover" src={coverUrl} alt="" onLoad={() => setLoadedCover(coverUrl)} onError={() => setFailedCover(coverUrl)} style={{ opacity: coverLoaded ? 1 : 0 }} />}
   </div>;
 }
 
 export const TemplateGalleryCard = memo(function TemplateGalleryCard({
-  template, onSelect, active, onPriority, playbackId, footer, brandCredit = false, resourceKind = 'template', animatedPreview, coverUrl, showAvatar = true, showCoverDuration = true,
+  template, onSelect, active, onPriority, playbackId, footer, brandCredit = false, resourceKind = 'template', animatedPreview, coverUrl, showAvatar = true, showCoverDuration = true, brandedFallback = false,
 }: {
   template: GalleryTemplate;
   onSelect: (template: GalleryTemplate, trigger: HTMLButtonElement) => void;
@@ -77,6 +80,7 @@ export const TemplateGalleryCard = memo(function TemplateGalleryCard({
   coverUrl?: string;
   showAvatar?: boolean;
   showCoverDuration?: boolean;
+  brandedFallback?: boolean;
 }) {
   const { t } = useI18n();
   const video = useRef<HTMLVideoElement>(null);
@@ -106,7 +110,7 @@ export const TemplateGalleryCard = memo(function TemplateGalleryCard({
     <Button variant="plain" className="motion-gallery-card-cover om-gallery-cover" style={{ aspectRatio: templateAspect(template) }} onClick={event => onSelect(template, event.currentTarget)}
       onMouseEnter={() => onPriority(playbackId ?? template.id)} onMouseLeave={() => onPriority(null)} onFocus={() => onPriority(playbackId ?? template.id)} onBlur={() => onPriority(null)}
       aria-label={t(resourceKind === 'brand-kit' ? 'Preview Brand Kit {title}' : 'Preview template {title}', { title: template.title })}>
-      <TemplatePoster key={template.posterUrl} template={template} coverUrl={coverUrl} />
+      <TemplatePoster key={template.posterUrl} template={template} coverUrl={coverUrl} brandedFallback={brandedFallback} />
       {template.previewUrl && <video ref={video} muted playsInline loop preload="none" aria-hidden="true" onPlaying={() => setPlaying(true)} onError={() => { setFailed(true); setPlaying(false); }} style={{ opacity: active && playing ? 1 : 0 }} />}
       {animatedPreview && active && animate && <iframe className="om-gallery-animation" src={animatedPreview} loading="lazy" sandbox="allow-scripts" title={template.title} tabIndex={-1} aria-hidden="true" />}
       <span className="om-gallery-card-shade" />

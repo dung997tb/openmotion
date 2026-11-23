@@ -157,6 +157,9 @@ export async function uploadLibraryAsset(
 ): Promise<LibraryAsset> {
   if (file.size > MAX_ASSET_BYTES) throw new AssetUploadError('rejected', 'size');
   if (!file.size) throw new AssetUploadError('rejected', 'unreadable');
+  if (file.type === 'image/svg+xml' || /\.svgz?$/i.test(file.name)) {
+    throw new AssetUploadError('rejected', 'unsupported');
+  }
   const requestId = crypto.randomUUID();
   const mimeType = file.type || 'application/octet-stream';
   const ticketBody = JSON.stringify({

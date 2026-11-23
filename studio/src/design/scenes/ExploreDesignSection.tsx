@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import { RemixIcon } from '../../../../packages/design-system/react/RemixIcons';
-import { designBriefPrompt, designScenarios, findDesignScenario, type DesignScenarioId, type DesignTemplateSummary } from '../../../../shared/design-project';
+import { designBriefPrompt, designScenarios, findDesignScenario, type DesignTemplateSummary } from '../../../../shared/design-project';
 import { StudioToastViewport } from '../../components/StudioToastViewport';
 import { useToast } from '../../hooks/useToast';
 import { useI18n } from '../../i18n/I18n';
+import { reportCreativeClick } from '../../motion/exploreTracking';
 import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { designClient } from '../designClient';
 import { DesignTemplateDetailModal } from '../DesignTemplateDetailModal';
@@ -16,9 +17,11 @@ import '../design.css';
  * Design Studio HTML scenarios and live-preview starter template shelf embedded in Explore.
  */
 export function ExploreDesignSection({
+  active = true,
   onSelectDesignScene,
   onOpenProject,
 }: {
+  active?: boolean;
   onSelectDesignScene: (scene: DesignTabId) => void;
   onOpenProject: (projectId: string) => void;
 }) {
@@ -27,6 +30,8 @@ export function ExploreDesignSection({
   const toast = useToast();
   const [templates, setTemplates] = useState<DesignTemplateSummary[]>([]);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const [remixing, setRemixing] = useState(false);
+  const previewTrigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -36,12 +41,29 @@ export function ExploreDesignSection({
     return () => { active = false; };
   }, []);
 
+  const openPreview = (index: number, trigger: HTMLButtonElement) => {
+    const template = templates[index];
+    previewTrigger.current = trigger;
+    setPreviewIdx(index);
+    reportCreativeClick('explore', 'explore_collection', 'open_template', { studio: 'design', collection: 'design', scene: template.scenario, template: template.id });
+  };
+
+  const closePreview = () => {
+    setPreviewIdx(null);
+    requestAnimationFrame(() => previewTrigger.current?.focus({ preventScroll: true }));
+  };
+
   const remix = async (tpl: DesignTemplateSummary) => {
+    if (remixing) return;
+    setRemixing(true);
     try {
-      const { project } = await designClient.createProject({ scenario: tpl.scenario as DesignScenarioId, templateId: tpl.id });
+      const { project } = await designClient.createProject({ scenario: tpl.scenario, templateId: tpl.id });
+      setPreviewIdx(null);
       onOpenProject(project.id);
     } catch {
-      onSelectDesignScene(tpl.scenario);
+      toast.showToast(t('Could not create project'), 'error', 'feedback');
+    } finally {
+      setRemixing(false);
     }
   };
 
@@ -56,10 +78,10 @@ export function ExploreDesignSection({
     try {
       await navigator.clipboard.writeText(prompt);
       toast.showToast(t('Copied. Paste into your Agent.'), 'info', 'feedback');
+      closePreview();
     } catch {
-      onSelectDesignScene(tpl.scenario);
+      toast.showToast(t('Copy failed'), 'error', 'feedback');
     }
-    setPreviewIdx(null);
   };
 
   return (
@@ -102,21 +124,37 @@ export function ExploreDesignSection({
             {templates.slice(0, 8).map((tpl, idx) => {
               const scen = findDesignScenario(tpl.scenario);
               return (
-                <article key={tpl.id} className="om-design-card" data-design-template={tpl.id}>
-                  <div style={{ cursor: 'pointer' }} onClick={() => setPreviewIdx(idx)}>
+                <article key={tpl.id} className="om-design-card om-design-gallery-card" data-design-template={tpl.id} onClick={event => {
+                  if (event.target instanceof Element && event.target.closest('button')) return;
+                  event.currentTarget.querySelector<HTMLButtonElement>('.om-design-card-open')?.click();
+                }}>
+                  <div className="om-design-explore-cover">
                     <ScaledPreviewThumb
+                      key={tpl.previewUrl}
+                      active={active && previewIdx === null}
+                      brandedFallback
                       src={tpl.previewUrl}
                       title={tpl.title}
                       badge={scen ? t(scen.label) : tpl.scenario}
                     />
+                    <Button
+                      type="button"
+                      size="md"
+                      variant="ghost"
+                      className="om-button om-design-gallery-action om-design-explore-use"
+                      data-primary="media"
+                      data-blurred=""
+                      disabled={remixing}
+                      onClick={() => void remix(tpl)}
+                    >
+                      {t('Use')}
+                    </Button>
                   </div>
                   <div className="om-design-card-body">
-                    <strong className="om-design-card-title" style={{ cursor: 'pointer' }} onClick={() => setPreviewIdx(idx)}>{tpl.title}</strong>
+                    <Button type="button" variant="plain" className="om-design-card-open" onClick={event => openPreview(idx, event.currentTarget)}>
+                      <strong className="om-design-card-title">{tpl.title}</strong>
+                    </Button>
                     <p className="om-design-card-desc">{tpl.description}</p>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
-                      <Button type="button" size="sm" variant="primary" onClick={() => onSelectDesignScene(tpl.scenario)}>{t('Try')}</Button>
-                      <Button type="button" size="sm" variant="secondary" onClick={() => void remix(tpl)}>{t('Remix')}</Button>
-                    </div>
                   </div>
                 </article>
               );
@@ -129,9 +167,10 @@ export function ExploreDesignSection({
         <DesignTemplateDetailModal
           templates={templates.slice(0, 8)}
           index={previewIdx}
+          remixing={remixing}
           onNavigate={setPreviewIdx}
-          onClose={() => setPreviewIdx(null)}
-          onRemix={tpl => { void remix(tpl); setPreviewIdx(null); }}
+          onClose={closePreview}
+          onRemix={tpl => { void remix(tpl); }}
           onUseWithAgent={tpl => { void useWithAgent(tpl); }}
         />
       )}
