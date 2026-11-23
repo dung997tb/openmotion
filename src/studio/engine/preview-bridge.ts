@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { PREVIEW_FIRST_FRAME } from './preview-first-frame.ts';
 import { PREVIEW_ASSET_READINESS } from './preview-asset-readiness.ts';
 import { PREVIEW_INSPECTOR } from './preview-inspector.ts';
+import { PREVIEW_INSPECTOR_STYLES } from './preview-inspector-styles.ts';
 import { PREVIEW_TIMELINE_MANIFEST } from './preview-timeline-manifest.ts';
 import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
@@ -88,6 +89,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   ${PREVIEW_INLINE_TEXT}
   ${PREVIEW_PEER_TIMING}
   ${PREVIEW_INSPECTOR}
+  ${PREVIEW_INSPECTOR_STYLES}
   ${PREVIEW_LAYERS}
   ${PREVIEW_THUMBNAIL_CAPTURE}
   function respond(requestId,result,error,transfer){
@@ -140,6 +142,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         respond(requestId,canvas?{sourceFile:compositionPath,fit:canvas.getAttribute('data-canvas-fit')==='cover'?'cover':'contain'}:null); return;
       }
       if(message.type==='inspect-element'){ respond(requestId,inspectPreviewElement(message)); return; }
+      if(message.type==='inspector-styles'){
+        if(settings.studioOrigin && settings.studioOrigin === event.origin) previewInspectorStyles(message);
+        return;
+      }
       if(message.type==='layer-tree'){ previewLayerTree(message); return; }
       if(message.type==='layer-family'){ respond(requestId,previewLayerFamily(message)); return; }
       if(message.type==='layer-select'){ respond(requestId,selectPreviewLayer(message)); return; }
