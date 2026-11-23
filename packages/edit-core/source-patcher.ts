@@ -251,10 +251,13 @@ function replaceTagAtMatch(html: string, match: TagMatch, newTag: string): strin
   return `${html.slice(0, match.start)}${newTag}${html.slice(match.end)}`;
 }
 
-function findTagByAttribute(html: string, name: string, value: string): TagMatch | null {
+function findTagByAttribute(html: string, name: string, value?: string, selectorIndex = 0): TagMatch | null {
+  let index = 0;
   const found = scanHtmlOpeningTags(html).find((tag) => {
     const attr = tag.attributes.find((attr) => attr.name === name);
-    return tag.closed && attr?.kind === "value" && decodeAuthoredAttribute(attr.value) === value;
+    if (!tag.closed || !attr) return false;
+    const actualValue = attr.kind === "value" ? decodeAuthoredAttribute(attr.value) : "";
+    return (value === undefined || actualValue === value) && index++ === selectorIndex;
   });
   return found
     ? { tag: html.slice(found.start, found.bodyEnd), start: found.start, end: found.bodyEnd }
@@ -277,6 +280,18 @@ function findTagByClass(html: string, target: PatchTarget): TagMatch | null {
     : null;
 }
 
+// Studio emits a single class or a simple attribute selector for elements without an id.
+const SIMPLE_ATTRIBUTE_SELECTOR = /^\[\s*([\w:.-]+)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s\]"']+))\s*)?\]$/;
+const CSS_ESCAPE = /\\(?:([\da-fA-F]{1,6})\s?|(.))/g;
+
+function decodeCssEscape(_escape: string, hex: string | undefined, literal: string): string {
+  if (!hex) return literal;
+  const code = parseInt(hex, 16);
+  return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+    ? String.fromCodePoint(code)
+    : "\uFFFD";
+}
+
 export function findTagByTarget(html: string, target: PatchTarget): TagMatch | null {
   if (target.hfId) {
     const result = findTagByAttribute(html, "data-hf-id", target.hfId);
@@ -290,10 +305,10 @@ export function findTagByTarget(html: string, target: PatchTarget): TagMatch | n
 
   if (!target.selector) return null;
 
-  const compositionIdMatch = target.selector.match(/^\[data-composition-id="([^"]+)"\]$/);
-  if (compositionIdMatch) {
-    const result = findTagByAttribute(html, "data-composition-id", compositionIdMatch[1]);
-    if (result) return result;
+  const attribute = target.selector.match(SIMPLE_ATTRIBUTE_SELECTOR);
+  if (attribute) {
+    const value = attribute[2] ?? attribute[3] ?? attribute[4];
+    return findTagByAttribute(html, attribute[1]!.toLowerCase(), value?.replace(CSS_ESCAPE, decodeCssEscape), target.selectorIndex);
   }
 
   return findTagByClass(html, target);

@@ -87,3 +87,19 @@ test('a pasted subtree cannot take a sibling’s original id when generating a n
   assert.equal(document.querySelector('section')?.id, 'cover-3');
   assert.equal(document.querySelector('section > div')?.id, 'cover-2');
 });
+
+test('pasting after an attribute-selected wrapper keeps the selected occurrence and its parent', () => {
+  const source = `<main data-composition-id="main">
+    <section data-hf-group='A &quot;B&quot;' data-anchor></section>
+    <aside><section data-hf-group='A &quot;B&quot;' data-anchor><b>Original</b></section><footer></footer></aside>
+  </main>`;
+  for (const originSelector of ['[data-hf-group="A \\"B\\""]', '[data-anchor]']) {
+    const html = applyContentCommand(source, {
+      kind: 'pasteElement', compositionPath, start: 0,
+      html: '<section id="copy"><b>Copy</b></section>', originSelector, originSelectorIndex: 1,
+    });
+    const document = parseSourceDocument(html).document;
+    assert.equal(document.querySelector('aside > section + #copy + footer')?.localName, 'footer');
+    assert.equal(document.querySelector('aside > section > b')?.textContent, 'Original');
+  }
+});
