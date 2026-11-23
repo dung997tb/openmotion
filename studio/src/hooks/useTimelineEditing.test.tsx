@@ -1,3 +1,4 @@
+import { moveClip as moveClipWithAnimations } from "../../../packages/edit-core";
 // fallow-ignore-file code-duplication
 // @vitest-environment happy-dom
 
@@ -504,6 +505,22 @@ describe("useTimelineEditing timeline z-index reorder", () => {
     expect(write).toHaveBeenCalled();
     expect(usePlayerStore.getState().elements[0]).toMatchObject({ start: updates.start, duration: updates.duration });
     hook.unmount();
+  });
+
+  it("repairs a tween the SDK left in place before publishing a move candidate", async () => {
+    const source = ROOT_DURATION_FALLBACK_SOURCE.replace("</div>\n</div>",
+      '<span class="word"></span></div><script>const tl=gsap.timeline();tl.to(".word",{x:20},0.5);</script></div>');
+    const session = await openComposition(source);
+    try {
+      // Model an SDK version that changes the clip timing but leaves its tween untouched.
+      vi.spyOn(session, "setTiming").mockImplementation(() => {
+        session.applyPatches([{ op: "replace", path: "/elements/hf-clip/timing/start", value: 1 }]);
+      });
+      moveClipWithAnimations(session, { kind: "moveClip", hfId: "hf-clip", start: 1 }, source);
+      expect(session.serialize()).toContain('tl.to(".word",{x:20},1.5)');
+    } finally {
+      session.dispose();
+    }
   });
 
   it("shows a cloud move before the save completes and sends just the move command", async () => {

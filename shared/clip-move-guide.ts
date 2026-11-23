@@ -1,0 +1,3 @@
+export const clipMoveLimits = "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.";
+export const clipMoveInstruction = "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.";
+export const clipMoveExample = 'openmotion_edit_project({"projectId":"<projectId>","expectedRevision":"<revision>","expectedVersionId":"<currentVersionId>","requestId":"<unique-request-id>","edit":{"kind":"moveClip","compositionPath":"index.html","hfId":"<data-hf-id>","start":5}})';

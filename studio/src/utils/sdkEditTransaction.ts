@@ -190,14 +190,14 @@ function candidatePublisherAvailable(
 async function buildCandidateEdit(
   live: Composition,
   deps: CutoverDeps,
-  mutate: (candidate: Composition) => void,
+  mutate: (candidate: Composition, source: string) => void,
   sourceSnapshot?: string,
 ): Promise<CandidateEdit | CutoverResult> {
   let candidate: Composition | undefined;
   try {
     const serializedBefore = sourceSnapshot ?? live.serialize();
     candidate = await createCandidateSession(serializedBefore, live, deps);
-    candidate.batch(() => mutate(candidate!));
+    candidate.batch(() => mutate(candidate!, serializedBefore));
     const after = candidate.serialize();
     if (after === serializedBefore) {
       disposeCandidate(candidate, live);
@@ -329,7 +329,7 @@ export async function persistSdkCandidateMutation(
   targetPath: string,
   originalContent: string,
   deps: CutoverDeps,
-  mutate: (candidate: Composition) => void,
+  mutate: (candidate: Composition, source: string) => void,
   options?: CutoverOptions,
   sourceSnapshot?: string,
 ): Promise<CutoverResult> {

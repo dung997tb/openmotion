@@ -172,7 +172,7 @@ openmotion_edit_project and openmotion_restore_version accept the same optional 
 
 ### openmotion_edit_project
 
-必填 projectId、requestId、expectedRevision、expectedVersionId、files=[{path,content}]；可选 requirements、summary。只保存宿主已生成的文本，不启动第二个创作 Agent。requirements 存在工程受版本管理的元数据中，与文件一起提交。
+所有写入都需要 projectId、requestId、expectedRevision 和 expectedVersionId。批量保存文本时传 files=[{path,content}]，可附 requirements 和 summary。只保存宿主已生成的文本，不启动第二个创作 Agent。requirements 存在工程受版本管理的元数据中，与文件一起提交。
 
 返回 projectId、version、revision、changed、changedFiles、previewSync。无内容变化返回 changed=false，不造空版本。Studio 已打开时返回 file_watcher_notified，这不是已观测到每个画面刷新完成的证明。路径/类型/体积/并发失败时拒绝或回滚整批；恢复冲突保留现场并阻塞覆盖。
 
@@ -312,6 +312,16 @@ For NEW generated media, use openmotion_media_use inspect/reference/models to di
 `openmotion_edit_project` accepts optional `namingLanguage` and `assetNames: [{path, name}]` with its existing `expectedRevision`, `expectedVersionId` and stable `requestId` guards. Use `files: []` for a metadata-only update; the batch is atomic, versioned and retry-safe. Set an unpinned language before assigning new names; change a saved language only on explicit user instruction. A display rename retains original-name metadata, stored bytes, paths, IDs and composition references. Unsupported or missing paths reject the entire batch. Reread after a version conflict instead of overwriting newer names.
 
 Imports accept readable `items[].name`; library generation/import accepts `name`. `import_to_project` defaults to the saved library name, including later library renames; provide `name` only for an explicit rename or missing-name repair. Project captions omit known media extensions and disambiguate duplicates with display-only numeric suffixes. UUID storage names fall back to parsed font metadata or localized type/sequence labels. Platform fallbacks cover Studio's eleven languages, with English for unsupported languages; the Agent can supply names in other languages. See the [shared Agent naming contract](../skills/openmotion-production/references/materials.md#asset-naming).
+
+### 云端移动时间轴片段
+
+用 `openmotion_get_project({projectId, file: {path: "index.html"}})` 读取当前工程版本和片段的 `data-hf-id`。将实际值填入下例，把片段移到其所属合成的第 5 秒。子合成请使用自己的 HTML 路径。
+
+```js
+openmotion_edit_project({"projectId":"<projectId>","expectedRevision":"<revision>","expectedVersionId":"<currentVersionId>","requestId":"<unique-request-id>","edit":{"kind":"moveClip","compositionPath":"index.html","hfId":"<data-hf-id>","start":5}})
+```
+
+此命令支持单个独立计时、未锁定且未链接的片段。起点和时长须为数值，移动后的终点须在当前合成时长内。合成容器本身和位于另一个计时容器内的元素不适用。单独提交 `edit`，省略 `files`、`canvas`、`assetNames`、`requirements` 和 `namingLanguage`。超时后用完全相同的参数和 requestId 重试。遇到版本冲突时重新读取版本和片段，确认仍需移动后用新的 requestId 提交。
 
 ### Native canvas and caption controls
 

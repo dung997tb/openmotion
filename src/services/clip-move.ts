@@ -31,7 +31,7 @@ export async function commitClipMove(files: ProjectFilesService, auth: AuthConte
   const session = await openComposition(current.content, { history: false });
   let content: string;
   try {
-    moveClip(session, command);
+    moveClip(session, command, current.content);
     content = session.serialize();
   } catch (cause) {
     throw new CloudError('INVALID_ARGUMENT', cause instanceof Error ? cause.message : 'Invalid clip move.', { status: 400, cause });

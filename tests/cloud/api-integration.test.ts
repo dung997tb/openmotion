@@ -1439,7 +1439,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
       app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const { projectId } = await (await post('/motion-api/projects', { title: 'Clip move parity' })).json();
     const file = (path: string) => `/api/projects/${projectId}/files/${path}`;
-    const source = '<html><body><div data-composition-id="scene" data-duration="12"><div id="title" data-hf-id="hf-title" data-start="2" data-duration="3"></div><script>const tl=gsap.timeline();tl.to("#title",{opacity:1,duration:0.5},2.25);</script></div></body></html>';
+    const source = '<html><body><div data-composition-id="scene" data-duration="12"><div id="title" data-hf-id="hf-title" data-start="2" data-duration="3"><span class="word"></span></div><script>const tl=gsap.timeline();tl.to("#title",{opacity:1,duration:0.5},2.25);tl.to(".word",{duration:1,keyframes:{"0%":{x:20},"100%":{x:80}}},2.5);tl.to("#other",{x:10},7);</script></div></body></html>';
     for (const path of ['ui.html', 'agent.html']) {
       const seed = await app.request(file(path), { method: 'PUT', headers: { 'If-None-Match': '*' }, body: source });
       assert.equal(seed.status, 200);
@@ -1456,6 +1456,9 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     const { content } = await (await app.request(file('ui.html'))).json();
     assert.match(content, /data-start="5"/);
     assert.match(content, /duration:0.5},5.25\)/);
+    assert.match(content, /"100%":\{x:80\}\}\},5\.5\)/);
+    assert.match(content, /hf-hold/);
+    assert.match(content, /"#other",\{x:10\},7\)/);
 
     const headers: Record<string, string> = { Authorization: `Bearer ${config.DEV_PAT}`, Accept: 'application/json, text/event-stream' };
     const rpc = (method: string, params: unknown) => post('/mcp', { jsonrpc: '2.0', id: 1, method, params }, headers);

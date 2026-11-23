@@ -157,7 +157,7 @@ export async function sdkTimingPersist(
       targetPath,
       serializedBefore,
       deps,
-      (session) => command ? moveClip(session, command) : session.setTiming(hfId, timingUpdate),
+      (session, source) => command ? moveClip(session, command, source) : session.setTiming(hfId, timingUpdate),
       options,
       serializedBefore,
     );
