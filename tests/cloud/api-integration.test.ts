@@ -1505,6 +1505,45 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal(history.entries[1].label, 'Edit source');
   });
 
+  it('undoes a timeline deletion and its duration shrink as one named action', async () => {
+    const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const json = async (url: string, init?: RequestInit) => {
+      const response = await app.request(url, init);
+      assert.ok(response.ok, await response.clone().text());
+      return response.json();
+    };
+    const { projectId } = await json('/motion-api/projects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Delete history' }),
+    });
+    const base = `/api/projects/${projectId}`;
+    const file = base + '/files/scene.html';
+    await json(file, { method: 'PUT', headers: { 'If-None-Match': '*' }, body:
+      '<html><body><main data-composition-id="main" data-duration="6"><div id="first" data-start="0" data-duration="2"></div><div id="tail" data-start="2" data-duration="4"></div></main></body></html>' });
+    const before = await json(file);
+    const { currentSeq } = await json(base + '/history');
+    const label = 'Delete timeline clip';
+    const gesture = { 'X-OpenMotion-Edit-Window': randomUUID(), 'X-OpenMotion-Edit-Label': encodeURIComponent(label) };
+    const removed = await json(base + '/file-mutations/remove-elements/scene.html', {
+      method: 'POST', headers: { ...gesture, 'Content-Type': 'application/json', 'If-Match': before.version },
+      body: JSON.stringify({ targets: [{ id: 'tail' }] }),
+    });
+    assert.doesNotMatch(removed.content, /id="tail"/);
+    assert.match(removed.content, /data-duration="6"/);
+    const shrunk = removed.content.replace('data-duration="6"', 'data-duration="2"');
+    await json(file, { method: 'PUT', headers: { ...gesture, 'If-Match': removed.version }, body: shrunk });
+    assert.equal((await json(file)).content, shrunk);
+    const after = await json(base + '/history');
+    assert.equal(after.currentSeq, currentSeq + 1);
+    assert.equal(after.back.label, label);
+    const step = (direction: 'back' | 'forward') => json(base + '/history/step', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
+    });
+    assert.equal((await step('back')).seq, currentSeq);
+    assert.equal((await json(file)).content, before.content);
+    await step('forward');
+    assert.equal((await json(file)).content, shrunk);
+  });
+
   it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
     const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>

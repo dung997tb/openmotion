@@ -45,6 +45,7 @@ import {
   useSafeGsapCommitMutation,
 } from "./useSafeGsapCommitMutation";
 import { requestGsapMutation } from "./gsapMutationClient";
+import { cloudHistoryForWrite, type StudioWriteHistory } from "../utils/studioFileHistory";
 import { whileScriptWrites } from "../player/previewReloading";
 
 async function mutateGsapScript(
@@ -52,8 +53,9 @@ async function mutateGsapScript(
   route: "gsap-mutations" | "gsap-mutations-batch",
   sourceFile: string,
   body: unknown,
+  history?: StudioWriteHistory,
 ): Promise<MutationResult> {
-  const res = await requestGsapMutation(projectId, route, sourceFile, body);
+  const res = await requestGsapMutation(projectId, route, sourceFile, body, history);
   if (!res.ok) throw new GsapMutationHttpError(res.status, await readJsonResponseBody(res));
   const result = (await res.json()) as MutationResult;
   if (!result.ok) throw new Error(`Failed to update GSAP in ${sourceFile}`);
@@ -376,13 +378,13 @@ export function useGsapScriptCommits({ projectIdRef, activeCompPath, previewIfra
 
   const runCommit = useCallback((pid: string, compositionPath: string | null, targetPath: string, selection: DomEditSelection, mutation: Record<string, unknown>, options: CommitMutationOptions) => whileScriptWrites(async () => {
     const result = await runMutationRequest([mutation], options, showToast, () =>
-      mutateGsapScript(pid, "gsap-mutations", targetPath, mutation),
+      mutateGsapScript(pid, "gsap-mutations", targetPath, mutation, options.history ?? cloudHistoryForWrite(writeProjectFile, options)),
     );
     if (!result) return;
     trackKeyframeCommit([mutation], result, options);
     options.onResult?.(result);
     await finalizeSuccessfulMutation(pid, compositionPath, selection, mutation, targetPath, result, options);
-  }), [showToast, finalizeSuccessfulMutation]);
+  }), [showToast, finalizeSuccessfulMutation, writeProjectFile]);
 
   const runBatchCommit = useCallback((pid: string, compositionPath: string | null, targetPath: string, calls: CommitMutationCall[], options: CommitMutationOptions) => whileScriptWrites(async () => {
     const first = calls[0];
@@ -390,7 +392,7 @@ export function useGsapScriptCommits({ projectIdRef, activeCompPath, previewIfra
     if (!first || !last) return;
     const mutations = calls.map(({ mutation }) => mutation);
     const result = await runMutationRequest(mutations, options, showToast, () =>
-      mutateGsapScript(pid, "gsap-mutations-batch", targetPath, { mutations }),
+      mutateGsapScript(pid, "gsap-mutations-batch", targetPath, { mutations }, options.history ?? cloudHistoryForWrite(writeProjectFile, options)),
     );
     if (!result) return;
     trackKeyframeCommit(mutations, result, options, calls.map((call) => call.options));
@@ -403,7 +405,7 @@ export function useGsapScriptCommits({ projectIdRef, activeCompPath, previewIfra
     const { instantPatch: _instantPatch, ...batchOptions } = options;
     const allPatched = instantPatches.length === calls.length;
     await finalizeSuccessfulMutation(pid, compositionPath, last.selection, last.mutation, targetPath, result, allPatched ? { ...batchOptions, instantPatches } : batchOptions);
-  }), [showToast, finalizeSuccessfulMutation]);
+  }), [showToast, finalizeSuccessfulMutation, writeProjectFile]);
 
   // Every GSAP-script commit is a read-modify-write of one file. Overlapping
   // commits to the SAME file (any op type, any animation) interleave server-side,

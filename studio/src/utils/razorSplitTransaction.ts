@@ -4,7 +4,8 @@ import type { RecordEditInput } from "../hooks/timelineEditingHelpers";
 import { buildPatchTarget } from "./timelineElementSplit";
 import { serializeStudioFileMutations } from "./studioFileMutationCoordinator";
 import { buildProjectApiPath } from "./projectRouting";
-import { markStudioWriteToken } from "./studioFileVersion";
+import { cloudHistoryForWrite, type StudioWriteHistory } from "./studioFileHistory";
+import { studioWriteHeaders } from "./studioFileVersion";
 import { resolveElementTrack } from "./studioHelpers";
 import { studioApiFetch } from "./studioApiFetch";
 
@@ -113,6 +114,7 @@ async function readFileVersion(projectId: string, path: string): Promise<string>
 async function requestAtomicCut(
   projectId: string,
   intents: CutFileIntent[],
+  history?: StudioWriteHistory,
 ): Promise<CutBatchResponse> {
   const files = [];
   for (const intent of intents) {
@@ -122,14 +124,13 @@ async function requestAtomicCut(
     });
   }
   const transactionToken = `cut:${crypto.randomUUID()}`;
-  markStudioWriteToken(transactionToken);
   const response = await studioApiFetch(
     buildProjectApiPath(projectId, "/file-mutations/split-batch"),
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Hyperframes-Write-Token": transactionToken,
+        ...studioWriteHeaders(history, transactionToken),
       },
       body: JSON.stringify({ files, transactionToken }),
     },
@@ -178,7 +179,8 @@ interface RunAtomicCutInput {
 export function runAtomicCutTransaction(input: RunAtomicCutInput): Promise<AtomicCutResult> {
   const paths = input.intents.map((intent) => intent.path);
   return serializeStudioFileMutations(input.writeProjectFile, paths, async () => {
-    const result = await requestAtomicCut(input.projectId, input.intents);
+    const history = cloudHistoryForWrite(input.writeProjectFile, input);
+    const result = await requestAtomicCut(input.projectId, input.intents, history);
     const snapshots = Object.fromEntries(
       result.files.map((file) => [file.path, { before: file.before, after: file.after }]),
     );

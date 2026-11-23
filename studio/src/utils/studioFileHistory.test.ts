@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { setCachedCloudDisklessMode } from "./cloudRuntime";
-import { saveProjectFilesWithHistory } from "./studioFileHistory";
+import { saveProjectFilesWithHistory, saveServerRewriteWithHistory, type StudioWriteHistory } from "./studioFileHistory";
 import { serializeStudioFileMutation } from "./studioFileMutationCoordinator";
 
 describe("saveProjectFilesWithHistory", () => {
@@ -22,6 +22,26 @@ describe("saveProjectFilesWithHistory", () => {
       expect(histories[2].label).toBe("Split clip");
       expect(new Set([histories[1].windowId, histories[2].windowId, histories[3].windowId]).size).toBe(3);
     } finally {
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
+  it("allocates a single window before the rewrite and reuses it for the follow-up save", async () => {
+    setCachedCloudDisklessMode(true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: "before" })));
+    try {
+      const writeFile = vi.fn();
+      const rewrite = vi.fn(async (_source: string, _history?: StudioWriteHistory) => ({ disk: "removed", after: "shrunk" }));
+      await saveServerRewriteWithHistory({
+        projectId: "p", path: "index.html", label: "Delete timeline clip",
+        writeFile, rewrite, recordEdit: vi.fn(),
+      });
+      const history = { label: "Delete timeline clip", windowId: expect.any(String) };
+      expect(rewrite).toHaveBeenCalledWith("before", history);
+      expect(writeFile).toHaveBeenCalledExactlyOnceWith("index.html", "shrunk", "removed", undefined,
+        rewrite.mock.lastCall?.[1]);
+    } finally {
+      vi.unstubAllGlobals();
       setCachedCloudDisklessMode(null);
     }
   });

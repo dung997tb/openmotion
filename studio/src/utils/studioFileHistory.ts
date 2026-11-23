@@ -43,6 +43,13 @@ export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, 
   return { label, windowId: id };
 }
 
+type HistoryGesture = Pick<RecordEditInput, "label" | "coalesceKey" | "coalesceMs">;
+
+export function cloudHistoryForWrite(writer: ProjectFileWriter | undefined, gesture: HistoryGesture): StudioWriteHistory | undefined {
+  if (!writer || !getCachedCloudDisklessMode()) return undefined;
+  return studioHistoryForWrite(writer, gesture.label, gesture.coalesceKey, gesture.coalesceMs);
+}
+
 interface SaveProjectFilesWithHistoryInput {
   projectId: string;
   label: string;
@@ -103,19 +110,20 @@ export async function saveServerRewriteWithHistory(input: {
   coalesceMs?: number;
   writeFile: ProjectFileWriter;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
-  rewrite: (original: string) => Promise<{ disk: string; after?: string } | null>;
+  rewrite: (original: string, history?: StudioWriteHistory) => Promise<{ disk: string; after?: string } | null>;
 }): Promise<boolean> {
   const { projectId, path, writeFile } = input;
   return serializeStudioFileMutations(writeFile, [path], async () => {
     const original = await readProjectFileContent(projectId, path);
-    const result = await input.rewrite(original);
+    const history = cloudHistoryForWrite(writeFile, input);
+    const result = await input.rewrite(original, history);
     if (!result) return false;
     await writeProjectFilesWithHistoryInQueue({
       ...input,
       files: { [path]: () => result.after ?? result.disk },
       readFile: async () => original,
       diskContent: { [path]: result.disk },
-    });
+    }, history);
     return true;
   });
 }
@@ -129,7 +137,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   writeFile,
   recordEdit,
   diskContent,
-}: SaveProjectFilesWithHistoryInput): Promise<string[]> {
+}: SaveProjectFilesWithHistoryInput, existingHistory?: StudioWriteHistory): Promise<string[]> {
   const snapshots: Record<string, { before: string; after: string }> = {};
   for (const [path, build] of Object.entries(files)) {
     const before = await readFile(path);
@@ -142,7 +150,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   const changedPaths = Object.keys(snapshots);
   if (changedPaths.length === 0) return [];
 
-  const history = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeFile, label, coalesceKey, coalesceMs) : null;
+  const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs });
   const writtenPaths: string[] = [];
   try {
     for (const path of changedPaths) {

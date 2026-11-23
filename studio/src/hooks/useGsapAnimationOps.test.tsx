@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { patchElementInHtml } from "@hyperframes/studio-server/source-mutation";
 import { jsonResponse } from "./fetchStubTestUtils";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useGsapAnimationOps } from "./useGsapAnimationOps";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -13,6 +14,7 @@ type HookApi = ReturnType<typeof useGsapAnimationOps>;
 
 let cleanup: (() => void) | null = null;
 afterEach(() => {
+  setCachedCloudDisklessMode(null);
   cleanup?.();
   cleanup = null;
   vi.unstubAllGlobals();
@@ -25,12 +27,14 @@ function renderOps(
   commitMutationSafely: (...args: unknown[]) => Promise<void>,
   commitMutation: (...args: unknown[]) => Promise<void> = vi.fn(async () => undefined),
   projectId: string | null = "project",
+  writeProjectFile?: () => Promise<void>,
 ): HookApi {
   const captured: { api: HookApi | null } = { api: null };
   function Probe() {
     captured.api = useGsapAnimationOps({
       projectIdRef: { current: projectId },
       activeCompPath: "index.html",
+      writeProjectFile,
       commitMutation,
       commitMutationSafely,
       showToast: vi.fn(),
@@ -119,6 +123,26 @@ describe("useGsapAnimationOps settlement", () => {
     deferred.release();
     await resultPromise;
     expect(settled).toBe(true);
+  });
+
+  it("shares the animation gesture with its preceding ensure-id write in cloud Studio", async () => {
+    setCachedCloudDisklessMode(true);
+    const server = serveCards();
+    const [element] = mountCards();
+    let headers = new Headers();
+    server.stub(async init => {
+      headers = new Headers(init?.headers);
+      return server.handle(init);
+    });
+    const commitMutation = vi.fn(async () => undefined);
+    const api = renderOps(vi.fn(), commitMutation, "project", vi.fn());
+    await addTo(api, element!, "hf-a");
+    const windowId = headers.get("X-OpenMotion-Edit-Window");
+    expect(windowId).toEqual(expect.any(String));
+    const label = "Add GSAP from animation";
+    expect(decodeURIComponent(headers.get("X-OpenMotion-Edit-Label")!)).toBe(label);
+    expect(commitMutation).toHaveBeenCalledWith(expect.anything(), expect.anything(),
+      expect.objectContaining({ history: { windowId, label } }));
   });
 
   it("soft-reloads the preview when adding an animation", async () => {

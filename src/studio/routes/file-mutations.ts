@@ -249,7 +249,7 @@ export function createStudioFileMutationsRoutes(
           ops: commitOps,
           filePreconditions: preconditions,
           source: 'studio',
-          summary: `Patched ${commitOps.length} composition file${commitOps.length === 1 ? '' : 's'}`,
+          ...studioWriteHistory(c.req.raw.headers, `Patched ${commitOps.length} composition file${commitOps.length === 1 ? '' : 's'}`),
           writeToken,
         });
         revision = committed.revision;
@@ -326,7 +326,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: after, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: formatVersionFromSha256(sha256Hex(before)) }],
         source: 'studio',
-        summary: `Batch patched ${matchedCount} elements in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Batch patched ${matchedCount} elements in ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? version;
@@ -369,7 +369,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: nextHtml, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: current.version }],
         source: 'studio',
-        summary: `Removed element from ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Removed element from ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(nextHtml));
@@ -416,7 +416,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: nextHtml, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: current.version }],
         source: 'studio',
-        summary: `Removed ${removedCount} elements from ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Removed ${removedCount} elements from ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(nextHtml));
@@ -484,7 +484,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: splitRes.html, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: current.version }],
         source: 'studio',
-        summary: `Split element in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Split element in ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(splitRes.html));
@@ -586,7 +586,7 @@ export function createStudioFileMutationsRoutes(
         ops: commitOps,
         filePreconditions: preconditions,
         source: 'studio',
-        summary: 'Razor split clips',
+        ...studioWriteHistory(c.req.raw.headers, 'Razor split clips'),
         writeToken,
       });
       for (const item of results) {
@@ -638,7 +638,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: wrapped.html, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: current.version }],
         source: 'studio',
-        summary: `Grouped elements in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Grouped elements in ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(wrapped.html));
@@ -684,7 +684,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: res.html, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: current.version }],
         source: 'studio',
-        summary: `Ungrouped elements in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Ungrouped elements in ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(res.html));
@@ -772,7 +772,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: dup.html, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: formatVersionFromSha256(sha256Hex(currentText)) }],
         source: 'studio',
-        summary: `Duplicated element in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Duplicated element in ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? version;
@@ -840,7 +840,7 @@ export function createStudioFileMutationsRoutes(
       ops: [{ op: 'upsert_text', path: filePath, content: after }],
       filePreconditions: [{ path: filePath, ifMatch: parentFile.version }, ...graph.preconditions],
       source: 'studio',
-      summary: `Inserted composition ${childPath}`,
+      ...studioWriteHistory(c.req.raw.headers, `Inserted composition ${childPath}`),
       writeToken,
     });
 
@@ -885,7 +885,7 @@ export function createStudioFileMutationsRoutes(
         ops: [{ op: 'upsert_text', path: filePath, content: updated, stampHfIds: true }],
         filePreconditions: [{ path: filePath, ifMatch: current.version }],
         source: 'studio',
-        summary: `Relinked split halves in ${filePath}`,
+        ...studioWriteHistory(c.req.raw.headers, `Relinked split halves in ${filePath}`),
         writeToken,
       });
       version = committed.versionsByPath[filePath] ?? formatVersionFromSha256(sha256Hex(updated));
@@ -926,7 +926,7 @@ export function createStudioFileMutationsRoutes(
       projectId,
       ops,
       source: 'studio',
-      summary: body.summary ?? `Batch updated ${ops.length} files`,
+      ...studioWriteHistory(c.req.raw.headers, body.summary ?? `Batch updated ${ops.length} files`),
       writeToken,
     });
 
