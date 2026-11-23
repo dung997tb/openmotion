@@ -5,7 +5,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { assetVersion, type LibraryAsset } from '../../../shared/asset-library';
 import { resumableJob, type GenerationJob } from '../../../shared/gateway';
 import { useI18n } from '../i18n/I18n';
-import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
@@ -139,11 +138,13 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
     });
     return () => { selectionRequest.current++; };
   }, [active, routeId, routeVersion, onAssetRoute, onError, clearPreview, selectVersion, missingVersion]);
-  useVisibilityPolling(
-    async signal => {
+  useEffect(() => {
+    if (!active) return; let cancelled = false, pending = false;
+    const poll = async () => {
+      if (pending || document.hidden) return; pending = true;
       try {
         const [jobResult, chatResult] = await Promise.allSettled([assetRequest<{ jobs: GenerationJob[] }>({ action: 'jobs' }), gatewayRequest<{ conversations: AssetChatSummary[] }>('assets/conversations')]);
-        if (signal.aborted) return;
+        if (cancelled) return;
         if (chatResult.status === 'fulfilled') setConversations(current => {
           const merged = new Map(current.map(chat => [chat.id, chat]));
           for (const chat of chatResult.value.conversations) if ((merged.get(chat.id)?.updatedAt ?? 0) <= chat.updatedAt) merged.set(chat.id, chat);
@@ -157,14 +158,10 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
           knownJobs.current = next; setJobs(next);
           if (outputsChanged) refresh();
         }
-      } catch {
-        if (!signal.aborted) setHistoryError('Could not load task history');
-      } finally {
-        if (!signal.aborted) setHistoryLoading(false);
-      }
-    },
-    { enabled: active, intervalMs: 2500, immediate: true, resetKey: historyRetry },
-  );
+      } catch { if (!cancelled) setHistoryError('Could not load task history'); } finally { pending = false; if (!cancelled) setHistoryLoading(false); }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 2500); return () => { cancelled = true; clearInterval(timer); };
+  }, [active, refresh, historyRetry]);
   useEffect(() => {
     if (!active || !selected) return; let cancelled = false;
     const request = ++assetReadRequest.current;

@@ -521,25 +521,6 @@ export function McpConnectionPage({
                       </>
                     )}
 
-                    {info?.httpTransport && (
-                      <div className="om-mcp-manual-note">
-                        <span>
-                          <strong>{t('Remote MCP (Streamable HTTP)')}:</strong> <code>{info.httpTransport.url}</code>
-                        </span>
-                        <Button
-                          variant="plain"
-                          className="om-mcp-manual-copy"
-                          onClick={() => {
-                            void navigator.clipboard.writeText(info.httpTransport!.url)
-                              .then(() => toast.showToast(t('Copied endpoint URL'), 'info', 'feedback'))
-                              .catch(() => toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback'));
-                          }}
-                        >
-                          {t('Copy endpoint URL')}
-                        </Button>
-                      </div>
-                    )}
-
                     {client.host === 'deepseek' && (
                       <div className="om-mcp-manual-note">
                         <span>{t('Optional: embed the Studio editor right inside DeepSeek Harness with the standalone host plugin (remove the plain MCP entry above first).')}</span>

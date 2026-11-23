@@ -10,7 +10,7 @@ const { generate, loadGateway, gatewayRequest, chrome } = vi.hoisted(() => ({
   chrome: { openModelSettings: vi.fn(), openProviderSettings: vi.fn(), openAccountSettings: vi.fn(), openSubscriptionSettings: vi.fn() },
 }));
 vi.mock('./assetClient', () => ({ assetRequest: generate }));
-vi.mock('./gatewayClient', () => ({ loadGateway, gatewayRequest, invalidateGatewayCache: vi.fn() }));
+vi.mock('./gatewayClient', () => ({ loadGateway, gatewayRequest }));
 vi.mock('./AssetConversation', () => ({ AssetConversation: () => null }));
 vi.mock('../i18n/I18n', () => ({ useI18n: () => ({ t: (text: string) => text }) }));
 vi.mock('./WorkspaceFrame', () => ({ useWorkspaceChrome: () => chrome }));

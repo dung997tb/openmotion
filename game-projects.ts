@@ -15,7 +15,6 @@ import { WorkspaceStore } from './workspace.ts';
 import { execute, pluginRoot, HYPERFRAMES_VERSION } from './hyperframes.ts';
 import { verificationBinaries } from './scripts/verify-export.ts';
 import type { Duplex } from 'node:stream';
-import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/preview-bridge.ts';
 import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
 
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
@@ -1012,7 +1011,6 @@ export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: U
     if (parts.length === 1) { if (req.method === 'GET') return json(200,await service.get(id)); if (req.method === 'DELETE') return json(200,await service.delete(id)); }
     if (action === 'trailer' && !rest.length && req.method==='GET')return json(200,await service.trailer(id));
     if (action === 'handoff' && !rest.length && req.method==='GET')return json(200,await service.handoff(id));
-    if (action === 'files' && !rest.length && req.method==='GET')return json(200,{ files: (await service.detail(id)).files });
     if (action === 'play' && req.method === 'GET') {
       const entry=!rest.length||(rest.length===1&&rest[0]==='index.html');
       if(entry&&!url.searchParams.has('room')&&(await service.get(id)).multiplayer){
@@ -1020,18 +1018,11 @@ export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: U
         res.writeHead(302,{'Location':target.pathname+target.search,'Cache-Control':'no-store','Access-Control-Allow-Origin':'*'});res.end();return true;
       }
       const file = await service.staticFile(id,rest.length?rest.join('/'):'index.html');
-      const bridgeToken = url.searchParams.get('omBridge');
-      const payload = entry && file.mime.startsWith('text/html') && isValidPreviewBridgeToken(bridgeToken)
-        ? injectPreviewBridgeHtml(file.data, bridgeToken)
-        : file.data;
       const origin = new URL(url); if (req.headers?.host) origin.host = req.headers.host;
-      const encodedId = encodeURIComponent(id);
-      const assetOrigins = `${origin.origin}/api/assets/ ${origin.origin}/motion-api/assets/`;
-      const playOrigins = `${origin.origin}/api/games/${encodedId}/play/ ${origin.origin}/motion-api/games/${encodedId}/play/`;
       const sockets = ['/api/games', '/motion-api/games'].map(prefix => `${origin.protocol === 'https:' ? 'wss:' : 'ws:'}//${origin.host}${prefix}/${id}/rooms/`).join(' ');
       const executable = /^(?:text\/html|image\/svg\+xml)/.test(file.mime);
-      const csp = `sandbox allow-scripts allow-pointer-lock allow-popups allow-modals; default-src 'self' data: blob: ${playOrigins} ${assetOrigins}; connect-src 'self' blob: data: ${playOrigins} ${assetOrigins} ${sockets} https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${playOrigins} https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' ${playOrigins}; worker-src 'none'`;
-      res.writeHead(200, { 'Access-Control-Allow-Origin':'*', 'Content-Type':file.mime, 'Content-Length':payload.length, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', ...(executable ? { 'Content-Security-Policy': csp } : {}) }); res.end(payload); return true;
+      const csp = "sandbox allow-scripts allow-pointer-lock allow-popups allow-modals; default-src 'self' data: blob:; connect-src 'self' blob: data: " + sockets + " https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline'; worker-src 'none'";
+      res.writeHead(200, { 'Access-Control-Allow-Origin':'*', 'Content-Type':file.mime, 'Content-Length':file.data.length, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', ...(executable ? { 'Content-Security-Policy': csp } : {}) }); res.end(file.data); return true;
     }
     if (parts.length === 2 && req.method === 'POST') {
       if (action === 'capture-cover') return json(200,await service.captureCover(id,await input(req, LIMIT)));

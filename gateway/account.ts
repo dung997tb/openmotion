@@ -33,31 +33,12 @@ async function openSystemBrowser(url: string) {
 }
 const consoleUrl = registeredProvider('account')!.website!;
 export type SignInRecord = EventFields<typeof omEvents['account_sign_in_result']>;
-export type OpenDesignWorkspacePrincipal = {
-  workspaceId: string;
-  workspaceName: string;
-  workspaceMemberId: string;
-  workspaceType: 'personal' | 'team';
-};
-export type OpenDesignWorkspaceInfo = {
-  workspaceId: string;
-  workspaceName: string;
-  workspaceType: 'personal' | 'team';
-  workspaceMemberId: string;
-  role: string;
-  isDefault: boolean;
-  memberStatus: string;
-  lifecycleState: string;
-};
 type Profile = { apiUrl?: string; controlKey?: string; controlKeyId?: string; runtimeKey?: string; pendingLogin?: unknown; user?: { id?: string; name?: string; email?: string } };
 /** Connector-owned credentials file. `pendingRevocations` holds keys whose remote revocation has not been confirmed yet. */
 type CredentialsFile = { profiles?: Record<string, Profile>; pendingRevocations?: unknown[] };
 type AccountOptions = {
   pollMs?: number; binary?: string; authorizationMs?: number; log?: (line: string) => void;
-  run?: (args: string[], signal?: AbortSignal) => Promise<string>;
-  runInWorkspace?: (workspaceId: string, args: string[], signal?: AbortSignal) => Promise<string>;
-  workspacePrincipal?: (signal?: AbortSignal) => Promise<OpenDesignWorkspacePrincipal | null>;
-  spawn?: typeof spawn;
+  run?: (args: string[], signal?: AbortSignal) => Promise<string>; spawn?: typeof spawn;
   fetcher?: Fetcher;
   download?: typeof import('./network.ts').streamMedia;
   /** Receives one record per finished sign-in attempt. */
@@ -120,30 +101,12 @@ export class AccountRequestError extends Error {
   readonly status?: number;
   readonly code?: string;
   constructor(stderr: string) {
-    let parsedEnvelope: { status?: number; code?: string } | undefined;
-    try {
-      const parsed: unknown = JSON.parse(stderr.trim());
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof (parsed as { error?: unknown }).error === 'string') {
-        const record = parsed as { status?: unknown; errorCode?: unknown };
-        const envelopeStatus = typeof record.status === 'number' && Number.isInteger(record.status) && record.status >= 400 && record.status <= 599
-          ? record.status
-          : undefined;
-        const envelopeCode = typeof record.errorCode === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(record.errorCode)
-          ? record.errorCode
-          : undefined;
-        if (envelopeStatus !== undefined || envelopeCode !== undefined) {
-          parsedEnvelope = { status: envelopeStatus, code: envelopeCode };
-        }
-      }
-    } catch {
-      // Plain-text Vela stderr falls through to regex parsing below.
-    }
     // Generic API errors read `API request failed with status 403: code`; media commands read `<text> (code, HTTP 400)`.
     const api = /API request failed with status (\d{3})(?:: ([a-z0-9_]{1,64})(?=\s|$))?/.exec(stderr);
     // A response without a JSON body has an empty code: `(, HTTP 502)`.
-    const media = parsedEnvelope || api ? undefined : [...stderr.matchAll(/\(([^,()]{0,64}), HTTP (\d{3})\)/g)].at(-1);
-    const status = parsedEnvelope?.status ?? (api ? Number(api[1]) : media ? Number(media[2]) : undefined);
-    const code = parsedEnvelope?.code ?? (api ? api[2] : media && /^[a-z0-9_]{1,64}$/.test(media[1]) ? media[1] : undefined);
+    const media = api ? undefined : [...stderr.matchAll(/\(([^,()]{0,64}), HTTP (\d{3})\)/g)].at(-1);
+    const status = api ? Number(api[1]) : media ? Number(media[2]) : undefined;
+    const code = api ? api[2] : media && /^[a-z0-9_]{1,64}$/.test(media[1]) ? media[1] : undefined;
     // Local CLI flag/argument rejections exit without an HTTP status; do not misreport them as connection or sign-in failures.
     const cliInvalid = !status && !code && /(?:^|\n)Error: (?:if any flags in the group |unknown (?:shorthand )?flag:|invalid argument |required flag\(s\) |flag needs an argument:)/.test(stderr);
     super((code && requestMessages[code]) || (cliInvalid ? requestMessages.invalid_request : status === 401 ? requestMessages.unauthorized : status ? jobMessages.service : jobMessages.connection));
@@ -383,150 +346,11 @@ export class OpenDesignAccount {
   }
   /** Prepares the connector after startup so the first sign-in does not wait for it. A failure stays silent; sign-in tries again. */
   prefetch() { void this.prepare().catch(() => {}); }
-  private async executeConnector(
-    args: string[],
-    envOverrides: Record<string, string> | undefined,
-    timeoutMs: number,
-    maxBuffer: number,
-    signal?: AbortSignal,
-  ) {
-    // A workspace can be signed in through the shared account before its own connector is prepared.
-    try {
-      const binary = await this.resolveRuntime().catch(() => this.prepare());
-      const { stdout } = await execute(binary, args, {
-        env: envOverrides ? { ...this.env(), ...envOverrides } : this.env(),
-        timeout: timeoutMs,
-        signal,
-        maxBuffer,
-      });
-      return stdout;
-    } catch (error) {
-      throw new AccountRequestError(String((error as { stderr?: unknown }).stderr ?? ''));
-    }
-  }
   async run(args: string[], signal?: AbortSignal) {
     if (this.options.run) return this.options.run(args, signal);
-    return this.executeConnector(args, undefined, 120_000, 2 * 1024 * 1024, signal);
-  }
-  async runInWorkspace(workspaceId: string, args: string[], signal?: AbortSignal) {
-    const trimmedWorkspaceId = workspaceId.trim();
-    if (!trimmedWorkspaceId) throw new Error('OpenDesign workspace ID is required');
-    if (this.options.runInWorkspace) return this.options.runInWorkspace(trimmedWorkspaceId, args, signal);
-    return this.executeConnector(
-      args,
-      { VELA_INVOCATION_SOURCE: 'open-design', VELA_WORKSPACE_ID: trimmedWorkspaceId },
-      180_000,
-      16 * 1024 * 1024,
-      signal,
-    );
-  }
-  private async fetchWorkspaceRecords(profile: Profile, signal?: AbortSignal, timeoutMs = 15_000): Promise<Record<string, unknown>[]> {
-    const apiBase = (profile.apiUrl?.trim() || productionApi).replace(/\/$/, '');
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-    const fetcher = this.options.fetcher ?? fetch;
-    let response: Response;
-    try {
-      response = await fetcher(`${apiBase}/api/v1/workspaces`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${profile.controlKey}`, Accept: 'application/json' },
-        redirect: 'error',
-        signal: combinedSignal,
-      });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      throw new AccountRequestError('');
-    }
-    const payload = await response.json().catch(() => null) as {
-      workspaces?: unknown[];
-      items?: unknown[];
-      error?: unknown;
-    } | unknown[] | null;
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        this.rejectedKeyId = profile.controlKeyId;
-      }
-      const errField = !Array.isArray(payload) ? payload?.error : undefined;
-      const code = typeof errField === 'string' && /^[a-z0-9_]{1,64}$/.test(errField) ? `: ${errField}` : '';
-      throw new AccountRequestError(`API request failed with status ${response.status}${code}`);
-    }
-    const items = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.workspaces)
-        ? payload.workspaces
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : [];
-    return items.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'));
-  }
-  async workspacePrincipal(signal?: AbortSignal): Promise<OpenDesignWorkspacePrincipal | null> {
-    if (this.options.workspacePrincipal) return this.options.workspacePrincipal(signal);
-    const profile = await this.profile();
-    if (!signedInProfile(profile)) return null;
-    const items = await this.fetchWorkspaceRecords(profile!, signal, 12_000);
-    const active: Array<OpenDesignWorkspacePrincipal & { isDefault?: boolean }> = [];
-    for (const raw of items) {
-      const workspaceId = typeof raw.workspaceId === 'string' ? raw.workspaceId.trim() : '';
-      const workspaceName = typeof raw.workspaceName === 'string' ? raw.workspaceName.trim() : '';
-      const workspaceMemberId = typeof raw.workspaceMemberId === 'string' ? raw.workspaceMemberId.trim() : '';
-      const workspaceType = raw.workspaceType === 'personal' || raw.workspaceType === 'team' ? raw.workspaceType : null;
-      if (!workspaceId || !workspaceName || !workspaceMemberId || !workspaceType) continue;
-      if (raw.memberStatus !== 'active' || raw.lifecycleState !== 'active') continue;
-      active.push({
-        workspaceId,
-        workspaceName,
-        workspaceMemberId,
-        workspaceType,
-        ...(raw.isDefault === true ? { isDefault: true } : {}),
-      });
-    }
-    const chosen = active.find(item => item.workspaceType === 'personal')
-      ?? active.find(item => item.isDefault === true)
-      ?? active[0];
-    return chosen
-      ? {
-          workspaceId: chosen.workspaceId,
-          workspaceName: chosen.workspaceName,
-          workspaceMemberId: chosen.workspaceMemberId,
-          workspaceType: chosen.workspaceType,
-        }
-      : null;
-  }
-  async runWithEnv(
-    args: string[],
-    extraEnv: Record<string, string> = {},
-    options: { signal?: AbortSignal; timeoutMs?: number; maxBuffer?: number } = {},
-  ): Promise<string> {
-    if (this.options.run) return this.options.run(args, options.signal);
-    return this.executeConnector(
-      args,
-      Object.keys(extraEnv).length ? extraEnv : undefined,
-      options.timeoutMs ?? 120_000,
-      options.maxBuffer ?? 16 * 1024 * 1024,
-      options.signal,
-    );
-  }
-  async isSignedIn(): Promise<boolean> {
-    return signedInProfile(await this.profile());
-  }
-  async listWorkspaces(signal?: AbortSignal): Promise<OpenDesignWorkspaceInfo[]> {
-    const profile = await this.profile();
-    if (!signedInProfile(profile) || !profile?.controlKey) {
-      throw new Error('OPENDESIGN_SIGN_IN_REQUIRED: Sign in to OpenDesign in Settings -> Account before deploying to the web.');
-    }
-    const items = await this.fetchWorkspaceRecords(profile, signal, 15_000);
-    return items
-      .filter(item => typeof item.workspaceId === 'string' && item.memberStatus !== 'removed' && item.lifecycleState !== 'deleted')
-      .map(item => ({
-        workspaceId: String(item.workspaceId),
-        workspaceName: typeof item.workspaceName === 'string' ? item.workspaceName : 'Personal',
-        workspaceType: item.workspaceType === 'team' ? 'team' : 'personal',
-        workspaceMemberId: typeof item.workspaceMemberId === 'string' ? item.workspaceMemberId : String(profile.user?.id || ''),
-        role: typeof item.role === 'string' ? item.role : 'owner',
-        isDefault: Boolean(item.isDefault),
-        memberStatus: typeof item.memberStatus === 'string' ? item.memberStatus : 'active',
-        lifecycleState: typeof item.lifecycleState === 'string' ? item.lifecycleState : 'active',
-      }));
+    // A workspace can be signed in through the shared account before its own connector is prepared.
+    try { const { stdout } = await execute(await this.resolveRuntime().catch(() => this.prepare()), args, { env: this.env(), timeout: 120_000, signal, maxBuffer: 2 * 1024 * 1024 }); return stdout; }
+    catch (error) { throw new AccountRequestError(String((error as { stderr?: unknown }).stderr ?? '')); }
   }
   async summary(refresh = false): Promise<AccountSummary> {
     const generation = this.generation;

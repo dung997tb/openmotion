@@ -17,11 +17,9 @@ import '../design.css';
  * Design Studio HTML scenarios and live-preview starter template shelf embedded in Explore.
  */
 export function ExploreDesignSection({
-  active = true,
   onSelectDesignScene,
   onOpenProject,
 }: {
-  active?: boolean;
   onSelectDesignScene: (scene: DesignTabId) => void;
   onOpenProject: (projectId: string) => void;
 }) {
@@ -131,7 +129,6 @@ export function ExploreDesignSection({
                   <div className="om-design-explore-cover">
                     <ScaledPreviewThumb
                       key={tpl.previewUrl}
-                      active={active && previewIdx === null}
                       brandedFallback
                       src={tpl.previewUrl}
                       title={tpl.title}

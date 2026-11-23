@@ -1,20 +1,14 @@
-import { createContext, Suspense, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
-import { lazyWithChunkReload } from '../utils/chunkReload';
 import { isStudioSaveErrorAlreadyToasted } from '../utils/studioSaveDiagnostics';
+import { ModelSettings } from './ModelSettings';
+import { MediaGenerator } from './MediaGenerator';
 import { useArtifactViewActive } from './ArtifactViewState';
 import type { GenerateInput, GenerationJob, Modality } from './gatewayClient';
 import type { MediaPopoverAnchor } from './mediaPopoverPosition';
 import './media-gateway.css';
-
-const ModelSettings = lazyWithChunkReload(() =>
-  import('./ModelSettings').then(m => ({ default: m.ModelSettings })),
-);
-const MediaGenerator = lazyWithChunkReload(() =>
-  import('./MediaGenerator').then(m => ({ default: m.MediaGenerator })),
-);
 
 export type MediaPlacement = { start: number; duration: number; track: number };
 export type SelectedMedia = { key: string; elementId: string; path: string; src: string; sourceFile?: string; modality: Modality; label: string };
@@ -52,17 +46,9 @@ export function MediaGatewayProvider({ children }: { children: ReactNode }) {
       });
     }} />
     {active && <StudioToastViewport {...toast} />}
-    {active && settings && (
-      <Suspense fallback={null}>
-        <ModelSettings onClose={() => setSettings(false)} />
-      </Suspense>
-    )}
+    {active && settings && <ModelSettings onClose={() => setSettings(false)} />}
     {createPortal(<div hidden={!active} inert={!active}>
-      {request && (
-        <Suspense fallback={null}>
-          <MediaGenerator key={request.id} request={request} onClose={() => setRequest(null)} onSettings={openSettings} />
-        </Suspense>
-      )}
+      {request && <MediaGenerator key={request.id} request={request} onClose={() => setRequest(null)} onSettings={openSettings} />}
     </div>, document.body)}
   </MediaGatewayContext.Provider>;
 }
