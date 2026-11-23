@@ -74,7 +74,7 @@ export function McpConnectionPage({
   inSettings = false,
 }: {
   openLibrary: WorkspaceChrome['openLibrary'];
-  openProviders: () => void;
+  openProviders: (provider?: string) => void;
   previewsEnabled?: boolean;
   route?: WorkspacePage;
   onRouteChange?: (patch: Partial<WorkspacePage>) => void;
@@ -150,9 +150,9 @@ export function McpConnectionPage({
     click(area, 'open_detail', { capability: target.brandKitId });
     changeRoute({ settings: 'brand-kit', brandKit: 'official', templates: false, template: null });
   };
-  const openProviders = (area: 'mcp_resources' | 'mcp_footer') => () => {
+  const openProviders = (area: 'mcp_resources' | 'mcp_footer', provider?: string) => () => {
     click(area, 'manage_providers');
-    openProvidersRaw();
+    openProvidersRaw(provider);
   };
   const docLink = (area: 'mcp_resources' | 'mcp_footer', doc: 'mcp_tools' | 'skills' | 'agent_adapters' | 'docs_home' | 'repository') => () =>
     click(area, 'view_documentation', { doc_id: doc });
@@ -351,7 +351,7 @@ export function McpConnectionPage({
             <span className="om-mcp-entitlement-cta-label">{t('Claim now')}</span>
             <RemixIcon name="arrow-right-s-line" size={15} aria-hidden="true" />
           </Button>
-          <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources')}>
+          <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources', 'opendesign')}>
             {t('Already have an API key? Connect directly')}
           </Button>
         </div>

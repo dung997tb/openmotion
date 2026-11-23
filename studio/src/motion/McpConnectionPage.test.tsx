@@ -151,7 +151,7 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   expect(document.querySelector('.motion-feedback-layer [role=status]')?.textContent).toContain('Copied to clipboard');
   expect(document.querySelector('.om-mcp-content [role=status]')).toBeNull();
   await act(async () => button('All 30+ templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
-  await act(async () => button('Already have an API key? Connect directly').click()); expect(openProviders).toHaveBeenCalledOnce();
+  await act(async () => button('Already have an API key? Connect directly').click()); expect(openProviders).toHaveBeenCalledExactlyOnceWith('opendesign');
   expect(tab('ChatGPT')).toBeUndefined();
   expect(document.querySelectorAll('#showcase .om-mcp-carousel-module')).toHaveLength(3);
   expect(document.querySelectorAll('#mcp-faq .om-mcp-faq-acc')).toHaveLength(6);

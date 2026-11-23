@@ -15,6 +15,7 @@ export function McpHeroShowcaseStage({
 }) {
   const { t, locale } = useI18n();
   const [activeBeat, setActiveBeat] = useState(0);
+  const [selectedByUser, setSelectedByUser] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
@@ -24,12 +25,12 @@ export function McpHeroShowcaseStage({
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 
   useEffect(() => {
-    if (!enabled || hovered || reducedMotion) return;
+    if (!enabled || hovered || reducedMotion || selectedByUser) return;
     const timer = window.setInterval(() => {
       if (!document.hidden) setActiveBeat(prev => (prev + 1) % mcpHeroBeats.length);
     }, 5500);
     return () => window.clearInterval(timer);
-  }, [enabled, hovered, reducedMotion]);
+  }, [enabled, hovered, reducedMotion, selectedByUser]);
 
   useEffect(() => {
     if (!copied) return;
@@ -40,6 +41,11 @@ export function McpHeroShowcaseStage({
   async function handleCopy() {
     const ok = await onCopyPrompt(formatMcpAgentPrompt(currentText.prompt, current.target));
     if (ok) setCopied(true);
+  }
+
+  function selectBeat(index: number) {
+    setSelectedByUser(true);
+    setActiveBeat(index);
   }
 
   return (
@@ -56,7 +62,7 @@ export function McpHeroShowcaseStage({
                 className="om-mcp-stage-step"
                 data-active={isActive || undefined}
                 aria-pressed={isActive}
-                onClick={() => setActiveBeat(index)}
+                onClick={() => selectBeat(index)}
               >
                 <span className="om-mcp-stage-step-head">
                   <span className="om-mcp-stage-step-num">{beat.num}</span>
@@ -91,7 +97,7 @@ export function McpHeroShowcaseStage({
                       aria-label={beat.content[lang].alt}
                       autoPlay
                       muted
-                      loop
+                      loop={beat.loop !== false}
                       playsInline
                       preload="metadata"
                       onError={() => setVideoErrors(prev => ({ ...prev, [beat.id]: true }))}
@@ -111,7 +117,7 @@ export function McpHeroShowcaseStage({
                   className="om-mcp-beat-dot"
                   data-active={index === activeBeat || undefined}
                   aria-label={t('Showcase step {index}', { index: index + 1 })}
-                  onClick={() => setActiveBeat(index)}
+                  onClick={() => selectBeat(index)}
                 />
               ))}
             </div>

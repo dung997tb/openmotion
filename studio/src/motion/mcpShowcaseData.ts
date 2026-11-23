@@ -26,6 +26,7 @@ export type McpHeroBeat = {
   num: string;
   image: string;
   video?: string;
+  loop?: boolean;
   target?: McpCaseTarget;
   content: LocalizedPair<{ title: string; desc: string; prompt: string; alt: string }>;
 };
@@ -206,6 +207,7 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
     num: '04',
     image: studioEditingPoster,
     video: studioEditingVideo,
+    loop: false,
     content: {
       en: {
         title: 'Fine-tune in Studio and export',
@@ -330,14 +332,14 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
         target: { kind: 'skill', skillId: 'openmotion-juicy-splash-poster' },
         content: {
           en: {
-            tabLabel: 'Splash ad',
+            tabLabel: 'Juicy Splash Poster',
             title: 'A fruit and liquid burst for a drink launch',
             prompt: `Use the Juicy Splash Poster Skill with our drink photo and flavour name. Keep the packaging readable as fruit and liquid burst around it, then hold on the final poster.`,
           },
           'zh-CN': {
-            tabLabel: '饮品飞溅',
+            tabLabel: '夏日饮品冰爽海报',
             title: '用果片和水花做一支饮品广告',
-            prompt: `用「饮品飞溅海报」Skill，把我的饮料图和口味名做成动效海报。果片和液体从产品周围迸发，保持包装清晰，最后停在完整海报。`,
+            prompt: `用「夏日饮品冰爽海报」Skill，把我的饮料图和口味名做成动效海报。果片和液体从产品周围迸发，保持包装清晰，最后停在完整海报。`,
           },
         },
       },
@@ -348,14 +350,14 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
         target: { kind: 'skill', skillId: 'openmotion-ink-ribbon' },
         content: {
           en: {
-            tabLabel: 'Ribbon transitions',
+            tabLabel: 'Ink Ribbon',
             title: 'One blue ribbon links every step of a workflow',
             prompt: `Use the Ink Ribbon Skill to explain our three-step workflow. Carry a glossy blue ribbon from the opening headline through each step icon and into the closing brand mark.`,
           },
           'zh-CN': {
-            tabLabel: '丝带转场',
+            tabLabel: '产品流程一线串讲',
             title: '用一条蓝色丝带串起完整流程',
-            prompt: `用「丝带转场」Skill 讲解我们的三步流程。让一条有光泽的蓝色丝带从开场标题穿过三个步骤图标，最后收成品牌标志。`,
+            prompt: `用「产品流程一线串讲」Skill 讲解我们的三步流程。让一条有光泽的蓝色丝带从开场标题穿过三个步骤图标，最后收成品牌标志。`,
           },
         },
       },

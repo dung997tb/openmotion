@@ -128,7 +128,6 @@ export function McpTemplateShowcase({ client, enabled, canTry, onCopy, openLibra
                 <span className="om-mcp-demo-shade" />
                 <span className="om-mcp-demo-kind">{kindLabel(card.kind)}</span>
                 <span className="om-mcp-demo-duration">{card.duration}</span>
-                <span className="om-mcp-demo-play" aria-hidden="true">▶</span>
               </Button>
               <div className="om-mcp-template-caption">
                 <h3>{content(card).title}</h3>

@@ -48,24 +48,24 @@
 [data-motion-studio] .om-mcp-client-dock {
   background: var(--motion-mcp-dock-bg);
   border-radius: var(--motion-radius-full);
-  backdrop-filter: blur(12px);
 }
 [data-motion-studio] .om-mcp-client-tab {
+  border: 1px solid transparent;
   border-radius: var(--motion-radius-full);
   background: transparent;
-  color: var(--motion-muted);
+  color: var(--motion-mcp-dock-muted);
   font-size: 13px;
   font-weight: var(--motion-weight-medium);
 }
-[data-motion-studio] .om-mcp-client-tab:hover { color: var(--motion-strong); background: var(--motion-mcp-dock-hover); }
+[data-motion-studio] .om-mcp-client-tab:hover { color: var(--motion-mcp-dock-ink); background: var(--motion-mcp-dock-hover); }
 [data-motion-studio] .om-mcp-client-tab[aria-selected=true] {
   background: var(--motion-mcp-dock-active);
-  color: var(--motion-strong);
+  color: var(--motion-mcp-dock-ink);
   font-weight: var(--motion-weight-semibold);
 }
-[data-motion-studio] .om-mcp-client-ico { color: var(--motion-strong); }
+[data-motion-studio] .om-mcp-client-ico { color: var(--motion-mcp-dock-ink); }
 [data-motion-studio] .om-mcp-client-ico .om-avatar { background: transparent; border: 0; }
-[data-motion-studio] .om-mcp-client-ico .om-mcp-generic-icon { color: var(--motion-strong); border-radius: var(--motion-radius-sm); }
+[data-motion-studio] .om-mcp-client-ico .om-mcp-generic-icon { color: inherit; border-radius: var(--motion-radius-sm); }
 [data-motion-studio]:not([data-theme="paper"]) .om-mcp-client-ico [data-provider="cursor-agent"] img { filter: brightness(0) invert(1); }
 
 /* Spacious Hero H1 with inline Agent + OpenDesign brand pills */
@@ -231,7 +231,10 @@
   border: 1px solid var(--motion-mcp-stage-pill-border);
   box-shadow: var(--motion-shadow-lg);
 }
-.om-mcp-carousel-scrim { background: var(--motion-mcp-stage-scrim); }
+.om-mcp-carousel-scrim {
+  background: var(--motion-mcp-stage-scrim);
+  mask-image: linear-gradient(var(--motion-mcp-stage-ink) calc(100% - var(--motion-space-32)), transparent);
+}
 .om-mcp-carousel-title {
   font-size: clamp(22px, 2.2cqi, 28px);
   line-height: 1.24;
@@ -301,8 +304,6 @@
 .om-mcp-demo-kind, .om-mcp-demo-duration { padding: 3px 8px; background: var(--motion-video-overlay); color: var(--motion-overlay-ink); font-size: var(--motion-text-xs); }
 .om-mcp-demo-kind { border-radius: var(--motion-radius-full); border: 1px solid color-mix(in srgb, var(--motion-overlay-ink) 14%, transparent); backdrop-filter: blur(8px); }
 .om-mcp-demo-duration { border-radius: var(--motion-radius-sm); font-family: var(--motion-font-mono); }
-.om-mcp-demo-play { border-radius: var(--motion-radius-full); background: var(--motion-overlay-ink); color: var(--motion-video-ink); opacity: 0; transform: translate(-50%, -50%) scale(.92); box-shadow: var(--motion-shadow-md); }
-.om-mcp-demo-card:is(:hover, :focus-within) .om-mcp-demo-play { opacity: 1; transform: translate(-50%, -50%); }
 .om-mcp-template-caption h3 { color: var(--motion-strong); font-size: 15.5px; font-weight: var(--motion-weight-semibold); line-height: 1.35; }
 .om-mcp-template-caption p { color: var(--motion-mcp-gallery-muted); font-size: var(--motion-text-md); line-height: var(--motion-leading-body); }
 .om-mcp-demo-actions { border-top: 1px solid var(--motion-mcp-gallery-border); }
@@ -420,7 +421,6 @@
   .om-mcp-demo-card:hover { transform: translateY(-4px); box-shadow: var(--motion-shadow-lg); }
   .om-mcp-demo-cover > img { transition: transform .7s cubic-bezier(.22, 1, .36, 1); }
   .om-mcp-demo-card:hover .om-mcp-demo-cover > img { transform: scale(1.06); }
-  .om-mcp-demo-play { transition: opacity .2s, transform .2s; }
   .om-mcp-carousel-img { transition: transform .85s cubic-bezier(.22, 1, .36, 1); }
   .om-mcp-carousel-card:hover .om-mcp-carousel-img { transform: scale(1.025); }
   .om-mcp-carousel-peek { transition: opacity .25s, transform .25s; }

@@ -37,7 +37,7 @@
 .om-mcp-client-tab { height: 36px; padding-inline: 13px; display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; }
 .om-mcp-client-ico { width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 [data-motion-studio] .om-mcp-client-ico .om-avatar { width: 17px; height: 17px; }
-.om-mcp-client-ico svg, .om-mcp-client-ico img { width: 16px; height: 16px; display: block; }
+[data-motion-studio] .om-mcp-client-ico :is(svg, img) { width: 16px; height: 16px; display: block; }
 
 /* Spacious Hero Centerpiece */
 .om-mcp-hero-top { padding: 120px 0 116px; text-align: center; max-width: 920px; margin-inline: auto; }
@@ -123,9 +123,9 @@
 .om-mcp-carousel-shell { position: relative; flex: 0 0 min(960px, calc(100cqi - 80px)); width: min(960px, calc(100cqi - 80px)); }
 .om-mcp-carousel-card { position: relative; width: 100%; aspect-ratio: 16 / 9.1; min-height: 440px; overflow: hidden; }
 .om-mcp-carousel-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.om-mcp-carousel-scrim { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.om-mcp-carousel-scrim { position: absolute; inset: -32px -80px -40px -32px; z-index: -1; pointer-events: none; }
 .om-mcp-carousel-content { position: relative; z-index: 4; height: 100%; padding: 30px 32px 26px; display: flex; flex-direction: column; justify-content: space-between; }
-.om-mcp-carousel-top { max-width: 440px; }
+.om-mcp-carousel-top { position: relative; isolation: isolate; max-width: 440px; }
 .om-mcp-carousel-title { margin: 0 0 12px; }
 .om-mcp-carousel-prompt { margin: 0; }
 .om-mcp-carousel-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
@@ -151,7 +151,6 @@
 .om-mcp-demo-shade { pointer-events: none; }
 .om-mcp-demo-kind { position: absolute; inset-block-start: 10px; inset-inline-start: 10px; }
 .om-mcp-demo-duration { position: absolute; inset-block-end: 10px; inset-inline-end: 10px; }
-.om-mcp-demo-play { position: absolute; inset: 50% auto auto 50%; display: grid; place-items: center; width: 44px; height: 44px; }
 .om-mcp-template-caption { display: flex; flex: 1; flex-direction: column; gap: var(--motion-space-8); padding: 18px 18px 16px; }
 .om-mcp-template-caption h3 { margin: 0; overflow-wrap: anywhere; }
 .om-mcp-template-caption p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; flex: 1; }

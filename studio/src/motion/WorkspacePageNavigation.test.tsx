@@ -266,6 +266,16 @@ it('uses browser history across settings, reloads and new navigation branches', 
   await accountAction('Help'); await traverse(1); expect(page().settings).toBe('help');
 });
 
+it('routes MCP account claims and API key setup to different settings', async () => {
+  await mount();
+  await openMcp();
+  await click('Claim now');
+  expect(page()).toMatchObject({ settings: 'account', provider: null });
+  await traverse(-1);
+  await click('Already have an API key? Connect directly');
+  expect(page()).toMatchObject({ settings: 'providers', provider: 'opendesign' });
+});
+
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
   const detail = 'dialog[aria-label="Template preview"]';
   await mount(); await openMcp(); await click('All 30+ templates');

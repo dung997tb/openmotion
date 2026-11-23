@@ -147,7 +147,7 @@
   --motion-mcp-stage-bg: #0c0d0f;
   --motion-mcp-stage-ink: #f8f9fa;
   --motion-mcp-stage-muted: rgba(242, 244, 248, 0.88);
-  --motion-mcp-stage-scrim: linear-gradient(90deg, rgba(10, 11, 13, 0.95) 0%, rgba(10, 11, 13, 0.80) 38%, rgba(10, 11, 13, 0.24) 64%, rgba(10, 11, 13, 0) 82%), linear-gradient(180deg, rgba(10, 11, 13, 0.18) 0%, rgba(10, 11, 13, 0) 42%, rgba(10, 11, 13, 0.62) 100%);
+  --motion-mcp-stage-scrim: linear-gradient(90deg, rgba(10, 11, 13, 0.88), rgba(10, 11, 13, 0.76) calc(100% - 80px), rgba(10, 11, 13, 0));
   --motion-mcp-stage-vignette: linear-gradient(180deg, transparent 76%, rgb(10 11 13 / 48%) 100%);
   --motion-mcp-stage-pill-bg: rgba(14, 15, 18, 0.74);
   --motion-mcp-stage-pill-hover: rgba(28, 30, 36, 0.88);
@@ -160,6 +160,8 @@
   --motion-mcp-dock-bg: rgba(18, 19, 22, 0.04);
   --motion-mcp-dock-active: rgba(18, 19, 22, 0.09);
   --motion-mcp-dock-hover: rgba(18, 19, 22, 0.04);
+  --motion-mcp-dock-muted: var(--motion-muted);
+  --motion-mcp-dock-ink: var(--motion-strong);
   --motion-mcp-page-bg: var(--motion-workspace);
   --motion-mcp-banner-bg: rgb(0 113 6 / 4%);
   --motion-mcp-banner-border: rgba(0, 113, 6, 0.20);
@@ -286,7 +288,7 @@
   --motion-mcp-stage-bg: #0c0d0f;
   --motion-mcp-stage-ink: #f8f9fa;
   --motion-mcp-stage-muted: rgba(242, 244, 248, 0.88);
-  --motion-mcp-stage-scrim: linear-gradient(90deg, rgba(10, 11, 13, 0.95) 0%, rgba(10, 11, 13, 0.80) 38%, rgba(10, 11, 13, 0.24) 64%, rgba(10, 11, 13, 0) 82%), linear-gradient(180deg, rgba(10, 11, 13, 0.18) 0%, rgba(10, 11, 13, 0) 42%, rgba(10, 11, 13, 0.62) 100%);
+  --motion-mcp-stage-scrim: linear-gradient(90deg, rgba(10, 11, 13, 0.88), rgba(10, 11, 13, 0.76) calc(100% - 80px), rgba(10, 11, 13, 0));
   --motion-mcp-stage-vignette: linear-gradient(180deg, transparent 76%, rgb(10 11 13 / 48%) 100%);
   --motion-mcp-stage-pill-bg: rgba(14, 15, 18, 0.74);
   --motion-mcp-stage-pill-hover: rgba(28, 30, 36, 0.88);
@@ -299,6 +301,8 @@
   --motion-mcp-dock-bg: rgba(255, 255, 255, 0.04);
   --motion-mcp-dock-active: rgba(255, 255, 255, 0.13);
   --motion-mcp-dock-hover: rgba(255, 255, 255, 0.04);
+  --motion-mcp-dock-muted: #9ea5b0;
+  --motion-mcp-dock-ink: #f8f9fa;
   --motion-mcp-page-bg: #111214;
   --motion-mcp-banner-bg: rgb(0 255 8 / 4%);
   --motion-mcp-banner-border: rgba(0, 255, 8, 0.22);
@@ -426,7 +430,7 @@
     --motion-mcp-stage-bg: #0c0d0f;
     --motion-mcp-stage-ink: #f8f9fa;
     --motion-mcp-stage-muted: rgba(242, 244, 248, 0.88);
-    --motion-mcp-stage-scrim: linear-gradient(90deg, rgba(10, 11, 13, 0.95) 0%, rgba(10, 11, 13, 0.80) 38%, rgba(10, 11, 13, 0.24) 64%, rgba(10, 11, 13, 0) 82%), linear-gradient(180deg, rgba(10, 11, 13, 0.18) 0%, rgba(10, 11, 13, 0) 42%, rgba(10, 11, 13, 0.62) 100%);
+    --motion-mcp-stage-scrim: linear-gradient(90deg, rgba(10, 11, 13, 0.88), rgba(10, 11, 13, 0.76) calc(100% - 80px), rgba(10, 11, 13, 0));
     --motion-mcp-stage-vignette: linear-gradient(180deg, transparent 76%, rgb(10 11 13 / 48%) 100%);
     --motion-mcp-stage-pill-bg: rgba(14, 15, 18, 0.74);
     --motion-mcp-stage-pill-hover: rgba(28, 30, 36, 0.88);
@@ -439,6 +443,8 @@
     --motion-mcp-dock-bg: rgba(255, 255, 255, 0.04);
     --motion-mcp-dock-active: rgba(255, 255, 255, 0.13);
     --motion-mcp-dock-hover: rgba(255, 255, 255, 0.04);
+    --motion-mcp-dock-muted: #9ea5b0;
+    --motion-mcp-dock-ink: #f8f9fa;
     --motion-mcp-page-bg: #111214;
     --motion-mcp-banner-bg: rgb(0 255 8 / 4%);
     --motion-mcp-banner-border: rgba(0, 255, 8, 0.22);

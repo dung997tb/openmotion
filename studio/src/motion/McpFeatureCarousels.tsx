@@ -139,9 +139,9 @@ function FeatureModuleCarousel({
             ) : (
               <img className="om-mcp-carousel-img" src={current.image} alt={currentText.title} decoding="async" />
             )}
-            <div className="om-mcp-carousel-scrim" aria-hidden="true" />
             <div className="om-mcp-carousel-content">
               <div className="om-mcp-carousel-top">
+                <div className="om-mcp-carousel-scrim" aria-hidden="true" />
                 <h3 className="om-mcp-carousel-title">{currentText.title}</h3>
                 <p className="om-mcp-carousel-prompt">
                   <span className="om-mcp-at-brand">@OpenDesign</span>
