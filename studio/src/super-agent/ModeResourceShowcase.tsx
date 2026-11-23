@@ -955,7 +955,7 @@ export function ModeResourceShowcase({
                     type="button"
                     className="om-sa-game-fan-card"
                     aria-pressed={isCenter ? isSelected : undefined}
-                    aria-label={isCenter ? `${t('Make one like this')}: ${title}` : title}
+                    aria-label={isCenter ? `${t('Remix')}: ${title}` : title}
                     onClick={() => {
                       if (!isCenter) {
                         setFanIndex(index);
@@ -972,7 +972,7 @@ export function ModeResourceShowcase({
                         aria-hidden="true"
                       >
                         <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
-                        <span>{isSelected ? t('Selected') : t('Make one like this')}</span>
+                        <span>{isSelected ? t('Selected') : t('Remix')}</span>
                       </span>
                     )}
                     <span className="om-sa-game-fan-label">{t(genreLabels[game.genre])}</span>
@@ -984,10 +984,10 @@ export function ModeResourceShowcase({
                           variant="plain"
                           type="button"
                           className="om-sa-game-tile-deploy"
-                          title={t('Cloud deploy')}
-                          aria-label={`${t('Cloud deploy')}: ${title}`}
+                          title={t('Share')}
+                          aria-label={`${t('Share')}: ${title}`}
                           onClick={() => onDeployGame(game)}
-                          icon={<RemixIcon name="cloud-line" size={13} />}
+                          icon={<RemixIcon name="share-forward-line" size={13} />}
                         />
                       )}
                       {onPlayGame && (
@@ -1246,7 +1246,7 @@ export function ModeResourceShowcase({
                       type="button"
                       className="om-sa-game-tile-cover"
                       aria-pressed={isSelected}
-                      aria-label={isMine ? `${t('Attach to Chat')}: ${title}` : `${t('Make one like this')}: ${title}`}
+                      aria-label={isMine ? `${t('Attach')}: ${title}` : `${t('Remix')}: ${title}`}
                       onClick={() => selectGameForAgent(game)}
                     >
                       {cover ? (
@@ -1263,7 +1263,7 @@ export function ModeResourceShowcase({
                         aria-hidden="true"
                       >
                         <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
-                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Make one like this')}</span>
+                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Remix')}</span>
                       </span>
                       {status && (
                         <span className="om-sa-game-status" data-tone={game.status}>
@@ -1292,10 +1292,10 @@ export function ModeResourceShowcase({
                             variant="plain"
                             type="button"
                             className="om-sa-game-tile-deploy"
-                            title={t('Cloud deploy')}
-                            aria-label={`${t('Cloud deploy')}: ${title}`}
+                            title={t('Share')}
+                            aria-label={`${t('Share')}: ${title}`}
                             onClick={() => onDeployGame(game)}
-                            icon={<RemixIcon name="cloud-line" size={13} />}
+                            icon={<RemixIcon name="share-forward-line" size={13} />}
                           />
                         )}
                         {onPlayGame && (

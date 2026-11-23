@@ -143,7 +143,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。",
     "Playable ad": "广告游戏",
     "Continue in Super Agent": "在 Super Agent 中继续",
-    "Edit & optimize in Super Agent": "在 Super Agent 中二创与优化"
+    "Edit & optimize in Super Agent": "在 Super Agent 中二创与优化",
+    "Create trailer": "生成宣传片",
+    "Edit in Agent": "在 Agent 中编辑"
   },
   "ja": {
     "3D": "3D",
@@ -289,7 +291,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。",
     "Playable ad": "プレイアブル広告",
     "Continue in Super Agent": "Super Agent で続ける",
-    "Edit & optimize in Super Agent": "Super Agent で編集・最適化"
+    "Edit & optimize in Super Agent": "Super Agent で編集・最適化",
+    "Create trailer": "予告編を作成",
+    "Edit in Agent": "Agent で編集"
   },
   "ko": {
     "3D": "3D",
@@ -435,7 +439,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다.",
     "Playable ad": "플레이어블 광고",
     "Continue in Super Agent": "Super Agent에서 계속하기",
-    "Edit & optimize in Super Agent": "Super Agent에서 편집 및 최적화"
+    "Edit & optimize in Super Agent": "Super Agent에서 편집 및 최적화",
+    "Create trailer": "트레일러 생성",
+    "Edit in Agent": "Agent에서 편집"
   },
   "de": {
     "3D": "3D",
@@ -581,7 +587,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst.",
     "Playable ad": "Playable Ad",
     "Continue in Super Agent": "In Super Agent fortfahren",
-    "Edit & optimize in Super Agent": "In Super Agent bearbeiten & optimieren"
+    "Edit & optimize in Super Agent": "In Super Agent bearbeiten & optimieren",
+    "Create trailer": "Trailer erstellen",
+    "Edit in Agent": "Im Agent bearbeiten"
   },
   "fr": {
     "3D": "3D",
@@ -727,7 +735,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même.",
     "Playable ad": "Publicité jouable",
     "Continue in Super Agent": "Continuer dans Super Agent",
-    "Edit & optimize in Super Agent": "Modifier et optimiser dans Super Agent"
+    "Edit & optimize in Super Agent": "Modifier et optimiser dans Super Agent",
+    "Create trailer": "Créer une bande-annonce",
+    "Edit in Agent": "Modifier dans Agent"
   },
   "ru": {
     "3D": "3D",
@@ -873,7 +883,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами.",
     "Playable ad": "Играбельная реклама",
     "Continue in Super Agent": "Продолжить в Super Agent",
-    "Edit & optimize in Super Agent": "Редактировать и улучшать в Super Agent"
+    "Edit & optimize in Super Agent": "Редактировать и улучшать в Super Agent",
+    "Create trailer": "Создать трейлер",
+    "Edit in Agent": "Изменить в Agent"
   },
   "es": {
     "3D": "3D",
@@ -1019,7 +1031,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú.",
     "Playable ad": "Anuncio jugable",
     "Continue in Super Agent": "Continuar en Super Agent",
-    "Edit & optimize in Super Agent": "Editar y optimizar en Super Agent"
+    "Edit & optimize in Super Agent": "Editar y optimizar en Super Agent",
+    "Create trailer": "Crear tráiler",
+    "Edit in Agent": "Editar en Agent"
   },
   "pt-BR": {
     "3D": "3D",
@@ -1165,7 +1179,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo.",
     "Playable ad": "Anúncio jogável",
     "Continue in Super Agent": "Continuar no Super Agent",
-    "Edit & optimize in Super Agent": "Editar e otimizar no Super Agent"
+    "Edit & optimize in Super Agent": "Editar e otimizar no Super Agent",
+    "Create trailer": "Criar trailer",
+    "Edit in Agent": "Editar no Agent"
   },
   "it": {
     "3D": "3D",
@@ -1311,7 +1327,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu.",
     "Playable ad": "Annuncio giocabile",
     "Continue in Super Agent": "Continua in Super Agent",
-    "Edit & optimize in Super Agent": "Modifica e ottimizza in Super Agent"
+    "Edit & optimize in Super Agent": "Modifica e ottimizza in Super Agent",
+    "Create trailer": "Crea trailer",
+    "Edit in Agent": "Modifica in Agent"
   },
   "tr": {
     "3D": "3D",
@@ -1457,6 +1475,8 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın.",
     "Playable ad": "Oynanabilir reklam",
     "Continue in Super Agent": "Super Agent'ta devam et",
-    "Edit & optimize in Super Agent": "Super Agent'ta düzenle ve iyileştir"
+    "Edit & optimize in Super Agent": "Super Agent'ta düzenle ve iyileştir",
+    "Create trailer": "Fragman oluştur",
+    "Edit in Agent": "Agent’ta düzenle"
   }
 }

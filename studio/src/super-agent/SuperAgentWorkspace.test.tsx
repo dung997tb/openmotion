@@ -1109,7 +1109,7 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(onOpenArtifactId).toHaveBeenCalledWith('design:d-99');
   const deliverableActions = document.querySelector('.om-sa-deliverable-actions');
   expect(deliverableActions?.textContent).toContain('Preview');
-  expect(deliverableActions?.textContent).toContain('Cloud deploy');
+  expect(deliverableActions?.textContent).toContain('Share');
   expect(deliverableActions?.textContent).toContain('Export');
 
   const viewerLinkBtn = document.querySelector<HTMLButtonElement>('.om-sa-link-viewer-btn')!;
@@ -1784,7 +1784,7 @@ it('supports web preview device toolbar, browser options menu, and visual elemen
   expect(menu.textContent).toContain('Appearance');
   expect(menu.textContent).toContain('Clear cookies');
   expect(menu.textContent).toContain('Clear cache');
-  expect(menu.textContent).toContain('Open in new window');
+  expect(menu.textContent).toContain('Open external');
   await act(async () => menuBtn.click());
   await flush();
 
@@ -2092,6 +2092,13 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     expect(turnBody?.attachments?.some((att: any) => att.kind === 'game-project' && att.id === CREATED_GAME_ID)).toBe(true);
     expect(turnBody?.text).toBe('Co-op pixel shooter in space');
     expect(turnBody?.hiddenInstructions).toContain('openmotion_present_artifact');
+    expect(turnBody?.contextTags?.map((tag: any) => tag.label)).toEqual([
+      'Game',
+      'Shooter',
+      'Pixel art',
+      '9:16',
+      'Multiplayer',
+    ]);
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -2755,10 +2762,10 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   expect(viewer?.textContent).toContain('The Little Prince: Star Journey');
   expect(chatCreateCalls).toBe(0);
 
-  // Clicking "Make one like this" inside the Artifact Viewer selects the playing game into the Agent composer
+  // Clicking "Remix" inside the Artifact Viewer selects the playing game into the Agent composer
   const viewerUseBtn = viewer?.querySelector('.om-sa-game-use-btn') as HTMLButtonElement;
   expect(viewerUseBtn).toBeTruthy();
-  expect(viewerUseBtn.textContent).toContain('Make one like this');
+  expect(viewerUseBtn.textContent).toContain('Remix');
   await act(async () => viewerUseBtn.click());
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('The Little Prince: Star Journey');
@@ -2777,14 +2784,14 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   expect(fanCenterCard).toBeTruthy();
   await act(async () => fanCenterCard.click());
   await flush();
-  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Remix ·');
 
   // Clicking a bottom masonry card cover selects it into the composer. The Try game button opens the viewer.
   const listCoverBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-cover') as HTMLButtonElement;
   expect(listCoverBtn).toBeTruthy();
   await act(async () => listCoverBtn.click());
   await flush();
-  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+  expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Remix ·');
 
   const listPlayBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
   expect(listPlayBtn).toBeTruthy();
@@ -2996,6 +3003,7 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
             text: turnBody.text,
             createdAt: 2001,
             attachments: turnBody.attachments,
+            contextTags: turnBody.contextTags,
           },
         ],
         approvals: [
@@ -3023,10 +3031,16 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
   }) as any;
 
   queueSuperAgentHandoff(buildSuperAgentHandoff(
-    { kind: 'game-project', id: 'game-2024', title: '2024小游戏', genre: 'casual' },
+    { kind: 'game-project', id: 'game-2024', title: '我想做一个2024小游戏', genre: 'casual' },
     {
       prompt: '我想做一个2024小游戏',
       hiddenInstructions: 'Use the openmotion-game Skill to build game game-2024. Read openmotion://workflow/game/start.',
+      contextTags: [
+        { kind: 'mode', label: 'Game', icon: 'gamepad-line', tone: 'agent' },
+        { kind: 'param', label: 'Casual' },
+        { kind: 'param', label: '9:16' },
+        { kind: 'param', label: 'Single player' },
+      ],
       locale: 'zh-CN',
       autoSend: true,
       newChat: true,
@@ -3061,6 +3075,11 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
   expect(userBubble?.textContent).not.toContain('openmotion-game Skill');
   expect(userBubble?.textContent).not.toContain('openmotion://workflow/game/start');
 
+  // Mode + parameter tags render cleanly above the user bubble, while duplicate draft game chip is suppressed
+  const tagLabels = [...container.querySelectorAll('.om-sa-context-tag')].map(el => el.textContent?.trim());
+  expect(tagLabels).toEqual(['Game', 'Casual', '9:16', 'Single player']);
+  expect(container.querySelectorAll('.om-sa-msg-attachments .om-sa-attachment-chip').length).toBe(0);
+
   // Approval card renders plain-language summary + target chip, with technical details collapsed by default
   const approvalCard = container.querySelector('.om-sa-approval')!;
   expect(approvalCard).toBeTruthy();
@@ -3072,9 +3091,9 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
   expect(detailsEl.open).toBe(false);
   expect(detailsEl.querySelector('.om-sa-approval-pre')?.textContent).not.toContain('availableDecisions');
 
-  // Clicking "Always allow in this task" sends alwaysAllow: true and clears the card
+  // Clicking "Always allow" sends alwaysAllow: true and clears the card
   const alwaysAllowBtn = [...approvalCard.querySelectorAll('button')].find(
-    b => b.textContent?.trim() === 'Always allow in this task',
+    b => b.textContent?.trim() === 'Always allow',
   ) as HTMLButtonElement;
   expect(alwaysAllowBtn).toBeTruthy();
   await act(async () => alwaysAllowBtn.click());
@@ -3085,4 +3104,258 @@ it('keeps Skill handoff instructions out of visible user messages and renders hu
     alwaysAllow: true,
   });
   expect(container.querySelector('.om-sa-approval')).toBeNull();
+});
+
+it('FilesChangedCard renders collapsible folder tree, inline diff/image preview, and Open in Code Viewer', async () => {
+  const onCopyText = vi.fn();
+  const onOpenChangedFile = vi.fn();
+  const treeChat: SuperAgentChat = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 'Action Shooter',
+    intent: 'game',
+    engine: 'antigravity',
+    permissionMode: 'auto',
+    projectDir: '/tmp/workspace/games/game-9',
+    projectKind: 'game',
+    createdAt: 1000,
+    updatedAt: 4500,
+    state: 'idle',
+    artifacts: [
+      {
+        id: 'game:game-9',
+        kind: 'game-project',
+        title: 'Action Shooter',
+        projectId: 'game-9',
+        createdAt: 2000,
+        updatedAt: 3000,
+      },
+    ],
+    turnChangedFiles: {
+      u1: [
+        { action: 'create', path: 'design/plan.md', addedLines: 4, diffPreview: '+# Plan', artifactId: 'game:game-9' },
+        { action: 'create', path: 'design/assets.csv', addedLines: 2, diffPreview: '+name,type', artifactId: 'game:game-9' },
+        { action: 'create', path: 'design/verification.md', addedLines: 3, diffPreview: '+# Verified', artifactId: 'game:game-9' },
+        { action: 'create', path: 'assets/icon.svg', addedLines: 1, diffPreview: '+<svg/>', artifactId: 'game:game-9', previewUrl: '/motion-api/games/game-9/play/assets/icon.svg' },
+        { action: 'create', path: 'assets/cover.png', binary: true, sizeBytes: 12400, artifactId: 'game:game-9', previewUrl: '/motion-api/games/game-9/play/assets/cover.png' },
+        { action: 'create', path: 'index.html', addedLines: 10, diffPreview: '+<!doctype html>', artifactId: 'game:game-9' },
+        { action: 'create', path: 'style.css', addedLines: 8, diffPreview: '+body { margin: 0; }', artifactId: 'game:game-9' },
+        { action: 'edit', path: 'client.js', addedLines: 5, removedLines: 1, diffPreview: '-old()\n+new()', artifactId: 'game:game-9' },
+        { action: 'create', path: 'logic.js', addedLines: 12, diffPreview: '+export const meta = {};', artifactId: 'game:game-9' },
+      ],
+    },
+    approvals: [],
+    messages: [
+      { id: 'u1', role: 'user', text: 'Build action game', createdAt: 1000 },
+      { id: 'a1', role: 'assistant', text: 'Done.', createdAt: 4000, status: 'completed' },
+    ],
+  };
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={treeChat}
+          busy={false}
+          sending={false}
+          engineLabel="Antigravity"
+          onOpenArtifactId={vi.fn()}
+          onOpenChangedFile={onOpenChangedFile}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={onCopyText}
+          onApprove={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+
+  const card = container.querySelector('.om-sa-files-changed')!;
+  expect(card.textContent).toContain('Files changed (9)');
+  expect(card.textContent).toContain('+45');
+  expect(card.textContent).toContain('-1');
+
+  const folderNames = [...card.querySelectorAll('.om-sa-file-folder-name')].map(el => el.textContent);
+  expect(folderNames).toEqual(['assets', 'design']);
+  expect(card.textContent).toContain('index.html');
+  expect(card.textContent).toContain('cover.png');
+  expect(card.textContent).toContain('assets.csv');
+
+  // Collapse all folders via header action, then re-expand
+  const collapseAllBtn = card.querySelector<HTMLButtonElement>('.om-sa-files-head-action-btn')!;
+  expect(collapseAllBtn.textContent).toContain('Collapse all');
+  await act(async () => collapseAllBtn.click());
+  await flush();
+  expect(card.textContent).not.toContain('cover.png');
+  expect(card.textContent).not.toContain('plan.md');
+  expect(card.querySelector('.om-sa-files-head-action-btn')?.textContent).toContain('Expand all');
+
+  await act(async () => collapseAllBtn.click());
+  await flush();
+  expect(card.textContent).toContain('cover.png');
+
+  // Collapse a single folder (assets)
+  const assetsFolderBtn = [...card.querySelectorAll<HTMLButtonElement>('.om-sa-file-folder-trigger')].find(
+    el => el.textContent?.includes('assets'),
+  )!;
+  await act(async () => assetsFolderBtn.click());
+  await flush();
+  expect(card.textContent).not.toContain('cover.png');
+  expect(card.textContent).toContain('plan.md');
+  await act(async () => assetsFolderBtn.click());
+  await flush();
+
+  // Clicking binary image opens inline preview drawer
+  const coverBtn = [...card.querySelectorAll<HTMLButtonElement>('.om-sa-file-row-trigger')].find(
+    el => el.title === 'assets/cover.png',
+  )!;
+  await act(async () => coverBtn.click());
+  await flush();
+  const imgPreview = card.querySelector<HTMLImageElement>('.om-sa-file-preview-img');
+  expect(imgPreview?.getAttribute('src')).toBe('/motion-api/games/game-9/play/assets/cover.png');
+
+  // Clicking "Open in Code Viewer" invokes callback with index.html
+  const openViewerBtn = [...card.querySelectorAll<HTMLButtonElement>('.om-sa-file-copy-btn')].find(
+    btn => btn.getAttribute('aria-label') === 'Open in Code Viewer' && btn.closest('.om-sa-file-change-row')?.textContent?.includes('index.html'),
+  )!;
+  expect(openViewerBtn).toBeTruthy();
+  await act(async () => openViewerBtn.click());
+  await flush();
+  expect(onOpenChangedFile).toHaveBeenCalledWith(expect.objectContaining({ path: 'index.html', artifactId: 'game:game-9' }));
+
+  // Project directory footer button copies canonical directory
+  const dirFootBtn = card.querySelector<HTMLButtonElement>('.om-sa-files-dir-btn')!;
+  expect(dirFootBtn.textContent).toContain('/tmp/workspace/games/game-9');
+  await act(async () => dirFootBtn.click());
+  expect(onCopyText).toHaveBeenCalledWith('/tmp/workspace/games/game-9');
+
+  // Card header toggles full collapse
+  const cardHeadBtn = card.querySelector<HTMLButtonElement>('.om-sa-files-changed-head-btn')!;
+  await act(async () => cardHeadBtn.click());
+  await flush();
+  expect(card.querySelector('.om-sa-files-changed-list')).toBeNull();
+});
+
+it('SuperAgentWorkspace shows task project directory in header and opens changed file in Code Viewer', async () => {
+  const GAME_TREE_CHAT_ID = '22222222-2222-4222-8222-222222222222';
+  const chatPayload: SuperAgentChat = {
+    id: GAME_TREE_CHAT_ID,
+    title: 'Neon Runner',
+    intent: 'game',
+    engine: 'antigravity',
+    permissionMode: 'auto',
+    projectDir: '/tmp/data/games/game-neon-1',
+    projectKind: 'game',
+    createdAt: 1000,
+    updatedAt: 5000,
+    state: 'idle',
+    artifacts: [
+      {
+        id: 'game:game-neon-1',
+        kind: 'game-project',
+        title: 'Neon Runner',
+        projectId: 'game-neon-1',
+        url: '/motion-api/games/game-neon-1/play/index.html',
+        revision: 'rev-1',
+        createdAt: 2000,
+        updatedAt: 3000,
+      },
+    ],
+    activeArtifactId: 'game:game-neon-1',
+    turnChangedFiles: {
+      u1: [
+        { action: 'create', path: 'index.html', addedLines: 5, diffPreview: '+<!doctype html>', artifactId: 'game:game-neon-1' },
+        { action: 'create', path: 'style.css', addedLines: 3, diffPreview: '+.hud { color: red; }', artifactId: 'game:game-neon-1' },
+      ],
+    },
+    approvals: [],
+    messages: [
+      { id: 'u1', role: 'user', text: 'Create Neon Runner', createdAt: 1000 },
+      { id: 'a1', role: 'assistant', text: 'Ready!', createdAt: 4000, status: 'completed' },
+    ],
+  };
+
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'antigravity', label: 'Antigravity', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({ localDirectAvailable: true, defaultRuntimeId: 'local:direct', runtimes: [] });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json({
+        counts: { assets: 0, brandKits: 0, officialBrandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, designProjects: 0, motionProjects: 0, mediaProvidersAvailable: 0, workflows: 0, models: 0, games: 1 },
+        items: [],
+        generatedAt: Date.now(),
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats`) {
+      return json({ conversations: [{ ...chatPayload, artifactCount: 1, messageCount: 2 }] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${GAME_TREE_CHAT_ID}`) {
+      return json({ conversation: chatPayload });
+    }
+    if (url.includes('/motion-api/games/catalog')) {
+      return json({ games: [{ id: 'game-neon-1', title: 'Neon Runner', status: 'ready', source: 'mine', genre: 'arcade', multiplayer: false }] });
+    }
+    if (url.includes('/motion-api/games/game-neon-1/files')) {
+      return json({ files: [{ path: 'index.html', bytes: 64 }, { path: 'style.css', bytes: 42 }] });
+    }
+    if (url.includes('/motion-api/games/game-neon-1/play/style.css')) {
+      return new Response('.hud { color: red; }', { status: 200, headers: { 'Content-Type': 'text/css' } });
+    }
+    if (url.includes('/motion-api/games/game-neon-1/play/index.html')) {
+      return new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    }
+    return json({});
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={GAME_TREE_CHAT_ID}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  const dirHeaderBtn = container.querySelector<HTMLButtonElement>('.om-sa-head-dir-btn')!;
+  expect(dirHeaderBtn).toBeTruthy();
+  expect(dirHeaderBtn.textContent).toContain('games/game-neon-1');
+  await act(async () => dirHeaderBtn.click());
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/tmp/data/games/game-neon-1');
+
+  // Click Open in Code Viewer on style.css
+  const openStyleBtn = [...container.querySelectorAll<HTMLButtonElement>('.om-sa-file-copy-btn')].find(
+    btn => btn.getAttribute('aria-label') === 'Open in Code Viewer' && btn.closest('.om-sa-file-change-row')?.textContent?.includes('style.css'),
+  )!;
+  expect(openStyleBtn).toBeTruthy();
+  await act(async () => openStyleBtn.click());
+  await flush();
+  await flush();
+  await flush();
+
+  const selectedTab = [...container.querySelectorAll<HTMLElement>('.om-sa-code-file-row')].find(
+    el => el.getAttribute('aria-selected') === 'true',
+  );
+  expect(selectedTab?.textContent).toContain('style.css');
+  expect(container.textContent).toContain('.hud { color: red; }');
 });
