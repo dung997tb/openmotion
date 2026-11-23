@@ -141,6 +141,7 @@ it.each([
   ['The preview did not reload (load failed).', 'Preview could not be updated.'],
   ['Failed to save position', 'Changes could not be saved.'],
   ['revision mismatch conflict', 'The project changed elsewhere.'],
+  ['The project changed elsewhere. Changes were not saved.', 'The project changed elsewhere. Changes were not saved.'],
   ['unsupported video codec', 'This file format is not supported.'],
 ])('shows a concise cause for %s', (raw, summary) => {
   act(() => api.showToast(raw, 'error'));

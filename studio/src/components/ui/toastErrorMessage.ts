@@ -4,6 +4,7 @@ import { parseAssetUploadMessage } from '../../i18n/assetUploadMessages';
 /** Toasts show recognized causes, never raw diagnostics or a details affordance. */
 export function toastErrorMessage(raw: string): string {
   const message = sourceMessage(raw);
+  if (message === 'The project changed elsewhere. Changes were not saved.') return message;
   if (parseAssetUploadMessage(message)) return message;
   // These authored templates contain filenames, not server diagnostics. Match
   // before cause detection so words in a filename cannot change the feedback.
