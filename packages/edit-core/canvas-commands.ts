@@ -115,8 +115,9 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
           )
         )
           return false;
-        if (anim.hasUnresolvedSelector || anim.hasPartialSelector)
-          throw new Error("Cannot resolve the animated position target.");
+        // Dynamic JS targets cannot prove ownership of a layer. Preserve their script
+        // and apply a layer offset when no authored selector owns the drag.
+        if (anim.hasUnresolvedSelector) return false;
         let hits: Element[];
         try {
           hits = Array.from((el.closest("template") ?? document).querySelectorAll(anim.targetSelector));
@@ -124,7 +125,7 @@ export function applyCanvasCommand(source: string, command: CanvasCommand): stri
           throw new Error("Cannot resolve the animated position selector.");
         }
         if (!hits.includes(el)) return false;
-        if (hits.length !== 1)
+        if (anim.hasPartialSelector || hits.length !== 1)
           throw new Error(
             "The position tween targets multiple elements. Choose the shared animation explicitly.",
           );
