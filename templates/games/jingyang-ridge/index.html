@@ -32,9 +32,9 @@ if(!zh){document.documentElement.lang='en';brand.firstChild.textContent='Jingyan
 pauseBtn.textContent=T.pause;resume.textContent=T.resume;restart.textContent=T.restart;
 const c=document.getElementById('c'),x=c.getContext('2d');let W,H,D;
 function size(){D=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;c.width=W*D;c.height=H*D;x.setTransform(D,0,0,D,0,0)}addEventListener('resize',size);size();
-let state='intro',t=0,last=0,hp,thp,combo,best,player,tiger,fx,shake,startT,ac;
+let played=0,state='intro',t=0,last=0,hp,thp,combo,best,player,tiger,fx,shake,startT,ac;
 const lanes=[-1,0,1];
-function reset(){hp=100;thp=100;combo=0;best=0;player={lane:0,x:0,dodge:0,atk:0,hurt:0};tiger={phase:'idle',timer:1.4,move:null,lane:0,x:0,stun:0,hurt:0,anger:0};fx=[];shake=0;startT=t;combo=0;window.combo=0;upd()}
+function reset(){hp=100;thp=100;combo=0;best=0;player={lane:0,x:0,dodge:0,atk:0,hurt:0};tiger={phase:'idle',timer:1.4,move:null,lane:0,x:0,stun:0,hurt:0,anger:0};fx=[];shake=0;startT=t;played=0;combo=0;window.combo=0;upd()}
 const moves=[{k:'pounce',tell:.75,act:.32,dmg:24,hit:l=>true,miss:d=>d!==0},{k:'swipe',tell:.6,act:.28,dmg:16,dir:1},{k:'swipe',tell:.6,act:.28,dmg:16,dir:-1},{k:'sweep',tell:.85,act:.36,dmg:20}];
 function pick(){const ph=thp<35?2:thp<70?1:0;const m=moves[Math.floor(Math.random()*moves.length)];const sp=1-ph*.14;return {...m,tell:m.tell*sp,act:m.act}}
 function beep(f,d,type='triangle',v=.08){try{ac=ac||new AudioContext();const o=ac.createOscillator(),g=ac.createGain();o.type=type;o.frequency.value=f;g.gain.setValueAtTime(v,ac.currentTime);g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+d);o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}}
@@ -50,8 +50,8 @@ function strike(){if(state!=='play'||player.atk>0)return;player.atk=.22;
     if(thp<=0)finish(true)}
   else{combo=0;toast(T.miss);beep(220,.08,'sine',.04);if(tiger.phase==='idle')tiger.timer=Math.min(tiger.timer,.25)}
   upd()}
-function finish(win){state='end';const s=((t-startT)).toFixed(1);endEye.textContent=win?T.winEye:T.loseEye;endTitle.textContent=win?T.win:T.lose;endText.textContent=win?T.winText(s):T.loseText;document.getElementById('end').hidden=false;beep(win?660:110,.6,'triangle',.1)}
-function step(dt){
+function finish(win){state='end';const s=played.toFixed(1);endEye.textContent=win?T.winEye:T.loseEye;endTitle.textContent=win?T.win:T.lose;endText.textContent=win?T.winText(s):T.loseText;document.getElementById('end').hidden=false;beep(win?660:110,.6,'triangle',.1)}
+function step(dt){played+=dt;
   player.dodge=Math.max(0,player.dodge-dt);player.atk=Math.max(0,player.atk-dt);player.hurt=Math.max(0,player.hurt-dt);tiger.hurt=Math.max(0,tiger.hurt-dt);shake=Math.max(0,shake-dt*30);
   player.x+=(player.lane-player.x)*Math.min(1,dt*18);tiger.x+=(tiger.lane-tiger.x)*Math.min(1,dt*6);
   if(tiger.stun>0){tiger.stun-=dt;return}
