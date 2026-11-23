@@ -981,7 +981,10 @@ export function ModeComposerTopBar({
                     data-active={selected || undefined}
                     className="om-sa-game-choice-row"
                     onClick={() => {
-                      onChange({ gameOrientation: item.id });
+                      // Choosing portrait selects Playable ad by default, every time (like Game Studio).
+                      onChange(item.id === 'portrait' && options.gameOrientation !== 'portrait'
+                        ? { gameOrientation: item.id, gamePlayableAd: true, gameMultiplayer: false }
+                        : { gameOrientation: item.id });
                       setOpenMenu(null);
                     }}
                   >

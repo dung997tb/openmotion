@@ -1763,6 +1763,19 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     await flush();
     expect(topBar.textContent).toContain('Multiplayer');
 
+    // Switching back to portrait selects Playable ad again; then pick Multiplayer for the send below.
+    const pickRow = async (pill: string, row: string) => {
+      const trigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes(pill)) as HTMLButtonElement;
+      await act(async () => trigger.click()); await flush();
+      const option = [...document.querySelectorAll('.om-sa-game-choice-row')].find(b => b.querySelector('strong')?.textContent === row) as HTMLButtonElement;
+      await act(async () => option.click()); await flush();
+    };
+    await pickRow('Portrait', 'Landscape');
+    await pickRow('Landscape', 'Portrait');
+    expect(topBar.textContent).toContain('Playable ad');
+    await pickRow('Playable ad', 'Multiplayer');
+    expect(topBar.textContent).toContain('Multiplayer');
+
     // Send brief -> creates Game Studio project and starts Super Agent game turn
     const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
     await act(async () => {
