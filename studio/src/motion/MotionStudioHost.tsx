@@ -117,6 +117,10 @@ const host: StudioHost = {
   feedback: false,
 };
 
+export function MotionEditorHost({ children }: { children: ReactNode }) {
+  return <MotionHistoryProvider><StudioHostContext.Provider value={host}><OpenMotionAgentTools />{children}</StudioHostContext.Provider></MotionHistoryProvider>;
+}
+
 export function MotionStudioHost({ children }: { children: ReactNode }) {
   return <I18nProvider><MotionHistoryProvider><StudioHostContext.Provider value={host}><StudioErrorBoundary><OpenMotionAgentTools />{children}</StudioErrorBoundary></StudioHostContext.Provider></MotionHistoryProvider></I18nProvider>;
 }

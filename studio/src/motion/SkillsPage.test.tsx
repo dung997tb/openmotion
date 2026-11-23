@@ -297,6 +297,10 @@ it('ships static WebP posters and waits to fetch archived video until playback s
   act(() => root.render(<SkillMedia skill={skill} playing={false} />));
   expect(container.querySelectorAll('video')).toHaveLength(0);
   expect(container.querySelectorAll('img')).toHaveLength(2);
+  // Re-entering playback reuses the cached Blob instead of re-fetching from GitHub Raw.
+  await act(async () => root.render(<SkillMedia skill={skill} playing />));
+  expect(videoRequests()).toEqual([videoUrl]);
+  act(() => root.render(<SkillMedia skill={skill} playing={false} />));
 });
 
 it('merges same-repository cover credits while retaining external sources and attribution', () => {

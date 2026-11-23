@@ -164,9 +164,58 @@ class InMemoryPgClient {
       orderClause = orderMatch[1].trim();
       rem = rem.slice(0, orderMatch.index).trim();
     }
-    const whereMatch = /^where\s+([\s\S]+)$/i.exec(rem);
-    if (whereMatch) {
-      whereClause = whereMatch[1].trim();
+    const whereIdx = findTopLevelKeyword(rem, 'where');
+    const joinsClause = whereIdx >= 0 ? rem.slice(0, whereIdx).trim() : /^left\s+/i.test(rem) ? rem : '';
+    if (whereIdx >= 0) {
+      whereClause = rem.slice(whereIdx + 5).trim();
+    }
+
+    if (joinsClause) {
+      const joins: { table: string; on: string }[] = [];
+      let jc = joinsClause;
+      while (jc) {
+        const jm = /^left\s+(?:outer\s+)?join\s+"([^"]+)"\s+on\s+/i.exec(jc);
+        if (!jm) throw new Error(`Unsupported JOIN in test harness: ${sqlText}`);
+        const joinTable = jm[1];
+        const afterOn = jc.slice(jm[0].length);
+        const nextJoinIdx = findTopLevelKeyword(afterOn, 'left');
+        const onExpr = nextJoinIdx >= 0 ? afterOn.slice(0, nextJoinIdx).trim() : afterOn.trim();
+        joins.push({ table: joinTable, on: onExpr });
+        jc = nextJoinIdx >= 0 ? afterOn.slice(nextJoinIdx).trim() : '';
+      }
+      let combined: Map<string, Row | null>[] = this.rows(tableName).map((r) => new Map([[tableName, r]]));
+      for (const j of joins) {
+        const next: Map<string, Row | null>[] = [];
+        for (const rowMap of combined) {
+          let found = false;
+          for (const candidate of this.rows(j.table)) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, candidate);
+            if (evalJoinedWhere(merged, j.on, params)) {
+              next.push(merged);
+              found = true;
+            }
+          }
+          if (!found) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, null);
+            next.push(merged);
+          }
+        }
+        combined = next;
+      }
+      if (whereClause) combined = combined.filter((rowMap) => evalJoinedWhere(rowMap, whereClause, params));
+      if (limitCount !== null) combined = combined.slice(0, limitCount);
+      const specs = splitTopLevel(selectList, ',').map(extractQualifiedColumn);
+      return {
+        rows: combined.map((rowMap) =>
+          rowMode === 'array'
+            ? specs.map((s) => (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(tableName)?.[s.col]) ?? null)
+            : Object.fromEntries(
+                specs.map((s) => [s.col, (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(tableName)?.[s.col]) ?? null]),
+              ),
+        ),
+      };
     }
 
     let matched = this.rows(tableName).filter((row) =>
@@ -396,6 +445,43 @@ function extractColumnName(expr: string): string {
   const trimmed = expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').trim();
   const quoted = [...trimmed.matchAll(/"([^"]+)"/g)];
   return quoted.length > 0 ? quoted[quoted.length - 1][1] : trimmed;
+}
+
+function extractQualifiedColumn(expr: string): { table?: string; col: string } {
+  const trimmed = expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').trim();
+  const quoted = [...trimmed.matchAll(/"([^"]+)"/g)];
+  if (quoted.length >= 2) return { table: quoted[quoted.length - 2][1], col: quoted[quoted.length - 1][1] };
+  return { col: quoted.length === 1 ? quoted[0][1] : trimmed };
+}
+
+function evalJoinedOperand(rowMap: Map<string, Row | null>, expr: string, params: unknown[]): unknown {
+  const t = expr.trim();
+  const qm = /^"([^"]+)"\."([^"]+)"$/.exec(t);
+  if (qm) return rowMap.get(qm[1])?.[qm[2]] ?? null;
+  return evalScalar(t, params);
+}
+
+function evalJoinedWhere(rowMap: Map<string, Row | null>, rawWhere: string, params: unknown[]): boolean {
+  const unwrapped = stripOuterParens(rawWhere);
+  const terms = splitTopLevelAnd(unwrapped);
+  if (terms.length > 1) return terms.every((t) => evalJoinedWhere(rowMap, t, params));
+  const term = stripOuterParens(terms[0]);
+  const isNullMatch = /^([\s\S]+?)\s+is\s+null$/i.exec(term);
+  if (isNullMatch) return evalJoinedOperand(rowMap, isNullMatch[1], params) == null;
+  const isNotNullMatch = /^([\s\S]+?)\s+is\s+not\s+null$/i.exec(term);
+  if (isNotNullMatch) return evalJoinedOperand(rowMap, isNotNullMatch[1], params) != null;
+  const inMatch = /^([\s\S]+?)\s+in\s*\(([\s\S]+)\)$/i.exec(term);
+  if (inMatch) {
+    const lv = evalJoinedOperand(rowMap, inMatch[1], params);
+    return lv != null && splitTopLevel(inMatch[2], ',').map((v) => evalJoinedOperand(rowMap, v, params)).includes(lv);
+  }
+  const eqMatch = /^([\s\S]+?)\s*=\s*([\s\S]+)$/.exec(term);
+  if (eqMatch) {
+    const lv = evalJoinedOperand(rowMap, eqMatch[1], params);
+    const rv = evalJoinedOperand(rowMap, eqMatch[2], params);
+    return lv !== null && rv !== null && lv === rv;
+  }
+  throw new Error(`Unsupported joined WHERE in test harness: ${term}`);
 }
 
 function splitTopLevel(input: string, separator: string): string[] {

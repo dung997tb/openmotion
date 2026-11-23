@@ -390,11 +390,14 @@ export class ProjectFilesService {
       allowTrashed: options.allowTrashed ?? true,
       auth: ctx,
     });
+    return this.listFilesForProject(ctx, project.id);
+  }
 
+  private async listFilesForProject(ctx: AuthContext, projectId: string): Promise<VirtualFileRecord[]> {
     const rows = await this.db
       .select()
       .from(projectFiles)
-      .where(and(eq(projectFiles.workspaceId, ctx.workspaceId), eq(projectFiles.projectId, project.id)))
+      .where(and(eq(projectFiles.workspaceId, ctx.workspaceId), eq(projectFiles.projectId, projectId)))
       .orderBy(asc(projectFiles.path));
 
     if (rows.length === 0) return [];
@@ -403,29 +406,35 @@ export class ProjectFilesService {
     const catalogShas = [...new Set(rows.filter((r) => r.blobScope === 'catalog').map((r) => r.sha256.trim()))];
 
     const workspaceMetaMap = new Map<string, BlobMetadata | null>();
-    if (workspaceShas.length > 0) {
-      const blobRows = await this.db
-        .select({ sha256: workspaceBlobs.sha256, metadata: workspaceBlobs.metadata })
-        .from(workspaceBlobs)
-        .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), inArray(workspaceBlobs.sha256, workspaceShas)));
-      for (const blob of blobRows) {
-        workspaceMetaMap.set(blob.sha256.trim(), blob.metadata ?? null);
-      }
-    }
-
     const catalogMetaMap = new Map<string, BlobMetadata | null>();
-    if (catalogShas.length > 0) {
-      const catRows = await this.db
-        .select({ sha256: catalogTemplateFiles.sha256, metadata: catalogTemplateFiles.metadata })
-        .from(catalogTemplateFiles)
-        .where(inArray(catalogTemplateFiles.sha256, catalogShas));
-      for (const cat of catRows) {
-        const key = cat.sha256.trim();
-        if (!catalogMetaMap.has(key) || cat.metadata) {
-          catalogMetaMap.set(key, cat.metadata ?? null);
-        }
-      }
-    }
+
+    await Promise.all([
+      workspaceShas.length > 0
+        ? this.db
+            .select({ sha256: workspaceBlobs.sha256, metadata: workspaceBlobs.metadata })
+            .from(workspaceBlobs)
+            .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), inArray(workspaceBlobs.sha256, workspaceShas)))
+            .then((blobRows) => {
+              for (const blob of blobRows) {
+                workspaceMetaMap.set(blob.sha256.trim(), blob.metadata ?? null);
+              }
+            })
+        : Promise.resolve(),
+      catalogShas.length > 0
+        ? this.db
+            .select({ sha256: catalogTemplateFiles.sha256, metadata: catalogTemplateFiles.metadata })
+            .from(catalogTemplateFiles)
+            .where(inArray(catalogTemplateFiles.sha256, catalogShas))
+            .then((catRows) => {
+              for (const cat of catRows) {
+                const key = cat.sha256.trim();
+                if (!catalogMetaMap.has(key) || cat.metadata) {
+                  catalogMetaMap.set(key, cat.metadata ?? null);
+                }
+              }
+            })
+        : Promise.resolve(),
+    ]);
 
     return rows.map((row) => {
       const sha256 = row.sha256.trim();
@@ -446,6 +455,25 @@ export class ProjectFilesService {
     });
   }
 
+  /** Lightweight existence check for a file in an already-authorized project. */
+  async hasFile(ctx: AuthContext, projectId: string, filePath: string): Promise<boolean> {
+    assertValidUuid(ctx.workspaceId, 'workspaceId');
+    assertValidUuid(projectId, 'projectId');
+    const safePath = normalizeSafeProjectPath(filePath);
+    const rows = await this.db
+      .select({ path: projectFiles.path })
+      .from(projectFiles)
+      .where(
+        and(
+          eq(projectFiles.workspaceId, ctx.workspaceId),
+          eq(projectFiles.projectId, projectId),
+          eq(projectFiles.path, safePath),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+
   /** Lookup metadata for a single project file (PG metadata only, zero S3 read). */
   async getFile(
     ctx: AuthContext,
@@ -453,34 +481,57 @@ export class ProjectFilesService {
     filePath: string,
     options: { allowTrashed?: boolean } = {},
   ): Promise<VirtualFileRecord | null> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
-      allowTrashed: options.allowTrashed ?? true,
-      auth: ctx,
-    });
+    assertValidUuid(ctx.workspaceId, 'workspaceId');
+    assertValidUuid(projectId, 'projectId');
     const safePath = normalizeSafeProjectPath(filePath);
 
     const rows = await this.db
-      .select()
-      .from(projectFiles)
-      .where(
+      .select({
+        project: projects,
+        file: projectFiles,
+        workspaceBlobMetadata: workspaceBlobs.metadata,
+      })
+      .from(projects)
+      .leftJoin(
+        projectFiles,
         and(
-          eq(projectFiles.workspaceId, ctx.workspaceId),
-          eq(projectFiles.projectId, project.id),
+          eq(projectFiles.workspaceId, projects.workspaceId),
+          eq(projectFiles.projectId, projects.id),
           eq(projectFiles.path, safePath),
         ),
-      );
-    const row = rows[0];
+      )
+      .leftJoin(
+        workspaceBlobs,
+        and(
+          eq(workspaceBlobs.workspaceId, projectFiles.workspaceId),
+          eq(workspaceBlobs.sha256, projectFiles.sha256),
+          eq(projectFiles.blobScope, 'workspace'),
+        ),
+      )
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, ctx.workspaceId)))
+      .limit(1);
+
+    const joined = rows[0];
+    if (!joined) {
+      throw new CloudError('PROJECT_NOT_FOUND', `Project ${projectId} was not found in this workspace.`, {
+        status: 404,
+        applied: false,
+      });
+    }
+    await assertAgentProjectAccess(this.db, ctx, joined.project);
+    if (joined.project.trashed && !(options.allowTrashed ?? true)) {
+      throw new CloudError('PROJECT_TRASHED', `Project ${projectId} is in the trash and cannot be modified.`, {
+        status: 400,
+        applied: false,
+      });
+    }
+
+    const row = joined.file;
     if (!row) return null;
 
     const sha256 = row.sha256.trim();
-    let metadata: BlobMetadata | null = null;
-    if (row.blobScope === 'workspace') {
-      const blobRows = await this.db
-        .select({ metadata: workspaceBlobs.metadata })
-        .from(workspaceBlobs)
-        .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), eq(workspaceBlobs.sha256, sha256)));
-      metadata = blobRows[0]?.metadata ?? null;
-    } else {
+    let metadata: BlobMetadata | null = joined.workspaceBlobMetadata ?? null;
+    if (row.blobScope === 'catalog') {
       const catRows = await this.db
         .select({ metadata: catalogTemplateFiles.metadata })
         .from(catalogTemplateFiles)
@@ -611,16 +662,13 @@ export class ProjectFilesService {
     };
   }
 
-  /** Generate a short-lived tenant-scoped Presigned GET URL for a project file. */
-  async presignFileGet(
-    ctx: AuthContext,
-    projectId: string,
-    filePath: string,
+  /** Generate a short-lived tenant-scoped Presigned GET URL for an already-loaded project file (0 DB queries). */
+  async presignResolvedFileGet(
+    workspaceId: string,
+    file: VirtualFileRecord,
     options: PresignGetOptions = {},
-  ): Promise<{ file: VirtualFileRecord; url: string; etag: string } | null> {
-    const file = await this.getFile(ctx, projectId, filePath);
-    if (!file) return null;
-    const key = resolveBlobStorageKey(ctx.workspaceId, file.blobScope, file.sha256);
+  ): Promise<{ file: VirtualFileRecord; url: string; etag: string }> {
+    const key = resolveBlobStorageKey(workspaceId, file.blobScope, file.sha256);
     const url = await this.storage.presignGet(key, {
       expiresInSec: options.expiresInSec ?? 300,
       responseContentType: options.responseContentType ?? file.mimeType,
@@ -635,6 +683,18 @@ export class ProjectFilesService {
     };
   }
 
+  /** Generate a short-lived tenant-scoped Presigned GET URL for a project file. */
+  async presignFileGet(
+    ctx: AuthContext,
+    projectId: string,
+    filePath: string,
+    options: PresignGetOptions = {},
+  ): Promise<{ file: VirtualFileRecord; url: string; etag: string } | null> {
+    const file = await this.getFile(ctx, projectId, filePath);
+    if (!file) return null;
+    return this.presignResolvedFileGet(ctx.workspaceId, file, options);
+  }
+
   /**
    * Load an immutable in-memory snapshot (`InMemoryVirtualProject`) of a project's files and
    * text contents for `bundlePreviewInMemory`, `lintProjectInMemory`, `infoInMemory`, and `timelineInMemory`.
@@ -644,7 +704,7 @@ export class ProjectFilesService {
       allowTrashed: true,
       auth: ctx,
     });
-    const files = await this.listFiles(ctx, projectId, { allowTrashed: true });
+    const files = await this.listFilesForProject(ctx, project.id);
 
     const textContents = new Map<string, string>();
     const textFiles = files.filter((f) => f.isText);
