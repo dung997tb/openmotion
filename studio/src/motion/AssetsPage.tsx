@@ -50,6 +50,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const layout = studio && sceneLayout(studio.destination.scene);
   const [studioTab, setStudioTab] = useState<'guide' | 'library'>();
   const [mobileView, setMobileView] = useState<'library' | 'create'>('create');
+  const [promptAppliedToken, setPromptAppliedToken] = useState(0);
   const [taskId, setTaskId] = useState<string | undefined>(), [taskEpoch, setTaskEpoch] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true), [historyError, setHistoryError] = useState<string>(), [historyRetry, setHistoryRetry] = useState(0), [selectingTask, setSelectingTask] = useState(false);
   const studioForm = studio && !selected ? studio : undefined;
@@ -78,7 +79,16 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const audioStudio = studio?.openCreate ? studio : undefined;
   const hasGuide = studio?.destination.landing || layout === 'workbench';
   const guide = Boolean(hasGuide && (studioTab ? studioTab === 'guide' : studio?.destination.landing || browser.data?.total === 0));
-  const applyPrompt = (prompt: string) => { setDraft(current => ({ ...current, prompt })); setMobileView('create'); };
+  const applyPrompt = (prompt: string) => {
+    setDraft(current => ({ ...current, prompt }));
+    if (!studio) setCreating(true);
+    setMobileView('create');
+    setPromptAppliedToken(value => value + 1);
+    toast.showToast(
+      t(studio?.destination.scene.id === 'speech' ? 'Script loaded into editor' : 'Prompt loaded into editor'),
+      'info',
+    );
+  };
   const gallery = useRef<HTMLElement>(null), galleryScroll = useRef<{ top: number; key: string } | undefined>(undefined);
   useLayoutEffect(() => {
     if (selected || !gallery.current || !browser.data || !galleryScroll.current) return;
@@ -514,10 +524,10 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   };
   const blankCanvas = layout === 'canvas' && browser.data?.total === 0 && !placeholderJobs.length && !browser.query && (mediaGenerations || browser.source === 'all');
   const studioEmpty = studio && (layout === 'canvas' ? <StudioIdeas destination={studio.destination} onPrompt={applyPrompt}
-    modelName={studioModels?.selected && imageModelLabel(studioModels.selected)} /> : <p className="om-muted">{t('No assets yet')}</p>);
+    currentPrompt={draft.prompt} modelName={studioModels?.selected && imageModelLabel(studioModels.selected)} /> : <p className="om-muted">{t('No assets yet')}</p>);
   const history = { tasks, selectedKey, loading: historyLoading, error: historyError, onRetry: () => { setHistoryLoading(true); setHistoryRetry(value => value + 1); }, onSelect: (task: AssetTask) => { tracking.reportAssetsClick('asset_tasks', 'select_task', { task_mode: task.mode }); void selectTask(task); } };
   const taskMenu = <AssetTaskMenu {...history} disabled={selectingTask} />;
-  const composer = <AssetComposer studio={studioForm} key={taskEpoch} active={active} draft={draft} setDraft={setDraft} jobs={jobs} showCurrentJob={mediaGenerations ? false : !showLibraryPlaceholders} taskId={taskId} history={history} selectingTask={selectingTask}
+  const composer = <AssetComposer studio={studioForm} key={taskEpoch} active={active} draft={draft} setDraft={setDraft} promptAppliedToken={promptAppliedToken} jobs={jobs} showCurrentJob={mediaGenerations ? false : !showLibraryPlaceholders} taskId={taskId} history={history} selectingTask={selectingTask}
     onNew={() => startDraft({ modality: draft.modality, prompt: '', references: [] })}
     onCancel={cancelJob} onRetrySave={retrySave} onResume={resumeJob} onView={viewJob} uploadingReferences={uploadingReferences} onUploadReference={studioForm ? () => referenceUpload.current?.click() : undefined} onUploadFiles={studioForm ? (files, source) => { void uploadReferenceFiles(files, source === 'paste' ? 'other' : 'library_drop'); } : undefined} onReference={openReferencePicker} onCreated={job => {
       knownJobs.current = mergeAssetJobs(knownJobs.current, [job]); setJobs(knownJobs.current); setTaskId(job.id);
@@ -616,7 +626,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
         <Button variant="plain" className="om-nav-item" aria-pressed={!guide} onClick={() => setStudioTab('library')}>{t('Generations')}{activePlaceholderCount > 0 && <span className="om-badge om-tab-count" role="status">{activePlaceholderCount}</span>}</Button>
       </div> : <h2 className="om-subtitle">{t('Generations')}</h2>}{!mediaGenerations && <div className="om-asset-actions">{taskMenu}</div>}</header> : <header className="om-assets-heading"><div><h1 className="om-title">{t(kind === 'trash' ? 'Trash' : 'Workspace assets')}</h1><p className="om-muted">{t('One library for every creation.')}</p></div><div className="om-asset-actions">{taskMenu}<Button variant="ghost" className="om-button h-auto" disabled={uploading} onClick={() => { tracking.reportAssetsClick('assets_library', 'upload'); upload.current?.click(); }}><RemixIcon name="upload-2-line" size={16} />{t(uploading ? 'Uploading…' : 'Upload')}</Button><Button variant="ghost" className="om-button h-auto" data-primary onClick={create}><RemixIcon name="add-line" size={16} />{t('AI Create')}</Button></div></header>}
 
-      {guide && studio ? <StudioIdeas destination={studio.destination} active={active} onPrompt={applyPrompt} /> : studio && (studio.destination.scene.modality === 'image' || studio.destination.scene.modality === 'video') ? (
+      {guide && studio ? <StudioIdeas destination={studio.destination} active={active} currentPrompt={draft.prompt} onPrompt={applyPrompt} /> : studio && (studio.destination.scene.modality === 'image' || studio.destination.scene.modality === 'video') ? (
         <MediaGenerationHistory
           modality={studio.destination.scene.modality}
           browser={browser}

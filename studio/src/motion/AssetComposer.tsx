@@ -30,8 +30,8 @@ import { registeredProvider } from '../../../shared/provider-registry';
 import { ProviderSetupNotice } from './ProviderSetupNotice';
 
 export interface AssetDraft { modality: Modality; prompt: string; relight?: RelightChoices; videoChoices?: Record<string, string>; shotPreferences?: { aspect: string; duration?: number }; preferredModel?: string; model?: string; parameters?: Record<string, unknown>; target?: { asset: LibraryAsset; versionId: string }; references: { reference: AssetReference; name: string }[] }
-export function AssetComposer({ active, studio, draft, setDraft, jobs, showCurrentJob = true, taskId, history, selectingTask, onNew, onCancel, onView, onRetrySave, onResume, onReference, onUploadReference, onUploadFiles, uploadingReferences = false, onCreated, onError, onInfo, onClose }: {
-  active: boolean; studio?: StudioCreation; draft: AssetDraft; setDraft: Dispatch<SetStateAction<AssetDraft>>; jobs: GenerationJob[]; showCurrentJob?: boolean;
+export function AssetComposer({ active, studio, draft, setDraft, promptAppliedToken = 0, jobs, showCurrentJob = true, taskId, history, selectingTask, onNew, onCancel, onView, onRetrySave, onResume, onReference, onUploadReference, onUploadFiles, uploadingReferences = false, onCreated, onError, onInfo, onClose }: {
+  active: boolean; studio?: StudioCreation; draft: AssetDraft; setDraft: Dispatch<SetStateAction<AssetDraft>>; promptAppliedToken?: number; jobs: GenerationJob[]; showCurrentJob?: boolean;
   taskId?: string;
   history: Omit<ComponentProps<typeof AssetTaskHistory>, 'trigger'>; selectingTask: boolean; onNew: () => void;
   onCancel: (job: GenerationJob) => void; onView: (job: GenerationJob) => void; onRetrySave?: (job: GenerationJob) => Promise<void>; onReference: () => void; onUploadReference?: () => void;
@@ -52,6 +52,23 @@ export function AssetComposer({ active, studio, draft, setDraft, jobs, showCurre
   const featureMode = isFeatureScene(scene);
   const modelId = studio?.destination.model ?? draft.model;
   const promptId = useId();
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const appliedTokenRef = useRef(promptAppliedToken);
+  const [promptHighlight, setPromptHighlight] = useState<'a' | 'b'>();
+  useEffect(() => {
+    if (promptAppliedToken === appliedTokenRef.current) return;
+    appliedTokenRef.current = promptAppliedToken;
+    const input = promptRef.current;
+    if (input) {
+      input.scrollIntoView?.({ block: 'nearest' });
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange?.(end, end);
+    }
+    setPromptHighlight(promptAppliedToken % 2 === 1 ? 'a' : 'b');
+    const timer = window.setTimeout(() => setPromptHighlight(undefined), 900);
+    return () => window.clearTimeout(timer);
+  }, [promptAppliedToken]);
   const libraryCatalog = useMediaCatalog(active && !studio);
   const { catalog: gateway, failed, retry } = studio?.catalog ?? libraryCatalog;
   const [busy, setBusy] = useState(false);
@@ -252,12 +269,12 @@ export function AssetComposer({ active, studio, draft, setDraft, jobs, showCurre
   };
   const promptField = imageWorkspace ? <div className="om-label">
     <label className="om-eyebrow" htmlFor={promptId}>{t('Detailed description')}</label>
-    <div className="om-field" data-form-field="intrinsic">
-      <FieldTextarea {...promptInput} appearance="embedded" className="om-image-prompt" />
+    <div className="om-field" data-form-field="intrinsic" data-prompt-applied={promptHighlight}>
+      <FieldTextarea ref={promptRef} {...promptInput} appearance="embedded" className="om-image-prompt" />
     </div>
-  </div> : <div className="om-creation-prompt">
+  </div> : <div className="om-creation-prompt" data-prompt-applied={promptHighlight}>
     <label className="om-eyebrow" htmlFor={promptId}><RemixIcon name="pen-nib-line" size={14} />{t(speechPrompt ? 'Speech text' : 'Your idea')}</label>
-    <textarea {...promptInput} />
+    <textarea ref={promptRef} {...promptInput} />
     {!scene && (maximumReferences > 0 || draft.references.length > 0) && references}
     <div className="om-creation-prompt-footer">
       <span className="om-eyebrow">{t(draft.references.length ? 'References stay linked to their versions' : 'Start with a few words. Make it your own.')}</span>
