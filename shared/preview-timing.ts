@@ -1,3 +1,4 @@
+export const MAX_PEER_PREVIEW_SOURCE_LENGTH = 128 * 1024;
 export const TIMING_ATTRIBUTES = [
   "data-start", "data-end", "data-duration", "data-track-index", "data-playback-start", "data-media-start",
 ] as const;

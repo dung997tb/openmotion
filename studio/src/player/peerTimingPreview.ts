@@ -1,6 +1,6 @@
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { createPreviewAdapter } from "./lib/previewAdapter";
-import { TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
@@ -59,7 +59,7 @@ function changedStyles(left: HTMLElement, right: HTMLElement): PreviewChange["st
 /** Strip only supported changes, then compare the entire remaining document before touching the player. */
 export function diffPreviewChanges(previous: string, current: string, temporary = false): PreviewChange[] | null {
   // This optional fast path runs on the UI thread; large source rewrites use the regular loader.
-  if (previous === current || Math.max(previous.length, current.length) > 128 * 1024) return null;
+  if (previous === current || Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
   const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
   // The first visual edit can persist the same IDs already mounted by the preview compiler.
   const newlyStamped = temporary && !previous.includes("data-hf-id=") && current.includes("data-hf-id=");

@@ -7,6 +7,7 @@ import { announcePreviewScenesSwapped, notePeerPreviewChange, previewSourceRevis
 import { usePlayerStore } from "../player/store/playerStore";
 import { isStudioEditSaving } from "../utils/studioPendingEdits";
 import type { RemoteFileRead } from "./remoteFileReads";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH } from "../../../shared/preview-timing";
 import { confirmedSource } from "../utils/confirmedTextSources";
 
 /** Project the latest source immediately. Only a verified in-place preview can waive a refresh. */
@@ -21,12 +22,16 @@ export function syncPeerComposition(
   const changedPath = paths?.length === 1 ? paths[0] : undefined;
   if (frame && hasScriptedStylePreview(frame) && changedPath?.endsWith(".html")) {
     const base = confirmedSource(projectId, changedPath) ?? (changedPath === path ? previous : null);
-    if (base) {
+    if (base && base.content.length <= MAX_PEER_PREVIEW_SOURCE_LENGTH) {
       const revision = previewSourceRevision();
       const isCurrent = () => frame === frameRef.current && revision === previewSourceRevision() &&
         usePlayerStore.getState().timelineProjectId === projectId && !isStudioEditSaving();
       // The old document stays visible while the normal script rebuild starts independently.
-      void read(projectId, changedPath)?.then(({ content, version }) => {
+      const changedFile = read(projectId, changedPath);
+      if (changedFile && changedPath !== path) {
+        shareCompositionPosterRead(usePlayerStore.getState(), projectId, changedPath, changedFile);
+      }
+      void changedFile?.then(({ content, version }) => {
         if (typeof content === "string" && version && isCurrent())
           return tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "temporary");
       }).catch(() => {});
