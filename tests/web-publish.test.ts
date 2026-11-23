@@ -596,3 +596,78 @@ test('OpenDesignAccount Vela JSON error envelope parsing and signed-out workspac
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
+
+test('WebPublish stops previous slug on new_link rotation and allows unpublish/status after local project deletion', () => fixture(async store => {
+  const { webPublishOperation } = await import('../gateway/web-publish-ops.ts');
+  const { designProjectsFor } = await import('../design-projects.ts');
+  const { client } = createMockWebPublishAccount();
+  const calls: Array<{ args: string[]; workspaceId?: string }> = [];
+  const origRun = client.runWithEnv.bind(client);
+  client.runWithEnv = async (args, env) => {
+    calls.push({ args, workspaceId: env?.VELA_WORKSPACE_ID });
+    return origRun(args, env);
+  };
+  const service = new WebPublishService(store.directory, client);
+
+  const design = designProjectsFor(store.directory);
+  const created = await design.create({
+    requestId: 'wp-rot-del-1',
+    scenario: 'prototype',
+    title: 'Rotate And Delete',
+  });
+  await design.write(created.id, {
+    requestId: 'wp-rot-del-2',
+    expectedRevision: created.revision,
+    files: [{ path: 'index.html', content: '<!doctype html><html><body>v1</body></html>' }],
+  });
+
+  // 1. Publish initial link
+  const first = (await webPublishOperation(
+    store,
+    { command: 'publish', targetKind: 'design', targetId: created.id },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(first.publication.status, 'published');
+  const firstSlug = first.publication.slug;
+
+  // 2. Rotating with deployMode="new_link" while published must stop the previous slug first
+  const rotated = (await webPublishOperation(
+    store,
+    { command: 'publish', targetKind: 'design', targetId: created.id, deployMode: 'new_link' },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(rotated.publication.status, 'published');
+  assert.notEqual(rotated.publication.slug, firstSlug);
+  assert.ok(
+    calls.some(c => c.args[0] === 'share' && c.args[1] === 'stop' && c.args[2] === firstSlug),
+    'new_link rotation must stop the previous active slug before minting a replacement',
+  );
+
+  // 3. Delete the local design project; status & unpublish must still succeed from persisted records
+  await design.trash(created.id, 'wp-rot-del-trash');
+  await design.remove(created.id, 'wp-rot-del-remove');
+
+  const statusAfterDelete = (await webPublishOperation(
+    store,
+    { command: 'status', targetKind: 'design', targetId: created.id },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(statusAfterDelete.active?.slug, rotated.publication.slug);
+  assert.equal(statusAfterDelete.active?.status, 'published');
+
+  const stoppedAfterDelete = (await webPublishOperation(
+    store,
+    { command: 'unpublish', targetKind: 'design', targetId: created.id },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(stoppedAfterDelete.publication.status, 'stopped');
+  assert.equal(stoppedAfterDelete.publication.slug, rotated.publication.slug);
+  assert.ok(
+    calls.some(c => c.args[0] === 'share' && c.args[1] === 'stop' && c.args[2] === rotated.publication.slug),
+    'unpublish after project deletion must call share stop on the persisted slug',
+  );
+}));

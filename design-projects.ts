@@ -1914,15 +1914,31 @@ export async function designHttp(
       const id = deployMatch[1];
       const deployService = designDeployFor(dataDirectory);
       try {
-        const project = await service.get(id, origin);
         if (req.method === 'GET') {
+          const reqFilePath = url.searchParams.get('filePath') ?? undefined;
+          let project: { id: string; entry: string; path?: string; title?: string };
+          try {
+            project = await service.get(id, origin);
+          } catch (error) {
+            if (error instanceof DesignError && error.code === 'NOT_FOUND') {
+              const storedEntry = await deployService.webPublish.findStoredEntryPath('design', id, reqFilePath);
+              if (storedEntry) {
+                project = { id, entry: storedEntry };
+              } else {
+                throw error;
+              }
+            } else {
+              throw error;
+            }
+          }
           const status = await deployService.status(project, {
-            filePath: url.searchParams.get('filePath') ?? undefined,
+            filePath: reqFilePath,
             refresh: url.searchParams.get('refresh') === '1',
           });
           return sendJson(200, status);
         }
         if (req.method === 'POST') {
+          const project = await service.get(id, origin);
           const body = await input(req, 32 * 1024).catch(() => ({}));
           const result = await deployService.deploy(project, project.path, {
             filePath: typeof body?.filePath === 'string' ? body.filePath : undefined,
@@ -1936,6 +1952,21 @@ export async function designHttp(
           const body = await input(req, 16 * 1024).catch(() => ({}));
           const filePath = url.searchParams.get('filePath')
             ?? (typeof body?.filePath === 'string' ? body.filePath : undefined);
+          let project: { id: string; entry: string };
+          try {
+            project = await service.get(id, origin);
+          } catch (error) {
+            if (error instanceof DesignError && error.code === 'NOT_FOUND') {
+              const storedEntry = await deployService.webPublish.findStoredEntryPath('design', id, filePath);
+              if (storedEntry) {
+                project = { id, entry: storedEntry };
+              } else {
+                throw error;
+              }
+            } else {
+              throw error;
+            }
+          }
           const result = await deployService.unpublish(project, { filePath });
           return sendJson(200, result);
         }
@@ -2079,9 +2110,24 @@ export async function dispatchDesignTool(
       }
       case 'deploy_status': {
         if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
-        const project = await service.get(args.projectId, origin);
+        const deployService = designDeployFor(dataDirectory);
+        let project: { id: string; entry: string; path?: string; title?: string };
         try {
-          return await designDeployFor(dataDirectory).status(project, {
+          project = await service.get(args.projectId, origin);
+        } catch (error) {
+          if (error instanceof DesignError && error.code === 'NOT_FOUND') {
+            const storedEntry = await deployService.webPublish.findStoredEntryPath('design', args.projectId, args.filePath);
+            if (storedEntry) {
+              project = { id: args.projectId, entry: storedEntry };
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        }
+        try {
+          return await deployService.status(project, {
             filePath: args.filePath,
             refresh: args.refresh === true,
           });
@@ -2091,9 +2137,24 @@ export async function dispatchDesignTool(
       }
       case 'unpublish': {
         if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
-        const project = await service.get(args.projectId, origin);
+        const deployService = designDeployFor(dataDirectory);
+        let project: { id: string; entry: string };
         try {
-          return await designDeployFor(dataDirectory).unpublish(project, {
+          project = await service.get(args.projectId, origin);
+        } catch (error) {
+          if (error instanceof DesignError && error.code === 'NOT_FOUND') {
+            const storedEntry = await deployService.webPublish.findStoredEntryPath('design', args.projectId, args.filePath);
+            if (storedEntry) {
+              project = { id: args.projectId, entry: storedEntry };
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        }
+        try {
+          return await deployService.unpublish(project, {
             filePath: args.filePath,
           });
         } catch (error) {

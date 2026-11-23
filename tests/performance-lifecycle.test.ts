@@ -224,7 +224,7 @@ test('serveEditorFile compresses static payloads (br/gzip), sets cache headers, 
     if (existsSync(path.resolve('studio/build/index.html'))) {
       const htmlRes = await requestRaw(address.port, '/', { 'Accept-Encoding': 'br, gzip' });
       assert.equal(htmlRes.statusCode, 200);
-      assert.equal(htmlRes.headers['cache-control'], 'no-cache');
+      assert.equal(htmlRes.headers['cache-control'], 'no-store');
     }
 
     const assetsDir = path.resolve('studio/build/editor-assets');

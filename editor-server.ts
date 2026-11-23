@@ -63,7 +63,7 @@ function resolveCacheControl(pathname: string, designFile: string | undefined): 
   ) {
     return 'public, max-age=86400';
   }
-  return 'no-cache';
+  return 'no-store';
 }
 
 function negotiatedEncoding(req?: IncomingMessage): 'br' | 'gzip' | null {

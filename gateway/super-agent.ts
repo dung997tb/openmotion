@@ -1052,8 +1052,13 @@ export class SuperAgentConversations {
         await existing.writes;
         return this.get(id);
       }
-      throw new Error('This Agent is already working');
+      if (existing.stopped) {
+        await existing.done;
+      } else {
+        throw new Error('This Agent is already working');
+      }
     }
+    if (this.active.has(id)) throw new Error('This Agent is already working');
     if (this.starting.has(id)) throw new Error('This Agent is already working');
     this.starting.add(id);
     try {

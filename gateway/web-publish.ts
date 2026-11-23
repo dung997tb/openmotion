@@ -640,6 +640,28 @@ export class WebPublishService {
       );
     }
 
+    if (mode === 'new_link' && existingPublication?.status === 'published') {
+      const prevProjectId = existingPublication.cloudProjectId || cloudProjectIdFor(target.kind, target.id);
+      const stoppedPrev = await this.runVelaJson(
+        ['share', 'stop', existingPublication.slug, '--project-id', prevProjectId, '--json'],
+        existingPublication.workspaceId,
+      );
+      if (stoppedPrev.status !== 'stopped' || stoppedPrev.slug !== existingPublication.slug) {
+        throw new Error('DEPLOY_FAILED: Could not stop the previous public link before rotating to a new link');
+      }
+      await withProcessLock(this.lockFile(target.kind, target.id), async () => {
+        const latest = await this.readState(target.kind, target.id);
+        if (latest.publications[filePath]?.slug === existingPublication.slug) {
+          latest.publications[filePath] = {
+            ...latest.publications[filePath],
+            status: 'stopped',
+            updatedAt: Date.now(),
+          };
+          await this.saveState(target.kind, target.id, latest);
+        }
+      });
+    }
+
     const cloudProjectId =
       mode !== 'new_link' && existingPublication?.cloudProjectId
         ? existingPublication.cloudProjectId
@@ -915,6 +937,22 @@ export class WebPublishService {
     } finally {
       await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
+  }
+
+  async findStoredEntryPath(
+    kind: WebPublishTargetKind,
+    id: string,
+    filePath?: string,
+  ): Promise<string | undefined> {
+    const state = await this.readState(kind, id);
+    if (filePath) {
+      const normalized = normalizeEntryPath(filePath, 'index.html');
+      if (state.publications[normalized]) return normalized;
+    }
+    const records = Object.values(state.publications);
+    const active = records.find(r => r.status === 'published');
+    const chosen = active ?? records[0];
+    return chosen?.filePath || chosen?.entryPath;
   }
 
   async unpublish(

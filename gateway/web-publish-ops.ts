@@ -239,12 +239,25 @@ export async function webPublishOperation(
         { filePath, refresh: input.refresh === true },
       );
     }
-    const resolved = await resolveWebPublishTarget(
-      store,
-      { targetKind, targetId, sourcePath, filePath, title },
-      origin,
-    );
-    return await service.status(resolved, { filePath, refresh: input.refresh === true });
+    try {
+      const resolved = await resolveWebPublishTarget(
+        store,
+        { targetKind, targetId, sourcePath, filePath, title },
+        origin,
+      );
+      return await service.status(resolved, { filePath, refresh: input.refresh === true });
+    } catch (error) {
+      if (targetId && /NOT_FOUND|not found/i.test(error instanceof Error ? error.message : String(error))) {
+        const storedEntry = await service.findStoredEntryPath(targetKind, targetId, filePath);
+        if (storedEntry) {
+          return await service.status(
+            { kind: targetKind, id: targetId, entryPath: storedEntry },
+            { filePath: filePath ?? storedEntry, refresh: input.refresh === true },
+          );
+        }
+      }
+      throw error;
+    }
   }
 
   if (command === 'publish') {
@@ -267,6 +280,15 @@ export async function webPublishOperation(
         { kind: 'html', id: targetId, entryPath: filePath || 'index.html' },
         { filePath },
       );
+    }
+    if (targetId) {
+      const storedEntry = await service.findStoredEntryPath(targetKind, targetId, filePath);
+      if (storedEntry) {
+        return await service.unpublish(
+          { kind: targetKind, id: targetId, entryPath: storedEntry },
+          { filePath: filePath ?? storedEntry },
+        );
+      }
     }
     const resolved = await resolveWebPublishTarget(
       store,
