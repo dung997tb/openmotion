@@ -1746,12 +1746,17 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     await act(async () => portraitOption.click());
     await flush();
     expect(topBar.textContent).toContain('Portrait');
+    // Portrait defaults to a playable ad, like Game Studio.
+    expect(topBar.textContent).toContain('Playable ad');
 
-    // Open Players dropdown and select Multiplayer
-    const playersTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Single player')) as HTMLButtonElement;
+    // Open Players dropdown: portrait offers Single player, Multiplayer and Playable ad; select Multiplayer
+    const playersTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Playable ad')) as HTMLButtonElement;
     expect(playersTrigger.getAttribute('aria-haspopup')).toBe('listbox');
     await act(async () => playersTrigger.click());
     await flush();
+    const playerRows = [...document.querySelectorAll('.om-sa-game-choice-row')];
+    expect(playerRows.map(row => row.querySelector('strong')?.textContent)).toEqual(['Single player', 'Multiplayer', 'Playable ad']);
+    expect(playerRows.find(row => row.textContent?.includes('Playable ad'))?.getAttribute('aria-selected')).toBe('true');
     const multiplayerOption = [...document.querySelectorAll('.om-sa-game-choice-row')].find(b => b.textContent?.includes('Multiplayer')) as HTMLButtonElement;
     expect(multiplayerOption).toBeTruthy();
     await act(async () => multiplayerOption.click());
@@ -1777,6 +1782,7 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
       setting: null,
       multiplayer: true,
       orientation: 'portrait',
+      playableAd: false,
     });
     expect(createChatBody?.intent).toBe('game');
     expect(turnBody?.mode).toBe('game');

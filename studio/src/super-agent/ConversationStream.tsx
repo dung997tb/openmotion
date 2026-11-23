@@ -53,6 +53,7 @@ import {
   getModeComposerPlaceholder,
   ModeComposerControls,
   ModeComposerTopBar,
+  isPlayableAd,
   type ModeComposerOptions,
 } from './ModeComposerControls';
 
@@ -250,6 +251,7 @@ export function ConversationStream({
         gameSetting: picked.setting,
         gameOrientation: picked.orientation ?? 'landscape',
         gameMultiplayer: picked.multiplayer,
+        gamePlayableAd: Boolean(picked.playableAd),
       }));
     } else {
       const displayTitle = localizedGameTitle(picked, locale);
@@ -436,6 +438,7 @@ export function ConversationStream({
                     setting: modeOptions.gameSetting ?? selectedTemplate.setting,
                     multiplayer: modeOptions.gameMultiplayer,
                     orientation: modeOptions.gameOrientation,
+                    playableAd: isPlayableAd(modeOptions),
                   }
                 : {
                     prompt: text.trim() || gameBrief,
@@ -444,6 +447,7 @@ export function ConversationStream({
                     setting: modeOptions.gameSetting,
                     multiplayer: modeOptions.gameMultiplayer,
                     orientation: modeOptions.gameOrientation,
+                    playableAd: isPlayableAd(modeOptions),
                   },
             );
         rememberInstruction(created.game.id, created.agentInstruction);

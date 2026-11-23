@@ -69,12 +69,19 @@ export type ModeComposerOptions = {
   gameSetting: GameSetting | null;
   gameOrientation: 'landscape' | 'portrait';
   gameMultiplayer: boolean;
+  /** Portrait only: build a playable ad. On by default, matching Game Studio; ignored for landscape or multiplayer. */
+  gamePlayableAd: boolean;
   gameTemplate: GameCard | null;
 
   // Pure Coding
   codingWorkdir: string;
   codingFocus: 'general' | 'debug' | 'refactor' | 'test' | 'review';
 };
+
+/** A portrait, single-player game brief with the ad option on is built as a playable ad. */
+export function isPlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gameMultiplayer' | 'gamePlayableAd'>): boolean {
+  return options.gameOrientation === 'portrait' && options.gamePlayableAd && !options.gameMultiplayer;
+}
 
 export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
   imageModelId: 'auto',
@@ -109,6 +116,7 @@ export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
   gameSetting: null,
   gameOrientation: 'landscape',
   gameMultiplayer: false,
+  gamePlayableAd: true,
   gameTemplate: null,
 
   codingWorkdir: '',
@@ -262,7 +270,7 @@ export function formatModePromptPrefix(
     if (options.gameStyle) parts.push(`Style: ${styleLabels[options.gameStyle]}`);
     if (options.gameSetting) parts.push(`Setting: ${settingLabels[options.gameSetting]}`);
     parts.push(`Layout: ${options.gameOrientation === 'portrait' ? 'Portrait (9:16)' : 'Landscape (16:9)'}`);
-    parts.push(`Players: ${options.gameMultiplayer ? 'Multiplayer' : 'Single player'}`);
+    parts.push(`Players: ${isPlayableAd(options) ? 'Playable ad' : options.gameMultiplayer ? 'Multiplayer' : 'Single player'}`);
     if (options.gameTemplate) parts.push(`Template: ${options.gameTemplate.title}`);
   } else {
     parts.push(`Mode: ${mode.label}`);
@@ -1004,16 +1012,16 @@ export function ModeComposerTopBar({
               variant="plain"
               type="button"
               className="om-sa-composer-top-pill"
-              data-active={options.gameMultiplayer || openMenu === 'game-players' || undefined}
+              data-active={options.gameMultiplayer || isPlayableAd(options) || openMenu === 'game-players' || undefined}
               data-open={openMenu === 'game-players' || undefined}
               aria-haspopup="listbox"
               aria-expanded={openMenu === 'game-players'}
               disabled={disabled}
             >
-              <span key={options.gameMultiplayer ? 'multi' : 'solo'} className="om-sa-pill-swap">
-                <RemixIcon name={options.gameMultiplayer ? 'group-line' : 'user-3-line'} size={13} />
+              <span key={isPlayableAd(options) ? 'ad' : options.gameMultiplayer ? 'multi' : 'solo'} className="om-sa-pill-swap">
+                <RemixIcon name={isPlayableAd(options) ? 'cursor-line' : options.gameMultiplayer ? 'group-line' : 'user-3-line'} size={13} />
                 <span className="om-sa-composer-top-pill-label">
-                  {t(options.gameMultiplayer ? 'Multiplayer' : 'Single player')}
+                  {t(isPlayableAd(options) ? 'Playable ad' : options.gameMultiplayer ? 'Multiplayer' : 'Single player')}
                 </span>
               </span>
               <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
@@ -1038,8 +1046,16 @@ export function ModeComposerTopBar({
                   label: 'Multiplayer',
                   description: 'Shared room link so friends can join live',
                 },
-              ]).map(item => {
-                const selected = options.gameMultiplayer === item.multiplayer;
+                // A playable ad is a portrait single-player build, so it is offered only for portrait.
+                ...(options.gameOrientation === 'portrait' ? [{
+                  multiplayer: false,
+                  playableAd: true,
+                  icon: 'cursor-line',
+                  label: 'Playable ad',
+                  description: 'Ad-ready: instant play, hand tutorial, short levels and a store button',
+                }] : []),
+              ] as { multiplayer: boolean; playableAd?: boolean; icon: string; label: string; description: string }[]).map(item => {
+                const selected = item.playableAd ? isPlayableAd(options) : !isPlayableAd(options) && options.gameMultiplayer === item.multiplayer;
                 return (
                   <Button
                     key={item.label}
@@ -1050,7 +1066,7 @@ export function ModeComposerTopBar({
                     data-active={selected || undefined}
                     className="om-sa-game-choice-row"
                     onClick={() => {
-                      onChange({ gameMultiplayer: item.multiplayer });
+                      onChange({ gameMultiplayer: item.multiplayer, gamePlayableAd: Boolean(item.playableAd) });
                       setOpenMenu(null);
                     }}
                   >
