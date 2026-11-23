@@ -247,7 +247,15 @@ export class TemplateCatalog {
         this.warning = undefined;
       } else {
         if (!response.ok) throw new Error(`模板目录清单下载失败（HTTP ${response.status}）`);
-        const payload: unknown = await response.json();
+        let payload: unknown;
+        try {
+          payload = await response.json();
+        } catch {
+          await this.downloadMain(filename);
+          this.warning = undefined;
+          this.checkedAt = Date.now();
+          return this.snapshot!;
+        }
         if (this.isV4Manifest(payload)) {
           this.validateIdentity(payload);
           const targetLocale = catalogLocale(payload.contents.map(item => item.locale), this.locale, payload.defaultLocale);
@@ -275,7 +283,7 @@ export class TemplateCatalog {
           await atomicWrite(filename, JSON.stringify(candidate));
           this.snapshot = candidate;
         } else {
-          throw new Error('模板目录清单格式无效');
+          await this.downloadMain(filename);
         }
         this.warning = undefined;
       }

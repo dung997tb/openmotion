@@ -277,3 +277,34 @@ test('v4 manifest rejects tampered locale payloads and cross-origin content URLs
   assert.equal(cachedPreserved.catalogVersion, good.catalogVersion);
   assert.match(cachedPreserved.warning!, /校验失败/);
 });
+
+test('falls back to main.json when manifest.json has an unrecognized version or non-JSON body', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'motion-prism-manifest-fallback-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const data = publication(1);
+  const requests: string[] = [];
+  const v5Fetch: typeof fetch = async input => {
+    const url = String(input);
+    requests.push(new URL(url).pathname.split('/').at(-1)!);
+    if (url.endsWith('/manifest.json')) {
+      return Response.json({ manifestVersion: 'v5', resourceId: data.resourceId, environment: 'prod', channel: 'default', publicationId: 'v5-pub', defaultLocale: 'zh-CN', locales: [] });
+    }
+    if (url.endsWith('/main.json')) return Response.json(data, { headers: { etag: '"main-v5-fallback"' } });
+    return new Response('missing', { status: 404 });
+  };
+  const fromV5 = await new TemplateCatalog(path.join(directory, 'v5'), { fetch: v5Fetch }).index();
+  assert.equal(fromV5.catalogVersion, 'test-publication-1');
+  assert.deepEqual(requests, ['manifest.json', 'main.json']);
+
+  const htmlRequests: string[] = [];
+  const htmlFetch: typeof fetch = async input => {
+    const url = String(input);
+    htmlRequests.push(new URL(url).pathname.split('/').at(-1)!);
+    if (url.endsWith('/manifest.json')) return new Response('<!doctype html><html><body>Not found</body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    if (url.endsWith('/main.json')) return Response.json(data, { headers: { etag: '"main-html-fallback"' } });
+    return new Response('missing', { status: 404 });
+  };
+  const fromHtml = await new TemplateCatalog(path.join(directory, 'html'), { fetch: htmlFetch }).index();
+  assert.equal(fromHtml.catalogVersion, 'test-publication-1');
+  assert.deepEqual(htmlRequests, ['manifest.json', 'main.json']);
+});
