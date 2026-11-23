@@ -178,21 +178,23 @@ export function UnifiedDiffView({ diff }: { diff: string }) {
   const lines = useMemo(() => diff.split('\n').slice(0, 120), [diff]);
   return (
     <pre className="om-sa-diff-pre">
-      {lines.map((line, i) => {
-        const kind = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')
-          ? 'meta'
-          : line.startsWith('+')
-            ? 'add'
-            : line.startsWith('-')
-              ? 'del'
-              : 'ctx';
-        return (
-          <span key={i} className="om-sa-diff-line" data-kind={kind}>
-            {line}
-            {'\n'}
-          </span>
-        );
-      })}
+      <code className="om-sa-diff-code">
+        {lines.map((line, i) => {
+          const kind = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')
+            ? 'meta'
+            : line.startsWith('+')
+              ? 'add'
+              : line.startsWith('-')
+                ? 'del'
+                : 'ctx';
+          return (
+            <span key={i} className="om-sa-diff-line" data-kind={kind}>
+              {line}
+              {'\n'}
+            </span>
+          );
+        })}
+      </code>
     </pre>
   );
 }

@@ -5992,15 +5992,29 @@
 
 .om-sa-diff-pre {
   margin: 0;
-  padding: var(--motion-space-8) var(--motion-space-12);
-  overflow-x: auto;
+  padding: var(--motion-space-8) 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 280px;
+  overflow: auto;
+  box-sizing: border-box;
   font-family: var(--motion-font-mono);
   font-size: var(--motion-text-xs);
   line-height: 1.45;
 }
 
+.om-sa-diff-code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  font-family: inherit;
+}
+
 .om-sa-diff-line {
   display: block;
+  width: 100%;
+  padding: 0 var(--motion-space-12);
+  box-sizing: border-box;
 }
 
 .om-sa-diff-line[data-kind='add'] {
@@ -6021,6 +6035,8 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border-radius: var(--motion-radius-xl);
   border: 0;
   background: var(--motion-inset);
@@ -6108,14 +6124,19 @@
 .om-sa-files-changed-list {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   border: 0;
   padding: 0 0 var(--motion-space-6);
 }
 
 .om-sa-file-folder-item,
+.om-sa-file-folder-children,
 .om-sa-file-change-item {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .om-sa-file-folder-row,
@@ -6299,6 +6320,8 @@
 
 .om-sa-file-diff-drawer {
   margin: var(--motion-space-4) var(--motion-space-12) var(--motion-space-8);
+  min-width: 0;
+  max-width: calc(100% - var(--motion-space-24));
   border: 0;
   border-radius: var(--motion-radius-md);
   background: var(--motion-panel);
