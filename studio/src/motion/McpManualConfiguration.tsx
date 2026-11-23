@@ -67,7 +67,7 @@ export function McpManualConfiguration({ host, value, onCopy, children }: {
           onClick={() => setExpanded(current => !current)}
         >
           {t(expanded ? 'Hide full configuration' : 'View full configuration')}
-          <RemixIcon name={expanded ? 'arrow-up-s-line' : 'arrow-down-s-line'} size={16} />
+          <RemixIcon name="arrow-down-s-line" size={16} />
         </Button>
         <div className="om-mcp-manual-resources">{children}</div>
       </div>
