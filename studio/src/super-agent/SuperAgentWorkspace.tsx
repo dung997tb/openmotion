@@ -1,5 +1,5 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { LOCAL_DIRECT_RUNTIME_ID, type AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { assetMediaUrl } from '../../../shared/asset-library';
 import type { SuperAgentHandoffPayload } from '../../../shared/capability-hub';
@@ -8,6 +8,7 @@ import type { GameCard } from '../../../shared/game-contract';
 import {
   NEW_VIEWER_TAB_ID,
   safeBrowserTabId,
+  summarizeSuperAgentChat,
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
@@ -30,6 +31,7 @@ import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentR
 import { useLocalAgents } from '../motion/useLocalAgents';
 import { preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { ConversationSidebar } from './ConversationSidebar';
+import { useReadTaskResults } from './useReadTaskResults';
 import { ConversationStream, type AgentSelection } from './ConversationStream';
 import type { SuperAgentCreationModeId } from './ModeResourceShowcase';
 import { resourceKey } from './ResourcePickerDialog';
@@ -84,26 +86,15 @@ export function clampSuperAgentViewerWidth(
   return Math.max(MIN_VIEWER_WIDTH, Math.min(maxViewer, desired));
 }
 
-function upsertSummary(
-  list: SuperAgentChatSummary[],
-  chat: SuperAgentChat,
-): SuperAgentChatSummary[] {
-  const summary: SuperAgentChatSummary = {
-    id: chat.id,
-    title: chat.title,
-    intent: chat.intent,
-    ...(chat.pinned ? { pinned: true } : {}),
-    engine: chat.engine,
-    state: chat.state,
-    artifactCount: chat.artifacts.length,
-    messageCount: chat.messages.filter(m => m.role !== 'tool' && m.role !== 'reasoning').length,
-    updatedAt: chat.updatedAt,
-    createdAt: chat.createdAt,
-  };
+function upsertSummary(list: SuperAgentChatSummary[], chat: SuperAgentChat): SuperAgentChatSummary[] {
   const next = list.filter(item => item.id !== chat.id);
-  next.push(summary);
+  next.push(summarizeSuperAgentChat(chat));
   next.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   return next;
+}
+
+function isTaskInProgress({ state }: SuperAgentChatSummary): boolean {
+  return state === 'running' || state === 'waiting';
 }
 
 function resourceToArtifactPatch(
@@ -221,7 +212,7 @@ export function SuperAgentWorkspace({
   requestedMode = null,
   requestedGameId = null,
   onBack,
-  onExitRequestedMode,
+  onChangeRequestedMode,
   onChatIdChange,
   onOpenDesignProject,
   onOpenMotionProject,
@@ -238,7 +229,7 @@ export function SuperAgentWorkspace({
   requestedMode?: SuperAgentCreationModeId | null;
   requestedGameId?: string | null;
   onBack?: () => void;
-  onExitRequestedMode?: () => void;
+  onChangeRequestedMode?: (mode: SuperAgentCreationModeId | null) => void;
   onChatIdChange: (id: string | null, replace?: boolean) => void;
   onOpenDesignProject: (projectId: string) => void;
   onOpenMotionProject: (projectId: string) => void;
@@ -457,6 +448,43 @@ export function SuperAgentWorkspace({
       .catch(() => { /* non-blocking sidebar refresh */ })
       .finally(() => setLoadingList(false));
   }, []);
+
+  const backgroundTasks = conversations.filter(item => item.id !== chatId && isTaskInProgress(item));
+  const hasBackgroundTask = backgroundTasks.length > 0;
+  const getBackgroundTaskIds = useEffectEvent(() => backgroundTasks.map(item => item.id));
+
+  useEffect(() => {
+    if (!active || !hasBackgroundTask) return;
+    let cancelled = false;
+    let timer = window.setTimeout(refreshBackgroundTasks, 2000);
+
+    async function refreshBackgroundTasks() {
+      const outcomes = await Promise.allSettled(getBackgroundTaskIds().map(id => getSuperAgentChat(id, { fresh: true })));
+      if (cancelled) return;
+      const latestById = new Map<string, SuperAgentChat>();
+      for (const outcome of outcomes) {
+        if (outcome.status === 'fulfilled' && outcome.value?.conversation) {
+          const chat = outcome.value.conversation;
+          latestById.set(chat.id, chat);
+        }
+      }
+      setConversations(previous => {
+        const next = previous.map(item => {
+          const latest = latestById.get(item.id);
+          return isTaskInProgress(item) && latest && latest.updatedAt >= item.updatedAt && latest.state !== item.state
+            ? summarizeSuperAgentChat(latest)
+            : item;
+        });
+        return next.some((item, index) => item !== previous[index]) ? next : previous;
+      });
+      timer = window.setTimeout(refreshBackgroundTasks, 2000);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [active, chatId, hasBackgroundTask]);
 
   useEffect(() => {
     if (!runtimesDir) return;
@@ -727,7 +755,7 @@ export function SuperAgentWorkspace({
         .catch(() => { /* composer still holds draft + attachments */ });
     }
 
-    if (payload.prompt.trim() || mergedAttachments.length > 0 || payload.initialArtifact) {
+    if (payload.prompt.trim() || payload.mode || mergedAttachments.length > 0 || payload.initialArtifact) {
       showToast(t('Loaded into Super Agent'), 'info', 'feedback');
     }
   }, [active, attachments, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange, showToast, t]);
@@ -1402,9 +1430,16 @@ export function SuperAgentWorkspace({
     }
   }, [conversations]);
 
+  const taskResultRead = useReadTaskResults(
+    active && !loadingChat && !loadFailed && activeChat?.id === chatId
+      ? activeChat
+      : null,
+  );
+
   const sidebarNode = (
     <ConversationSidebar
       conversations={conversations}
+      taskResultRead={taskResultRead}
       activeId={chatId}
       loading={loadingList}
       agentStatus={agentStatus}
@@ -1477,7 +1512,7 @@ export function SuperAgentWorkspace({
             selection={selection}
             permissionMode={permissionMode}
             onBack={onBack}
-            onExitRequestedMode={onExitRequestedMode}
+            onChangeRequestedMode={onChangeRequestedMode}
             onPlayGame={game => void handlePlayGame(game)}
             onDeployGame={game => void handleDeployGame(game)}
             onRetryLoad={() => setChatRetry(value => value + 1)}

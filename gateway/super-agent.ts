@@ -35,6 +35,7 @@ import {
   isSuperAgentId,
   modeToSuperAgentIntent,
   normalizeSuperAgentTitle,
+  summarizeSuperAgentChat,
   type SuperAgentApproval,
   type SuperAgentArtifact,
   type SuperAgentChat,
@@ -726,19 +727,7 @@ export class SuperAgentConversations {
     return chats
       .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
       .slice(0, 200)
-      .map(chat => ({
-        id: chat.id,
-        title: chat.title,
-        intent: inferSuperAgentIntent(chat),
-        ...(chat.pinned ? { pinned: true } : {}),
-        ...(chat.runtimeId ? { runtimeId: chat.runtimeId } : {}),
-        engine: chat.engine,
-        state: chat.state,
-        artifactCount: chat.artifacts.length,
-        messageCount: chat.messages.filter(m => m.role !== 'tool' && m.role !== 'reasoning').length,
-        updatedAt: chat.updatedAt,
-        createdAt: chat.createdAt,
-      }));
+      .map(summarizeSuperAgentChat);
   }
 
   async create(input: {

@@ -83,7 +83,12 @@ test('SuperAgentConversations persists CRUD state, recovers interrupted runs, an
   // Persist running state on disk directly to verify restart interruption recovery.
   const file = await service.file(created.id);
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(file, JSON.stringify({ ...updated, state: 'running', approvals: [{ id: 'a1', kind: 'tool', title: 'Pending', detail: '{}' }] }));
+  await writeFile(file, JSON.stringify({
+    ...updated,
+    state: 'running',
+    approvals: [{ id: 'a1', kind: 'tool', title: 'Pending', detail: '{}' }],
+    requestReceipts: [{ requestId: 'req-new-turn', inputHash: 'fixture-hash' }],
+  }));
   const reloaded = new SuperAgentConversations(store);
   const recovered = await reloaded.get(created.id);
   assert.equal(recovered.state, 'failed');
@@ -94,6 +99,7 @@ test('SuperAgentConversations persists CRUD state, recovers interrupted runs, an
   assert.equal(list.length, 1);
   assert.equal(list[0].id, created.id);
   assert.equal(list[0].pinned, true);
+  assert.equal(list[0].lastTurnId, 'req-new-turn');
 
   await reloaded.remove(created.id);
   await assert.rejects(() => reloaded.get(created.id), /CONVERSATION_NOT_FOUND/);

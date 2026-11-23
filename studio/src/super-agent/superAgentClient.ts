@@ -34,17 +34,6 @@ function resourcesCacheKey(params: { kind?: string; query?: string; limit?: numb
   return JSON.stringify([params.kind && params.kind !== 'all' ? params.kind : 'all', params.query?.trim() ?? '', params.limit ?? null]);
 }
 
-function touchChatCache(chat: SuperAgentChat): void {
-  if (!isClientCacheEnabled()) return;
-  chatCache.delete(chat.id);
-  chatCache.set(chat.id, { value: chat, expiresAt: Date.now() + CHAT_CACHE_TTL_MS });
-  while (chatCache.size > MAX_CACHED_CHATS) {
-    const oldest = chatCache.keys().next().value;
-    if (!oldest) break;
-    chatCache.delete(oldest);
-  }
-}
-
 function invalidateChatListCache(): void {
   listCacheGeneration++;
   chatListCache = null;
@@ -69,7 +58,19 @@ export function peekCachedSuperAgentChat(id: string): SuperAgentChat | undefined
 }
 
 export function seedCachedSuperAgentChat(chat: SuperAgentChat): void {
-  touchChatCache(chat);
+  if (!isClientCacheEnabled()) return;
+  chatCache.delete(chat.id);
+  chatCache.set(chat.id, { value: chat, expiresAt: Date.now() + CHAT_CACHE_TTL_MS });
+  while (chatCache.size > MAX_CACHED_CHATS) {
+    const oldest = chatCache.keys().next().value;
+    if (!oldest) break;
+    chatCache.delete(oldest);
+  }
+
+  const cachedSummary = chatListCache?.value.find(item => item.id === chat.id);
+  if (cachedSummary && chat.updatedAt >= cachedSummary.updatedAt && chat.state !== cachedSummary.state) {
+    invalidateChatListCache();
+  }
 }
 
 export function prefetchSuperAgentChat(id: string): void {
@@ -179,8 +180,8 @@ export async function createSuperAgentChat(body: {
   return res;
 }
 
-export async function getSuperAgentChat(id: string) {
-  if (isClientCacheEnabled()) {
+export async function getSuperAgentChat(id: string, { fresh = false }: { fresh?: boolean } = {}) {
+  if (!fresh && isClientCacheEnabled()) {
     const cached = chatCache.get(id);
     if (cached && cached.expiresAt > Date.now()) {
       return { conversation: cached.value };
