@@ -18,35 +18,32 @@ async function maybeCompressRasterForPublish(
   ext: string,
   mimeType?: string,
 ): Promise<{ data: Buffer; ext: string }> {
-  const isCompressible =
-    originalBytes.length >= WEBP_COMPRESS_MIN_BYTES
-    && (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || mimeType === 'image/png' || mimeType === 'image/jpeg');
-  if (!isCompressible) return { data: originalBytes, ext };
+  const isPng = ext === '.png' || mimeType === 'image/png';
+  const isJpeg = ext === '.jpg' || ext === '.jpeg' || mimeType === 'image/jpeg';
+  if (originalBytes.length < WEBP_COMPRESS_MIN_BYTES || (!isPng && !isJpeg)) {
+    return { data: originalBytes, ext };
+  }
 
   const tempDir = await mkdtemp(path.join(tmpdir(), 'openmotion-publish-webp-'));
   const outputPath = path.join(tempDir, 'out.webp');
   try {
     const cwebpBin = process.env.CWEBP_PATH || 'cwebp';
-    const cwebpRes = await execute(
-      cwebpBin,
-      ['-quiet', '-q', '82', '-alpha_q', '90', sourcePath, '-o', outputPath],
-      tempDir,
-      15_000,
-    ).catch(() => null);
+    const cwebpArgs = isPng
+      ? ['-quiet', '-lossless', '-exact', '-z', '6', sourcePath, '-o', outputPath]
+      : ['-quiet', '-q', '82', sourcePath, '-o', outputPath];
+    const cwebpRes = await execute(cwebpBin, cwebpArgs, tempDir, 15_000).catch(() => null);
     let encoded = cwebpRes?.code === 0;
     if (!encoded) {
       const { ffmpeg } = verificationBinaries();
-      const ffmpegRes = await execute(
-        ffmpeg,
-        ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-c:v', 'libwebp', '-quality', '82', outputPath],
-        tempDir,
-        15_000,
-      ).catch(() => null);
+      const ffmpegArgs = isPng
+        ? ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-c:v', 'libwebp', '-lossless', '1', '-compression_level', '6', outputPath]
+        : ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-c:v', 'libwebp', '-quality', '82', outputPath];
+      const ffmpegRes = await execute(ffmpeg, ffmpegArgs, tempDir, 15_000).catch(() => null);
       encoded = ffmpegRes?.code === 0;
     }
     if (!encoded) return { data: originalBytes, ext };
     const compressed = await readFile(outputPath).catch(() => null);
-    if (compressed && compressed.length > 0 && compressed.length < originalBytes.length * 0.85) {
+    if (compressed && compressed.length > 0 && compressed.length < originalBytes.length * 0.95) {
       return { data: compressed, ext: '.webp' };
     }
     return { data: originalBytes, ext };

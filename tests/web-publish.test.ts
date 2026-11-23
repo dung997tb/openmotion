@@ -638,8 +638,21 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     assert.ok(bigBundled);
     const bigHtml = bigBundle.files.find(f => f.file === 'index.html')!.data.toString('utf8');
     if (bigBundled.file.endsWith('.webp')) {
-      assert.ok(bigBundled.data.length < bigPng.length * 0.85, 'compressed WebP must be meaningfully smaller');
+      assert.ok(bigBundled.data.length < bigPng.length * 0.95, 'compressed lossless WebP must be smaller than original PNG');
       assert.match(bigHtml, /\.webp/);
+      // Verify decoded RGBA pixels are preserved bit-for-bit identically (lossless PNG -> WebP).
+      const { execFileSync } = await import('node:child_process');
+      const { verificationBinaries } = await import('../scripts/verify-export.ts');
+      const webpTmp = path.join(store.directory, 'big-sky-check.webp');
+      await writeFile(webpTmp, bigBundled.data);
+      try {
+        const { ffmpeg } = verificationBinaries();
+        const origRgba = execFileSync(ffmpeg, ['-v', 'error', '-nostdin', '-i', bigPath, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 4 * 1024 * 1024 });
+        const webpRgba = execFileSync(ffmpeg, ['-v', 'error', '-nostdin', '-i', webpTmp, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 4 * 1024 * 1024 });
+        assert.equal(Buffer.compare(origRgba, webpRgba), 0, 'lossless PNG->WebP must preserve exact decoded RGBA pixels');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+      }
     } else {
       assert.equal(bigBundled.data.length, bigPng.length);
     }

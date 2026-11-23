@@ -64,7 +64,7 @@ Rules:
 - Do NOT put into the formula: asset-specific content (that's the per-asset
   description), background/keying instructions (that's the kind suffix),
   pixel dimensions or resolutions.
-- **Keep raster payload lightweight**: request 1K / game-appropriate sizes for in-game sprites, tiles and backdrops instead of defaulting to 4K multi-megabyte PNGs, keeping total raster assets well under ~8 MB per game for fast browser loading (during `web_publish`, large >256 KiB PNG/JPEG library assets are automatically transcoded to WebP with alpha preserved).
+- **Keep raster payload lightweight**: request 1K / game-appropriate sizes for in-game sprites, tiles and backdrops instead of defaulting to 4K multi-megabyte PNGs, keeping total raster assets well under ~8 MB per game for fast browser loading (during `web_publish`, large >=256 KiB PNG/JPEG library assets are automatically transcoded to WebP — lossless for PNGs to preserve exact RGBA pixels, quality 82 for JPEGs).
 
 ### STYLE TOKEN (compressed form)
 
