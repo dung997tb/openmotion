@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
 import {
   createStudioSaveHttpError,
@@ -105,7 +106,9 @@ export async function patchElementBatches(projectId: string, batches: DomEditPat
   const guarded = batches.map(batch => batch.ifMatch
     ? { ...batch, ifMatch: isolatedEditVersion(projectId, batch.sourceFile, batch.ifMatch) }
     : batch);
-  const body = JSON.stringify({ batches: guarded });
+  const body = JSON.stringify({ batches: guarded.map(batch => batch.box && getCachedCloudDisklessMode()
+    ? {sourceFile:batch.sourceFile, ifMatch:batch.ifMatch, geometry:{target:batch.patches[0]!.target, box:batch.box, position:batch.position}}
+    : batch) });
   try {
     const response = await studioApiFetch(
       `/api/projects/${encodeURIComponent(projectId)}/file-mutations/patch-element-batches`,

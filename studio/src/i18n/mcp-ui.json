@@ -344,7 +344,10 @@
     "Yes. Give your Agent the reference and your brand. The recreation Skill analyses the reference, rebuilds the film as editable source, checks representative preview moments and hands it over after automatic technical export verification on render workers.": "可以。将参考视频和品牌信息交给 Agent，复刻 Skill 会分析参考、重建为可编辑源码、抽查关键预览画面，并在渲染 Worker 自动技术验证 MP4 后交付。",
     "Move a cloud timeline clip": "移动云端时间轴片段",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "移动一个使用数值计时、未锁定且未链接的片段。移动后的终点须在所属合成的时长内。",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "用 openmotion_get_project 读取合成，将 data-hf-id 和当前版本填入下例。移到合成的第 5 秒，单独提交 edit。超时后重试同一请求；版本冲突时重新读取，并使用新的请求 ID。"
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "用 openmotion_get_project 读取合成，将 data-hf-id 和当前版本填入下例。移到合成的第 5 秒，单独提交 edit。超时后重试同一请求；版本冲突时重新读取，并使用新的请求 ID。",
+    "Edit a cloud composition": "编辑云端合成",
+    "Edit elements, clips, media and animations in the same history as Studio.": "修改元素、片段、素材和动画，与 Studio 共用项目历史。",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "读取当前合成和元素的稳定标识。一次编辑的所有修改一起提交。如果同一次操作涉及多个合成，请使用批量命令。"
   },
   "ja": {
     "Create and reuse assets": "アセットを作成して再利用",
@@ -479,7 +482,10 @@
     "Studio preview and render-worker exports": "Studio プレビューとレンダーワーカー書き出し",
     "Move a cloud timeline clip": "クラウドのタイムラインでクリップを移動",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "数値で時間を指定した、ロックもリンクもされていないクリップを移動します。終了位置はコンポジションの長さ以内に収めます。",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "openmotion_get_project でコンポジションを読み、下の例に data-hf-id と現在のバージョンを入れてください。絶対位置の5秒に移動し、edit を単独で送信します。タイムアウト時は同じ要求を再送し、バージョン競合時は再取得して新しい要求 ID を使います。"
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "openmotion_get_project でコンポジションを読み、下の例に data-hf-id と現在のバージョンを入れてください。絶対位置の5秒に移動し、edit を単独で送信します。タイムアウト時は同じ要求を再送し、バージョン競合時は再取得して新しい要求 ID を使います。",
+    "Edit a cloud composition": "クラウドのコンポジションを編集",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Studio と同じ履歴で要素、クリップ、メディア、アニメーションを編集します。",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "現在のコンポジションと要素の固定 ID を読み取ります。一度の編集に含まれる変更をまとめて適用し、複数のコンポジションにまたがる場合はバッチを使います。"
   },
   "ko": {
     "Create and reuse assets": "에셋 생성 및 재사용",
@@ -614,7 +620,10 @@
     "Studio preview and render-worker exports": "Studio 미리보기 및 렌더 워커 내보내기",
     "Move a cloud timeline clip": "클라우드 타임라인 클립 이동",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "시간이 숫자로 지정된 잠금 및 연결 해제 상태의 클립 하나를 옮깁니다. 끝 지점은 컴포지션 길이 이내여야 합니다.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "openmotion_get_project로 컴포지션을 읽고 아래 예시에 data-hf-id와 현재 버전을 넣으세요. 절대 위치 5초로 이동하고 edit만 제출하세요. 시간 초과 시 같은 요청을 재시도하고, 버전 충돌 시 다시 읽고 새 요청 ID를 사용하세요."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "openmotion_get_project로 컴포지션을 읽고 아래 예시에 data-hf-id와 현재 버전을 넣으세요. 절대 위치 5초로 이동하고 edit만 제출하세요. 시간 초과 시 같은 요청을 재시도하고, 버전 충돌 시 다시 읽고 새 요청 ID를 사용하세요.",
+    "Edit a cloud composition": "클라우드 컴포지션 편집",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Studio와 같은 기록에서 요소, 클립, 미디어 및 애니메이션을 편집합니다.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "현재 컴포지션과 요소의 고정 ID를 읽으세요. 한 번의 편집에 속하는 변경 사항은 함께 적용하세요. 한 동작이 여러 컴포지션을 변경하면 일괄 명령을 사용하세요."
   },
   "de": {
     "Create and reuse assets": "Assets erstellen und wiederverwenden",
@@ -749,7 +758,10 @@
     "Studio preview and render-worker exports": "Studio-Vorschau und Render-Worker-Exporte",
     "Move a cloud timeline clip": "Clip in der Cloud-Zeitleiste verschieben",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Verschiebe einen entsperrten, unverknüpften Clip mit numerischen Zeitangaben. Sein Ende muss innerhalb der Komposition liegen.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Lies die Komposition mit openmotion_get_project und setze data-hf-id und die aktuellen Versionen unten ein. Verschiebe den Clip auf Sekunde 5 und sende edit allein. Wiederhole bei Zeitüberschreitung dieselbe Anfrage. Lies bei Versionskonflikten erneut und verwende eine neue Anfrage-ID."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Lies die Komposition mit openmotion_get_project und setze data-hf-id und die aktuellen Versionen unten ein. Verschiebe den Clip auf Sekunde 5 und sende edit allein. Wiederhole bei Zeitüberschreitung dieselbe Anfrage. Lies bei Versionskonflikten erneut und verwende eine neue Anfrage-ID.",
+    "Edit a cloud composition": "Cloud-Komposition bearbeiten",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Bearbeite Elemente, Clips, Medien und Animationen im selben Verlauf wie Studio.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Lies die aktuelle Komposition und ihre stabilen Element-IDs. Übernimm zusammengehörige Änderungen gemeinsam. Ändert eine Geste mehrere Kompositionen, nutze einen Batch."
   },
   "fr": {
     "Create and reuse assets": "Créer et réutiliser des ressources",
@@ -884,7 +896,10 @@
     "Studio preview and render-worker exports": "Aperçu Studio et exports sur workers de rendu",
     "Move a cloud timeline clip": "Déplacer un clip sur la timeline cloud",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Déplacez un clip déverrouillé et non lié dont les temps sont numériques. Sa fin doit rester dans la composition.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Lisez la composition avec openmotion_get_project et insérez son data-hf-id et ses versions actuelles ci-dessous. Déplacez le clip à la seconde 5 et envoyez edit seul. En cas de délai dépassé, répétez la même requête. En cas de conflit de version, relisez la composition et utilisez un nouvel identifiant de requête."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Lisez la composition avec openmotion_get_project et insérez son data-hf-id et ses versions actuelles ci-dessous. Déplacez le clip à la seconde 5 et envoyez edit seul. En cas de délai dépassé, répétez la même requête. En cas de conflit de version, relisez la composition et utilisez un nouvel identifiant de requête.",
+    "Edit a cloud composition": "Modifier une composition cloud",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Modifiez les éléments, clips, médias et animations dans le même historique que Studio.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Lisez la composition et les identifiants stables de ses éléments. Regroupez les changements d’une même modification. Utilisez un lot si un geste modifie plusieurs compositions."
   },
   "ru": {
     "Create and reuse assets": "Создавайте и используйте ресурсы повторно",
@@ -1019,7 +1034,10 @@
     "Studio preview and render-worker exports": "Предпросмотр Studio и экспорт на рендер-воркерах",
     "Move a cloud timeline clip": "Переместить клип на облачной шкале времени",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Переместите один незаблокированный и несвязанный клип с числовыми значениями времени. Конец клипа должен оставаться в пределах композиции.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Прочитайте композицию через openmotion_get_project и подставьте data-hf-id и текущие версии в пример ниже. Переместите клип на отметку 5 секунд, отправив только edit. После тайм-аута повторите тот же запрос. При конфликте версий перечитайте данные и используйте новый ID запроса."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Прочитайте композицию через openmotion_get_project и подставьте data-hf-id и текущие версии в пример ниже. Переместите клип на отметку 5 секунд, отправив только edit. После тайм-аута повторите тот же запрос. При конфликте версий перечитайте данные и используйте новый ID запроса.",
+    "Edit a cloud composition": "Редактирование облачной композиции",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Изменяйте элементы, клипы, медиа и анимацию в общей со Studio истории.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Прочитайте текущую композицию и постоянные ID её элементов. Применяйте вместе изменения одного действия. Если оно затрагивает несколько композиций, используйте пакет."
   },
   "es": {
     "Create and reuse assets": "Crear y reutilizar recursos",
@@ -1154,7 +1172,10 @@
     "Studio preview and render-worker exports": "Vista previa en Studio y exportaciones en workers",
     "Move a cloud timeline clip": "Mover un clip en la línea de tiempo en la nube",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Mueve un clip desbloqueado y sin vincular con tiempos numéricos. Su final debe quedar dentro de la composición.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Lee la composición con openmotion_get_project e introduce su data-hf-id y las versiones actuales en el ejemplo. Mueve el clip al segundo 5 y envía edit por separado. Si se agota el tiempo, repite la misma solicitud. Si hay un conflicto de versiones, vuelve a leer y usa un ID de solicitud nuevo."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Lee la composición con openmotion_get_project e introduce su data-hf-id y las versiones actuales en el ejemplo. Mueve el clip al segundo 5 y envía edit por separado. Si se agota el tiempo, repite la misma solicitud. Si hay un conflicto de versiones, vuelve a leer y usa un ID de solicitud nuevo.",
+    "Edit a cloud composition": "Editar una composición en la nube",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Edita elementos, clips, medios y animaciones con el mismo historial que Studio.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Lee la composición actual y los identificadores estables de sus elementos. Aplica juntos los cambios de una edición. Usa un lote si un gesto modifica varias composiciones."
   },
   "pt-BR": {
     "Create and reuse assets": "Crie e reutilize recursos",
@@ -1289,7 +1310,10 @@
     "Studio preview and render-worker exports": "Prévia no Studio e exportações em workers",
     "Move a cloud timeline clip": "Mover um clipe na linha do tempo na nuvem",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Mova um clipe desbloqueado e sem vínculo com tempos numéricos. O fim do clipe deve ficar dentro da composição.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Leia a composição com openmotion_get_project e preencha o exemplo com data-hf-id e as versões atuais. Mova o clipe para o segundo 5 e envie edit sozinho. Se o tempo esgotar, repita a mesma solicitação. Se houver conflito de versão, leia novamente e use um novo ID de solicitação."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Leia a composição com openmotion_get_project e preencha o exemplo com data-hf-id e as versões atuais. Mova o clipe para o segundo 5 e envie edit sozinho. Se o tempo esgotar, repita a mesma solicitação. Se houver conflito de versão, leia novamente e use um novo ID de solicitação.",
+    "Edit a cloud composition": "Editar uma composição na nuvem",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Edite elementos, clipes, mídia e animações no mesmo histórico do Studio.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Leia a composição atual e os IDs estáveis dos elementos. Aplique juntas as mudanças de uma edição. Use um lote quando um gesto alterar várias composições."
   },
   "it": {
     "Create and reuse assets": "Crea e riutilizza risorse",
@@ -1424,7 +1448,10 @@
     "Studio preview and render-worker exports": "Anteprima Studio ed esportazioni su worker di rendering",
     "Move a cloud timeline clip": "Spostare una clip sulla timeline cloud",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Sposta una clip sbloccata e scollegata con tempi numerici. La fine deve rientrare nella durata della composizione.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Leggi la composizione con openmotion_get_project e inserisci data-hf-id e le versioni correnti nell’esempio. Sposta la clip al secondo 5 e invia solo edit. In caso di timeout ripeti la stessa richiesta. In caso di conflitto di versione rileggi i dati e usa un nuovo ID richiesta."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Leggi la composizione con openmotion_get_project e inserisci data-hf-id e le versioni correnti nell’esempio. Sposta la clip al secondo 5 e invia solo edit. In caso di timeout ripeti la stessa richiesta. In caso di conflitto di versione rileggi i dati e usa un nuovo ID richiesta.",
+    "Edit a cloud composition": "Modificare una composizione cloud",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Modifica elementi, clip, media e animazioni nella stessa cronologia di Studio.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Leggi la composizione e gli ID stabili degli elementi. Applica insieme le modifiche di una singola operazione. Usa un batch se un gesto modifica più composizioni."
   },
   "tr": {
     "Create and reuse assets": "Varlık oluşturun ve yeniden kullanın",
@@ -1559,6 +1586,9 @@
     "Studio preview and render-worker exports": "Studio önizlemesi ve render çalışanı dışa aktarımları",
     "Move a cloud timeline clip": "Bulut zaman çizelgesinde klip taşı",
     "Move one unlocked, unlinked clip with numeric timing. Its end must fit inside its own composition.": "Zaman değerleri sayısal olan, kilitsiz ve bağlantısız bir klibi taşıyın. Bitiş noktası kompozisyon süresini aşmamalıdır.",
-    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Kompozisyonu openmotion_get_project ile okuyup aşağıdaki örneğe data-hf-id ve güncel sürümleri girin. Klibi 5. saniyeye taşıyın ve yalnızca edit gönderin. Zaman aşımında aynı isteği yineleyin. Sürüm çakışmasında yeniden okuyup yeni bir istek kimliği kullanın."
+    "Read the composition with openmotion_get_project. Use its data-hf-id and current versions in the example below. Move to absolute second 5. Send edit alone. Retry the same request after a timeout. After a version conflict, reread and use a new request ID.": "Kompozisyonu openmotion_get_project ile okuyup aşağıdaki örneğe data-hf-id ve güncel sürümleri girin. Klibi 5. saniyeye taşıyın ve yalnızca edit gönderin. Zaman aşımında aynı isteği yineleyin. Sürüm çakışmasında yeniden okuyup yeni bir istek kimliği kullanın.",
+    "Edit a cloud composition": "Bulut kompozisyonunu düzenle",
+    "Edit elements, clips, media and animations in the same history as Studio.": "Öğeleri, klipleri, medyayı ve animasyonları Studio ile aynı geçmişte düzenleyin.",
+    "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Geçerli kompozisyonu ve öğelerin sabit kimliklerini okuyun. Bir düzenlemeye ait değişiklikleri birlikte uygulayın. Tek bir hareket birden çok kompozisyonu değiştiriyorsa toplu işlem kullanın."
   }
 }

@@ -1,8 +1,11 @@
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { ImportedFontAsset } from "../components/editor/fontAssets";
 import type { PatchOperation, PatchTarget } from "../utils/sourcePatcher";
 
 export interface DomEditPatchBatch {
+  position?: {time:number; x:number; y:number};
+  box?: import("../../../packages/edit-core/canvas-box").CanvasBox;
   ifMatch?: string;
   sourceFile: string;
   patches: Array<{ target: PatchTarget; operations: PatchOperation[] }>;
@@ -51,6 +54,8 @@ export type PersistDomEditOperations = (
   selection: DomEditSelection,
   operations: PatchOperation[],
   options?: {
+    projectEdit?: ProjectEditCommand;
+    canvasPosition?: { x: number; y: number };
     label?: string;
     coalesceKey?: string;
     coalesceMs?: number;
@@ -70,5 +75,5 @@ export type PersistDomEditOperations = (
 export type CommitDomAttributeBatch = (
   selection: DomEditSelection,
   operations: PatchOperation[],
-  options: { label: string; onError?: (error: unknown) => void; prepareContent?: (html: string) => string; validateContent?: (html: string) => void; syncTimingInPlace?: boolean; shouldSave?: () => boolean },
+  options: { label: string; projectEdit?: ProjectEditCommand; onError?: (error: unknown) => void; prepareContent?: (html: string) => string; validateContent?: (html: string) => void; syncTimingInPlace?: boolean; shouldSave?: () => boolean },
 ) => Promise<boolean>;

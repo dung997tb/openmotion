@@ -1480,6 +1480,158 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal((await tool('openmotion_edit_project', { ...args, requestId: 'stale-agent' })).isError, true);
   });
 
+  it('creates, replays and updates beat grids over HTTP while rejecting invalid project media', async () => {
+    const { app, pgClient } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = (url: string, body: unknown, headers: Record<string, string> = {}) => app.request(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body),
+    });
+    const { projectId } = await (await post('/motion-api/projects', { title: 'Beat markers' })).json();
+    const base = '/api/projects/' + projectId;
+    const assetPath = 'media/music.mp3';
+    const path = 'beats/' + assetPath + '.json';
+    const file = (name: string) => base + '/files/' + encodeURIComponent(name);
+    const upload = new FormData();
+    upload.set('file', new File([new Uint8Array([0x49, 0x44, 0x33, 0])], 'music.mp3', { type: 'audio/mpeg' }));
+    upload.set('path', assetPath);
+    const uploaded = await app.request(base + '/upload', { method: 'POST', body: upload });
+    assert.equal(uploaded.status, 201, await uploaded.clone().text());
+    assert.equal((await app.request(file('notes.html'), {method: 'PUT', headers: {'If-None-Match':'*'}, body:'<p>Notes</p>'})).status, 200);
+    const countHistory = () => pgClient.rows('project_history_entries').length;
+    const initial = countHistory();
+    const beats = [{ time: 2, strength: 0.25 }, { time: 1, strength: 0.8 }];
+    const grid = (audio: string, markers = beats) => ({ kind: 'setBeatGrid', assetPath: audio, beats: markers });
+    const save = (markers: typeof beats, requestId: string, version?: string) => post(base + '/edits/' + encodeURIComponent(path),
+      grid(assetPath, markers), { 'Idempotency-Key': requestId, ...(version ? { 'If-Match': version } : { 'If-None-Match': '*' }) });
+
+    const created = await save(beats, 'create-grid');
+    assert.equal(created.status, 200, await created.clone().text());
+    const first = await created.json();
+    const replayed = await save(beats, 'create-grid');
+    assert.equal(replayed.status, 200);
+    assert.deepEqual(await replayed.json(), first);
+    assert.equal(countHistory(), initial + 1);
+    const read = async () => JSON.parse((await (await app.request(file(path))).json()).content);
+    assert.deepEqual(await read(), { version: 1, audio: assetPath, beats: [beats[1], beats[0]] });
+    assert.equal((await save(beats, 'stale-create')).status, 409);
+    const changed = [{ time: 0.5, strength: 1 }];
+    const update = await save(changed, 'update-grid', first.version);
+    assert.equal(update.status, 200, await update.clone().text());
+    assert.deepEqual((await read()).beats, changed);
+    assert.equal((await save(beats, 'stale-update', first.version)).status, 409);
+
+    for (const [audio, status] of [['notes.html', 400], ['media/missing.mp3', 404], ['../music.mp3', 400]] as const) {
+      const invalid = await post(base + '/edits', { edit: grid(audio), versions: { ['beats/' + audio + '.json']: null } }, { 'Idempotency-Key': 'invalid-' + status + audio.length });
+      assert.equal(invalid.status, status, await invalid.clone().text());
+    }
+    const unrelated = await post(base + '/edits/' + encodeURIComponent('beats/other.json'), grid(assetPath),
+      { 'If-None-Match': '*', 'Idempotency-Key': 'wrong-sidecar' });
+    assert.equal(unrelated.status, 400);
+    assert.equal(countHistory(), initial + 2);
+    assert.deepEqual((await read()).beats, changed);
+  });
+
+  it('commits canvas properties and timeline edits as one undoable gesture through Studio or remote MCP', async () => {
+    const { app, config, pgClient } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    const { projectId } = await (await post('/motion-api/projects', { title: 'Composite edit' })).json();
+    const base = '/api/projects/' + projectId;
+    const original = '<html><body><div data-composition-id="scene" data-duration="10"><div id="title" data-hf-id="hf-title" data-start="1" data-duration="3">Title</div></div></body></html>';
+    const read = async (path: string) => (await app.request(base + '/files/' + path)).json();
+    const paths = ['ui.html', 'ui-track.html', 'agent.html', 'agent-track.html'];
+    for (const path of paths) {
+      assert.equal((await app.request(base + '/files/' + path, { method: 'PUT', headers: { 'If-None-Match': '*' }, body: original })).status, 200);
+    }
+    const edit = (comp: string, track: string) => ({ kind: 'batch', commands: [
+      { compositionPath: comp, kind: 'editElements', patches: [{ target: { hfId: 'hf-title' }, operations: [
+        { type: 'text-content', property: 'textContent', value: 'Hello' },
+        { type: 'inline-style', property: 'font-size', value: '32px' },
+        { type: 'inline-style', property: 'color', value: 'red' },
+      ] }] },
+      { compositionPath: comp, kind: 'moveCanvasElement', target: { hfId: 'hf-title' }, x: 30, y: 12 },
+      { compositionPath: track, kind: 'splitClips', hfIds: ['hf-title'], at: 2.5 },
+    ] });
+    const version = (await read(paths[0]!)).version;
+    const before = (await read(paths[0]!)).content;
+    const versions = { 'ui.html': version, 'ui-track.html': version };
+    const historyCount = () => pgClient.tables.get('project_history_entries')!.length;
+    const count = historyCount();
+    const studio = (body: unknown, key: string) => post(base + '/edits', body, { 'Idempotency-Key': key });
+    const bad = edit(paths[0]!, paths[1]!);
+    Object.assign(bad.commands[2]!, { hfIds: ['missing'] });
+    assert.equal((await studio({ edit: bad, versions }, 'invalid-batch')).status, 400);
+    assert.equal((await read(paths[0]!)).content, before);
+    assert.equal(historyCount(), count);
+    const input = { edit: edit(paths[0]!, paths[1]!), versions };
+    const first = await studio(input, 'gesture');
+    assert.equal(first.status, 200, await first.clone().text());
+    const replay = await studio(input, 'gesture');
+    assert.equal(replay.status, 200);
+    assert.deepEqual((await replay.json()).versions, (await first.json()).versions);
+    assert.equal(historyCount(), count + 1);
+    assert.equal((await studio(input, 'stale-gesture')).status, 409);
+    const ui = await read(paths[0]!);
+    const split = await read(paths[1]!);
+    assert.match(ui.content, /Hello/);
+    assert.match(ui.content, /font-size:\s*32px/);
+    assert.match(ui.content, /color:\s*red/);
+    assert.match(ui.content, /translate:\s*30px 12px/);
+    assert.match(split.content, /title-split/);
+    assert.equal((await post(base + '/history/step', { direction: 'back' })).status, 200);
+    for (const path of paths.slice(0, 2)) assert.equal((await read(path)).content, before);
+
+    const headers: Record<string, string> = { Authorization: 'Bearer ' + config.DEV_PAT, Accept: 'application/json, text/event-stream' };
+    const rpc = (method: string, params: unknown) => post('/mcp', { jsonrpc: '2.0', id: 1, method, params }, headers);
+    const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'project-edits', version: '1' } });
+    headers['Mcp-Session-Id'] = init.headers.get('mcp-session-id')!;
+    const call = async (name: string, args: unknown) => (await (await rpc('tools/call', { name, arguments: args })).json()).result;
+    const project = (await call('openmotion_get_project', { projectId, inspect: { compositionPath: paths[2], limit: 100 } })).structuredContent;
+    const target = project.elements.find((element: { id?: string; text?: string }) => element.id === 'title' && element.text === 'Title');
+    assert.equal(target.sourceFile, paths[2]);
+    assert.equal(target.hfId, 'hf-title');
+    assert.equal(target.start, 1);
+    const agent = await call('openmotion_edit_project', { projectId, requestId: 'agent-gesture', expectedRevision: project.revision,
+      expectedVersionId: project.currentVersionId, edit: edit(paths[2]!, paths[3]!) });
+    assert.equal(agent.isError, undefined, JSON.stringify(agent));
+    assert.equal((await read(paths[2]!)).content, ui.content);
+    assert.equal((await read(paths[3]!)).content, split.content);
+  });
+
+  it('persists the same authored keyframe values in Studio and a remote MCP session', async () => {
+    const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(url, { method:'POST', headers:{'Content-Type':'application/json', ...headers}, body:JSON.stringify(body) });
+    const {projectId} = await (await post('/motion-api/projects', {title:'Animated drag'})).json();
+    const base = '/api/projects/' + projectId;
+    const source = '<div data-composition-id="stage" data-duration="6"><div id="title">Title</div><script>const tl=gsap.timeline();tl.fromTo("#title",{x:0,y:0},{x:100,y:80,ease:"none",duration:4},0);</script></div>';
+    for (const path of ['studio.html','agent.html']) {
+      assert.equal((await app.request(base+'/files/'+path,{method:'PUT',headers:{'If-None-Match':'*'},body:source})).status,200);
+    }
+    const before = await (await app.request(base+'/gsap-animations/studio.html')).json();
+    const animationId = before.animations[0].id;
+    const at = {time:2};
+    const values = {x:44,y:28};
+    const studio = await post(base+'/gsap-mutations/studio.html',{type:'set-animated-values',animationId,at,values});
+    assert.equal(studio.status,200,await studio.clone().text());
+    const headers: Record<string,string> = {Authorization:'Bearer '+config.DEV_PAT,Accept:'application/json, text/event-stream'};
+    const rpc = (method:string,params:unknown) => post('/mcp',{jsonrpc:'2.0',id:1,method,params},headers);
+    const init = await rpc('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'canvas',version:'1'}});
+    headers['Mcp-Session-Id'] = init.headers.get('mcp-session-id')!;
+    const call = async(name:string,args:unknown) => (await (await rpc('tools/call',{name,arguments:args})).json()).result;
+    const edit = async (requestId:string,command:unknown) => {
+      const current = (await call('openmotion_get_project',{projectId})).structuredContent;
+      const result = await call('openmotion_edit_project',{projectId,requestId,expectedRevision:current.revision,expectedVersionId:current.currentVersionId,edit:command});
+      assert.equal(result.isError,undefined,JSON.stringify(result));
+    };
+    await edit('animated-position',{kind:'moveCanvasElement',compositionPath:'agent.html',target:{id:'title'},time:2,x:44,y:28});
+    const read = async(path:string) => (await (await app.request(base+'/files/'+path)).json()).content;
+    assert.equal(await read('studio.html'),await read('agent.html'));
+    const tween = (await (await app.request(base+'/gsap-animations/agent.html')).json()).animations.find((a:{keyframes?:unknown})=>a.keyframes);
+    assert.deepEqual(tween.keyframes.keyframes.find((k:{percentage:number})=>k.percentage===50).properties,values);
+    await edit('add-another-stop',{kind:'editAnimation',compositionPath:'agent.html',mutations:[{type:'add-keyframe',animationId:tween.id,percentage:75,properties:{x:82,y:61}}]});
+    assert.match(await read('agent.html'),/75%/);
+  });
+
   it('replays caption commands with the original track and guards both project versions', async () => {
     const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (path: string, data: unknown) => app.request('/motion-api/' + path, {

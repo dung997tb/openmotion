@@ -1,3 +1,4 @@
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import type { HistoryTarget } from "@hyperframes/studio-server";
 import { buildProjectApiPath } from "./projectRouting";
 import type { MutableRefObject } from "react";
@@ -26,7 +27,7 @@ export interface DomEditCommitBaseParams {
   clearDomSelection: () => void;
 }
 
-type ProjectFileWriter = (path: string, content: string, expectedContent?: string) => Promise<void>;
+export type ProjectFileWriter = (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand) => Promise<void>;
 
 interface SaveProjectFilesWithHistoryInput {
   projectId: string;
@@ -34,6 +35,7 @@ interface SaveProjectFilesWithHistoryInput {
   coalesceKey?: string;
   coalesceMs?: number;
   files: Record<string, (contentInsideFileQueue: string) => string>;
+  commandForWrite?: (path: string) => ProjectEditCommand | undefined;
   readFile: (path: string) => Promise<string>;
   writeFile: ProjectFileWriter;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
@@ -106,6 +108,7 @@ export async function saveServerRewriteWithHistory(input: {
 }
 
 export async function writeProjectFilesWithHistoryInQueue({
+  projectId,
   label,
   coalesceKey,
   coalesceMs,
@@ -114,6 +117,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   writeFile,
   recordEdit,
   diskContent,
+  commandForWrite,
 }: SaveProjectFilesWithHistoryInput): Promise<string[]> {
   const snapshots: Record<string, { before: string; after: string }> = {};
   for (const [path, build] of Object.entries(files)) {
@@ -127,10 +131,26 @@ export async function writeProjectFilesWithHistoryInQueue({
   const changedPaths = Object.keys(snapshots);
   if (changedPaths.length === 0) return [];
 
+  if (changedPaths.length > 1 && commandForWrite) {
+    const edits = changedPaths.flatMap(path => {
+      const command = commandForWrite(path);
+      return command ? [{ path, before: diskContent?.[path] ?? snapshots[path].before, after: snapshots[path].after, command }] : [];
+    });
+    if (edits.length === changedPaths.length) {
+      const { commitStudioEditBatch } = await import('./projectEditBatch');
+      await commitStudioEditBatch(projectId, edits);
+      await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
+      return changedPaths;
+    }
+  }
+
   const writtenPaths: string[] = [];
   try {
     for (const path of changedPaths) {
-      await writeFile(path, snapshots[path].after, diskContent?.[path] ?? snapshots[path].before);
+      const expected = diskContent?.[path] ?? snapshots[path].before;
+      const command = commandForWrite?.(path);
+      if (command) await writeFile(path, snapshots[path].after, expected, command);
+      else await writeFile(path, snapshots[path].after, expected);
       writtenPaths.push(path);
     }
 

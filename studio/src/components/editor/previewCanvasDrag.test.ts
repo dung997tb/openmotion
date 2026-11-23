@@ -47,6 +47,19 @@ it("holds the released layer, allows an unrelated source to move, and waits for 
   expect(gesture("start", "stale-source")).toBeNull();
 });
 
+it("captures the playhead and final local translation once at gesture completion", () => {
+  vi.stubGlobal("__player", {getTime: () => 2});
+  vi.stubGlobal("gsap", {getProperty: (_: Element, axis: string) => axis === "x" ? 5 : 10});
+  try {
+    const {gesture} = createScene();
+    gesture("start", "animated");
+    expect(gesture("move", "animated")).toBeNull();
+    expect(gesture("finish", "animated")).toMatchObject({position:{time:2, x:30, y:60}});
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("rolls back only properties still owned by the failed gesture and permits a retry", () => {
   const { one, gesture } = createScene();
   one.style.setProperty("top", "4px", "important");

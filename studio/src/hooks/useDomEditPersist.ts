@@ -1,3 +1,7 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { isolatedEditVersion } from "../utils/isolatedEditVersions";
+import { studioFileContentVersion } from "../utils/studioFileVersion";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -34,7 +38,7 @@ export interface UseDomEditPersistParams {
   previewIframeRef: React.MutableRefObject<HTMLIFrameElement | null>;
   showToast: (message: string, tone?: "error" | "info") => void;
   queueDomEditSave: <T>(save: () => Promise<T>) => Promise<T>;
-  writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
+  writeProjectFile: (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand) => Promise<void>;
   editHistory: { recordEdit: (entry: RecordEditInput) => Promise<void> };
   projectIdRef: React.MutableRefObject<string | null>;
   reloadPreview: () => void;
@@ -115,7 +119,16 @@ export function useDomEditPersist({
 
       // An imported font or prepareContent takes the server patch; the SDK serializes only the patched
       // DOM. The SDK re-reads in the file queue; this read is its fallback.
-      if (onTrySdkPersist && !selection.isolatedTarget && !font && !options?.prepareContent && !options?.validateContent) {
+      let cloudCommand: ProjectEditCommand | undefined;
+      if (getCachedCloudDisklessMode()) {
+        cloudCommand = options?.projectEdit;
+        if (!cloudCommand && !options?.prepareContent) {
+          cloudCommand = options?.canvasPosition
+            ? { kind: "moveCanvasElement", target: patchTarget, time: usePlayerStore.getState().currentTime, ...options.canvasPosition }
+            : { kind: "editElements", patches: [patchBody] };
+        }
+      }
+      if (!cloudCommand && onTrySdkPersist && !selection.isolatedTarget && !font && !options?.prepareContent && !options?.validateContent) {
         const originalContent = await readTarget();
         if (originalContent === null) return;
         const cutover = await onTrySdkPersist(selection, operations, originalContent, targetPath, {
@@ -139,7 +152,7 @@ export function useDomEditPersist({
         coalesceKey: options?.coalesceKey,
         coalesceMs: options?.coalesceMs,
       };
-      const prepare = options?.prepareContent;
+      const prepare = cloudCommand ? undefined : options?.prepareContent;
       let preparedWriteFailed = false;
       // Read, server patch, follow-up write and history hold the file's queue, so no save lands between them.
       const saved = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
@@ -147,7 +160,17 @@ export function useDomEditPersist({
         if (originalContent === null) return null;
         options?.validateContent?.(originalContent);
         let patchData: PatchElementResponse;
-        if (
+        if (cloudCommand) {
+          if (selection.isolatedTarget) {
+            const shown = isolatedEditVersion(pid, targetPath, '"sha256:' + selection.isolatedTarget.sha256 + '"');
+            if (shown !== await studioFileContentVersion(originalContent)) throw new Error("The selected frame is out of date.");
+          }
+          const {applyProjectEdit} = await import("../../../packages/edit-core/commands");
+          const {content} = await applyProjectEdit(originalContent, {...cloudCommand,compositionPath:targetPath},new Map());
+          const changed = content !== originalContent;
+          if (changed) await writeProjectFile(targetPath, content, originalContent, cloudCommand);
+          patchData = {matched: true, changed, content, path: targetPath, version: await studioFileContentVersion(content)};
+        } else if (
           selection.element?.namespaceURI === "http://www.w3.org/2000/svg" &&
           selection.hfId && !font &&
           operations.length > 0 &&

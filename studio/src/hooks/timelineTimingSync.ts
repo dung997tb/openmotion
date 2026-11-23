@@ -410,6 +410,16 @@ async function scaleGsapPositions(
   return postGsapMutation(projectId, filePath, mutation, "scale-positions failed");
 }
 
+/** Rebind the optimistic clip timing or swap the animation script produced by the shared edit. */
+export function refreshCommittedTimeline(iframe: HTMLIFrameElement | null, path: string, projectId: string | null, reloadPreview: () => void) {
+  return async (files: Record<string, {before: string; after: string}>) => {
+    const file = files[path];
+    if (!file) { reloadPreview(); return; }
+    const status = sdkTimingGsapSync({status: "committed", version:"", ...file});
+    await syncTimingEditPreview(iframe, status ?? UNMUTATED, projectId, reloadPreview, true);
+  };
+}
+
 /** The GSAP sync a committed SDK timing write made, or null when its timeline script is unchanged. */
 export function sdkTimingGsapSync(
   result: Extract<CutoverResult, { status: "committed" }>,
@@ -423,7 +433,7 @@ export function sdkTimingGsapSync(
   };
   if (timelineText(result.before) === timelineText(result.after)) {
     // The shared move already inspected the animation script during the commit.
-    return result.command ? UNMUTATED : null;
+    return result.command?.kind === "moveClip" ? UNMUTATED : null;
   }
   return { mutated: true, scriptText: extractGsapScriptText(result.after), after: result.after };
 }

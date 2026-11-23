@@ -1,3 +1,5 @@
+import {nearestKeyframeIndex} from "../../../packages/edit-core/playhead-edit";
+export {nearestKeyframeIndex} from "../../../packages/edit-core/playhead-edit";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { elementTargets } from "../utils/elementGsap";
 import { resolveTweenStart } from "../utils/globalTimeCompiler";
@@ -259,18 +261,6 @@ export function withExactStepTimes(anim: GsapAnimation, tween: ParsedTween | nul
 }
 
 /** The keyframe nearest `pct` within {@link KEYFRAME_PCT_MATCH}, or -1: two steps can sit under 1% apart. */
-export function nearestKeyframeIndex(keyframes: { percentage: number }[], pct: number): number {
-  let best = -1;
-  keyframes.forEach((kf, i) => {
-    const off = Math.abs(kf.percentage - pct);
-    if (
-      off <= KEYFRAME_PCT_MATCH &&
-      (best < 0 || off < Math.abs(keyframes[best]!.percentage - pct))
-    )
-      best = i;
-  });
-  return best;
-}
 
 export function exactKeyframePct(anim: GsapAnimation, tween: ParsedTween | null, pct: number) {
   const authored = anim.keyframes?.keyframes ?? [];

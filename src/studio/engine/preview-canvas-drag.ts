@@ -67,7 +67,11 @@ export const PREVIEW_CANVAS_DRAG = `
     const axes = measureDragAxes(element, left, top, makeRelative, original);
     if (!axes || (corner && (axes.a <= 0 || axes.d <= 0 || Math.abs(axes.b) + Math.abs(axes.c) > 0.001))) return null;
 
-    drag = { id: message.gestureId, element, original, left, top, makeRelative, axes, selection, width, height, corner };
+    const localTime = window.__timelines?.[element.closest('[data-composition-id]')?.getAttribute('data-composition-id')]?.time?.();
+    const time = Number.isFinite(localTime) ? localTime : (Number(window.__player?.getTime?.()) || 0);
+    const pos = axis => parseFloat(window.gsap?.getProperty?.(element, axis)) || 0;
+    const startPosition = {time,x:pos('x'),y:pos('y')};
+    drag = { startPosition, id: message.gestureId, element, original, left, top, makeRelative, axes, selection, width, height, corner };
     return { geometry: selection.geometry, viewport: selection.viewport };
   }
 
@@ -111,12 +115,13 @@ export const PREVIEW_CANVAS_DRAG = `
     drag.applied = applied;
     if (message.phase !== 'finish') return null;
     const { sourceFile, elementId, hfId } = drag.selection;
-    const { makeRelative } = drag;
+    const { makeRelative, startPosition } = drag;
+    const position = {time:startPosition.time, x:round(startPosition.x + offsetX), y:round(startPosition.y + offsetY)};
     const sha256 = sourceVersions[sourceFile];
     // A second edit of this source needs a confirmed base. Other source files remain editable.
     delete sourceVersions[sourceFile];
     pendingDrags.set(drag.id, { ...drag, sha256 });
     drag = null;
-    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative, ...(corner && {corner,width,height}) };
+    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
   }
 `;

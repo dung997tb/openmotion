@@ -9,7 +9,7 @@ export {
 export const STUDIO_ROTATION_PROP = "--hf-studio-rotation";
 
 /* ── Internal DOM attribute names ─────────────────────────────────── */
-export const STUDIO_PATH_OFFSET_ATTR = "data-hf-studio-path-offset";
+export { STUDIO_PATH_OFFSET_ATTR } from "../../../../packages/edit-core/canvas-position";
 export const STUDIO_EDIT_MOMENT_ATTR = "data-hf-studio-edit-at";
 export interface EditMoment {
   time: number;
@@ -18,7 +18,7 @@ export interface EditMoment {
 export const STUDIO_BOX_SIZE_ATTR = "data-hf-studio-box-size";
 export const STUDIO_ROTATION_ATTR = "data-hf-studio-rotation";
 export const STUDIO_ORIGINAL_TRANSLATE_ATTR = "data-hf-studio-original-translate";
-export const STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR = "data-hf-studio-original-inline-translate";
+export { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from "../../../../packages/edit-core/canvas-position";
 export const STUDIO_ORIGINAL_WIDTH_ATTR = "data-hf-studio-original-width";
 export const STUDIO_ORIGINAL_HEIGHT_ATTR = "data-hf-studio-original-height";
 /**

@@ -323,6 +323,18 @@ openmotion_edit_project({"projectId":"<projectId>","expectedRevision":"<revision
 
 此命令支持单个独立计时、未锁定且未链接的片段。起点和时长须为数值，移动后的终点须在当前合成时长内。合成容器本身和位于另一个计时容器内的元素不适用。单独提交 `edit`，省略 `files`、`canvas`、`assetNames`、`requirements` 和 `namingLanguage`。超时后用完全相同的参数和 requestId 重试。遇到版本冲突时重新读取版本和片段，确认仍需移动后用新的 requestId 提交。
 
+### Cloud editing commands
+
+Locate targets with `openmotion_get_project({projectId,inspect:{compositionPath:"index.html",limit:50}})`. Each row includes its source file and stable element ID, with text, timeline position, track and animation IDs where available. For additional rows pass nextOffset as offset and pin expectedRevision. Submit one `edit` with the project's revision, version and a stable request ID. For example, change a title, size and color in one commit:
+
+```js
+openmotion_edit_project({"projectId":"<projectId>","expectedRevision":"<revision>","expectedVersionId":"<currentVersionId>","requestId":"<unique-request-id>","edit":{"kind":"editElements","compositionPath":"index.html","patches":[{"target":{"hfId":"<data-hf-id>"},"operations":[{"type":"text-content","property":"textContent","value":"Hello"},{"type":"inline-style","property":"font-size","value":"32px"},{"type":"inline-style","property":"color","value":"red"}]}]}})
+```
+
+Each command in the tool schema documents its parameters. Use timeline commands for moving, trimming, splitting, deleting and linking clips. Use canvas commands for layout, properties, grouping and animation. Use placement and paste commands to insert existing project media and compositions. Use the transcript tool for caption tracks.
+
+For a gesture that touches several compositions, send `edit: {kind:"batch",commands:[...]}`. Each command has its own compositionPath. Commands execute in order against the previous result. A failure discards the whole gesture. A successful edit creates one project history step, even across files. Retry an uncertain response with the identical request. After a version conflict read the current composition before constructing a new request.
+
 ### Native canvas and caption controls
 
 `openmotion_edit_project` accepts `canvas: { compositionPath, ratio, fit }` with `ratio` in `16:9`, `9:16`, `1:1`, `4:3`, `3:4` and `fit` in `contain`, `cover`. Files are optional for a canvas-only edit; a batch cannot also replace that same composition. Both revision guards and a stable request ID remain required. The operation preserves authored content at its original design size and updates the native output canvas for preview and export. Center cropping is geometric, without automatic subject detection.

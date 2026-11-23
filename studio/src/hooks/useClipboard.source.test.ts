@@ -3,6 +3,9 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { applyContentCommand, isContentCommand, type ContentCommand } from "../../../packages/edit-core/content-commands";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useClipboard } from "./useClipboard";
 import { usePlayerStore, type TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
@@ -44,6 +47,7 @@ const TITLE: TimelineElement = {
 
 let root: Root | null = null;
 afterEach(() => {
+  setCachedCloudDisklessMode(null);
   act(() => root?.unmount());
   root = null;
   vi.unstubAllGlobals();
@@ -108,9 +112,14 @@ function mountClipboard(
   stubFiles(files, fail, delayMs);
   const iframe = mountPreview(sub, bundle, saved);
   const writes: string[] = [];
+  const commands: ContentCommand[] = [];
   const deleted: string[] = [];
   const domDeleted: DomEditSelection[] = [];
-  const writeProjectFile = async (_path: string, content: string) => {
+  const writeProjectFile = async (_path: string, content: string, before?:string, command?:ProjectEditCommand) => {
+    if (command && isContentCommand(command)) {
+      commands.push(command);
+      expect(applyContentCommand(before!, command)).toBe(content);
+    }
     writes.push(content);
   };
   const showToast = vi.fn();
@@ -143,6 +152,7 @@ function mountClipboard(
     rerender,
     showToast,
     clipboard,
+    commands,
     writes,
     deleted,
     domDeleted,
@@ -233,6 +243,17 @@ describe("copy takes a clip's saved markup, not the runtime's live styling", () 
   });
 });
 
+it("pastes through the same cloud command without requiring the preview to replay edits", async () => {
+  setCachedCloudDisklessMode(true);
+  selectTitle();
+  const { clipboard, commands, writes } = mountClipboard();
+  clipboard().handleCopy();
+  await clipboard().handlePaste();
+  expect(commands.map(command => command.kind)).toEqual(["pasteClips"]);
+  expect(writes).toHaveLength(1);
+  expect(writes[0]?.match(/>Title<\/h1>/g)).toHaveLength(2);
+});
+
 describe("copy of a clip missing from its saved file", () => {
   it("takes the preview's markup without its lazy loading or look-ahead mark, keeping authored loading", async () => {
     selectTitle();
@@ -246,9 +267,10 @@ describe("copy of a clip missing from its saved file", () => {
     files["index.html"] = SAVED.replace(/<h1[\s\S]*<\/h1>/, "");
     clipboard().handleCopy();
     await clipboard().handlePaste();
-    expect(writes[0]).toMatch(
-      /<img src="plate.png" data-hf-id="[^"]+"><img src="own.png" loading="lazy"/,
-    );
+    const copies = new DOMParser().parseFromString(writes[0]!, "text/html").querySelectorAll("h1:last-of-type img");
+    expect(Array.from(copies, image => [image.getAttribute("src"), image.getAttribute("loading"), !!image.getAttribute("data-hf-id")])).toEqual([
+      ["plate.png", null, true], ["own.png", "lazy", true],
+    ]);
     expect(writes[0]).not.toContain("data-hf-preview-lazy");
     expect(writes[0]).not.toContain("data-hf-upcoming");
   });

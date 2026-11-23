@@ -1,5 +1,6 @@
+import {resolveTweenStart,resolveTweenDuration} from "../../../packages/edit-core/playhead-edit";
+export {resolveTweenStart,resolveTweenDuration} from "../../../packages/edit-core/playhead-edit";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
-import { GSAP_DEFAULT_DURATION } from "@hyperframes/parsers/gsap-parser";
 import { progressAtTime, runEaseOf, timeAtProgress } from "./gsapKeyframeEases";
 
 export function absoluteToPercentage(
@@ -28,17 +29,6 @@ export function isTimeWithinTween(
   return time >= tweenStart && time <= tweenStart + tweenDuration;
 }
 
-export function resolveTweenStart(animation: GsapAnimation): number | null {
-  if (animation.resolvedStart != null) return animation.resolvedStart;
-  if (typeof animation.position === "number") return animation.position;
-  const parsed = Number.parseFloat(animation.position as string);
-  if (!Number.isNaN(parsed)) return parsed;
-  return null;
-}
-
-export function resolveTweenDuration(animation: GsapAnimation): number {
-  return animation.duration ?? GSAP_DEFAULT_DURATION;
-}
 
 export function findTweenAtTime(
   time: number,

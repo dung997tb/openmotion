@@ -1,3 +1,4 @@
+import { useCloudGroupMove } from "./cloudGroupMove";
 import type { GeometryCommitResult } from "../utils/previewFeatureUsage";
 import type { RotationCommit } from "../components/editor/rotationDraft";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -115,12 +116,14 @@ export function useDomGeometryCommit({
     });
   const makeFetchFallback = useGsapAnimationFetchFallback(projectId);
   const trackGsapInteractionFailure = useGsapInteractionFailureTelemetry(activeCompPath, showToast);
+  const commitCanvasGroup = useCloudGroupMove(projectIdRef, writeProjectFile, bumpGsapCache, reloadPreview);
   const {
     handleGsapAwarePathOffsetCommit,
     handleGsapAwareGroupPathOffsetCommit,
     handleGsapAwareBoxSizeCommit,
     handleGsapAwareRotationCommit,
   } = useGsapAwareEditing({
+    commitCanvasGroup,
     // The host owns selection, so every gesture reads its element's animations from the server.
     domEditSelection: null,
     selectedGsapAnimations: NO_SELECTED_ANIMATIONS,

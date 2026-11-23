@@ -1,3 +1,4 @@
+import { canSubmitTimelineCommand, saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { planClipMove } from "../../../packages/edit-core";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useCallback, type MutableRefObject } from "react";
@@ -17,6 +18,7 @@ import {
 import { playbackStartAttributeForElement } from "../player/lib/timelineElementHelpers";
 import {
   captureDurationRollback,
+  refreshCommittedTimeline,
   finishClipTimingFallback,
   sdkTimingGsapSync,
   readFileContent,
@@ -194,6 +196,11 @@ export function useTimelineClipTimingEditing({
           );
         return reorderDone
           .then(() => {
+            if (canSubmitTimelineCommand([element]) && projectIdRef.current && element.hfId) {
+              const change = { hfId: element.hfId, start: authoredStart, ...(trackChanged && { track: updates.track }) };
+              return saveCloudTimeline(projectIdRef.current, [{ path: targetPath, command: command ?? { kind: "moveClips", changes: [change] } }],
+                writeProjectFile, recordEdit, "Move timeline clip", refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectIdRef.current, reloadPreview)).then(() => forceReloadSdkSession?.());
+            }
             // SDK setTiming writes start only; a lane change needs the fallback's track patch.
             if (sdkSession && element.hfId && !element.link && !element.implicitTextTiming && !needsExtension && !trackChanged) {
               return sdkTimingPersist(
@@ -211,7 +218,7 @@ export function useTimelineClipTimingEditing({
                   readProjectFile: (path) => readFileContent(projectIdRef.current ?? "", path),
                   publishSession: publishSdkSession,
                 },
-                { label: "Move timeline clip", ...step, skipRefresh: true, command },
+                { label: "Move timeline clip", ...step, skipRefresh: true },
               ).then((result) => {
                 if (!cutoverCommittedOrThrow(result)) return moveFallback();
                 return finishMoveGsapSync(sdkTimingGsapSync(result));
@@ -234,6 +241,7 @@ export function useTimelineClipTimingEditing({
       enqueueEdit,
       activeCompPath,
       sdkSession,
+      forceReloadSdkSession,
       publishSdkSession,
       recordEdit,
       writeProjectFile,
@@ -304,8 +312,11 @@ export function useTimelineClipTimingEditing({
         enqueueEdit(element, "Resize timeline clip", buildResizePatches, step).then(() =>
           finishResizeGsapSync(),
         );
-      const persistDone =
-        sdkSession && element.hfId && !element.link && !hasPbsAdjustment && !needsExtension
+      const persistDone = canSubmitTimelineCommand([element]) && projectIdRef.current && element.hfId
+        ? saveCloudTimeline(projectIdRef.current, [{ path: targetPath, command: { kind: "trimClips", changes: [
+            { hfId: element.hfId, start: authoredStart, duration: updates.duration, playbackStart: updates.playbackStart },
+          ] } }], writeProjectFile, recordEdit, "Resize timeline clip", refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectIdRef.current, reloadPreview)).then(() => forceReloadSdkSession?.())
+        : sdkSession && element.hfId && !element.link && !hasPbsAdjustment && !needsExtension
           ? sdkTimingPersist(
               element.hfId,
               targetPath,
@@ -339,6 +350,7 @@ export function useTimelineClipTimingEditing({
       enqueueEdit,
       activeCompPath,
       sdkSession,
+      forceReloadSdkSession,
       publishSdkSession,
       recordEdit,
       writeProjectFile,

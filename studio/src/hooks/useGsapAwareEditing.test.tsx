@@ -1,3 +1,4 @@
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 // @vitest-environment happy-dom
 
 import React, { act } from "react";
@@ -121,6 +122,7 @@ function mountResizeHandler(
 type AwareEditingParams = Parameters<typeof useGsapAwareEditing>[0];
 
 function mountGroupHandler({
+  commitCanvasGroup,
   gsapCommitMutation = vi.fn().mockResolvedValue(undefined),
   makeFetchFallback = () => vi.fn().mockResolvedValue([]),
   trackGsapInteractionFailure = vi.fn(),
@@ -129,6 +131,7 @@ function mountGroupHandler({
 }: Partial<
   Pick<
     AwareEditingParams,
+    | "commitCanvasGroup"
     | "gsapCommitMutation"
     | "makeFetchFallback"
     | "trackGsapInteractionFailure"
@@ -150,6 +153,7 @@ function mountGroupHandler({
   ) => Promise<void | import("../utils/previewFeatureUsage").GeometryCommitResult>;
   function Harness() {
     const editing = useGsapAwareEditing({
+      commitCanvasGroup,
       domEditSelection: null,
       selectedGsapAnimations: [],
       gsapCommitMutation,
@@ -734,6 +738,35 @@ describe("useGsapAwareEditing anchored resize", () => {
     // Both members share ONE coalesceKey → they fold into a single undo entry.
     expect(capturedKeys[0]).toBe(capturedKeys[1]);
     act(() => root.unmount());
+  });
+
+  it("saves a mixed plain and animated cloud selection in one project edit", async () => {
+    setCachedCloudDisklessMode(true);
+    const commitCanvasGroup = vi.fn().mockResolvedValue(true);
+    const writer = vi.fn();
+    const {groupCommit,root} = mountGroupHandler({commitCanvasGroup,gsapCommitMutation:writer});
+    mocks.drag.mockImplementation(async (selection,_next,_animations,_frame,commit,_fetch,options) => {
+      if (!options?.preflightOnly) {
+        await commit(selection,{type:"update-properties",animationId:"tween",properties:{x:10,y:20}},{label:"Move"});
+      }
+      return {status:"persisted"};
+    });
+    const updates = [
+      {selection:{element:document.createElement("div"),id:"a"},plainTranslate:true,next:{x:10,y:20}},
+      {selection:{element:gsapPositioned("div"),id:"b",sourceFile:"b.html"},plainTranslate:false,next:{x:10,y:20}},
+      {selection:{element:gsapPositioned("div"),id:"c",sourceFile:"c.html"},plainTranslate:false,next:{x:10,y:20}},
+    ] as unknown as DomEditGroupPathOffsetCommit[];
+    try {
+      await act(()=>groupCommit(updates));
+      expect(writer).not.toHaveBeenCalled();
+      expect(commitCanvasGroup).toHaveBeenCalledOnce();
+      expect(commitCanvasGroup.mock.calls[0]?.[0].map((write: {command:{kind:string}})=>write.command.kind))
+        .toEqual(["moveCanvasElement","editAnimation","editAnimation"]);
+      expect(commitCanvasGroup.mock.calls[0]?.[0].map((write:{path:string})=>write.path)).toEqual(["index.html","b.html","c.html"]);
+    } finally {
+      setCachedCloudDisklessMode(null);
+      act(()=>root.unmount());
+    }
   });
 
   it("preflights every group member before the first mutation", async () => {

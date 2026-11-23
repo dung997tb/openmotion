@@ -1,3 +1,4 @@
+import { canSubmitTimelineCommand, saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
 import { usePlayerStore, type TimelineElement } from "../player";
 import { reseekPreviewAtTime } from "../player/hooks/timelineSyncHydration";
@@ -167,7 +168,12 @@ async function setElementsHidden({
   }
 
   try {
-    const changedPaths = await saveProjectFilesWithHistory({
+    const changedPaths = canSubmitTimelineCommand(elements)
+      ? await saveCloudTimeline(projectId, [...groupElementsByTargetPath(elements, activeCompPath)].map(([path, clips]) => {
+          pendingTimelineEditPathRef.current.add(path);
+          return { path, command: { kind: 'setClipState', state: 'hidden', enabled: hidden, hfIds: clips.map(el => el.hfId!) } };
+        }), writeProjectFile, recordEdit, label)
+      : await saveProjectFilesWithHistory({
       projectId,
       label,
       files,

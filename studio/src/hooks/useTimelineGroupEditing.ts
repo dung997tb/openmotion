@@ -1,3 +1,5 @@
+import { canSubmitTimelineCommand, saveCloudTimeline, timelineTimingEdits, type TimelinePaintPlan } from "../utils/cloudTimelineEdit";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { usePlayerStore } from "../player/store/playerStore";
 import { compactMainTrack } from "../player/components/timelineMainMagnet";
 // fallow-ignore-file code-duplication
@@ -25,6 +27,7 @@ import {
 import { playbackStartAttributeForElement } from "../player/lib/timelineElementHelpers";
 import {
   captureDurationRollback,
+  refreshCommittedTimeline,
   finishGroupTimingGsapFallback,
   timingGestureStep,
   sdkTimingGsapSync,
@@ -51,7 +54,9 @@ export interface TimelineGroupResizeChange {
 }
 
 export interface TimelineGroupCommitOptions {
+  gapEdit?: { kind: "closeTrackGaps"; track: number; at?: number };
   beforeTiming?: Promise<void>;
+  paint?: TimelinePaintPlan;
   coalesceKey?: string;
   /** Overrides the default "Move timeline clips" undo-history label. Coalescing
    *  keeps the LAST entry's label (editHistory.ts), so a mechanical follow-up
@@ -237,6 +242,12 @@ export function useTimelineGroupEditing({
     ],
   );
 
+  const persistCloudGroup = useCallback(async (projectId: string, changes: (TimelineGroupMoveChange | TimelineGroupResizeChange)[], label: string, paint?: TimelinePaintPlan) => {
+    await saveCloudTimeline(projectId, timelineTimingEdits(changes, activeCompPath, paint), writeProjectFile, recordEdit, label,
+      refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectId, reloadPreview));
+    forceReloadSdkSession?.();
+  }, [activeCompPath, forceReloadSdkSession, previewIframeRef, recordEdit, reloadPreview, writeProjectFile]);
+
   const handleTimelineGroupMove = useCallback(
     (changes: TimelineGroupMoveChange[], options?: TimelineGroupCommitOptions) => {
       if (changes.length === 0) return Promise.resolve();
@@ -287,6 +298,12 @@ export function useTimelineGroupEditing({
       const label = options?.label ?? "Move timeline clips";
       return enqueueGroupOperation(label, async (projectId) => {
         await options?.beforeTiming;
+        if (options?.gapEdit && canSubmitTimelineCommand(changes.map(change => change.element))) {
+          await saveCloudTimeline(projectId, [{path:targetPathFor(changes[0]!.element, activeCompPath), command:options.gapEdit}], writeProjectFile, recordEdit, label, refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectId, reloadPreview));
+          forceReloadSdkSession?.();
+          return;
+        }
+        if (getCachedCloudDisklessMode()) return persistCloudGroup(projectId, changes, label, options?.paint);
         const sdk = await trySdkBatchPersist({
           changes,
           sdkChanges: toSdkTimingChanges(changes, (change) => ({
@@ -361,6 +378,7 @@ export function useTimelineGroupEditing({
       recordEdit,
       reloadPreview,
       trySdkBatchPersist,
+      persistCloudGroup,
       showToast,
       invalidateGsapCache,
       writeProjectFile,
@@ -401,6 +419,7 @@ export function useTimelineGroupEditing({
       const { coalesceKey, coalesceMs } = timingGestureStep("timeline-group-resize", options);
       return enqueueGroupOperation("Resize timeline clips", async (projectId) => {
         await options?.beforeTiming;
+        if (getCachedCloudDisklessMode()) return persistCloudGroup(projectId, changes, "Resize timeline clips");
         const sdk = await trySdkBatchPersist({
           changes,
           sdkChanges: toSdkTimingChanges(changes, (change) => ({
@@ -469,6 +488,7 @@ export function useTimelineGroupEditing({
       recordEdit,
       reloadPreview,
       trySdkBatchPersist,
+      persistCloudGroup,
       showToast,
       invalidateGsapCache,
       writeProjectFile,

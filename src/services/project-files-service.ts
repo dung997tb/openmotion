@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
@@ -522,17 +522,47 @@ export class ProjectFilesService {
     return content;
   }
 
-  /** Capture authorized source metadata before checking the receipt. A concurrent replay
-   * either sees the completed command here or under the project lock at commit. */
-  async readTextForCommand(
-    ctx: AuthContext, projectId: string, path: string, scope: string, requestId: string, inputHash: string,
-  ) {
-    const file = await this.getFile(ctx, projectId, path, { allowTrashed: false });
+  /** A command only needs the referenced files, even in a project with thousands of assets. */
+  async readEditInputs(ctx: AuthContext, projectId: string, requested: ReadonlyMap<string, 'text' | 'asset' | 'optional-text'>,
+    scope: string, requestId: string, inputHash: string, base?: { expectedRevision: string; expectedVersionId: string }) {
+    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { auth: ctx, allowTrashed: false });
+    const rows = await this.db.select().from(projectFiles).where(and(
+      eq(projectFiles.workspaceId, ctx.workspaceId), eq(projectFiles.projectId, projectId),
+      inArray(projectFiles.path, [...requested.keys()]),
+    ));
+    // Look up the receipt after observing the source rows so concurrent identical requests
+    // either see the original input or replay the first commit.
     const replay = await readCommitReceipt(this.db, ctx.workspaceId, scope, requestId, inputHash);
     if (replay) return { kind: 'replay' as const, commit: replay };
-    if (!file) throw new CloudError('NOT_FOUND', 'Composition file not found', { status: 404 });
-    if (!file.isText) throw new CloudError('INVALID_ARGUMENT', 'Composition must be a text file', { status: 415 });
-    return { kind: 'source' as const, content: await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256) };
+    if (base && (project.revision.trim() !== base.expectedRevision || project.currentVersionId !== base.expectedVersionId)) {
+      throw new CloudError('VERSION_CONFLICT', 'Project version changed before the edit', {
+        status: 409, applied: false, details: { currentRevision: project.revision.trim(), currentVersionId: project.currentVersionId },
+      });
+    }
+    const versions = new Map<string, string | null>();
+    const sources = new Map<string, string>();
+    for (const file of rows) {
+      if (requested.get(file.path) !== 'asset' && !file.isText) {
+        throw new CloudError('INVALID_ARGUMENT', 'A composition must be a text file', { status: 415 });
+      }
+      versions.set(file.path, formatVersionFromSha256(file.sha256.trim()));
+    }
+    for (const path of requested.keys()) {
+      if (!versions.has(path) && requested.get(path) === 'optional-text') {
+        versions.set(path, null);
+        sources.set(path, '');
+      }
+      if (!versions.has(path)) throw new CloudError('NOT_FOUND', `Project file not found: ${path}`, { status: 404 });
+    }
+    await Promise.all(rows.filter(file => requested.get(file.path) !== 'asset').map(async file => {
+      sources.set(file.path, await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256.trim()));
+    }));
+    return { kind: 'inputs' as const, versions, sources, filesByPath: new Map(rows.map(file => [file.path, file] as const)) };
+  }
+
+  async readTextForCommand(ctx: AuthContext, projectId: string, path: string, scope: string, requestId: string, inputHash: string) {
+    const snapshot = await this.readEditInputs(ctx, projectId, new Map([[path, 'text']]), scope, requestId, inputHash);
+    return snapshot.kind === 'replay' ? snapshot : { kind: 'source' as const, content: snapshot.sources.get(path)! };
   }
 
   /** Read a binary blob directly from S3 CAS. */
@@ -1053,7 +1083,8 @@ export class ProjectFilesService {
       const shouldCreateVersion = !input.skipVersion && (hasFileChanges || Boolean(input.forceVersion));
       const now = this.nowFn();
       const actor = actorDefaults(ctx, input.actorKind, input.actorName);
-      const safeWindowId = input.windowId && isUuid(input.windowId) ? input.windowId : null;
+      // A completed semantic command is a distinct undo step, including against a subsequent raw save.
+      const safeWindowId = input.commandReceipt ? randomUUID() : input.windowId && isUuid(input.windowId) ? input.windowId : null;
       const effectiveSource: ProjectVersionSource = input.source ?? 'studio';
       const summary = (
         input.summary?.trim() ||
@@ -1074,7 +1105,7 @@ export class ProjectFilesService {
         (input.origin === undefined || input.origin === 'studio') &&
         input.actorKind !== 'agent' &&
         input.actorKind !== 'system' &&
-        !input.forceVersion;
+        !input.forceVersion && !input.commandReceipt;
 
       if (
         shouldCreateVersion &&
@@ -1132,7 +1163,7 @@ export class ProjectFilesService {
           project.currentHistorySeq === maxHistorySeq &&
           headEntry.actorKind === actor.actorKind &&
           headEntry.actorName === actor.actorName &&
-          (safeWindowId === null || headEntry.windowId === safeWindowId)
+          headEntry.windowId === safeWindowId
         ) {
           const headReferenceMs = Math.min(headEntry.startedAt.getTime(), headEntry.endedAt.getTime());
           const elapsedMs = now.getTime() - headReferenceMs;

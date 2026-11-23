@@ -1,3 +1,4 @@
+import { canSubmitTimelineCommand, saveCloudTimeline } from "./cloudTimelineEdit";
 import type { TimelineElement } from "../player";
 import { toAuthoredStart } from "../player/store/timelineElement";
 import type { RecordEditInput } from "../hooks/timelineEditingHelpers";
@@ -176,6 +177,17 @@ interface RunAtomicCutInput {
 
 /** One coordinator owns request, history registration, safe rollback, and resync. */
 export function runAtomicCutTransaction(input: RunAtomicCutInput): Promise<AtomicCutResult> {
+  if (input.intents.every(intent => canSubmitTimelineCommand(intent.targets.map(cut => cut.target))
+    && intent.targets.every(cut => cut.splitTime === intent.targets[0]?.splitTime))) {
+    const edits = input.intents.map(intent => ({ path: intent.path, command: { kind: 'splitClips' as const,
+      hfIds: intent.targets.map(cut => cut.target.hfId!), at: intent.targets[0]!.splitTime, measured: intent.targets.map(cut => ({hfId:cut.target.hfId!,start:cut.elementStart,duration:cut.elementDuration,track:cut.track})) } }));
+    const skipped = new Set<string>();
+    return saveCloudTimeline(input.projectId, edits, input.writeProjectFile, input.recordEdit, input.label, undefined, selectors => selectors.forEach(selector => skipped.add(selector))).then(() => {
+      let syncFailed = false;
+      try { input.synchronize(); } catch { syncFailed = true; }
+      return { splitCount: edits.reduce((sum, edit) => sum + edit.command.hfIds.length, 0), skippedSelectors: [...skipped], syncFailed };
+    });
+  }
   const paths = input.intents.map((intent) => intent.path);
   return serializeStudioFileMutations(input.writeProjectFile, paths, async () => {
     const result = await requestAtomicCut(input.projectId, input.intents);
