@@ -90,13 +90,42 @@ export type AtomCredentialInjectParams = {
 export type AtomCredentialRevokeParams = {
   featureId: string;
   credentialId: string;
+  accountId?: string;
 };
 
 export type AtomCredentialRevokeResult = {
   credentialId: string;
-  revoked: true;
+  revoked: boolean;
+  pendingRevoke: boolean;
   installationId?: string;
   revokedAt: string;
+  remoteRevokeError?: string;
+};
+
+export type AtomCredentialRetryPendingRevokesParams = {
+  featureId: string;
+  credentialId?: string;
+  accountId?: string;
+};
+
+export type AtomCredentialRetryPendingRevokesResult = {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  skippedDifferentAccount: number;
+  remaining: number;
+};
+
+export type PendingRevokeRecord = {
+  credentialId: string;
+  accountId?: string;
+  installationId: string;
+  revokeUrl: string;
+  revokeSecretKey?: string;
+  attempts: number;
+  lastError: string;
+  createdAt: string;
+  lastAttemptAt: string;
 };
 
 type CredentialMetadataRecord = {
@@ -106,12 +135,17 @@ type CredentialMetadataRecord = {
   secretAccountKey: string;
   updatedAt: string;
   revoked: boolean;
+  status?: 'active' | 'pending_revoke' | 'revoked';
   revokedAt?: string;
+  pendingRevokeAt?: string;
+  revokeAttempts?: number;
+  lastRevokeError?: string;
 };
 
 type PersistedCredentialsMetaFile = {
   schemaVersion: number;
   credentials: Record<string, CredentialMetadataRecord>;
+  pendingRevokes?: PendingRevokeRecord[];
 };
 
 type PendingDeviceAuthSession = {
@@ -348,13 +382,28 @@ export class CredentialAtom {
     const ruleResult = this.resolveRule(params.credentialId);
     if (!ruleResult.ok) return ruleResult;
 
-    const meta = this.readMetadata()[params.credentialId];
-    if (!meta || meta.revoked) {
+    const metaFile = this.readMetadataFile();
+    const meta = metaFile.credentials[params.credentialId];
+    const hasPendingRevoke =
+      meta?.status === 'pending_revoke' ||
+      Boolean(
+        meta?.installationId &&
+          metaFile.pendingRevokes.some(
+            entry =>
+              entry.credentialId === params.credentialId &&
+              entry.installationId === meta.installationId,
+          ),
+      );
+
+    if (!meta || meta.revoked || meta.status === 'pending_revoke') {
       return hostOk({
         credentialId: params.credentialId,
         stored: false,
+        accountId: meta?.accountId,
         installationId: meta?.installationId,
         updatedAt: meta?.updatedAt,
+        status: !meta ? 'none' : meta.status === 'pending_revoke' ? 'pending_revoke' : 'revoked',
+        pendingRevoke: hasPendingRevoke,
       });
     }
 
@@ -365,6 +414,8 @@ export class CredentialAtom {
       accountId: meta.accountId,
       installationId: meta.installationId,
       updatedAt: meta.updatedAt,
+      status: secret ? 'active' : 'none',
+      pendingRevoke: hasPendingRevoke,
     });
   }
 
@@ -386,6 +437,9 @@ export class CredentialAtom {
       id: rule.credentialId,
     });
     if (!authCheck.ok) return authCheck;
+
+    const versionCheck = this.confirmationGate.assertMinShellVersion(signedConfig, authCheck.data);
+    if (!versionCheck.ok) return versionCheck;
 
     const deviceAuthUrl = this.resolveEndpointUrl(rule.issuerUrl, rule.deviceAuthPath);
     if (!deviceAuthUrl.ok) return deviceAuthUrl;
@@ -505,6 +559,9 @@ export class CredentialAtom {
     });
     if (!authCheck.ok) return authCheck;
 
+    const versionCheck = this.confirmationGate.assertMinShellVersion(signedConfig, authCheck.data);
+    if (!versionCheck.ok) return versionCheck;
+
     const session = this.pendingSessions.get(params.sessionId);
     if (!session || session.credentialId !== rule.credentialId) {
       return hostErr('NOT_FOUND', 'Unknown or expired device authorization session', {
@@ -587,21 +644,22 @@ export class CredentialAtom {
       await this.secretStore.set(secretAccountKey, accessToken);
 
       const updatedAt = this.now().toISOString();
-      const allMeta = this.readMetadata();
-      const previous = allMeta[rule.credentialId];
+      const metaFile = this.readMetadataFile();
+      const previous = metaFile.credentials[rule.credentialId];
       if (previous && previous.secretAccountKey !== secretAccountKey) {
         await this.secretStore.delete(previous.secretAccountKey).catch(() => false);
       }
 
-      allMeta[rule.credentialId] = {
+      metaFile.credentials[rule.credentialId] = {
         credentialId: rule.credentialId,
         accountId,
         installationId,
         secretAccountKey,
         updatedAt,
         revoked: false,
+        status: 'active',
       };
-      this.writeMetadata(allMeta);
+      this.writeMetadataFile(metaFile);
       this.pendingSessions.delete(session.sessionId);
 
       // Return metadata only — NEVER return the secret value!
@@ -635,8 +693,11 @@ export class CredentialAtom {
     });
     if (!authCheck.ok) return authCheck;
 
+    const versionCheck = this.confirmationGate.assertMinShellVersion(signedConfig, authCheck.data);
+    if (!versionCheck.ok) return versionCheck;
+
     const meta = this.readMetadata()[rule.credentialId];
-    if (!meta || meta.revoked) {
+    if (!meta || meta.revoked || meta.status === 'pending_revoke') {
       return hostErr('UNAUTHORIZED', `Credential "${rule.credentialId}" is not stored or has been revoked`, {
         credentialId: rule.credentialId,
       });
@@ -684,6 +745,9 @@ export class CredentialAtom {
     });
     if (!authCheck.ok) return authCheck;
 
+    const versionCheck = this.confirmationGate.assertMinShellVersion(signedConfig, authCheck.data);
+    if (!versionCheck.ok) return versionCheck;
+
     const approval = await this.confirmationGate.ensureApproved({
       featureId: params.featureId,
       signedConfig,
@@ -698,25 +762,66 @@ export class CredentialAtom {
     if (!approval.ok) return approval;
 
     return this.mutationQueue.enqueue(async () => {
-      const allMeta = this.readMetadata();
-      const existing = allMeta[rule.credentialId];
+      const metaFile = this.readMetadataFile();
+      const existing = metaFile.credentials[rule.credentialId];
+
+      // Account isolation: never allow a caller after account switch (or omitting accountId)
+      // to revoke or execute operations belonging to a different account's credential record.
+      if (existing?.accountId && params.accountId !== existing.accountId) {
+        return hostErr(
+          'UNAUTHORIZED',
+          `Cannot revoke credential "${rule.credentialId}" belonging to a different account`,
+          {
+            credentialId: rule.credentialId,
+            ...(params.accountId ? { requestedAccountId: params.accountId } : {}),
+          },
+        );
+      }
+
+      const nowIso = this.now().toISOString();
+      let remoteRevokeFailed = false;
+      let remoteRevokeError: string | undefined;
+      let attemptedRevokeUrl: string | undefined;
+      let secretForRevoke: string | null = null;
+      const matchingPendingRecords = existing
+        ? metaFile.pendingRevokes.filter(
+            entry =>
+              entry.credentialId === rule.credentialId && entry.installationId === existing.installationId,
+          )
+        : [];
 
       if (existing && !existing.revoked && rule.revokePath) {
         const revokeUrl = this.resolveEndpointUrl(rule.issuerUrl, rule.revokePath);
         if (revokeUrl.ok) {
-          const secret = await this.secretStore.get(existing.secretAccountKey);
+          attemptedRevokeUrl = revokeUrl.data;
+          secretForRevoke = await this.secretStore.get(existing.secretAccountKey);
+          if (!secretForRevoke) {
+            for (const pending of matchingPendingRecords) {
+              if (!pending.revokeSecretKey) continue;
+              const quarantined = await this.secretStore.get(pending.revokeSecretKey).catch(() => null);
+              if (quarantined) {
+                secretForRevoke = quarantined;
+                break;
+              }
+            }
+          }
           try {
-            await this.httpClient(revokeUrl.data, {
+            const response = await this.httpClient(revokeUrl.data, {
               method: 'POST',
-              headers: secret ? { authorization: `Bearer ${secret}` } : undefined,
+              headers: secretForRevoke ? { authorization: `Bearer ${secretForRevoke}` } : undefined,
               body: {
                 credential_id: rule.credentialId,
                 installation_id: existing.installationId,
               },
               timeoutMs: this.httpTimeoutMs,
             });
-          } catch {
-            // Always proceed to remove local secret even if remote revoke is unreachable.
+            if (response.status < 200 || response.status >= 300) {
+              remoteRevokeFailed = true;
+              remoteRevokeError = `Remote revoke returned HTTP ${response.status}`;
+            }
+          } catch (error) {
+            remoteRevokeFailed = true;
+            remoteRevokeError = error instanceof Error ? error.message : String(error);
           }
         }
       }
@@ -725,25 +830,254 @@ export class CredentialAtom {
         await this.secretStore.delete(existing.secretAccountKey).catch(() => false);
       }
 
-      const revokedAt = this.now().toISOString();
-      allMeta[rule.credentialId] = {
+      const installationId = existing?.installationId ?? randomUUID();
+
+      if (remoteRevokeFailed && attemptedRevokeUrl) {
+        const existingPending = metaFile.pendingRevokes.find(
+          entry =>
+            entry.credentialId === rule.credentialId && entry.installationId === installationId,
+        );
+        // Quarantine the secret under a revoke-only keychain key so inject()/status() can never
+        // use it while retryPendingRevokes() can still authenticate to the remote revoke endpoint.
+        let revokeSecretKey = existingPending?.revokeSecretKey;
+        if (secretForRevoke) {
+          revokeSecretKey = `openmotion:pending-revoke:${rule.credentialId}:${installationId}`;
+          await this.secretStore.set(revokeSecretKey, secretForRevoke).catch(() => {});
+        }
+        const attempts = (existingPending?.attempts ?? existing?.revokeAttempts ?? 0) + 1;
+        const nextPending: PendingRevokeRecord = {
+          credentialId: rule.credentialId,
+          accountId: existing?.accountId ?? params.accountId,
+          installationId,
+          revokeUrl: attemptedRevokeUrl,
+          ...(revokeSecretKey ? { revokeSecretKey } : {}),
+          attempts,
+          lastError: remoteRevokeError ?? 'Remote revoke failed',
+          createdAt: existingPending?.createdAt ?? nowIso,
+          lastAttemptAt: nowIso,
+        };
+        metaFile.pendingRevokes = [
+          ...metaFile.pendingRevokes.filter(
+            entry =>
+              !(entry.credentialId === rule.credentialId && entry.installationId === installationId),
+          ),
+          nextPending,
+        ];
+        metaFile.credentials[rule.credentialId] = {
+          credentialId: rule.credentialId,
+          accountId: existing?.accountId ?? params.accountId,
+          installationId,
+          secretAccountKey: existing?.secretAccountKey ?? `openmotion:${rule.credentialId}:pending-revoke`,
+          updatedAt: nowIso,
+          revoked: false,
+          status: 'pending_revoke',
+          pendingRevokeAt: nowIso,
+          revokeAttempts: attempts,
+          lastRevokeError: remoteRevokeError,
+        };
+        this.writeMetadataFile(metaFile);
+
+        return hostOk({
+          credentialId: rule.credentialId,
+          revoked: false,
+          pendingRevoke: true,
+          installationId,
+          revokedAt: nowIso,
+          remoteRevokeError,
+        });
+      }
+
+      for (const entry of metaFile.pendingRevokes) {
+        if (
+          entry.credentialId === rule.credentialId &&
+          entry.installationId === installationId &&
+          entry.revokeSecretKey
+        ) {
+          await this.secretStore.delete(entry.revokeSecretKey).catch(() => false);
+        }
+      }
+      metaFile.pendingRevokes = metaFile.pendingRevokes.filter(
+        entry => !(entry.credentialId === rule.credentialId && entry.installationId === installationId),
+      );
+      metaFile.credentials[rule.credentialId] = {
         credentialId: rule.credentialId,
         accountId: existing?.accountId,
-        installationId: existing?.installationId ?? randomUUID(),
+        installationId,
         secretAccountKey: existing?.secretAccountKey ?? `openmotion:${rule.credentialId}:revoked`,
-        updatedAt: revokedAt,
+        updatedAt: nowIso,
         revoked: true,
-        revokedAt,
+        status: 'revoked',
+        revokedAt: nowIso,
       };
-      this.writeMetadata(allMeta);
+      this.writeMetadataFile(metaFile);
 
       return hostOk({
         credentialId: rule.credentialId,
         revoked: true,
-        installationId: allMeta[rule.credentialId]!.installationId,
-        revokedAt,
+        pendingRevoke: false,
+        installationId,
+        revokedAt: nowIso,
       });
     }, `atom.credential.revoke:${rule.credentialId}`);
+  }
+
+  /**
+   * Lists persisted pending remote revocation records (optionally filtered by accountId).
+   */
+  listPendingRevokes(accountId?: string): PendingRevokeRecord[] {
+    const records = this.readMetadataFile().pendingRevokes;
+    if (!accountId) return records;
+    return records.filter(entry => entry.accountId === accountId);
+  }
+
+  /**
+   * Retries previously failed remote revocations strictly for records matching `params.accountId`.
+   * Records belonging to a different account are skipped and never executed under the new account.
+   */
+  async retryPendingRevokes(
+    params: AtomCredentialRetryPendingRevokesParams,
+  ): Promise<HostInvokeResult<AtomCredentialRetryPendingRevokesResult>> {
+    if (!params?.featureId) {
+      return hostErr('INVALID_PARAMS', 'featureId is required');
+    }
+
+    const signedConfig = this.getSignedConfig();
+    const feature = signedConfig.features?.[params.featureId];
+    if (!feature) {
+      return hostErr('POLICY_DENIED', `Unknown featureId in verified signed config: "${params.featureId}"`, {
+        featureId: params.featureId,
+      });
+    }
+    const allowedFeatureCredentialIds = new Set(feature.credentialIds ?? []);
+    if (params.credentialId) {
+      const authCheck = assertFeatureAllowsResource(params.featureId, signedConfig, {
+        kind: 'credential',
+        id: params.credentialId,
+      });
+      if (!authCheck.ok) return authCheck;
+    } else if (allowedFeatureCredentialIds.size === 0) {
+      return hostErr(
+        'POLICY_DENIED',
+        `Feature "${params.featureId}" is not authorized to manage any credentials`,
+        { featureId: params.featureId },
+      );
+    }
+
+    const versionCheck = this.confirmationGate.assertMinShellVersion(signedConfig, feature);
+    if (!versionCheck.ok) return versionCheck;
+
+    return this.mutationQueue.enqueue(async () => {
+      const metaFile = this.readMetadataFile();
+      const remaining: PendingRevokeRecord[] = [];
+      let attempted = 0;
+      let succeeded = 0;
+      let failed = 0;
+      let skippedDifferentAccount = 0;
+      const nowIso = this.now().toISOString();
+
+      for (const record of metaFile.pendingRevokes) {
+        if (!allowedFeatureCredentialIds.has(record.credentialId)) {
+          remaining.push(record);
+          continue;
+        }
+        if (params.credentialId && record.credentialId !== params.credentialId) {
+          remaining.push(record);
+          continue;
+        }
+
+        // Strict account boundary: never execute an old account's pending revoke
+        // when signed in as a different account (or without matching account identity).
+        if (record.accountId && params.accountId !== record.accountId) {
+          skippedDifferentAccount += 1;
+          remaining.push(record);
+          continue;
+        }
+        if (!record.accountId && params.accountId) {
+          skippedDifferentAccount += 1;
+          remaining.push(record);
+          continue;
+        }
+
+        if (
+          !isUrlInAllowedDomainScope(record.revokeUrl, {
+            channel: this.channel,
+            allowLocalDevLoopback: this.allowLocalDevLoopback,
+          })
+        ) {
+          failed += 1;
+          remaining.push({
+            ...record,
+            attempts: record.attempts + 1,
+            lastError: 'Revoke URL is outside allowed domain scope',
+            lastAttemptAt: nowIso,
+          });
+          continue;
+        }
+
+        attempted += 1;
+        let ok = false;
+        let lastError = 'Remote revoke retry failed';
+        const quarantinedSecret = record.revokeSecretKey
+          ? await this.secretStore.get(record.revokeSecretKey).catch(() => null)
+          : null;
+        try {
+          const response = await this.httpClient(record.revokeUrl, {
+            method: 'POST',
+            headers: quarantinedSecret ? { authorization: `Bearer ${quarantinedSecret}` } : undefined,
+            body: {
+              credential_id: record.credentialId,
+              installation_id: record.installationId,
+            },
+            timeoutMs: this.httpTimeoutMs,
+          });
+          // Treat 2xx or 404/410 (already revoked remotely) as resolved.
+          if ((response.status >= 200 && response.status < 300) || response.status === 404 || response.status === 410) {
+            ok = true;
+          } else {
+            lastError = `Remote revoke returned HTTP ${response.status}`;
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+        }
+
+        if (ok) {
+          succeeded += 1;
+          if (record.revokeSecretKey) {
+            await this.secretStore.delete(record.revokeSecretKey).catch(() => false);
+          }
+          const currentMeta = metaFile.credentials[record.credentialId];
+          if (currentMeta && currentMeta.installationId === record.installationId) {
+            metaFile.credentials[record.credentialId] = {
+              ...currentMeta,
+              updatedAt: nowIso,
+              revoked: true,
+              status: 'revoked',
+              revokedAt: nowIso,
+              lastRevokeError: undefined,
+            };
+          }
+        } else {
+          failed += 1;
+          remaining.push({
+            ...record,
+            attempts: record.attempts + 1,
+            lastError,
+            lastAttemptAt: nowIso,
+          });
+        }
+      }
+
+      metaFile.pendingRevokes = remaining;
+      this.writeMetadataFile(metaFile);
+
+      return hostOk({
+        attempted,
+        succeeded,
+        failed,
+        skippedDifferentAccount,
+        remaining: remaining.length,
+      });
+    }, `atom.credential.retryPendingRevokes:${params.credentialId ?? 'all'}`);
   }
 
   private resolveRule(
@@ -785,30 +1119,51 @@ export class CredentialAtom {
     }
   }
 
-  private readMetadata(): Record<string, CredentialMetadataRecord> {
+  private readMetadataFile(): {
+    credentials: Record<string, CredentialMetadataRecord>;
+    pendingRevokes: PendingRevokeRecord[];
+  } {
     const metaPath = path.join(this.dataDir, CREDENTIALS_META_FILE);
-    if (!existsSync(metaPath)) return {};
+    if (!existsSync(metaPath)) return { credentials: {}, pendingRevokes: [] };
     try {
       const parsed = JSON.parse(readFileSync(metaPath, 'utf8')) as Partial<PersistedCredentialsMetaFile>;
-      if (!parsed || typeof parsed.credentials !== 'object' || !parsed.credentials) {
-        return {};
-      }
-      return { ...parsed.credentials };
+      const credentials =
+        parsed && typeof parsed.credentials === 'object' && parsed.credentials
+          ? { ...parsed.credentials }
+          : {};
+      const pendingRevokes = Array.isArray(parsed?.pendingRevokes)
+        ? parsed.pendingRevokes.filter(
+            (entry): entry is PendingRevokeRecord =>
+              Boolean(entry) &&
+              typeof entry.credentialId === 'string' &&
+              typeof entry.installationId === 'string' &&
+              typeof entry.revokeUrl === 'string',
+          )
+        : [];
+      return { credentials, pendingRevokes };
     } catch {
-      return {};
+      return { credentials: {}, pendingRevokes: [] };
     }
   }
 
-  private writeMetadata(credentials: Record<string, CredentialMetadataRecord>): void {
+  private writeMetadataFile(state: {
+    credentials: Record<string, CredentialMetadataRecord>;
+    pendingRevokes: PendingRevokeRecord[];
+  }): void {
     mkdirSync(this.dataDir, { recursive: true });
     const metaPath = path.join(this.dataDir, CREDENTIALS_META_FILE);
     const payload: PersistedCredentialsMetaFile = {
       schemaVersion: 1,
-      credentials,
+      credentials: state.credentials,
+      ...(state.pendingRevokes.length > 0 ? { pendingRevokes: state.pendingRevokes } : {}),
     };
     const tmpPath = `${metaPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     renameSync(tmpPath, metaPath);
+  }
+
+  private readMetadata(): Record<string, CredentialMetadataRecord> {
+    return this.readMetadataFile().credentials;
   }
 }
 

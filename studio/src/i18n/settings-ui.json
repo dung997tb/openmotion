@@ -444,7 +444,10 @@
     "OpenAI compatible": "OpenAI 兼容",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "此协议当前仅支持同步目录与配置文本默认模型，暂不直接执行图片、视频或音频生成。",
     "Active workspace": "当前使用",
-    "Creating token…": "正在创建…"
+    "Creating token…": "正在创建…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "将在系统浏览器中打开。请确认网页登录账号为 {account}，完成后返回点击刷新即可生效。",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "将在系统浏览器中打开。请确认网页登录的是同一账号，完成后返回点击刷新即可生效。",
+    "Could not start sign-in": "无法启动登录"
   },
   "ja": {
     "Local Agents": "ローカル Agent",
@@ -655,7 +658,10 @@
     "OpenAI compatible": "OpenAI 互換",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "このプロトコルは現在、モデル同期とテキスト既定値の保存のみに対応しており、画像・動画・音声の生成は実行されません。",
     "Active workspace": "使用中",
-    "Creating token…": "作成中…"
+    "Creating token…": "作成中…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "ブラウザで開きます。{account} としてサインインしていることを確認し、戻ったら更新をクリックしてください。",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "ブラウザで開きます。同じアカウントでサインインしていることを確認し、戻ったら更新をクリックしてください。",
+    "Could not start sign-in": "サインインを開始できませんでした"
   },
   "ko": {
     "What's new": "새로운 소식",
@@ -761,7 +767,10 @@
     "OpenAI compatible": "OpenAI 호환",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "이 프로토콜은 현재 모델 동기화와 텍스트 기본값 저장만 지원하며 이미지·비디오·오디오 생성은 실행되지 않습니다.",
     "Active workspace": "활성",
-    "Creating token…": "생성 중…"
+    "Creating token…": "생성 중…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "브라우저에서 열립니다. {account} 계정으로 로그인되어 있는지 확인한 뒤 돌아와서 새로고침을 클릭하세요.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "브라우저에서 열립니다. 같은 계정으로 로그인되어 있는지 확인한 뒤 돌아와서 새로고침을 클릭하세요.",
+    "Could not start sign-in": "로그인을 시작할 수 없습니다"
   },
   "de": {
     "What's new": "Neuigkeiten",
@@ -867,7 +876,10 @@
     "OpenAI compatible": "OpenAI-kompatibel",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Dieses Protokoll synchronisiert derzeit nur Modelle und speichert Text-Standardwerte; Bild-, Video- und Audiogenerierung wird darüber nicht ausgeführt.",
     "Active workspace": "Aktiv",
-    "Creating token…": "Wird erstellt…"
+    "Creating token…": "Wird erstellt…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "Wird im Browser geöffnet. Prüfe, ob du als {account} angemeldet bist, und klicke nach der Rückkehr auf Aktualisieren.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "Wird im Browser geöffnet. Prüfe, ob du dort mit demselben Konto angemeldet bist, und klicke nach der Rückkehr auf Aktualisieren.",
+    "Could not start sign-in": "Anmeldung konnte nicht gestartet werden"
   },
   "fr": {
     "What's new": "Nouveautés",
@@ -973,7 +985,10 @@
     "OpenAI compatible": "Compatible OpenAI",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Ce protocole synchronise actuellement uniquement les modèles et enregistre les valeurs texte par défaut ; la génération d’images, de vidéos et d’audio n’est pas exécutée via ce protocole.",
     "Active workspace": "Actif",
-    "Creating token…": "Création…"
+    "Creating token…": "Création…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "S’ouvre dans votre navigateur. Vérifiez que vous êtes connecté en tant que {account}, puis cliquez sur Actualiser à votre retour.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "S’ouvre dans votre navigateur. Vérifiez que vous êtes connecté au même compte, puis cliquez sur Actualiser à votre retour.",
+    "Could not start sign-in": "Impossible de démarrer la connexion"
   },
   "ru": {
     "What's new": "Что нового",
@@ -1079,7 +1094,10 @@
     "OpenAI compatible": "Совместимый с OpenAI",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Этот протокол пока поддерживает только синхронизацию каталога и сохранение текстовых настроек по умолчанию; генерация изображений, видео и аудио через него не выполняется.",
     "Active workspace": "Активен",
-    "Creating token…": "Создание…"
+    "Creating token…": "Создание…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "Откроется в браузере. Убедитесь, что вы вошли как {account}, а затем нажмите «Обновить» после возвращения.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "Откроется в браузере. Убедитесь, что вы вошли в тот же аккаунт, и нажмите «Обновить» после возвращения.",
+    "Could not start sign-in": "Не удалось начать вход"
   },
   "es": {
     "What's new": "Novedades",
@@ -1185,7 +1203,10 @@
     "OpenAI compatible": "Compatible con OpenAI",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo actualmente solo sincroniza modelos y guarda valores predeterminados de texto; no ejecuta generación de imágenes, video ni audio.",
     "Active workspace": "Activo",
-    "Creating token…": "Creando…"
+    "Creating token…": "Creando…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "Se abrirá en tu navegador. Verifica que hayas iniciado sesión como {account} y haz clic en Actualizar al volver.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "Se abrirá en tu navegador. Verifica que hayas iniciado sesión con la misma cuenta allí y haz clic en Actualizar al volver.",
+    "Could not start sign-in": "No se pudo iniciar sesión"
   },
   "pt-BR": {
     "What's new": "Novidades",
@@ -1291,7 +1312,10 @@
     "OpenAI compatible": "Compatível com OpenAI",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo atualmente apenas sincroniza modelos e salva padrões de texto; geração de imagem, vídeo e áudio não é executada por ele.",
     "Active workspace": "Ativo",
-    "Creating token…": "Criando…"
+    "Creating token…": "Criando…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "Abrirá no seu navegador. Verifique se você está conectado como {account} e clique em Atualizar ao retornar.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "Abrirá no seu navegador. Verifique se você está conectado à mesma conta lá e clique em Atualizar ao retornar.",
+    "Could not start sign-in": "Não foi possível iniciar o login"
   },
   "it": {
     "What's new": "Novità",
@@ -1397,7 +1421,10 @@
     "OpenAI compatible": "Compatibile OpenAI",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Questo protocollo attualmente sincronizza solo i modelli e salva i valori predefiniti di testo; la generazione di immagini, video e audio non viene eseguita tramite esso.",
     "Active workspace": "Attivo",
-    "Creating token…": "Creazione…"
+    "Creating token…": "Creazione…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "Si apre nel browser. Verifica di aver effettuato l’accesso come {account}, quindi fai clic su Aggiorna al tuo ritorno.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "Si apre nel browser. Verifica di aver effettuato l’accesso con lo stesso account, quindi fai clic su Aggiorna al tuo ritorno.",
+    "Could not start sign-in": "Impossibile avviare l’accesso"
   },
   "tr": {
     "What's new": "Yenilikler",
@@ -1503,6 +1530,9 @@
     "OpenAI compatible": "OpenAI uyumlu",
     "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Bu protokol şu anda yalnızca modelleri eşitler ve metin varsayılanlarını kaydeder; görsel, video ve ses üretimi bu protokol üzerinden çalıştırılmaz.",
     "Active workspace": "Etkin",
-    "Creating token…": "Oluşturuluyor…"
+    "Creating token…": "Oluşturuluyor…",
+    "Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.": "Tarayıcınızda açılır. {account} hesabıyla oturum açtığınızı doğrulayın ve döndüğünüzde Yenile’ye tıklayın.",
+    "Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.": "Tarayıcınızda açılır. Orada aynı hesapla oturum açtığınızı doğrulayın ve döndüğünüzde Yenile’ye tıklayın.",
+    "Could not start sign-in": "Oturum açma başlatılamadı"
   }
 }

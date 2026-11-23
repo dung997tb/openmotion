@@ -434,7 +434,12 @@
           retryBtn.disabled = true;
           retryBtn.textContent = 'Retrying…';
           try {
-            if (window.__OPENMOTION_HOST__?.invoke) {
+            if (window.__OPENMOTION_LOCAL_PAGE__?.retryStartup) {
+              const result = await window.__OPENMOTION_LOCAL_PAGE__.retryStartup();
+              if (result && result.ok === false) {
+                showToast(result.error?.message || 'Could not reconnect yet.');
+              }
+            } else if (window.__OPENMOTION_HOST__?.invoke) {
               const result = await window.__OPENMOTION_HOST__.invoke('window', 'retryStartup');
               if (result && result.ok === false) {
                 showToast(result.error?.message || 'Could not reconnect yet.');
@@ -455,10 +460,33 @@
         exportBtn?.addEventListener('click', async () => {
           exportBtn.disabled = true;
           try {
-            if (window.__OPENMOTION_HOST__?.invoke) {
-              const result = await window.__OPENMOTION_HOST__.invoke('diagnostics', 'export');
+            if (window.__OPENMOTION_LOCAL_PAGE__?.exportDiagnostics) {
+              const result = await window.__OPENMOTION_LOCAL_PAGE__.exportDiagnostics();
               if (result && result.ok) {
-                showToast('Diagnostics exported.');
+                const payload = result.data || {};
+                if (payload.ok) {
+                  showToast('Diagnostics exported.');
+                } else if (payload.canceled) {
+                  showToast('Diagnostics export canceled.');
+                } else {
+                  showToast(payload.error || 'Could not export diagnostics.');
+                }
+              } else if (result && result.error?.code === 'USER_DENIED') {
+                showToast('Diagnostics export canceled.');
+              } else {
+                showToast(result?.error?.message || 'Could not export diagnostics.');
+              }
+            } else if (window.__OPENMOTION_HOST__?.invoke) {
+              const result = await window.__OPENMOTION_HOST__.invoke('diagnostics', 'exportBundle');
+              if (result && result.ok) {
+                const payload = result.data || {};
+                if (payload.ok) {
+                  showToast('Diagnostics exported.');
+                } else if (payload.canceled) {
+                  showToast('Diagnostics export canceled.');
+                } else {
+                  showToast(payload.error || 'Could not export diagnostics.');
+                }
               } else if (result && result.error?.code === 'USER_DENIED') {
                 showToast('Diagnostics export canceled.');
               } else {

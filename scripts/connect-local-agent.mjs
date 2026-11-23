@@ -62,12 +62,14 @@ export async function resolveConnectBridge(options) {
     await signedConfig.fetchAndApply().catch(() => {});
   }
 
-  const studioUrl =
-    options?.studioUrl ??
-    signedConfig.getActiveConfig().studioUrl ??
-    DEFAULT_STUDIO_URLS[channel];
-  const expectedMcpUrl =
-    options?.expectedMcpUrl ?? `${studioUrl.replace(/\/+$/, '')}/mcp`;
+  const resolveExpectedMcpUrl = () => {
+    if (options?.expectedMcpUrl) return options.expectedMcpUrl;
+    const studioUrl =
+      options?.studioUrl ??
+      signedConfig.getActiveConfig().studioUrl ??
+      DEFAULT_STUDIO_URLS[channel];
+    return `${studioUrl.replace(/\/+$/, '')}/mcp`;
+  };
 
   const atomsRuntime = createLocalAtomsRuntime({
     dataDir,
@@ -76,7 +78,8 @@ export async function resolveConnectBridge(options) {
     arch: process.arch,
     channel,
     allowLocalDevLoopback,
-    expectedMcpUrl,
+    getExpectedMcpUrl: resolveExpectedMcpUrl,
+    shellVersion: CONNECT_SCRIPT_VERSION,
     getSignedConfig: () => signedConfig.getActiveConfig(),
     confirmCallback: async request => {
       if (typeof options?.confirm === 'function') {

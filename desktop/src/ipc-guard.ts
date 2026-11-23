@@ -15,9 +15,10 @@ export const HOST_IPC_CHANNELS = {
   EVENT: 'openmotion:host:event',
   DOM_FULLSCREEN: 'openmotion:dom-fullscreen',
   SPLASH_RETRY: 'openmotion:splash-retry',
+  SPLASH_EXPORT_DIAGNOSTICS: 'openmotion:splash-export-diagnostics',
 } as const;
 
-export const SPLASH_ALLOWED_ACTIONS = ['retryStartup'] as const;
+export const SPLASH_ALLOWED_ACTIONS = ['retryStartup', 'exportDiagnostics'] as const;
 export type SplashAllowedAction = (typeof SPLASH_ALLOWED_ACTIONS)[number];
 
 const ALLOWED_SPLASH_FILENAMES = new Set(['splash.html', 'retry.html']);
@@ -58,6 +59,8 @@ export type PrivilegedIpcGuardOptions = {
   studioUrl?: string;
   /** Permits http://127.0.0.1 and http://localhost only when channel === 'dev'. */
   allowLocalDevLoopback?: boolean;
+  /** True while an explicit in-window login fallback session is active (denies privileged IPC). */
+  inWindowAuthFallbackActive?: boolean;
 };
 
 export type PrivilegedIpcAuthSuccess = {
@@ -213,6 +216,10 @@ export function authorizePrivilegedIpcSender(
     return hostErr('UNAUTHORIZED', 'Only the main Studio frame may invoke privileged host APIs');
   }
 
+  if (options.inWindowAuthFallbackActive) {
+    return hostErr('UNAUTHORIZED', 'Privileged host APIs are disabled during in-window sign-in');
+  }
+
   const rawUrl = senderFrame?.url;
   if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
     return hostErr('ORIGIN_DENIED', 'IPC sender frame URL is missing');
@@ -223,6 +230,10 @@ export function authorizePrivilegedIpcSender(
     parsed = new URL(rawUrl);
   } catch {
     return hostErr('ORIGIN_DENIED', 'IPC sender frame URL is invalid');
+  }
+
+  if (parsed.pathname === '/auth' || parsed.pathname.startsWith('/auth/')) {
+    return hostErr('ORIGIN_DENIED', 'Privileged host APIs are disabled on authentication pages');
   }
 
   if (parsed.username || parsed.password) {

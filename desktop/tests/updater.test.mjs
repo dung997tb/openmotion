@@ -10,6 +10,7 @@ import {
   normalizeSemver,
   normalizeUpdateChannel,
   resolveElectronAutoUpdater,
+  resolvePackagedReleaseChannel,
   resolveUpdateFeedConfig,
 } from '../src/updater.ts';
 
@@ -442,4 +443,43 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /releases\.open-design\.ai/);
   assert.match(workflowYml, /open-motion\/desktop\//);
   assert.match(workflowYml, /aws\s+.*s3 cp/);
+  assert.match(workflowYml, /extraMetadata\.openmotionChannel=/);
+  assert.match(workflowYml, /npm --prefix desktop ci/);
+  assert.match(workflowYml, /npm --prefix desktop test/);
+});
+
+test('resolvePackagedReleaseChannel preserves test channel from bundle metadata even for clean semver versions', () => {
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1',
+      packageChannel: 'test',
+    }),
+    'test',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1',
+      appUpdateYmlContent: 'provider: generic\nurl: https://releases.open-design.ai/open-motion/desktop/test\nchannel: test\n',
+    }),
+    'test',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1',
+      envChannel: 'dev',
+      packageChannel: 'stable',
+    }),
+    'stable',
+    'packaged builds must not allow MOTION_DESKTOP_CHANNEL=dev override',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: false,
+      version: '0.2.1',
+    }),
+    'dev',
+  );
 });

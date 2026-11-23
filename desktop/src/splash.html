@@ -1091,8 +1091,11 @@ void main() {
             mode: 'booting',
             status: 'Starting the local engine',
           });
+          const localPage = window.__OPENMOTION_LOCAL_PAGE__;
           const api = desktop();
-          if (api?.splashRetry) {
+          if (localPage?.retryStartup) {
+            void localPage.retryStartup();
+          } else if (api?.splashRetry) {
             void api.splashRetry();
           } else {
             window.location.hash = 'retry=' + Date.now();
@@ -1100,8 +1103,11 @@ void main() {
         });
 
         document.getElementById('export-logs-btn')?.addEventListener('click', async () => {
+          const localPage = window.__OPENMOTION_LOCAL_PAGE__;
           const api = desktop();
-          if (api?.exportLogs) {
+          if (localPage?.exportDiagnostics) {
+            await localPage.exportDiagnostics();
+          } else if (api?.exportLogs) {
             await api.exportLogs();
           }
         });

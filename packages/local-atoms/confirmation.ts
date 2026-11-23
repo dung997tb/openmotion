@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import path from 'node:path';
 import {
   BUILTIN_TEMPLATE_MAP,
+  isShellVersionSatisfied,
   type BuiltinThirdPartyTemplate,
 } from '../../shared/desktop-builtin-rules.ts';
 import {
@@ -57,6 +58,7 @@ export type ConfirmCallback = (request: HostConfirmationRequest) => Promise<bool
 export type FeatureConfirmationGateOptions = {
   dataDir: string;
   confirmCallback: ConfirmCallback;
+  shellVersion?: string;
   now?: () => Date;
 };
 
@@ -240,11 +242,13 @@ export function assertFeatureAllowsResource(
 export class FeatureConfirmationGate {
   private readonly approvalsPath: string;
   private readonly confirmCallback: ConfirmCallback;
+  private readonly shellVersion?: string;
   private readonly now: () => Date;
 
   constructor(options: FeatureConfirmationGateOptions) {
     this.approvalsPath = path.join(options.dataDir, APPROVALS_FILE_NAME);
     this.confirmCallback = options.confirmCallback;
+    this.shellVersion = options.shellVersion;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -277,6 +281,41 @@ export class FeatureConfirmationGate {
     this.writeApprovals([]);
   }
 
+  assertMinShellVersion(
+    signedConfig: SignedConfigPayload,
+    feature?: SignedFeatureDefinition,
+  ): HostInvokeResult<true> {
+    const checks: Array<{ min: string; label: string; featureId?: string }> = [];
+    if (typeof signedConfig.minShellVersion === 'string' && signedConfig.minShellVersion.trim()) {
+      checks.push({ min: signedConfig.minShellVersion.trim(), label: 'OpenDesign desktop' });
+    }
+    if (feature && typeof feature.minShellVersion === 'string' && feature.minShellVersion.trim()) {
+      checks.push({
+        min: feature.minShellVersion.trim(),
+        label: `Feature "${feature.title}"`,
+        featureId: feature.featureId,
+      });
+    }
+
+    for (const check of checks) {
+      if (!isShellVersionSatisfied(this.shellVersion, check.min)) {
+        return hostErr(
+          'UNSUPPORTED',
+          `${check.label} requires desktop shell v${check.min} or newer${this.shellVersion ? ` (current: v${this.shellVersion})` : ''}`,
+          {
+            reason: 'SHELL_VERSION_TOO_OLD',
+            ...(check.featureId ? { featureId: check.featureId } : {}),
+            minShellVersion: check.min,
+            requiredShellVersion: check.min,
+            ...(this.shellVersion ? { currentShellVersion: this.shellVersion } : {}),
+          },
+        );
+      }
+    }
+
+    return hostOk(true);
+  }
+
   async ensureApproved(params: {
     featureId: string;
     signedConfig: SignedConfigPayload;
@@ -289,6 +328,9 @@ export class FeatureConfirmationGate {
         featureId: params.featureId,
       });
     }
+
+    const versionCheck = this.assertMinShellVersion(params.signedConfig, feature);
+    if (!versionCheck.ok) return versionCheck;
 
     const definitionHash = computeFeatureDefinitionHash(feature, params.signedConfig);
     if (!params.forcePrompt && this.hasApproval(feature.featureId, feature.version, definitionHash)) {

@@ -12,9 +12,14 @@
  *   degrading if `schemaVersion` exceeds `MURMUR_STATUS_MAX_SCHEMA_VERSION`.
  */
 
+import { existsSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
-import { DEFAULT_MCP_SERVER_NAME } from '../../shared/desktop-builtin-rules.ts';
+import path from 'node:path';
+import {
+  canonicalizeUrlForComparison,
+  DEFAULT_MCP_SERVER_NAME,
+} from '../../shared/desktop-builtin-rules.ts';
 import {
   hostOk,
   type AtomDetectResult,
@@ -28,9 +33,7 @@ import {
   MURMUR_ENGINE_HOST,
   MURMUR_ENGINE_PORT,
   MURMUR_PERSONAL_IDENTITY_PREFIX,
-  MURMUR_STATUS_MAX_SCHEMA_VERSION,
-  MURMUR_STATUS_MIN_SCHEMA_VERSION,
-  type MurmurStatusPayload,
+  parseMurmurStatusJson,
 } from '../../shared/engine-command-contract.ts';
 import type { SignedConfigPayload } from '../../shared/signed-config.ts';
 import { readMcpEntryFromFile, resolveSafeHomePath } from './config.ts';
@@ -71,6 +74,7 @@ export type DetectAtomDeps = {
   arch?: string;
   homeDir?: string;
   expectedMcpUrl?: string;
+  getExpectedMcpUrl?: () => string | undefined;
   getSignedConfig: () => SignedConfigPayload;
   pathResolver: PathResolver;
   componentRegistry: ComponentInstallRegistry;
@@ -119,7 +123,7 @@ function normalizePlatform(raw: NodeJS.Platform | HostPlatform): HostPlatform {
 }
 
 function normalizeUrlForComparison(url: string): string {
-  return url.trim().replace(/\/+$/, '');
+  return canonicalizeUrlForComparison(url);
 }
 
 function deriveExpectedMcpUrl(
@@ -279,6 +283,7 @@ export class DetectAtom {
   private readonly arch: string;
   private readonly homeDir: string;
   private readonly expectedMcpUrl?: string;
+  private readonly getExpectedMcpUrl?: () => string | undefined;
   private readonly getSignedConfig: () => SignedConfigPayload;
   private readonly pathResolver: PathResolver;
   private readonly componentRegistry: ComponentInstallRegistry;
@@ -294,6 +299,7 @@ export class DetectAtom {
     this.arch = deps.arch ?? process.arch;
     this.homeDir = deps.homeDir ?? os.homedir();
     this.expectedMcpUrl = deps.expectedMcpUrl;
+    this.getExpectedMcpUrl = deps.getExpectedMcpUrl;
     this.getSignedConfig = deps.getSignedConfig;
     this.pathResolver = deps.pathResolver;
     this.componentRegistry = deps.componentRegistry;
@@ -308,7 +314,8 @@ export class DetectAtom {
   async scan(params?: AtomDetectParams): Promise<HostInvokeResult<AtomDetectResult>> {
     const signedConfig = this.getSignedConfig();
     const serverName = params?.serverName?.trim() || DEFAULT_MCP_SERVER_NAME;
-    const expectedMcpUrl = deriveExpectedMcpUrl(params, this.expectedMcpUrl, signedConfig);
+    const dynamicExpected = this.getExpectedMcpUrl?.() ?? this.expectedMcpUrl;
+    const expectedMcpUrl = deriveExpectedMcpUrl(params, dynamicExpected, signedConfig);
     const agentSpecs = this.collectAgentSpecs(signedConfig);
 
     const [agents, engine] = await Promise.all([
@@ -389,8 +396,9 @@ export class DetectAtom {
         if (readResult.ok && readResult.exists && readResult.entry) {
           mcpConfigured = true;
           mcpUrl = readResult.entry.url;
-          if (mcpUrl && expectedMcpUrl) {
-            mcpConflict = normalizeUrlForComparison(mcpUrl) !== normalizeUrlForComparison(expectedMcpUrl);
+          if (expectedMcpUrl) {
+            // Existing legacy local-mode stdio entry (no url) is also a conflict against remote MCP.
+            mcpConflict = !mcpUrl || normalizeUrlForComparison(mcpUrl) !== normalizeUrlForComparison(expectedMcpUrl);
           } else {
             mcpConflict = false;
           }
@@ -410,11 +418,22 @@ export class DetectAtom {
     };
   }
 
+  private resolveStandaloneMurmurPath(): string | null {
+    const binaryName = this.platform === 'win32' ? 'murmur.exe' : 'murmur';
+    const candidate = path.join(this.homeDir, '.murmurant', 'bin', binaryName);
+    return existsSync(candidate) ? candidate : null;
+  }
+
   private async probeEngine(): Promise<DetectedEngineStatus> {
     const installedRecord = this.componentRegistry.getInstalled(MURMUR_COMPONENT_ID);
+    const standaloneBinary = this.resolveStandaloneMurmurPath();
     const [httpProbe, resolvedPathBinary] = await Promise.all([
       this.engineHttpProbe(MURMUR_ENGINE_HOST, MURMUR_ENGINE_PORT, this.engineHttpTimeoutMs),
-      installedRecord ? Promise.resolve(installedRecord.executablePath) : this.pathResolver.resolveBinary('murmur'),
+      installedRecord
+        ? Promise.resolve(installedRecord.executablePath)
+        : standaloneBinary
+          ? Promise.resolve(standaloneBinary)
+          : this.pathResolver.resolveBinary('murmur'),
     ]);
 
     const classified = classifyHttpProbe(httpProbe);
@@ -441,42 +460,48 @@ export class DetectAtom {
       env: { ...process.env, PATH: mergedPath },
     });
 
-    if (cliResult.exitCode !== 0 || cliResult.timedOut || !cliResult.stdout.trim()) {
+    // Per murmurant/docs/member-status.md, `murmur status --json` prints valid schema-1
+    // JSON to stdout and exits non-zero when signed out of a team gateway (the normal
+    // OpenDesign user state). Always attempt to parse stdout JSON regardless of exitCode.
+    if (cliResult.timedOut || !cliResult.stdout.trim()) {
       return status;
     }
 
-    try {
-      const parsed = JSON.parse(cliResult.stdout) as Partial<MurmurStatusPayload>;
-      if (!parsed || typeof parsed !== 'object') return status;
-
-      if (typeof parsed.version === 'string' && parsed.version.trim()) {
-        status.version = parsed.version.trim();
+    const parsed = parseMurmurStatusJson(cliResult.stdout);
+    if (!parsed.ok) {
+      if (parsed.version) {
+        status.version = parsed.version;
       }
-
-      const schemaVersion = typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : NaN;
-      if (
-        Number.isNaN(schemaVersion) ||
-        schemaVersion < MURMUR_STATUS_MIN_SCHEMA_VERSION ||
-        schemaVersion > MURMUR_STATUS_MAX_SCHEMA_VERSION
-      ) {
+      if (parsed.schemaUnsupported) {
         // Gracefully degrade on unknown future schema versions (Contract M9).
         status.mode = status.mode ?? 'unknown';
-        return status;
+        status.schemaUnsupported = true;
       }
+      return status;
+    }
 
-      if (parsed.mode === 'personal' || parsed.mode === 'pool') {
-        status.mode = parsed.mode;
-      } else {
-        status.mode = 'unknown';
-      }
+    if (parsed.version) {
+      status.version = parsed.version;
+    }
+    status.signedIn = parsed.signedIn;
+    status.servedBy = parsed.servedBy;
+    status.mode = parsed.mode;
 
-      if (parsed.desktopMagpieActive && status.providerKind !== 'murmur-personal') {
+    if (parsed.desktopMagpieActive && status.providerKind !== 'murmur-personal') {
+      if (parsed.running || status.running) {
         status.providerKind = 'magpie-desktop';
         status.occupiedBy = 'magpie-desktop';
         status.running = true;
       }
-    } catch {
-      // Ignore malformed status JSON; HTTP probe result remains authoritative.
+    } else if (
+      parsed.servedBy === 'personal' &&
+      parsed.running &&
+      (status.providerKind === 'none' ||
+        (status.providerKind === 'other-process' && status.occupiedBy?.startsWith('http-')))
+    ) {
+      status.providerKind = 'murmur-personal';
+      delete status.occupiedBy;
+      status.running = true;
     }
 
     return status;

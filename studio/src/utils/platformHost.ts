@@ -98,6 +98,21 @@ export function compareSemver(a: string, b: string): number {
   return pa.prerelease.localeCompare(pb.prerelease);
 }
 
+/**
+ * Checks whether the active shell version satisfies a required minimum semver.
+ * Returns `true` when `minVersion` is omitted/blank; fails closed (`false`)
+ * when `minVersion` is set and either version is missing or unparseable.
+ */
+export function isShellVersionSupported(
+  currentVersion: string | undefined,
+  minVersion: string | undefined,
+): boolean {
+  if (!minVersion || !minVersion.trim()) return true;
+  if (!currentVersion || !currentVersion.trim()) return false;
+  if (!parseSemver(currentVersion) || !parseSemver(minVersion)) return false;
+  return compareSemver(currentVersion, minVersion) >= 0;
+}
+
 function isUniversalHostBridge(value: unknown): value is UniversalHostBridge {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;

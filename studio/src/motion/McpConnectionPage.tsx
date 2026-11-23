@@ -48,27 +48,57 @@ type ConnectedAppEvidence = {
 };
 
 type AuthorizedAgentsState = Record<DesktopConnectAgentId, boolean>;
+type AgentAuthorizationStatus = {
+  authorized: AuthorizedAgentsState;
+  tokenWithoutCall: AuthorizedAgentsState;
+};
 
 const EMPTY_AUTHORIZED_AGENTS: AuthorizedAgentsState = { codex: false, claude: false };
+const EMPTY_AGENT_AUTH_STATUS: AgentAuthorizationStatus = {
+  authorized: { codex: false, claude: false },
+  tokenWithoutCall: { codex: false, claude: false },
+};
 
-function deriveAuthorizedAgents(
+function isValidUsageTimestamp(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return Number.isFinite(Date.parse(trimmed));
+}
+
+function deriveAgentAuthorizationStatus(
   connections: readonly ConnectedAppEvidence[] | undefined,
   workspaceId?: string,
-): AuthorizedAgentsState {
-  const result: AuthorizedAgentsState = { codex: false, claude: false };
-  if (!Array.isArray(connections)) return result;
+): AgentAuthorizationStatus {
+  const authorized: AuthorizedAgentsState = { codex: false, claude: false };
+  const tokenIssued: AuthorizedAgentsState = { codex: false, claude: false };
+  if (!Array.isArray(connections)) {
+    return { authorized, tokenWithoutCall: { ...EMPTY_AUTHORIZED_AGENTS } };
+  }
   for (const item of connections) {
     if (!item || typeof item !== 'object') continue;
-    if (workspaceId && item.workspaceId && item.workspaceId !== workspaceId) continue;
-    const hasActiveEvidence =
-      (typeof item.activeTokenCount === 'number' && item.activeTokenCount > 0) ||
-      (typeof item.lastUsedAt === 'string' && item.lastUsedAt.trim().length > 0);
-    if (!hasActiveEvidence) continue;
+    if (workspaceId && item.workspaceId !== workspaceId) continue;
+    const hasActiveToken = typeof item.activeTokenCount === 'number' && item.activeTokenCount > 0;
+    if (!hasActiveToken) continue;
+
+    const hasUsedTool = isValidUsageTimestamp(item.lastUsedAt);
     const name = typeof item.clientName === 'string' ? item.clientName.toLowerCase() : '';
-    if (name.includes('codex')) result.codex = true;
-    if (name.includes('claude')) result.claude = true;
+    if (name.includes('codex')) {
+      if (hasUsedTool) authorized.codex = true;
+      else tokenIssued.codex = true;
+    }
+    if (name.includes('claude')) {
+      if (hasUsedTool) authorized.claude = true;
+      else tokenIssued.claude = true;
+    }
   }
-  return result;
+  return {
+    authorized,
+    tokenWithoutCall: {
+      codex: tokenIssued.codex && !authorized.codex,
+      claude: tokenIssued.claude && !authorized.claude,
+    },
+  };
 }
 
 export function McpConnectionPage({
@@ -132,13 +162,13 @@ export function McpConnectionPage({
 
   const isHttp = isStreamableHttpTransport(info?.transport);
   const workspaceId = info?.workspaceId;
-  const [authorizedAgents, setAuthorizedAgents] = useState<AuthorizedAgentsState>(EMPTY_AUTHORIZED_AGENTS);
+  const [agentAuthStatus, setAgentAuthStatus] = useState<AgentAuthorizationStatus>(EMPTY_AGENT_AUTH_STATUS);
   const authCheckController = useRef<AbortController | null>(null);
 
   const refreshAuthorizedAgents = useCallback(async () => {
     authCheckController.current?.abort();
     if (!isHttp) {
-      setAuthorizedAgents(EMPTY_AUTHORIZED_AGENTS);
+      setAgentAuthStatus(EMPTY_AGENT_AUTH_STATUS);
       return;
     }
     const controller = new AbortController();
@@ -150,17 +180,17 @@ export function McpConnectionPage({
       });
       if (controller.signal.aborted) return;
       if (!response.ok) {
-        setAuthorizedAgents(EMPTY_AUTHORIZED_AGENTS);
+        setAgentAuthStatus(EMPTY_AGENT_AUTH_STATUS);
         return;
       }
       const data = (await response.json().catch(() => null)) as {
         connections?: ConnectedAppEvidence[];
       } | null;
       if (controller.signal.aborted) return;
-      setAuthorizedAgents(deriveAuthorizedAgents(data?.connections, workspaceId));
+      setAgentAuthStatus(deriveAgentAuthorizationStatus(data?.connections, workspaceId));
     } catch {
       if (!controller.signal.aborted) {
-        setAuthorizedAgents(EMPTY_AUTHORIZED_AGENTS);
+        setAgentAuthStatus(EMPTY_AGENT_AUTH_STATUS);
       }
     } finally {
       if (authCheckController.current === controller) {
@@ -259,7 +289,8 @@ export function McpConnectionPage({
         {info && isStreamableHttpTransport(info.transport) && (client.host === 'codex' || client.host === 'claude') && (
           <DesktopConnectPanel
             mcpUrl={info.transport.url}
-            hasAuthorizedConnection={authorizedAgents}
+            hasAuthorizedConnection={agentAuthStatus.authorized}
+            hasTokenWithoutCall={agentAuthStatus.tokenWithoutCall}
             onCheckAuthorization={refreshAuthorizedAgents}
           />
         )}

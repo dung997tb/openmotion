@@ -250,7 +250,7 @@ export function validateSignedConfigPayloadBounds(
         message: `First-party command references unknown component: ${cmd.componentId}`,
       });
     }
-    const argvCheck = validateFirstPartyCommandArgvBounds(cmd.componentId, cmd.argv);
+    const argvCheck = validateFirstPartyCommandArgvBounds(cmd.componentId, cmd.argv, urlOpts);
     if (!argvCheck.ok) {
       issues.push({
         path: `firstPartyCommands.${key}.argv`,

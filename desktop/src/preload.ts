@@ -24,6 +24,8 @@ function isTopLevelFrame(): boolean {
 
 function isAllowedBridgeLocation(): boolean {
   if (typeof window === 'undefined' || !window.location) return false;
+  const pathname = (window.location.pathname || '/').toLowerCase();
+  if (pathname === '/auth' || pathname.startsWith('/auth/')) return false;
   const protocol = window.location.protocol;
   if (protocol === 'https:') return true;
   if (protocol === 'http:') {
@@ -31,6 +33,22 @@ function isAllowedBridgeLocation(): boolean {
     return hostname === '127.0.0.1' || hostname === 'localhost';
   }
   return false;
+}
+
+function isAllowedLocalPageLocation(): boolean {
+  if (typeof window === 'undefined' || !window.location) return false;
+  if (window.location.protocol !== 'file:') return false;
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(window.location.pathname || '');
+  } catch {
+    return false;
+  }
+  const normalized = decodedPath.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  if (segments.some(segment => segment === '..')) return false;
+  const basename = segments[segments.length - 1] ?? '';
+  return basename === 'retry.html' || basename === 'splash.html';
 }
 
 if (isTopLevelFrame() && isAllowedBridgeLocation()) {
@@ -79,4 +97,11 @@ if (isTopLevelFrame() && isAllowedBridgeLocation()) {
       ipcRenderer.send(HOST_IPC_CHANNELS.DOM_FULLSCREEN, Boolean(document.fullscreenElement));
     });
   }
+} else if (isTopLevelFrame() && isAllowedLocalPageLocation()) {
+  const localPageBridge = Object.freeze({
+    retryStartup: () => ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_RETRY) as Promise<HostInvokeResult>,
+    exportDiagnostics: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_EXPORT_DIAGNOSTICS) as Promise<HostInvokeResult>,
+  });
+  contextBridge.exposeInMainWorld('__OPENMOTION_LOCAL_PAGE__', localPageBridge);
 }

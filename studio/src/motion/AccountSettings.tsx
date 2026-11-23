@@ -284,7 +284,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
       const targetUrl = subscriptionUrl(consoleUrl, source);
       if (event.detail === 0 && event.button === 0) event.currentTarget.href = targetUrl;
       tracking.reportSettingsClick('account', element);
-      if (isDesktopApp() && event.button === 0) {
+      if (isDesktopApp() && (event.button === 0 || event.button === 1)) {
         event.preventDefault();
         void openBillingAndRefreshOnFocus(targetUrl, () => {
           void state.refresh(true);
@@ -305,7 +305,11 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
     tracking.reportSettingsClick('account', 'sign_in');
     const loginUrl = buildLoginUrl();
     if (isDesktopApp()) {
-      void startDesktopBrowserLogin({ loginUrl });
+      void startDesktopBrowserLogin({ loginUrl }).then(result => {
+        if (!result.ok) {
+          toast.showToast(result.error || t('Could not start sign-in'), 'error', 'feedback');
+        }
+      });
       return;
     }
     window.location.assign(loginUrl);
@@ -716,6 +720,18 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
                   {t('Manage subscription')}<RemixIcon name="external-link-line" size={15} />
                 </a>
               </div>
+              {isDesktopApp() && (
+                <p className="om-muted" data-desktop-billing-hint="true">
+                  {account.user?.email
+                    ? t(
+                        'Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.',
+                        { account: account.user.email },
+                      )
+                    : t(
+                        'Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.',
+                      )}
+                </p>
+              )}
             </section>
           )}
 
@@ -764,9 +780,23 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
               </div>
             )}
             {signedIn && !upgradeGuide && (
-              <a className="om-button" {...subscriptionLink('openmotion_manage_subscription', 'manage_subscription')}>
-                {t('Manage subscription')}<RemixIcon name="external-link-line" size={15} />
-              </a>
+              <>
+                <a className="om-button" {...subscriptionLink('openmotion_manage_subscription', 'manage_subscription')}>
+                  {t('Manage subscription')}<RemixIcon name="external-link-line" size={15} />
+                </a>
+                {isDesktopApp() && (
+                  <p className="om-muted" data-desktop-billing-hint="true">
+                    {account.user?.email
+                      ? t(
+                          'Opens in your browser. Verify you are signed in as {account}, then click Refresh when you return.',
+                          { account: account.user.email },
+                        )
+                      : t(
+                          'Opens in your browser. Verify you are signed into the same account there, then click Refresh when you return.',
+                        )}
+                  </p>
+                )}
+              </>
             )}
           </section>
 

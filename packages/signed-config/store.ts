@@ -120,6 +120,8 @@ export type SignedConfigStatus = {
   lastUpdatedAt: string | null;
   lastError: SignedConfigLastError | null;
   stateFilePath: string;
+  minShellVersion: string | null;
+  featureMinShellVersions: Record<string, string>;
 };
 
 type PersistedSignedConfigState = {
@@ -205,6 +207,13 @@ export class SignedConfigManager {
     const notAfterMs = cert ? Date.parse(cert.notAfter) : NaN;
     const certificateExpired = cert !== undefined && Number.isFinite(notAfterMs) && this.now() > notAfterMs;
 
+    const featureMinShellVersions: Record<string, string> = {};
+    for (const [featureId, def] of Object.entries(this.activePayload.features ?? {})) {
+      if (typeof def?.minShellVersion === 'string' && def.minShellVersion.trim()) {
+        featureMinShellVersions[featureId] = def.minShellVersion.trim();
+      }
+    }
+
     return {
       source: this.source,
       channel: this.channel,
@@ -221,6 +230,11 @@ export class SignedConfigManager {
       lastUpdatedAt: this.lastUpdatedAt,
       lastError: this.lastError ? structuredClone(this.lastError) : null,
       stateFilePath: this.stateFilePath,
+      minShellVersion:
+        typeof this.activePayload.minShellVersion === 'string' && this.activePayload.minShellVersion.trim()
+          ? this.activePayload.minShellVersion.trim()
+          : null,
+      featureMinShellVersions,
     };
   }
 

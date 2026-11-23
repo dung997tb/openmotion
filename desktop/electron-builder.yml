@@ -50,11 +50,15 @@ win:
         - x64
 
 nsis:
+  artifactName: OpenDesign-Setup-${version}-${os}-${arch}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: OpenDesign
+
+portable:
+  artifactName: OpenDesign-Portable-${version}-${os}-${arch}.${ext}
 
 publish:
   provider: generic

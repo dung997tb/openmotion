@@ -17,13 +17,18 @@
  */
 
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import {
+  BUILTIN_PUBLISHERS,
   BUILTIN_TEMPLATE_MAP,
+  canonicalizeUrlForComparison,
   DEFAULT_MCP_SERVER_NAME,
+  DEFAULT_STUDIO_URLS,
   isBuiltinPublisherId,
   validateFirstPartyCommandArgvBounds,
   validateTypedPlaceholderValue,
+  type BuiltinPublisherEntry,
   type TemplatePlaceholderType,
 } from '../../shared/desktop-builtin-rules.ts';
 import {
@@ -33,12 +38,19 @@ import {
   type AtomExecResult,
   type ConfirmationFact,
   type HostInvokeResult,
+  type HostPlatform,
   type HostReleaseChannel,
 } from '../../shared/desktop-contract.ts';
+import { MURMUR_COMPONENT_ID } from '../../shared/engine-command-contract.ts';
 import type { SignedConfigPayload } from '../../shared/signed-config.ts';
 import { readMcpEntryFromFile, resolveSafeHomePath } from './config.ts';
 import { assertFeatureAllowsResource, type FeatureConfirmationGate } from './confirmation.ts';
-import type { ComponentInstallRegistry } from './install-component.ts';
+import {
+  defaultCodeSignatureVerifier,
+  getUnifiedMurmurBinaryPath,
+  type CodeSignatureVerifier,
+  type ComponentInstallRegistry,
+} from './install-component.ts';
 import type { PathResolver } from './path-resolver.ts';
 import type { SerialMutationQueue } from './serial-queue.ts';
 
@@ -74,8 +86,12 @@ export type ExecPreviewResult = {
 
 export type ExecAtomDeps = {
   homeDir?: string;
+  platform?: HostPlatform;
+  arch?: string;
   channel?: HostReleaseChannel;
   allowLocalDevLoopback?: boolean;
+  expectedMcpUrl?: string;
+  getExpectedMcpUrl?: () => string | undefined;
   getSignedConfig: () => SignedConfigPayload;
   pathResolver: PathResolver;
   componentRegistry: ComponentInstallRegistry;
@@ -83,6 +99,8 @@ export type ExecAtomDeps = {
   mutationQueue: SerialMutationQueue;
   commandRunner?: CommandRunner;
   timeoutMs?: number;
+  publishers?: readonly BuiltinPublisherEntry[];
+  codeSignatureVerifier?: CodeSignatureVerifier;
   /** Optional publisher allowlist validator override (defaults to `isBuiltinPublisherId`). */
   isAllowedPublisherId?: (publisherId: string) => boolean;
 };
@@ -92,6 +110,7 @@ type ResolvedTemplate = {
   templateId: string;
   program: string;
   componentId?: string;
+  publisherId?: string;
   mutating: boolean;
   stdinSecret: boolean;
   argvTemplate: readonly string[];
@@ -196,10 +215,23 @@ function resolveBuiltinMcpConfigTarget(
   };
 }
 
+function normalizePlatform(raw: NodeJS.Platform | HostPlatform): HostPlatform {
+  if (raw === 'darwin' || raw === 'win32' || raw === 'linux') return raw;
+  return 'linux';
+}
+
+function normalizeUrlForComparison(url: string): string {
+  return canonicalizeUrlForComparison(url);
+}
+
 export class ExecAtom {
   private readonly homeDir: string;
+  private readonly platform: HostPlatform;
+  private readonly arch: string;
   private readonly channel: HostReleaseChannel;
   private readonly allowLocalDevLoopback: boolean;
+  private readonly expectedMcpUrl?: string;
+  private readonly getExpectedMcpUrl?: () => string | undefined;
   private readonly getSignedConfig: () => SignedConfigPayload;
   private readonly pathResolver: PathResolver;
   private readonly componentRegistry: ComponentInstallRegistry;
@@ -207,12 +239,18 @@ export class ExecAtom {
   private readonly mutationQueue: SerialMutationQueue;
   private readonly commandRunner: CommandRunner;
   private readonly timeoutMs: number;
+  private readonly publishers: readonly BuiltinPublisherEntry[];
+  private readonly codeSignatureVerifier: CodeSignatureVerifier;
   private readonly isAllowedPublisherId: (publisherId: string) => boolean;
 
   constructor(deps: ExecAtomDeps) {
     this.homeDir = deps.homeDir ?? os.homedir();
+    this.platform = normalizePlatform(deps.platform ?? process.platform);
+    this.arch = deps.arch ?? process.arch;
     this.channel = deps.channel ?? 'stable';
     this.allowLocalDevLoopback = deps.allowLocalDevLoopback ?? false;
+    this.expectedMcpUrl = deps.expectedMcpUrl;
+    this.getExpectedMcpUrl = deps.getExpectedMcpUrl;
     this.getSignedConfig = deps.getSignedConfig;
     this.pathResolver = deps.pathResolver;
     this.componentRegistry = deps.componentRegistry;
@@ -220,7 +258,23 @@ export class ExecAtom {
     this.mutationQueue = deps.mutationQueue;
     this.commandRunner = deps.commandRunner ?? defaultCommandRunner;
     this.timeoutMs = deps.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
+    this.publishers = deps.publishers ?? BUILTIN_PUBLISHERS;
+    this.codeSignatureVerifier = deps.codeSignatureVerifier ?? defaultCodeSignatureVerifier;
     this.isAllowedPublisherId = deps.isAllowedPublisherId ?? isBuiltinPublisherId;
+  }
+
+  private resolveAuthoritativeMcpUrl(signedConfig: SignedConfigPayload): string {
+    const candidate =
+      this.getExpectedMcpUrl?.()?.trim() ||
+      this.expectedMcpUrl?.trim() ||
+      (signedConfig.studioUrl?.trim() ? `${signedConfig.studioUrl.trim().replace(/\/+$/, '')}/mcp` : undefined) ||
+      `${DEFAULT_STUDIO_URLS[this.channel]}/mcp`;
+    return normalizeUrlForComparison(candidate);
+  }
+
+  private resolveStandaloneMurmurBinary(): string | null {
+    const candidate = getUnifiedMurmurBinaryPath(this.homeDir, this.platform);
+    return existsSync(candidate) ? candidate : null;
   }
 
   /**
@@ -255,6 +309,29 @@ export class ExecAtom {
         id: template.templateId,
       });
       if (!authCheck.ok) return authCheck;
+
+      if (
+        template.templateId === 'claude.mcp.add_remote' &&
+        conflictPolicy === 'replace' &&
+        this.hasExistingMcpEntry(template.templateId, validatedArgs, signedConfig)
+      ) {
+        const removeAuth = assertFeatureAllowsResource(params.featureId, signedConfig, {
+          kind: 'commandTemplate',
+          id: 'claude.mcp.remove',
+        });
+        if (!removeAuth.ok) return removeAuth;
+      }
+    } else {
+      const feature = params.featureId ? signedConfig.features?.[params.featureId] : undefined;
+      if (params.featureId) {
+        const authCheck = assertFeatureAllowsResource(params.featureId, signedConfig, {
+          kind: 'commandTemplate',
+          id: template.templateId,
+        });
+        if (!authCheck.ok) return authCheck;
+      }
+      const versionCheck = this.confirmationGate.assertMinShellVersion(signedConfig, feature);
+      if (!versionCheck.ok) return versionCheck;
     }
 
     // Pre-check MCP conflicts before prompting the user.
@@ -274,6 +351,35 @@ export class ExecAtom {
       // Re-check inside serial queue to prevent TOCTOU races.
       const queueConflict = this.checkMcpConflict(template.templateId, validatedArgs, conflictPolicy, signedConfig);
       if (!queueConflict.ok) return queueConflict;
+
+      // Claude Code >= 2.1.330 rejects `claude mcp add` when the server name already exists.
+      // When conflictPolicy === 'replace' and an existing entry is present, remove it first.
+      if (
+        template.templateId === 'claude.mcp.add_remote' &&
+        conflictPolicy === 'replace' &&
+        this.hasExistingMcpEntry(template.templateId, validatedArgs, signedConfig)
+      ) {
+        const serverName = validatedArgs.serverName ?? DEFAULT_MCP_SERVER_NAME;
+        const removeTemplate = BUILTIN_TEMPLATE_MAP.get('claude.mcp.remove');
+        if (removeTemplate) {
+          const removeResult = await this.executePrepared(
+            {
+              source: 'builtin-third-party',
+              templateId: removeTemplate.templateId,
+              program: removeTemplate.program,
+              mutating: true,
+              stdinSecret: false,
+              argvTemplate: removeTemplate.argv,
+              paramSchemas: removeTemplate.params,
+            },
+            ['mcp', 'remove', '--scope', 'user', serverName],
+            undefined,
+          );
+          if (!removeResult.ok) {
+            return removeResult;
+          }
+        }
+      }
 
       return this.executePrepared(template, argv, undefined);
     };
@@ -402,7 +508,47 @@ export class ExecAtom {
       allowLocalDevLoopback: this.allowLocalDevLoopback,
     };
 
+    const isRemoteMcpAddTemplate =
+      template.templateId === 'codex.mcp.add_remote' || template.templateId === 'claude.mcp.add_remote';
+
     for (const [paramName, schema] of Object.entries(template.paramSchemas)) {
+      if (isRemoteMcpAddTemplate && paramName === 'mcpUrl') {
+        const authoritativeUrl = this.resolveAuthoritativeMcpUrl(signedConfig);
+        const authoritativeCheck = validateTypedPlaceholderValue('url_in_domain_scope', authoritativeUrl, domainOpts);
+        if (!authoritativeCheck.ok) {
+          return hostErr('POLICY_DENIED', authoritativeCheck.reason, {
+            templateId: template.templateId,
+            arg: paramName,
+            type: schema.type,
+          });
+        }
+        const provided = rawArgs[paramName];
+        if (provided !== undefined) {
+          const providedCheck = validateTypedPlaceholderValue(schema.type, provided, domainOpts);
+          if (!providedCheck.ok) {
+            return hostErr('POLICY_DENIED', providedCheck.reason, {
+              templateId: template.templateId,
+              arg: paramName,
+              type: schema.type,
+            });
+          }
+          if (normalizeUrlForComparison(providedCheck.value) !== normalizeUrlForComparison(authoritativeCheck.value)) {
+            return hostErr(
+              'ORIGIN_DENIED',
+              `MCP URL must match the shell-configured endpoint (${authoritativeCheck.value})`,
+              {
+                templateId: template.templateId,
+                arg: paramName,
+                requestedUrl: providedCheck.value,
+                expectedMcpUrl: authoritativeCheck.value,
+              },
+            );
+          }
+        }
+        validatedArgs[paramName] = authoritativeCheck.value;
+        continue;
+      }
+
       const provided = rawArgs[paramName];
       const rawValue = provided !== undefined ? provided : schema.defaultValue;
       if (rawValue === undefined) {
@@ -450,7 +596,7 @@ export class ExecAtom {
     }
 
     if (template.source === 'signed-first-party' && template.componentId) {
-      const renderedBounds = validateFirstPartyCommandArgvBounds(template.componentId, renderedArgv);
+      const renderedBounds = validateFirstPartyCommandArgvBounds(template.componentId, renderedArgv, domainOpts);
       if (!renderedBounds.ok) {
         return hostErr('POLICY_DENIED', renderedBounds.reason, {
           templateId: template.templateId,
@@ -459,7 +605,7 @@ export class ExecAtom {
       }
     }
 
-    const facts = this.buildFacts(template, renderedArgv, validatedArgs, signedConfig);
+    const facts = this.buildFacts(template, renderedArgv, validatedArgs, signedConfig, conflictPolicy);
     return hostOk({
       signedConfig,
       template,
@@ -501,7 +647,12 @@ export class ExecAtom {
     }
 
     const installed = this.componentRegistry.getInstalled(firstParty.componentId);
-    if (!installed) {
+    const standaloneMurmur =
+      !installed && firstParty.componentId === MURMUR_COMPONENT_ID
+        ? this.resolveStandaloneMurmurBinary()
+        : null;
+
+    if (!installed && !standaloneMurmur) {
       return hostErr(
         'NOT_FOUND',
         `First-party component "${firstParty.componentId}" must be installed via atom.installComponent before running "${templateId}"`,
@@ -509,15 +660,24 @@ export class ExecAtom {
       );
     }
 
-    if (!this.isAllowedPublisherId(installed.publisherId)) {
+    const platformKey = `${this.platform}-${this.arch}` as keyof NonNullable<typeof componentManifest.platforms>;
+    const manifestPublisherId =
+      installed?.publisherId ??
+      componentManifest.platforms?.[platformKey]?.publisherId ??
+      Object.values(componentManifest.platforms ?? {})[0]?.publisherId;
+
+    if (!manifestPublisherId || !this.isAllowedPublisherId(manifestPublisherId)) {
       return hostErr(
         'POLICY_DENIED',
-        `Installed component "${firstParty.componentId}" publisher "${installed.publisherId}" is not allowlisted`,
-        { templateId, componentId: firstParty.componentId, publisherId: installed.publisherId },
+        `Component "${firstParty.componentId}" publisher "${String(manifestPublisherId)}" is not allowlisted`,
+        { templateId, componentId: firstParty.componentId, publisherId: manifestPublisherId },
       );
     }
 
-    const argvBounds = validateFirstPartyCommandArgvBounds(firstParty.componentId, firstParty.argv);
+    const argvBounds = validateFirstPartyCommandArgvBounds(firstParty.componentId, firstParty.argv, {
+      channel: this.channel,
+      allowLocalDevLoopback: this.allowLocalDevLoopback,
+    });
     if (!argvBounds.ok) {
       return hostErr('POLICY_DENIED', argvBounds.reason, {
         templateId,
@@ -530,11 +690,29 @@ export class ExecAtom {
       templateId: firstParty.templateId,
       program: firstParty.componentId,
       componentId: firstParty.componentId,
+      publisherId: manifestPublisherId,
       mutating: firstParty.mutating,
       stdinSecret: Boolean(firstParty.stdinSecret),
       argvTemplate: firstParty.argv,
       paramSchemas: firstParty.params ?? {},
     });
+  }
+
+  private hasExistingMcpEntry(
+    templateId: string,
+    validatedArgs: Record<string, string>,
+    signedConfig: SignedConfigPayload,
+  ): boolean {
+    const target = resolveBuiltinMcpConfigTarget(templateId, signedConfig, this.homeDir);
+    if (!target) return false;
+    const serverName = validatedArgs.serverName ?? DEFAULT_MCP_SERVER_NAME;
+    const readResult = readMcpEntryFromFile({
+      filePath: target.filePath,
+      fileFormat: target.fileFormat,
+      sectionPath: target.sectionPath,
+      serverName,
+    });
+    return Boolean(readResult.ok && readResult.exists && readResult.entry);
   }
 
   private checkMcpConflict(
@@ -563,19 +741,22 @@ export class ExecAtom {
       sectionPath: target.sectionPath,
       serverName,
     });
-    if (!readResult.ok || !readResult.exists || !readResult.entry?.url) {
+    if (!readResult.ok || !readResult.exists || !readResult.entry) {
       return hostOk(true);
     }
 
-    if (readResult.entry.url !== requestedUrl) {
+    const existingUrl = readResult.entry.url;
+    if (!existingUrl || normalizeUrlForComparison(existingUrl) !== normalizeUrlForComparison(requestedUrl)) {
       return hostErr(
         'CONFLICT',
-        `MCP server "${serverName}" is already configured with a different URL (${readResult.entry.url})`,
+        existingUrl
+          ? `MCP server "${serverName}" is already configured with a different URL (${existingUrl})`
+          : `MCP server "${serverName}" is already configured as a local stdio entry`,
         {
           templateId,
           serverName,
           configPath: target.filePath,
-          existingUrl: readResult.entry.url,
+          ...(existingUrl ? { existingUrl } : {}),
           requestedUrl,
         },
       );
@@ -589,14 +770,28 @@ export class ExecAtom {
     renderedArgv: readonly string[],
     validatedArgs: Record<string, string>,
     signedConfig: SignedConfigPayload,
+    conflictPolicy: 'abort' | 'replace' = 'abort',
   ): ConfirmationFact[] {
-    const facts: ConfirmationFact[] = [
-      {
+    const facts: ConfirmationFact[] = [];
+
+    if (
+      template.templateId === 'claude.mcp.add_remote' &&
+      conflictPolicy === 'replace' &&
+      this.hasExistingMcpEntry(template.templateId, validatedArgs, signedConfig)
+    ) {
+      const serverName = validatedArgs.serverName ?? DEFAULT_MCP_SERVER_NAME;
+      facts.push({
         kind: 'exec_program',
-        label: `Run ${template.program} (${template.templateId})`,
-        value: `${template.program} ${renderedArgv.join(' ')}`.trim(),
-      },
-    ];
+        label: 'Remove existing claude MCP entry (claude.mcp.remove)',
+        value: `claude mcp remove --scope user ${serverName}`,
+      });
+    }
+
+    facts.push({
+      kind: 'exec_program',
+      label: `Run ${template.program} (${template.templateId})`,
+      value: `${template.program} ${renderedArgv.join(' ')}`.trim(),
+    });
 
     for (const [paramName, schema] of Object.entries(template.paramSchemas)) {
       if (schema.type === 'url_in_domain_scope' && validatedArgs[paramName]) {
@@ -629,13 +824,46 @@ export class ExecAtom {
 
     if (template.source === 'signed-first-party' && template.componentId) {
       const installed = this.componentRegistry.getInstalled(template.componentId);
-      if (!installed) {
+      const isStandalone = !installed && template.componentId === MURMUR_COMPONENT_ID;
+      if (installed) {
+        binaryPath = installed.executablePath;
+      } else if (isStandalone) {
+        binaryPath = this.resolveStandaloneMurmurBinary();
+      }
+      if (!binaryPath) {
         return hostErr('NOT_FOUND', `Installed component "${template.componentId}" is no longer available`, {
           templateId: template.templateId,
           componentId: template.componentId,
         });
       }
-      binaryPath = installed.executablePath;
+
+      // Security invariant: Always verify publisher code signature before executing
+      // standalone Murmur or piping runtime secrets via stdin (Murmur may be updated
+      // out-of-band in `~/.murmurant/bin/murmur`).
+      if (isStandalone || stdinSecret !== undefined || template.componentId === MURMUR_COMPONENT_ID) {
+        const publisher = this.publishers.find(entry => entry.id === template.publisherId);
+        if (!publisher || !this.isAllowedPublisherId(publisher.id)) {
+          return hostErr(
+            'POLICY_DENIED',
+            `Component "${template.componentId}" publisher "${String(template.publisherId)}" is not allowlisted`,
+            { templateId: template.templateId, componentId: template.componentId },
+          );
+        }
+        const sigResult = await this.codeSignatureVerifier(binaryPath, publisher.appleTeamId, this.platform);
+        if (!sigResult.ok) {
+          return hostErr(
+            'VERIFICATION_FAILED',
+            `First-party component "${template.componentId}" failed signature verification: ${sigResult.reason}`,
+            {
+              templateId: template.templateId,
+              componentId: template.componentId,
+              publisherId: publisher.id,
+              expectedTeamId: publisher.appleTeamId,
+              actualTeamId: sigResult.actualTeamId,
+            },
+          );
+        }
+      }
     } else {
       binaryPath = await this.pathResolver.resolveBinary(template.program);
       if (!binaryPath) {
@@ -650,6 +878,9 @@ export class ExecAtom {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       PATH: mergedPath,
+      ...(template.componentId === MURMUR_COMPONENT_ID && !process.env.MURMUR_MENUBAR
+        ? { MURMUR_MENUBAR: 'off' }
+        : {}),
     };
 
     const startTime = Date.now();

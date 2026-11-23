@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import {
@@ -17,14 +17,20 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { Tooltip } from '../components/ui/Tooltip';
 import { ProviderAvatar } from './settingsPrimitives';
 import {
+  compareSemver,
   invokeHostAtom,
+  isShellVersionSupported,
   resolveCapabilityMethod,
+  useDesktopUpdateState,
   useHostCapabilities,
 } from '../utils/platformHost';
 import {
+  bootstrapStudioPairingFromHash,
   connectLocalConnectBridge,
   disconnectLocalConnectBridge,
+  getLocalConnectAutoPairState,
   getLocalConnectStatus,
+  subscribeLocalConnectBridge,
 } from '../utils/localConnectBridge';
 
 export type DesktopConnectAgentId = 'codex' | 'claude';
@@ -42,11 +48,19 @@ export type DesktopConnectPanelProps = {
   /** Optional MCP server identifier. Defaults to `openmotion`. */
   serverName?: string;
   /**
-   * External evidence confirming that an Agent has completed OAuth authorization
-   * or an authenticated MCP tool call. "Authorized & ready" is only displayed when
-   * this evidence is true; local config writes alone only show "Config written".
+   * External evidence confirming that an Agent has successfully completed an
+   * authenticated MCP tool call in this workspace. "Authorized & ready" is only
+   * displayed when this evidence is true; local config writes or unused OAuth
+   * tokens alone stay in "Config written".
    */
   hasAuthorizedConnection?: boolean | Partial<Record<DesktopConnectAgentId, boolean>>;
+  /**
+   * True when an Agent has an active OAuth token in this workspace but has not
+   * yet completed its first read-only MCP tool call.
+   */
+  hasTokenWithoutCall?: boolean | Partial<Record<DesktopConnectAgentId, boolean>>;
+  /** Optional minimum desktop shell version required for one-click setup. */
+  minShellVersion?: string;
   /** Optional callback fired after an Agent MCP configuration is written. */
   onConfigured?: (agentId: DesktopConnectAgentId) => void;
   /** Optional callback allowing the user to re-check cloud authorization status. */
@@ -65,8 +79,35 @@ type AgentMeta = {
 
 type AgentConflictState = {
   existingUrl?: string;
+  requestedUrl?: string;
   message: string;
 };
+
+type ShellUpgradeRequiredState = {
+  requiredVersion: string;
+  currentVersion?: string;
+};
+
+function extractShellUpgradeRequirement(
+  code: string,
+  details?: Record<string, unknown>,
+  fallbackCurrentVersion?: string,
+): ShellUpgradeRequiredState | null {
+  if (code !== 'UNSUPPORTED' || !details) return null;
+  if (details.reason !== 'SHELL_VERSION_TOO_OLD') return null;
+  const required =
+    typeof details.requiredShellVersion === 'string' && details.requiredShellVersion.trim()
+      ? details.requiredShellVersion.trim()
+      : typeof details.minShellVersion === 'string' && details.minShellVersion.trim()
+        ? details.minShellVersion.trim()
+        : null;
+  if (!required) return null;
+  const current =
+    typeof details.currentShellVersion === 'string' && details.currentShellVersion.trim()
+      ? details.currentShellVersion.trim()
+      : fallbackCurrentVersion;
+  return { requiredVersion: required, currentVersion: current };
+}
 
 const SUPPORTED_AGENTS: readonly AgentMeta[] = [
   {
@@ -131,6 +172,8 @@ export function DesktopConnectPanel({
   mcpUrl,
   serverName = DEFAULT_MCP_SERVER_NAME,
   hasAuthorizedConnection = false,
+  hasTokenWithoutCall = false,
+  minShellVersion,
   onConfigured,
   onCheckAuthorization,
   compact = false,
@@ -138,6 +181,7 @@ export function DesktopConnectPanel({
   const { t } = useI18n();
   const toast = useToast();
   const host = useHostCapabilities();
+  const updater = useDesktopUpdateState();
 
   const resolvedMcpUrl = useMemo(() => (mcpUrl?.trim() || defaultMcpUrl()), [mcpUrl]);
   const resolvedServerName = serverName.trim() || DEFAULT_MCP_SERVER_NAME;
@@ -150,15 +194,106 @@ export function DesktopConnectPanel({
   const [writtenAgents, setWrittenAgents] = useState<Partial<Record<DesktopConnectAgentId, boolean>>>({});
   const [conflicts, setConflicts] = useState<Partial<Record<DesktopConnectAgentId, AgentConflictState>>>({});
   const [keptConflicts, setKeptConflicts] = useState<Partial<Record<DesktopConnectAgentId, boolean>>>({});
+  const [runtimeUpgradeRequired, setRuntimeUpgradeRequired] = useState<ShellUpgradeRequiredState | null>(null);
+  const [signedConfigMinShellVersion, setSignedConfigMinShellVersion] = useState<string | null>(null);
 
   // Web Connect Script pairing state (token stays strictly in React state / memory, never localStorage).
   const [portInput, setPortInput] = useState(String(CONNECT_SCRIPT_DEFAULT_PORT));
   const [tokenInput, setTokenInput] = useState('');
-  const [pairing, setPairing] = useState(false);
+  const [manualPairing, setManualPairing] = useState(false);
+  const autoPairState = useSyncExternalStore(
+    subscribeLocalConnectBridge,
+    getLocalConnectAutoPairState,
+    getLocalConnectAutoPairState,
+  );
+  const pairing = manualPairing || autoPairState.pairing;
+  const lastAutoPairOutcomeRef = useRef<{ succeeded: boolean; error: string | null }>({
+    succeeded: false,
+    error: null,
+  });
 
   const canDetect = Boolean(host.bridge && host.has(HOST_CAPABILITIES.ATOM_DETECT, '1.0.0'));
   const canExec = Boolean(host.bridge && host.has(HOST_CAPABILITIES.ATOM_EXEC, '1.0.0'));
+  const canCheckUpdates = Boolean(host.hostKind === 'desktop' && host.has(HOST_CAPABILITIES.UPDATER, '1.0.0'));
+  const canReadSignedConfig = Boolean(host.bridge && host.has(HOST_CAPABILITIES.SIGNED_CONFIG, '1.0.0'));
   const localConnectStatus = host.hostKind === 'connect-script' ? getLocalConnectStatus() : null;
+
+  const effectiveMinShellVersion = useMemo(() => {
+    const candidates = [minShellVersion?.trim(), signedConfigMinShellVersion?.trim()].filter(
+      (value): value is string => Boolean(value),
+    );
+    if (candidates.length === 0) return undefined;
+    return candidates.reduce((highest, current) =>
+      compareSemver(current, highest) > 0 ? current : highest,
+    );
+  }, [minShellVersion, signedConfigMinShellVersion]);
+
+  const shellUpgradeRequired = useMemo<ShellUpgradeRequiredState | null>(() => {
+    if (runtimeUpgradeRequired) return runtimeUpgradeRequired;
+    if (
+      host.bridge &&
+      effectiveMinShellVersion &&
+      host.info?.shellVersion &&
+      !isShellVersionSupported(host.info.shellVersion, effectiveMinShellVersion)
+    ) {
+      return {
+        requiredVersion: effectiveMinShellVersion,
+        currentVersion: host.info.shellVersion,
+      };
+    }
+    return null;
+  }, [runtimeUpgradeRequired, host.bridge, host.info?.shellVersion, effectiveMinShellVersion]);
+
+  const actionsDisabledByVersion = Boolean(shellUpgradeRequired);
+
+  // StrictMode-safe, module-singleton hash pairing bootstrap (also invoked at app startup in main.tsx).
+  useEffect(() => {
+    void bootstrapStudioPairingFromHash();
+  }, []);
+
+  useEffect(() => {
+    const prev = lastAutoPairOutcomeRef.current;
+    if (autoPairState.succeeded && !prev.succeeded) {
+      toast.showToast(t('Connected to local helper.'), 'info', 'feedback');
+    } else if (autoPairState.error && autoPairState.error !== prev.error) {
+      toast.showToast(autoPairState.error, 'error', 'feedback');
+    }
+    lastAutoPairOutcomeRef.current = {
+      succeeded: autoPairState.succeeded,
+      error: autoPairState.error,
+    };
+  }, [autoPairState.succeeded, autoPairState.error, t, toast.showToast]);
+
+  // Proactively query host signedConfig status for minShellVersion requirements.
+  useEffect(() => {
+    if (!host.bridge || !canReadSignedConfig) {
+      setSignedConfigMinShellVersion(null);
+      return;
+    }
+    let active = true;
+    void host.bridge
+      .invoke<{
+        minShellVersion?: string | null;
+        featureMinShellVersions?: Record<string, string>;
+      }>(HOST_CAPABILITIES.SIGNED_CONFIG, 'getStatus')
+      .then(result => {
+        if (!active || !result.ok || !result.data) return;
+        const candidates = [
+          result.data.minShellVersion ?? undefined,
+          result.data.featureMinShellVersions?.mcp_connect,
+        ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+        if (candidates.length === 0) {
+          setSignedConfigMinShellVersion(null);
+          return;
+        }
+        const highest = candidates.reduce((best, cur) => (compareSemver(cur, best) > 0 ? cur : best));
+        setSignedConfigMinShellVersion(highest);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [host.bridge, canReadSignedConfig]);
 
   const runDetection = useCallback(
     async (options?: { notify?: boolean }) => {
@@ -191,6 +326,14 @@ export function DesktopConnectPanel({
             toast.showToast(t('Local Agent status updated'), 'info', 'feedback');
           }
         } else {
+          const upgrade = extractShellUpgradeRequirement(
+            result.error.code,
+            result.error.details,
+            host.info?.shellVersion,
+          );
+          if (upgrade) {
+            setRuntimeUpgradeRequired(upgrade);
+          }
           setDetectError(result.error.message);
           if (options?.notify) {
             toast.showToast(result.error.message, 'error', 'feedback');
@@ -200,7 +343,7 @@ export function DesktopConnectPanel({
         setDetecting(false);
       }
     },
-    [host.bridge, host.capabilities, canDetect, t, toast.showToast],
+    [host.bridge, host.capabilities, host.info?.shellVersion, canDetect, t, toast.showToast],
   );
 
   useEffect(() => {
@@ -211,6 +354,7 @@ export function DesktopConnectPanel({
         setConflicts({});
         setKeptConflicts({});
         setWrittenAgents({});
+        setRuntimeUpgradeRequired(null);
       }
       return;
     }
@@ -223,6 +367,16 @@ export function DesktopConnectPanel({
         toast.showToast(t('One-click setup is unavailable for this connection.'), 'error', 'feedback');
         return;
       }
+      if (actionsDisabledByVersion) {
+        toast.showToast(
+          t('Update the OpenDesign desktop app to v{version} or newer to use one-click setup.', {
+            version: shellUpgradeRequired?.requiredVersion ?? '',
+          }),
+          'error',
+          'feedback',
+        );
+        return;
+      }
       setConnectingAgent(meta.id);
       try {
         const params = {
@@ -230,7 +384,6 @@ export function DesktopConnectPanel({
           templateId: meta.templateId,
           args: {
             serverName: resolvedServerName,
-            mcpUrl: resolvedMcpUrl,
           },
           conflictPolicy,
         };
@@ -245,7 +398,12 @@ export function DesktopConnectPanel({
           params,
           { bridge: host.bridge },
         );
-        if (!result.ok && result.error.code === 'UNSUPPORTED' && primaryMethod === 'run') {
+        if (
+          !result.ok &&
+          result.error.code === 'UNSUPPORTED' &&
+          result.error.details?.reason !== 'SHELL_VERSION_TOO_OLD' &&
+          primaryMethod === 'run'
+        ) {
           result = await invokeHostAtom<AtomExecResult>(
             HOST_CAPABILITIES.ATOM_EXEC,
             'exec',
@@ -276,16 +434,38 @@ export function DesktopConnectPanel({
           return;
         }
 
+        const upgrade = extractShellUpgradeRequirement(
+          result.error.code,
+          result.error.details,
+          host.info?.shellVersion,
+        );
+        if (upgrade) {
+          setRuntimeUpgradeRequired(upgrade);
+          toast.showToast(
+            t('Update the OpenDesign desktop app to v{version} or newer to use one-click setup.', {
+              version: upgrade.requiredVersion,
+            }),
+            'error',
+            'feedback',
+          );
+          return;
+        }
+
         if (result.error.code === 'CONFLICT') {
           const detected = detection?.agents.find(item => item.agentId === meta.id);
           const existingUrl =
             typeof result.error.details?.existingUrl === 'string'
               ? result.error.details.existingUrl
               : detected?.mcpUrl;
+          const requestedUrl =
+            typeof result.error.details?.requestedUrl === 'string'
+              ? result.error.details.requestedUrl
+              : undefined;
           setConflicts(previous => ({
             ...previous,
             [meta.id]: {
               existingUrl,
+              requestedUrl,
               message: result.error.message,
             },
           }));
@@ -317,9 +497,11 @@ export function DesktopConnectPanel({
     [
       host.bridge,
       host.capabilities,
+      host.info?.shellVersion,
       canExec,
+      actionsDisabledByVersion,
+      shellUpgradeRequired?.requiredVersion,
       resolvedServerName,
-      resolvedMcpUrl,
       detection,
       onConfigured,
       runDetection,
@@ -381,7 +563,7 @@ export function DesktopConnectPanel({
         toast.showToast(t('Enter the pairing token shown by the local helper.'), 'error', 'feedback');
         return;
       }
-      setPairing(true);
+      setManualPairing(true);
       try {
         const result = await connectLocalConnectBridge({
           port: parsedPort,
@@ -394,7 +576,7 @@ export function DesktopConnectPanel({
           toast.showToast(result.error.message, 'error', 'feedback');
         }
       } finally {
-        setPairing(false);
+        setManualPairing(false);
       }
     },
     [portInput, tokenInput, t, toast.showToast],
@@ -420,6 +602,10 @@ export function DesktopConnectPanel({
       data-host-kind={host.hostKind ?? 'web'}
       data-compact={compact || undefined}
       aria-label={t('Connect local Agents')}
+      style={{
+        textAlign: 'left',
+        marginTop: compact ? undefined : 'var(--motion-space-16)',
+      }}
     >
       <div className="om-settings-row" style={{ width: '100%' }}>
         <div style={{ display: 'grid', gap: 'var(--motion-space-4)', minWidth: 0 }}>
@@ -480,6 +666,80 @@ export function DesktopConnectPanel({
 
       {host.bridge ? (
         <div style={{ width: '100%', display: 'grid', gap: 'var(--motion-space-12)' }}>
+          {shellUpgradeRequired && (
+            <div
+              className="om-inset"
+              data-shell-upgrade-notice="true"
+              style={{ display: 'grid', gap: 'var(--motion-space-10)', justifyItems: 'start' }}
+            >
+              <p className="om-muted" style={{ margin: 0 }}>
+                {shellUpgradeRequired.currentVersion
+                  ? t(
+                      'This feature requires OpenDesign desktop v{required} or newer (current: v{current}). Update the app to continue.',
+                      {
+                        required: shellUpgradeRequired.requiredVersion,
+                        current: shellUpgradeRequired.currentVersion,
+                      },
+                    )
+                  : t(
+                      'This feature requires OpenDesign desktop v{required} or newer. Update the app to continue.',
+                      { required: shellUpgradeRequired.requiredVersion },
+                    )}
+              </p>
+              {canCheckUpdates && (
+                <div className="om-settings-actions">
+                  {updater.state?.status === 'downloaded' ? (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      loading={updater.busy}
+                      onClick={() => {
+                        void updater.installUpdateNow().then(result => {
+                          if (!result.ok && result.error) {
+                            toast.showToast(result.error, 'error', 'feedback');
+                          }
+                        });
+                      }}
+                    >
+                      {t('Restart to install update')}
+                    </Button>
+                  ) : updater.state?.status === 'available' ? (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      loading={updater.busy}
+                      onClick={() => void updater.downloadUpdate()}
+                    >
+                      {t('Download update')}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      loading={updater.busy || updater.state?.status === 'checking' || updater.state?.status === 'downloading'}
+                      onClick={() => void updater.checkForUpdates()}
+                      icon={<RemixIcon name="refresh-line" size={14} />}
+                    >
+                      {t('Check for updates')}
+                    </Button>
+                  )}
+                  {updater.state?.status === 'downloading' && typeof updater.state.progress === 'number' && (
+                    <span className="om-muted">{Math.round(updater.state.progress)}%</span>
+                  )}
+                  {(updater.state?.status === 'error' || updater.state?.status === 'unsupported') &&
+                    updater.state.message && (
+                      <span className="om-muted">{updater.state.message}</span>
+                    )}
+                  {updater.state?.status === 'up-to-date' && (
+                    <span className="om-muted">{t('No newer update was found yet.')}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {host.loading || (detecting && !detection) ? (
             <div
               role="status"
@@ -522,6 +782,8 @@ export function DesktopConnectPanel({
                 const conflict = conflicts[meta.id];
                 const conflictKept = Boolean(keptConflicts[meta.id]);
                 const authorizedEvidence = isAgentAuthorized(hasAuthorizedConnection, meta.id);
+                const awaitingFirstToolCall =
+                  !authorizedEvidence && isAgentAuthorized(hasTokenWithoutCall, meta.id);
                 const state = resolveAgentConnectionState(detected, {
                   hasConflict: Boolean(conflict),
                   conflictKept,
@@ -575,9 +837,14 @@ export function DesktopConnectPanel({
                                 name: resolvedServerName,
                               })}
                             {state === 'configured' &&
-                              t('Config written. Open {agent} and approve sign-in when prompted.', {
-                                agent: meta.label,
-                              })}
+                              (awaitingFirstToolCall
+                                ? t(
+                                    'Sign-in token issued, awaiting first tool call. Run a quick read-only prompt in {agent} to verify the connection, then click Check sign-in.',
+                                    { agent: meta.label },
+                                  )
+                                : t('Config written. Open {agent} and approve sign-in when prompted.', {
+                                    agent: meta.label,
+                                  }))}
                             {state === 'authorized' &&
                               t('{agent} is authorized and ready to work in this workspace.', {
                                 agent: meta.label,
@@ -593,7 +860,7 @@ export function DesktopConnectPanel({
                             variant="primary"
                             size="sm"
                             loading={busy}
-                            disabled={!canExec || (connectingAgent !== null && !busy)}
+                            disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                             onClick={() => void connectAgent(meta, 'abort')}
                             icon={<RemixIcon name="plug-line" size={14} />}
                           >
@@ -619,7 +886,7 @@ export function DesktopConnectPanel({
                               variant="ghost"
                               size="sm"
                               loading={busy}
-                              disabled={!canExec || (connectingAgent !== null && !busy)}
+                              disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                               onClick={() => void connectAgent(meta, 'abort')}
                             >
                               {t('Re-apply config')}
@@ -632,7 +899,7 @@ export function DesktopConnectPanel({
                             variant="ghost"
                             size="sm"
                             loading={busy}
-                            disabled={!canExec || (connectingAgent !== null && !busy)}
+                            disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                             onClick={() => void connectAgent(meta, 'abort')}
                           >
                             {t('Re-apply config')}
@@ -674,7 +941,7 @@ export function DesktopConnectPanel({
                             </p>
                           )}
                           <p className="om-muted" style={{ margin: 0, fontFamily: 'var(--motion-font-mono)' }}>
-                            {t('New: {url}', { url: resolvedMcpUrl })}
+                            {t('New: {url}', { url: conflict?.requestedUrl ?? resolvedMcpUrl })}
                           </p>
                         </div>
                         <div className="om-settings-actions">
@@ -683,7 +950,7 @@ export function DesktopConnectPanel({
                             variant="primary"
                             size="sm"
                             loading={busy}
-                            disabled={!canExec || (connectingAgent !== null && !busy)}
+                            disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                             onClick={() => void connectAgent(meta, 'replace')}
                           >
                             {t('Replace existing URL')}

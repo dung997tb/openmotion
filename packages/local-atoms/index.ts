@@ -6,6 +6,7 @@
  * - Web Connect Script loopback host (K9)
  */
 
+import os from 'node:os';
 import type { BuiltinPublisherEntry } from '../../shared/desktop-builtin-rules.ts';
 import {
   HOST_CAPABILITIES,
@@ -37,6 +38,7 @@ import {
   createCredentialAtom,
   type AtomCredentialInjectParams,
   type AtomCredentialPollParams,
+  type AtomCredentialRetryPendingRevokesParams,
   type AtomCredentialRevokeParams,
   type CredentialHttpClient,
   type SecretStore,
@@ -54,6 +56,7 @@ import {
 } from './exec.ts';
 import {
   ComponentInstallRegistry,
+  getUnifiedMurmurBinDir,
   InstallComponentAtom,
   createInstallComponentAtom,
   type ArtifactDownloader,
@@ -98,6 +101,8 @@ export type LocalAtomsRuntimeDeps = {
   allowLocalDevLoopback?: boolean;
   appBundlePath?: string;
   expectedMcpUrl?: string;
+  getExpectedMcpUrl?: () => string | undefined;
+  shellVersion?: string;
   getSignedConfig: () => SignedConfigPayload;
   confirmCallback: ConfirmCallback;
   /** Optional injectable dependencies for deterministic tests or custom host adapters. */
@@ -135,11 +140,15 @@ export type LocalAtomsRuntime = {
 };
 
 export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtomsRuntime {
+  const effectiveHomeDir = deps.homeDir ?? os.homedir();
+  const resolveExpectedMcpUrl = (): string | undefined =>
+    deps.getExpectedMcpUrl?.() ?? deps.expectedMcpUrl;
+
   const pathResolver =
     deps.pathResolver ??
     createPathResolver({
       platform: deps.platform,
-      homeDir: deps.homeDir,
+      homeDir: effectiveHomeDir,
       env: deps.env,
       loginShellRunner: deps.loginShellRunner,
       fs: deps.pathResolverFs,
@@ -151,9 +160,14 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
     createFeatureConfirmationGate({
       dataDir: deps.dataDir,
       confirmCallback: deps.confirmCallback,
+      shellVersion: deps.shellVersion,
       now: deps.now,
     });
-  const componentRegistry = deps.componentRegistry ?? new ComponentInstallRegistry(deps.dataDir);
+  const componentRegistry =
+    deps.componentRegistry ??
+    new ComponentInstallRegistry(deps.dataDir, {
+      extraAllowedRoots: [getUnifiedMurmurBinDir(effectiveHomeDir)],
+    });
 
   const isAllowedPublisherId = deps.publishers
     ? (publisherId: string) => deps.publishers!.some(entry => entry.id === publisherId)
@@ -161,9 +175,11 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
 
   const configAtom = createConfigAtom({
     dataDir: deps.dataDir,
-    homeDir: deps.homeDir,
+    homeDir: effectiveHomeDir,
     channel: deps.channel,
     allowLocalDevLoopback: deps.allowLocalDevLoopback,
+    expectedMcpUrl: deps.expectedMcpUrl,
+    getExpectedMcpUrl: resolveExpectedMcpUrl,
     getSignedConfig: deps.getSignedConfig,
     confirmationGate,
     mutationQueue,
@@ -172,6 +188,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
 
   const installComponentAtom = createInstallComponentAtom({
     dataDir: deps.dataDir,
+    homeDir: effectiveHomeDir,
     platform: deps.platform,
     arch: deps.arch,
     channel: deps.channel,
@@ -184,19 +201,26 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
     publishers: deps.publishers,
     downloader: deps.downloader,
     codeSignatureVerifier: deps.codeSignatureVerifier,
+    commandRunner: deps.commandRunner,
     now: deps.now,
   });
 
   const execAtom = createExecAtom({
-    homeDir: deps.homeDir,
+    homeDir: effectiveHomeDir,
+    platform: deps.platform,
+    arch: deps.arch,
     channel: deps.channel,
     allowLocalDevLoopback: deps.allowLocalDevLoopback,
+    expectedMcpUrl: deps.expectedMcpUrl,
+    getExpectedMcpUrl: resolveExpectedMcpUrl,
     getSignedConfig: deps.getSignedConfig,
     pathResolver,
     componentRegistry,
     confirmationGate,
     mutationQueue,
     commandRunner: deps.commandRunner,
+    publishers: deps.publishers,
+    codeSignatureVerifier: deps.codeSignatureVerifier,
     isAllowedPublisherId,
   });
 
@@ -217,8 +241,9 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
   const detectAtom = createDetectAtom({
     platform: deps.platform,
     arch: deps.arch,
-    homeDir: deps.homeDir,
+    homeDir: effectiveHomeDir,
     expectedMcpUrl: deps.expectedMcpUrl,
+    getExpectedMcpUrl: resolveExpectedMcpUrl,
     getSignedConfig: deps.getSignedConfig,
     pathResolver,
     componentRegistry,
@@ -290,7 +315,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         name: HOST_CAPABILITIES.ATOM_CREDENTIAL,
         version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ATOM_CREDENTIAL],
         status: 'available',
-        methods: ['start', 'poll', 'status', 'inject', 'revoke'],
+        methods: ['start', 'poll', 'status', 'inject', 'revoke', 'retryPendingRevokes'],
       },
       async invoke(method, params) {
         if (method === 'start') {
@@ -307,6 +332,11 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         }
         if (method === 'revoke') {
           return credentialAtom.revoke((params ?? {}) as unknown as AtomCredentialRevokeParams);
+        }
+        if (method === 'retryPendingRevokes') {
+          return credentialAtom.retryPendingRevokes(
+            (params ?? {}) as unknown as AtomCredentialRetryPendingRevokesParams,
+          );
         }
         return hostErr('UNSUPPORTED', `Unknown method "${method}" for ${HOST_CAPABILITIES.ATOM_CREDENTIAL}`);
       },

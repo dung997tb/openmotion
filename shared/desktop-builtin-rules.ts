@@ -104,7 +104,7 @@ export const BUILTIN_THIRD_PARTY_TEMPLATES: readonly BuiltinThirdPartyTemplate[]
     argv: ['mcp', 'add', '{serverName}', '--url', '{mcpUrl}'],
     params: {
       serverName: { type: 'identifier', required: false, defaultValue: DEFAULT_MCP_SERVER_NAME },
-      mcpUrl: { type: 'url_in_domain_scope', required: true },
+      mcpUrl: { type: 'url_in_domain_scope', required: false },
     },
     description: 'Register remote OpenMotion MCP server in Codex CLI',
   },
@@ -133,7 +133,7 @@ export const BUILTIN_THIRD_PARTY_TEMPLATES: readonly BuiltinThirdPartyTemplate[]
     argv: ['mcp', 'add', '--scope', 'user', '--transport', 'http', '{serverName}', '{mcpUrl}'],
     params: {
       serverName: { type: 'identifier', required: false, defaultValue: DEFAULT_MCP_SERVER_NAME },
-      mcpUrl: { type: 'url_in_domain_scope', required: true },
+      mcpUrl: { type: 'url_in_domain_scope', required: false },
     },
     description: 'Register remote OpenMotion MCP server in Claude Code CLI (user scope)',
   },
@@ -156,6 +156,72 @@ export const BUILTIN_TEMPLATE_MAP: ReadonlyMap<string, BuiltinThirdPartyTemplate
 const IDENTIFIER_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const MODEL_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/;
+const SEMVER_PARTS_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9.-]+))?(?:\+[a-zA-Z0-9.-]+)?$/;
+
+export function compareSemver(a: string, b: string): number {
+  const matchA = SEMVER_PARTS_RE.exec(a.trim());
+  const matchB = SEMVER_PARTS_RE.exec(b.trim());
+  if (!matchA || !matchB) {
+    throw new Error(`Invalid semver comparison: "${a}" vs "${b}"`);
+  }
+  const coreA = [Number(matchA[1]), Number(matchA[2]), Number(matchA[3])];
+  const coreB = [Number(matchB[1]), Number(matchB[2]), Number(matchB[3])];
+  for (let i = 0; i < 3; i++) {
+    const diff = coreA[i]! - coreB[i]!;
+    if (diff !== 0) return diff;
+  }
+  const preA = matchA[4];
+  const preB = matchB[4];
+  if (!preA && !preB) return 0;
+  if (!preA && preB) return 1;
+  if (preA && !preB) return -1;
+  const partsA = preA!.split('.');
+  const partsB = preB!.split('.');
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const segA = partsA[i];
+    const segB = partsB[i];
+    if (segA === undefined) return -1;
+    if (segB === undefined) return 1;
+    if (segA === segB) continue;
+    const numA = /^\d+$/.test(segA) ? Number(segA) : null;
+    const numB = /^\d+$/.test(segB) ? Number(segB) : null;
+    if (numA !== null && numB !== null) return numA - numB;
+    if (numA !== null) return -1;
+    if (numB !== null) return 1;
+    return segA < segB ? -1 : 1;
+  }
+  return 0;
+}
+
+export function isShellVersionSatisfied(
+  currentVersion: string | undefined,
+  minVersion: string | undefined,
+): boolean {
+  if (!minVersion || !minVersion.trim()) return true;
+  if (!currentVersion || !currentVersion.trim()) return false;
+  try {
+    return compareSemver(currentVersion, minVersion) >= 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Canonicalizes an HTTP(S) URL for equality comparisons (lowercased scheme/host,
+ * default port elided via `new URL()`, trailing slash stripped on pathname).
+ */
+export function canonicalizeUrlForComparison(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = new URL(trimmed);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '') || '';
+    return `${parsed.origin}${normalizedPath}${parsed.search}`;
+  } catch {
+    return trimmed.replace(/\/+$/, '');
+  }
+}
 
 export function getAllowedDomains(channel: HostReleaseChannel): readonly string[] {
   return channel === 'stable' ? BUILTIN_ALLOWED_DOMAINS_STABLE : BUILTIN_ALLOWED_DOMAINS_TEST;
@@ -236,9 +302,21 @@ const MURMUR_SAFE_DAEMON_VERBS = new Set([
  * launcher/exec subcommand for `murmur-engine` and restricts it to management
  * subcommands only.
  */
+const MURMUR_SAFE_PROVIDER_VERBS = new Set([
+  'add',
+  'set',
+  'key',
+  'rm',
+  'remove',
+  'upsert',
+]);
+
+const SINGLE_PLACEHOLDER_RE = /^\{[a-zA-Z0-9_]+\}$/;
+
 export function validateFirstPartyCommandArgvBounds(
   componentId: string,
   argv: readonly string[],
+  options?: { channel?: HostReleaseChannel; allowLocalDevLoopback?: boolean },
 ): { ok: true } | { ok: false; reason: string } {
   if (!Array.isArray(argv) || argv.length === 0) {
     return { ok: false, reason: 'First-party command argv must be a non-empty array' };
@@ -279,9 +357,43 @@ export function validateFirstPartyCommandArgvBounds(
         : { ok: false, reason: 'murmur magpie daemon only allows install|uninstall|start|stop|restart|status' };
     }
     if (second === 'provider') {
-      return argv.length >= 3
-        ? { ok: true }
-        : { ok: false, reason: 'murmur magpie provider requires a subcommand' };
+      if (argv.length < 4 || !third || !MURMUR_SAFE_PROVIDER_VERBS.has(third.toLowerCase())) {
+        return {
+          ok: false,
+          reason: 'murmur magpie provider only allows add|set|key|rm|remove with a provider target',
+        };
+      }
+      for (const tok of argv.slice(3)) {
+        const lower = tok.toLowerCase();
+        let urlCandidate: string | null = null;
+        const eqIndex = tok.indexOf('=');
+        if (eqIndex > 0) {
+          const key = lower.slice(0, eqIndex);
+          const value = tok.slice(eqIndex + 1);
+          if (
+            value.includes('://') ||
+            key === 'url' ||
+            key === '--url' ||
+            key === 'base_url' ||
+            key === '--base-url' ||
+            key === 'endpoint' ||
+            key === '--endpoint'
+          ) {
+            urlCandidate = value;
+          }
+        } else if (tok.includes('://')) {
+          urlCandidate = tok;
+        }
+        if (urlCandidate !== null && !SINGLE_PLACEHOLDER_RE.test(urlCandidate)) {
+          if (!isUrlInAllowedDomainScope(urlCandidate, options)) {
+            return {
+              ok: false,
+              reason: `murmur magpie provider URL is outside allowed domain scope: "${urlCandidate}"`,
+            };
+          }
+        }
+      }
+      return { ok: true };
     }
     // Agent toggle / restore: `magpie <agentId> <modelId|default>` (exactly 3 tokens, no `run`/`env`)
     if (

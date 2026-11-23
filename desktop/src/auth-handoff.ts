@@ -72,8 +72,10 @@ export type DesktopAuthExchangeFetch = (
 ) => Promise<DesktopAuthExchangeResponseLike>;
 
 export type DesktopAuthHandoffManagerOptions = {
-  /** Base Studio origin, e.g. "https://motion.open-design.ai". */
-  studioOrigin: string;
+  /** Base Studio origin, e.g. "https://motion.open-design.ai". Optional when `getStudioOrigin` is supplied. */
+  studioOrigin?: string;
+  /** Dynamic resolver for the active Studio origin (follows signed config updates). */
+  getStudioOrigin?: () => string;
   /** Opens the handoff start URL in the user's system browser. */
   openExternal: (url: string) => Promise<void> | void;
   /**
@@ -109,6 +111,7 @@ export type StartedDesktopLogin = {
 type ActiveAttempt = {
   id: number;
   startedAt: string;
+  studioOrigin: string;
   codeVerifier: string;
   expectedState: string;
   redirectUri: string;
@@ -330,7 +333,8 @@ function closeServerAfterResponse(server: Server): void {
 }
 
 export class DesktopAuthHandoffManager {
-  private readonly studioOrigin: string;
+  private readonly staticStudioOrigin?: string;
+  private readonly getStudioOriginFn?: () => string;
   private readonly openExternal: (url: string) => Promise<void> | void;
   private readonly exchangeFetch: DesktopAuthExchangeFetch;
   private readonly timeoutMs: number;
@@ -344,7 +348,11 @@ export class DesktopAuthHandoffManager {
   private nextAttemptId = 1;
 
   constructor(options: DesktopAuthHandoffManagerOptions) {
-    this.studioOrigin = normalizeStudioOrigin(options.studioOrigin);
+    if (!options.getStudioOrigin && !options.studioOrigin) {
+      throw new Error('DesktopAuthHandoffManager requires studioOrigin or getStudioOrigin');
+    }
+    this.staticStudioOrigin = options.studioOrigin ? normalizeStudioOrigin(options.studioOrigin) : undefined;
+    this.getStudioOriginFn = options.getStudioOrigin;
     this.openExternal = options.openExternal;
     this.exchangeFetch = options.exchangeFetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_DESKTOP_HANDOFF_TIMEOUT_MS;
@@ -352,6 +360,13 @@ export class DesktopAuthHandoffManager {
     const rawPath = options.callbackPath?.trim() || DEFAULT_DESKTOP_CALLBACK_PATH;
     this.callbackPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
     this.onFocusMainWindow = options.onFocusMainWindow;
+  }
+
+  private resolveCurrentStudioOrigin(): string {
+    if (this.getStudioOriginFn) {
+      return normalizeStudioOrigin(this.getStudioOriginFn());
+    }
+    return this.staticStudioOrigin!;
   }
 
   getState(): DesktopAuthHandoffState {
@@ -370,7 +385,7 @@ export class DesktopAuthHandoffManager {
    * for environments where system-browser handoff cannot complete.
    */
   openInWindowFallback(options?: { switchAccount?: boolean }): string {
-    const url = new URL('/auth/login', this.studioOrigin);
+    const url = new URL('/auth/login', this.resolveCurrentStudioOrigin());
     if (options?.switchAccount) {
       url.searchParams.set('switch', '1');
     }
@@ -419,12 +434,13 @@ export class DesktopAuthHandoffManager {
   }
 
   private buildStartUrl(input: {
+    studioOrigin: string;
     codeChallenge: string;
     redirectUri: string;
     state: string;
     switchAccount?: boolean;
   }): string {
-    const url = new URL(DESKTOP_HANDOFF_START_PATH, this.studioOrigin);
+    const url = new URL(DESKTOP_HANDOFF_START_PATH, input.studioOrigin);
     url.searchParams.set('code_challenge', input.codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('redirect_uri', input.redirectUri);
@@ -499,7 +515,9 @@ export class DesktopAuthHandoffManager {
       this.handleLoopbackRequest(attemptRef, req, res);
     });
 
+    const attemptOrigin = this.resolveCurrentStudioOrigin();
     const startUrl = this.buildStartUrl({
+      studioOrigin: attemptOrigin,
       codeChallenge,
       redirectUri,
       state,
@@ -509,6 +527,7 @@ export class DesktopAuthHandoffManager {
     const attempt: ActiveAttempt = {
       id: attemptId,
       startedAt,
+      studioOrigin: attemptOrigin,
       codeVerifier,
       expectedState: state,
       redirectUri,
@@ -664,7 +683,7 @@ export class DesktopAuthHandoffManager {
       redirectUri: attempt.redirectUri,
     });
 
-    const exchangeUrl = new URL(DESKTOP_HANDOFF_EXCHANGE_PATH, this.studioOrigin).toString();
+    const exchangeUrl = new URL(DESKTOP_HANDOFF_EXCHANGE_PATH, attempt.studioOrigin).toString();
     const requestBody: DesktopHandoffExchangeRequest = {
       code,
       codeVerifier: attempt.codeVerifier,

@@ -45,7 +45,7 @@ import {
 import { createTerminalConfirm, type ConfirmFn } from './terminal-confirm.ts';
 
 export const CONNECT_SCRIPT_VERSION = '1.0.0' as const;
-export const CONNECT_FEATURE_ID = 'connect-local-agent' as const;
+export const CONNECT_FEATURE_ID = 'mcp_connect' as const;
 export const CONNECT_FEATURE_VERSION = '1.0.0' as const;
 
 export type ConnectAgentTarget = BuiltinThirdPartyProgram | 'all';
@@ -58,6 +58,8 @@ export type ConnectCliArgs = {
   allowDevLoopback: boolean;
   studioUrl: string;
   mcpUrl: string;
+  hasStudioUrlOverride?: boolean;
+  hasMcpUrlOverride?: boolean;
   serverName: string;
   replaceConflict: boolean;
   yes: boolean;
@@ -70,6 +72,8 @@ export type ConnectCliParseResult =
 export type ConnectBridgeFactoryOptions = {
   channel: HostReleaseChannel;
   allowLocalDevLoopback: boolean;
+  studioUrl?: string;
+  expectedMcpUrl?: string;
   confirm: ConfirmFn;
 };
 
@@ -318,6 +322,8 @@ export function parseConnectCliArgs(argv: readonly string[]): ConnectCliParseRes
         allowDevLoopback: allowDevLoopback && channel === 'dev',
         studioUrl,
         mcpUrl: mcpUrlOverride ?? buildDefaultMcpUrl(studioUrl),
+        hasStudioUrlOverride: Boolean(studioUrlOverride),
+        hasMcpUrlOverride: Boolean(mcpUrlOverride),
         serverName,
         replaceConflict,
         yes,
@@ -362,6 +368,8 @@ export function parseConnectCliArgs(argv: readonly string[]): ConnectCliParseRes
       allowDevLoopback: effectiveAllowDevLoopback,
       studioUrl,
       mcpUrl,
+      hasStudioUrlOverride: Boolean(studioUrlOverride),
+      hasMcpUrlOverride: Boolean(mcpUrlOverride),
       serverName: validatedName.value,
       replaceConflict,
       yes,
@@ -828,10 +836,26 @@ export async function runConnectCli(
       output: out,
     });
 
+  let confirmedInCli = false;
+  const wrappedConfirm: ConfirmFn = async request => {
+    // Avoid double-prompting when `runConnectFlow` already obtained explicit approval
+    // for `CONNECT_FEATURE_ID` in this interactive CLI invocation.
+    if (confirmedInCli && request.featureId === CONNECT_FEATURE_ID) {
+      return true;
+    }
+    const accepted = await confirm(request);
+    if (accepted && request.featureId === CONNECT_FEATURE_ID) {
+      confirmedInCli = true;
+    }
+    return accepted;
+  };
+
   const bridge = await runtime.createBridge({
     channel: args.channel,
     allowLocalDevLoopback: args.allowDevLoopback,
-    confirm,
+    ...(args.hasStudioUrlOverride ? { studioUrl: args.studioUrl } : {}),
+    ...(args.hasMcpUrlOverride ? { expectedMcpUrl: args.mcpUrl } : {}),
+    confirm: wrappedConfirm,
   });
 
   if (args.mode === 'serve') {
@@ -847,7 +871,7 @@ export async function runConnectCli(
   const result = await runConnectFlow({
     args,
     bridge,
-    confirm,
+    confirm: wrappedConfirm,
     output: out,
     errorOutput: errOut,
   });

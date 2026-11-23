@@ -176,6 +176,9 @@ export type DetectedEngineStatus = {
   version?: string;
   mode?: 'personal' | 'pool' | 'unknown';
   occupiedBy?: string;
+  signedIn?: boolean;
+  servedBy?: 'desktop' | 'personal' | 'none';
+  schemaUnsupported?: boolean;
 };
 
 export type AtomDetectResult = {
@@ -220,6 +223,7 @@ export type AtomInstallComponentResult = {
   sha256: string;
   publisherId: string;
   alreadyInstalled: boolean;
+  reusedExisting?: boolean;
 };
 
 /**
@@ -243,6 +247,8 @@ export type AtomCredentialStatusResult = {
   accountId?: string;
   installationId?: string;
   updatedAt?: string;
+  status?: 'active' | 'pending_revoke' | 'revoked' | 'none';
+  pendingRevoke?: boolean;
 };
 
 /**

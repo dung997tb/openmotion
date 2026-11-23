@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -225,7 +225,6 @@ describe('DesktopConnectPanel', () => {
       templateId: 'codex.mcp.add_remote',
       args: {
         serverName: 'openmotion',
-        mcpUrl: 'https://motion.open-design.ai/mcp',
       },
       conflictPolicy: 'abort',
     });
@@ -409,5 +408,271 @@ describe('DesktopConnectPanel', () => {
     await act(async () => findButton('Disconnect')!.click());
     await flushMicrotasks();
     expect(document.querySelector('[data-connect-script-form]')).not.toBeNull();
+  });
+
+  it('auto-pairs from #connect_port & #connect_token hash fragment under StrictMode and scrubs the URL immediately', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/mcp-setup?host=codex#connect_port=43125&connect_token=hash-secret-999&tab=setup',
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      if (url.endsWith('/v1/health')) {
+        return Response.json({
+          ok: true,
+          protocolVersion: '1.0',
+          hostKind: 'connect-script',
+          requiresToken: true,
+        });
+      }
+      if (headers['x-openmotion-connect-token'] !== 'hash-secret-999') {
+        return Response.json(hostErr('UNAUTHORIZED', 'bad token'), { status: 401 });
+      }
+      if (url.endsWith('/v1/info')) {
+        return Response.json({
+          hostKind: 'connect-script',
+          shellVersion: '0.2.1',
+          contractVersion: '1.0',
+          platform: 'darwin',
+          arch: 'arm64',
+          releaseChannel: 'stable',
+          isPackaged: false,
+        });
+      }
+      if (url.endsWith('/v1/capabilities')) {
+        return Response.json([
+          { name: HOST_CAPABILITIES.ATOM_DETECT, version: '1.0.0', status: 'available', methods: ['scan'] },
+          { name: HOST_CAPABILITIES.ATOM_EXEC, version: '1.0.0', status: 'available', methods: ['run'] },
+        ]);
+      }
+      if (url.endsWith('/v1/invoke')) {
+        return Response.json(
+          hostOk({
+            platform: 'darwin',
+            arch: 'arm64',
+            agents: [
+              { agentId: 'codex', installed: true, version: 'v0.31.0', mcpConfigured: false },
+              { agentId: 'claude', installed: false, mcpConfigured: false },
+            ],
+            engine: { installed: false, running: false, port: 0, providerKind: 'none' },
+            detectedAt: '2026-11-23T08:00:00Z',
+          }),
+        );
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <StrictMode>
+          <I18nProvider>
+            <DesktopConnectPanel mcpUrl="https://motion.open-design.ai/mcp" />
+          </I18nProvider>
+        </StrictMode>,
+      );
+    });
+    await flushMicrotasks();
+
+    // Token and port MUST be scrubbed from location.hash while preserving unrelated hash/search params.
+    expect(window.location.hash).toBe('#tab=setup');
+    expect(window.location.href).not.toContain('hash-secret-999');
+    expect(window.location.search).toBe('?host=codex');
+    expect(document.querySelector('[data-desktop-connect-panel]')?.getAttribute('data-host-kind')).toBe(
+      'connect-script',
+    );
+    expect(document.querySelector('[data-agent-id="codex"]')?.textContent).toContain('v0.31.0');
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('disables connect actions and shows upgrade notice when shellVersion is below minShellVersion', async () => {
+    const checkUpdatesMock = vi.fn(async () =>
+      hostOk({ status: 'checking', currentVersion: '0.2.1' }),
+    );
+    const { bridge } = createDesktopBridgeMock({
+      detectResult: () => ({
+        platform: 'darwin',
+        arch: 'arm64',
+        agents: [
+          { agentId: 'codex', installed: true, version: 'v0.25.0', mcpConfigured: false },
+          { agentId: 'claude', installed: false, mcpConfigured: false },
+        ],
+        engine: { installed: false, running: false, port: 0, providerKind: 'none' },
+        detectedAt: '2026-11-23T08:00:00Z',
+      }),
+    });
+    const origInfo = bridge.info.bind(bridge);
+    bridge.info = async () => ({
+      ...(await origInfo()),
+      shellVersion: '0.2.1',
+    });
+    const origCapabilities = bridge.capabilities.bind(bridge);
+    bridge.capabilities = async () => [
+      ...(await origCapabilities()),
+      { name: HOST_CAPABILITIES.UPDATER, version: '1.0.0', status: 'available', methods: ['getState', 'checkForUpdates'] },
+    ];
+    const origInvoke = bridge.invoke.bind(bridge);
+    bridge.invoke = (async (capability: string, method: string, params?: Record<string, unknown>) => {
+      if (capability === HOST_CAPABILITIES.UPDATER && method === 'checkForUpdates') {
+        return checkUpdatesMock();
+      }
+      if (capability === HOST_CAPABILITIES.UPDATER && method === 'getState') {
+        return hostOk({ status: 'idle', currentVersion: '0.2.1' });
+      }
+      return origInvoke(capability, method, params);
+    }) as typeof bridge.invoke;
+    window.__OPENMOTION_HOST__ = bridge;
+
+    await mount({
+      mcpUrl: 'https://motion.open-design.ai/mcp',
+      minShellVersion: '0.9.0',
+    });
+
+    const notice = document.querySelector('[data-shell-upgrade-notice="true"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain('v0.9.0');
+    expect(notice?.textContent).toContain('v0.2.1');
+    const connectCodex = findButton('Connect Codex')!;
+    expect(connectCodex.disabled).toBe(true);
+
+    const checkUpdatesBtn = findButton('Check for updates')!;
+    expect(checkUpdatesBtn).toBeDefined();
+    await act(async () => checkUpdatesBtn.click());
+    expect(checkUpdatesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads proactive minShellVersion from signedConfig.getStatus and preserves reactive SHELL_VERSION_TOO_OLD across Rescan', async () => {
+    let signedConfigMinShell: string | undefined = undefined;
+    const { bridge } = createDesktopBridgeMock({
+      detectResult: () => ({
+        platform: 'darwin',
+        arch: 'arm64',
+        agents: [
+          { agentId: 'codex', installed: true, version: 'v0.25.0', mcpConfigured: false },
+          { agentId: 'claude', installed: false, mcpConfigured: false },
+        ],
+        engine: { installed: false, running: false, port: 0, providerKind: 'none' },
+        detectedAt: '2026-11-23T08:00:00Z',
+      }),
+      onExec: () =>
+        hostErr('UNSUPPORTED', 'Feature requires a newer desktop shell', {
+          reason: 'SHELL_VERSION_TOO_OLD',
+          requiredShellVersion: '0.8.0',
+          currentShellVersion: '0.2.1',
+        }),
+    });
+    const origInfo = bridge.info.bind(bridge);
+    bridge.info = async () => ({ ...(await origInfo()), shellVersion: '0.2.1' });
+    const origCapabilities = bridge.capabilities.bind(bridge);
+    bridge.capabilities = async () => [
+      ...(await origCapabilities()),
+      { name: 'signedConfig', version: '1.0.0', status: 'available', methods: ['getStatus'] },
+    ];
+    const origInvoke = bridge.invoke.bind(bridge);
+    bridge.invoke = (async (capability: string, method: string, params?: Record<string, unknown>) => {
+      if (capability === 'signedConfig' && method === 'getStatus') {
+        return hostOk({
+          minShellVersion: signedConfigMinShell,
+          featureMinShellVersions: signedConfigMinShell ? { mcp_connect: signedConfigMinShell } : {},
+        });
+      }
+      return origInvoke(capability, method, params);
+    }) as typeof bridge.invoke;
+    window.__OPENMOTION_HOST__ = bridge;
+
+    await mount({ mcpUrl: 'https://motion.open-design.ai/mcp' });
+    expect(document.querySelector('[data-shell-upgrade-notice="true"]')).toBeNull();
+
+    // Clicking Connect triggers reactive SHELL_VERSION_TOO_OLD
+    await act(async () => findButton('Connect Codex')!.click());
+    await flushMicrotasks();
+    expect(document.querySelector('[data-shell-upgrade-notice="true"]')?.textContent).toContain('v0.8.0');
+
+    // Rescan must NOT clear the reactive upgrade notice while shellVersion is still 0.2.1!
+    signedConfigMinShell = '0.8.0';
+    await act(async () => findButton('Rescan local Agents')!.click());
+    await flushMicrotasks();
+    expect(document.querySelector('[data-shell-upgrade-notice="true"]')?.textContent).toContain('v0.8.0');
+    expect(findButton('Connect Codex')!.disabled).toBe(true);
+  });
+
+  it('proactively disables connect via signedConfig.getStatus minShellVersion and wires Download / Restart updater buttons', async () => {
+    const downloadMock = vi.fn(async () =>
+      hostOk({ status: 'downloaded', currentVersion: '0.2.1', availableVersion: '0.9.0' }),
+    );
+    const installMock = vi.fn(async () => hostOk({ ok: true }));
+    const { bridge } = createDesktopBridgeMock({
+      detectResult: () => ({
+        platform: 'darwin',
+        arch: 'arm64',
+        agents: [
+          { agentId: 'codex', installed: true, version: 'v0.25.0', mcpConfigured: false },
+          { agentId: 'claude', installed: false, mcpConfigured: false },
+        ],
+        engine: { installed: false, running: false, port: 0, providerKind: 'none' },
+        detectedAt: '2026-11-23T08:00:00Z',
+      }),
+    });
+    const origInfo = bridge.info.bind(bridge);
+    bridge.info = async () => ({ ...(await origInfo()), shellVersion: '0.2.1' });
+    const origCapabilities = bridge.capabilities.bind(bridge);
+    bridge.capabilities = async () => [
+      ...(await origCapabilities()),
+      { name: 'signedConfig', version: '1.0.0', status: 'available', methods: ['getStatus'] },
+      {
+        name: HOST_CAPABILITIES.UPDATER,
+        version: '1.0.0',
+        status: 'available',
+        methods: ['getState', 'checkForUpdates', 'downloadUpdate', 'installNow'],
+      },
+    ];
+    const origInvoke = bridge.invoke.bind(bridge);
+    bridge.invoke = (async (capability: string, method: string, params?: Record<string, unknown>) => {
+      if (capability === 'signedConfig' && method === 'getStatus') {
+        return hostOk({
+          minShellVersion: '0.9.0',
+          featureMinShellVersions: { mcp_connect: '0.9.0' },
+        });
+      }
+      if (capability === HOST_CAPABILITIES.UPDATER && method === 'getState') {
+        return hostOk({ status: 'available', currentVersion: '0.2.1', availableVersion: '0.9.0' });
+      }
+      if (capability === HOST_CAPABILITIES.UPDATER && method === 'downloadUpdate') {
+        return downloadMock();
+      }
+      if (capability === HOST_CAPABILITIES.UPDATER && method === 'installNow') {
+        return installMock();
+      }
+      return origInvoke(capability, method, params);
+    }) as typeof bridge.invoke;
+    window.__OPENMOTION_HOST__ = bridge;
+
+    // Mount WITHOUT minShellVersion prop — proactive signedConfig.getStatus() must gate Connect!
+    await mount({ mcpUrl: 'https://motion.open-design.ai/mcp' });
+    await flushMicrotasks();
+
+    const notice = document.querySelector('[data-shell-upgrade-notice="true"]');
+    expect(notice?.textContent).toContain('v0.9.0');
+    expect(findButton('Connect Codex')!.disabled).toBe(true);
+
+    // Updater 'available' shows Download update -> transitions to Restart to install update!
+    const downloadBtn = findButton('Download update')!;
+    expect(downloadBtn).toBeDefined();
+    await act(async () => downloadBtn.click());
+    await flushMicrotasks();
+    expect(downloadMock).toHaveBeenCalledTimes(1);
+
+    const restartBtn = findButton('Restart to install update')!;
+    expect(restartBtn).toBeDefined();
+    await act(async () => restartBtn.click());
+    await flushMicrotasks();
+    expect(installMock).toHaveBeenCalledTimes(1);
   });
 });

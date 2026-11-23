@@ -41,6 +41,8 @@ import {
   isBillingOrAccountPortalUrl,
   POPUP_HARDENED_WEB_PREFERENCES,
 } from '../src/window-policy.ts';
+import { authorizePrivilegedIpcSender } from '../src/ipc-guard.ts';
+import { resolvePackagedReleaseChannel } from '../src/updater.ts';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -704,15 +706,172 @@ test('R5 openmotion:// protocol parsing validates safe deep links, rejects untru
   assert.deepEqual(calls[1][2], [path.resolve('dist/main.mjs')]);
 });
 
-test('K1/K2 retry.html is self-contained, supports light/dark themes without backdrop-filter, and wires host bridge actions', () => {
+test('K1/K2 retry.html is self-contained, supports light/dark themes without backdrop-filter, and wires minimal local-page bridge actions', () => {
   const retryHtml = readFileSync(path.join(desktopRoot, 'src', 'retry.html'), 'utf8');
   assert.match(retryHtml, /prefers-color-scheme:\s*dark/);
   assert.equal(/backdrop-filter/i.test(retryHtml), false, 'retry.html must not use frosted glass / backdrop-filter');
   assert.equal(/<(?:script|link)\b[^>]+https?:\/\//i.test(retryHtml), false, 'retry.html must be self-contained');
   assert.match(retryHtml, /id="retry-btn"/);
   assert.match(retryHtml, /id="export-diagnostics-btn"/);
-  assert.match(retryHtml, /__OPENMOTION_HOST__\?\.invoke/);
-  assert.match(retryHtml, /'window',\s*'retryStartup'/);
-  assert.match(retryHtml, /'diagnostics',\s*'export'/);
+  assert.match(retryHtml, /__OPENMOTION_LOCAL_PAGE__\?\.retryStartup/);
+  assert.match(retryHtml, /__OPENMOTION_LOCAL_PAGE__\?\.exportDiagnostics/);
+  assert.match(retryHtml, /'diagnostics',\s*'exportBundle'/);
   assert.equal(retryHtml.includes('innerHTML'), false, 'retry.html should never use innerHTML for error text');
+});
+
+test('K2 in-window auth fallback permits allowlisted accounts.open-design.ai OIDC redirects while keeping /billing external', () => {
+  const config = {
+    studioOrigin: 'https://motion.open-design.ai',
+    channel: 'stable',
+    windowPolicy: {
+      allowedPopupOrigins: ['https://motion.open-design.ai'],
+      allowedAuthOrigins: ['https://motion.open-design.ai', 'https://accounts.open-design.ai'],
+      allowBlankPopups: true,
+    },
+    inWindowAuthFallbackActive: true,
+  };
+
+  const authRedirect = evaluateNavigationPolicy('https://accounts.open-design.ai/oauth/authorize?client_id=om', config);
+  assert.equal(authRedirect.action, 'allow');
+  assert.equal(authRedirect.reason, 'auth-fallback-origin');
+
+  const billingOnAccountHost = evaluateNavigationPolicy('https://accounts.open-design.ai/billing', config);
+  assert.equal(billingOnAccountHost.action, 'deny');
+  assert.equal(billingOnAccountHost.reason, 'billing-external');
+  assert.equal(billingOnAccountHost.openExternal, true);
+
+  const outsideFallback = evaluateNavigationPolicy('https://accounts.open-design.ai/profile', {
+    ...config,
+    inWindowAuthFallbackActive: false,
+  });
+  assert.equal(outsideFallback.action, 'deny');
+  assert.equal(outsideFallback.reason, 'billing-external');
+  assert.equal(outsideFallback.openExternal, true);
+});
+
+test('K3 DesktopAuthHandoffManager resolves studioOrigin dynamically after signed config domain migration', async () => {
+  let currentOrigin = 'https://motion.open-design.ai';
+  let openedUrl = '';
+  const manager = new DesktopAuthHandoffManager({
+    getStudioOrigin: () => currentOrigin,
+    openExternal: url => {
+      openedUrl = url;
+    },
+    exchangeFetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+  });
+
+  assert.equal(manager.openInWindowFallback(), 'https://motion.open-design.ai/auth/login');
+  currentOrigin = 'https://studio.open-design.ai';
+  assert.equal(manager.openInWindowFallback(), 'https://studio.open-design.ai/auth/login');
+
+  const started = await manager.startLogin();
+  assert.ok(openedUrl.startsWith('https://studio.open-design.ai/auth/desktop/start?'));
+  assert.equal(started.startUrl, openedUrl);
+  manager.cancelLogin();
+});
+
+test('K2 billing query params stay external during auth fallback and privileged IPC is denied on /auth/* or during fallback', () => {
+  const policyConfig = {
+    studioOrigin: 'https://motion.open-design.ai',
+    channel: 'stable',
+    windowPolicy: {
+      allowedPopupOrigins: ['https://motion.open-design.ai'],
+      allowedAuthOrigins: ['https://motion.open-design.ai', 'https://accounts.open-design.ai'],
+      allowBlankPopups: true,
+    },
+    inWindowAuthFallbackActive: true,
+  };
+
+  for (const billingQueryUrl of [
+    'https://motion.open-design.ai/settings?billing=plan',
+    'https://accounts.open-design.ai/account?checkout=pro',
+    'https://motion.open-design.ai/home?upgrade=1',
+  ]) {
+    const decision = evaluateNavigationPolicy(billingQueryUrl, policyConfig);
+    assert.equal(decision.action, 'deny', billingQueryUrl);
+    assert.equal(decision.openExternal, true, billingQueryUrl);
+    assert.equal(decision.isBillingOrAccountPortal, true, billingQueryUrl);
+  }
+
+  const authFrame = { url: 'https://motion.open-design.ai/auth/login', parent: null };
+  const authWin = { webContents: { id: 42, mainFrame: authFrame } };
+  assert.equal(
+    authorizePrivilegedIpcSender(
+      { sender: authWin.webContents, senderFrame: authFrame },
+      { mainWindow: authWin, studioOrigin: 'https://motion.open-design.ai', channel: 'stable' },
+    ).ok,
+    false,
+  );
+
+  const studioFrame = { url: 'https://motion.open-design.ai/mcp-setup', parent: null };
+  const studioWin = { webContents: { id: 43, mainFrame: studioFrame } };
+  assert.equal(
+    authorizePrivilegedIpcSender(
+      { sender: studioWin.webContents, senderFrame: studioFrame },
+      {
+        mainWindow: studioWin,
+        studioOrigin: 'https://motion.open-design.ai',
+        channel: 'stable',
+        inWindowAuthFallbackActive: true,
+      },
+    ).ok,
+    false,
+  );
+  assert.equal(
+    authorizePrivilegedIpcSender(
+      { sender: studioWin.webContents, senderFrame: studioFrame },
+      {
+        mainWindow: studioWin,
+        studioOrigin: 'https://motion.open-design.ai',
+        channel: 'stable',
+        inWindowAuthFallbackActive: false,
+      },
+    ).ok,
+    true,
+  );
+});
+
+test('K10 resolvePackagedReleaseChannel preserves packaged test channel and ignores env overrides when packaged', () => {
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1',
+      packageChannel: 'stable',
+      envChannel: 'test',
+    }),
+    'stable',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1',
+      packageChannel: 'test',
+      envChannel: 'stable',
+    }),
+    'test',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1',
+      appUpdateYmlContent: 'provider: generic\nurl: https://releases.open-design.ai/desktop/test/mac-arm64/\n',
+    }),
+    'test',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: true,
+      version: '0.2.1-beta.1',
+    }),
+    'test',
+  );
+  assert.equal(
+    resolvePackagedReleaseChannel({
+      isPackaged: false,
+      version: '0.2.1',
+      packageChannel: 'stable',
+      envChannel: 'test',
+    }),
+    'test',
+  );
 });

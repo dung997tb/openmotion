@@ -31,6 +31,7 @@ import { StudioRouterProvider } from "./router/createAppRouter";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
 import { bindDesktopHost } from './utils/platformHost';
+import { bootstrapStudioPairingFromHash } from './utils/localConnectBridge';
 import { warmCloudDisklessMode } from './utils/cloudRuntime';
 import { bindVitePreloadErrorReload, lazyWithChunkReload } from './utils/chunkReload';
 import { ensureLocaleLoaded, isLocaleLoaded, readLocale } from './i18n/I18n';
@@ -51,6 +52,8 @@ import.meta.hot?.dispose(unbindHostTheme);
 
 const unbindDesktopHost = bindDesktopHost();
 import.meta.hot?.dispose(unbindDesktopHost);
+
+void bootstrapStudioPairingFromHash();
 
 const stopDiagnostics = initializeDiagnostics();
 import.meta.hot?.dispose(stopDiagnostics);

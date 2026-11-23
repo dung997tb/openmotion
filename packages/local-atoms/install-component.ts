@@ -29,6 +29,7 @@ import https from 'node:https';
 import path from 'node:path';
 import {
   BUILTIN_PUBLISHERS,
+  compareSemver,
   isUrlInAllowedDomainScope,
   validateTypedPlaceholderValue,
   type BuiltinPublisherEntry,
@@ -43,12 +44,14 @@ import {
   type HostPlatform,
   type HostReleaseChannel,
 } from '../../shared/desktop-contract.ts';
+import { MURMUR_COMPONENT_ID } from '../../shared/engine-command-contract.ts';
 import type {
   SignedComponentManifest,
   SignedComponentPlatformArtifact,
   SignedConfigPayload,
 } from '../../shared/signed-config.ts';
 import { assertFeatureAllowsResource, type FeatureConfirmationGate } from './confirmation.ts';
+import type { CommandRunner } from './exec.ts';
 import type { SerialMutationQueue } from './serial-queue.ts';
 
 const COMPONENTS_DIR_NAME = 'components';
@@ -57,6 +60,28 @@ const STAGING_DIR_NAME = '.staging';
 const MAX_REDIRECTS = 5;
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000;
 const SAFE_COMPONENT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+const APPLE_TEAM_ID_RE = /^[A-Z0-9]{10}$/;
+
+export function getUnifiedMurmurBinDir(homeDir: string): string {
+  return path.resolve(homeDir, '.murmurant', 'bin');
+}
+
+export function getUnifiedMurmurBinaryPath(homeDir: string, platform: HostPlatform = normalizePlatform(process.platform)): string {
+  const binaryName = platform === 'win32' ? 'murmur.exe' : 'murmur';
+  return path.join(getUnifiedMurmurBinDir(homeDir), binaryName);
+}
+
+/**
+ * Builds the strict Apple Developer ID Application designated requirement string
+ * passed to `codesign --verify --strict -R ...`.
+ */
+export function buildMacOsDeveloperIdRequirement(teamId: string): string | null {
+  const trimmed = teamId.trim();
+  if (!APPLE_TEAM_ID_RE.test(trimmed)) {
+    return null;
+  }
+  return `=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "${trimmed}"`;
+}
 
 export type SupportedPlatformArch = 'darwin-arm64' | 'darwin-x64' | 'win32-x64';
 
@@ -97,6 +122,7 @@ export type CodeSignatureVerifier = (
 
 export type InstallComponentAtomDeps = {
   dataDir: string;
+  homeDir?: string;
   platform?: HostPlatform;
   arch?: string;
   channel?: HostReleaseChannel;
@@ -111,6 +137,7 @@ export type InstallComponentAtomDeps = {
   publishers?: readonly BuiltinPublisherEntry[];
   downloader?: ArtifactDownloader;
   codeSignatureVerifier?: CodeSignatureVerifier;
+  commandRunner?: CommandRunner;
   downloadTimeoutMs?: number;
   now?: () => Date;
 };
@@ -248,41 +275,35 @@ export const defaultCodeSignatureVerifier: CodeSignatureVerifier = async (filePa
     };
   }
 
+  const trimmedTeamId = expectedTeamId.trim();
+  const requirement = buildMacOsDeveloperIdRequirement(trimmedTeamId);
+  if (!requirement) {
+    return {
+      ok: false,
+      reason: `Expected publisher Team ID "${trimmedTeamId}" is not a valid 10-character Apple Team ID`,
+    };
+  }
+
   return new Promise(resolve => {
     execFile(
       '/usr/bin/codesign',
-      ['-dv', '--verbose=4', filePath],
+      ['--verify', '--strict', '-R', requirement, filePath],
       {
         encoding: 'utf8',
         timeout: 10_000,
         shell: false,
         maxBuffer: 256 * 1024,
       },
-      (error, stdout, stderr) => {
-        const outStr = typeof stdout === 'string' ? stdout : '';
+      (error, _stdout, stderr) => {
         const errStr = typeof stderr === 'string' ? stderr : '';
         if (error) {
           resolve({
             ok: false,
-            reason: `codesign verification failed: ${errStr.trim() || error.message}`,
+            reason: `Apple Developer ID codesign verification failed: ${errStr.trim() || error.message}`,
           });
           return;
         }
-        const combined = `${outStr}\n${errStr}`;
-        const teamId = parseMacOsCodesignTeamId(combined);
-        if (!teamId) {
-          resolve({ ok: false, reason: 'Binary does not contain a valid macOS TeamIdentifier' });
-          return;
-        }
-        if (teamId !== expectedTeamId) {
-          resolve({
-            ok: false,
-            reason: `Code signature TeamIdentifier mismatch: expected "${expectedTeamId}", got "${teamId}"`,
-            actualTeamId: teamId,
-          });
-          return;
-        }
-        resolve({ ok: true, teamId });
+        resolve({ ok: true, teamId: trimmedTeamId });
       },
     );
   });
@@ -290,10 +311,12 @@ export const defaultCodeSignatureVerifier: CodeSignatureVerifier = async (filePa
 
 export class ComponentInstallRegistry {
   private readonly componentsRoot: string;
+  private readonly extraAllowedRoots: readonly string[];
   private readonly registryPath: string;
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, options?: { extraAllowedRoots?: readonly string[] }) {
     this.componentsRoot = path.resolve(dataDir, COMPONENTS_DIR_NAME);
+    this.extraAllowedRoots = (options?.extraAllowedRoots ?? []).map(root => path.resolve(root));
     this.registryPath = path.join(this.componentsRoot, REGISTRY_FILE_NAME);
   }
 
@@ -301,12 +324,17 @@ export class ComponentInstallRegistry {
     return this.componentsRoot;
   }
 
+  isAllowedInstallPath(candidatePath: string): boolean {
+    if (isPathInside(this.componentsRoot, candidatePath)) return true;
+    return this.extraAllowedRoots.some(root => isPathInside(root, candidatePath));
+  }
+
   getInstalled(componentId: string): InstalledComponentRecord | null {
     const all = this.readAll();
     const record = all[componentId];
     if (!record) return null;
     if (!record.installedByHost) return null;
-    if (!isPathInside(this.componentsRoot, record.executablePath)) return null;
+    if (!this.isAllowedInstallPath(record.executablePath)) return null;
     if (!existsSync(record.executablePath)) return null;
     return record;
   }
@@ -315,7 +343,7 @@ export class ComponentInstallRegistry {
     return Object.values(this.readAll()).filter(
       record =>
         record.installedByHost &&
-        isPathInside(this.componentsRoot, record.executablePath) &&
+        this.isAllowedInstallPath(record.executablePath) &&
         existsSync(record.executablePath),
     );
   }
@@ -361,6 +389,7 @@ export class ComponentInstallRegistry {
 }
 
 export class InstallComponentAtom {
+  private readonly homeDir?: string;
   private readonly platform: HostPlatform;
   private readonly arch: string;
   private readonly channel: HostReleaseChannel;
@@ -373,10 +402,12 @@ export class InstallComponentAtom {
   private readonly publishers: readonly BuiltinPublisherEntry[];
   private readonly downloader: ArtifactDownloader;
   private readonly codeSignatureVerifier: CodeSignatureVerifier;
+  private readonly commandRunner?: CommandRunner;
   private readonly downloadTimeoutMs: number;
   private readonly now: () => Date;
 
   constructor(deps: InstallComponentAtomDeps) {
+    this.homeDir = deps.homeDir;
     this.platform = normalizePlatform(deps.platform ?? process.platform);
     this.arch = deps.arch ?? process.arch;
     this.channel = deps.channel ?? 'stable';
@@ -385,10 +416,12 @@ export class InstallComponentAtom {
     this.getSignedConfig = deps.getSignedConfig;
     this.confirmationGate = deps.confirmationGate;
     this.mutationQueue = deps.mutationQueue;
-    this.registry = deps.registry ?? new ComponentInstallRegistry(deps.dataDir);
+    const extraAllowedRoots = deps.homeDir ? [getUnifiedMurmurBinDir(deps.homeDir)] : undefined;
+    this.registry = deps.registry ?? new ComponentInstallRegistry(deps.dataDir, { extraAllowedRoots });
     this.publishers = deps.publishers ?? BUILTIN_PUBLISHERS;
     this.downloader = deps.downloader ?? defaultArtifactDownloader;
     this.codeSignatureVerifier = deps.codeSignatureVerifier ?? defaultCodeSignatureVerifier;
+    this.commandRunner = deps.commandRunner;
     this.downloadTimeoutMs = deps.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
     this.now = deps.now ?? (() => new Date());
   }
@@ -457,6 +490,102 @@ export class InstallComponentAtom {
     if (!approval.ok) return approval;
 
     return this.mutationQueue.enqueue(async () => {
+      // Design Doc M5: Never overwrite or downgrade an already-installed Murmur binary at
+      // `~/.murmurant/bin/murmur` (whether standalone or previously installed by this host;
+      // Murmur's own updater owns upgrades). Always verify its live publisher signature AND
+      // version on disk before reusing it (or return upgrade-required if older than manifest.minVersion).
+      const useUnifiedMurmurPath = manifest.componentId === MURMUR_COMPONENT_ID && Boolean(this.homeDir);
+      if (useUnifiedMurmurPath) {
+        const unifiedBinaryPath = getUnifiedMurmurBinaryPath(this.homeDir!, this.platform);
+        if (existsSync(unifiedBinaryPath)) {
+          const standaloneSig = await this.codeSignatureVerifier(
+            unifiedBinaryPath,
+            publisher.appleTeamId,
+            this.platform,
+          );
+          if (!standaloneSig.ok) {
+            return hostErr(
+              'VERIFICATION_FAILED',
+              `Standalone Murmur binary failed publisher signature verification: ${standaloneSig.reason}`,
+              {
+                componentId: manifest.componentId,
+                installPath: unifiedBinaryPath,
+                publisherId: publisher.id,
+                expectedTeamId: publisher.appleTeamId,
+                actualTeamId: standaloneSig.actualTeamId,
+              },
+            );
+          }
+
+          let detectedVersion: string | undefined;
+          const runVersion = async (): Promise<{ exitCode: number; stdout: string }> => {
+            if (this.commandRunner) {
+              return this.commandRunner({
+                binaryPath: unifiedBinaryPath,
+                argv: ['version'],
+                timeoutMs: 5_000,
+              });
+            }
+            return new Promise(resolve => {
+              execFile(
+                unifiedBinaryPath,
+                ['version'],
+                { encoding: 'utf8', shell: false, timeout: 5_000, maxBuffer: 64 * 1024 },
+                (error, stdout) => {
+                  const exitCode = !error
+                    ? 0
+                    : typeof (error as { code?: unknown }).code === 'number'
+                      ? Number((error as { code: number }).code)
+                      : 1;
+                  resolve({ exitCode, stdout: typeof stdout === 'string' ? stdout : '' });
+                },
+              );
+            });
+          };
+          try {
+            const verRes = await runVersion();
+            if (verRes.exitCode === 0) {
+              const semverMatch = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(verRes.stdout);
+              if (semverMatch?.[1]) {
+                detectedVersion = semverMatch[1];
+              }
+            }
+          } catch {
+            // Fall through to minVersion check.
+          }
+
+          if (!detectedVersion) {
+            return hostErr(
+              'VERIFICATION_FAILED',
+              `Could not determine version of standalone Murmur binary at ${unifiedBinaryPath}`,
+              { componentId: manifest.componentId, installPath: unifiedBinaryPath },
+            );
+          }
+          if (compareSemver(detectedVersion, manifest.minVersion) < 0) {
+            return hostErr(
+              'VERIFICATION_FAILED',
+              `Standalone Murmur v${detectedVersion} is older than required v${manifest.minVersion}`,
+              {
+                componentId: manifest.componentId,
+                installPath: unifiedBinaryPath,
+                detectedVersion,
+                minVersion: manifest.minVersion,
+              },
+            );
+          }
+
+          return hostOk({
+            componentId: manifest.componentId,
+            version: detectedVersion,
+            installPath: unifiedBinaryPath,
+            sha256: computeFileSha256(unifiedBinaryPath),
+            publisherId: publisher.id,
+            alreadyInstalled: true,
+            reusedExisting: true,
+          });
+        }
+      }
+
       // Check if identical version + sha256 + publisher is already installed on disk.
       const existing = this.registry.getInstalled(manifest.componentId);
       if (
@@ -475,11 +604,13 @@ export class InstallComponentAtom {
         });
       }
 
-      const stagingDir = path.join(this.registry.getComponentsRoot(), STAGING_DIR_NAME);
+      const stagingDir = useUnifiedMurmurPath
+        ? getUnifiedMurmurBinDir(this.homeDir!)
+        : path.join(this.registry.getComponentsRoot(), STAGING_DIR_NAME);
       mkdirSync(stagingDir, { recursive: true });
       const stagingFile = path.join(
         stagingDir,
-        `${manifest.componentId}-${process.pid}-${randomBytes(6).toString('hex')}.bin`,
+        `.${manifest.componentId}-${process.pid}-${randomBytes(6).toString('hex')}.bin`,
       );
 
       const urlScopeOpts = {
@@ -524,10 +655,14 @@ export class InstallComponentAtom {
         });
       }
 
-      // 3. Install strictly outside app bundle
-      const fileName = deriveExecutableFileName(manifest.componentId, artifact.url, this.platform);
-      const versionDir = path.join(installDir, manifest.minVersion);
-      const executablePath = path.join(versionDir, fileName);
+      // 3. Install strictly outside app bundle (Murmur uses unified `~/.murmurant/bin` per M5)
+      const executablePath = useUnifiedMurmurPath
+        ? getUnifiedMurmurBinaryPath(this.homeDir!, this.platform)
+        : path.join(
+            path.join(installDir, manifest.minVersion),
+            deriveExecutableFileName(manifest.componentId, artifact.url, this.platform),
+          );
+      const targetDir = path.dirname(executablePath);
 
       if (this.appBundlePath && isPathInside(this.appBundlePath, executablePath)) {
         rmSync(stagingFile, { force: true });
@@ -537,7 +672,7 @@ export class InstallComponentAtom {
         });
       }
 
-      mkdirSync(versionDir, { recursive: true });
+      mkdirSync(targetDir, { recursive: true });
       renameSync(stagingFile, executablePath);
       if (this.platform !== 'win32') {
         chmodSync(executablePath, 0o755);
@@ -614,18 +749,24 @@ export class InstallComponentAtom {
           componentId: params.componentId,
         });
       }
-      if (!isPathInside(this.registry.getComponentsRoot(), current.installDir)) {
-        return hostErr('POLICY_DENIED', 'Refusing to remove directory outside host components root', {
+      if (!this.registry.isAllowedInstallPath(current.executablePath)) {
+        return hostErr('POLICY_DENIED', 'Refusing to remove component outside allowed install roots', {
           componentId: params.componentId,
           installDir: current.installDir,
         });
       }
-      rmSync(current.installDir, { recursive: true, force: true });
+      const inHostComponentsRoot = isPathInside(this.registry.getComponentsRoot(), current.installDir);
+      if (inHostComponentsRoot) {
+        rmSync(current.installDir, { recursive: true, force: true });
+      } else {
+        // Unified user bin directory (e.g. ~/.murmurant/bin): remove ONLY the host-installed binary file.
+        rmSync(current.executablePath, { force: true });
+      }
       this.registry.removeRecord(params.componentId);
       return hostOk({
         componentId: params.componentId,
         removed: true,
-        removedPath: current.installDir,
+        removedPath: inHostComponentsRoot ? current.installDir : current.executablePath,
       });
     }, `atom.installComponent.uninstall:${params.componentId}`);
   }
@@ -697,7 +838,10 @@ export class InstallComponentAtom {
       });
     }
 
-    const installDir = path.join(this.registry.getComponentsRoot(), manifest.componentId);
+    const installDir =
+      manifest.componentId === MURMUR_COMPONENT_ID && this.homeDir
+        ? getUnifiedMurmurBinDir(this.homeDir)
+        : path.join(this.registry.getComponentsRoot(), manifest.componentId);
     if (this.appBundlePath && isPathInside(this.appBundlePath, installDir)) {
       return hostErr('POLICY_DENIED', 'Component install directory must be outside the app bundle', {
         componentId,

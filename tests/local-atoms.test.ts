@@ -394,14 +394,14 @@ describe('atom.config (JSON & TOML surgical merge, conflict detection, backup & 
     ].join('\n');
     writeFileSync(codexTomlPath, initialToml, 'utf8');
 
-    const signedConfig = createSampleSignedConfig(Buffer.from('bin'));
-    const gate = createFeatureConfirmationGate({ dataDir, confirmCallback: async () => true });
+    let activeSignedConfig = createSampleSignedConfig(Buffer.from('bin'));
+    const gate = createFeatureConfirmationGate({ dataDir, shellVersion: '1.0.0', confirmCallback: async () => true });
     const queue = createSerialMutationQueue();
     const configAtom = createConfigAtom({
       dataDir,
       homeDir,
       channel: 'stable',
-      getSignedConfig: () => signedConfig,
+      getSignedConfig: () => activeSignedConfig,
       confirmationGate: gate,
       mutationQueue: queue,
     });
@@ -427,7 +427,26 @@ describe('atom.config (JSON & TOML surgical merge, conflict detection, backup & 
     assert.ok(updatedToml.includes('[mcp_servers.murmur]\nurl = "http://127.0.0.1:3425/mcp"'));
     assert.ok(updatedToml.includes('[mcp_servers.openmotion]\nurl = "https://motion.open-design.ai/mcp"'));
 
-    // 2. Writing a DIFFERENT URL without conflictPolicy='replace' returns CONFLICT
+    // 1b. Writing a different *.open-design.ai URL that disagrees with shell studioUrl is ORIGIN_DENIED
+    const mismatchedOriginRes = await configAtom.write({
+      featureId: 'connect-agents',
+      ruleId: 'codex-mcp',
+      fieldType: 'remote_mcp_entry',
+      value: {
+        serverName: 'openmotion',
+        url: 'https://staging.open-design.ai/mcp',
+      },
+    });
+    assert.equal(mismatchedOriginRes.ok, false);
+    if (!mismatchedOriginRes.ok) {
+      assert.equal(mismatchedOriginRes.error.code, 'ORIGIN_DENIED');
+    }
+
+    // 2. After shell signedConfig migrates studioUrl, writing the new URL without conflictPolicy='replace' returns CONFLICT
+    activeSignedConfig = {
+      ...activeSignedConfig,
+      studioUrl: 'https://staging.open-design.ai',
+    };
     const conflictRes = await configAtom.write({
       featureId: 'connect-agents',
       ruleId: 'codex-mcp',
@@ -461,10 +480,37 @@ describe('atom.config (JSON & TOML surgical merge, conflict detection, backup & 
       assert.equal(readAfterReplace.data.entry?.url, 'https://staging.open-design.ai/mcp');
     }
 
-    // 4. Restore initial backup recovers original file verbatim
-    const restoreRes = await configAtom.restoreBackup({ backupPath: addRes.data.backupPath! });
+    // 4. Restore backup requires valid featureId and recovers original file verbatim
+    const unauthRestore = await configAtom.restoreBackup({ backupPath: addRes.data.backupPath! });
+    assert.equal(unauthRestore.ok, false);
+    if (!unauthRestore.ok) assert.equal(unauthRestore.error.code, 'INVALID_PARAMS');
+
+    const restoreRes = await configAtom.restoreBackup({
+      featureId: 'connect-agents',
+      backupPath: addRes.data.backupPath!,
+    });
     assert.equal(restoreRes.ok, true);
     assert.equal(readFileSync(codexTomlPath, 'utf8'), initialToml);
+
+    // 4b. Legacy stdio entry (command without url) also triggers CONFLICT unless conflictPolicy='replace'
+    writeFileSync(
+      codexTomlPath,
+      '[mcp_servers.openmotion]\ncommand = "npx"\nargs = ["-y", "openmotion-mcp"]\n',
+      'utf8',
+    );
+    const stdioConflictRes = await configAtom.write({
+      featureId: 'connect-agents',
+      ruleId: 'codex-mcp',
+      fieldType: 'remote_mcp_entry',
+      value: {
+        serverName: 'openmotion',
+        url: 'https://staging.open-design.ai/mcp',
+      },
+    });
+    assert.equal(stdioConflictRes.ok, false);
+    if (!stdioConflictRes.ok) {
+      assert.equal(stdioConflictRes.error.code, 'CONFLICT');
+    }
 
     // 5. Security: reject out-of-scope URL and arbitrary backup paths
     const evilUrlRes = await configAtom.write({
@@ -476,7 +522,10 @@ describe('atom.config (JSON & TOML surgical merge, conflict detection, backup & 
     assert.equal(evilUrlRes.ok, false);
     if (!evilUrlRes.ok) assert.equal(evilUrlRes.error.code, 'POLICY_DENIED');
 
-    const badRestore = await configAtom.restoreBackup({ backupPath: '/etc/passwd' });
+    const badRestore = await configAtom.restoreBackup({
+      featureId: 'connect-agents',
+      backupPath: '/etc/passwd',
+    });
     assert.equal(badRestore.ok, false);
     if (!badRestore.ok) assert.equal(badRestore.error.code, 'POLICY_DENIED');
   });
@@ -661,6 +710,33 @@ describe('atom.exec security boundaries & MCP conflict protection', () => {
     });
     assert.equal(uninstalled.ok, false);
     if (!uninstalled.ok) assert.equal(uninstalled.error.code, 'NOT_FOUND');
+
+    // 8. Claude Code conflictPolicy='replace' when ~/.claude.json exists WITHOUT openmotion does NOT invoke `claude mcp remove`
+    writeFileSync(
+      path.join(homeDir, '.claude.json'),
+      JSON.stringify({ mcpServers: { sibling: { type: 'http', url: 'https://other.example/mcp' } } }),
+      'utf8',
+    );
+    const beforeClaudeRuns = executed.length;
+    const claudeCleanAdd = await execAtom.run({
+      featureId: 'connect-agents',
+      templateId: 'claude.mcp.add_remote',
+      args: { serverName: 'openmotion', mcpUrl: 'https://motion.open-design.ai/mcp' },
+      conflictPolicy: 'replace',
+    });
+    assert.equal(claudeCleanAdd.ok, true);
+    const claudeRuns = executed.slice(beforeClaudeRuns);
+    assert.equal(claudeRuns.length, 1);
+    assert.deepEqual(claudeRuns[0]!.argv, [
+      'mcp',
+      'add',
+      '--scope',
+      'user',
+      '--transport',
+      'http',
+      'openmotion',
+      'https://motion.open-design.ai/mcp',
+    ]);
   });
 });
 
@@ -775,6 +851,7 @@ describe('atom.credential secret isolation & stdin-only injection', () => {
 
     const execAtom = createExecAtom({
       homeDir,
+      platform: 'darwin',
       channel: 'stable',
       getSignedConfig: () => signedConfig,
       pathResolver: createPathResolver({
@@ -787,6 +864,7 @@ describe('atom.credential secret isolation & stdin-only injection', () => {
       componentRegistry: registry,
       confirmationGate,
       mutationQueue,
+      codeSignatureVerifier: async (_p, teamId) => ({ ok: true, teamId }),
       commandRunner: async input => {
         capturedCommands.push(input);
         // Simulate buggy binary echoing stdin back to stdout — host must scrub it!
@@ -902,10 +980,18 @@ describe('atom.credential secret isolation & stdin-only injection', () => {
       assert.ok(injectRes.data.stdout.includes('[REDACTED]'));
     }
 
-    // 4. Revoke deletes secret & prevents subsequent inject
+    // 4. Revoke enforces accountId match (denies omitted or wrong accountId), then deletes secret & prevents subsequent inject
+    const omittedAcctRevoke = await credentialAtom.revoke({
+      featureId: 'enable-murmur',
+      credentialId: 'opendesign-runtime',
+    });
+    assert.equal(omittedAcctRevoke.ok, false);
+    if (!omittedAcctRevoke.ok) assert.equal(omittedAcctRevoke.error.code, 'UNAUTHORIZED');
+
     const revokeRes = await credentialAtom.revoke({
       featureId: 'enable-murmur',
       credentialId: 'opendesign-runtime',
+      accountId: 'acct_42',
     });
     assert.equal(revokeRes.ok, true);
     assert.deepEqual(revokedInstallations, ['inst_mac_001']);
@@ -918,6 +1004,114 @@ describe('atom.credential secret isolation & stdin-only injection', () => {
     });
     assert.equal(injectAfterRevoke.ok, false);
     if (!injectAfterRevoke.ok) assert.equal(injectAfterRevoke.error.code, 'UNAUTHORIZED');
+  });
+
+  it('repeated revoke() on pending_revoke uses quarantined Bearer token and cleans up quarantined keychain entry on success', async () => {
+    const dataDir = makeTempDir('om-cred-repeat-revoke-');
+    const binaryBytes = Buffer.from('#!/bin/sh\necho ok\n');
+    const signedConfig = createSampleSignedConfig(binaryBytes);
+    const secretStore = createMemorySecretStore();
+    const mutationQueue = createSerialMutationQueue();
+    const confirmationGate = createFeatureConfirmationGate({ dataDir, shellVersion: '1.0.0', confirmCallback: async () => true });
+    const execAtom = createExecAtom({
+      homeDir: dataDir,
+      platform: 'darwin',
+      channel: 'stable',
+      getSignedConfig: () => signedConfig,
+      pathResolver: createPathResolver({
+        platform: 'darwin',
+        homeDir: dataDir,
+        env: { PATH: '' },
+        loginShellRunner: async () => ({ exitCode: 0, stdout: '' }),
+        fs: { existsSync: () => false, readdirSync: () => [], isExecutableFile: () => false },
+      }),
+      componentRegistry: new ComponentInstallRegistry(dataDir),
+      confirmationGate,
+      mutationQueue,
+    });
+
+    let failRevoke = true;
+    const revokeAuthHeaders: Array<string | undefined> = [];
+    const credentialAtom = createCredentialAtom({
+      dataDir,
+      platform: 'darwin',
+      channel: 'stable',
+      getSignedConfig: () => signedConfig,
+      confirmationGate,
+      mutationQueue,
+      execAtom,
+      secretStore,
+      httpClient: async (url, req) => {
+        if (url.endsWith('/oauth/device/code')) {
+          return {
+            status: 200,
+            body: {
+              device_code: 'dev-code-repeat',
+              user_code: 'RPT-1234',
+              verification_uri: 'https://auth.open-design.ai/device',
+              expires_in: 300,
+              interval: 1,
+            },
+          };
+        }
+        if (url.endsWith('/oauth/token')) {
+          return {
+            status: 200,
+            body: {
+              access_token: 'sk_live_repeat_revoke_secret',
+              account_id: 'acct_repeat',
+              installation_id: 'inst_repeat_001',
+            },
+          };
+        }
+        if (url.endsWith('/oauth/revoke')) {
+          revokeAuthHeaders.push(req.headers?.authorization ?? req.headers?.Authorization);
+          if (failRevoke) return { status: 503, body: { error: 'unavailable' } };
+          return { status: 200, body: { ok: true } };
+        }
+        return { status: 404, body: {} };
+      },
+    });
+
+    const startRes = await credentialAtom.start({ featureId: 'enable-murmur', credentialId: 'opendesign-runtime' });
+    assert.equal(startRes.ok, true);
+    if (!startRes.ok) return;
+    const pollRes = await credentialAtom.poll({
+      featureId: 'enable-murmur',
+      credentialId: 'opendesign-runtime',
+      sessionId: startRes.data.sessionId,
+    });
+    assert.equal(pollRes.ok, true);
+
+    // First revoke fails remotely -> secret quarantined under openmotion:pending-revoke:...
+    const firstRevoke = await credentialAtom.revoke({
+      featureId: 'enable-murmur',
+      credentialId: 'opendesign-runtime',
+      accountId: 'acct_repeat',
+    });
+    assert.equal(firstRevoke.ok, true);
+    if (firstRevoke.ok) assert.equal(firstRevoke.data.pendingRevoke, true);
+    const quarantineKey = 'openmotion:pending-revoke:opendesign-runtime:inst_repeat_001';
+    assert.equal(await secretStore.get(quarantineKey), 'sk_live_repeat_revoke_secret');
+
+    // Second direct revoke() succeeds -> MUST send quarantined Bearer token AND delete quarantineKey!
+    failRevoke = false;
+    const secondRevoke = await credentialAtom.revoke({
+      featureId: 'enable-murmur',
+      credentialId: 'opendesign-runtime',
+      accountId: 'acct_repeat',
+    });
+    assert.equal(secondRevoke.ok, true);
+    if (secondRevoke.ok) {
+      assert.equal(secondRevoke.data.revoked, true);
+      assert.equal(secondRevoke.data.pendingRevoke, false);
+    }
+    assert.deepEqual(revokeAuthHeaders, [
+      'Bearer sk_live_repeat_revoke_secret',
+      'Bearer sk_live_repeat_revoke_secret',
+    ]);
+    assert.equal(await secretStore.get(quarantineKey), null);
+    assert.equal(credentialAtom.listPendingRevokes().length, 0);
   });
 
   it('encrypts secrets at rest in EncryptedFileSecretStore', async () => {

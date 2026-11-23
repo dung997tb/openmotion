@@ -415,7 +415,7 @@ it('wires real /motion-api/connections OAuth evidence and Check sign-in refresh 
     expect(codexRow.textContent).toContain('Config written');
     expect(codexRow.textContent).not.toContain('Authorized & ready');
 
-    // Return active OAuth evidence for Codex in this workspace, plus an inactive Claude entry.
+    // Return an active OAuth token WITHOUT a tool call yet for Codex: must stay configured, NOT authorized.
     connectionsResponse = () =>
       Response.json({
         connections: [
@@ -435,8 +435,52 @@ it('wires real /motion-api/connections OAuth evidence and Check sign-in refresh 
       await Promise.resolve();
     });
 
+    expect(codexRow.getAttribute('data-connection-state')).toBe('configured');
+    expect(codexRow.textContent).toContain('awaiting first tool call');
+    expect(codexRow.textContent).not.toContain('Authorized & ready');
+    expect(claudeRow.getAttribute('data-connection-state')).toBe('configured');
+
+    // Once Codex completes a read-only MCP tool call (`lastUsedAt` populated), it upgrades to Authorized & ready.
+    connectionsResponse = () =>
+      Response.json({
+        connections: [
+          { clientName: 'Codex CLI', workspaceId: 'ws-prod', activeTokenCount: 1, lastUsedAt: '2026-11-23T08:00:00Z' },
+          { clientName: 'Claude Code', workspaceId: 'ws-prod', activeTokenCount: 0, lastUsedAt: null },
+        ],
+      });
+
+    await act(async () => checkSignIn.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
     expect(codexRow.getAttribute('data-connection-state')).toBe('authorized');
     expect(codexRow.textContent).toContain('Authorized & ready');
+    expect(claudeRow.getAttribute('data-connection-state')).toBe('configured');
+    expect(claudeRow.textContent).not.toContain('Authorized & ready');
+
+    // Revoked token with historical lastUsedAt OR omitted activeTokenCount MUST downgrade back to configured!
+    connectionsResponse = () =>
+      Response.json({
+        connections: [
+          { clientName: 'Codex CLI', workspaceId: 'ws-prod', activeTokenCount: 0, lastUsedAt: '2026-11-23T08:00:00Z' },
+          { clientName: 'Claude Code', workspaceId: 'ws-prod', lastUsedAt: '2026-11-23T08:00:00Z' },
+        ],
+      });
+
+    const claudeCheckSignIn = [...claudeRow.querySelectorAll<HTMLButtonElement>('button')].find(
+      node => node.textContent?.trim() === 'Check sign-in',
+    )!;
+    expect(claudeCheckSignIn).toBeDefined();
+    await act(async () => claudeCheckSignIn.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(codexRow.getAttribute('data-connection-state')).toBe('configured');
+    expect(codexRow.textContent).not.toContain('Authorized & ready');
     expect(claudeRow.getAttribute('data-connection-state')).toBe('configured');
     expect(claudeRow.textContent).not.toContain('Authorized & ready');
   } finally {

@@ -46,11 +46,11 @@ jobs:
             pack_script: pack:win:x64
 
     steps:
-      - name: Enforce main-only publish guard
+      - name: Enforce main-only release guard
         shell: bash
         run: |
-          if [ "${{ inputs.publish }}" = "true" ] && [ "${{ github.ref }}" != "refs/heads/main" ]; then
-            echo "::error::Publishing desktop releases is restricted to refs/heads/main (got ${{ github.ref }})."
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::Desktop release workflow is restricted to refs/heads/main (got ${{ github.ref }})."
             exit 1
           fi
 
@@ -69,12 +69,19 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Install desktop Electron dependencies
-        run: npm --prefix desktop install --no-audit --no-fund
+        run: npm --prefix desktop ci --no-audit --no-fund
 
       - name: Typecheck and test desktop shell
         run: |
           npm --prefix desktop run typecheck
-          node --experimental-strip-types --test desktop/tests/updater.test.mjs
+          npm --prefix desktop test
+          node --experimental-strip-types --test \
+            tests/desktop-contracts.test.ts \
+            tests/signed-config.test.ts \
+            tests/desktop-security-audit.test.ts \
+            tests/local-atoms.test.ts \
+            tests/connect-script.test.ts \
+            tests/desktop-showcase-e2e.test.ts
 
       - name: Package macOS installer (${{ matrix.arch }})
         if: matrix.platform == 'darwin'
@@ -100,6 +107,7 @@ jobs:
           fi
           FEED_URL="https://releases.open-design.ai/open-motion/desktop/${{ inputs.channel }}"
           npm --prefix desktop run "${{ matrix.pack_script }}" -- \
+            -c.extraMetadata.openmotionChannel="${{ inputs.channel }}" \
             -c.publish.provider=generic \
             -c.publish.url="${FEED_URL}" \
             -c.publish.channel="${{ inputs.channel }}"
@@ -117,6 +125,7 @@ jobs:
           fi
           FEED_URL="https://releases.open-design.ai/open-motion/desktop/${{ inputs.channel }}"
           npm --prefix desktop run "${{ matrix.pack_script }}" -- \
+            -c.extraMetadata.openmotionChannel="${{ inputs.channel }}" \
             -c.publish.provider=generic \
             -c.publish.url="${FEED_URL}" \
             -c.publish.channel="${{ inputs.channel }}"

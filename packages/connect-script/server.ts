@@ -119,6 +119,11 @@ export function buildStudioPairingUrl(options: {
   token: string;
 }): string {
   const parsed = new URL(options.studioUrl);
+  // Route bare origin or reserved `/mcp` backend path (with or without trailing slash) to `/mcp-setup`.
+  const normalizedPathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  if (normalizedPathname === '/' || normalizedPathname === '/mcp') {
+    parsed.pathname = '/mcp-setup';
+  }
   const hashParams = new URLSearchParams({
     connect_port: String(options.port),
     connect_token: options.token,

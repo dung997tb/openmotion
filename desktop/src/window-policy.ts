@@ -114,7 +114,7 @@ export type WindowOpenPolicyDecision =
 const EXTERNAL_ALLOWED_PROTOCOLS = new Set(['https:', 'http:', 'mailto:']);
 const WEB_PROTOCOLS = new Set(['https:', 'http:']);
 
-const DEFAULT_BILLING_EXACT_HOSTS = new Set([
+const DEFAULT_EXPLICIT_BILLING_HOSTS = new Set([
   'billing.stripe.com',
   'checkout.stripe.com',
   'invoice.stripe.com',
@@ -122,8 +122,16 @@ const DEFAULT_BILLING_EXACT_HOSTS = new Set([
   'checkout.paddle.com',
   'billing.open-design.ai',
   'pay.open-design.ai',
+]);
+
+const DEFAULT_ACCOUNT_PORTAL_HOSTS = new Set([
   'account.open-design.ai',
   'accounts.open-design.ai',
+]);
+
+const DEFAULT_BILLING_EXACT_HOSTS = new Set([
+  ...DEFAULT_EXPLICIT_BILLING_HOSTS,
+  ...DEFAULT_ACCOUNT_PORTAL_HOSTS,
 ]);
 
 const DEFAULT_BILLING_HOST_PREFIXES = ['billing.', 'checkout.', 'pay.'] as const;
@@ -230,24 +238,15 @@ export function isAllowedExternalUrl(rawUrl: string): boolean {
   return true;
 }
 
-/**
- * Identifies billing, checkout, subscription, and external account-portal URLs.
- * Main-window navigations and popups to these URLs are routed to the system browser,
- * and Studio can use this signal to refresh entitlements on window focus return.
- */
-export function isBillingOrAccountPortalUrl(
-  rawUrl: string,
+function isExplicitBillingOnlyUrl(
+  parsed: URL,
   options?: {
     extraHostnames?: readonly string[];
     extraPathPrefixes?: readonly string[];
   },
 ): boolean {
-  const parsed = parseSafeUrl(rawUrl);
-  if (!parsed || !WEB_PROTOCOLS.has(parsed.protocol)) return false;
-  if (parsed.username || parsed.password) return false;
-
   const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
-  if (DEFAULT_BILLING_EXACT_HOSTS.has(host)) {
+  if (DEFAULT_EXPLICIT_BILLING_HOSTS.has(host)) {
     return true;
   }
   if (DEFAULT_BILLING_HOST_PREFIXES.some(prefix => host.startsWith(prefix))) {
@@ -273,7 +272,36 @@ export function isBillingOrAccountPortalUrl(
     }
   }
 
+  for (const billingParam of ['billing', 'checkout', 'subscription', 'upgrade'] as const) {
+    if (parsed.searchParams.has(billingParam)) {
+      return true;
+    }
+  }
+
   return false;
+}
+
+/**
+ * Identifies billing, checkout, subscription, and external account-portal URLs.
+ * Main-window navigations and popups to these URLs are routed to the system browser,
+ * and Studio can use this signal to refresh entitlements on window focus return.
+ */
+export function isBillingOrAccountPortalUrl(
+  rawUrl: string,
+  options?: {
+    extraHostnames?: readonly string[];
+    extraPathPrefixes?: readonly string[];
+  },
+): boolean {
+  const parsed = parseSafeUrl(rawUrl);
+  if (!parsed || !WEB_PROTOCOLS.has(parsed.protocol)) return false;
+  if (parsed.username || parsed.password) return false;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (DEFAULT_BILLING_EXACT_HOSTS.has(host)) {
+    return true;
+  }
+  return isExplicitBillingOnlyUrl(parsed, options);
 }
 
 /**
@@ -312,11 +340,18 @@ export function evaluateNavigationPolicy(
     };
   }
 
-  const isBilling = isBillingOrAccountPortalUrl(parsed.href, {
+  const channel = config.channel ?? 'stable';
+  const allowLocalDevLoopback = Boolean(config.allowLocalDevLoopback && channel === 'dev');
+  const scopeOptions = { channel, allowLocalDevLoopback };
+
+  const billingOptions = {
     extraHostnames: config.billingHostnames,
     extraPathPrefixes: config.billingPathPrefixes,
-  });
-  if (isBilling) {
+  };
+
+  // Explicit billing / checkout / subscription URLs ALWAYS open in the system browser,
+  // even while in-window auth fallback is active.
+  if (isExplicitBillingOnlyUrl(parsed, billingOptions)) {
     return {
       action: 'deny',
       reason: 'billing-external',
@@ -326,9 +361,38 @@ export function evaluateNavigationPolicy(
     };
   }
 
-  const channel = config.channel ?? 'stable';
-  const allowLocalDevLoopback = Boolean(config.allowLocalDevLoopback && channel === 'dev');
-  const scopeOptions = { channel, allowLocalDevLoopback };
+  // While in-window auth fallback is active, allow allowlisted auth origins (including
+  // OIDC redirects to accounts.open-design.ai when explicitly allowlisted) before the
+  // general account-portal external redirect rule.
+  if (config.inWindowAuthFallbackActive) {
+    const signedAuthOrigins = collectValidatedDomainOrigins(
+      config.windowPolicy?.allowedAuthOrigins,
+      scopeOptions,
+    );
+    const idpAuthOrigins = collectValidatedExplicitIdpOrigins(
+      config.explicitIdpAuthOrigins,
+      scopeOptions,
+    );
+    if (signedAuthOrigins.has(parsed.origin) || idpAuthOrigins.has(parsed.origin)) {
+      return {
+        action: 'allow',
+        reason: 'auth-fallback-origin',
+        openExternal: false,
+        isBillingOrAccountPortal: false,
+      };
+    }
+  }
+
+  const isBilling = isBillingOrAccountPortalUrl(parsed.href, billingOptions);
+  if (isBilling) {
+    return {
+      action: 'deny',
+      reason: 'billing-external',
+      openExternal: true,
+      externalUrl: parsed.href,
+      isBillingOrAccountPortal: true,
+    };
+  }
 
   const studioOrigin = normalizeOrigin(config.studioOrigin);
   if (studioOrigin && parsed.origin === studioOrigin) {
@@ -348,25 +412,6 @@ export function evaluateNavigationPolicy(
       openExternal: false,
       isBillingOrAccountPortal: false,
     };
-  }
-
-  if (config.inWindowAuthFallbackActive) {
-    const signedAuthOrigins = collectValidatedDomainOrigins(
-      config.windowPolicy?.allowedAuthOrigins,
-      scopeOptions,
-    );
-    const idpAuthOrigins = collectValidatedExplicitIdpOrigins(
-      config.explicitIdpAuthOrigins,
-      scopeOptions,
-    );
-    if (signedAuthOrigins.has(parsed.origin) || idpAuthOrigins.has(parsed.origin)) {
-      return {
-        action: 'allow',
-        reason: 'auth-fallback-origin',
-        openExternal: false,
-        isBillingOrAccountPortal: false,
-      };
-    }
   }
 
   return {

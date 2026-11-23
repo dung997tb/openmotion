@@ -25,6 +25,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import {
+  canonicalizeUrlForComparison,
   DEFAULT_MCP_SERVER_NAME,
   isBuiltinConfigFieldType,
   validateTypedPlaceholderValue,
@@ -69,7 +70,7 @@ type BackupIndexFile = {
 
 export type AtomConfigRestoreParams = {
   backupPath: string;
-  featureId?: string;
+  featureId: string;
 };
 
 export type AtomConfigRestoreResult = {
@@ -83,6 +84,8 @@ export type ConfigAtomDeps = {
   homeDir?: string;
   channel?: HostReleaseChannel;
   allowLocalDevLoopback?: boolean;
+  expectedMcpUrl?: string;
+  getExpectedMcpUrl?: () => string | undefined;
   getSignedConfig: () => SignedConfigPayload;
   confirmationGate: FeatureConfirmationGate;
   mutationQueue: SerialMutationQueue;
@@ -283,24 +286,38 @@ export function upsertJsonMcpEntry(
           ? existing.transport
           : undefined;
 
-    if (existingUrl !== undefined && existingUrl !== value.url && conflictPolicy !== 'replace') {
+    const urlsMatch =
+      existingUrl !== undefined &&
+      canonicalizeUrlForComparison(existingUrl) === canonicalizeUrlForComparison(value.url);
+
+    if (!urlsMatch && conflictPolicy !== 'replace') {
       return {
         ok: false,
         code: 'CONFLICT',
-        reason: `MCP server "${value.serverName}" is already configured with a different URL`,
-        existingUrl,
+        reason: existingUrl
+          ? `MCP server "${value.serverName}" is already configured with a different URL`
+          : `MCP server "${value.serverName}" is already configured as a local stdio entry`,
+        ...(existingUrl ? { existingUrl } : {}),
       };
     }
 
-    if (existingUrl === value.url && (existingTransport === desiredTransport || (!value.transport && existingTransport))) {
+    if (urlsMatch && (existingTransport === desiredTransport || (!value.transport && existingTransport))) {
       return { ok: true, content: rawText ?? `${JSON.stringify(root, null, 2)}\n`, changed: false };
     }
 
-    cursor[value.serverName] = {
-      ...existing,
-      type: desiredTransport,
-      url: value.url,
-    };
+    if (existingUrl === undefined) {
+      // Replacing a legacy local stdio entry: drop stale command/args fields cleanly.
+      cursor[value.serverName] = {
+        type: desiredTransport,
+        url: value.url,
+      };
+    } else {
+      cursor[value.serverName] = {
+        ...existing,
+        type: desiredTransport,
+        url: value.url,
+      };
+    }
   } else {
     cursor[value.serverName] = {
       type: desiredTransport,
@@ -635,16 +652,23 @@ export function upsertTomlMcpEntry(
     }
   }
 
-  if (existingUrl !== undefined && existingUrl !== value.url && conflictPolicy !== 'replace') {
+  const entryExists = targetHeaderLineIdx !== -1 || inlineLineIdx !== -1;
+  const urlsMatch =
+    existingUrl !== undefined &&
+    canonicalizeUrlForComparison(existingUrl) === canonicalizeUrlForComparison(value.url);
+
+  if (entryExists && !urlsMatch && conflictPolicy !== 'replace') {
     return {
       ok: false,
       code: 'CONFLICT',
-      reason: `MCP server "${value.serverName}" is already configured with a different URL`,
-      existingUrl,
+      reason: existingUrl
+        ? `MCP server "${value.serverName}" is already configured with a different URL`
+        : `MCP server "${value.serverName}" is already configured as a local stdio entry`,
+      ...(existingUrl ? { existingUrl } : {}),
     };
   }
 
-  if (existingUrl === value.url) {
+  if (urlsMatch) {
     return {
       ok: true,
       content: source,
@@ -661,7 +685,24 @@ export function upsertTomlMcpEntry(
       const indent = indentMatch ? indentMatch[1]! : '';
       lines[targetUrlLineIdx] = `${indent}url = "${escapedUrl}"`;
     } else {
-      lines.splice(targetHeaderLineIdx + 1, 0, `url = "${escapedUrl}"`);
+      // Replacing a legacy local stdio section: strip command/args lines in this section before adding url.
+      let sectionEnd = targetHeaderLineIdx + 1;
+      while (sectionEnd < lines.length) {
+        const trimmedLine = lines[sectionEnd]!.trim();
+        if (trimmedLine.startsWith('[')) break;
+        sectionEnd += 1;
+      }
+      const preservedLines = lines.slice(targetHeaderLineIdx + 1, sectionEnd).filter(line => {
+        const kv = parseTomlKeyValueLine(line);
+        if (!kv) return true;
+        return kv.key !== 'command' && kv.key !== 'args';
+      });
+      lines.splice(
+        targetHeaderLineIdx + 1,
+        sectionEnd - (targetHeaderLineIdx + 1),
+        `url = "${escapedUrl}"`,
+        ...preservedLines,
+      );
     }
   } else if (inlineLineIdx !== -1) {
     const originalLine = lines[inlineLineIdx]!;
@@ -724,6 +765,8 @@ export class ConfigAtom {
   private readonly homeDir: string;
   private readonly channel: HostReleaseChannel;
   private readonly allowLocalDevLoopback: boolean;
+  private readonly expectedMcpUrl?: string;
+  private readonly getExpectedMcpUrl?: () => string | undefined;
   private readonly getSignedConfig: () => SignedConfigPayload;
   private readonly confirmationGate: FeatureConfirmationGate;
   private readonly mutationQueue: SerialMutationQueue;
@@ -734,10 +777,22 @@ export class ConfigAtom {
     this.homeDir = deps.homeDir ?? os.homedir();
     this.channel = deps.channel ?? 'stable';
     this.allowLocalDevLoopback = deps.allowLocalDevLoopback ?? false;
+    this.expectedMcpUrl = deps.expectedMcpUrl;
+    this.getExpectedMcpUrl = deps.getExpectedMcpUrl;
     this.getSignedConfig = deps.getSignedConfig;
     this.confirmationGate = deps.confirmationGate;
     this.mutationQueue = deps.mutationQueue;
     this.now = deps.now ?? (() => new Date());
+  }
+
+  private resolveAuthoritativeMcpUrl(signedConfig: SignedConfigPayload): string | undefined {
+    const candidate =
+      this.getExpectedMcpUrl?.()?.trim() ||
+      this.expectedMcpUrl?.trim() ||
+      (signedConfig.studioUrl?.trim()
+        ? `${signedConfig.studioUrl.trim().replace(/\/+$/, '')}/mcp`
+        : undefined);
+    return candidate ? canonicalizeUrlForComparison(candidate) : undefined;
   }
 
   /**
@@ -893,21 +948,28 @@ export class ConfigAtom {
       });
     }
 
-    if (params.featureId) {
-      const signedConfig = this.getSignedConfig();
-      const approval = await this.confirmationGate.ensureApproved({
-        featureId: params.featureId,
-        signedConfig,
-        facts: [
-          {
-            kind: 'modify_file',
-            label: 'Restore config backup',
-            value: record.targetPath,
-          },
-        ],
-      });
-      if (!approval.ok) return approval;
+    if (!params.featureId || typeof params.featureId !== 'string') {
+      return hostErr('INVALID_PARAMS', 'featureId is required to restore a config backup');
     }
+    const signedConfig = this.getSignedConfig();
+    const authCheck = assertFeatureAllowsResource(params.featureId, signedConfig, {
+      kind: 'configRule',
+      id: record.ruleId,
+    });
+    if (!authCheck.ok) return authCheck;
+
+    const approval = await this.confirmationGate.ensureApproved({
+      featureId: params.featureId,
+      signedConfig,
+      facts: [
+        {
+          kind: 'modify_file',
+          label: 'Restore config backup',
+          value: record.targetPath,
+        },
+      ],
+    });
+    if (!approval.ok) return approval;
 
     return this.mutationQueue.enqueue(async () => {
       try {
@@ -1006,6 +1068,23 @@ export class ConfigAtom {
     });
     if (!urlCheck.ok) {
       return hostErr('POLICY_DENIED', urlCheck.reason, { field: 'value.url', url: params.value.url });
+    }
+
+    const authoritativeMcpUrl = this.resolveAuthoritativeMcpUrl(signedConfig);
+    if (
+      params.fieldType === 'remote_mcp_entry' &&
+      authoritativeMcpUrl &&
+      canonicalizeUrlForComparison(urlCheck.value) !== authoritativeMcpUrl
+    ) {
+      return hostErr(
+        'ORIGIN_DENIED',
+        `MCP URL must match the shell-configured endpoint (${authoritativeMcpUrl})`,
+        {
+          field: 'value.url',
+          requestedUrl: urlCheck.value,
+          expectedMcpUrl: authoritativeMcpUrl,
+        },
+      );
     }
 
     if (

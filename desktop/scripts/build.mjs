@@ -62,6 +62,15 @@ export async function buildDesktop() {
     }
   }
 
+  const distScriptsDir = path.join(distDir, 'scripts');
+  mkdirSync(distScriptsDir, { recursive: true });
+  for (const scriptFile of ['diagnostics.mjs', 'zip.mjs', 'diagnostic-redaction.mjs']) {
+    const src = path.join(repoRoot, 'scripts', scriptFile);
+    if (existsSync(src)) {
+      copyFileSync(src, path.join(distScriptsDir, scriptFile));
+    }
+  }
+
   const brandSourceDir = path.join(repoRoot, 'packages', 'design-system', 'brand');
   for (const asset of ['loading-mark.svg', 'loading-wordmark.svg', 'openmotion-logo.svg', 'apple-touch-icon.png']) {
     const src = path.join(brandSourceDir, asset);

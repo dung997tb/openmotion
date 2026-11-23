@@ -46,7 +46,7 @@ export function createBundledDefaultConfigPayload(
     windowPolicy: {
       allowedPopupOrigins: [studioOrigin],
       allowedAuthOrigins: [studioOrigin],
-      allowBlankPopups: false,
+      allowBlankPopups: true,
     },
     featureFlags: {
       mcpConnect: true,

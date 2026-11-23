@@ -381,6 +381,7 @@ describe('Scenario 1: Compromised Renderer / Injected Script (XSS)', () => {
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       ...createMockPathResolverDeps(['codex', 'claude', 'sh', 'bash', 'curl', 'python3']),
@@ -447,6 +448,7 @@ describe('Scenario 1: Compromised Renderer / Injected Script (XSS)', () => {
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       ...createMockPathResolverDeps(['codex', 'claude']),
@@ -513,6 +515,7 @@ describe('Scenario 1: Compromised Renderer / Injected Script (XSS)', () => {
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       ...createMockPathResolverDeps(['codex', 'claude']),
@@ -629,6 +632,7 @@ describe('Scenario 1: Compromised Renderer / Injected Script (XSS)', () => {
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       secretStore: createMemorySecretStore(),
@@ -1034,6 +1038,7 @@ describe('Scenario 1: Compromised Renderer / Injected Script (XSS)', () => {
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       ...createMockPathResolverDeps(['codex', 'claude']),
@@ -1090,6 +1095,7 @@ describe('Scenario 1: Compromised Renderer / Injected Script (XSS)', () => {
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       ...createMockPathResolverDeps(['codex']),
@@ -1407,6 +1413,7 @@ describe('Scenario 2: Compromised Daily Signing Key + Hosted Config Takeover', (
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => signedConfig,
       confirmCallback: async () => true,
       engineHttpProbe: async () => ({ reachable: false }),
@@ -1678,6 +1685,7 @@ describe('Scenario 3: Interrupted Mid-Flow Recovery (Close Page & Re-enter)', ()
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       expectedMcpUrl: EXPECTED_MCP_URL,
       getSignedConfig: () => signedConfig,
       confirmCallback: async req => {
@@ -1759,6 +1767,7 @@ describe('Scenario 3: Interrupted Mid-Flow Recovery (Close Page & Re-enter)', ()
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       expectedMcpUrl: EXPECTED_MCP_URL,
       getSignedConfig: () => signedConfig,
       confirmCallback: async req => {
@@ -1880,6 +1889,7 @@ describe('Scenario 3: Interrupted Mid-Flow Recovery (Close Page & Re-enter)', ()
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => configV1,
       confirmCallback: async req => {
         prompts1.push(req);
@@ -1918,6 +1928,7 @@ describe('Scenario 3: Interrupted Mid-Flow Recovery (Close Page & Re-enter)', ()
       platform: 'darwin',
       arch: 'arm64',
       channel: 'stable',
+      shellVersion: '1.0.0',
       getSignedConfig: () => configV2,
       confirmCallback: async req => {
         prompts2.push(req);

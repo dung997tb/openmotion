@@ -71,6 +71,50 @@ export function normalizeUpdateChannel(channel?: HostReleaseChannel): UpdateFeed
   return channel === 'test' || channel === 'dev' ? 'test' : 'stable';
 }
 
+/**
+ * Resolves the active release channel for Electron startup.
+ * Packaged builds prefer signed-bundle metadata (`openmotionChannel` in
+ * `package.json`, then `app-update.yml` channel/url) before falling back to
+ * the semver prerelease heuristic, so `test` builds with a clean semver
+ * version (e.g. `0.2.1`) do not silently downgrade to `stable`.
+ */
+export function resolvePackagedReleaseChannel(options: {
+  isPackaged: boolean;
+  version: string;
+  envChannel?: string;
+  packageChannel?: string;
+  appUpdateYmlContent?: string;
+}): HostReleaseChannel {
+  if (!options.isPackaged) {
+    const normalizedEnv = options.envChannel?.trim().toLowerCase();
+    if (normalizedEnv === 'stable' || normalizedEnv === 'test' || normalizedEnv === 'dev') {
+      return normalizedEnv;
+    }
+    return 'dev';
+  }
+
+  const normalizedPkg = options.packageChannel?.trim().toLowerCase();
+  if (normalizedPkg === 'stable' || normalizedPkg === 'test') {
+    return normalizedPkg;
+  }
+
+  if (options.appUpdateYmlContent) {
+    const channelMatch = /^\s*channel\s*:\s*['"]?(test|stable)['"]?\s*$/im.exec(
+      options.appUpdateYmlContent,
+    );
+    if (channelMatch?.[1]) {
+      return channelMatch[1].toLowerCase() as UpdateFeedChannel;
+    }
+    const urlMatch = /^\s*url\s*:\s*['"]?([^\s'"]+)['"]?\s*$/im.exec(options.appUpdateYmlContent);
+    if (urlMatch?.[1]) {
+      if (/\/test(?:\/|$)/i.test(urlMatch[1])) return 'test';
+      if (/\/stable(?:\/|$)/i.test(urlMatch[1])) return 'stable';
+    }
+  }
+
+  return options.version.includes('-') ? 'test' : 'stable';
+}
+
 export function resolveUpdateFeedConfig(options?: {
   channel?: HostReleaseChannel;
   feedUrl?: string;

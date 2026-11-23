@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +44,7 @@ import {
   authorizePrivilegedIpcSender,
   authorizeSplashSender,
   HOST_IPC_CHANNELS,
+  resolveAllowedStudioOrigins,
   type PrivilegedIpcGuardOptions,
 } from './ipc-guard.ts';
 import { createDesktopDiagnosticZip, DesktopLogger } from './logger.ts';
@@ -60,7 +61,7 @@ import {
   registerDesktopProtocolClient,
 } from './protocol.ts';
 import { SplashController } from './splash.ts';
-import { DesktopUpdaterController } from './updater.ts';
+import { DesktopUpdaterController, resolvePackagedReleaseChannel } from './updater.ts';
 import {
   attachWindowNavigationPolicies,
   isAllowedExternalUrl,
@@ -87,13 +88,46 @@ if (!singleLock) {
   process.exit(0);
 }
 
-function resolveReleaseChannel(): HostReleaseChannel {
-  const envChannel = process.env.MOTION_DESKTOP_CHANNEL?.trim().toLowerCase();
-  if (envChannel === 'stable' || envChannel === 'test' || envChannel === 'dev') {
-    return envChannel;
+function readBundledPackageChannel(): string | undefined {
+  const candidates = [
+    path.join(app.getAppPath(), 'package.json'),
+    path.resolve(distDir, '..', 'package.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as {
+        openmotionChannel?: unknown;
+      };
+      if (typeof parsed.openmotionChannel === 'string' && parsed.openmotionChannel.trim()) {
+        return parsed.openmotionChannel.trim();
+      }
+    } catch {
+      // Ignore unreadable package metadata and continue fallback chain.
+    }
   }
-  if (!app.isPackaged) return 'dev';
-  return app.getVersion().includes('-') ? 'test' : 'stable';
+  return undefined;
+}
+
+function readBundledAppUpdateYml(): string | undefined {
+  if (!app.isPackaged || !process.resourcesPath) return undefined;
+  const candidate = path.join(process.resourcesPath, 'app-update.yml');
+  try {
+    if (!existsSync(candidate)) return undefined;
+    return readFileSync(candidate, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveReleaseChannel(): HostReleaseChannel {
+  return resolvePackagedReleaseChannel({
+    isPackaged: app.isPackaged,
+    version: app.getVersion(),
+    envChannel: process.env.MOTION_DESKTOP_CHANNEL,
+    packageChannel: readBundledPackageChannel(),
+    appUpdateYmlContent: readBundledAppUpdateYml(),
+  });
 }
 
 const releaseChannel = resolveReleaseChannel();
@@ -129,7 +163,7 @@ const signedConfig = new SignedConfigManager({
 });
 
 function resolveStudioUrl(): string {
-  const envOverride = process.env.MOTION_DESKTOP_STUDIO_URL?.trim();
+  const envOverride = !app.isPackaged ? process.env.MOTION_DESKTOP_STUDIO_URL?.trim() : undefined;
   if (
     envOverride &&
     isUrlInAllowedDomainScope(envOverride, { channel: releaseChannel, allowLocalDevLoopback })
@@ -177,11 +211,11 @@ const updater = new DesktopUpdaterController({
   currentVersion: app.getVersion(),
   isPackaged: app.isPackaged,
   channel: releaseChannel === 'stable' ? 'stable' : 'test',
-  feedUrl: process.env.MOTION_DESKTOP_UPDATE_URL?.trim() || undefined,
+  feedUrl: !app.isPackaged ? process.env.MOTION_DESKTOP_UPDATE_URL?.trim() || undefined : undefined,
 });
 
 const authHandoff = new DesktopAuthHandoffManager({
-  studioOrigin: resolveStudioOrigin(),
+  getStudioOrigin: () => resolveStudioOrigin(),
   openExternal: async url => {
     await shell.openExternal(url);
   },
@@ -241,13 +275,24 @@ const atomsRuntime = createLocalAtomsRuntime({
   channel: releaseChannel,
   allowLocalDevLoopback,
   appBundlePath: app.isPackaged ? process.resourcesPath : undefined,
-  expectedMcpUrl: `${resolveStudioOrigin()}/mcp`,
+  getExpectedMcpUrl: () => `${resolveStudioOrigin()}/mcp`,
+  shellVersion: app.getVersion(),
   getSignedConfig: () => signedConfig.getActiveConfig(),
   confirmCallback: confirmFeatureWithDialog,
 });
 
 const registry = new CapabilityRegistry({
-  sinks: [createWebContentsEventSink(() => mainWindow?.webContents)],
+  sinks: [
+    createWebContentsEventSink(() => {
+      const wc = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+      if (!wc) return null;
+      const auth = authorizePrivilegedIpcSender(
+        { sender: wc, senderFrame: wc.mainFrame },
+        getPrivilegedGuardOptions(),
+      );
+      return auth.ok ? wc : null;
+    }),
+  ],
   onInternalError: ({ capability, method, error }) => {
     logger.error('main', `Capability error in ${capability}.${method}`, {
       error: error instanceof Error ? error.message : String(error),
@@ -310,7 +355,34 @@ function getPrivilegedGuardOptions(): PrivilegedIpcGuardOptions {
     studioUrl: resolveStudioUrl(),
     allowedOrigins: active.allowedOrigins,
     allowLocalDevLoopback,
+    inWindowAuthFallbackActive,
   };
+}
+
+function maybeReloadMainWindowForSignedConfigChange(): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || showingRetryPage) return;
+  const currentUrl = win.webContents.getURL();
+  if (!currentUrl || currentUrl.startsWith('file://')) return;
+  try {
+    const currentOrigin = new URL(currentUrl).origin;
+    const active = signedConfig.getActiveConfig();
+    const allowedOrigins = resolveAllowedStudioOrigins({
+      channel: releaseChannel,
+      studioUrl: resolveStudioUrl(),
+      allowedOrigins: active.allowedOrigins,
+      allowLocalDevLoopback,
+    });
+    if (!allowedOrigins.has(currentOrigin)) {
+      logger.info('main', 'Reloading Studio after signed config origin migration', {
+        previousOrigin: currentOrigin,
+        nextUrl: resolveStudioUrl(),
+      });
+      void loadStudioIntoMainWindow();
+    }
+  } catch {
+    // Ignore malformed current URL.
+  }
 }
 
 function getWindowPolicyConfig(): WindowPolicyConfig {
@@ -419,6 +491,7 @@ async function showRetryPage(info: { code?: string; message?: string; detail?: s
   const win = mainWindow;
   if (!win || win.isDestroyed() || showingRetryPage) return;
   showingRetryPage = true;
+  inWindowAuthFallbackActive = false;
   rendererReady = false;
   const query: Record<string, string> = { theme: currentTheme };
   if (info.code) query.code = info.code;
@@ -432,6 +505,7 @@ async function loadStudioIntoMainWindow(): Promise<void> {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
   showingRetryPage = false;
+  inWindowAuthFallbackActive = false;
   rendererReady = false;
   const targetUrl = resolveStudioUrl();
   logger.info('main', 'Loading cloud Studio URL', { url: targetUrl });
@@ -529,7 +603,12 @@ function registerCapabilities(): void {
         inWindowAuthFallbackActive = true;
         const loginUrl = authHandoff.openInWindowFallback();
         if (mainWindow && !mainWindow.isDestroyed()) {
-          await mainWindow.loadURL(loginUrl);
+          try {
+            await mainWindow.loadURL(loginUrl);
+          } catch (error) {
+            inWindowAuthFallbackActive = false;
+            throw error;
+          }
         }
         return { state: 'in-window', url: loginUrl };
       },
@@ -550,6 +629,7 @@ function registerCapabilities(): void {
           const result = await signedConfig.fetchAndApply();
           if (result.applied && !result.unchanged) {
             registry.emit(HOST_CAPABILITIES.SIGNED_CONFIG, 'updated', signedConfig.getStatus());
+            maybeReloadMainWindowForSignedConfigChange();
           }
           return hostOk(result);
         },
@@ -639,6 +719,25 @@ function registerIpc(): void {
     return hostOk({ ok: true });
   });
 
+  ipcMain.handle(HOST_IPC_CHANNELS.SPLASH_EXPORT_DIAGNOSTICS, async event => {
+    const allowedFiles = [path.join(distDir, 'splash.html'), path.join(distDir, 'retry.html')];
+    const auth =
+      authorizeSplashSender(event, 'exportDiagnostics', {
+        splashWindow: splash?.window,
+        allowedFilePaths: allowedFiles,
+      }).ok
+        ? { ok: true as const }
+        : authorizeSplashSender(event, 'exportDiagnostics', {
+            splashWindow: mainWindow,
+            allowedFilePaths: allowedFiles,
+          });
+    if (!auth.ok) {
+      return auth;
+    }
+    const result = await exportLogsWithDialog();
+    return hostOk(result);
+  });
+
   ipcMain.on(HOST_IPC_CHANNELS.DOM_FULLSCREEN, (event, active: boolean) => {
     const auth = authorizePrivilegedIpcSender(event, getPrivilegedGuardOptions());
     if (!auth.ok) return;
@@ -693,6 +792,7 @@ function createMainWindow(): BrowserWindow {
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // Ignore subframe failures and ERR_ABORTED
     if (validatedURL.startsWith('file://')) return;
+    inWindowAuthFallbackActive = false;
     logger.error('main', 'Cloud Studio load failed', { errorCode, errorDescription, validatedURL });
     void showRetryPage({
       code: `NET_${errorCode}`,
@@ -706,6 +806,22 @@ function createMainWindow(): BrowserWindow {
       event.preventDefault();
       void loadStudioIntoMainWindow();
     }
+  });
+
+  const maybeResetAuthFallback = (url: string) => {
+    if (!inWindowAuthFallbackActive) return;
+    try {
+      const parsed = new URL(url);
+      if (parsed.origin === resolveStudioOrigin() && parsed.pathname !== '/auth' && !parsed.pathname.startsWith('/auth/')) {
+        inWindowAuthFallbackActive = false;
+      }
+    } catch {
+      // Ignore unparseable URLs.
+    }
+  };
+  win.webContents.on('did-navigate', (_event, url) => maybeResetAuthFallback(url));
+  win.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+    if (isMainFrame) maybeResetAuthFallback(url);
   });
 
   win.once('ready-to-show', () => {
@@ -800,6 +916,7 @@ async function bootDesktop(): Promise<void> {
         .then(result => {
           if (result.applied && !result.unchanged) {
             registry.emit(HOST_CAPABILITIES.SIGNED_CONFIG, 'updated', signedConfig.getStatus());
+            maybeReloadMainWindowForSignedConfigChange();
           }
         })
         .catch(() => {});
