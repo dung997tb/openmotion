@@ -441,6 +441,8 @@ export async function markZeroRefForDeletion(
           WHERE av.workspace_id = wb.workspace_id
             AND av.sha256 = wb.sha256
         )
+        AND NOT EXISTS (SELECT 1 FROM project_text_revisions tr WHERE tr.workspace_id = wb.workspace_id
+          AND ((tr.parent_scope = 'workspace' AND tr.parent_id = wb.sha256) OR tr.checkpoint_sha = wb.sha256))
         AND NOT EXISTS (
           SELECT 1
           FROM upload_tickets ut
@@ -511,6 +513,8 @@ export async function finalizeBlobDeletion(
         WHERE av.workspace_id = wb.workspace_id
           AND av.sha256 = wb.sha256
       )
+      AND NOT EXISTS (SELECT 1 FROM project_text_revisions tr WHERE tr.workspace_id = wb.workspace_id
+          AND ((tr.parent_scope = 'workspace' AND tr.parent_id = wb.sha256) OR tr.checkpoint_sha = wb.sha256))
       AND NOT EXISTS (
         SELECT 1
         FROM upload_tickets ut

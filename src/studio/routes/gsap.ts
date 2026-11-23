@@ -13,7 +13,7 @@ import {
   parseGsapAnimationsFromHtml,
   type GsapMutationBody,
 } from '../engine/gsap-mutations.ts';
-import { createWriteToken, formatVersionFromSha256, sha256Hex } from '../etag.ts';
+import { createWriteToken, formatFileVersion, formatVersionFromSha256, sha256Hex } from '../etag.ts';
 
 function resolveGsapFilePath(url: string, markers: readonly string[]): string {
   for (const marker of markers) {
@@ -42,7 +42,7 @@ export function createStudioGsapRoutes(deps: DisklessStudioDeps): Hono<{ Variabl
       return c.json({ error: 'Composition file not found', path: filePath }, 404);
     }
 
-    const etag = `"sha256:${file.file.sha256}:gsap-animations:v1"`;
+    const etag = `${file.version.slice(0, -1)}:gsap-animations:v1"`;
     if (c.req.header('if-none-match')?.trim() === etag) {
       c.header('ETag', etag);
       return c.body(null, 304);
@@ -176,7 +176,13 @@ export function createStudioGsapRoutes(deps: DisklessStudioDeps): Hono<{ Variabl
       });
     }
 
-    const expectedEtag = formatVersionFromSha256(sha256Hex(body.expected));
+    let expectedEtag = formatVersionFromSha256(sha256Hex(body.expected));
+    const observed = await deps.files.getFile(auth, projectId, filePath);
+    if (observed?.blobScope === 'patch') {
+      const text = await deps.files.readTextBlob(auth.workspaceId, observed.blobScope, observed.sha256);
+      if (text !== body.expected) return c.json({ error: 'The file changed before rollback.' }, 409);
+      expectedEtag = formatFileVersion(observed.blobScope, observed.sha256);
+    }
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
 
     try {

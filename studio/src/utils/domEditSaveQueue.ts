@@ -72,6 +72,9 @@ export function createDomEditSaveQueue(options: DomEditSaveQueueOptions = {}): D
       }
       return result;
     } catch (error) {
+      // A stale base is definitive. Its sender already requested an authoritative
+      // refresh; edits in independent files can continue through this queue.
+      if (error instanceof StudioFileConflictError && error.syncLatest) throw error;
       drainError = error;
       consecutiveFailures += 1;
       if (getStudioSaveStatusCode(error) === 409 || consecutiveFailures >= failureThreshold)

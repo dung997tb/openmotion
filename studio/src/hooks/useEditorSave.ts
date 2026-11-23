@@ -125,6 +125,11 @@ export function useEditorSave({
           return { status: "clean" };
         })
         .catch<EditorSaveDrainResult>((error: unknown) => {
+          if (error instanceof StudioFileConflictError && error.syncLatest) {
+            if (pendingCandidateRef.current?.baseline === candidate.baseline) pendingCandidateRef.current = null;
+            showToast(`Couldn't save ${candidate.path}. Loading the latest version.`, "error");
+            return { status: "clean" };
+          }
           reportFailure(candidate.path, error);
           return error instanceof StudioFileConflictError
             ? { status: "conflict", error }
@@ -140,7 +145,7 @@ export function useEditorSave({
       inFlightCandidateRef.current = candidate;
       return task;
     },
-    [recordEdit, reportFailure, setRefreshKey, writeProjectFile],
+    [recordEdit, reportFailure, setRefreshKey, showToast, writeProjectFile],
   );
 
   const handleContentChange = useCallback(

@@ -124,6 +124,6 @@ export const PREVIEW_CANVAS_DRAG = `
     delete sourceVersions[sourceFile];
     pendingDrags.set(drag.id, { ...drag, sha256 });
     drag = null;
-    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
+    return { sourceFile, elementId, hfId, ...sourceIdentity(sha256), left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
   }
 `;

@@ -1,3 +1,6 @@
+import { readVersionedSource } from "./readVersionedSource";
+import { confirmedSource, observeSourceRead } from "./confirmedTextSources";
+import { tryStudioTextEdit } from "./studioTextEdits";
 import type { RebasedFileEdit } from "./rebasedFileEdit";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { getCachedCloudDisklessMode } from "./cloudRuntime";
@@ -6,7 +9,6 @@ import { buildProjectApiPath } from "./projectRouting";
 import type { MutableRefObject } from "react";
 import { serializeStudioFileMutations } from "./studioFileMutationCoordinator";
 import { createStudioSaveHttpError } from "./studioSaveDiagnostics";
-import { studioApiFetch } from "./studioApiFetch";
 
 export type EditContextTarget = HistoryTarget;
 
@@ -82,8 +84,9 @@ interface SaveProjectFilesWithHistoryInput {
 }
 
 export async function readProjectFileContent(pid: string, path: string): Promise<string> {
-  const response = await studioApiFetch(
+  const response = await readVersionedSource(
     buildProjectApiPath(pid, `/files/${encodeURIComponent(path)}`),
+    confirmedSource(pid, path),
   );
   if (!response.ok) {
     throw await createStudioSaveHttpError(response, `Failed to read ${path}`);
@@ -92,6 +95,7 @@ export async function readProjectFileContent(pid: string, path: string): Promise
   if (typeof data.content !== "string") {
     throw new Error(`Missing file contents for ${path}`);
   }
+  observeSourceRead(pid, path, response, data);
   return data.content;
 }
 
@@ -158,6 +162,13 @@ export async function writeProjectFilesWithHistoryInQueue({
   if (changedPaths.length === 0) return [];
 
   const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs });
+  if (changedPaths.length > 1 && !commandForWrite) {
+    const sources = changedPaths.map(path => ({ path, before: diskContent?.[path] ?? snapshots[path].before, after: snapshots[path].after }));
+    if (await tryStudioTextEdit(projectId, sources, history)) {
+      await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
+      return changedPaths;
+    }
+  }
   if (changedPaths.length > 1 && commandForWrite) {
     const edits = changedPaths.flatMap(path => {
       const command = commandForWrite(path);

@@ -36,7 +36,7 @@ export const PREVIEW_INSPECTOR = `
       el.textContent.length + el.childElementCount <= 16384;
     const leafText = text ? Array.from(el.childNodes, n => n.nodeName === 'BR' ? '\\n' : n.textContent || '').join('') : null;
     const src = el.getAttribute('src');
-    return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, sha256,
+    return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, ...sourceIdentity(sha256),
       tag: el.localName, geometry: detail.geometry, inline, computed, data, leafText, lineBreaks: text && el.childElementCount > 0, binding: binding || undefined,
       compositionHost: el.matches('[data-composition-src],[data-composition-file]'),
       compositionRoot: el === document.querySelector('[data-composition-id]'),

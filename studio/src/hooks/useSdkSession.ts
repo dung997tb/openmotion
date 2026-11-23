@@ -1,3 +1,4 @@
+import { observeSourceRead } from "../utils/confirmedTextSources";
 import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { openComposition } from "@hyperframes/sdk";
@@ -8,7 +9,7 @@ import type { PublishSdkSession } from "../utils/sdkCutover";
 import { addExternalFileReloadListener } from "./externalFileReloadBus";
 import { rememberCompositionPosterSource } from "../player/lib/compositionPosterSource";
 import { usePlayerStore, whenPreviewBooted } from "../player/store/playerStore";
-import { studioApiFetch } from "../utils/studioApiFetch";
+import { readVersionedSource, type SourceVersion } from "../utils/readVersionedSource";
 
 /**
  * Why an optional project-file read produced no usable content. `stage: "read"`
@@ -70,7 +71,7 @@ type ProjectFileReadFailure =
   | { ok: false; reason: "invalid_json"; contentType: string }
   | { ok: false; reason: "network"; elapsedMs: number; hidden: boolean };
 
-type ProjectFileReadResult = { ok: true; content: string } | ProjectFileReadFailure;
+type ProjectFileReadResult = { ok: true; content: string; version?: string } | ProjectFileReadFailure;
 
 /** The three ways a 200 can carry no composition — old combined label plus its split. */
 const EMPTY_READ_REASONS = new Set<ProjectFileReadFailure["reason"]>([
@@ -156,6 +157,7 @@ async function httpReadFailureWhy(res: Response): Promise<string | undefined> {
 }
 
 interface ProjectFileBody {
+  version?: string;
   content?: string;
   /** Present only from a server that separates its shim from a real 0-byte file. */
   missing?: boolean;
@@ -173,7 +175,7 @@ interface ProjectFileBody {
  */
 function classifyProjectFileBody(data: ProjectFileBody): ProjectFileReadResult {
   if (typeof data.content !== "string") return { ok: false, reason: "missing_content" };
-  if (data.content !== "") return { ok: true, content: data.content };
+  if (data.content !== "") return { ok: true, content: data.content, ...(typeof data.version === "string" && { version: data.version }) };
   if (data.missing === true) return { ok: false, reason: "absent" };
   if (data.missing === false) return { ok: false, reason: "empty_file" };
   return { ok: false, reason: "absent_or_empty" };
@@ -188,6 +190,7 @@ function classifyProjectFileBody(data: ProjectFileBody): ProjectFileReadResult {
 async function readProjectFileOptional(
   projectId: string,
   path: string,
+  base?: SourceVersion,
 ): Promise<ProjectFileReadResult> {
   // Reject traversal / NUL before building the request URL — `path` is a
   // user-influenced composition path (mirrors the guard in timelineEditingHelpers,
@@ -198,7 +201,7 @@ async function readProjectFileOptional(
   let res: Response;
   const fetchStarted = performance.now();
   try {
-    res = await studioApiFetch(optionalProjectSourceUrl(projectId, path));
+    res = await readVersionedSource(optionalProjectSourceUrl(projectId, path), base);
   } catch {
     return networkReadFailure(fetchStarted);
   }
@@ -220,6 +223,7 @@ async function readProjectFileOptional(
       contentType: res.headers.get("content-type") ?? "",
     };
   }
+  observeSourceRead(projectId, path, res, data);
   const read = classifyProjectFileBody(data);
   if (read.ok) rememberCompositionPosterSource(previewState, projectId, path, read.content);
   return read;
@@ -371,6 +375,7 @@ export function useSdkSession(
   const ownedSessionRef = useRef<OwnedSdkSession | null>(null);
   const sessionOwnersRef = useRef(new WeakMap<Composition, SdkSessionOwner>());
   const generationRef = useRef(0);
+  const confirmedSource = useRef<(SourceVersion & { projectId: string; path: string }) | null>(null);
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const activeCompPathRef = useRef(activeCompPath);
@@ -432,6 +437,7 @@ export function useSdkSession(
     setOwnedSession(null);
     if (previous) disposeSdkSession(previous.session);
 
+    if (confirmedSource.current?.projectId !== projectId || confirmedSource.current?.path !== activeCompPath) confirmedSource.current = null;
     if (!projectId || !activeCompPath) {
       setUnreachableProject(null);
       setCompositionMissing(false);
@@ -451,17 +457,19 @@ export function useSdkSession(
     // the first frame and play do not need it, so it waits for the live preview to boot.
     whenPreviewBooted(projectId)
       .then((booted) =>
-        cancelled || !booted ? null : readProjectFileOptional(projectId, activeCompPath),
+        cancelled || !booted ? null : readProjectFileOptional(projectId, activeCompPath, confirmedSource.current ?? undefined),
       )
       .then(async (read) => {
         if (!read || cancelled) return;
         if (!read.ok) {
+          confirmedSource.current = null;
           handleReadFailure(read, projectId, activeCompPath);
           return;
         }
         setUnreachableProject(null);
         setCompositionMissing(false);
         const content = read.content;
+        confirmedSource.current = read.version ? { projectId, path: activeCompPath, content, version: read.version } : null;
         // No persist queue: Studio's writeProjectFile (via sdkCutover's
         // persistSdkSerialize) is the SINGLE writer. Wiring the SDK persist
         // queue too would double-write the file (queue auto-writes on every

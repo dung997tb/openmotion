@@ -1,3 +1,4 @@
+import type { BlobScope } from '../contracts/storage.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 export { computePreviewImpact, type PreviewImpact } from '../../shared/preview-impact.ts';
@@ -21,6 +22,10 @@ export function fileContentVersion(content: string | Buffer | Uint8Array): strin
 /** Build strong ETag directly from an existing 64-char lowercase SHA-256 hex digest. */
 export function formatVersionFromSha256(sha256: string): string {
   return `"sha256:${sha256}"`;
+}
+
+export function formatFileVersion(scope: BlobScope, id: string): string {
+  return scope === 'patch' ? `"patch:${id}"` : formatVersionFromSha256(id);
 }
 
 /** Extract lowercase 64-char SHA-256 hex from a strong ETag `"sha256:<hex>"`, or null if malformed. */

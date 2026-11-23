@@ -1,4 +1,7 @@
+import { prepareFullBaseline } from './text-patch-boundaries.ts';
+import { appendTextRevisions, commitTextEdits, type PendingTextRevision, type TextEditIdentity } from './project-text-edits.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import { isUtf8 } from 'node:buffer';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
@@ -12,6 +15,7 @@ import { catalogTemplateFiles, workspaceBlobs } from '../db/schema/blobs-assets.
 import { idempotencyReceipts, jobs } from '../db/schema/jobs.ts';
 import {
   projectFiles,
+  projectTextRevisions,
   projectHistoryEntries,
   projectVersionFiles,
   projectVersions,
@@ -20,7 +24,7 @@ import {
 } from '../db/schema/project-files.ts';
 import { projectGrants, projects } from '../db/schema/projects.ts';
 import { projectChannel, workspaceCatalogChannel } from '../infra/redis.ts';
-import { assertTenantScopedKey, catalogBlobKey, workspaceBlobKey } from '../infra/storage.ts';
+import { assertTenantScopedKey, catalogBlobKey, textRevisionKey, workspaceBlobKey } from '../infra/storage.ts';
 import {
   assertWritableProjectPath,
   computeProjectRevision,
@@ -31,7 +35,7 @@ import {
 import {
   computePreviewImpact,
   createWriteToken,
-  formatVersionFromSha256,
+  formatFileVersion,
   getMimeType,
   sha256Hex,
 } from '../studio/etag.ts';
@@ -66,6 +70,7 @@ export interface ProjectFilesServiceDeps {
   readonly historyCoalesceWindowMs?: number;
   /** Optional clock provider for deterministic tests. Defaults to `() => new Date()`. */
   readonly now?: () => Date;
+  readonly textPatchWrites?: boolean;
 }
 
 export type ProjectFileOp =
@@ -107,6 +112,7 @@ export interface FilePrecondition {
 export interface CommitProjectFilesInput {
   readonly projectId: string;
   readonly ops: readonly ProjectFileOp[];
+  readonly textRevisions?: readonly PendingTextRevision[];
   readonly expectedRevision?: string;
   readonly expectedVersionId?: string;
   readonly filePreconditions?: readonly FilePrecondition[];
@@ -221,6 +227,7 @@ export function isBinaryBuffer(buffer: Buffer): boolean {
 }
 
 export function resolveBlobStorageKey(workspaceId: string, blobScope: BlobScope, sha256: string): string {
+  if (blobScope === 'patch') return textRevisionKey(workspaceId, sha256);
   const key = blobScope === 'catalog' ? catalogBlobKey(sha256) : workspaceBlobKey(workspaceId, sha256);
   return assertTenantScopedKey(workspaceId, key, { allowCatalog: blobScope === 'catalog' });
 }
@@ -229,7 +236,7 @@ export function canonicalInputHash(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-async function readCommitReceipt(
+export async function readCommitReceipt(
   db: DbExecutor, workspaceId: string, scope: string, requestId: string, inputHash: string, lock = false,
 ): Promise<CommitProjectFilesResult | null> {
   const query = db
@@ -368,9 +375,11 @@ export class ProjectFilesService {
   private readonly eventBus?: EventBusPort;
   private readonly historyCoalesceWindowMs: number;
   private readonly nowFn: () => Date;
+  readonly textPatchWrites: boolean;
 
   constructor(deps: ProjectFilesServiceDeps) {
     this.db = deps.db;
+    this.textPatchWrites = deps.textPatchWrites ?? false;
     this.storage = deps.storage;
     this.hotTextCache = deps.hotTextCache;
     this.eventBus = deps.eventBus;
@@ -480,7 +489,7 @@ export class ProjectFilesService {
         .from(workspaceBlobs)
         .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), eq(workspaceBlobs.sha256, sha256)));
       metadata = blobRows[0]?.metadata ?? null;
-    } else {
+    } else if (row.blobScope === 'catalog') {
       const catRows = await this.db
         .select({ metadata: catalogTemplateFiles.metadata })
         .from(catalogTemplateFiles)
@@ -503,7 +512,7 @@ export class ProjectFilesService {
 
   /** Read a text blob via SHA-256 HotTextCache -> S3 CAS fallback + async cache warm. */
   async readTextBlob(workspaceId: string, blobScope: BlobScope, sha256: string): Promise<string> {
-    if (this.hotTextCache) {
+    if (this.hotTextCache && blobScope !== 'patch') {
       try {
         const cached = await this.hotTextCache.getText(sha256);
         if (cached !== null) return cached;
@@ -516,7 +525,7 @@ export class ProjectFilesService {
     const buffer = await this.storage.getObjectBuffer(key, MAX_TEXT_FILE_BYTES);
     const content = buffer.toString('utf8');
 
-    if (this.hotTextCache) {
+    if (this.hotTextCache && blobScope !== 'patch') {
       void this.hotTextCache.setText(sha256, content).catch(() => {});
     }
     return content;
@@ -545,7 +554,7 @@ export class ProjectFilesService {
       if (requested.get(file.path) !== 'asset' && !file.isText) {
         throw new CloudError('INVALID_ARGUMENT', 'A composition must be a text file', { status: 415 });
       }
-      versions.set(file.path, formatVersionFromSha256(file.sha256.trim()));
+      versions.set(file.path, formatFileVersion(file.blobScope, file.sha256.trim()));
     }
     for (const path of requested.keys()) {
       if (!versions.has(path) && requested.get(path) === 'optional-text') {
@@ -558,6 +567,25 @@ export class ProjectFilesService {
       sources.set(file.path, await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256.trim()));
     }));
     return { kind: 'inputs' as const, revision: project.revision.trim(), versionId: project.currentVersionId, versions, sources, filesByPath: new Map(rows.map(file => [file.path, file] as const)) };
+  }
+
+  /** MCP supplies a project snapshot. Only files actually used by an edit need to match. */
+  async checkObservedFiles(ctx: AuthContext, projectId: string, expected: {expectedVersionId: string; expectedRevision: string},
+    versions: ReadonlyMap<string, string | null>): Promise<void> {
+    if (!isUuid(expected.expectedVersionId)) {
+      throw new CloudError('INVALID_ARGUMENT', 'Invalid project version ID', {status: 400, applied: false});
+    }
+    const [snapshot] = await this.db.select({revision: projectVersions.revision}).from(projectVersions).where(and(
+      eq(projectVersions.workspaceId, ctx.workspaceId), eq(projectVersions.projectId, projectId), eq(projectVersions.id, expected.expectedVersionId)));
+    if (!snapshot || snapshot.revision !== expected.expectedRevision) throw new CloudError('VERSION_CONFLICT',
+      'The original project snapshot is unavailable', {status: 409, applied: false});
+    const entries = await this.db.select().from(projectVersionFiles).where(and(eq(projectVersionFiles.versionId, expected.expectedVersionId),
+      eq(projectVersionFiles.projectId, projectId), inArray(projectVersionFiles.path, [...versions.keys()])));
+    const observed = new Map(entries.map(entry => [entry.path, formatFileVersion(entry.blobScope, entry.sha256)]));
+    for (const [path, currentVersion] of versions) {
+      if ((observed.get(path) ?? null) !== currentVersion) throw new CloudError('VERSION_CONFLICT', 'An input file was changed',
+        {status: 409, applied: false, details: {path, currentVersion}});
+    }
   }
 
   async readTextForCommand(ctx: AuthContext, projectId: string, path: string, scope: string, requestId: string, inputHash: string) {
@@ -583,15 +611,24 @@ export class ProjectFilesService {
       throw new CloudError('INVALID_ARGUMENT', `File "${file.path}" is binary and cannot be read as text.`, {
         status: 415,
         applied: false,
-        details: { why: 'binary', path: file.path, version: formatVersionFromSha256(file.sha256) },
+        details: { why: 'binary', path: file.path, version: formatFileVersion(file.blobScope, file.sha256) },
       });
     }
     const content = await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256);
     return {
       file,
       content,
-      version: formatVersionFromSha256(file.sha256),
+      version: formatFileVersion(file.blobScope, file.sha256),
     };
+  }
+
+  /** The caller resolves revisionId from the authorized project's file manifest. */
+  async readParentPatch(workspaceId: string, projectId: string, revisionId: string, baseVersion: string) {
+    const [row] = await this.db.select({
+      parentScope: projectTextRevisions.parentScope, parentId: projectTextRevisions.parentId, patch: projectTextRevisions.patch,
+    }).from(projectTextRevisions).where(and(eq(projectTextRevisions.workspaceId, workspaceId),
+      eq(projectTextRevisions.projectId, projectId), eq(projectTextRevisions.id, revisionId)));
+    return row && formatFileVersion(row.parentScope, row.parentId) === baseVersion ? row.patch : undefined;
   }
 
   /** Read a single file as raw Buffer from S3 CAS. */
@@ -607,7 +644,7 @@ export class ProjectFilesService {
     return {
       file,
       buffer,
-      version: formatVersionFromSha256(file.sha256),
+      version: formatFileVersion(file.blobScope, file.sha256),
     };
   }
 
@@ -631,7 +668,7 @@ export class ProjectFilesService {
     return {
       file,
       url,
-      etag: formatVersionFromSha256(file.sha256),
+      etag: formatFileVersion(file.blobScope, file.sha256),
     };
   }
 
@@ -693,11 +730,15 @@ export class ProjectFilesService {
    * 6. Canonical SHA-256 `revision` recomputation + unified PG version & history append
    * 7. Post-commit `HotTextCache` warm + `RedisEventBus` notification (`om:project:{wid}:{pid}`).
    */
+  async commitTextEdits(ctx: AuthContext, projectId: string, body: unknown, identity: TextEditIdentity) {
+    return commitTextEdits(this, this.db, this.storage, ctx, projectId, body, identity);
+  }
+
   async commitChanges(ctx: AuthContext, input: CommitProjectFilesInput): Promise<CommitProjectFilesResult> {
     assertValidUuid(ctx.workspaceId, 'workspaceId');
     assertValidUuid(input.projectId, 'projectId');
 
-    if (input.ops.length > MAX_BATCH_FILE_OPS) {
+    if (input.ops.length + (input.textRevisions?.length ?? 0) > MAX_BATCH_FILE_OPS) {
       throw new CloudError('INVALID_ARGUMENT', `Too many file operations in one commit (max ${MAX_BATCH_FILE_OPS}).`, {
         status: 400,
         applied: false,
@@ -909,7 +950,7 @@ export class ProjectFilesService {
   private async executeCommitTransaction(
     ctx: AuthContext,
     input: CommitProjectFilesInput,
-    preparedOps: readonly PreparedFileOp[],
+    stagedOps: readonly PreparedFileOp[],
     uploads: ReadonlyMap<string, PreparedBlobUpload>,
     writeToken: string,
     scope: string,
@@ -998,7 +1039,7 @@ export class ProjectFilesService {
         for (const pre of input.filePreconditions) {
           const safePath = normalizeSafeProjectPath(pre.path);
           const existing = currentByPath.get(safePath);
-          const currentVersion = existing ? formatVersionFromSha256(existing.sha256) : null;
+          const currentVersion = existing ? formatFileVersion(existing.blobScope, existing.sha256) : null;
 
           if (pre.ifNoneMatch === '*') {
             if (existing) {
@@ -1035,6 +1076,18 @@ export class ProjectFilesService {
           }
         }
       }
+
+      if (this.textPatchWrites) {
+        for (const upload of uploads.values()) {
+          if (upload.textContent !== undefined && upload.buffer.length <= MAX_TEXT_FILE_BYTES &&
+              isUtf8(upload.buffer)) {
+            await prepareFullBaseline(tx, {workspaceId: ctx.workspaceId, projectId: project.id,
+              scope: 'workspace', id: upload.sha256, bytes: upload.buffer});
+          }
+        }
+      }
+      const preparedOps: readonly PreparedFileOp[] = input.textRevisions?.length
+        ? [...stagedOps, ...await appendTextRevisions(tx, ctx.workspaceId, project.id, input.textRevisions)] : stagedOps;
 
       // 5. Compute next live file map and diff.
       const nextByPath = new Map(currentByPath);
@@ -1100,7 +1153,7 @@ export class ProjectFilesService {
         touchedVersionFiles: Map<string, { blobScope: BlobScope; sha256: string }>;
       } | null = null;
 
-      const isInteractiveStudioEdit =
+      const isInteractiveStudioEdit = !this.textPatchWrites &&
         effectiveSource === 'studio' &&
         (input.origin === undefined || input.origin === 'studio') &&
         input.actorKind !== 'agent' &&
@@ -1579,7 +1632,7 @@ export class ProjectFilesService {
       for (const filePath of versionPaths) {
         const entry = nextByPath.get(filePath);
         if (entry) {
-          versionsByPath[filePath] = formatVersionFromSha256(entry.sha256);
+          versionsByPath[filePath] = formatFileVersion(entry.blobScope, entry.sha256);
         }
       }
 

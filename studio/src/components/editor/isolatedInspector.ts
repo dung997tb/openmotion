@@ -58,7 +58,7 @@ export async function inspectIsolatedElement(adapter: PreviewAdapter, identity: 
   return {
     element, id: id || undefined, hfId: hfId || undefined, selector, sourceFile, compositionPath: sourceFile,
     label: id || hfId || tag, tagName: tag, ...flags, boundingBox: geometry, inlineStyles, computedStyles, dataAttributes,
-    existsInSource: true, textContent, isolatedTarget: { sourceFile, sha256: snapshot.sha256, elementId: id, hfId, binding: snapshot.binding },
+    existsInSource: true, textContent, isolatedTarget: { sourceFile, sha256: snapshot.sha256, ...(snapshot.fileVersion && {fileVersion: snapshot.fileVersion}), elementId: id, hfId, binding: snapshot.binding },
     textFields: textContent === null ? [] : [{ key: "self", label: "Text", value: textContent, tagName: tag,
       attributes: [], inlineStyles, computedStyles, preserveLineBreaks: snapshot.lineBreaks === true, source: "self" as const }],
     capabilities: resolveDomEditCapabilities({ ...flags, selector, tagName: tag, inlineStyles, computedStyles,
