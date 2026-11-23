@@ -82,6 +82,7 @@ function ProjectHistoryPanel({ onRestored = reloadProject, compact = false, allo
 
   useEffect(() => {
     mounted.current = true;
+    let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
       if (!pending.current || running.current || activeRead.current) return;
@@ -102,8 +103,10 @@ function ProjectHistoryPanel({ onRestored = reloadProject, compact = false, allo
       if (id === projectId && (event === 'history-changed' || event === 'connected')) scheduleRead.current();
     });
     pending.current = true;
-    void read();
+    // StrictMode replays mount effects in development. Only start the read for the surviving mount.
+    queueMicrotask(() => { if (!disposed) void read(); });
     return () => {
+      disposed = true;
       mounted.current = false; pending.current = false; scheduleRead.current = () => {};
       unsubscribe(); clearTimeout(timer); activeRead.current?.abort();
       activeRead.current = null;

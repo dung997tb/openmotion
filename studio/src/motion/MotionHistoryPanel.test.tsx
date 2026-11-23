@@ -44,6 +44,15 @@ const click = async (text: string) => { await act(async () => button(text).click
 const render = async () => { await act(async () => root.render(<I18nProvider initialLocale="zh-CN"><MotionHistoryPanel onRestored={onRestored} /></I18nProvider>)); };
 const advance = async (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
+it('opens once when the development shell replays mount effects', async () => {
+  setCachedCloudDisklessMode(true);
+  await act(async () => root.render(<React.StrictMode><I18nProvider initialLocale="zh-CN">
+    <MotionHistoryPanel onRestored={onRestored} />
+  </I18nProvider></React.StrictMode>));
+  expect(calls).toHaveLength(1);
+  expect(button('first edit')).toBeTruthy();
+});
+
 it('reads cloud history on open, matching edits and reconnect without polling while idle', async () => {
   vi.useFakeTimers();
   setCachedCloudDisklessMode(true);
