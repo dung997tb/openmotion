@@ -557,7 +557,7 @@ export class ProjectFilesService {
     await Promise.all(rows.filter(file => requested.get(file.path) !== 'asset').map(async file => {
       sources.set(file.path, await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256.trim()));
     }));
-    return { kind: 'inputs' as const, versions, sources, filesByPath: new Map(rows.map(file => [file.path, file] as const)) };
+    return { kind: 'inputs' as const, revision: project.revision.trim(), versionId: project.currentVersionId, versions, sources, filesByPath: new Map(rows.map(file => [file.path, file] as const)) };
   }
 
   async readTextForCommand(ctx: AuthContext, projectId: string, path: string, scope: string, requestId: string, inputHash: string) {
@@ -1571,7 +1571,12 @@ export class ProjectFilesService {
       const impact = computePreviewImpact([...sortedChanged, ...sortedDeleted]);
 
       const versionsByPath: Record<string, string> = {};
-      for (const filePath of sortedChanged) {
+      // Return the verified versions of unchanged command inputs too. A rebased
+      // no-op must acknowledge the current file, including on receipt replay.
+      const versionPaths = input.commandReceipt
+        ? new Set([...sortedChanged, ...(input.filePreconditions ?? []).map(pre => pre.path)])
+        : sortedChanged;
+      for (const filePath of versionPaths) {
         const entry = nextByPath.get(filePath);
         if (entry) {
           versionsByPath[filePath] = formatVersionFromSha256(entry.sha256);
