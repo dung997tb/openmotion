@@ -1603,7 +1603,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     const base = '/api/projects/' + projectId;
     const path = 'scene.html';
     const file = base + '/files/' + path;
-    const html = '<html><body><main data-composition-id="scene" data-duration="10"><audio data-hf-id="song" src="music.mp3" data-start="0" data-duration="10"></audio></main></body></html>';
+    const html = '<html><body><main data-composition-id="scene" data-duration="10"><span id="other"></span><audio id="singer" data-hf-id="song" src="music.mp3" data-start="0" data-duration="10"></audio></main></body></html>';
     assert.equal((await app.request(file, { method: 'PUT', headers: { 'If-None-Match': '*' }, body: html })).status, 200);
     const etag = (await app.request(file)).headers.get('etag')!;
     const edit = (requestId: string, command: unknown) => post(base + '/edits/' + path, command,
@@ -1646,6 +1646,11 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
       operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
     }] });
     assert.equal(oldSelector.status, 409);
+    const previousId = await edit('reused-id', { kind: 'editElements', patches: [{
+      target: { hfId: 'song', id: 'other' },
+      operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
+    }] });
+    assert.equal(previousId.status, 409);
     const final = await (await app.request(file)).json();
     const audio = final.content.match(/<audio[^>]*>/)?.[0] ?? '';
     assert.match(audio, /data-duration="6"/);

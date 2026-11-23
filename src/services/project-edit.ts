@@ -1,3 +1,5 @@
+import { walkCompositionDescendants } from '@hyperframes/parsers/hf-ids';
+import { parseSourceDocument, type SourceMutationTarget } from '@hyperframes/studio-server/source-mutation';
 import { hasRelativeLutSource } from '../../packages/edit-core/color-grading.ts';
 import { applyProjectEdit, locateEdit, type CompositionEdit, type EditRequest } from '../../packages/edit-core/commands.ts';
 import { contentDependencies, isContentCommand } from '../../packages/edit-core/content-schema.ts';
@@ -42,6 +44,28 @@ function dependencies(command: CompositionEdit) {
 // can point at a different child after another editor restructures the HTML.
 function stableTarget(target: { hfId?: string; id?: string | null }) {
   return target.hfId || target.id ? { hfId: target.hfId, id: target.id } : undefined;
+}
+
+function targetsStillMatch(source: string, targets: SourceMutationTarget[]): boolean {
+  // Match within nested composition templates as well. An SDK fallback to the
+  // first DOM match would silently retarget ambiguous edits after restructuring.
+  const identities = targets.map(target => [
+    ...(target.hfId ? ['hf:' + target.hfId] : []),
+    ...(target.id ? ['id:' + target.id] : []),
+  ]);
+  const matches = new Map<string, Element | null | undefined>(identities.flat().map(key => [key, undefined]));
+  const { document } = parseSourceDocument(source);
+  walkCompositionDescendants(document, element => {
+    const record = (key: string) => {
+      if (matches.has(key)) matches.set(key, matches.get(key) === undefined ? element : null);
+    };
+    record('hf:' + (element.getAttribute('data-hf-id') ?? ''));
+    record('id:' + (element.getAttribute('id') ?? ''));
+  });
+  return identities.every(keys => {
+    const first = matches.get(keys[0]);
+    return Boolean(first) && keys.every(key => matches.get(key) === first);
+  });
 }
 
 const snapshotAttributes = new Set(['style', 'class', 'id', 'data-hf-id', 'data-composition-variables', 'data-variable-values']);
@@ -133,7 +157,8 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
         throw invalid('Beat markers require a project audio or video asset');
       }
     }
-    const { sources, versions } = snapshot;
+    const { versions } = snapshot;
+    const sources = new Map(snapshot.sources);
     const rebased = guard.source === 'agent'
       ? snapshot.revision !== guard.expectedRevision || snapshot.versionId !== guard.expectedVersionId
       : Object.entries(guard.versions).some(([path, expected]) => versions.get(path) !== expected);
@@ -164,6 +189,15 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
       }
       try {
         const before = sources.get(path)!;
+        if (rebased) {
+          const targets = command.kind === 'editElements' ? command.patches.map(patch => patch.target)
+            : command.kind === 'setCanvasBox' || command.kind === 'moveCanvasElement' ? [command.target] : [];
+          if (targets.length && !targetsStillMatch(before, targets)) {
+            throw new CloudError('VERSION_CONFLICT', 'The edited canvas element changed identity.', {
+              status: 409, applied: false, details: { path, currentVersion: versions.get(path), currentContent: snapshot.sources.get(path) },
+            });
+          }
+        }
         const edited = await applyProjectEdit(before, command, sources);
         if (edited.content !== before) {
           sources.set(path, edited.content);
