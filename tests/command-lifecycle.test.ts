@@ -6,15 +6,36 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { execute } from '../hyperframes.ts';
 
+async function linuxProcessState(pid: number, readStat = (id: number) => readFile(`/proc/${id}/stat`, 'utf8')) {
+  try {
+    const stat = await readStat(pid);
+    return stat.match(/\) ([A-Z]) /)?.[1];
+  } catch (error) {
+    // A PID can vanish before open (ENOENT) or after open while procfs reads its stat (ESRCH).
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ESRCH') return 'X';
+    throw error;
+  }
+}
+
 async function processState(pid: number) {
+  if (process.platform === 'linux') return linuxProcessState(pid);
   try { process.kill(pid, 0); } catch (error) { assert.equal((error as NodeJS.ErrnoException).code, 'ESRCH'); return 'X'; }
-  if (process.platform === 'linux') return readFile(`/proc/${pid}/stat`, 'utf8').then(text => text.match(/\) ([A-Z]) /)?.[1], error => { if (error.code === 'ENOENT') return 'X'; throw error; });
   // macOS can also expose an exited grandchild until its new parent reaps it.
   const result = spawnSync('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8' });
   if (result.error) throw result.error;
   assert.ok(result.status === 0 || result.status === 1 && !result.stdout.trim() && !result.stderr.trim(), result.stderr);
   return result.status === 1 ? 'X' : result.stdout.trim()[0];
 }
+
+test('Linux process probe recognizes both reaping races and preserves other read failures', async () => {
+  for (const code of ['ENOENT', 'ESRCH', 'EACCES']) {
+    const failure = Object.assign(new Error(code), { code });
+    const state = linuxProcessState(42, async () => { throw failure; });
+    if (code === 'EACCES') await assert.rejects(state, failure);
+    else assert.equal(await state, 'X');
+  }
+});
 
 test('detached render environment reaches the child while execution timeout still cancels it', async () => {
   await assert.rejects(execute(process.execPath, ['-e', 'process.stderr.write("detached="+process.env.HYPERFRAMES_RENDER_DETACHED);setInterval(()=>{},1000)'], tmpdir(), 500,
