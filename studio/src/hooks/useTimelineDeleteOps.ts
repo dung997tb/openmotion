@@ -1,3 +1,6 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
+import { mainVisualTrack } from "../player/components/timelineLinkage";
 import { buildProjectApiPath } from "../utils/projectRouting";
 // Timeline clip deletion: the marquee/multi path and the single-clip wrapper
 // the context menu uses. Extracted verbatim from useTimelineEditing.ts to keep
@@ -108,9 +111,33 @@ export function useTimelineDeleteOps({
         // Shared with the ripple move below so a folded ripple is one undo step with the delete.
         const step = timingGestureStep("main-track-ripple-delete");
         const deleteHistoryLabel = "Delete timeline clip";
+        const cloudDelete = getCachedCloudDisklessMode();
+        const removing = cloudDelete ? selection : sameFile;
         let rollbackDuration = () => {};
         try {
-          await saveServerRewriteWithHistory({
+          if (cloudDelete) {
+            const groups = new Map<string, typeof selection>();
+            for (const clip of removing) {
+              const path = clip.sourceFile || activeCompPath || "index.html";
+              const group = groups.get(path) ?? [];
+              group.push(clip);
+              groups.set(path, group);
+            }
+            await saveCloudTimeline(pid, [...groups].map(([path, clips]) => {
+              const peers = timelineElements.filter(el => (el.sourceFile || activeCompPath || "index.html") === path);
+              const main = mainVisualTrack(peers);
+              const anchor = usePlayerStore.getState().rippleEditEnabled && clips.find(el => el.track === main);
+              const rippleTrack = anchor ? anchor.authoredTrack ?? anchor.track : undefined;
+              // Legacy files can share an authored track across audio/visual zones or overlap into spill rows.
+              const splitLane = rippleTrack !== undefined && peers.some(el =>
+                el.track !== main && (el.authoredTrack ?? el.track) === rippleTrack,
+              );
+              return { path, command: resolve => ({
+                kind: "deleteClips", hfIds: clips.map(resolve), rippleTrack,
+                ...(splitLane && { rippleMembers: peers.filter(el => el.track === main).map(resolve) }),
+              }) };
+            }), writeProjectFile, recordEdit, deleteHistoryLabel);
+          } else await saveServerRewriteWithHistory({
             projectId: pid,
             path: targetPath,
             label: deleteHistoryLabel,
@@ -163,8 +190,8 @@ export function useTimelineDeleteOps({
           throw error;
         }
 
-        removeIframeTimelineElements(previewIframeRef.current, sameFile, activeCompPath);
-        const deletedKeys = new Set(sameFile.map((te) => te.key ?? te.id));
+        removeIframeTimelineElements(previewIframeRef.current, removing, activeCompPath);
+        const deletedKeys = new Set(removing.map((te) => te.key ?? te.id));
         const survivors = timelineElements.filter((te) => !deletedKeys.has(te.key ?? te.id));
 
         // Ripple: close the gap the delete left on the main track. Pure decision
@@ -173,14 +200,14 @@ export function useTimelineDeleteOps({
         // then the one write, folded into the delete's undo entry above.
         const rippleShifts = resolveMainTrackDeleteRippleShifts(
           survivors,
-          sameFile,
+          removing,
           usePlayerStore.getState().rippleEditEnabled,
         );
         const rippleChanges = rippleShifts ? resolveShiftedElements(survivors, rippleShifts) : null;
         // The timeline follows the delete's write at once, as the owner of the ripple's optimistic update.
         usePlayerStore.getState().setElements(applyRippleShifts(survivors, rippleChanges));
         let rippleFailed = false;
-        if (rippleChanges) {
+        if (rippleChanges && !cloudDelete) {
           try {
             await handleTimelineGroupMove(rippleChanges, {
               coalesceKey: step.coalesceKey,

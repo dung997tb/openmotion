@@ -277,4 +277,30 @@ describe("saveProjectFilesWithHistory", () => {
       }),
     );
   });
+  it("keeps the same undo window when a repeated gesture batches two compositions", async () => {
+    const windows: string[] = [];
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const windowId = new Headers(init?.headers).get("X-OpenMotion-Edit-Window");
+      expect(windowId).toBeTruthy();
+      windows.push(windowId!);
+      return Response.json({ versions: {} });
+    });
+    const writeFile = vi.fn();
+    const save = () => saveProjectFilesWithHistory({
+      projectId: "p", label: "Move clips", coalesceKey: "drag", writeFile,
+      files: { "index.html": () => "after", "child.html": () => "after" },
+      commandForWrite: () => ({ kind: "moveClip", hfId: "hf-clip", start: 2 }),
+      readFile: async () => "before", recordEdit: vi.fn(),
+    });
+    setCachedCloudDisklessMode(true);
+    try {
+      await save();
+      await save();
+      expect(windows).toEqual([expect.any(String), windows[0]]);
+      expect(writeFile).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+      setCachedCloudDisklessMode(null);
+    }
+  });
 });

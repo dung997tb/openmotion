@@ -9,7 +9,7 @@ import { useI18n } from "../../i18n/I18n";
 import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/previewAdapter";
 import { projectPreviewAdapter } from "../../player/lib/projectPreviewAdapter";
 import { usePlayerStore } from "../../player/store/playerStore";
-import type { PatchOperation } from "../../utils/sourcePatcher";
+import { canvasBoxOperations, type MeasuredCanvasPosition } from "../../../../packages/edit-core/canvas-box";
 
 interface Drag {
   pointer: number;
@@ -31,6 +31,7 @@ interface DragResult extends IsolatedSourceTarget {
   left: number;
   top: number;
   makeRelative: boolean;
+  position?: MeasuredCanvasPosition;
   corner?: Corner;
   width?: number;
   height?: number;
@@ -44,19 +45,10 @@ function validResult(result: DragResult | null): result is DragResult {
 }
 
 function positionPatch(result: DragResult) {
-  const operations: PatchOperation[] = [];
-  const { corner } = result;
-  if (result.makeRelative === true && (!corner || corner !== "se")) {
-    operations.push({ type: "inline-style", property: "position", value: "relative" });
-  }
-  if (!corner || corner.endsWith("w")) operations.push({ type: "inline-style", property: "left", value: result.left + "px" });
-  if (!corner || corner.startsWith("n")) operations.push({ type: "inline-style", property: "top", value: result.top + "px" });
-  if (corner) {
-    operations.push({ type: "inline-style", property: "width", value: result.width + "px" },
-      { type: "inline-style", property: "height", value: result.height + "px" });
-  }
   const { sourceFile, ifMatch, target } = isolatedPatchTarget(result);
-  return { sourceFile, ifMatch, patches: [{ target, operations }] };
+  const {left, top, width, height, makeRelative, corner} = result;
+  const box = {left, top, width, height, makeRelative, corner};
+  return { sourceFile, ifMatch, patches: [{ target, operations:canvasBoxOperations(box) }], box, ...(result.position && {position:result.position}) };
 }
 
 /** Input and persistence stay in Studio. The scoped frame only measures and previews layout. */
@@ -150,7 +142,8 @@ export function IsolatedCanvasOverlay() {
     active.finishing = true;
     let committed = false;
     let changed = false;
-    void active.adapter.request<DragResult | null>("canvas-drag", payload).then(async result => {
+    const wholePath = event.altKey || !usePlayerStore.getState().autoKeyframeEnabled;
+    void active.adapter.request<DragResult | null>("canvas-drag", { ...payload, wholePath }).then(async result => {
       if (drag.current !== active || previewIframeRef.current !== active.adapter.iframe) return;
       if (createPreviewAdapter({ iframe: active.adapter.iframe }).token !== active.adapter.token) return;
       if (!validResult(result) || result.corner !== active.corner || (active.corner &&

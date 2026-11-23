@@ -1,4 +1,4 @@
-import type { MoveClip } from "../../../packages/edit-core";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { studioHistoryForWrite, type StudioWriteHistory, type EditContextTarget } from "./studioFileHistory";
 import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import { openComposition, type Composition } from "@hyperframes/sdk";
@@ -14,7 +14,7 @@ import {
 
 export type CutoverResult =
   | { status: "declined"; reason: string }
-  | { status: "committed"; version: string; before: string; after: string; command?: MoveClip }
+  | { status: "committed"; version: string; before: string; after: string; command?: ProjectEditCommand }
   | { status: "failed"; error: Error };
 
 export interface SdkSessionPublication {
@@ -44,7 +44,7 @@ export interface CutoverDeps {
    * Must be bound to one project. Its identity plus path scopes the shared
    * mutation queue used by every whole-file writer in that project.
    */
-  writeProjectFile: (path: string, content: string, expectedContent?: string, command?: MoveClip, history?: StudioWriteHistory) => Promise<void>;
+  writeProjectFile: (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory) => Promise<void>;
   reloadPreview: () => void;
   refresh?: (after: string) => void;
   compositionPath?: string | null;
@@ -60,7 +60,7 @@ export interface CutoverDeps {
 }
 
 export interface CutoverOptions {
-  command?: MoveClip;
+  command?: ProjectEditCommand;
   targets?: EditContextTarget[];
   label?: string;
   coalesceKey?: string;

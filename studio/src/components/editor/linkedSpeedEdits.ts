@@ -85,6 +85,8 @@ export function useLinkedSpeedCommit(
       let ok: boolean;
       try { ok = await commit(selection, [{ type: 'attribute', property: 'playback-rate', value }], {
         label: 'Edit speed',
+        ...(selection.hfId && { projectEdit: { kind: 'setClipSpeed', hfId: selection.hfId, rate: Number(value),
+          includeLinked: isLinkedSelectionOn(), ripple: state.rippleEditEnabled, linkage: state.timelineLinkageEnabled } }),
         syncTimingInPlace: true,
         // Slider events waiting behind a save should not replay obsolete widths after release.
         shouldSave: latest,

@@ -1,3 +1,5 @@
+export { stepListBlock } from "../../../packages/edit-core/playhead-edit";
+import { stepListBlock } from "../../../packages/edit-core/playhead-edit";
 /**
  * Low-level drag commit helpers for GSAP position mutations.
  * Extracted from gsapRuntimeBridge.ts to keep file sizes under the 600-line limit.
@@ -7,11 +9,10 @@ import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import {
   percentageToAbsoluteForAnimation,
-  resolveTweenStart,
   resolveTweenDuration,
 } from "../utils/globalTimeCompiler";
 import { roundTo3, roundToLayoutPx } from "../utils/rounding";
-import { computeElementPercentage, keyframeEases, writeTargetSelector } from "./gsapShared";
+import { computeElementPercentage, writeTargetSelector } from "./gsapShared";
 import {
   computeDraggedGsapPosition,
   readDragStamp,
@@ -20,10 +21,10 @@ import {
 } from "./draggedGsapPosition";
 import type { CommitMutation } from "./gsapScriptCommitTypes";
 import { isGestureTransactionCommit, runGestureTransaction } from "./gestureTransaction";
-import { synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
+import { planWholePathOffset } from "../../../packages/edit-core/animation-path";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { setPatchFromUpdateProperty } from "./gsapDragStaticSetHelpers";
-import { GsapEditBlockedError, type PlayheadEditRefusal } from "./gsapEditOutcome";
-import { isTweenConfigKey } from "@hyperframes/parsers/gsap-constants";
+import { GsapEditBlockedError } from "./gsapEditOutcome";
 export {
   findExistingPositionWrite,
   findRotationSetAnimation,
@@ -130,29 +131,6 @@ export async function materializeIfDynamic(
   throw new GsapEditBlockedError("source-uneditable", "geometry-unresolved-source");
 }
 
-/** Why a percentage keyframe can't stand in for this array step entry, or null when it can. */
-function stepBlock([key, value]: [string, number | string]): PlayheadEditRefusal | null {
-  if (key === "delay") return "array-step-delay";
-  if (/^on[A-Z]/.test(key)) return "array-step-callback";
-  if (isTweenConfigKey(key)) return "array-step-config";
-  if (typeof value === "number") return null;
-  return STEP_VALUE_BLOCKS.find(([pattern]) => pattern.test(value))?.[1] ?? null;
-}
-
-/** First match wins: code is computed, even when it calls random(). */
-const STEP_VALUE_BLOCKS: Array<[RegExp, PlayheadEditRefusal]> = [
-  [/^__raw:/, "array-step-computed"],
-  [/random\(/, "array-step-random"],
-  [/[-+*/]=/, "array-step-relative"],
-];
-
-/** Why a step list can't be rewritten as percentage keyframes, or null. */
-export function stepListBlock(anim: GsapAnimation): PlayheadEditRefusal | null {
-  const data = anim.keyframes;
-  if (data?.format !== "object-array") return null;
-  const entries = data.keyframes.flatMap((kf) => Object.entries(kf.properties));
-  return entries.map(stepBlock).find(Boolean) ?? null;
-}
 
 /** Whole-offset writers rewrite every step as a keyframe; refuse a list that holds more than values. */
 export function refuseStepListRewrite(anim: GsapAnimation): void {
@@ -378,45 +356,10 @@ export async function commitWholePathOffset(
     if (newId) effectiveAnim = { ...anim, id: newId };
   }
 
-  const ts = resolveTweenStart(effectiveAnim);
-  const td = resolveTweenDuration(effectiveAnim);
-
-  let kfs = effectiveAnim.keyframes?.keyframes ?? [];
-  if (kfs.length === 0) {
-    const fromProps = effectiveAnim.method === "from" ? effectiveAnim.properties : effectiveAnim.fromProperties ?? {};
-    const toProps = effectiveAnim.method === "from" ? {} : effectiveAnim.properties;
-    const startX = typeof fromProps.x === "number" ? fromProps.x : 0;
-    const startY = typeof fromProps.y === "number" ? fromProps.y : 0;
-    const endX = typeof toProps.x === "number" ? toProps.x : effectiveAnim.method === "from" ? 0 : startX;
-    const endY = typeof toProps.y === "number" ? toProps.y : effectiveAnim.method === "from" ? 0 : startY;
-    const endpoints = synthesizeFlatTweenKeyframes(effectiveAnim)?.keyframes;
-    kfs = [
-      { percentage: 0, properties: { ...endpoints?.[0]?.properties, ...fromProps, x: startX, y: startY } },
-      { percentage: 100, properties: { ...endpoints?.[1]?.properties, ...toProps, x: endX, y: endY } },
-    ];
-  }
-
-  const shifted = kfs.map((kf) => ({
-    percentage: kf.percentage,
-    properties: {
-      ...kf.properties,
-      x: roundTo3((typeof kf.properties.x === "number" ? kf.properties.x : 0) + deltaX),
-      y: roundTo3((typeof kf.properties.y === "number" ? kf.properties.y : 0) + deltaY),
-    },
-    ...(kf.ease ? { ease: kf.ease } : {}),
-  }));
-
+  const mutation = planWholePathOffset(effectiveAnim,deltaX,deltaY);
   await callbacks.commitMutation(
     selection,
-    {
-      type: "replace-with-keyframes",
-      animationId: effectiveAnim.id,
-      targetSelector: effectiveAnim.targetSelector,
-      position: roundTo3(ts ?? 0),
-      duration: roundTo3(td || 1),
-      keyframes: shifted,
-      ...keyframeEases(effectiveAnim),
-    },
+    getCachedCloudDisklessMode() ? {type:"shift-animation-path",animationId:effectiveAnim.id,deltaX,deltaY} : mutation,
     { label: "Move animation path", softReload: true, beforeReload: restoreOffset },
   );
 }

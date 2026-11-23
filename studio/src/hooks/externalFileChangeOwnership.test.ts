@@ -48,6 +48,33 @@ describe("external file-change subscription ownership", () => {
     }
   });
 
+  it("creates one fresh stream and catches up after a browser offline interval", () => {
+    const network = new EventTarget();
+    const streams: FakeEventSource[] = [];
+    class FakeEventSource extends EventTarget {
+      close = vi.fn();
+      constructor() { super(); streams.push(this); }
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.stubGlobal("addEventListener", network.addEventListener.bind(network));
+    vi.stubGlobal("removeEventListener", network.removeEventListener.bind(network));
+    try {
+      const catchUp = vi.fn();
+      const stop = sseFileChangeChannel(vi.fn(), catchUp);
+      streams[0].dispatchEvent(new Event("open"));
+      network.dispatchEvent(new Event("offline"));
+      expect(streams[0].close).toHaveBeenCalledOnce();
+      network.dispatchEvent(new Event("online"));
+      expect(streams).toHaveLength(2);
+      streams[1].dispatchEvent(new Event("open"));
+      expect(catchUp).toHaveBeenCalledOnce();
+      stop();
+      network.dispatchEvent(new Event("offline"));
+      network.dispatchEvent(new Event("online"));
+      expect(streams).toHaveLength(2);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("delivers the raw file-change event from EventSource to the handler and closes on cleanup", () => {
     const listeners = new Map<string, (event: unknown) => void>();
     const close = vi.fn();

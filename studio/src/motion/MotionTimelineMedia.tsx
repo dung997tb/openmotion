@@ -58,6 +58,8 @@ export function MotionTimelineMedia({ projectId, compositionId, disabled, onFile
         let failure: unknown;
         const ok = await now.edits.handleDomAttributeBatchCommit(selection, [{ type: 'html-attribute', property: 'src', value: encodeUrlPath(resolveTimelineAssetSrc(selection.sourceFile, asset)) }], {
           label: t('Replace generated image'),
+          ...(selection.hfId && { projectEdit: {kind:'replaceAsset', compositionPath:selection.sourceFile,
+            hfId:selection.hfId, assetPath:asset, expectedAssetPath:captured.path} }),
           onError: error => { failure = error; },
           validateContent: source => {
             check();

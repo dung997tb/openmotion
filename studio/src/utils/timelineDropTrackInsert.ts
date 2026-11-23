@@ -1,3 +1,4 @@
+import { applyAssetTrackLayout, type TrackPlacement } from "../../../packages/edit-core/asset-track-layout";
 import type { TimelineElement } from "../player";
 import { layoutAfterTrackInsert } from "../player/components/timelineDragLanding";
 import { canMoveTimelineElement } from "../player/components/timelineAuthoredMoveTarget";
@@ -5,7 +6,7 @@ import { resolveZoneDropPlacement } from "../player/components/timelineCollision
 import { authoredTrackForLane } from "../player/components/timelineAuthoredTrack";
 import { isAudioTimelineElement } from "./timelineInspector";
 import type { TimelineDropPlacement } from "../player/components/timelineCallbacks";
-import { applyPatchByTarget, readAttributeByTarget, readTagSnippetByTarget, readTagAttribute } from "./sourcePatcher";
+import { readAttributeByTarget, readTagSnippetByTarget, readTagAttribute } from "./sourcePatcher";
 import { buildPatchTarget } from "../hooks/timelineEditingHelpers";
 import { formatTimelineAttributeNumber } from "../player/components/timelineEditing";
 import { planTimelineLanePersistence, withPersistedTimelineLanes } from "../player/components/timelineLanePersistence";
@@ -57,23 +58,17 @@ export function planDropTrackInsert(input: {
 
 /** Rewrite `data-track-index` on each renumbered clip's opening tag, via the shared source patcher. */
 export function applyTrackRenumbers(source: string, plan: DropTrackInsertPlan): string {
-  let out = source;
-  for (const { element, track } of plan.renumbers) {
+  return applyAssetTrackLayout(source, trackPlacements(plan));
+}
+
+function trackPlacements(plan: DropTrackInsertPlan): TrackPlacement[] {
+  return plan.renumbers.map(({element, track}) => {
     const target = buildPatchTarget(element);
-    if (!target || !readTagSnippetByTarget(out, target)) {
-      throw new Error(`Cannot renumber the track of "${element.id}" in the source`);
-    }
-    if (element.implicitTextTiming) {
-      out = applyPatchByTarget(out, target, { type: "attribute", property: "start", value: formatTimelineAttributeNumber(element.start) });
-      out = applyPatchByTarget(out, target, { type: "attribute", property: "duration", value: formatTimelineAttributeNumber(element.duration) });
-    }
-    out = applyPatchByTarget(out, target, {
-      type: "attribute",
-      property: "track-index",
-      value: formatTimelineAttributeNumber(track),
-    });
-  }
-  return out;
+    if (!target) throw new Error("Cannot renumber a missing clip.");
+    return {target, track, ...(element.implicitTextTiming && {
+      start:Number(formatTimelineAttributeNumber(element.start)), duration:Number(formatTimelineAttributeNumber(element.duration)),
+    })};
+  });
 }
 
 type DroppedClip = Pick<TimelineElement, "id" | "tag" | "start" | "duration">;
@@ -136,12 +131,18 @@ export function resolveDropTrack(input: {
   placed?: readonly TimelineElement[];
   placement: TimelineDropPlacement;
   dropped: DroppedClip;
+  trackLayout?: TrackPlacement[];
 }): { source: string; track: number; start: number } {
   const { source, elements, placement, dropped } = input;
+  const realize = (html: string, plan: DropTrackInsertPlan) => {
+    const changes = trackPlacements(plan);
+    input.trackLayout?.push(...changes);
+    return applyAssetTrackLayout(html, changes);
+  };
   if (placement.newTrack === "top") {
     const target = elements[0];
     const realized = target ? planTimelineLanePersistence(elements, target) : [];
-    const insertionSource = applyTrackRenumbers(source, { track: 0, renumbers: realized });
+    const insertionSource = realize(source, { track: 0, renumbers: realized });
     // Read tracks from the serialized source, since a previous insertion may
     // already be saved while the iframe still shows the old row order.
     const peers = new Map<string, TimelineElement>();
@@ -158,14 +159,14 @@ export function resolveDropTrack(input: {
       dropped,
     });
     if (!plan) throw new Error("Cannot open a new track here: a locked clip would have to move.");
-    return { source: applyTrackRenumbers(insertionSource, plan), track: plan.track, start: dropped.start };
+    return { source: realize(insertionSource, plan), track: plan.track, start: dropped.start };
   }
   if (placement.insertRow == null) {
     const target = { ...dropped, track: placement.track, sourceFile: elements[0]?.sourceFile };
     const renumbers = planTimelineLanePersistence(elements, target);
     const persisted = withPersistedTimelineLanes(elements, renumbers);
     return {
-      source: applyTrackRenumbers(source, { track: placement.track, renumbers }),
+      source: realize(source, { track: placement.track, renumbers }),
       track: authoredTrackForLane(placement.track, persisted, target),
       start: dropped.start,
     };
@@ -173,7 +174,7 @@ export function resolveDropTrack(input: {
   const { insertRow, trackOrder } = placement;
   const plan = planDropTrackInsert({ elements, trackOrder, insertRow, dropped });
   if (!plan) throw new Error("Cannot open a new track here: a locked clip would have to move.");
-  return { source: applyTrackRenumbers(source, plan), track: plan.track, start: dropped.start };
+  return { source: realize(source, plan), track: plan.track, start: dropped.start };
 }
 
 /** Keep a new top visual track above both stylesheet-authored and just-saved peers. */

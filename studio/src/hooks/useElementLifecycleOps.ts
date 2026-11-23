@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
@@ -128,7 +129,7 @@ export function useElementLifecycleOps({
         const shownVersions = new Set(sameFile.flatMap(member => member.isolatedTarget ? [member.isolatedTarget.sha256] : []));
         if (shownVersions.size > 1) throw new Error("Preview changed before the elements could be deleted");
         const [shownVersion] = shownVersions;
-        if (!shownVersion && onTrySdkDelete && hfIds.length === sameFile.length) {
+        if (!getCachedCloudDisklessMode() && !shownVersion && onTrySdkDelete && hfIds.length === sameFile.length) {
           const originalContent = await readProjectFileContent(pid, targetPath);
           assertSafeElementDeletion(originalContent, patchTargets);
           // SDK members commit separately; validate each before the first write.

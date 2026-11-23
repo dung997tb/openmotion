@@ -13,6 +13,7 @@ interface UseDomEditPositionPatchCommitParams {
 }
 
 type PositionPatchOptions = {
+  canvasPosition?: { x: number; y: number };
   label: string;
   coalesceKey: string;
   coalesceMs?: number;
@@ -28,6 +29,7 @@ export function useDomEditPositionPatchCommit({
   return useCallback(
     (selection: DomEditSelection, patches: PatchOperation[], options: PositionPatchOptions) => {
       return persistDomEditOperations(selection, patches, {
+        ...(options.canvasPosition && { canvasPosition: options.canvasPosition }),
         label: options.label,
         coalesceKey: options.coalesceKey,
         coalesceMs: options.coalesceMs,

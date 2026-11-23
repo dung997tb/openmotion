@@ -1,11 +1,11 @@
-import { clipMoveExample } from '../shared/clip-move-guide.ts';
+import { clipMoveExample, projectEditExample } from '../shared/clip-move-guide.ts';
 import { reviewCommentsPrompt } from '../shared/review-comments.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mcpCapabilities, mcpScenarios, platformExportExample, mcpBenefits, mcpReviewGuide, mcpFaq, mcpClientComparison } from '../studio/src/motion/mcpCapabilities.ts';
 import { assetNamingInstruction } from '../shared/asset-names.ts';
-import { phase1Tools } from '../shared/phase1-tools.ts';
+import { phase1Tools, validateInput } from '../shared/phase1-tools.ts';
 import {
   agentGuide,
   buildCloudIntegrationInfo,
@@ -78,6 +78,21 @@ test('cloud clip move example uses the public edit contract in the handbook and 
   assert.deepEqual(args.edit, { kind: 'moveClip', compositionPath: 'index.html', hfId: '<data-hf-id>', start: 5 });
   const reference = readFileSync(new URL('../docs/mcp-phase1-tools.md', import.meta.url), 'utf8');
   assert.ok(reference.includes(clipMoveExample));
+});
+
+test('the documented element edit works alone or inside one atomic batch', () => {
+  const guide = agentGuide(buildCloudIntegrationInfo({
+    publicOrigin: 'https://motion.example.com', version: '1', workspaceId: 'w', authMode: 'dev', tools: phase1Tools,
+  }), 'codex');
+  assert.ok(guide.includes(projectEditExample));
+  const args = { ...JSON.parse(projectEditExample.slice('openmotion_edit_project('.length, -1)),
+    projectId: 'project', expectedRevision: 'a'.repeat(64) };
+  const schema = phase1Tools.find(tool => tool.name === 'openmotion_edit_project')!.inputSchema;
+  validateInput(schema, args);
+  const batch = (commands: unknown[]) => ({ ...args, edit: { kind: 'batch', commands } });
+  validateInput(schema, batch([args.edit, { ...args.edit, compositionPath: 'compositions/title.html' }]));
+  assert.throws(() => validateInput(schema, batch([{ ...args.edit, patches: [] }])));
+  assert.throws(() => validateInput(schema, batch([batch([args.edit]).edit])));
 });
 
 test('every capability and benefit has a real shared icon', () => {

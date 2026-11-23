@@ -23,8 +23,7 @@ import {
   buildBrowserObservabilityConfig,
   injectRuntimeConfigIntoHtml,
 } from '../../packages/observability/config.ts';
-import type { MoveClip } from '../../packages/edit-core/index.ts';
-import { commitClipMove } from '../services/clip-move.ts';
+import { commitProjectEdit } from '../services/project-edit.ts';
 import { compositionCanvasSource, type CanvasFit, type CanvasRatio } from '../../shared/composition-canvas.ts';
 import {
   agentGuide,
@@ -119,6 +118,7 @@ import { ProjectArchiveService } from '../services/project-archive-service.ts';
 import { createOrCloneProject } from '../services/project-creation.ts';
 import {
   ProjectFilesService,
+  normalizeSafeProjectPath,
   loadProjectOrThrow,
   type HotTextCachePort,
   type ProjectFileOp,
@@ -1085,6 +1085,9 @@ function createMcpDomainPorts(deps: {
     projects: {
       async getProject(auth, args) {
         const projectId = typeof args.projectId === 'string' ? args.projectId : undefined;
+        if (args.inspect && (!projectId || args.file || args.workId || args.exportJobId)) {
+          throw new CloudError('INVALID_ARGUMENT', 'Inspect one composition in an explicit project.', { status: 400 });
+        }
         if (!projectId) {
           const catalog = await deps.workspace.getCatalog(auth);
           const list = args.trashed === true ? catalog.trashedProjects : catalog.projects;
@@ -1113,6 +1116,22 @@ function createMcpDomainPorts(deps: {
             applied: false,
             details: { currentRevision: project.revision, currentVersionId: project.currentVersionId },
           });
+        }
+
+        if (args.inspect) {
+          const query = args.inspect as { compositionPath: string; offset?: number; limit?: number };
+          const path = normalizeSafeProjectPath(query.compositionPath);
+          if (!/\.html?$/i.test(path)) throw new CloudError('INVALID_ARGUMENT', 'Inspect an HTML composition.', { status: 400 });
+          const file = await deps.files.readTextFile(auth, projectId, path);
+          if (!file) throw new CloudError('NOT_FOUND', 'Composition not found.', { status: 404 });
+          // Check after capturing the file so the returned edit guards describe that source.
+          const current = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+          if (current.revision !== project.revision || current.currentVersionId !== project.currentVersionId) {
+            throw new CloudError('VERSION_CONFLICT', 'The project changed during inspection. Read it again.', { status: 409 });
+          }
+          const { inspectComposition } = await import('../../packages/edit-core/inspect.ts');
+          return { projectId, revision: current.revision, currentVersionId: current.currentVersionId, fileVersion: file.version,
+            ...await inspectComposition(file.content, path, query.offset, query.limit) };
         }
 
         const virtual = await deps.files.loadVirtualProject(auth, project.id);
@@ -1325,8 +1344,7 @@ function createMcpDomainPorts(deps: {
 
         let committed = null;
         if (args.edit !== undefined) {
-          const move = args.edit as MoveClip & { compositionPath: string };
-          committed = await commitClipMove(deps.files, auth, projectId, move.compositionPath, move, requestId,
+          committed = await commitProjectEdit(deps.files, auth, projectId, args.edit, requestId,
             { source: 'agent', expectedRevision, expectedVersionId });
         } else if (ops.length > 0 || args.requirements !== undefined || args.namingLanguage !== undefined) {
           committed = await deps.files.commitChanges(auth, {
@@ -1390,7 +1408,7 @@ function createMcpDomainPorts(deps: {
         }
 
         const latest = await deps.workspace.getProject(auth, projectId);
-        // A retried move points to the committed version even after subsequent edits.
+        // A retried command points to the committed version even after subsequent edits.
         const project = args.edit && committed ? { ...latest, revision: committed.revision,
           currentVersionId: committed.versionId, currentVersionNumber: committed.versionNumber } : latest;
         return {

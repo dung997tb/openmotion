@@ -1,5 +1,3 @@
-import { shiftPositionsInScript, syncPositionHoldsBeforeKeyframes } from '@hyperframes/parsers/gsap-writer-acorn';
-import { extractGsapScriptBlock } from './gsap-block.ts';
 import type { Composition, HyperFramesElement } from '@hyperframes/sdk';
 
 export interface MoveClip {
@@ -43,25 +41,17 @@ export function planClipMove(session: Composition, hfId: string, start: number):
   return canMoveClip(session, command) ? command : undefined;
 }
 
-/** The SDK shifts the clip and its targeted tweens together, preserving their offsets. */
-export function moveClip(session: Composition, move: MoveClip, source: string): void {
-  if (!canMoveClip(session, move)) {
-    throw new Error('Choose an unlocked, unlinked timed clip and a position within its composition.');
+/** Keep the original single-clip eligibility and wire shape. The plural command owns the edit. */
+export async function applyLegacyClipMove(source: string, move: MoveClip): Promise<string> {
+  const { openComposition } = await import('@hyperframes/sdk');
+  const session = await openComposition(source, { history: false });
+  try {
+    if (!canMoveClip(session, move)) {
+      throw new Error('Choose an unlocked, unlinked timed clip and a position within its composition.');
+    }
+  } finally {
+    session.dispose();
   }
-  const clip = session.getElement(move.hfId)!;
-  const delta = move.start - Number(clip.attributes['data-start'] ?? 0);
-  session.setTiming(move.hfId, { start: move.start });
-  if (!delta || !/<script\b/i.test(source)) return;
-
-  const block = extractGsapScriptBlock(source);
-  if (!block) return;
-  const original = block.scriptText;
-  const sdkScript = session.getOverrides()['script.gsap'] ?? original;
-  if (typeof sdkScript !== 'string') throw new Error('Invalid timeline script.');
-  // Keep the legacy AST fallback inside the same command in Studio and MCP.
-  const shifted = sdkScript === original && clip.attributes.id
-    ? shiftPositionsInScript(original, '#' + clip.attributes.id, delta, block.root)
-    : sdkScript;
-  const script = syncPositionHoldsBeforeKeyframes(shifted, original);
-  if (script !== sdkScript) session.applyPatches([{ op: 'replace', path: '/script/gsap', value: script }]);
+  const { applyTimelineCommand } = await import('./timeline-commands.ts');
+  return applyTimelineCommand(source, { kind: 'moveClips', changes: [{ hfId: move.hfId, start: move.start }] });
 }

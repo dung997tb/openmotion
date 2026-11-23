@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
+import { type TimelineFileEdit, saveCloudTimeline } from "./cloudTimelineEdit";
 import type { TimelineElement } from "../player";
 import { toAuthoredStart } from "../player/store/timelineElement";
 import type { RecordEditInput } from "../hooks/timelineEditingHelpers";
@@ -177,6 +179,20 @@ interface RunAtomicCutInput {
 
 /** One coordinator owns request, history registration, safe rollback, and resync. */
 export function runAtomicCutTransaction(input: RunAtomicCutInput): Promise<AtomicCutResult> {
+  if (getCachedCloudDisklessMode() && input.intents.every(intent => intent.targets.length)) {
+    const edits: TimelineFileEdit[] = input.intents.map(intent => ({ path: intent.path, command: resolve => {
+      const measured = intent.targets.map(cut => ({ hfId: resolve({...cut.target, domId: cut.target.id ?? undefined}),
+        start: cut.elementStart, duration: cut.elementDuration, track: cut.track,
+        ...(cut.splitTime !== intent.targets[0]!.splitTime && { at: cut.splitTime }) }));
+      return { kind: "splitClips", hfIds: measured.map(cut => cut.hfId), at: intent.targets[0]!.splitTime, measured };
+    }}));
+    const skipped = new Set<string>();
+    return saveCloudTimeline(input.projectId, edits, input.writeProjectFile, input.recordEdit, input.label, undefined, selectors => selectors.forEach(selector => skipped.add(selector))).then(() => {
+      let syncFailed = false;
+      try { input.synchronize(); } catch { syncFailed = true; }
+      return { splitCount: input.intents.reduce((sum, edit) => sum + edit.targets.length, 0), skippedSelectors: [...skipped], syncFailed };
+    });
+  }
   const paths = input.intents.map((intent) => intent.path);
   return serializeStudioFileMutations(input.writeProjectFile, paths, async () => {
     const history = cloudHistoryForWrite(input.writeProjectFile, input);

@@ -1,4 +1,4 @@
-import { clipMoveExample, clipMoveInstruction, clipMoveLimits } from './clip-move-guide.ts';
+import { clipMoveExample, clipMoveInstruction, clipMoveLimits, projectEditExample, projectEditInstruction } from './clip-move-guide.ts';
 import { reviewCommentsPrompt } from './review-comments.ts';
 import { formatTemplatePrompt } from './template-prompts.ts';
 import { templateGuideContinuationInstruction } from './template-guide.ts';
@@ -419,6 +419,10 @@ ${info.tools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
 ${clipMoveLimits} ${clipMoveInstruction}
 
 ${clipMoveExample}
+
+Use openmotion_get_project({projectId, inspect:{compositionPath:"index.html"}}) to list authored element IDs, text, timing and tracks without a browser. ${projectEditInstruction} To update the title, size and color in one undoable edit:
+
+${projectEditExample}
 
 ## Cloud Asset Import & Unified OpenDesign Model Gateway
 

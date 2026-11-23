@@ -2,6 +2,7 @@
 
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { usePlayerStore, type TimelineElement } from "../player";
 import { applyRippleShifts, useTimelineDeleteOps } from "./useTimelineDeleteOps";
 import { installReactActEnvironment, mountReactHarness } from "./domSelectionTestHarness";
@@ -66,8 +67,10 @@ describe("useTimelineDeleteOps: ripple undo label", () => {
     handleTimelineGroupMove: DeleteOpsOptions["handleTimelineGroupMove"];
     showToast?: DeleteOpsOptions["showToast"];
     recordEdit?: DeleteOpsOptions["recordEdit"];
+    writeProjectFile?: DeleteOpsOptions["writeProjectFile"];
+    elements?: TimelineElement[];
   }) {
-    const elements = [el("hf-a", 0, 2), el("hf-b", 2, 2), el("hf-c", 4, 2)];
+    const elements = overrides.elements ?? [el("hf-a", 0, 2), el("hf-b", 2, 2), el("hf-c", 4, 2)];
     let hook: ReturnType<typeof useTimelineDeleteOps> | null = null;
     function Harness() {
       hook = useTimelineDeleteOps({
@@ -75,7 +78,7 @@ describe("useTimelineDeleteOps: ripple undo label", () => {
         activeCompPath: "index.html",
         timelineElements: elements,
         showToast: overrides.showToast ?? vi.fn(),
-        writeProjectFile: vi.fn().mockResolvedValue(undefined),
+        writeProjectFile: overrides.writeProjectFile ?? vi.fn().mockResolvedValue(undefined),
         recordEdit: overrides.recordEdit ?? vi.fn().mockResolvedValue(undefined),
         reloadPreview: vi.fn(),
         previewIframeRef: { current: null },
@@ -86,6 +89,36 @@ describe("useTimelineDeleteOps: ripple undo label", () => {
     mountReactHarness(<Harness />);
     return { elements, b: elements[1], getHook: () => hook! };
   }
+
+  it.each([
+    { authored: 0, shared: false }, { authored: 7, shared: false }, { authored: 7, shared: true },
+  ])("saves ripple deletion on authored track $authored (legacy shared lane: $shared)", async ({authored, shared}) => {
+    // Without hfIds the command has to resolve these original HTML ids from the file.
+    const a = { ...el("left", 0, 2), authoredTrack: authored };
+    const b = { ...el("right", 3, 2), authoredTrack: authored };
+    const audio = { ...el("sound", 4, 2, 1), tag: "audio", authoredTrack: shared ? authored : authored + 2 };
+    const elements = [a, b, audio];
+    const source = '<div data-composition-id="root" data-duration="6">' + elements.map(clip =>
+      `<${clip.tag} id="${clip.id}" data-start="${clip.start}" data-duration="${clip.duration}" data-track="${clip.authoredTrack}"></${clip.tag}>`,
+    ).join("") + "</div>";
+    stubRemoveElementsFetch(source, source);
+    const write = vi.fn(async (_path: string, _after: string, _before?: string, _command?: unknown) => {});
+    const { getHook } = mountDeleteHarness({ elements, handleTimelineGroupMove: vi.fn(), writeProjectFile: write });
+    usePlayerStore.getState().setElements(elements);
+    setCachedCloudDisklessMode(true);
+    try {
+      await act(() => getHook().handleTimelineElementDelete(a));
+      expect(write).toHaveBeenCalledTimes(1);
+      const [, after,, command] = write.mock.calls[0]!;
+      expect(command).toMatchObject({ kind: "deleteClips", rippleTrack: authored });
+      if (shared) expect(command).toHaveProperty("rippleMembers", [expect.any(String), expect.any(String)]);
+      else expect(command).not.toHaveProperty("rippleMembers");
+      const doc = new DOMParser().parseFromString(after, "text/html");
+      expect(doc.getElementById("left")).toBeNull();
+      expect(doc.getElementById("right")?.getAttribute("data-start")).toBe("1");
+      expect(doc.getElementById("sound")?.getAttribute("data-start")).toBe("4");
+    } finally { setCachedCloudDisklessMode(null); }
+  });
 
   it("drops the deleted clip from the timeline while the ripple is still saving", async () => {
     let finishRipple = () => {};

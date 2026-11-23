@@ -1,3 +1,4 @@
+import { setCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { DraggedClipState } from "./useTimelineClipDrag";
@@ -215,6 +216,24 @@ describe("commitDraggedClipMove", () => {
     expect(onMoveElements.mock.calls[0][2]).toBe("lane-reorder");
     expect(map.a).toEqual({ start: 20, track: 1 });
     expect(map.b).toBeUndefined(); // the other clip is NOT rewritten
+  });
+
+  it("includes paint in the same cloud lane gesture for moves and inserts", async () => {
+    setCachedCloudDisklessMode(true);
+    try {
+      for (const insertRow of [null, -0.5]) {
+        const elements = overlapping();
+        const writePaint = vi.fn();
+        const {onMoveElements} = runClipMove(drag(elements[0], {previewStart:0, previewTrack:0, desiredTrack:0, insertRow}),
+          {elements, trackOrder:[0,1], readZIndex:zOf, onStackingPatches:writePaint});
+        await flushMicrotasks();
+        expect(writePaint).not.toHaveBeenCalled();
+        expect(onMoveElements).toHaveBeenCalledTimes(1);
+        expect(onMoveElements.mock.calls[0]![2]).toMatchObject({kind:"laneWithPaint", paint:{ranks:expect.any(Array)}});
+      }
+    } finally {
+      setCachedCloudDisklessMode(null);
+    }
   });
 
   it("persists a lane change in AUTHORED track space when the file is sparse", () => {

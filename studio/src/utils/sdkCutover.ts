@@ -1,4 +1,4 @@
-import { moveClip } from "../../../packages/edit-core";
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import type { Composition, GsapTweenSpec } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { PatchOperation } from "./sourcePatcher";
@@ -35,6 +35,7 @@ export type {
   PublishSdkSession,
 } from "./sdkEditTransaction";
 function sdkFamilyEnabled(family: StudioSdkOperationFamily): boolean {
+  if (getCachedCloudDisklessMode() && (family === "gsap-animation" || family === "gsap-keyframe")) return false;
   const configured = Object.prototype.hasOwnProperty.call(
     studioAvailability,
     "STUDIO_SDK_CUTOVER_FAMILIES",
@@ -150,14 +151,13 @@ export async function sdkTimingPersist(
   if (wrongCompositionFile(deps, targetPath))
     return declinedCutover("wrong_composition_file", "timing");
   try {
-    const command = options?.command;
     const serializedBefore = sdkSession.serialize();
     const result = await persistSdkCandidateMutation(
       sdkSession,
       targetPath,
       serializedBefore,
       deps,
-      (session, source) => command ? moveClip(session, command, source) : session.setTiming(hfId, timingUpdate),
+      (session) => session.setTiming(hfId, timingUpdate),
       options,
       serializedBefore,
     );

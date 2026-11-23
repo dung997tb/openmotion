@@ -341,9 +341,7 @@ export function clampNumber(value: number, min: number, max: number): number {
 // fallow-ignore-next-line unused-export
 export { COMPOSITION_ROOT_OPEN_TAG_RE } from "./compositionPatterns";
 
-export function collectHtmlIds(source: string): string[] {
-  return Array.from(source.matchAll(/\bid="([^"]+)"/g), (match) => match[1] ?? "");
-}
+export { collectHtmlIds } from "../../../packages/edit-core/asset-placement";
 
 const pendingDurationProbes = new Map<string, Promise<number>>();
 

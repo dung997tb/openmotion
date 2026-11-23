@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
+import { toAuthoredStart } from "../store/timelineElement";
 import type { TimelineElement } from "../store/playerStore";
 import { getTimelineEditCapabilities } from "./timelineEditing";
 import {
@@ -78,10 +80,16 @@ function commitShifts(
   laneElements: readonly TimelineElement[],
   shifts: readonly TrackGapShift[],
   deps: DragCommitDeps,
+  time?: number,
 ): boolean {
   const edits = buildShiftEdits(laneElements, shifts);
   if (!edits) return false;
-  void persistMoveEdits(edits, deps, `track-gap-close:${gapCloseGestureSeq++}`);
+  const first = laneElements[0]!;
+  const track = first.authoredTrack;
+  const intent = getCachedCloudDisklessMode() && track != null && laneElements.every(el => el.hfId && el.authoredTrack === track && el.sourceFile === first.sourceFile)
+    ? { kind: "closeTrackGaps" as const, track, ...(time !== undefined && { at: toAuthoredStart(first, time) }) }
+    : "timing";
+  void persistMoveEdits(edits, deps, `track-gap-close:${gapCloseGestureSeq++}`, intent);
   return true;
 }
 
@@ -98,7 +106,7 @@ export function commitCloseTrackGap(
 ): boolean {
   const gap = resolveTrackGapAt(laneElements, time, undefined, laneGapFloor(laneElements));
   if (!gap) return false;
-  return commitShifts(laneElements, resolveCloseGapShifts(laneElements, gap), deps);
+  return commitShifts(laneElements, resolveCloseGapShifts(laneElements, gap), deps, time);
 }
 
 /**

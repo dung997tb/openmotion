@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { getTimelineElementIndexes } from "../lib/timelineElementIndexes";
 import { clampToHostStart } from "../store/timelineElement";
@@ -369,6 +370,11 @@ export function commitDraggedClipMove(drag: DraggedClipState, deps: DragCommitDe
     if (multi?.keys.has(keyOf(e))) return { ...e, start: multi.movedStart(e) };
     return e;
   });
+  if (isVertical && getCachedCloudDisklessMode() && deps.onMoveElements) {
+    void refreshAfterDurableLaneMove(persistMoveEdits(preserveLanes(edits), deps, coalesceKey,
+      cloudLaneOperation(candidate, drag.element, drag.previewTrack, deps)), deps);
+    return;
+  }
   if (!isVertical || !deps.readZIndex || !deps.onStackingPatches) {
     void refreshAfterDurableLaneMove(
       persistMoveEdits(preserveLanes(edits), deps, coalesceKey, "lane-reorder"),
@@ -475,6 +481,11 @@ function commitTrackInsert(
   if (edits.length === 0) return;
 
   const coalesceKey = `clip-lane-move:${laneChangeGestureSeq++}`;
+  if (getCachedCloudDisklessMode() && deps.onMoveElements) {
+    void refreshAfterDurableLaneMove(persistMoveEdits(edits, deps, coalesceKey,
+      cloudLaneOperation(candidate, drag.element, drag.insertRow!, deps)), deps);
+    return;
+  }
   if (!deps.readZIndex || !deps.onStackingPatches) {
     void refreshAfterDurableLaneMove(
       persistMoveEdits(edits, deps, coalesceKey, "track-insert"),
@@ -564,14 +575,25 @@ function syncStackingForEdit(
   deps: DragCommitDeps,
   coalesceKey?: string,
 ): Promise<void> {
-  const { readZIndex, onStackingPatches } = deps;
-  if (!readZIndex || !onStackingPatches) return Promise.resolve();
+  if (!deps.readZIndex || !deps.onStackingPatches || aimedLane === currentLane) return Promise.resolve();
+  const patches = stackingForMove(candidate, dragKey, currentLane, aimedLane, deps.readZIndex);
+  return patches.length ? Promise.resolve(deps.onStackingPatches(patches, coalesceKey)).then(() => undefined) : Promise.resolve();
+}
 
-  // Aiming at the clip's OWN current display lane is not a relocation — never
-  // touch z (guards the pure-time-move invariant even if a spurious topology call
-  // slips through). Every real lane-realization drop aims at a DIFFERENT lane.
-  if (aimedLane === currentLane) return Promise.resolve();
+function cloudLaneOperation(candidate: TimelineElement[], dragged: TimelineElement, lane: number, deps: DragCommitDeps): TimelineMoveOperation {
+  const direction = lane < dragged.track ? "up" : "down";
+  // A mounted preview can supply the true CSS cascade and display-row projection.
+  // With a headless/isolated preview the shared core uses authored tracks and ranks.
+  if (!deps.readZIndex || !Number.isFinite(deps.readZIndex(dragged, true))) {
+    return { kind: "laneWithPaint", paint: { element: dragged, direction } };
+  }
+  const ranks = stackingForMove(candidate, keyOf(dragged), dragged.track, lane, deps.readZIndex);
+  const byKey = new Map(candidate.map(el => [keyOf(el), el]));
+  return { kind: "laneWithPaint", paint: { ranks: ranks.map(rank => ({ element: byKey.get(rank.key)!, zIndex: rank.zIndex })) } };
+}
 
+function stackingForMove(candidate: TimelineElement[], dragKey: string, currentLane: number, aimedLane: number,
+  readZIndex: NonNullable<DragCommitDeps["readZIndex"]>): StackingPatch[] {
   // Discovery order is DOM order, which breaks equal-z ties.
   const stackingEls = candidate.map((el, domIndex) => ({
     key: keyOf(el),
@@ -585,11 +607,5 @@ function syncStackingForEdit(
     stackingContextId: el.stackingContextId ?? null,
   }));
 
-  const patches = computeStackingPatches(
-    stackingEls,
-    [dragKey],
-    aimedLane < currentLane ? "up" : "down",
-  );
-  if (patches.length === 0) return Promise.resolve();
-  return Promise.resolve(onStackingPatches(patches, coalesceKey)).then(() => undefined);
+  return computeStackingPatches(stackingEls, [dragKey], aimedLane < currentLane ? "up" : "down");
 }

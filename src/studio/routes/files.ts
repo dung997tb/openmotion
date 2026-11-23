@@ -1,6 +1,6 @@
-import { commitClipMove } from '../../services/clip-move.ts';
+import { commitProjectEdit } from '../../services/project-edit.ts';
 import path from 'node:path';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { CloudError, isCloudError } from '../../contracts/errors.ts';
 import { AUDIO_EXT, IMAGE_EXT, VIDEO_EXT } from '../../../shared/asset-names.ts';
@@ -240,15 +240,22 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     }
   });
 
-  app.post('/api/projects/:id/edits/*', async (c) => {
+  const handleEdit = async (c: Context<{ Variables: StudioVariables }>, path?: string) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:write', minRole: 'editor' });
-    const path = normalizeSafeProjectPath(extractWildcardPath(c.req.url, '/edits/'), true);
     const body = await c.req.json().catch(() => null);
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        (path && (body.kind === 'batch' || (body.compositionPath !== undefined && body.compositionPath !== path))) ||
+        (!path && (!body.versions || typeof body.versions !== 'object' || Array.isArray(body.versions)))) {
+      return c.json({ error: 'Invalid editing command or base versions' }, 400);
+    }
+    const edit = path ? { ...body, compositionPath: path } : body.edit;
+    const versions = path ? { [path]: c.req.header('if-match') ?? (c.req.header('if-none-match') === '*' ? null : '') } : body.versions;
     try {
-      const commit = await commitClipMove(deps.files, auth, c.req.param('id'), path, body,
-        c.req.header('idempotency-key') ?? '', { source: 'studio', ifMatch: c.req.header('if-match') ?? '', writeToken, windowId: c.req.header('x-openmotion-edit-window') });
-      return c.json({ version: commit.versionsByPath[path] ?? c.req.header('if-match'), revision: commit.revision, writeToken: commit.writeToken });
+      const commit = await commitProjectEdit(deps.files, auth, c.req.param('id')!, edit,
+        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window') });
+      return c.json({ ...(path && { version: commit.versionsByPath[path] ?? versions[path] }),
+        versions: { ...versions, ...commit.versionsByPath }, revision: commit.revision, writeToken: commit.writeToken });
     } catch (error) {
       if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {
         if (typeof error.details?.currentContent === 'string') return c.json(error.details, 409);
@@ -256,7 +263,10 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       }
       throw error;
     }
-  });
+  };
+  app.post('/api/projects/:id/edits', c => handleEdit(c));
+  app.post('/api/projects/:id/edits/*', c => handleEdit(c,
+    normalizeSafeProjectPath(extractWildcardPath(c.req.url, '/edits/'), true)));
 
   // POST /api/projects/:id/files/* — Create a new text file (409 if already exists).
   app.post('/api/projects/:id/files/*', async (c) => {

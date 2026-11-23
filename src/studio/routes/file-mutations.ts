@@ -1,3 +1,6 @@
+import { applyCanvasCommand, patchCanvasElement } from '../../../packages/edit-core/canvas-commands.ts';
+import { groupCanvasElements } from '../../../packages/edit-core/canvas-source.ts';
+import type { CanvasBox, MeasuredCanvasPosition } from '../../../packages/edit-core/canvas-box.ts';
 import { readCompositionDependencies } from '../engine/composition-dependencies.ts';
 import { randomUUID } from 'node:crypto';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
@@ -22,15 +25,11 @@ import {
   findUnsafeDomPatchValues,
   insertCompositionInMemory,
   isStudioFontFaceCss,
-  patchElementInHtml,
   probeElementInSource,
   probeElementsInSource,
   relinkSplitHalvesInHtml,
-  removeElementFromHtml,
-  removeElementsFromHtml,
   splitElementInHtml,
   unwrapGroupWithGsapCleanup,
-  wrapElementsInHtml,
   type AtomicCutTarget,
   type ElementRebase,
   type PatchOperation,
@@ -38,6 +37,14 @@ import {
   type UnwrapChildTrack,
 } from '../engine/source-mutations.ts';
 import { createWriteToken, fileContentVersion, formatVersionFromSha256, sha256Hex } from '../etag.ts';
+
+function canvasEdit<T>(apply: () => T): T {
+  try {
+    return apply();
+  } catch (error) {
+    throw new CloudError('INVALID_ARGUMENT', error instanceof Error ? error.message : 'Invalid canvas edit.', { status: 400, applied: false });
+  }
+}
 
 function readTargetPath(url: string, marker: string, fallback = 'index.html'): string {
   const raw = extractWildcardPath(url, marker);
@@ -93,7 +100,7 @@ export function createStudioFileMutationsRoutes(
       }
     }
     const takenIds = collectProjectHtmlIds(htmlByPath);
-    const patched = patchElementInHtml(currentText, body.target, operations, takenIds);
+    const patched = canvasEdit(() => patchCanvasElement(currentText, { target: body.target!, operations }, takenIds));
     let nextHtml = patched.html;
 
     if (body.fontFaceCss !== undefined) {
@@ -149,6 +156,7 @@ export function createStudioFileMutationsRoutes(
         sourceFile?: string;
         path?: string;
         ifMatch?: string;
+        geometry?: { target: SourceMutationTarget; box: CanvasBox; position?: MeasuredCanvasPosition };
         patches?: Array<{ target: SourceMutationTarget; operations: PatchOperation[] }>;
         edits?: Array<{ target: SourceMutationTarget; ops: PatchOperation[]; fontFaceCss?: string }>;
         target?: SourceMutationTarget;
@@ -206,18 +214,32 @@ export function createStudioFileMutationsRoutes(
       })) ?? batch.edits ?? (batch.target && batch.ops
         ? [{ target: batch.target, ops: batch.ops, fontFaceCss: batch.fontFaceCss }]
         : []);
-      if (!edits.length) return c.json({ error: 'No patches supplied', durable: false }, 400);
+      if (!batch.geometry && !edits.length) return c.json({ error: 'No patches supplied', durable: false }, 400);
 
       let after = before;
       const matched: boolean[] = [];
 
+      if (batch.geometry) {
+        const { target, position, box } = batch.geometry;
+        if (!box || !target || edits.length || (position && !Number.isFinite(position.time))) {
+          return c.json({ error: 'Invalid canvas geometry', durable: false }, 400);
+        }
+        try {
+          after = applyCanvasCommand(before, position
+            ? { kind: 'moveCanvasElement', target, time: position.time, staticBox: box, ...(position.delta ? { delta: position.delta } : { x: position.x, y: position.y }) }
+            : { kind: 'setCanvasBox', target, box });
+          matched.push(true);
+        } catch (error) {
+          return c.json({ error: error instanceof Error ? error.message : 'Invalid canvas geometry', durable: false }, 400);
+        }
+      }
       for (const edit of edits) {
         if (!edit?.target || !Array.isArray(edit.ops)) return c.json({ error: 'Invalid patch', durable: false }, 400);
         const unsafe = findUnsafeDomPatchValues(edit.ops);
         if (unsafe.length > 0) {
           return c.json({ error: 'Non-finite or unsafe DOM patch values', unsafe, durable: false }, 400);
         }
-        const patched = patchElementInHtml(after, edit.target, edit.ops, takenIds);
+        const patched = canvasEdit(() => patchCanvasElement(after, { target: edit.target, operations: edit.ops }, takenIds));
         matched.push(patched.matched);
         if (patched.elementId) takenIds.add(patched.elementId);
         after = patched.html;
@@ -307,7 +329,7 @@ export function createStudioFileMutationsRoutes(
       if (unsafe.length > 0) {
         return c.json({ error: 'Non-finite or unsafe DOM patch values', unsafe }, 400);
       }
-      const res = patchElementInHtml(after, edit.target, edit.ops);
+      const res = canvasEdit(() => patchCanvasElement(after, { target: edit.target, operations: edit.ops }));
       if (res.matched) matchedCount += 1;
       elementIds.push(res.elementId ?? null);
       after = res.html;
@@ -358,7 +380,7 @@ export function createStudioFileMutationsRoutes(
     const current = await deps.files.readTextFile(auth, projectId, filePath);
     if (!current) return c.json({ error: 'Target file not found', path: filePath }, 404);
 
-    const nextHtml = removeElementFromHtml(current.content, body.target);
+    const nextHtml = canvasEdit(() => applyCanvasCommand(current.content, { kind: 'deleteCanvasElements', targets: [body.target!] }));
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     let version = current.version;
     const removed = nextHtml !== current.content;
@@ -404,7 +426,7 @@ export function createStudioFileMutationsRoutes(
     if (shownVersion !== undefined && shownVersion !== current.version)
       return c.json({ error: 'file conflict', code: 'VERSION_MISMATCH', durable: false }, 409);
 
-    const nextHtml = removeElementsFromHtml(current.content, body.targets);
+    const nextHtml = canvasEdit(() => applyCanvasCommand(current.content, { kind: 'deleteCanvasElements', targets: body.targets! }));
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     let version = current.version;
     const changed = nextHtml !== current.content;
@@ -622,13 +644,13 @@ export function createStudioFileMutationsRoutes(
     const current = await deps.files.readTextFile(auth, projectId, filePath);
     if (!current) return c.json({ error: 'Target file not found', path: filePath }, 404);
 
-    const wrapped = wrapElementsInHtml(
+    const wrapped = canvasEdit(() => groupCanvasElements(
       current.content,
-      body.targets,
+      body.targets!,
       body.groupId ?? `group-${randomUUID().slice(0, 6)}`,
       body.bbox ?? { left: 0, top: 0, width: 100, height: 100 },
       body.rebases ?? [],
-    );
+    ));
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     let version = current.version;
 
@@ -674,7 +696,7 @@ export function createStudioFileMutationsRoutes(
     const current = await deps.files.readTextFile(auth, projectId, filePath);
     if (!current) return c.json({ error: 'Target file not found', path: filePath }, 404);
 
-    const res = unwrapGroupWithGsapCleanup(current.content, body.target, body.childTracks);
+    const res = canvasEdit(() => unwrapGroupWithGsapCleanup(current.content, body.target!, body.childTracks));
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     let version = current.version;
 
@@ -758,11 +780,11 @@ export function createStudioFileMutationsRoutes(
       }
     }
 
-    const dup = duplicateElementInHtml(currentText, body.target, {
+    const dup = canvasEdit(() => duplicateElementInHtml(currentText, body.target!, {
       newId: body.newId,
       takenIds: collectProjectHtmlIds(htmlByPath),
       delta: body.delta,
-    });
+    }));
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     let version = formatVersionFromSha256(sha256Hex(dup.html));
 

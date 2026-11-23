@@ -27,9 +27,8 @@ export function isHtmlElement(value: unknown): value is HTMLElement {
 // module's public surface (6 studio callers import parsePx from it).
 export { parsePx } from "@hyperframes/core/editing";
 
-export function isTextBearingTag(tagName: string): boolean {
-  return ["div", "span", "p", "strong", "h1", "h2", "h3", "h4", "h5", "h6"].includes(tagName);
-}
+export { isTextBearingTag } from "../../../../packages/edit-core/text-tag";
+import { isTextBearingTag } from "../../../../packages/edit-core/text-tag";
 
 // Remember text-bearing nodes while editing so clearing copy does not remove
 // its controls. Weak references release this metadata with the preview document.

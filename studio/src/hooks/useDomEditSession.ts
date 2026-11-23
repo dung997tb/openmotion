@@ -1,3 +1,4 @@
+import { useCloudGroupMove } from "./cloudGroupMove";
 import { useCallback } from "react";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import { isAudioDomElement } from "../utils/timelineInspector";
@@ -429,6 +430,7 @@ export function useDomEditSession({
     setActiveGroupElement,
     onClickToSource,
   });
+  const commitCanvasGroup = useCloudGroupMove(projectIdRef, writeProjectFile, bumpGsapCache, reloadPreview);
   const {
     getGsapAnimationsForSelection,
     handleGsapAwarePathOffsetCommit,
@@ -442,6 +444,7 @@ export function useDomEditSession({
     handleUnroll,
     commitMutation,
   } = useGsapAwareEditing({
+    commitCanvasGroup,
     domEditSelection,
     selectedGsapAnimations,
     gsapCommitMutation,

@@ -1,3 +1,4 @@
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { useCallback, useRef } from "react";
 import { HTML_BOOLEAN_ATTRIBUTES, type PatchOperation } from "../utils/sourcePatcher";
 import {
@@ -27,6 +28,7 @@ export interface UseDomEditAttributeCommitsParams {
 }
 
 interface DataAttributeCommitOptions {
+  projectEdit?: ProjectEditCommand;
   label: string;
   coalescePrefix: string;
   skipRefresh: boolean;
@@ -286,6 +288,7 @@ export function useDomEditAttributeCommits({
             coalesceKey: commitKey,
             skipRefresh: options.skipRefresh,
             prepareContent: options.prepareContent,
+            projectEdit: options.projectEdit,
             validateContent: options.validateContent,
             syncTimingInPlace: options.syncTimingInPlace,
             shouldSave: options.shouldSave,
@@ -361,6 +364,7 @@ export function useDomEditAttributeCommits({
         refreshAfter: true,
         syncAutomation: true,
         prepareContent: options.prepareContent,
+        projectEdit: options.projectEdit,
         validateContent: options.validateContent,
         syncTimingInPlace: options.syncTimingInPlace,
         shouldSave: options.shouldSave,

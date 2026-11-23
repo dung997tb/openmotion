@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { timelineAttributeCommand } from "../utils/cloudTimelineEdit";
 import { stampHfIdsInPlace } from "@hyperframes/parsers/hf-ids";
 import { isHtmlElement } from "@hyperframes/core/runtime/dom-realm";
 import { applyAuthoredTiming } from "@hyperframes/core/studio-preview-mark";
@@ -573,13 +575,17 @@ export async function persistElementAttribute({
     patchLive(value);
 
     const operation: PatchOperation = { type: "attribute", property: attr, value };
-    const patched = applyPatchByTarget(before, patchTarget, operation);
+    const command = getCachedCloudDisklessMode() ? timelineAttributeCommand([{ target: patchTarget, value }], attr) : undefined;
 
     pendingTimelineEditPathRef.current.add(targetPath);
     try {
+      const patched = command
+        ? (await import("../../../packages/edit-core/canvas-commands")).applyCanvasCommand(before, command)
+        : applyPatchByTarget(before, patchTarget, operation);
       return await writeProjectFilesWithHistoryInQueue({
         projectId,
         label,
+        commandForWrite: command ? () => command : undefined,
         files: { [targetPath]: () => patched },
         readFile: async () => before,
         writeFile: writeProjectFile,

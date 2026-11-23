@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
 import { usePlayerStore, type TimelineElement } from "../player";
 import { reseekPreviewAtTime } from "../player/hooks/timelineSyncHydration";
@@ -167,7 +169,12 @@ async function setElementsHidden({
   }
 
   try {
-    const changedPaths = await saveProjectFilesWithHistory({
+    const changedPaths = getCachedCloudDisklessMode()
+      ? await saveCloudTimeline(projectId, [...groupElementsByTargetPath(elements, activeCompPath)].map(([path, clips]) => {
+          pendingTimelineEditPathRef.current.add(path);
+          return { path, command: resolve => ({ kind: 'setClipState', state: 'hidden', enabled: hidden, hfIds: clips.map(resolve) }) };
+        }), writeProjectFile, recordEdit, label)
+      : await saveProjectFilesWithHistory({
       projectId,
       label,
       files,

@@ -1,3 +1,6 @@
+import type { BeatGridCommand } from '../../../packages/edit-core/commands';
+import { writeBeatGrid } from '../../../packages/edit-core/beat-file';
+import { getCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { useEffect, useMemo, useRef } from "react";
 import { usePlayerStore } from "../player/store/playerStore";
 import { resolveBeatSourceTrack } from "../utils/timelineInspector";
@@ -10,7 +13,6 @@ import { remapBeatAnalysisToComposition } from "../utils/beatEditActions";
 import {
   audioRelPathForSrc,
   beatFilePathForSrc,
-  serializeBeats,
   parseBeats,
 } from "@hyperframes/core/beats";
 
@@ -116,7 +118,7 @@ export function useMusicBeatAnalysis(): void {
 
   // File IO via ref so the effects only re-run when the track changes.
   const ioRef = useRef<
-    (ProjectIo & { writeProjectFile: (p: string, c: string) => Promise<void> }) | null
+    (ProjectIo & { writeProjectFile: (p: string, c: string, before?: string, command?: BeatGridCommand) => Promise<void> }) | null
   >(null);
   ioRef.current =
     readOptionalProjectFile && writeProjectFile
@@ -201,13 +203,17 @@ export function useMusicBeatAnalysis(): void {
     const io = ioRef.current;
     const audio = audioRelPathForSrc(musicSrc) ?? "audio";
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let pending: string | null = null;
+    let pending: BeatGridCommand | null = null;
 
     const flush = () => {
       if (pending === null) return;
-      const content = pending;
+      const command = pending;
+      const content = writeBeatGrid(command.assetPath, command.beats);
       pending = null;
-      void io.writeProjectFile(beatPath, content).catch(() => {});
+      const write = getCachedCloudDisklessMode()
+        ? io.writeProjectFile(beatPath, content, undefined, command)
+        : io.writeProjectFile(beatPath, content);
+      void write.catch(() => {});
     };
 
     const persist = () => {
@@ -215,7 +221,8 @@ export function useMusicBeatAnalysis(): void {
       const a = s.beatAnalysis;
       if (!a) return;
       const merged = mergeUserBeats(a.beatTimes, a.beatStrengths, s.beatEdits, musicSrc);
-      pending = serializeBeats(merged.times, merged.strengths, audio);
+      pending = { kind: 'setBeatGrid', assetPath: audio,
+        beats: merged.times.map((time, index) => ({ time, strength: merged.strengths[index] ?? 0.5 })) };
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;

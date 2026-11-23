@@ -69,7 +69,7 @@ function stagePlainTranslate(
     if (el.style.getPropertyValue("translate") === written) restoreStudioPathOffset(el, before);
   };
   const key = coalesceKey ?? `move:${++plainMoveCounter}`;
-  const options = { label: "Move layer", coalesceKey: key, coalesceMs: Number.POSITIVE_INFINITY };
+  const options = { canvasPosition: next, label: "Move layer", coalesceKey: key, coalesceMs: Number.POSITIVE_INFINITY };
   const save = () =>
     commitPositionPatchToHtml(selection, patches, options).catch((error) => {
       rollback();

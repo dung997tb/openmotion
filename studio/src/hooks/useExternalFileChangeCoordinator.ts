@@ -140,39 +140,60 @@ export function sseFileChangeChannel(
   onReconnect: () => void,
   onHistoryChanged: (delivery: unknown) => void = () => {},
 ): () => void {
-  const eventSource = new EventSource(studioProjectUrl('/api/events'));
-  eventSource.addEventListener("file-change", onDelivery);
-  eventSource.addEventListener("history-changed", onHistoryChanged);
-  eventSource.addEventListener("catalog-changed", (event) => {
-    const projectId = readFileChangeField(decodeFileChange(event), "projectId");
-    if (projectId) notifyProjectActivity(projectId, "catalog-changed");
-  });
-  eventSource.addEventListener("render-updated", (event) => {
-    const projectId = readFileChangeField(decodeFileChange(event), "projectId");
-    if (projectId) notifyProjectActivity(projectId, "render-updated");
-  });
-  // Derived media (sprite/waveform/thumbnail/proxy/metadata) notifications update
-  // timeline & sidebar caches without reloading the preview iframe.
-  eventSource.addEventListener("media-derived-ready", (event) => {
-    const decoded = decodeFileChange(event);
-    if (isMediaDerivedReadyEvent(decoded)) {
-      emitMediaDerived(decoded);
-    }
-  });
-  // External / MCP media ingest placeholder & stage updates (never reload preview iframe).
-  eventSource.addEventListener("media-ingest-status", (event) => {
-    const decoded = decodeFileChange(event);
-    if (isMediaIngestStatusEvent(decoded)) {
-      emitMediaIngestStatus(decoded);
-    }
-  });
-  // Reopening the stream does not replay changes missed during a disconnect.
-  let opened = false;
-  eventSource.addEventListener("open", () => {
-    if (opened) onReconnect();
-    opened = true;
-  });
-  return () => eventSource.close();
+  let needsCatchUp = false;
+  function connect() {
+    const eventSource = new EventSource(studioProjectUrl('/api/events'));
+    eventSource.addEventListener("file-change", onDelivery);
+    eventSource.addEventListener("history-changed", onHistoryChanged);
+    eventSource.addEventListener("catalog-changed", (event) => {
+      const projectId = readFileChangeField(decodeFileChange(event), "projectId");
+      if (projectId) notifyProjectActivity(projectId, "catalog-changed");
+    });
+    eventSource.addEventListener("render-updated", (event) => {
+      const projectId = readFileChangeField(decodeFileChange(event), "projectId");
+      if (projectId) notifyProjectActivity(projectId, "render-updated");
+    });
+    // Derived media (sprite/waveform/thumbnail/proxy/metadata) notifications update
+    // timeline & sidebar caches without reloading the preview iframe.
+    eventSource.addEventListener("media-derived-ready", (event) => {
+      const decoded = decodeFileChange(event);
+      if (isMediaDerivedReadyEvent(decoded)) {
+        emitMediaDerived(decoded);
+      }
+    });
+    // External / MCP media ingest placeholder & stage updates (never reload preview iframe).
+    eventSource.addEventListener("media-ingest-status", (event) => {
+      const decoded = decodeFileChange(event);
+      if (isMediaIngestStatusEvent(decoded)) {
+        emitMediaIngestStatus(decoded);
+      }
+    });
+    eventSource.addEventListener("error", () => { needsCatchUp = true; });
+    eventSource.addEventListener("open", () => {
+      if (needsCatchUp) onReconnect();
+      needsCatchUp = true;
+    });
+    return eventSource;
+  }
+
+  let stream: EventSource | null = connect();
+  // Chrome can retain an open EventSource across an offline interval while its
+  // dependent preview/file requests fail. Reopen it before reconciling the project.
+  function offline() {
+    needsCatchUp = true;
+    stream?.close();
+    stream = null;
+  }
+  function online() {
+    if (!stream || stream.readyState === EventSource.CLOSED) stream = connect();
+  }
+  globalThis.addEventListener?.("offline", offline);
+  globalThis.addEventListener?.("online", online);
+  return () => {
+    globalThis.removeEventListener?.("offline", offline);
+    globalThis.removeEventListener?.("online", online);
+    stream?.close();
+  };
 }
 
 function eventIdentity(path: string, payload: unknown): string | null {

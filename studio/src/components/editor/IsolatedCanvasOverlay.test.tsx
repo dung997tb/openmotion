@@ -77,13 +77,16 @@ async function reply(phase: string, result: unknown) {
 it("captures a scaled drag, commits once on release and uses the shown file version", async () => {
   pointer("pointerdown", 60);
   expect(messages[0]).toMatchObject({ phase: "start", x: 0.25, y: 0.5 });
+  pointer("pointermove", 76);
   pointer("pointermove", 90);
+  expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
   expect(messages.at(-1)).toMatchObject({ phase: "move", dx: 0.15, dy: 0 });
   pointer("pointerup", 90);
   pointer("lostpointercapture", 90);
   await reply("start", null);
   await reply("finish", result);
   expect(state.commitDomEditPatchBatches).toHaveBeenCalledExactlyOnceWith([{
+    box: expect.objectContaining({ left: 12, top: 34, makeRelative: true }),
     sourceFile: result.sourceFile, ifMatch: '"sha256:' + result.sha256 + '"',
     patches: [{ target: { id: "title" }, operations: [
       { type: "inline-style", property: "position", value: "relative" },
