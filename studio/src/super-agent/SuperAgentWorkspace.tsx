@@ -454,7 +454,7 @@ export function SuperAgentWorkspace({
     let timer = window.setTimeout(refreshBackgroundTasks, 2000);
 
     async function refreshBackgroundTasks() {
-      const outcomes = await Promise.allSettled(getBackgroundTaskIds().map(getSuperAgentChat));
+      const outcomes = await Promise.allSettled(getBackgroundTaskIds().map(id => getSuperAgentChat(id, { fresh: true })));
       if (cancelled) return;
       const latestById = new Map<string, SuperAgentChat>();
       for (const outcome of outcomes) {

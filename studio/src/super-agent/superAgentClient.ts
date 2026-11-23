@@ -179,8 +179,8 @@ export async function createSuperAgentChat(body: {
   return res;
 }
 
-export async function getSuperAgentChat(id: string) {
-  if (isClientCacheEnabled()) {
+export async function getSuperAgentChat(id: string, { fresh = false }: { fresh?: boolean } = {}) {
+  if (!fresh && isClientCacheEnabled()) {
     const cached = chatCache.get(id);
     if (cached && cached.expiresAt > Date.now()) {
       return { conversation: cached.value };

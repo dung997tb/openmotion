@@ -16,6 +16,8 @@ import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeli
 import { SimpleMarkdown } from './SimpleMarkdown';
 import { DEFAULT_MODE_COMPOSER_OPTIONS, getModeComposerPlaceholder } from './ModeComposerControls';
 import { SUPER_AGENT_MODES } from './ModeResourceShowcase';
+import { clearSuperAgentCache, peekCachedSuperAgentChat } from './superAgentClient';
+import { setClientCacheOverrideForTest } from '../utils/clientCacheMode';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -440,6 +442,8 @@ it('keeps background task status in one slot and shows a dot only for an unread 
   });
 
   try {
+    clearSuperAgentCache();
+    setClientCacheOverrideForTest(true);
     await render(null);
     const pinnedRow = () => container.querySelector<HTMLButtonElement>('.om-sa-chat-group[aria-label="Pinned"] .om-sa-chat-row-btn')!;
     const row = pinnedRow();
@@ -454,6 +458,7 @@ it('keeps background task status in one slot and shows a dot only for an unread 
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(status.matches('.om-badge[data-state="waiting"]')).toBe(true);
     expect(status.textContent).toBe('Approval needed');
+    expect(peekCachedSuperAgentChat(CHAT_ID)?.state).toBe('waiting');
     expect(status.querySelector('svg')).toBeNull();
     expect(row.querySelector('.om-sa-chat-dot')).toBeNull();
 
@@ -462,11 +467,14 @@ it('keeps background task status in one slot and shows a dot only for an unread 
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(row.lastElementChild).toBe(status);
     expect(status.getAttribute('data-state')).toBe('completed');
+    expect(peekCachedSuperAgentChat(CHAT_ID)?.state).toBe('idle');
     expect(status.querySelector('.om-sa-chat-dot')).toBeTruthy();
     expect(status.querySelector('svg')).toBeNull();
     expect(row.querySelector('.om-sa-chat-icon-wrap .om-sa-chat-dot')).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
     expect(getTask).toHaveBeenCalledTimes(2);
+    clearSuperAgentCache();
+    setClientCacheOverrideForTest(null);
 
     await act(async () => row.click());
     expect(onChatIdChange).toHaveBeenCalledWith(CHAT_ID);
@@ -495,6 +503,8 @@ it('keeps background task status in one slot and shows a dot only for an unread 
     expect(container.querySelector('.om-sa-head-status-badge')?.textContent).toBe('Stopped');
     expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeNull();
   } finally {
+    clearSuperAgentCache();
+    setClientCacheOverrideForTest(null);
     vi.useRealTimers();
   }
 });
