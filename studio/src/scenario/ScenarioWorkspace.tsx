@@ -458,8 +458,13 @@ export function ScenarioWorkspace({
     [onRoute, run?.id, runId],
   );
 
+  // The studio saves its typed brief before the run or the view changes, so nothing typed is lost.
+  const studioFlushRef = useRef<(() => Promise<boolean>) | null>(null);
+  const flushStudio = useCallback(async () => (studioFlushRef.current ? studioFlushRef.current() : true), []);
+
   const handleModeChange = useCallback(
-    (next: ScenarioWorkspaceMode) => {
+    async (next: ScenarioWorkspaceMode) => {
+      if (!(await flushStudio())) return;
       setActiveMode(next);
       onRoute(
         {
@@ -501,13 +506,15 @@ export function ScenarioWorkspace({
   }, [scenarioId]);
 
   const handleSelectRun = useCallback(
-    (selectedRunId: string) => {
+    async (selectedRunId: string) => {
+      if (!(await flushStudio())) return;
       onRoute({ run: selectedRunId, step: null }, false);
     },
-    [onRoute],
+    [flushStudio, onRoute],
   );
 
   const handleNewRun = useCallback(async () => {
+    if (!(await flushStudio())) return;
     try {
       await startNewRun();
       toast.showToast(t('Started a new draft'), 'info', 'feedback');
@@ -518,7 +525,7 @@ export function ScenarioWorkspace({
         'feedback',
       );
     }
-  }, [startNewRun, t, toast]);
+  }, [flushStudio, startNewRun, t, toast]);
 
   const handleRenameRun = useCallback(
     async (title: string) => {
@@ -1153,6 +1160,7 @@ export function ScenarioWorkspace({
               poolItems={poolItems}
               onAddPoolItems={handleAddPoolItems}
               onRemovePoolItem={handleRemovePoolItem}
+              onRegisterFlush={flush => { studioFlushRef.current = flush; }}
               onOpenDesignProject={onOpenDesignProject}
               onOpenMotionProject={onOpenMotionProject}
               onCopyAgentPrompt={handleCopyAgentPrompt}
