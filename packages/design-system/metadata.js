@@ -2,17 +2,17 @@ import { brand, designSystemAsset } from './index.js';
 
 // Product copy only: never derive share metadata from a project, session or local URL.
 const copy = {
-  en: ['The fullstack agentic video editor. Turn ideas, brand templates and references into editable videos. Generate images, video, music and voiceovers with your AI agent.', 'en_US'],
-  'zh-CN': ['全栈 Agent 视频编辑器。把创意、品牌模板和参考视频变成可编辑作品；生成图片、视频、音乐与配音，完成剪辑、动效和动画，从灵感到成片。', 'zh_CN'],
-  ja: ['AI エージェントと、アイデア・ブランドテンプレート・参考映像を編集可能な動画へ。画像、動画、音楽、ナレーションの生成から、編集・モーションデザイン・アニメーションまで。', 'ja_JP'],
-  ko: ['AI 에이전트와 아이디어, 브랜드 템플릿, 참고 영상을 편집 가능한 영상으로 만드세요. 이미지·영상·음악·내레이션 생성부터 편집, 모션 디자인, 애니메이션까지.', 'ko_KR'],
-  de: ['Mit deinem KI-Agenten von Ideen, Markenvorlagen und Referenzen zum editierbaren Video. Bilder, Videos, Musik und Voiceovers erstellen, schneiden und animieren.', 'de_DE'],
-  fr: ['Avec votre agent IA, transformez idées, modèles de marque et références en vidéos modifiables. Générez images, vidéos, musique et voix off, puis montez et animez.', 'fr_FR'],
-  ru: ['Превращайте идеи, шаблоны брендов и референсы в редактируемые видео вместе с ИИ-агентом. Создавайте изображения, видео, музыку и озвучку, монтируйте и анимируйте.', 'ru_RU'],
-  es: ['Convierte ideas, plantillas de marca y referencias en vídeos editables con tu agente de IA. Genera imágenes, vídeo, música y voz en off; edita y anima.', 'es_ES'],
-  'pt-BR': ['Transforme ideias, templates de marca e referências em vídeos editáveis com seu agente de IA. Gere imagens, vídeo, música e narração; edite e anime.', 'pt_BR'],
-  it: ['Trasforma idee, modelli di brand e riferimenti in video modificabili con il tuo agente IA. Genera immagini, video, musica e voci fuori campo; monta e anima.', 'it_IT'],
-  tr: ['Yapay zekâ ajanınızla fikirleri, marka şablonlarını ve referansları düzenlenebilir videolara dönüştürün. Görsel, video, müzik ve seslendirme üretin; kurgulayın ve canlandırın.', 'tr_TR'],
+  en: ['Open-source AI Game & Video Studio. Turn ideas, templates and references into playable games and editable videos with your AI agent.', 'en_US'],
+  'zh-CN': ['开源 AI 游戏与视频创作工作室。用 AI Agent 把创意、模板与参考变成可运行的游戏和可编辑视频，一站式生成图片、视频、音乐与配音。', 'zh_CN'],
+  ja: ['オープンソースの AI ゲーム＆動画スタジオ。AI エージェントとアイデア・テンプレート・参考素材から遊べるゲームと編集可能な動画を制作。', 'ja_JP'],
+  ko: ['오픈소스 AI 게임 & 비디오 스튜디오. AI 에이전트와 아이디어, 템플릿, 참고 자료로 플레이 가능한 게임과 편집 가능한 영상을 만드세요.', 'ko_KR'],
+  de: ['Open-Source AI Game & Video Studio. Verwandle Ideen, Vorlagen und Referenzen mit deinem KI-Agenten in spielbare Games und editierbare Videos.', 'de_DE'],
+  fr: ['Studio open-source IA pour jeux et vidéos. Transformez idées, modèles et références en jeux jouables et vidéos modifiables avec votre agent IA.', 'fr_FR'],
+  ru: ['Открытая AI-студия для игр и видео. Превращайте идеи, шаблоны и референсы в игры и редактируемые видео вместе с ИИ-агентом.', 'ru_RU'],
+  es: ['Estudio open-source de juegos y vídeo con IA. Convierte ideas, plantillas y referencias en juegos jugables y vídeos editables con tu agente de IA.', 'es_ES'],
+  'pt-BR': ['Estúdio open-source de jogos e vídeo com IA. Transforme ideias, templates e referências em jogos jogáveis e vídeos editáveis com seu agente de IA.', 'pt_BR'],
+  it: ['Studio open-source AI per giochi e video. Trasforma idee, modelli e riferimenti in giochi giocabili e video modificabili con il tuo agente IA.', 'it_IT'],
+  tr: ['Açık kaynaklı AI Oyun ve Video Stüdyosu. Yapay zekâ ajanınızla fikirleri, şablonları ve referansları oynanabilir oyunlara ve düzenlenebilir videolara dönüştürün.', 'tr_TR'],
 };
 
 // Reuse the public README hero unchanged. Its immutable URL and attribution are
@@ -25,7 +25,7 @@ export const socialImage = Object.freeze({
 
 export function pageMetadata(locale = 'zh-CN') {
   const [description, ogLocale] = copy[locale] ?? copy.en;
-  const title = `${brand.website.name} — AI Video & Motion Design`;
+  const title = `${brand.website.name} — ${brand.website.tagline}`;
   const shareTitle = `${brand.website.name} — Create with your AI agent`;
   return {
     title,

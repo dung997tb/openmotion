@@ -174,9 +174,20 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
       setVisibleCount(nextCount);
     };
     update();
-    const observer = new ResizeObserver(update);
+    let frame: number | null = null;
+    const scheduleUpdate = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        update();
+      });
+    };
+    const observer = new ResizeObserver(scheduleUpdate);
     [viewport, trigger, ...items].forEach(element => observer.observe(element));
-    return () => observer.disconnect();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [studioStart]);
 
   useLayoutEffect(() => {

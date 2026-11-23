@@ -739,20 +739,23 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
             const filePath = url.searchParams.get('filePath') ?? undefined;
             const refresh = url.searchParams.get('refresh') === '1';
             const sourcePath = url.searchParams.get('sourcePath') ?? undefined;
+            const embedUrl = url.searchParams.get('embedUrl') ?? undefined;
+            const title = url.searchParams.get('title') ?? undefined;
             const target =
               targetKind === 'html' && !sourcePath
                 ? { kind: 'html' as const, id: targetId, entryPath: filePath || 'index.html' }
-                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath }, originUrl);
+                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath, embedUrl, title }, originUrl);
             return json(res, 200, await publishService.status(target, { filePath, refresh }));
           }
           if (req.method === 'POST') {
             const body = await input(req, 32 * 1024).catch(() => ({}));
             const filePath = typeof body?.filePath === 'string' ? body.filePath : undefined;
             const sourcePath = typeof body?.sourcePath === 'string' ? body.sourcePath : undefined;
+            const embedUrl = typeof body?.embedUrl === 'string' ? body.embedUrl : undefined;
             const title = typeof body?.name === 'string' ? body.name : typeof body?.title === 'string' ? body.title : undefined;
             const target = await resolveWebPublishTarget(
               rootStore,
-              { targetKind, targetId, sourcePath, filePath, title },
+              { targetKind, targetId, sourcePath, filePath, title, embedUrl },
               originUrl,
             );
             const result = await publishService.publish(target, {
@@ -768,10 +771,12 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
             const filePath = url.searchParams.get('filePath')
               ?? (typeof body?.filePath === 'string' ? body.filePath : undefined);
             const sourcePath = typeof body?.sourcePath === 'string' ? body.sourcePath : undefined;
+            const embedUrl = url.searchParams.get('embedUrl')
+              ?? (typeof body?.embedUrl === 'string' ? body.embedUrl : undefined);
             const target =
               targetKind === 'html' && !sourcePath
                 ? { kind: 'html' as const, id: targetId, entryPath: filePath || 'index.html' }
-                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath }, originUrl);
+                : await resolveWebPublishTarget(rootStore, { targetKind, targetId, sourcePath, filePath, embedUrl }, originUrl);
             return json(res, 200, await publishService.unpublish(target, { filePath }));
           }
         }

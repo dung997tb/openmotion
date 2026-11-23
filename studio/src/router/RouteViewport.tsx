@@ -7,7 +7,6 @@ import type { AssetDraft } from '../motion/AssetComposer';
 import type { CinemaTemplate } from '../motion/cinemaTemplates';
 import { mediaEditorDestination, motionStudio, type StudioDestination } from '../motion/creativeStudios';
 import { reportCreativeClick } from '../motion/exploreTracking';
-import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import type { McpClient } from '../motion/mcpClients';
 import type { McpEntry } from '../motion/pageTracking';
 import { SettingsSurfaceBoundary } from '../motion/SettingsSurfaceBoundary';
@@ -220,12 +219,6 @@ export function RouteViewport({
               }
             }}
             onBuildGameInSuperAgent={() => {
-              queueSuperAgentHandoff({
-                prompt: '',
-                mode: 'game',
-                newChat: true,
-                autoSend: false,
-              });
               navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: 'game', templates: false });
             }}
             filters={lastExplore}
@@ -525,6 +518,7 @@ export function RouteViewport({
             onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId && !kitId.startsWith('catalog:') ? kitId : null, templates: false })}
             onOpenAgentSettings={() => openSettings('local')}
             onOpenModelSettings={() => openSettings('models')}
+            onOpenAccountSettings={() => openSettings('account')}
             onOpenMcp={() => openMcp(undefined, undefined, true)}
           />
         </RouteSurface>

@@ -98,6 +98,7 @@ async function main() {
     {
       name: 'vite-studio',
       env: {
+        OPENMOTION_STUDIO_BACKEND: backendOrigin,
         MOTION_DEV_BACKEND_PROXY: backendOrigin,
         VITE_BACKEND_PROXY: backendOrigin,
       },
@@ -120,13 +121,24 @@ async function main() {
       throw new Error(`Desktop build failed with code ${buildRes}`);
     }
 
-    const electronBin = path.join(
+    const macDevAppExec = path.join(
       repoRoot,
       'desktop',
-      'node_modules',
-      '.bin',
-      process.platform === 'win32' ? 'electron.cmd' : 'electron',
+      'dist',
+      'OpenDesign.app',
+      'Contents',
+      'MacOS',
+      'Electron',
     );
+    const electronBin = process.platform === 'darwin' && existsSync(macDevAppExec)
+      ? macDevAppExec
+      : path.join(
+          repoRoot,
+          'desktop',
+          'node_modules',
+          '.bin',
+          process.platform === 'win32' ? 'electron.cmd' : 'electron',
+        );
     if (!existsSync(electronBin)) {
       throw new Error(
         `Electron binary not found at ${electronBin}. Install desktop dependencies with \`npm --prefix desktop install\`.`,

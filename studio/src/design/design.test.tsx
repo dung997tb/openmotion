@@ -12,6 +12,7 @@ import { DesignProjectList } from './DesignProjectList';
 import { DesignTemplateDetailModal } from './DesignTemplateDetailModal';
 import { ScaledPreviewThumb, MAX_ACTIVE_THUMBS } from './ScaledPreviewThumb';
 import { buildBridgeSrcDoc, looksLikeDeck, parseDeckSlides, parseSpeakerNotes } from './previewBridge';
+import { SCROLL_SETTLE_MS } from '../utils/scrollActivity';
 
 const projectId = '22222222-2222-4222-8222-222222222222';
 const revision = 'b'.repeat(64);
@@ -605,6 +606,62 @@ describe('DesignProjectEditor', () => {
       expect(nextTitles.length).toBe(MAX_ACTIVE_THUMBS);
       expect(nextTitles).toContain(`Card ${MAX_ACTIVE_THUMBS}`);
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('defers ScaledPreviewThumb iframe mounting during active scroll and mounts once scroll settles', async () => {
+    vi.useFakeTimers();
+    let emitIO!: (inView: boolean) => void;
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) {
+        emitIO = inView => callback([{ isIntersecting: inView } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+      observe() {}
+      disconnect() {}
+    });
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider>
+            <div data-scroller="" style={{ overflowY: 'auto' }}>
+              <ScaledPreviewThumb
+                active
+                src="/motion-api/design/catalog/templates/scroll-card/preview/index.html"
+                title="Scroll Card"
+              />
+            </div>
+          </I18nProvider>,
+        );
+      });
+      const scroller = container.querySelector<HTMLDivElement>('[data-scroller]')!;
+
+      // Enter then leave while scrolling: never spawns an iframe mid-scroll.
+      await act(async () => {
+        scroller.dispatchEvent(new Event('scroll'));
+        emitIO(true);
+      });
+      expect(container.querySelector('iframe')).toBeNull();
+
+      await act(async () => {
+        emitIO(false);
+        vi.advanceTimersByTime(SCROLL_SETTLE_MS);
+      });
+      expect(container.querySelector('iframe')).toBeNull();
+
+      // Stop scrolling while visible: mounts after SCROLL_SETTLE_MS.
+      await act(async () => {
+        scroller.dispatchEvent(new Event('scroll'));
+        emitIO(true);
+      });
+      expect(container.querySelector('iframe')).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(SCROLL_SETTLE_MS);
+      });
+      expect(container.querySelector('iframe')?.getAttribute('title')).toBe('Scroll Card');
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });

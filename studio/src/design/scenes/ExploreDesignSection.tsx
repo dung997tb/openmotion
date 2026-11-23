@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import { RemixIcon } from '../../../../packages/design-system/react/RemixIcons';
 import { designBriefPrompt, designScenarios, findDesignScenario, type DesignTemplateSummary } from '../../../../shared/design-project';
@@ -16,7 +16,7 @@ import '../design.css';
 /**
  * Design Studio HTML scenarios and live-preview starter template shelf embedded in Explore.
  */
-export function ExploreDesignSection({
+export const ExploreDesignSection = memo(function ExploreDesignSection({
   active = true,
   onSelectDesignScene,
   onOpenProject,
@@ -143,7 +143,6 @@ export function ExploreDesignSection({
                       variant="ghost"
                       className="om-button om-design-gallery-action om-design-explore-use"
                       data-primary="media"
-                      data-blurred=""
                       disabled={remixing}
                       onClick={() => void remix(tpl)}
                     >
@@ -178,4 +177,4 @@ export function ExploreDesignSection({
       <StudioToastViewport toasts={toast.toasts} dismissToast={toast.dismissToast} />
     </div>
   );
-}
+});

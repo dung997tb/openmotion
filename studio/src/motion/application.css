@@ -675,7 +675,7 @@
   }
 }
 .om-super-agent-nav-link { gap: var(--motion-space-4); }
-.om-super-agent-host { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; }
+.om-super-agent-host { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; contain: layout style; }
 .om-super-agent-host[hidden] { display: none; }
 
 @keyframes om-runtime-reveal {
@@ -767,6 +767,10 @@
   -webkit-app-region: drag;
   padding-inline-start: calc(var(--motion-space-8) + var(--om-desktop-inset-left, 0px));
   padding-inline-end: calc(var(--motion-space-8) + var(--om-desktop-inset-right, 0px));
+}
+[data-desktop="true"] .om-application[data-has-bf-banner="true"] .om-app-header {
+  padding-inline-start: var(--motion-space-8);
+  padding-inline-end: var(--motion-space-8);
 }
 [data-desktop="true"] .om-app-header :is(button, a, input, select, [role="button"], [role="menuitem"], .om-nav-item, .om-app-header-actions, .om-desktop-window-controls) {
   -webkit-app-region: no-drag;

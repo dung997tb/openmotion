@@ -1,7 +1,7 @@
 appId: io.nexu.openmotion.desktop
-productName: OpenMotion
-copyright: Copyright © OpenMotion Contributors
-artifactName: OpenMotion-${version}-${os}-${arch}.${ext}
+productName: OpenDesign
+copyright: Copyright © OpenDesign Contributors
+artifactName: OpenDesign-${version}-${os}-${arch}.${ext}
 
 directories:
   output: release
@@ -59,7 +59,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: OpenMotion
+  shortcutName: OpenDesign
 
 linux:
   icon: build/icon.png

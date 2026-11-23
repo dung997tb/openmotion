@@ -25,7 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const distDir = path.dirname(__filename);
 const platform = normalizeDesktopPlatform(process.platform);
 
-app.setName('OpenMotion');
+app.setName('OpenDesign');
 try {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenMotion'));
 } catch {
@@ -186,7 +186,7 @@ async function exportLogsWithDialog(): Promise<DesktopDiagnosticExportResult> {
           ? splash.window
           : undefined;
     const saveOptions = {
-      title: 'Export OpenMotion Diagnostic Logs',
+      title: 'Export OpenDesign Diagnostic Logs',
       defaultPath: path.join(app.getPath('downloads'), defaultName),
       filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
     };
@@ -448,7 +448,7 @@ async function startBackendAndOpenWindow(): Promise<void> {
       splash?.setProgress({
         step: 'ready',
         mode: 'welcome',
-        status: 'Opening OpenMotion Studio',
+        status: 'Opening OpenDesign Studio',
         agentsCount,
         account: {
           state: 'signed-in',
@@ -668,8 +668,8 @@ async function requestQuitWithConfirmation(): Promise<void> {
     const parent = BrowserWindow.getFocusedWindow() ?? (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined);
     const options = {
       type: 'question' as const,
-      title: isZh ? '退出 OpenMotion' : 'Quit OpenMotion',
-      message: isZh ? '确认退出 OpenMotion 吗？' : 'Are you sure you want to quit OpenMotion?',
+      title: isZh ? '退出 OpenDesign' : 'Quit OpenDesign',
+      message: isZh ? '确认退出 OpenDesign 吗？' : 'Are you sure you want to quit OpenDesign?',
       detail: isZh
         ? '退出后将停止本地 Studio 引擎和正在运行的 MCP 服务。'
         : 'Quitting will stop the local Studio engine and active MCP server.',

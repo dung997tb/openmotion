@@ -112,6 +112,7 @@ export function ConversationStream({
   onBack,
   onExitRequestedMode,
   onPlayGame,
+  onDeployGame,
   onRetryLoad,
   onOpenSidebar,
   onToggleViewer,
@@ -156,6 +157,7 @@ export function ConversationStream({
   onBack?: () => void;
   onExitRequestedMode?: () => void;
   onPlayGame?: (game: GameCard) => void;
+  onDeployGame?: (game: GameCard) => void;
   onRetryLoad: () => void;
   onOpenSidebar: () => void;
   onToggleViewer: () => void;
@@ -705,6 +707,7 @@ export function ConversationStream({
               onChangeModeOptions={updateModeOptions}
               onToggleAttachment={toggleResourceAttachment}
               onPlayGame={onPlayGame}
+              onDeployGame={onDeployGame}
               onFocusComposer={() => composerRef.current?.focus()}
               onPickPrompt={prompt => {
                 setText(prompt);

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Button } from 'open-design-ui/button';
 import { HorizontalRail } from './HorizontalRail';
 import { findTechniqueStudio, type CreativeStudio } from '../../../shared/studio-catalog';
@@ -31,7 +32,7 @@ type StoryActions = {
   onOpenBlackFriday: (button: HTMLButtonElement) => void;
 };
 
-export function ExploreHighlights({ onChooseStudio, onOpenBlackFriday }: Pick<StoryActions, 'onChooseStudio' | 'onOpenBlackFriday'>) {
+export const ExploreHighlights = memo(function ExploreHighlights({ onChooseStudio, onOpenBlackFriday }: Pick<StoryActions, 'onChooseStudio' | 'onOpenBlackFriday'>) {
   const { t } = useI18n();
   const jump = (id: string) => {
     const heading = document.getElementById('explore-' + id);
@@ -49,9 +50,9 @@ export function ExploreHighlights({ onChooseStudio, onOpenBlackFriday }: Pick<St
       <StoryCard title="Shorts Studio" poster={shorts} label={t('Short-form video')} description="Cut a recording into vertical shorts or assemble several clips into one reel." onClick={() => onChooseStudio(findTechniqueStudio('shorts')!)} />
     </HorizontalRail>
   </section>;
-}
+});
 
-export function ModelCollection({ story, gateway, onNavigate, onModel }: {
+export const ModelCollection = memo(function ModelCollection({ story, gateway, onNavigate, onModel }: {
   story: ModelStory; gateway: ReturnType<typeof useMediaCatalog>;
 } & Pick<StoryActions, 'onNavigate' | 'onModel'>) {
   const { t } = useI18n(), { openModelSettings } = useWorkspaceChrome();
@@ -70,11 +71,11 @@ export function ModelCollection({ story, gateway, onNavigate, onModel }: {
     </header>
     <ModelStoryGallery story={story} models={models} loading={loading} onNavigate={onNavigate} brandedFallback showLabels={false} />
   </section>;
-}
+});
 
 const FEATURED_GAME_IDS = ['community-what-the-water-keeps', 'community-evensong'] as const;
 
-export function GameStories({ onOpenGameStudio, onBuildGameInSuperAgent }: {
+export const GameStories = memo(function GameStories({ onOpenGameStudio, onBuildGameInSuperAgent }: {
   onOpenGameStudio: (gameId?: string) => void;
   onBuildGameInSuperAgent?: () => void;
 }) {
@@ -116,9 +117,9 @@ export function GameStories({ onOpenGameStudio, onBuildGameInSuperAgent }: {
       />
     ))}
   </section>;
-}
+});
 
-export function ClaudeStories({ onClaude }: Pick<StoryActions, 'onClaude'>) {
+export const ClaudeStories = memo(function ClaudeStories({ onClaude }: Pick<StoryActions, 'onClaude'>) {
   const { t } = useI18n();
   const film = mcpCapabilities.find(capability => capability.id === 'create')!;
   return <section className="om-card om-claude-stories" aria-labelledby="explore-claude">
@@ -131,4 +132,4 @@ export function ClaudeStories({ onClaude }: Pick<StoryActions, 'onClaude'>) {
     <StoryCard title={animeOpeningScenario.title} label="GPT Image 2.6 → Seedance 2.5" poster={floatingCity.poster} credit={floatingCity.credit} creditUrl={floatingCity.creditUrl} description={animeOpeningScenario.description} onClick={() => onClaude(animeOpeningScenario.id)} />
     <StoryCard title={film.title} label={'Claude Code · ' + t('Motion Studio')} poster={launch} description={film.description} onClick={() => onClaude(film.id)} />
   </section>;
-}
+});

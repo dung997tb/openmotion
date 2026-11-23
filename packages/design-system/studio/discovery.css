@@ -172,14 +172,11 @@
 [data-motion-studio] .om-button[data-primary="media"]:enabled:active { background: var(--motion-video-overlay); }
 [data-motion-studio] .om-button[data-primary="media"]:focus-visible { outline-color: var(--motion-overlay-ink); }
 [data-motion-studio] .om-button[data-primary="media"][data-blurred] {
-  -webkit-backdrop-filter: blur(var(--motion-space-8));
-  backdrop-filter: blur(var(--motion-space-8));
+  background: var(--motion-media-action-bg);
 }
 @media (prefers-reduced-transparency: reduce) {
   [data-motion-studio] .om-button[data-primary="media"][data-blurred]:enabled {
     background: var(--motion-video-ink);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
 }
 .om-media-pagination {

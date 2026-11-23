@@ -2431,7 +2431,7 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   // Auto-switched into Game mode with fanned hero, search input, sort combobox, and masonry waterfall
   expect(container.querySelector('.om-sa-stream')?.getAttribute('data-mode')).toBe('game');
   expect(container.querySelectorAll('.om-sa-game-fan-card').length).toBeGreaterThan(0);
-  expect(container.querySelectorAll('.om-sa-game-fan-remix').length).toBeGreaterThan(0);
+  expect(container.querySelectorAll('.om-sa-game-fan-actions .om-sa-game-tile-play').length).toBe(1);
   expect(container.querySelector('.om-sa-game-search input')).toBeTruthy();
   expect(container.querySelector('.om-sa-game-sort [role="combobox"]')).toBeTruthy();
   expect(container.querySelectorAll('.om-sa-game-tile').length).toBeGreaterThan(0);
@@ -2450,17 +2450,32 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('The Little Prince: Star Journey');
 
-  // Clicking Remix on a top fanned Hero card switches the Agent composer selection
-  const fanRemixBtn = container.querySelectorAll('.om-sa-game-fan-remix')[1] as HTMLButtonElement;
-  expect(fanRemixBtn).toBeTruthy();
-  await act(async () => fanRemixBtn.click());
+  // Top fanned Hero carousel rotates smoothly via Next/Previous controls and side-card clicks
+  const initialCenterLabel = container.querySelector('.om-sa-game-fan-item[data-slot="0"] .om-sa-game-fan-card')?.getAttribute('aria-label');
+  const nextFanBtn = container.querySelector('.om-sa-game-fan-nav[data-side="next"]') as HTMLButtonElement;
+  expect(nextFanBtn).toBeTruthy();
+  await act(async () => nextFanBtn.click());
+  await flush();
+  const nextCenterLabel = container.querySelector('.om-sa-game-fan-item[data-slot="0"] .om-sa-game-fan-card')?.getAttribute('aria-label');
+  expect(nextCenterLabel).not.toBe(initialCenterLabel);
+
+  // Clicking the center Hero card selects it into the Agent composer (not jarring auto-play)
+  const fanCenterCard = container.querySelector('.om-sa-game-fan-item[data-slot="0"] .om-sa-game-fan-card') as HTMLButtonElement;
+  expect(fanCenterCard).toBeTruthy();
+  await act(async () => fanCenterCard.click());
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
 
-  // Clicking Remix on a bottom masonry list card also selects into the composer
-  const listRemixBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-remix') as HTMLButtonElement;
-  expect(listRemixBtn).toBeTruthy();
-  await act(async () => listRemixBtn.click());
+  // Clicking a bottom masonry card cover selects it into the composer, while top-right Play opens the viewer
+  const listCoverBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-cover') as HTMLButtonElement;
+  expect(listCoverBtn).toBeTruthy();
+  await act(async () => listCoverBtn.click());
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('Based on');
+
+  const listPlayBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
+  expect(listPlayBtn).toBeTruthy();
+  await act(async () => listPlayBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-viewer')).toBeTruthy();
 });

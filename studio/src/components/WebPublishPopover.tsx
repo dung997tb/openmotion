@@ -22,11 +22,13 @@ export interface WebPublishPopoverProps {
   targetId: string;
   filePath?: string;
   sourcePath?: string;
+  embedUrl?: string;
   title?: string;
   revisionKey?: string;
   compact?: boolean;
   disabled?: boolean;
   triggerLabel?: string;
+  autoOpenSeq?: number;
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
   onNotify?: (message: string, variant?: 'info' | 'error') => void;
@@ -74,11 +76,13 @@ export function WebPublishPopover({
   targetId,
   filePath,
   sourcePath,
+  embedUrl,
   title,
   revisionKey,
   compact = false,
   disabled = false,
   triggerLabel,
+  autoOpenSeq,
   side = 'bottom',
   align = 'end',
   onNotify,
@@ -97,6 +101,7 @@ export function WebPublishPopover({
   const [prepublishEnabled, setPrepublishEnabled] = useState(true);
   const deployAfterSignInRef = useRef(false);
   const prevAccountStateRef = useRef<AccountSummary['state'] | undefined>(undefined);
+  const lastAutoOpenSeqRef = useRef<number | undefined>(undefined);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -106,6 +111,12 @@ export function WebPublishPopover({
     setPrepublishEnabled(true);
     setCopied(false);
   }, [targetKind, targetId, filePath]);
+
+  useEffect(() => {
+    if (!autoOpenSeq || lastAutoOpenSeqRef.current === autoOpenSeq) return;
+    lastAutoOpenSeqRef.current = autoOpenSeq;
+    setOpen(true);
+  }, [autoOpenSeq, targetId]);
 
   useEffect(() => () => {
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
@@ -119,6 +130,8 @@ export function WebPublishPopover({
       const next = await webPublishClient.getStatus(targetKind, targetId, {
         filePath,
         sourcePath,
+        embedUrl,
+        title,
         refresh: refreshRemote,
       });
       setStatus(next);
@@ -127,7 +140,7 @@ export function WebPublishPopover({
     } finally {
       setLoading(false);
     }
-  }, [filePath, sourcePath, t, targetId, targetKind]);
+  }, [embedUrl, filePath, sourcePath, t, targetId, targetKind, title]);
 
   useEffect(() => {
     if (!open) return;
@@ -159,7 +172,7 @@ export function WebPublishPopover({
     setError(null);
     try {
       if (op === 'stop') {
-        const stopped = await webPublishClient.unpublish(targetKind, targetId, { filePath, sourcePath });
+        const stopped = await webPublishClient.unpublish(targetKind, targetId, { filePath, sourcePath, embedUrl });
         setStatus(prev => mergePublicationStatus(prev, targetKind, targetId, stopped.publication, prev?.freshness ?? 'unknown'));
         onNotify?.(t('Share link disabled'), 'info');
         return;
@@ -168,6 +181,7 @@ export function WebPublishPopover({
       const published = await webPublishClient.publish(targetKind, targetId, {
         filePath,
         sourcePath,
+        embedUrl,
         deployMode: op,
         name: title,
       });
@@ -201,7 +215,7 @@ export function WebPublishPopover({
     } finally {
       setActiveOp(null);
     }
-  }, [activeOp, copyUrl, filePath, onNotify, refreshAccount, refreshStatus, sourcePath, t, targetId, targetKind, title]);
+  }, [activeOp, copyUrl, embedUrl, filePath, onNotify, refreshAccount, refreshStatus, sourcePath, t, targetId, targetKind, title]);
 
   // Automatically continue deploying as soon as an in-popover OpenDesign sign-in completes.
   useEffect(() => {

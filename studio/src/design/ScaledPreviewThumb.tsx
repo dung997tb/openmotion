@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Skeleton } from '../components/ui/Skeleton';
 import { CoverPlaceholder } from '../components/ui/CoverPlaceholder';
+import { findScrollContainer, observeScrollActivity } from '../utils/scrollActivity';
 
 const VIRTUAL_WIDTH = 960;
 const VIRTUAL_HEIGHT = 600;
 export const MAX_ACTIVE_THUMBS = 12;
+const STAGGER_BATCH_SIZE = 2;
+const STAGGER_TICK_MS = 32;
 
 type SlotEntry = {
   hovered: boolean;
@@ -17,6 +20,65 @@ type WaiterEntry = SlotEntry & {
 
 const activeThumbSlots = new Map<string, SlotEntry>();
 const waitingThumbSlots = new Map<string, WaiterEntry>();
+
+const visibilityListeners = new Set<(visible: boolean) => void>();
+let visibilityListenerAttached = false;
+
+function handleDocumentVisibilityChange() {
+  const isVisible = !document.hidden;
+  for (const listener of [...visibilityListeners]) {
+    listener(isVisible);
+  }
+}
+
+function subscribePageVisibility(listener: (visible: boolean) => void): () => void {
+  if (typeof document === 'undefined') return () => {};
+  visibilityListeners.add(listener);
+  if (!visibilityListenerAttached) {
+    visibilityListenerAttached = true;
+    document.addEventListener('visibilitychange', handleDocumentVisibilityChange);
+  }
+  return () => {
+    visibilityListeners.delete(listener);
+    if (visibilityListeners.size === 0 && visibilityListenerAttached) {
+      visibilityListenerAttached = false;
+      document.removeEventListener('visibilitychange', handleDocumentVisibilityChange);
+    }
+  };
+}
+
+const settledThumbQueue = new Map<string, () => void>();
+let staggerTickGrants = 0;
+let staggerTimer: ReturnType<typeof setTimeout> | undefined;
+
+function drainSettledThumbs() {
+  while (staggerTickGrants < STAGGER_BATCH_SIZE && settledThumbQueue.size > 0) {
+    const next = settledThumbQueue.entries().next().value as [string, () => void] | undefined;
+    if (!next) break;
+    const [id, reveal] = next;
+    settledThumbQueue.delete(id);
+    staggerTickGrants += 1;
+    reveal();
+  }
+  if (staggerTimer === undefined && (staggerTickGrants > 0 || settledThumbQueue.size > 0)) {
+    staggerTimer = setTimeout(() => {
+      staggerTimer = undefined;
+      staggerTickGrants = 0;
+      if (settledThumbQueue.size > 0) {
+        drainSettledThumbs();
+      }
+    }, STAGGER_TICK_MS);
+  }
+}
+
+function enqueueSettledThumb(id: string, reveal: () => void): void {
+  settledThumbQueue.set(id, reveal);
+  drainSettledThumbs();
+}
+
+function cancelSettledThumb(id: string): void {
+  settledThumbQueue.delete(id);
+}
 
 function disposeIframeResources(iframe: HTMLIFrameElement | null): void {
   if (!iframe) return;
@@ -110,10 +172,11 @@ function withThumbParam(src: string): string {
 /**
  * Viewport-aware, edge-to-edge scaled sandboxed iframe thumbnail for Design Studio templates and projects.
  * - Unmounts off-screen, hidden-tab, or inactive-page iframes so WebGL/rAF contexts are freed immediately.
+ * - Defers and staggers iframe mounts/teardowns across active scroll bursts so scrolling never stalls.
  * - Appends ?thumb=1 so heavy WebGL/rAF animations paint their initial frame and freeze at 0% GPU until hovered.
  * - Caps simultaneous mounted iframes across the workspace to MAX_ACTIVE_THUMBS so GPU/WebGL contexts cannot exhaust.
  */
-export function ScaledPreviewThumb({
+export const ScaledPreviewThumb = memo(function ScaledPreviewThumb({
   src,
   title,
   badge,
@@ -130,6 +193,7 @@ export function ScaledPreviewThumb({
   const hostRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const hoveredRef = useRef(false);
+  const inViewRef = useRef(false);
   const [pageVisible, setPageVisible] = useState(() =>
     typeof document === 'undefined' ? true : !document.hidden,
   );
@@ -144,46 +208,71 @@ export function ScaledPreviewThumb({
     [src, waitForReady],
   );
 
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const onVisibilityChange = () => setPageVisible(!document.hidden);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, []);
+  useEffect(() => subscribePageVisibility(setPageVisible), []);
 
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
-    const update = () => {
+    const updateScale = () => {
       const width = el.getBoundingClientRect().width;
-      if (width > 0) setScale(width / VIRTUAL_WIDTH);
+      if (width > 0) {
+        const nextScale = width / VIRTUAL_WIDTH;
+        setScale(prev => (Math.abs(prev - nextScale) > 0.002 ? nextScale : prev));
+      }
     };
-    update();
+    updateScale();
     let ro: ResizeObserver | undefined;
     if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(update);
+      ro = new ResizeObserver(updateScale);
       ro.observe(el);
     }
     if (!active || !pageVisible) {
+      inViewRef.current = false;
+      cancelSettledThumb(instanceId);
       setVisible(false);
       setLoaded(false);
       return () => { ro?.disconnect(); };
     }
     if (typeof IntersectionObserver === 'undefined') {
+      inViewRef.current = true;
       setVisible(true);
       return () => { ro?.disconnect(); };
     }
+    const scrollHost = findScrollContainer(el);
+    const scrollActivity = observeScrollActivity(scrollHost, () => {
+      if (!inViewRef.current) {
+        cancelSettledThumb(instanceId);
+        setVisible(false);
+        setLoaded(false);
+        return;
+      }
+      if (hoveredRef.current) {
+        cancelSettledThumb(instanceId);
+        setVisible(true);
+        return;
+      }
+      enqueueSettledThumb(instanceId, () => {
+        if (inViewRef.current && !scrollActivity.isScrolling()) {
+          setVisible(true);
+        }
+      });
+    });
     const io = new IntersectionObserver(entries => {
       const inView = entries.some(e => e.isIntersecting);
+      inViewRef.current = inView;
+      if (scrollActivity.isScrolling()) return;
+      cancelSettledThumb(instanceId);
       setVisible(inView);
       if (!inView) setLoaded(false);
     }, { rootMargin: '40px' });
     io.observe(el);
     return () => {
+      cancelSettledThumb(instanceId);
+      scrollActivity.disconnect();
       io.disconnect();
       ro?.disconnect();
     };
-  }, [active, pageVisible]);
+  }, [active, pageVisible, instanceId]);
 
   const wantMount = Boolean(active && pageVisible && visible && thumbSrc);
 
@@ -231,6 +320,10 @@ export function ScaledPreviewThumb({
 
   const setPlaying = (play: boolean) => {
     hoveredRef.current = play;
+    if (play && inViewRef.current && !visible && active && pageVisible) {
+      cancelSettledThumb(instanceId);
+      setVisible(true);
+    }
     if (play && wantMount && !slotGranted) {
       if (acquireThumbSlot(instanceId, true, evictSelf)) {
         setSlotGranted(true);
@@ -281,4 +374,4 @@ export function ScaledPreviewThumb({
       {badge && <span className="om-design-thumb-badge">{badge}</span>}
     </div>
   );
-}
+});

@@ -222,6 +222,7 @@ export function SuperAgentWorkspace({
   onOpenBrandKit,
   onOpenAgentSettings,
   onOpenModelSettings,
+  onOpenAccountSettings,
   onOpenMcp,
 }: {
   active: boolean;
@@ -238,6 +239,7 @@ export function SuperAgentWorkspace({
   onOpenBrandKit: (kitId?: string) => void;
   onOpenAgentSettings: () => void;
   onOpenModelSettings?: () => void;
+  onOpenAccountSettings?: () => void;
   onOpenMcp: () => void;
 }) {
   const { t, locale } = useI18n();
@@ -272,6 +274,8 @@ export function SuperAgentWorkspace({
 
   const [conversations, setConversations] = useState<SuperAgentChatSummary[]>([]);
   const [loadingList, setLoadingList] = useState(() => Boolean(active));
+  const hasLoadedListRef = useRef(false);
+  const lastActivationRefreshRef = useRef(0);
   const [activeChat, setActiveChat] = useState<SuperAgentChat | null>(null);
   const [loadingChat, setLoadingChat] = useState(() => Boolean(active && chatId));
   const [loadFailed, setLoadFailed] = useState(false);
@@ -307,6 +311,7 @@ export function SuperAgentWorkspace({
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>(NEW_VIEWER_TAB_ID);
   const [previewArtifacts, setPreviewArtifacts] = useState<SuperAgentArtifact[]>([]);
+  const [deployOpenSeq, setDeployOpenSeq] = useState(0);
   const handledRequestedGameRef = useRef<string | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -358,17 +363,26 @@ export function SuperAgentWorkspace({
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
+    let frame: number | null = null;
     const measure = () => {
       const next = el.clientWidth;
-      setContainerWidth(prev => (prev === next ? prev : next));
+      if (next > 0) setContainerWidth(prev => (prev === next ? prev : next));
+    };
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measure();
+      });
     };
     measure();
-    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleMeasure) : null;
     observer?.observe(el);
-    window.addEventListener('resize', measure);
+    window.addEventListener('resize', scheduleMeasure);
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
       observer?.disconnect();
-      window.removeEventListener('resize', measure);
+      window.removeEventListener('resize', scheduleMeasure);
     };
   }, [active]);
 
@@ -415,9 +429,12 @@ export function SuperAgentWorkspace({
   }, []);
 
   const refreshConversations = useCallback(() => {
-    setLoadingList(true);
+    if (!hasLoadedListRef.current) setLoadingList(true);
     void listSuperAgentChats()
-      .then(result => setConversations(Array.isArray(result?.conversations) ? result.conversations : []))
+      .then(result => {
+        hasLoadedListRef.current = true;
+        setConversations(Array.isArray(result?.conversations) ? result.conversations : []);
+      })
       .catch(() => { /* non-blocking sidebar refresh */ })
       .finally(() => setLoadingList(false));
   }, []);
@@ -447,11 +464,21 @@ export function SuperAgentWorkspace({
   }, [runtimesDir, activeChat, selection.runtimeId, selection.engine]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      for (const item of toasts) {
+        if (!item.action) dismissToast(item.id);
+      }
+      return;
+    }
+    const now = Date.now();
+    const stale = lastActivationRefreshRef.current === 0 || now - lastActivationRefreshRef.current > 15_000;
     refreshConversations();
-    refreshResources();
-    refreshAgents();
-    refreshRuntimes();
+    if (stale) {
+      lastActivationRefreshRef.current = now;
+      refreshResources();
+      refreshAgents();
+      refreshRuntimes();
+    }
   }, [active, refreshConversations, refreshResources, refreshAgents, refreshRuntimes]);
 
   // Apply chat snapshot and sync tabs / agent choices
@@ -672,7 +699,9 @@ export function SuperAgentWorkspace({
         .catch(() => { /* composer still holds draft + attachments */ });
     }
 
-    showToast(t('Loaded into Super Agent'), 'info', 'feedback');
+    if (payload.prompt.trim() || mergedAttachments.length > 0 || payload.initialArtifact) {
+      showToast(t('Loaded into Super Agent'), 'info', 'feedback');
+    }
   }, [active, attachments, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange, showToast, t]);
 
   useEffect(() => {
@@ -970,6 +999,11 @@ export function SuperAgentWorkspace({
     setViewerOpen(true);
   }, [activeChat, applyChatSnapshot, locale, showToast, t]);
 
+  const handleDeployGame = useCallback(async (game: GameCard) => {
+    await handlePlayGame(game);
+    setDeployOpenSeq(seq => seq + 1);
+  }, [handlePlayGame]);
+
   const handleUseGameInAgent = useCallback(async (artifact: SuperAgentArtifact) => {
     const gameId = artifact.projectId || (artifact.id.startsWith('game:') ? artifact.id.slice('game:'.length) : '');
     let game: GameCard | null =
@@ -1168,7 +1202,9 @@ export function SuperAgentWorkspace({
           })
           .catch(() => { /* keep draft seed only */ });
       }
-      showToast(t('Loaded into Super Agent'), 'info', 'feedback');
+      if (payload.prompt.trim() || handoffAttachments.length > 0 || payload.initialArtifact) {
+        showToast(t('Loaded into Super Agent'), 'info', 'feedback');
+      }
       return;
     }
 
@@ -1364,6 +1400,7 @@ export function SuperAgentWorkspace({
             onBack={onBack}
             onExitRequestedMode={onExitRequestedMode}
             onPlayGame={game => void handlePlayGame(game)}
+            onDeployGame={game => void handleDeployGame(game)}
             onRetryLoad={() => setChatRetry(value => value + 1)}
             onOpenSidebar={() => setSidebarOpen(true)}
             onToggleViewer={() => {
@@ -1452,6 +1489,8 @@ export function SuperAgentWorkspace({
               }}
               onAttachArtifact={handleAttachArtifact}
               onUseGameInAgent={artifact => void handleUseGameInAgent(artifact)}
+              deployOpenSeq={deployOpenSeq}
+              onOpenAccountSettings={onOpenAccountSettings}
               onAttachBrowserAnnotation={handleAttachBrowserAnnotation}
               onNotify={(msg, tone) => showToast(msg, tone === 'error' ? 'error' : 'info', 'feedback')}
               onOpenInDesignStudio={onOpenDesignProject}

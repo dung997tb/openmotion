@@ -454,6 +454,7 @@ export function ModeResourceShowcase({
   onChangeModeOptions,
   onToggleAttachment,
   onPlayGame,
+  onDeployGame,
   onFocusComposer,
   onPickPrompt,
   onOpenAllResources,
@@ -467,6 +468,7 @@ export function ModeResourceShowcase({
   onChangeModeOptions?: (patch: Partial<ModeComposerOptions>) => void;
   onToggleAttachment: (item: SuperAgentResourceAttachment) => void;
   onPlayGame?: (game: GameCard) => void;
+  onDeployGame?: (game: GameCard) => void;
   onFocusComposer?: () => void;
   onPickPrompt: (prompt: string) => void;
   onOpenAllResources: (category: ResourceCategoryTab) => void;
@@ -499,6 +501,8 @@ export function ModeResourceShowcase({
   const [activeSkillCategory, setActiveSkillCategory] = useState<SkillCategory | 'all'>('all');
   const [gameQuery, setGameQuery] = useState('');
   const [gameSort, setGameSort] = useState<GameSort>('relevance');
+  const [fanIndex, setFanIndex] = useState(0);
+  const [fanPaused, setFanPaused] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -507,13 +511,44 @@ export function ModeResourceShowcase({
     [gameCatalog],
   );
   const fannedGames = useMemo(
-    () => publishedGameTemplates.filter(g => Boolean(coverUrl(g))).slice(0, 5),
+    () => publishedGameTemplates.filter(g => Boolean(coverUrl(g))),
     [publishedGameTemplates],
   );
   const myGames = useMemo(
     () => gameCatalog.filter(g => g.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [gameCatalog],
   );
+
+  // Auto-rotate the fanned game showcase smoothly when visible and idle.
+  useEffect(() => {
+    if (!active || mode.id !== 'game' || fannedGames.length <= 1 || fanPaused) return;
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      setFanIndex(prev => (prev + 1) % fannedGames.length);
+    }, 4500);
+    return () => window.clearInterval(timer);
+  }, [active, mode.id, fannedGames.length, fanPaused]);
+
+  const fanSlots = useMemo(() => {
+    const total = fannedGames.length;
+    if (total === 0) return [];
+    const center = ((fanIndex % total) + total) % total;
+    const maxOffset = Math.min(3, Math.floor((total - 1) / 2));
+    const offsets: number[] = [];
+    for (let d = -maxOffset; d <= maxOffset; d += 1) {
+      offsets.push(d);
+    }
+    if (total % 2 === 0 && maxOffset < 3) {
+      offsets.push(maxOffset + 1);
+    }
+    return offsets.map(offset => {
+      const idx = (center + offset + total) % total;
+      return { game: fannedGames[idx]!, index: idx, offset };
+    });
+  }, [fannedGames, fanIndex]);
 
   // Build real categories & live counts per mode.
   const filters = useMemo<FilterOption[]>(() => {
@@ -854,57 +889,130 @@ export function ModeResourceShowcase({
             icon={<RemixIcon name="close-line" size={16} />}
           />
         </div>
-        {mode.id === 'game' && fannedGames.length > 0 ? (
-          <div className="om-sa-game-fan" aria-label={t('Game Studio')}>
-            {fannedGames.map((game, index) => {
+        {mode.id === 'game' && fanSlots.length > 0 ? (
+          <div
+            className="om-sa-game-fan"
+            role="region"
+            aria-roledescription="carousel"
+            aria-label={t('Game Studio')}
+            onMouseEnter={() => setFanPaused(true)}
+            onMouseLeave={() => setFanPaused(false)}
+            onFocusCapture={() => setFanPaused(true)}
+            onBlurCapture={event => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setFanPaused(false);
+              }
+            }}
+            onKeyDown={event => {
+              if (fannedGames.length <= 1) return;
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                setFanIndex(prev => (prev - 1 + fannedGames.length) % fannedGames.length);
+              } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                setFanIndex(prev => (prev + 1) % fannedGames.length);
+              }
+            }}
+          >
+            {fannedGames.length > 1 && (
+              <IconButton
+                variant="plain"
+                type="button"
+                className="om-sa-game-fan-nav"
+                data-side="prev"
+                aria-label={t('Previous')}
+                onClick={() => setFanIndex(prev => (prev - 1 + fannedGames.length) % fannedGames.length)}
+                icon={<RemixIcon name="arrow-left-line" size={16} />}
+              />
+            )}
+            {fanSlots.map(({ game, index, offset }) => {
               const title = localizedGameTitle(game, locale);
               const cover = coverUrl(game);
               const isSelected = modeOptions?.gameTemplate?.id === game.id;
               const isPlaying = playingGameId === game.id;
+              const isCenter = offset === 0;
+              const isEdgeHidden = Math.abs(offset) > 2;
               return (
                 <div
                   key={game.id}
                   className="om-sa-game-fan-item"
-                  data-slot={index}
+                  data-slot={offset}
+                  data-center={isCenter || undefined}
                   data-selected={isSelected || undefined}
                   data-playing={isPlaying || undefined}
+                  aria-hidden={isEdgeHidden || undefined}
+                  inert={isEdgeHidden || undefined}
                 >
                   <Button
                     variant="plain"
                     type="button"
                     className="om-sa-game-fan-card"
-                    aria-label={t('Play {title}', { title })}
+                    aria-pressed={isCenter ? isSelected : undefined}
+                    aria-label={isCenter ? `${t('Make one like this')}: ${title}` : title}
                     onClick={() => {
-                      if (onPlayGame) {
-                        onPlayGame(game);
+                      if (!isCenter) {
+                        setFanIndex(index);
                         return;
                       }
                       selectGameForAgent(game);
                     }}
                   >
                     {cover && <img src={cover} alt="" />}
-                    <span className="om-sa-game-play-cue" aria-hidden="true">
-                      <RemixIcon name="play-fill" size={13} />
-                      <span>{t('Play')}</span>
-                    </span>
+                    {isCenter && (
+                      <span
+                        className="om-sa-game-select-cue"
+                        data-selected={isSelected || undefined}
+                        aria-hidden="true"
+                      >
+                        <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
+                        <span>{isSelected ? t('Selected') : t('Make one like this')}</span>
+                      </span>
+                    )}
                     <span className="om-sa-game-fan-label">{t(genreLabels[game.genre])}</span>
                   </Button>
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-game-tile-remix om-sa-game-fan-remix"
-                    aria-pressed={isSelected}
-                    data-selected={isSelected || undefined}
-                    title={t('Make one like this')}
-                    aria-label={`${t('Make one like this')}: ${title}`}
-                    onClick={() => selectGameForAgent(game)}
-                  >
-                    <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={12} />
-                    <span>{isSelected ? t('Selected') : t('Make one like this')}</span>
-                  </Button>
+                  {isCenter && (onPlayGame || onDeployGame) && (
+                    <div className="om-sa-game-tile-actions om-sa-game-fan-actions">
+                      {onDeployGame && (game.status === 'ready' || game.status === 'published') && (
+                        <IconButton
+                          variant="plain"
+                          type="button"
+                          className="om-sa-game-tile-deploy"
+                          title={t('Cloud deploy')}
+                          aria-label={`${t('Cloud deploy')}: ${title}`}
+                          onClick={() => onDeployGame(game)}
+                          icon={<RemixIcon name="cloud-line" size={13} />}
+                        />
+                      )}
+                      {onPlayGame && (
+                        <Button
+                          variant="plain"
+                          type="button"
+                          className="om-sa-game-tile-play"
+                          data-playing={isPlaying || undefined}
+                          title={t('Play {title}', { title })}
+                          aria-label={t('Play {title}', { title })}
+                          onClick={() => onPlayGame(game)}
+                        >
+                          <RemixIcon name="play-fill" size={12} />
+                          <span>{t('Play')}</span>
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
+            {fannedGames.length > 1 && (
+              <IconButton
+                variant="plain"
+                type="button"
+                className="om-sa-game-fan-nav"
+                data-side="next"
+                aria-label={t('Next')}
+                onClick={() => setFanIndex(prev => (prev + 1) % fannedGames.length)}
+                icon={<RemixIcon name="arrow-right-line" size={16} />}
+              />
+            )}
           </div>
         ) : (
           <span className="om-creation-icon om-sa-mode-hero-icon" data-tone={mode.tone} aria-hidden="true">
@@ -1129,14 +1237,9 @@ export function ModeResourceShowcase({
                       variant="plain"
                       type="button"
                       className="om-sa-game-tile-cover"
-                      aria-label={t('Play {title}', { title })}
-                      onClick={() => {
-                        if (onPlayGame) {
-                          onPlayGame(game);
-                        } else {
-                          selectGameForAgent(game);
-                        }
-                      }}
+                      aria-pressed={isSelected}
+                      aria-label={isMine ? `${t('Attach to Chat')}: ${title}` : `${t('Make one like this')}: ${title}`}
+                      onClick={() => selectGameForAgent(game)}
                     >
                       {cover ? (
                         <img src={cover} alt="" loading="lazy" decoding="async" />
@@ -1146,9 +1249,13 @@ export function ModeResourceShowcase({
                           <span>{title}</span>
                         </div>
                       )}
-                      <span className="om-sa-game-play-cue" aria-hidden="true">
-                        <RemixIcon name="play-fill" size={14} />
-                        <span>{t('Play')}</span>
+                      <span
+                        className="om-sa-game-select-cue"
+                        data-selected={isSelected || undefined}
+                        aria-hidden="true"
+                      >
+                        <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
+                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Make one like this')}</span>
                       </span>
                       {status && (
                         <span className="om-sa-game-status" data-tone={game.status}>
@@ -1170,19 +1277,35 @@ export function ModeResourceShowcase({
                       )}
                     </Button>
 
-                    <Button
-                      variant="plain"
-                      type="button"
-                      className="om-sa-game-tile-remix"
-                      aria-pressed={isSelected}
-                      data-selected={isSelected || undefined}
-                      title={isMine ? t('Attach to Chat') : t('Make one like this')}
-                      aria-label={isMine ? `${t('Attach to Chat')}: ${title}` : `${t('Make one like this')}: ${title}`}
-                      onClick={() => selectGameForAgent(game)}
-                    >
-                      <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={12} />
-                      <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Make one like this')}</span>
-                    </Button>
+                    {(onPlayGame || onDeployGame) && (
+                      <div className="om-sa-game-tile-actions">
+                        {onDeployGame && (game.status === 'ready' || game.status === 'published') && (
+                          <IconButton
+                            variant="plain"
+                            type="button"
+                            className="om-sa-game-tile-deploy"
+                            title={t('Cloud deploy')}
+                            aria-label={`${t('Cloud deploy')}: ${title}`}
+                            onClick={() => onDeployGame(game)}
+                            icon={<RemixIcon name="cloud-line" size={13} />}
+                          />
+                        )}
+                        {onPlayGame && (
+                          <Button
+                            variant="plain"
+                            type="button"
+                            className="om-sa-game-tile-play"
+                            data-playing={isPlaying || undefined}
+                            title={t('Play {title}', { title })}
+                            aria-label={t('Play {title}', { title })}
+                            onClick={() => onPlayGame(game)}
+                          >
+                            <RemixIcon name="play-fill" size={12} />
+                            <span>{t('Play')}</span>
+                          </Button>
+                        )}
+                      </div>
+                    )}
 
                     <div className="om-sa-game-tile-meta">
                       {cover && (

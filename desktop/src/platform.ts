@@ -53,7 +53,7 @@ export function buildMainWindowOptions(input: {
     minWidth: 960,
     minHeight: 620,
     show: false,
-    title: 'OpenMotion Studio',
+    title: 'OpenDesign',
     backgroundColor: getDesktopWindowBackgroundColor(theme),
     ...(input.iconPath ? { icon: input.iconPath } : {}),
     webPreferences: {

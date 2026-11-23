@@ -8,7 +8,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenMotion</title>
+    <title>OpenDesign</title>
     <style>
       :root,
       html[data-theme="light"] {
@@ -416,7 +416,7 @@
     </div>
 
     <main class="om-stage" role="status" aria-live="polite">
-      <div id="splash-logo" role="img" aria-label="OpenMotion">
+      <div id="splash-logo" role="img" aria-label="OpenDesign">
         <img id="splash-static-logo" alt="" draggable="false" />
         <canvas id="splash-canvas" hidden></canvas>
       </div>
@@ -461,8 +461,8 @@
 
       <!-- Startup Recovery Panel -->
       <section class="om-panel om-panel-error" id="error-panel" aria-label="Startup error">
-        <h1 class="om-panel-title">Could not start OpenMotion</h1>
-        <p class="om-error-detail" id="error-detail">OpenMotion local engine did not respond.</p>
+        <h1 class="om-panel-title">Could not start OpenDesign</h1>
+        <p class="om-error-detail" id="error-detail">OpenDesign local engine did not respond.</p>
         <div class="om-btn-row">
           <button type="button" class="om-btn om-btn-primary" id="retry-btn">
             Retry startup
@@ -999,7 +999,7 @@ void main() {
                   window.__updateDesktopSplash({
                     step: 'ready',
                     mode: 'welcome',
-                    status: 'Opening OpenMotion Studio',
+                    status: 'Opening OpenDesign Studio',
                     account: {
                       state: 'signed-in',
                       name: updated.user?.name,

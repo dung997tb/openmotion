@@ -1061,7 +1061,7 @@ export function ExecutionTimeline({
       )}
 
       {chat.error && (
-        <div className="om-card om-sa-error-card" role="alert">
+        <div className="om-sa-error-card" role="alert">
           <span className="om-sa-error-icon" aria-hidden="true">
             <RemixIcon name="error-warning-line" size={18} />
           </span>
@@ -1071,8 +1071,8 @@ export function ExecutionTimeline({
           </div>
           {onContinue && (
             <Button
-              variant="secondary"
-              className="om-button om-sa-continue-btn"
+              variant="plain"
+              className="om-sa-continue-btn"
               disabled={continueDisabled || busy || sending}
               onClick={onContinue}
             >
@@ -1084,7 +1084,7 @@ export function ExecutionTimeline({
       )}
 
       {showInterruptedCard && (
-        <div className="om-card om-sa-interrupted-card" role="status">
+        <div className="om-sa-interrupted-card" role="status">
           <span className="om-sa-interrupted-icon" aria-hidden="true">
             <RemixIcon name="pause-line" size={18} />
           </span>
@@ -1097,8 +1097,9 @@ export function ExecutionTimeline({
           </div>
           {onContinue && (
             <Button
-              variant="primary"
-              className="om-button om-sa-continue-btn"
+              variant="plain"
+              className="om-sa-continue-btn"
+              data-primary
               disabled={continueDisabled}
               onClick={onContinue}
             >

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DesignError, designProjectsFor } from '../design-projects.ts';
 import { GameError, GameProjects } from '../game-projects.ts';
@@ -46,6 +46,72 @@ function assertSafeLocalSourcePath(resolved: string): void {
   }
 }
 
+const SAFE_GAME_TARGET_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}$/;
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function normalizeEmbedHttpsUrl(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol !== 'https:') return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureCloudGameWrapper(
+  rootDir: string,
+  targetId: string,
+  embedUrl: string,
+  title: string,
+): Promise<{ dir: string; revision: string }> {
+  if (!SAFE_GAME_TARGET_ID.test(targetId)) {
+    throw new Error('INVALID_ARGUMENT: Invalid game targetId');
+  }
+  const wrapperDir = path.join(rootDir, 'web-publish-cache', 'games', targetId);
+  const indexFile = path.join(wrapperDir, 'index.html');
+  const safeTitle = escapeHtmlAttr(title || targetId);
+  const safeUrl = escapeHtmlAttr(embedUrl);
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>${safeTitle} · OpenDesign</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0c0f; }
+    iframe { display: block; width: 100%; height: 100%; border: 0; background: #0b0c0f; }
+  </style>
+</head>
+<body>
+  <iframe
+    src="${safeUrl}"
+    title="${safeTitle}"
+    allow="fullscreen; gamepad; autoplay; clipboard-write"
+    allowfullscreen
+    referrerpolicy="no-referrer-when-downgrade"
+  ></iframe>
+</body>
+</html>
+`;
+  const revision = createHash('sha256').update(html, 'utf8').digest('hex').slice(0, 16);
+  await mkdir(wrapperDir, { recursive: true });
+  const existing = await readFile(indexFile, 'utf8').catch(() => null);
+  if (existing !== html) {
+    await writeFile(indexFile, html, 'utf8');
+  }
+  return { dir: wrapperDir, revision };
+}
+
 export async function resolveWebPublishTarget(
   store: WorkspaceStore,
   input: {
@@ -54,6 +120,7 @@ export async function resolveWebPublishTarget(
     sourcePath?: string;
     filePath?: string;
     title?: string;
+    embedUrl?: string;
   },
   origin: string,
 ): Promise<WebPublishTarget> {
@@ -82,22 +149,57 @@ export async function resolveWebPublishTarget(
       throw new Error('INVALID_ARGUMENT: targetId is required for game targets');
     }
     const games = new GameProjects(rootDir);
-    const [{ dir }, card] = await Promise.all([games.locate(targetId), games.get(targetId)]);
-    if (card.external) {
-      throw new Error('INVALID_ARGUMENT: External games cannot be published from local workspace files');
+    const localGame = await Promise.all([games.locate(targetId), games.get(targetId)]).catch(() => null);
+    if (localGame) {
+      const [{ dir }, card] = localGame;
+      if (!card.external) {
+        const entryPath = input.filePath?.trim() || 'index.html';
+        const entryStat = await stat(path.join(dir, entryPath)).catch(() => null);
+        const sourceRevision = `${card.updatedAt}:${entryStat?.size ?? 0}:${entryStat?.mtimeMs ?? 0}`;
+        return {
+          kind: 'game',
+          id: card.id,
+          title: input.title?.trim() || card.title || card.id,
+          entryPath,
+          sourceRevision,
+          sourcePath: dir,
+          multiplayer: card.multiplayer,
+        };
+      }
     }
-    const entryPath = input.filePath?.trim() || 'index.html';
-    const entryStat = await stat(path.join(dir, entryPath)).catch(() => null);
-    const sourceRevision = `${card.updatedAt}:${entryStat?.size ?? 0}:${entryStat?.mtimeMs ?? 0}`;
-    return {
-      kind: 'game',
-      id: card.id,
-      title: input.title?.trim() || card.title || card.id,
-      entryPath,
-      sourceRevision,
-      sourcePath: dir,
-      multiplayer: card.multiplayer,
-    };
+
+    const validEmbedUrl = normalizeEmbedHttpsUrl(input.embedUrl);
+    if (validEmbedUrl) {
+      const cleanTitle = input.title?.trim() || targetId;
+      const wrapper = await ensureCloudGameWrapper(rootDir, targetId, validEmbedUrl, cleanTitle);
+      return {
+        kind: 'game',
+        id: targetId,
+        title: cleanTitle,
+        entryPath: 'index.html',
+        sourceRevision: wrapper.revision,
+        sourcePath: wrapper.dir,
+      };
+    }
+
+    if (SAFE_GAME_TARGET_ID.test(targetId)) {
+      const cachedDir = path.join(rootDir, 'web-publish-cache', 'games', targetId);
+      const cachedEntry = await stat(path.join(cachedDir, 'index.html')).catch(() => null);
+      if (cachedEntry) {
+        const cachedHtml = await readFile(path.join(cachedDir, 'index.html'), 'utf8');
+        const revision = createHash('sha256').update(cachedHtml, 'utf8').digest('hex').slice(0, 16);
+        return {
+          kind: 'game',
+          id: targetId,
+          title: input.title?.trim() || targetId,
+          entryPath: 'index.html',
+          sourceRevision: revision,
+          sourcePath: cachedDir,
+        };
+      }
+    }
+
+    throw new GameError(`Game "${targetId}" was not found`, 404);
   }
 
   if (input.targetKind === 'motion') {
@@ -231,6 +333,7 @@ export async function webPublishOperation(
   const sourcePath = typeof input.sourcePath === 'string' ? input.sourcePath.trim() : undefined;
   const filePath = typeof input.filePath === 'string' ? input.filePath.trim() : undefined;
   const title = typeof input.title === 'string' ? input.title.trim() : undefined;
+  const embedUrl = typeof input.embedUrl === 'string' ? input.embedUrl.trim() : undefined;
 
   if (command === 'status') {
     if (targetKind === 'html' && targetId && !sourcePath) {
@@ -242,7 +345,7 @@ export async function webPublishOperation(
     try {
       const resolved = await resolveWebPublishTarget(
         store,
-        { targetKind, targetId, sourcePath, filePath, title },
+        { targetKind, targetId, sourcePath, filePath, title, embedUrl },
         origin,
       );
       return await service.status(resolved, { filePath, refresh: input.refresh === true });
@@ -263,7 +366,7 @@ export async function webPublishOperation(
   if (command === 'publish') {
     const resolved = await resolveWebPublishTarget(
       store,
-      { targetKind, targetId, sourcePath, filePath, title },
+      { targetKind, targetId, sourcePath, filePath, title, embedUrl },
       origin,
     );
     return await service.publish(resolved, {
@@ -292,7 +395,7 @@ export async function webPublishOperation(
     }
     const resolved = await resolveWebPublishTarget(
       store,
-      { targetKind, targetId, sourcePath, filePath, title },
+      { targetKind, targetId, sourcePath, filePath, title, embedUrl },
       origin,
     );
     return await service.unpublish(resolved, { filePath });

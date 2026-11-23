@@ -671,3 +671,89 @@ test('WebPublish stops previous slug on new_link rotation and allows unpublish/s
     'unpublish after project deletion must call share stop on the persisted slug',
   );
 }));
+
+test('WebPublish deploys embeddable community games via an OpenDesign Cloud wrapper and rejects non-https embedUrl', () => fixture(async store => {
+  const { resolveWebPublishTarget, webPublishOperation } = await import('../gateway/web-publish-ops.ts');
+  const { client } = createMockWebPublishAccount();
+  const service = new WebPublishService(store.directory, client);
+
+  // 1. Valid https embedUrl stages a cached wrapper outside games/ and publishes to OpenDesign Cloud
+  const target = await resolveWebPublishTarget(
+    store,
+    {
+      targetKind: 'game',
+      targetId: 'community-turbo-kart',
+      embedUrl: 'https://bridge-mind.github.io/turbo-kart-rally/',
+      title: 'Turbo Kart Rally',
+    },
+    'http://127.0.0.1:4173',
+  );
+  assert.equal(target.kind, 'game');
+  assert.equal(target.id, 'community-turbo-kart');
+  assert.equal(target.entryPath, 'index.html');
+  assert.ok(target.sourcePath.includes(path.join('web-publish-cache', 'games', 'community-turbo-kart')));
+
+  const wrapperHtml = await readFile(path.join(target.sourcePath, 'index.html'), 'utf8');
+  assert.ok(wrapperHtml.includes('src="https://bridge-mind.github.io/turbo-kart-rally/"'));
+  assert.ok(wrapperHtml.includes('<title>Turbo Kart Rally · OpenDesign</title>'));
+
+  // Must not pollute local user GameProjects catalog
+  const games = new GameProjects(store.directory);
+  const catalog = await games.catalog();
+  assert.equal(catalog.games.some(item => item.id === 'community-turbo-kart'), false);
+
+  const published = (await webPublishOperation(
+    store,
+    {
+      command: 'publish',
+      targetKind: 'game',
+      targetId: 'community-turbo-kart',
+      embedUrl: 'https://bridge-mind.github.io/turbo-kart-rally/',
+      title: 'Turbo Kart Rally',
+    },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(published.publication.status, 'published');
+  assert.ok(published.url?.startsWith('https://open-design.app/artifact/'));
+
+  // 2. Subsequent status & unpublish work from the cached wrapper even without re-sending embedUrl
+  const statusAfter = (await webPublishOperation(
+    store,
+    { command: 'status', targetKind: 'game', targetId: 'community-turbo-kart' },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(statusAfter.active?.url, published.url);
+  assert.equal(statusAfter.freshness, 'fresh');
+
+  // 3. Non-https embedUrl values are rejected
+  await assert.rejects(
+    () =>
+      resolveWebPublishTarget(
+        store,
+        {
+          targetKind: 'game',
+          targetId: 'community-bad-proto',
+          embedUrl: 'javascript:alert(1)',
+          title: 'Bad Game',
+        },
+        'http://127.0.0.1:4173',
+      ),
+    /GAME_NOT_FOUND|not found/i,
+  );
+  await assert.rejects(
+    () =>
+      resolveWebPublishTarget(
+        store,
+        {
+          targetKind: 'game',
+          targetId: 'community-http-local',
+          embedUrl: 'http://127.0.0.1:8080/game',
+          title: 'Insecure Local Game',
+        },
+        'http://127.0.0.1:4173',
+      ),
+    /GAME_NOT_FOUND|not found/i,
+  );
+}));

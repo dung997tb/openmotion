@@ -31,10 +31,10 @@ export function buildDesktopMenuTemplate(options: {
 
   if (isMac) {
     template.push({
-      label: 'OpenMotion',
+      label: 'OpenDesign',
       submenu: [
         {
-          label: `About OpenMotion (${appVersion})`,
+          label: `About OpenDesign (${appVersion})`,
           click: () => onAction('open-about'),
         },
         {
@@ -51,7 +51,7 @@ export function buildDesktopMenuTemplate(options: {
         { role: 'services' },
         { type: 'separator' },
         {
-          label: 'Hide OpenMotion',
+          label: 'Hide OpenDesign',
           accelerator: 'CmdOrCtrl+M',
           click: () => onHideApp?.(),
         },
@@ -59,7 +59,7 @@ export function buildDesktopMenuTemplate(options: {
         { role: 'unhide' },
         { type: 'separator' },
         {
-          label: 'Quit OpenMotion',
+          label: 'Quit OpenDesign',
           accelerator: 'CmdOrCtrl+Q',
           click: () => onRequestQuit?.(),
         },
@@ -85,7 +85,7 @@ export function buildDesktopMenuTemplate(options: {
             } as MenuItemConstructorOptions,
             { type: 'separator' } as MenuItemConstructorOptions,
             {
-              label: 'Quit OpenMotion',
+              label: 'Quit OpenDesign',
               accelerator: 'CmdOrCtrl+Q',
               click: () => onRequestQuit?.(),
             } as MenuItemConstructorOptions,
@@ -170,7 +170,7 @@ export function buildDesktopMenuTemplate(options: {
             click: () => onMinimizeWindow?.(),
           },
           {
-            label: 'Hide OpenMotion',
+            label: 'Hide OpenDesign',
             accelerator: 'CmdOrCtrl+M',
             click: () => onHideApp?.(),
           },
@@ -226,7 +226,7 @@ export function buildDesktopMenuTemplate(options: {
               click: () => onAction('check-updates'),
             } as MenuItemConstructorOptions,
             {
-              label: `About OpenMotion (${appVersion})`,
+              label: `About OpenDesign (${appVersion})`,
               click: () => onAction('open-about'),
             } as MenuItemConstructorOptions,
           ]

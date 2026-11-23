@@ -1,6 +1,5 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { menuClasses } from '../components/ui/menuStyle';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { brandCatalogFile, type BrandCatalogEntry } from '../../../shared/brand-catalog';
 import type { BrandKit } from '../../../shared/brand-kit';
@@ -1452,6 +1451,8 @@ export function ArtifactBrowserPane({
   onClosePane,
   onAttachArtifact,
   onUseGameInAgent,
+  deployOpenSeq,
+  onOpenAccountSettings,
   onAttachBrowserAnnotation,
   onNotify,
   onOpenInDesignStudio,
@@ -1477,6 +1478,8 @@ export function ArtifactBrowserPane({
   onClosePane: () => void;
   onAttachArtifact: (artifact: SuperAgentArtifact) => void;
   onUseGameInAgent?: (artifact: SuperAgentArtifact) => void;
+  deployOpenSeq?: number;
+  onOpenAccountSettings?: () => void;
   onAttachBrowserAnnotation?: (attachment: SuperAgentResourceAttachment, sendImmediately?: boolean) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
   onOpenInDesignStudio: (projectId: string) => void;
@@ -2117,7 +2120,16 @@ export function ArtifactBrowserPane({
         <div className="om-sa-context-actions">
           {(() => {
             const hasModeSwitch = activeArtifact?.kind === 'design-project' || (activeArtifact?.kind === 'game-project' && Boolean(activeArtifact.projectId));
-            const canCloudShare = !showNewTab && Boolean(activeArtifact?.projectId) && (activeArtifact?.kind === 'game-project' || activeArtifact?.kind === 'design-project');
+            const gamePublishId = activeArtifact?.kind === 'game-project'
+              ? (activeArtifact.projectId || (activeArtifact.id.startsWith('game:') ? activeArtifact.id.slice('game:'.length) : ''))
+              : '';
+            const gameEmbedUrl = activeArtifact?.kind === 'game-project' && !activeArtifact.projectId && activeArtifact.url && /^https:\/\//i.test(activeArtifact.url)
+              ? activeArtifact.url
+              : undefined;
+            const canCloudShare = !showNewTab && (
+              (Boolean(activeArtifact?.projectId) && activeArtifact?.kind === 'design-project')
+              || (activeArtifact?.kind === 'game-project' && Boolean(gamePublishId) && (Boolean(activeArtifact.projectId) || Boolean(gameEmbedUrl)))
+            );
             const activeDeviceIcon = activeArtifact?.kind === 'web'
               ? (webDevicePreset === 'mobile' ? 'smartphone-line' : webDevicePreset === 'tablet' ? 'tablet-line' : 'computer-line')
               : (viewport === 'mobile' ? 'smartphone-line' : viewport === 'tablet' ? 'tablet-line' : 'computer-line');
@@ -2357,14 +2369,18 @@ export function ArtifactBrowserPane({
                   <span className="om-sa-toolbar-divider" aria-hidden="true" />
                 )}
 
-                {canCloudShare && activeArtifact?.projectId && (activeArtifact.kind === 'game-project' || activeArtifact.kind === 'design-project') && (
+                {canCloudShare && activeArtifact && (activeArtifact.kind === 'game-project' || activeArtifact.kind === 'design-project') && (
                   <WebPublishPopover
                     compact
                     targetKind={activeArtifact.kind === 'game-project' ? 'game' : 'design'}
-                    targetId={activeArtifact.projectId}
+                    targetId={activeArtifact.kind === 'game-project' ? gamePublishId : activeArtifact.projectId!}
+                    embedUrl={gameEmbedUrl}
                     filePath={activeArtifact.entry}
                     title={activeArtifact.title}
+                    triggerLabel={activeArtifact.kind === 'game-project' ? t('Cloud deploy') : undefined}
+                    autoOpenSeq={activeArtifact.kind === 'game-project' ? deployOpenSeq : undefined}
                     revisionKey={activeArtifact.revision ?? String(activeArtifact.updatedAt)}
+                    onOpenAccount={onOpenAccountSettings}
                     onNotify={onNotify}
                   />
                 )}
@@ -2391,7 +2407,7 @@ export function ArtifactBrowserPane({
                 />
               }
             >
-              <div className={`${menuClasses.panel} om-sa-browser-menu`} role="menu" aria-label={t('Browser options')}>
+              <div className="om-sa-browser-menu" role="menu" aria-label={t('Browser options')}>
                 {activeArtifact.kind === 'web' && (
                   <Button
                     variant="plain"

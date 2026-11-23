@@ -7,7 +7,7 @@
 ## Name and message
 
 - **Name:** OpenMotion. Capital O and M. Command and directory names retain their actual spelling.
-- **Website metadata:** OpenDesign Motion — AI Video & Motion Design. Social cards use **OpenDesign Motion — Create with your AI agent**. Retain **The fullstack agentic video editor** as the positioning tagline. Keep these titles across interface languages and localize descriptions of the editable workflow, brand templates, references and image/video/music/voice generation. The shared source is `../metadata.js`; generate both HTML entries with `npm run design:tokens`. Catalogue counts require a verified source; recreation is a workflow, not a guarantee of fidelity or reach.
+- **Website metadata:** OpenDesign — Open-Source AI Game & Video Studio. Social cards use **OpenDesign — Create with your AI agent**. Keep these titles across interface languages and localize descriptions of open-source AI game and video creation. The shared source is `../metadata.js`; generate both HTML entries with `npm run design:tokens`. Catalogue counts require a verified source; recreation is a workflow, not a guarantee of fidelity or reach.
 - **Central topic:** AI 剪辑 / **AI editing**. Use **AI video editing** for the full category and **AI editing** in concise headings. The core positioning is **The AI-native, open-source CapCut alternative.**
 - **Product headline:** The All-in-One AI-native Studio for AI editing & Motion.
 - **Experience:** Edit videos with your agent. Tell your story.

@@ -88,7 +88,7 @@
   .om-asset-search { flex-basis: 100%; }
 }
 
-.om-assets-host { container: asset-workspace / inline-size; flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.om-assets-host { container: asset-workspace / inline-size; flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; contain: layout style; }
 .om-assets-host[hidden] { display: none; }
 
 .om-asset-chat-panel { flex: 1; min-height: 0; }

@@ -6,12 +6,13 @@ import { menuClasses } from "./menuStyle";
 const spacing = /(^| )-?(p|py|pt|pb|m|my|mt|mb)-\d/;
 const root = join(__dirname, "../..");
 
-/** Panels that are not a column of rows: a dialog, a crop toolbar, a preset card and a bare speed list. */
+/** Panels that are not a column of rows, or whose floating panel surface is owned by shared `Popover` (`popupSurface`). */
 const NOT_ROW_MENUS = new Set([
   "player/components/AudioGainDialog.tsx",
   "components/editor/CropPresetBar.tsx",
   "components/editor/EaseCurveSection.tsx",
   "player/components/SpeedMenu.tsx",
+  "super-agent/ArtifactBrowserPane.tsx",
 ]);
 
 function sources(dir: string): string[] {

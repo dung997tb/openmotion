@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { memo, useEffect, useRef, useState, type ReactElement } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import type { MotionSkill, SkillMotif } from './skillCatalog';
@@ -9,7 +9,7 @@ import { releaseMediaElement } from '../utils/releaseMediaElement';
 import './skills.css';
 
 /** Upstream demo media when available; otherwise the package-token illustration. */
-export function SkillMedia({ skill, playing = false, large = false, brandedFallback = false }: { skill: MotionSkill; playing?: boolean; large?: boolean; brandedFallback?: boolean }) {
+export const SkillMedia = memo(function SkillMedia({ skill, playing = false, large = false, brandedFallback = false }: { skill: MotionSkill; playing?: boolean; large?: boolean; brandedFallback?: boolean }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const cover = failed ? undefined : skill.cover;
@@ -30,7 +30,7 @@ export function SkillMedia({ skill, playing = false, large = false, brandedFallb
     <span className="om-skill-split-caption" data-side="after" aria-hidden="true">{t('After')}</span>
   </span>;
   return <span className="om-skill-media" data-large={large}><CoverMedia cover={cover} video={video} play={play} large={large} onFail={() => setFailed(true)} brandedFallback={brandedFallback} /></span>;
-}
+});
 
 /** Keep the poster visible while an active card's demo loads. */
 function CoverMedia({ cover, video, play, large, onFail, brandedFallback }: { cover: NonNullable<MotionSkill['cover']>; video?: string; play: boolean; large: boolean; onFail: () => void; brandedFallback: boolean }) {
@@ -47,13 +47,14 @@ function CoverMedia({ cover, video, play, large, onFail, brandedFallback }: { co
     const element = player.current;
     return () => releaseMediaElement(element);
   }, [video, videoFailed]);
+  const preloadMode = large ? 'auto' : 'metadata';
   if (brandedFallback) return <>
     <ExploreCoverImage src={video && !videoFailed ? cover.poster : (play && cover.gif ? cover.gif : cover.poster)} />
-    {video && !videoFailed && <video ref={player} src={video} muted playsInline loop preload="auto" aria-hidden="true"
+    {video && !videoFailed && <video ref={player} src={video} muted playsInline loop preload={preloadMode} aria-hidden="true"
       style={{ opacity: readyVideo === video ? 1 : 0 }} onLoadedData={() => setReadyVideo(video)} onError={() => setVideoFailed(true)} />}
   </>;
   if (video && !videoFailed) return <video ref={player} src={video} poster={cover.poster} muted playsInline loop
-    preload="auto" aria-hidden="true" onError={() => cover.poster ? setVideoFailed(true) : onFail()} />;
+    preload={preloadMode} aria-hidden="true" onError={() => cover.poster ? setVideoFailed(true) : onFail()} />;
   const still = cover.poster ?? cover.gif;
   return <>{cover.gif && <img src={play ? cover.gif : still} alt="" loading="lazy" decoding="async" onError={onFail} />}
     {!cover.gif && cover.poster && <img src={cover.poster} alt="" loading="lazy" decoding="async" onError={onFail} />}</>;
