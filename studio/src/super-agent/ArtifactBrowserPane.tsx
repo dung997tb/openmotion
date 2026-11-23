@@ -138,7 +138,17 @@ function isInspectableCodeFile(file: DesignFile): boolean {
 }
 
 function isInspectableGameFile(filePath: string): boolean {
-  return /\.(?:html?|css|m?js|cjs|tsx?|jsx?|json|md|txt|svg|glsl|wgsl)$/i.test(filePath);
+  return /\.(?:html?|css|m?js|cjs|tsx?|jsx?|json|md|txt|csv|ya?ml|xml|svg|glsl|wgsl)$/i.test(filePath);
+}
+
+function matchRequestedCodeFile(files: string[], rawTarget?: string | null): string | undefined {
+  if (!rawTarget || !files.length) return undefined;
+  const clean = rawTarget.replace(/\\/g, '/').replace(/^\.\/+/, '').trim();
+  if (!clean) return undefined;
+  return (
+    files.find(item => item === clean)
+    ?? files.find(item => clean.endsWith(`/${item}`))
+  );
 }
 
 function useInspectableCodeFiles({
@@ -146,6 +156,7 @@ function useInspectableCodeFiles({
   sourceKey,
   defaultPath,
   revisionKey,
+  requestedFile,
   loadErrorFallback,
   loadFiles,
   readFile,
@@ -154,6 +165,7 @@ function useInspectableCodeFiles({
   sourceKey: string;
   defaultPath: string;
   revisionKey: string;
+  requestedFile?: { path: string; seq: number } | null;
   loadErrorFallback: string;
   loadFiles: () => Promise<{ preferred: string; files: string[] }>;
   readFile: (path: string) => Promise<string>;
@@ -166,6 +178,8 @@ function useInspectableCodeFiles({
   const [codeError, setCodeError] = useState<string | null>(null);
   const selectedRef = useRef(selectedFile);
   selectedRef.current = selectedFile;
+  const requestedRef = useRef(requestedFile?.path ?? null);
+  requestedRef.current = requestedFile?.path ?? null;
   const loadFilesRef = useRef(loadFiles);
   loadFilesRef.current = loadFiles;
   const readFileRef = useRef(readFile);
@@ -180,7 +194,9 @@ function useInspectableCodeFiles({
       .then(({ preferred, files: nextFiles }) => {
         if (cancelled) return;
         setFiles(nextFiles);
-        const resolved = nextFiles.includes(selectedRef.current) ? selectedRef.current : preferred;
+        const requestedMatch = matchRequestedCodeFile(nextFiles, requestedRef.current);
+        const resolved = requestedMatch
+          ?? (nextFiles.includes(selectedRef.current) ? selectedRef.current : preferred);
         setSelectedFile(resolved);
         if (!resolved) {
           setFileContent('');
@@ -197,6 +213,14 @@ function useInspectableCodeFiles({
       cancelled = true;
     };
   }, [enabled, sourceKey, revisionKey, loadErrorFallback]);
+
+  useEffect(() => {
+    if (!enabled || !requestedFile?.path || !files.length) return;
+    const match = matchRequestedCodeFile(files, requestedFile.path);
+    if (match) {
+      setSelectedFile(match);
+    }
+  }, [enabled, requestedFile?.seq, requestedFile?.path, files]);
 
   useEffect(() => {
     if (!enabled || !sourceKey || !selectedFile) return;
@@ -846,6 +870,7 @@ function DesignProjectArtifactView({
   mode,
   viewport,
   reloadKey,
+  requestedCodeFile,
   annotateActive,
   annotTool,
   onToolChange,
@@ -860,6 +885,7 @@ function DesignProjectArtifactView({
   mode: 'preview' | 'code';
   viewport: DesignViewportId;
   reloadKey: number;
+  requestedCodeFile?: { path: string; seq: number } | null;
   annotateActive: boolean;
   annotTool: AnnotationOverlayTool;
   onToolChange: (tool: AnnotationOverlayTool) => void;
@@ -896,6 +922,7 @@ function DesignProjectArtifactView({
     sourceKey: projectId,
     defaultPath: entry,
     revisionKey,
+    requestedFile: requestedCodeFile,
     loadErrorFallback: t('Could not load project files'),
     loadFiles: async () => {
       const result = await designClient.getProject(projectId);
@@ -951,6 +978,7 @@ function GameProjectArtifactView({
   mode,
   viewport,
   reloadKey,
+  requestedCodeFile,
   annotateActive,
   annotTool,
   onToolChange,
@@ -966,6 +994,7 @@ function GameProjectArtifactView({
   mode: 'preview' | 'code' | 'trailer';
   viewport: DesignViewportId;
   reloadKey: number;
+  requestedCodeFile?: { path: string; seq: number } | null;
   annotateActive: boolean;
   annotTool: AnnotationOverlayTool;
   onToolChange: (tool: AnnotationOverlayTool) => void;
@@ -1090,6 +1119,7 @@ function GameProjectArtifactView({
     sourceKey: projectId,
     defaultPath: 'index.html',
     revisionKey,
+    requestedFile: requestedCodeFile,
     loadErrorFallback: t('Could not load game files'),
     loadFiles: async () => {
       const res = await fetch(`/motion-api/games/${encodeURIComponent(projectId)}/files`);
@@ -1132,7 +1162,7 @@ function GameProjectArtifactView({
             onClick={() => window.open(communityMatch.external!.url, '_blank', 'noopener,noreferrer')}
           >
             <RemixIcon name="external-link-line" size={15} />
-            <span>{t('Play on the creator’s page')}</span>
+            <span>{t('Open original')}</span>
           </Button>
         </div>
       </div>
@@ -1452,6 +1482,8 @@ export function ArtifactBrowserPane({
   onUseGameInAgent,
   pendingDeployArtifactId,
   onConsumeDeployRequest,
+  pendingCodeFile,
+  onConsumePendingCodeFile,
   onOpenAccountSettings,
   onAttachBrowserAnnotation,
   onNotify,
@@ -1480,6 +1512,8 @@ export function ArtifactBrowserPane({
   onUseGameInAgent?: (artifact: SuperAgentArtifact) => void;
   pendingDeployArtifactId?: string | null;
   onConsumeDeployRequest?: () => void;
+  pendingCodeFile?: { artifactId: string; filePath: string; seq: number } | null;
+  onConsumePendingCodeFile?: () => void;
   onOpenAccountSettings?: () => void;
   onAttachBrowserAnnotation?: (attachment: SuperAgentResourceAttachment, sendImmediately?: boolean) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
@@ -1513,6 +1547,7 @@ export function ArtifactBrowserPane({
   const [consoleEntries, setConsoleEntries] = useState<BrowserConsoleEntry[]>([]);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [webTabTitles, setWebTabTitles] = useState<Record<string, string>>({});
+  const [requestedCodeFile, setRequestedCodeFile] = useState<{ artifactId: string; path: string; seq: number } | null>(null);
   const webRef = useRef<WebBrowserHandle>(null);
   const tabStripRef = useRef<HTMLDivElement>(null);
   const previewCaptureRef = useRef<(() => Promise<string | null>) | null>(null);
@@ -1553,16 +1588,29 @@ export function ArtifactBrowserPane({
       setConsoleOpen(false);
     }
     setAddressDraft(artifactCanonicalAddress(activeArtifact));
+    const keepingCodeTarget = Boolean(pendingCodeFile && pendingCodeFile.artifactId === activeArtifact.id);
     if (activeArtifact.kind === 'design-project') {
-      setViewMode('preview');
+      setViewMode(keepingCodeTarget ? 'code' : 'preview');
       if (activeArtifact.scenario === 'mobile-app') setViewport('mobile');
       else setViewport('desktop');
     } else if (activeArtifact.kind === 'game-project') {
-      setViewMode('preview');
+      setViewMode(keepingCodeTarget ? 'code' : 'preview');
       if (activeArtifact.scenario === 'portrait') setViewport('mobile');
       else setViewport('desktop');
     }
   }, [activeArtifact?.id]);
+
+  useEffect(() => {
+    if (!pendingCodeFile || !activeArtifact || pendingCodeFile.artifactId !== activeArtifact.id) return;
+    if (activeArtifact.kind !== 'design-project' && activeArtifact.kind !== 'game-project') return;
+    setViewMode('code');
+    setRequestedCodeFile({
+      artifactId: activeArtifact.id,
+      path: pendingCodeFile.filePath,
+      seq: pendingCodeFile.seq,
+    });
+    onConsumePendingCodeFile?.();
+  }, [pendingCodeFile, activeArtifact, onConsumePendingCodeFile]);
 
   useEffect(() => {
     if (!active) {
@@ -1947,6 +1995,17 @@ export function ArtifactBrowserPane({
                   <RemixIcon name="global-line" size={13} />
                   <span>{t('New tab')}</span>
                 </Button>
+                <IconButton
+                  variant="plain"
+                  className="om-sa-viewer-tab-close"
+                  aria-label={t('Close tab')}
+                  onClick={() => {
+                    const fallback = openTabs.at(-1);
+                    if (fallback) onSelectTab(fallback.id);
+                    else onClosePane();
+                  }}
+                  icon={<RemixIcon name="close-line" size={12} />}
+                />
               </div>
             )}
           </div>
@@ -2309,10 +2368,7 @@ export function ArtifactBrowserPane({
                             )}
                           </>
                         ) : (
-                          (activeArtifact?.kind === 'game-project'
-                            ? designViewports.filter(preset => preset.id === 'desktop' || preset.id === 'mobile')
-                            : designViewports
-                          ).map(preset => {
+                          designViewports.map(preset => {
                             const isActive = viewport === preset.id;
                             const dims = preset.width && preset.height
                               ? `${preset.width} × ${preset.height}`
@@ -2344,11 +2400,11 @@ export function ArtifactBrowserPane({
                       </div>
                     </Popover>
 
-                    <Tooltip label={t('Capture screenshot to chat')}>
+                    <Tooltip label={t('Screenshot')}>
                       <IconButton
                         variant="ghost"
                         className="motion-icon-button om-sa-toolbar-secondary-tool"
-                        aria-label={t('Capture screenshot to chat')}
+                        aria-label={t('Screenshot')}
                         disabled={capturingScreenshot}
                         onClick={() => void handleCaptureScreenshot()}
                         icon={<RemixIcon name={capturingScreenshot ? 'loader-4-line' : 'camera-line'} size={15} />}
@@ -2380,16 +2436,16 @@ export function ArtifactBrowserPane({
                     {(hasModeSwitch || supportsAnnotate) && (
                       <span className="om-sa-toolbar-divider" aria-hidden="true" />
                     )}
-                    <Tooltip label={t('Make one like this')}>
+                    <Tooltip label={t('Remix')}>
                       <Button
                         variant="plain"
                         type="button"
                         className="om-sa-toolbar-btn om-sa-game-use-btn"
-                        aria-label={t('Make one like this')}
+                        aria-label={t('Remix')}
                         onClick={() => onUseGameInAgent(activeArtifact)}
                       >
                         <RemixIcon name="sparkling-line" size={14} />
-                        <span>{t('Make one like this')}</span>
+                        <span>{t('Remix')}</span>
                       </Button>
                     </Tooltip>
                   </>
@@ -2469,7 +2525,7 @@ export function ArtifactBrowserPane({
                       }}
                     >
                       <RemixIcon name="camera-line" size={14} />
-                      <span>{t('Capture screenshot to chat')}</span>
+                      <span>{t('Screenshot')}</span>
                     </Button>
                     <Button
                       variant="plain"
@@ -2505,7 +2561,7 @@ export function ArtifactBrowserPane({
                     }}
                   >
                     <RemixIcon name="external-link-line" size={14} />
-                    <span>{t('Open in new window')}</span>
+                    <span>{t('Open external')}</span>
                   </Button>
                 )}
 
@@ -2544,7 +2600,7 @@ export function ArtifactBrowserPane({
                         }}
                       >
                         <RemixIcon name={activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? 'sparkling-line' : 'add-line'} size={14} />
-                        <span>{activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? t('Make one like this') : t('Attach to Chat')}</span>
+                        <span>{activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? t('Remix') : t('Attach')}</span>
                       </Button>
                     )}
 
@@ -2877,6 +2933,7 @@ export function ArtifactBrowserPane({
             mode={viewMode === 'code' ? 'code' : 'preview'}
             viewport={viewport}
             reloadKey={reloadKey}
+            requestedCodeFile={requestedCodeFile?.artifactId === activeArtifact.id ? requestedCodeFile : null}
             annotateActive={annotateActive}
             annotTool={annotTool}
             onToolChange={setAnnotTool}
@@ -2923,6 +2980,7 @@ export function ArtifactBrowserPane({
             mode={viewMode}
             viewport={viewport}
             reloadKey={reloadKey}
+            requestedCodeFile={requestedCodeFile?.artifactId === activeArtifact.id ? requestedCodeFile : null}
             annotateActive={annotateActive}
             annotTool={annotTool}
             onToolChange={setAnnotTool}

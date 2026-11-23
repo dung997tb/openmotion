@@ -10,7 +10,9 @@ import {
   superAgentIntentMeta,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentContextTag,
   type SuperAgentEngine,
+  type SuperAgentFileOperation,
   type SuperAgentPermissionMode,
   type SuperAgentResourceAttachment,
   type SuperAgentResourceCounts,
@@ -31,6 +33,7 @@ import {
   rememberInstruction,
 } from '../motion/game/gameCatalog';
 import {
+  buildGameContextTags,
   buildGameHiddenInstructions,
   buildGameUserPrompt,
   localizedGameTitle,
@@ -42,6 +45,7 @@ import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
 import { WorkspaceBack } from '../motion/WorkspaceBack';
+import { compactDirLabel } from './ChangedFilesTree';
 import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
 import {
@@ -50,6 +54,7 @@ import {
   type SuperAgentCreationModeId,
 } from './ModeResourceShowcase';
 import {
+  buildModeContextTags,
   DEFAULT_MODE_COMPOSER_OPTIONS,
   formatModePromptPrefix,
   getModeComposerPlaceholder,
@@ -128,6 +133,7 @@ export function ConversationStream({
   onResourcesUploaded,
   onAttachmentsChange,
   onOpenArtifactId,
+  onOpenChangedFile,
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
@@ -155,7 +161,13 @@ export function ConversationStream({
   viewerOpen: boolean;
   counts: SuperAgentResourceCounts | null;
   attachments: SuperAgentResourceAttachment[];
-  draftSeed?: { id: number; text: string; hiddenInstructions?: string; mode?: SuperAgentCreationModeId } | null;
+  draftSeed?: {
+    id: number;
+    text: string;
+    hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
+    mode?: SuperAgentCreationModeId;
+  } | null;
   gameTemplateSeed?: { id: number; game: GameCard } | null;
   agents: LocalAgent[];
   agentsLoaded?: boolean;
@@ -177,6 +189,7 @@ export function ConversationStream({
     text: string,
     meta?: {
       hiddenInstructions?: string;
+      contextTags?: SuperAgentContextTag[];
       mode?: SuperAgentCreationModeId;
       workingDir?: string;
       overrideAttachments?: SuperAgentResourceAttachment[];
@@ -188,6 +201,7 @@ export function ConversationStream({
   onResourcesUploaded?: () => void;
   onAttachmentsChange: (next: SuperAgentResourceAttachment[]) => void;
   onOpenArtifactId: (artifactId: string) => void;
+  onOpenChangedFile?: (file: SuperAgentFileOperation) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
@@ -241,11 +255,13 @@ export function ConversationStream({
 
   const appliedDraftSeedRef = useRef<number | null>(null);
   const pendingHiddenInstructionsRef = useRef<string | undefined>(undefined);
+  const pendingContextTagsRef = useRef<SuperAgentContextTag[] | undefined>(undefined);
   useEffect(() => {
     if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
     appliedDraftSeedRef.current = draftSeed.id;
     setText(draftSeed.text);
     pendingHiddenInstructionsRef.current = draftSeed.hiddenInstructions?.trim() || undefined;
+    pendingContextTagsRef.current = draftSeed.contextTags?.length ? draftSeed.contextTags : undefined;
     if (draftSeed.mode && !chat?.messages.length) {
       setActiveModeId(draftSeed.mode);
     } else if (!draftSeed.mode) {
@@ -274,7 +290,7 @@ export function ConversationStream({
       }));
     } else {
       const displayTitle = localizedGameTitle(picked, locale);
-      setText(prev => (prev.trim() ? prev : t('Based on {title}', { title: displayTitle })));
+      setText(prev => (prev.trim() ? prev : t('Remix · {title}', { title: displayTitle })));
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [gameTemplateSeed, chat?.messages.length, locale, t]);
@@ -407,6 +423,7 @@ export function ConversationStream({
     } else if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
       setActiveModeId(null);
       pendingHiddenInstructionsRef.current = undefined;
+      pendingContextTagsRef.current = undefined;
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     followRef.current = true;
@@ -475,16 +492,23 @@ export function ConversationStream({
         const ready = created.game.status === 'ready' || created.game.status === 'published';
         const userVisiblePrompt = text.trim()
           || (selectedTemplate
-            ? t('Based on {title}', { title: localizedGameTitle(selectedTemplate, locale) })
+            ? t('Remix · {title}', { title: localizedGameTitle(selectedTemplate, locale) })
             : buildGameUserPrompt(created.game, locale));
         const hiddenInstructions = buildGameHiddenInstructions(
           created.game,
           created.agentInstruction,
           selectedTemplate && text.trim() ? text.trim() : undefined,
         );
+        const contextTags: SuperAgentContextTag[] = [
+          ...buildGameContextTags({ ...created.game, playableAd: isPlayableAd(modeOptions) }, t),
+          ...(selectedTemplate
+            ? [{ kind: 'param' as const, label: `${t('Remix')} · ${localizedGameTitle(selectedTemplate, locale)}` }]
+            : []),
+        ];
         const nextAttachments = [...attachments, toGameResourceAttachment(created.game, displayTitle)];
         const ok = await onSend(userVisiblePrompt, {
           hiddenInstructions,
+          contextTags,
           mode: 'game',
           overrideAttachments: nextAttachments,
           ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
@@ -492,6 +516,7 @@ export function ConversationStream({
         if (ok) {
           setText('');
           pendingHiddenInstructionsRef.current = undefined;
+          pendingContextTagsRef.current = undefined;
           setActiveModeId(null);
           updateModeOptions({ gameTemplate: null });
           followRef.current = true;
@@ -518,8 +543,12 @@ export function ConversationStream({
       rawBody === prefix ? '' : prefix,
       pendingHiddenInstructionsRef.current,
     ].filter(Boolean).join('\n\n') || undefined;
+    const contextTags = activeMode
+      ? buildModeContextTags(activeMode, modeOptions, mediaModelsRef.current, t, locale)
+      : pendingContextTagsRef.current;
     const ok = await onSend(rawBody, {
       ...(hiddenInstructions ? { hiddenInstructions } : {}),
+      ...(contextTags?.length ? { contextTags } : {}),
       ...(activeMode ? { mode: activeMode.id } : {}),
       ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
         ? { workingDir: modeOptions.codingWorkdir.trim() }
@@ -528,6 +557,7 @@ export function ConversationStream({
     if (ok) {
       setText('');
       pendingHiddenInstructionsRef.current = undefined;
+      pendingContextTagsRef.current = undefined;
       setActiveModeId(null);
       updateModeOptions({ gameTemplate: null });
       followRef.current = true;
@@ -677,6 +707,20 @@ export function ConversationStream({
               <span>{chat ? chat.title : t('New conversation')}</span>
               {chat && <RemixIcon name="edit-line" size={12} />}
             </Button>
+          )}
+          {chat && !renaming && chat.projectDir && (
+            <Tooltip label={t('Project directory: {path}', { path: chat.projectDir })}>
+              <Button
+                variant="plain"
+                type="button"
+                className="om-sa-head-dir-btn"
+                aria-label={t('Copy project directory')}
+                onClick={() => onCopyText(chat.projectDir!)}
+              >
+                <RemixIcon name="folder-line" size={13} />
+                <span>{compactDirLabel(chat.projectDir)}</span>
+              </Button>
+            </Tooltip>
           )}
           {chat && chat.state !== 'idle' && (
             <span className="om-badge om-sa-head-status-badge" data-active={chat.state === 'running' || undefined}>
@@ -855,6 +899,7 @@ export function ConversationStream({
             continueDisabled={sending || scaffoldingGame || busy || runnableEngines.length === 0}
             engineLabel={effectiveAgents.find(a => a.id === chat.engine)?.label ?? chat.engine}
             onOpenArtifactId={onOpenArtifactId}
+            onOpenChangedFile={onOpenChangedFile}
             onPreviewAttachment={onPreviewAttachment}
             onOpenWebUrl={onOpenWebUrl}
             onCopyText={onCopyText}
@@ -932,7 +977,7 @@ export function ConversationStream({
               {activeMode?.id === 'game' && modeOptions.gameTemplate && (
                 <span className="om-sa-attachment-chip">
                   <RemixIcon name="gamepad-line" size={13} />
-                  <span>{t('Based on {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
+                  <span>{t('Remix · {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
                   <IconButton
                     variant="plain"
                     className="om-sa-chip-remove"

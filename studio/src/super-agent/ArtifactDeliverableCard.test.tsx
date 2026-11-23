@@ -94,7 +94,7 @@ describe('ArtifactDeliverableCard', () => {
 
     const text = container.querySelector('.om-sa-deliverable-actions')?.textContent ?? '';
     expect(text).toContain('Play');
-    expect(text).toContain('Cloud deploy');
+    expect(text).toContain('Share');
     expect(text).toContain('Export ZIP');
 
     // Primary Play button opens the artifact in the viewer
@@ -127,7 +127,7 @@ describe('ArtifactDeliverableCard', () => {
           createdAt: 1,
           updatedAt: 2,
         },
-        expected: ['Preview', 'Cloud deploy', 'Export', 'Edit in Studio'],
+        expected: ['Preview', 'Share', 'Export', 'Edit in Studio'],
       },
       {
         artifact: {
@@ -138,7 +138,7 @@ describe('ArtifactDeliverableCard', () => {
           createdAt: 1,
           updatedAt: 2,
         },
-        expected: ['Preview', 'Cloud deploy', 'Export video'],
+        expected: ['Preview', 'Share', 'Export video'],
       },
       {
         artifact: {

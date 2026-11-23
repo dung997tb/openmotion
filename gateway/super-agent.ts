@@ -39,6 +39,7 @@ import {
   type SuperAgentArtifact,
   type SuperAgentChat,
   type SuperAgentChatSummary,
+  type SuperAgentContextTag,
   type SuperAgentEngine,
   type SuperAgentFileOperation,
   type SuperAgentIntent,
@@ -72,6 +73,16 @@ import {
   type ProviderAdapterCallbacks,
 } from './super-agent-adapters.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from './super-agent-resources.ts';
+import {
+  captureWorkspaceSnapshot,
+  collectTaskProjectRoots,
+  collectToolChangedFiles,
+  diffWorkspaceSnapshots,
+  hydrateLegacyTurnChangedFiles,
+  mergeTurnChangedFiles,
+  resolveTaskProjectDir,
+  type WorkspaceSnapshot,
+} from './super-agent-workspace.ts';
 
 export interface SuperAgentRuntimeContext {
   origin: string;
@@ -114,8 +125,12 @@ interface ActiveSuperAgentChat {
   bin?: string;
   devServerUrls?: Set<string>;
   touchedGameIds?: Set<string>;
+  touchedDesignIds?: Set<string>;
+  touchedMotionIds?: Set<string>;
   writtenGameCodeIds?: Set<string>;
   presentedArtifactIds?: Set<string>;
+  turnUserMessageId?: string;
+  beforeSnapshot?: WorkspaceSnapshot;
 }
 
 const SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
@@ -201,6 +216,33 @@ const ALLOWED_ARTIFACT_KINDS = new Set<SuperAgentArtifact['kind']>([
   'game-project',
   'web',
 ]);
+
+function sanitizeContextTags(raw: unknown): SuperAgentContextTag[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const allowedKinds = new Set<SuperAgentContextTag['kind']>(['mode', 'param', 'skill']);
+  const allowedTones = new Set<NonNullable<SuperAgentContextTag['tone']>>(['coding', 'agent', 'image', 'video', 'audio']);
+  const out: SuperAgentContextTag[] = [];
+  for (const item of raw.slice(0, 16)) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const kind = typeof obj.kind === 'string' && allowedKinds.has(obj.kind as SuperAgentContextTag['kind'])
+      ? (obj.kind as SuperAgentContextTag['kind'])
+      : 'param';
+    const label = typeof obj.label === 'string' ? obj.label.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    if (!label) continue;
+    const icon = typeof obj.icon === 'string' && /^[a-z0-9-]{1,40}$/.test(obj.icon) ? obj.icon : undefined;
+    const tone = typeof obj.tone === 'string' && allowedTones.has(obj.tone as NonNullable<SuperAgentContextTag['tone']>)
+      ? (obj.tone as NonNullable<SuperAgentContextTag['tone']>)
+      : undefined;
+    out.push({
+      kind,
+      label,
+      ...(icon ? { icon } : {}),
+      ...(tone ? { tone } : {}),
+    });
+  }
+  return out.length ? out : undefined;
+}
 
 function sameOriginRelativeUrl(raw: unknown): string | undefined {
   if (raw === undefined) return undefined;
@@ -631,10 +673,17 @@ export class SuperAgentConversations {
     return this.store.safePath(`chats/${id}.json`, this.root);
   }
 
-  async get(id: string): Promise<SuperAgentChat> {
+  private syncProjectDir(chat: SuperAgentChat) {
+    const resolved = resolveTaskProjectDir(this.store.directory, chat);
+    chat.projectDir = resolved.projectDir;
+    chat.projectKind = resolved.projectKind;
+  }
+
+  private async readChat(id: string, hydrateFiles: boolean): Promise<SuperAgentChat> {
     const live = this.active.get(id)?.chat;
     if (live) {
       live.intent = inferSuperAgentIntent(live);
+      this.syncProjectDir(live);
       return structuredClone(live);
     }
     let raw: string;
@@ -651,7 +700,16 @@ export class SuperAgentConversations {
       chat.approvals = [];
     }
     chat.intent = inferSuperAgentIntent(chat);
+    this.syncProjectDir(chat);
+    if (hydrateFiles) {
+      const hydrated = await hydrateLegacyTurnChangedFiles(this.store.directory, chat).catch(() => undefined);
+      if (hydrated) chat.turnChangedFiles = hydrated;
+    }
     return chat;
+  }
+
+  async get(id: string): Promise<SuperAgentChat> {
+    return this.readChat(id, true);
   }
 
   async list(): Promise<SuperAgentChatSummary[]> {
@@ -663,7 +721,7 @@ export class SuperAgentConversations {
     const chats = await Promise.all(
       names
         .filter(name => name.endsWith('.json') && isSuperAgentId(name.slice(0, -5)))
-        .map(name => this.get(name.slice(0, -5))),
+        .map(name => this.readChat(name.slice(0, -5), false)),
     );
     return chats
       .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
@@ -736,6 +794,11 @@ export class SuperAgentConversations {
       const artIntent = artifactToSuperAgentIntent(stored);
       if (artIntent && !chat.intent) chat.intent = artIntent;
     }
+    if (!workingDir) {
+      const workDir = await this.store.safePath(`work/${chat.id}`, this.root).catch(() => null);
+      if (workDir) await mkdir(workDir, { recursive: true, mode: 0o700 });
+    }
+    this.syncProjectDir(chat);
     await atomicAssetJson(await this.file(chat.id), chat);
     return chat;
   }
@@ -789,6 +852,7 @@ export class SuperAgentConversations {
           : chat.activeArtifactId;
     }
     chat.updatedAt = Date.now();
+    this.syncProjectDir(chat);
     if (live) {
       await this.persist(live, true);
       return structuredClone(live.chat);
@@ -870,6 +934,7 @@ export class SuperAgentConversations {
     }, true);
     active.presentedArtifactIds ??= new Set();
     active.presentedArtifactIds.add(stored.id);
+    this.syncProjectDir(active.chat);
     return stored;
   }
 
@@ -1238,12 +1303,19 @@ export class SuperAgentConversations {
           currentTitle: chat.title,
         });
       }
+      const sanitizedContextTags = sanitizeContextTags(input.contextTags);
+      const userMessageId = randomUUID();
+      active.turnUserMessageId = userMessageId;
+      active.touchedDesignIds = new Set();
+      active.touchedMotionIds = new Set();
+      this.syncProjectDir(chat);
       this.pushMessage(active, {
-        id: randomUUID(),
+        id: userMessageId,
         role: 'user',
         text: input.text,
         createdAt: Date.now(),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+        ...(sanitizedContextTags?.length ? { contextTags: sanitizedContextTags } : {}),
       }, true);
       await this.persist(active, true);
 
@@ -1587,10 +1659,33 @@ export class SuperAgentConversations {
       const st = await stat(active.chat.workingDir).catch(() => null);
       if (st?.isDirectory()) cwd = active.chat.workingDir;
     }
+    this.syncProjectDir(active.chat);
+    active.beforeSnapshot = await captureWorkspaceSnapshot(
+      collectTaskProjectRoots(this.store.directory, active.chat),
+    ).catch(() => undefined);
 
     const blocks: string[] = [input.text];
+    const sanitizedTags = sanitizeContextTags(input.contextTags);
+    const taskDirectiveParts: string[] = [];
+    const paramLabels = (sanitizedTags ?? [])
+      .filter(tag => tag.kind !== 'mode')
+      .map(tag => tag.label);
+    if (!isCoding && (input.mode || paramLabels.length)) {
+      const modeLine = input.mode ? `Mode/Skill: ${input.mode}` : '';
+      const paramLine = paramLabels.length ? `Selected parameters: ${paramLabels.join(' · ')}` : '';
+      const header = [modeLine, paramLine].filter(Boolean).join(' | ');
+      if (header) taskDirectiveParts.push(header);
+    } else if (isCoding && paramLabels.length) {
+      taskDirectiveParts.push(`Selected parameters: ${paramLabels.join(' · ')}`);
+    }
+    if (!isCoding && cwd && (!active.runtimeId || active.runtimeId === LOCAL_DIRECT_RUNTIME_ID)) {
+      taskDirectiveParts.push(`Task project directory: ${cwd}`);
+    }
     if (input.hiddenInstructions?.trim()) {
-      blocks.push(`<openmotion-task-instructions>\n${input.hiddenInstructions.trim()}\n</openmotion-task-instructions>`);
+      taskDirectiveParts.push(input.hiddenInstructions.trim());
+    }
+    if (taskDirectiveParts.length > 0) {
+      blocks.push(`<openmotion-task-instructions>\n${taskDirectiveParts.join('\n\n')}\n</openmotion-task-instructions>`);
     }
     if (!isCoding || hasNonBrowserAttachments) {
       blocks.push(await buildResourceContextManifest(this.store, input.attachments ?? []));
@@ -3058,6 +3153,8 @@ export class SuperAgentConversations {
       }
       if (value.project?.id) {
         const p = value.project;
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(p.id);
         const activate = ['create', 'duplicate', 'restore'].includes(action);
         const stored = upsertChatArtifact(active.chat, {
           id: `design:${p.id}`,
@@ -3072,10 +3169,13 @@ export class SuperAgentConversations {
           createdAt: now,
           updatedAt: now,
         }, activate);
+        this.syncProjectDir(active.chat);
         await this.persist(active, true);
         return stored;
       }
       if (action === 'open' && value.projectId) {
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(value.projectId);
         const detail = await designProjectsFor(this.store.directory).get(value.projectId).catch(() => null);
         const entry = detail?.entry ?? 'index.html';
         return this.presentChatArtifact(active, {
@@ -3094,6 +3194,8 @@ export class SuperAgentConversations {
       }
       if (action === 'import' && Array.isArray(value.projects) && value.projects[0]?.id) {
         const p = value.projects[0];
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(p.id);
         const stored = upsertChatArtifact(active.chat, {
           id: `design:${p.id}`,
           kind: 'design-project',
@@ -3107,31 +3209,42 @@ export class SuperAgentConversations {
           createdAt: now,
           updatedAt: now,
         }, true);
+        this.syncProjectDir(active.chat);
         await this.persist(active, true);
         return stored;
       }
     }
 
-    if (name === 'openmotion_design_edit' && value.project?.id) {
-      const p = value.project;
-      const stored = upsertChatArtifact(active.chat, {
-        id: `design:${p.id}`,
-        kind: 'design-project',
-        title: p.title,
-        subtitle: p.scenario,
-        projectId: p.id,
-        scenario: p.scenario,
-        entry: p.entry,
-        revision: p.revision,
-        url: `${designRoutes.raw(p.id, p.entry)}?rev=${encodeURIComponent(p.revision || '')}`,
-        createdAt: now,
-        updatedAt: now,
-      }, true);
-      await this.persist(active, true);
-      return stored;
+    if (name === 'openmotion_design_edit') {
+      const pid = value.project?.id || (typeof args.projectId === 'string' ? args.projectId.trim() : '');
+      if (pid) {
+        active.touchedDesignIds ??= new Set();
+        active.touchedDesignIds.add(pid);
+      }
+      if (value.project?.id) {
+        const p = value.project;
+        const stored = upsertChatArtifact(active.chat, {
+          id: `design:${p.id}`,
+          kind: 'design-project',
+          title: p.title,
+          subtitle: p.scenario,
+          projectId: p.id,
+          scenario: p.scenario,
+          entry: p.entry,
+          revision: p.revision,
+          url: `${designRoutes.raw(p.id, p.entry)}?rev=${encodeURIComponent(p.revision || '')}`,
+          createdAt: now,
+          updatedAt: now,
+        }, true);
+        this.syncProjectDir(active.chat);
+        await this.persist(active, true);
+        return stored;
+      }
     }
 
     if (name === 'openmotion_create_project' && value.projectId) {
+      active.touchedMotionIds ??= new Set();
+      active.touchedMotionIds.add(value.projectId);
       const stored = upsertChatArtifact(active.chat, {
         id: `motion:${value.projectId}`,
         kind: 'motion-project',
@@ -3143,6 +3256,7 @@ export class SuperAgentConversations {
         createdAt: now,
         updatedAt: now,
       }, true);
+      this.syncProjectDir(active.chat);
       await this.persist(active, true);
       return stored;
     }
@@ -3151,6 +3265,8 @@ export class SuperAgentConversations {
       if (name === 'openmotion_open_preview' && (args.target === 'templates' || args.target === 'providers' || args.action === 'begin' || args.action === 'complete_generation')) {
         return undefined;
       }
+      active.touchedMotionIds ??= new Set();
+      active.touchedMotionIds.add(value.projectId);
       const catalog = this.store.projectCatalog();
       const projectMeta = catalog.projects.find(item => item.id === value.projectId);
       const session = catalog.sessions?.find(item => item.artifacts.some(a => a.projectId === value.projectId));
@@ -3169,6 +3285,7 @@ export class SuperAgentConversations {
         return this.presentChatArtifact(active, artifactDraft);
       }
       const stored = upsertChatArtifact(active.chat, artifactDraft, true);
+      this.syncProjectDir(active.chat);
       await this.persist(active, true);
       return stored;
     }
@@ -3265,6 +3382,8 @@ export class SuperAgentConversations {
       if (args.action === 'scenario') {
         if (value.project?.id && value.project?.scenario) {
           const p = value.project;
+          active.touchedDesignIds ??= new Set();
+          active.touchedDesignIds.add(p.id);
           const entry = p.entry || 'index.html';
           const stored = upsertChatArtifact(active.chat, {
             id: `design:${p.id}`,
@@ -3279,11 +3398,14 @@ export class SuperAgentConversations {
             createdAt: now,
             updatedAt: now,
           }, true);
+          this.syncProjectDir(active.chat);
           await this.persist(active, true);
           return stored;
         }
         if (value.project?.projectId) {
           const proj = value.project;
+          active.touchedMotionIds ??= new Set();
+          active.touchedMotionIds.add(proj.projectId);
           const stored = upsertChatArtifact(active.chat, {
             id: `motion:${proj.projectId}`,
             kind: 'motion-project',
@@ -3295,6 +3417,7 @@ export class SuperAgentConversations {
             createdAt: now,
             updatedAt: now,
           }, true);
+          this.syncProjectDir(active.chat);
           await this.persist(active, true);
           return stored;
         }
@@ -3378,10 +3501,12 @@ export class SuperAgentConversations {
 
         if (alreadyInChat && (name === 'openmotion_game_update_meta' || wroteRunnableCode)) {
           const stored = upsertChatArtifact(active.chat, artifactDraft, false);
+          this.syncProjectDir(active.chat);
           await this.persist(active, true);
           return stored;
         }
 
+        this.syncProjectDir(active.chat);
         if (titleUpdated) {
           await this.persist(active, true);
         }
@@ -3454,6 +3579,35 @@ export class SuperAgentConversations {
     active.chat.error = error?.slice(0, 1000);
     active.chat.approvals = [];
     active.chat.intent = inferSuperAgentIntent(active.chat);
+    this.syncProjectDir(active.chat);
+    if (!active.deleted && active.turnUserMessageId) {
+      const postRoots = collectTaskProjectRoots(this.store.directory, active.chat, {
+        gameIds: active.touchedGameIds,
+        designIds: active.touchedDesignIds,
+        motionIds: active.touchedMotionIds,
+      });
+      const afterSnapshot = await captureWorkspaceSnapshot(postRoots).catch(() => undefined);
+      const snapshotFiles = afterSnapshot ? diffWorkspaceSnapshots(active.beforeSnapshot, afterSnapshot) : [];
+      const turnStartIdx = active.chat.messages.findIndex(m => m.id === active.turnUserMessageId);
+      const turnMessages = turnStartIdx >= 0
+        ? active.chat.messages.slice(turnStartIdx + 1)
+        : active.chat.messages;
+      const toolFiles = collectToolChangedFiles(turnMessages);
+      const merged = mergeTurnChangedFiles(snapshotFiles, toolFiles);
+      if (merged.length > 0) {
+        const nextMap: Record<string, SuperAgentFileOperation[]> = {
+          ...(active.chat.turnChangedFiles ?? {}),
+          [active.turnUserMessageId]: merged,
+        };
+        const keys = Object.keys(nextMap);
+        if (keys.length > 30) {
+          for (const oldKey of keys.slice(0, keys.length - 30)) {
+            delete nextMap[oldKey];
+          }
+        }
+        active.chat.turnChangedFiles = nextMap;
+      }
+    }
     if (!error && !active.chat.titleCustomized) {
       const firstUserText =
         active.chat.messages.find(m => m.role === 'user' && !isGenericSuperAgentTitle(generateSuperAgentTitle({ prompt: m.text })))?.text

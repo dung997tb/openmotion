@@ -1,7 +1,7 @@
 import type { CapabilityResourceRef } from '../../../../shared/capability-hub';
 import type { GameCard, GameGenre, GameSetting, GameStyle } from '../../../../shared/game-contract';
-import type { SuperAgentArtifact, SuperAgentResourceAttachment } from '../../../../shared/super-agent';
-import { coverUrl } from './gameCatalog';
+import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentResourceAttachment } from '../../../../shared/super-agent';
+import { coverUrl, genreLabels, settingLabels, styleLabels } from './gameCatalog';
 
 export function gamePlayPath(id: string): string {
   return `/motion-api/games/${encodeURIComponent(id)}/play/index.html`;
@@ -55,6 +55,24 @@ export function toGameResourceAttachment(game: GameCard, displayTitle: string): 
     subtitle: `${game.genre} · ${playerLabel(game)}`,
     ...(coverUrl(game) ? { previewUrl: coverUrl(game)! } : {}),
   };
+}
+
+export function buildGameContextTags(
+  game: Pick<GameCard, 'genre' | 'style' | 'setting' | 'orientation' | 'multiplayer'> & { playableAd?: boolean },
+  t: (text: string) => string,
+): SuperAgentContextTag[] {
+  const tags: SuperAgentContextTag[] = [
+    { kind: 'mode', label: t('Game'), icon: 'gamepad-line', tone: 'agent' },
+    { kind: 'param', label: t(genreLabels[game.genre]) },
+  ];
+  if (game.style) tags.push({ kind: 'param', label: t(styleLabels[game.style]) });
+  if (game.setting) tags.push({ kind: 'param', label: t(settingLabels[game.setting]) });
+  tags.push({ kind: 'param', label: game.orientation === 'portrait' ? '9:16' : '16:9' });
+  tags.push({
+    kind: 'param',
+    label: game.playableAd ? t('Playable ad') : game.multiplayer ? t('Multiplayer') : t('Single player'),
+  });
+  return tags;
 }
 
 export function buildGameUserPrompt(game: GameCard, locale: string, userNotes?: string): string {
