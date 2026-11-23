@@ -18,7 +18,8 @@ let lastComposerOnUploadFiles: ((files: File[]) => void) | undefined;
 let lastComposerUploadingReferences: boolean | undefined;
 let lastComposerPromptAppliedToken: number | undefined;
 let lastComposerSetDraft: ((next: AssetDraft | ((current: AssetDraft) => AssetDraft)) => void) | undefined;
-vi.mock('./AssetComposer', () => ({ AssetComposer: ({ draft, setDraft, promptAppliedToken, onReference, onUploadFiles, uploadingReferences, onCreated, showCurrentJob }: { draft: AssetDraft; setDraft: (next: AssetDraft | ((current: AssetDraft) => AssetDraft)) => void; promptAppliedToken?: number; onReference: () => void; onUploadFiles?: (files: File[]) => void; uploadingReferences?: boolean; onCreated: (job: import('../../../shared/gateway').GenerationJob) => void; showCurrentJob?: boolean }) => { lastComposerOnCreated = onCreated; lastShowCurrentJob = showCurrentJob; lastComposerOnUploadFiles = onUploadFiles; lastComposerUploadingReferences = uploadingReferences; lastComposerPromptAppliedToken = promptAppliedToken; lastComposerSetDraft = setDraft; return <><input aria-label="Creation draft" data-reference-count={draft.references.length} data-prompt={draft.prompt} data-prompt-applied-token={promptAppliedToken ?? 0} /><button onClick={onReference}>References</button></>; } }));
+let lastComposerOnClose: (() => void) | undefined;
+vi.mock('./AssetComposer', () => ({ AssetComposer: ({ draft, setDraft, promptAppliedToken, onReference, onUploadFiles, uploadingReferences, onCreated, onClose, showCurrentJob }: { draft: AssetDraft; setDraft: (next: AssetDraft | ((current: AssetDraft) => AssetDraft)) => void; promptAppliedToken?: number; onReference: () => void; onUploadFiles?: (files: File[]) => void; uploadingReferences?: boolean; onCreated: (job: import('../../../shared/gateway').GenerationJob) => void; onClose: () => void; showCurrentJob?: boolean }) => { lastComposerOnCreated = onCreated; lastComposerOnClose = onClose; lastShowCurrentJob = showCurrentJob; lastComposerOnUploadFiles = onUploadFiles; lastComposerUploadingReferences = uploadingReferences; lastComposerPromptAppliedToken = promptAppliedToken; lastComposerSetDraft = setDraft; return <><input aria-label="Creation draft" data-reference-count={draft.references.length} data-prompt={draft.prompt} data-prompt-applied-token={promptAppliedToken ?? 0} /><button onClick={onReference}>References</button></>; } }));
 vi.mock('./AssetTaskHistory', () => ({ AssetTaskMenu: () => null }));
 vi.mock('./assetClient', () => ({ assetRequest: vi.fn(), uploadLibraryAsset: vi.fn() }));
 vi.mock('./gatewayClient', () => ({ gatewayRequest: async () => ({ conversations: [] }) }));
@@ -1333,4 +1334,45 @@ it('tracks applied state per example card in the image canvas guide', async () =
   await act(async () => { deckButtons[1].click(); }); await flush();
   expect(action.textContent).toBe('Use this example');
   expect(action.getAttribute('data-applied')).toBeNull();
+});
+
+it('passes pending prompt feedback when opening a closed standalone library creator and clears it on later draft resets', async () => {
+  const jobFailed: import('../../../shared/gateway').GenerationJob = {
+    id: 'job-fail-closed', requestId: 'req-fail-closed', modality: 'image', prompt: 'Neon alley rain scene', state: 'failed',
+    error: 'Provider timeout',
+    model: { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'opendesign' },
+    createdAt: 250, updatedAt: 250,
+  };
+  let polledJobs: import('../../../shared/gateway').GenerationJob[] = [];
+  const baseImpl = vi.mocked(assetRequest).getMockImplementation()!;
+  vi.mocked(assetRequest).mockImplementation(async args => {
+    if (args.action === 'jobs') return { jobs: structuredClone(polledJobs) };
+    return baseImpl(args);
+  });
+
+  await render();
+  expect(container.querySelector('[aria-label="Creation draft"]')).toBeNull();
+
+  // Create a failed placeholder tile, then close the standalone creator before clicking Reuse prompt.
+  await click('AI Create');
+  polledJobs = [jobFailed];
+  await act(async () => { lastComposerOnCreated?.(jobFailed); }); await flush();
+  await act(async () => { lastComposerOnClose?.(); }); await flush();
+  expect(container.querySelector('[aria-label="Creation draft"]')).toBeNull();
+
+  await click('Reuse prompt');
+  const openedDraft = container.querySelector<HTMLInputElement>('[aria-label="Creation draft"]')!;
+  expect(openedDraft).not.toBeNull();
+  expect(openedDraft.getAttribute('data-prompt')).toBe('Neon alley rain scene');
+  expect(openedDraft.getAttribute('data-prompt-applied-token')).toBe('1');
+  expect(document.body.textContent).toContain('Prompt loaded into editor');
+
+  // Starting a new draft resets the token to 0 so remounted tasks never replay stale prompt feedback.
+  await act(async () => { container.querySelector<HTMLButtonElement>('.om-assets-heading button[data-primary]')!.click(); }); await flush();
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Creation draft"]')?.getAttribute('data-prompt-applied-token')).toBe('0');
+
+  // Closing and reusing again issues a fresh monotonic token on the newly opened composer.
+  await act(async () => { lastComposerOnClose?.(); }); await flush();
+  await click('Reuse prompt');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Creation draft"]')?.getAttribute('data-prompt-applied-token')).toBe('2');
 });

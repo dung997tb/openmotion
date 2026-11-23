@@ -43,14 +43,16 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const [kind, setKind] = useState<AssetKind>(studio?.destination.scene.modality ?? 'all'), [revision, setRevision] = useState(0), [creating, setCreating] = useState(Boolean(studio) && !studio?.openCreate), [picking, setPicking] = useState(false), [pickerMulti, setPickerMulti] = useState(false), [uploading, setUploading] = useState(false), [selected, setSelected] = useState<LibraryAsset>(), [versionId, setVersionId] = useState(''), [jobs, setJobs] = useState<GenerationJob[]>([]), [sessionJobIds, setSessionJobIds] = useState<string[]>([]), [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
   const [draft, setDraft] = useState<AssetDraft>(() => studio?.initialDraft ?? { modality: studio?.destination.scene.modality ?? 'image', prompt: '', references: [] });
   const [draftKeyState, setDraftKeyState] = useState(studio?.draftKey);
+  const promptAppliedSeq = useRef(0);
+  const [promptAppliedToken, setPromptAppliedToken] = useState(0);
   if (studio?.draftKey && studio.draftKey !== draftKeyState) {
     setDraftKeyState(studio.draftKey);
     setDraft(studio.initialDraft ?? { modality: studio.destination.scene.modality, prompt: '', references: [] });
+    setPromptAppliedToken(0);
   }
   const layout = studio && sceneLayout(studio.destination.scene);
   const [studioTab, setStudioTab] = useState<'guide' | 'library'>();
   const [mobileView, setMobileView] = useState<'library' | 'create'>('create');
-  const [promptAppliedToken, setPromptAppliedToken] = useState(0);
   const [taskId, setTaskId] = useState<string | undefined>(), [taskEpoch, setTaskEpoch] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true), [historyError, setHistoryError] = useState<string>(), [historyRetry, setHistoryRetry] = useState(0), [selectingTask, setSelectingTask] = useState(false);
   const studioForm = studio && !selected ? studio : undefined;
@@ -83,7 +85,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
     setDraft(current => ({ ...current, prompt }));
     if (!studio) setCreating(true);
     setMobileView('create');
-    setPromptAppliedToken(value => value + 1);
+    setPromptAppliedToken(++promptAppliedSeq.current);
     toast.showToast(
       t(studio?.destination.scene.id === 'speech' ? 'Script loaded into editor' : 'Prompt loaded into editor'),
       'info',
@@ -105,6 +107,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const clearPreview = useCallback(() => {
     selectionRequest.current++; assetReadRequest.current++; selectedAsset.current = undefined;
     setSelectingTask(false); setSelected(undefined); setVersionId(''); setCreating(scoped && !studio?.openCreate);
+    setPromptAppliedToken(0);
     if (scoped) { setDraft(lastStudioDraft.current); setTaskId(undefined); }
   }, [scoped, Boolean(studio?.openCreate)]);
   const closePreview = useCallback(() => {
@@ -113,7 +116,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   }, [clearPreview, onAssetRoute]);
   const selectVersion = useCallback((asset: LibraryAsset, id: string) => {
     selectionRequest.current++; assetReadRequest.current++; selectedAsset.current = asset;
-    setSelectingTask(false); setSelected(asset); setVersionId(id); setCreating(false);
+    setSelectingTask(false); setSelected(asset); setVersionId(id); setCreating(false); setPromptAppliedToken(0);
   }, []);
   const open = useCallback((asset: LibraryAsset, id = asset.currentVersionId) => {
     if (gallery.current && browser.data) galleryScroll.current = { top: gallery.current.scrollTop, key: browser.data.key };
@@ -271,6 +274,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const startDraft = (next: AssetDraft) => {
     setMobileView('create');
     selectionRequest.current++; setSelectingTask(false); setDraft(next);
+    setPromptAppliedToken(0);
     setTaskId(undefined); setTaskEpoch(value => value + 1); setCreating(true);
   };
   const edit = () => {
@@ -300,7 +304,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
       }
       const nextDraft: AssetDraft = { modality: job.modality, prompt: job.prompt, model: job.model.id, parameters: job.parameters, references, target };
       if (request !== selectionRequest.current) return;
-      setDraft(nextDraft); setTaskId(task.id);
+      setDraft(nextDraft); setPromptAppliedToken(0); setTaskId(task.id);
       setTaskEpoch(value => value + 1); setCreating(true); setMobileView('create');
     } catch (error) { if (request === selectionRequest.current) onError((error as Error).message); }
     finally { if (request === selectionRequest.current) setSelectingTask(false); }
@@ -540,7 +544,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
       if (browser.page > 0) browser.setPage(0);
       if (gallery.current) gallery.current.scrollTo({ top: 0, behavior: 'smooth' });
       refresh(); toast.showToast(t(studio ? 'Added to Generations' : 'Generation started. Track it in Tasks.'), 'info');
-    }} onError={onError} onInfo={onInfo} onClose={() => { selectionRequest.current++; setSelectingTask(false); setCreating(false); }} />;
+    }} onError={onError} onInfo={onInfo} onClose={() => { selectionRequest.current++; setSelectingTask(false); setPromptAppliedToken(0); setCreating(false); }} />;
   const soundWorkbench = studio?.destination.scene.modality === 'audio' && !audioStudio;
   const libraryToolbar = <AssetGalleryToolbar browser={browser} games={gamesView} onGames={() => { setGamesView(true); if (kind === 'trash') setKind('all'); }} onKindChange={next => {
     if (next !== kind || gamesView) tracking.reportAssetsClick('assets_library', next === 'trash' ? 'trash_view' : 'kind_filter', { asset_kind: next });

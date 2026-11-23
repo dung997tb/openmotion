@@ -53,11 +53,9 @@ export function AssetComposer({ active, studio, draft, setDraft, promptAppliedTo
   const modelId = studio?.destination.model ?? draft.model;
   const promptId = useId();
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const appliedTokenRef = useRef(promptAppliedToken);
   const [promptHighlight, setPromptHighlight] = useState<'a' | 'b'>();
   useEffect(() => {
-    if (promptAppliedToken === appliedTokenRef.current) return;
-    appliedTokenRef.current = promptAppliedToken;
+    if (!promptAppliedToken) return;
     const input = promptRef.current;
     if (input) {
       input.scrollIntoView?.({ block: 'nearest' });

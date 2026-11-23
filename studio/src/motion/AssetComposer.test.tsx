@@ -1300,6 +1300,32 @@ it('focuses and pulses the prompt field when promptAppliedToken increments in vi
     const imageTextarea = container.querySelector<HTMLTextAreaElement>('.om-image-prompt')!;
     expect(document.activeElement).toBe(imageTextarea);
     expect(imageField.getAttribute('data-prompt-applied')).toBe('a');
+
+    // Freshly mounting a closed standalone library composer with a pending token consumes it immediately.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    const reusedPrompt = 'Neon alley rain scene';
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: reusedPrompt, references: [] }} promptAppliedToken={1} />,
+    ));
+    const libraryPromptBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const libraryTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).toBe(libraryTextarea);
+    expect(libraryTextarea.selectionStart).toBe(reusedPrompt.length);
+    expect(libraryPromptBox.getAttribute('data-prompt-applied')).toBe('a');
+    await act(async () => { vi.advanceTimersByTime(950); });
+    expect(libraryPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    // A later task remount with token reset to 0 does not replay focus or highlight.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: reusedPrompt, references: [] }} promptAppliedToken={0} />,
+    ));
+    const remountedBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const remountedTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).not.toBe(remountedTextarea);
+    expect(remountedBox.getAttribute('data-prompt-applied')).toBeNull();
   } finally {
     vi.useRealTimers();
   }
