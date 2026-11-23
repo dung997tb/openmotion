@@ -8,4 +8,4 @@ Source: [higgsfield-ai/skills](https://github.com/higgsfield-ai/skills).
 
 > `references/game-playable-ad.md` was written independently for OpenMotion after studying publicly observable playable-ad products; it is original text and code, not a port.
 
-> `references/game-brief.md` and `references/game-gates.md` were written for OpenMotion from public game-design practice and observed AI game workflows; they are original text, not a port.
+> `references/game-brief.md`, `references/game-gates.md`, `references/game-3c-modules.md`, and `references/game-lookup.md` were written for OpenMotion from public game-design practice and observed AI game workflows; they are original text, not a port.
