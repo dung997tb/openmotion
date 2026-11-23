@@ -478,6 +478,16 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     await mkdir(path.join(located.dir, 'trailer'), { recursive: true });
     await writeFile(path.join(located.dir, 'trailer', 'clip.mp4'), 'trailer-placeholder');
 
+    await mkdir(path.join(located.dir, 'assets', 'playtests'), { recursive: true });
+    await writeFile(path.join(located.dir, 'assets', 'playtests', 'private.png'), pngBytes);
+    await writeFile(path.join(located.dir, 'assets', 'runtime.png'), pngBytes);
+    await writeFile(path.join(located.dir, 'assets', 'cover.png'), pngBytes);
+    await mkdir(path.join(located.dir, 'Design'), { recursive: true });
+    await writeFile(path.join(located.dir, 'Design', 'plan.md'), 'Internal uppercase plan');
+    await mkdir(path.join(located.dir, 'designs'), { recursive: true });
+    await writeFile(path.join(located.dir, 'designs', 'keep.txt'), 'Public sibling directory');
+    await games.write(created.id, [{path: 'design/verification.md', content: 'Internal test notes'}]);
+
     const bundle = await buildPublishBundle({
       dataDirectory: store.directory,
       kind: 'game',
@@ -502,6 +512,11 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     assert.match(logicFile.data.toString('utf8'), new RegExp(`"\\./_shared-assets/${asset.id}-${assetVersionId}\\.png"`));
     assert.ok(!bundle.files.some(f => f.file.toLowerCase() === 'game.json'), 'game.json must not be staged');
     assert.ok(!bundle.files.some(f => f.file.toLowerCase().startsWith('trailer/')), 'trailer/ must not be staged');
+
+    assert.ok(!bundle.files.some(f => /^(assets\/playtests|design)\//i.test(f.file)));
+    assert.ok(bundle.files.some(f => f.file === 'assets/runtime.png'));
+    assert.ok(bundle.files.some(f => f.file === 'assets/cover.png'));
+    assert.ok(bundle.files.some(f => f.file === 'designs/keep.txt'));
 
     // Original files on disk remain untouched.
     const diskHtml = await readFile(path.join(located.dir, 'index.html'), 'utf8');

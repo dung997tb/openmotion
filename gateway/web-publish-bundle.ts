@@ -112,7 +112,7 @@ async function collectSourceFiles(
         continue;
       }
       const relPosix = relDir ? `${relDir}/${entry.name}` : entry.name;
-      if (kind === 'game' && (relPosix.toLowerCase() === 'game.json' || relPosix.toLowerCase().startsWith('trailer/'))) {
+      if (kind === 'game' && /^(?:game\.json$|(?:trailer|design|assets\/playtests)(?:\/|$))/i.test(relPosix)) {
         continue;
       }
       const absPath = path.join(resolvedRoot, relPosix);

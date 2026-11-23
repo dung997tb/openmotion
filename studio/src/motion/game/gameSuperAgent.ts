@@ -1,3 +1,4 @@
+import { gameAssetInstructions } from '../../../../shared/game-contract';
 import type { CapabilityResourceRef } from '../../../../shared/capability-hub';
 import type { GameCard, GameGenre, GameSetting, GameStyle } from '../../../../shared/game-contract';
 import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentResourceAttachment } from '../../../../shared/super-agent';
@@ -101,10 +102,11 @@ export function buildGameHiddenInstructions(game: GameCard, instruction: string,
     // The draft instruction already carries the ad recipe; repeating the format here keeps it visible in Super Agent turns.
     game.playableAd ? 'format=playable ad (follow the openmotion-game playable-ad recipe: first-frame play with a hand tutorial, short levels, win/fail end cards with a store CTA, one self-contained HTML)' : '',
   ].filter(Boolean);
+  const assetNote = instruction.includes('openmotion_media_use') ? '' : ` ${gameAssetInstructions}`;
   return [
     instruction,
     extraNotes,
-    `Game Studio context: ${contextParts.join(', ')}. Proceed directly to building and testing without unnecessary questions. If custom visual sprites, textures, music, or sound effects will elevate the game, you may generate reusable assets via openmotion_assets_use(action="generate") and reference their /motion-api/assets/<assetId>/versions/<versionId>/media URLs. Always finish by calling openmotion_present_artifact(kind="game-project", projectId="${game.id}") so the playable result opens in the Browser Artifact Viewer.`,
+    `Game Studio context: ${contextParts.join(', ')}. Proceed directly to building and testing without unnecessary questions (except a single batched spend-consent check when priced media generation is planned).${assetNote} Always finish by calling openmotion_present_artifact(kind="game-project", projectId="${game.id}") so the playable result opens in the Browser Artifact Viewer.`,
   ].filter(Boolean).join('\n\n');
 }
 
