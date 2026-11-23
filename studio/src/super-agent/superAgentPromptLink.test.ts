@@ -3,8 +3,8 @@ import { readSuperAgentPromptLink, withoutSuperAgentPromptLink } from './superAg
 
 describe('Super Agent prompt link', () => {
   it('reads a prefilled new-chat handoff that is never auto-sent', () => {
-    expect(readSuperAgentPromptLink('?prompt=Remix%20this&mode=game&title=Forge')).toEqual({
-      prompt: 'Remix this', mode: 'game', title: 'Forge', newChat: true, autoSend: false,
+    expect(readSuperAgentPromptLink('?prompt=Remix%20this&mode=game')).toEqual({
+      prompt: 'Remix this', mode: 'game', newChat: true, autoSend: false,
     });
   });
   it('ignores empty prompts and unknown modes', () => {
@@ -16,6 +16,6 @@ describe('Super Agent prompt link', () => {
     expect(readSuperAgentPromptLink(`?prompt=${'a'.repeat(9000)}`)?.prompt).toHaveLength(8000);
   });
   it('strips only the one-shot parameters', () => {
-    expect(withoutSuperAgentPromptLink('http://127.0.0.1:5/agent?prompt=x&mode=game&title=t&lang=zh#a')).toBe('/agent?lang=zh#a');
+    expect(withoutSuperAgentPromptLink('http://127.0.0.1:5/agent?prompt=x&mode=game&lang=zh#a')).toBe('/agent?lang=zh#a');
   });
 });
