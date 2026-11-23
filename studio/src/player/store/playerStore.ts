@@ -19,6 +19,7 @@ import { createEditingModeSlice, type EditingModeSlice } from "./editingModeSlic
 import { createPreviewQualitySlice, type PreviewQualitySlice } from "./previewQualitySlice";
 import { createTimelineFocusRequest, type TimelineFocusRequest } from "./timelineFocusState";
 import { createThumbnailSlice, type ThumbnailSlice } from "./thumbnailSlice";
+import { invalidateLatestSourceWrite } from "../../utils/studioFileVersion";
 import { createPlaybackReadinessSlice } from "./readinessSlice";
 import { createRangeSelectionSlice, type RangeSelectionSlice } from "./rangeSelectionSlice";
 import { createTimelineResetState } from "./timelineResetState";
@@ -568,6 +569,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   beginTimelineSession: (projectId) =>
     set((state) => {
       if (state.timelineProjectId === projectId) return state;
+      invalidateLatestSourceWrite();
       return {
         ...createTimelineResetState(),
         timelineSnapEnabled: readStudioUiPreferences(undefined, projectId).timelineSnapEnabled ?? true,

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
+  changedFileVersion,
   mergeFileChangePayloads,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
   readFileTreeChanged,
   readFileChangeField,
   readStudioFileChangePath,
-} from "../components/editor/manualEdits";
+} from "../components/editor/manualEditsParsing";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import type { ExternalConflictSnapshot } from "../utils/externalConflictStorage";
 import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { onRebasedFileEdit } from "../utils/rebasedFileEdit";
-import { consumeStudioWriteToken } from "../utils/studioFileVersion";
+import { consumeStudioWriteToken, invalidateLatestSourceWrite, isLatestSourceWrite } from "../utils/studioFileVersion";
 import { useCloudDisklessMode } from "../utils/cloudRuntime";
 import { logReload } from "../utils/reloadDebug";
 import { notifyProjectActivity } from "../motion/workspaceRefresh";
@@ -76,6 +77,7 @@ interface ExternalFileChangeCoordinatorOptions {
   onAcceptedPersistedFileChange: (
     path: string,
     affectedCompositions: readonly string[] | null,
+    ownWrite?: { token: string; version: string },
   ) => void;
   /**
    * Called alongside `reloadPreview`/`refreshFileViews` on every accepted
@@ -530,8 +532,11 @@ export function useExternalFileChangeCoordinator({
 
       const ownWriteToken = consumeStudioWriteToken(token);
       const ownContentEcho = content != null && isSelfWriteEcho(path, content);
+      if (!ownWriteToken) invalidateLatestSourceWrite();
       if (ownWriteToken || ownContentEcho) {
-        onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(payload));
+        const version = changedFileVersion(payload, path);
+        const ownWrite = ownWriteToken && token && version && isLatestSourceWrite(token) ? { token, version } : undefined;
+        onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(payload), ownWrite);
         logReload("suppressed", {
           path,
           why: ownWriteToken ? "own write token" : "own content echo",

@@ -4,6 +4,7 @@ import { MAX_PEER_PREVIEW_SOURCE_LENGTH } from "../../../../shared/preview-timin
 import { confirmedSource, rememberSource } from "../../utils/confirmedTextSources";
 import { optionalProjectSourceUrl } from "../../utils/projectRouting";
 import { studioApiFetch } from "../../utils/studioApiFetch";
+import { isLatestSourceWrite } from "../../utils/studioFileVersion";
 import { MAX_POSTER_SOURCE_LENGTH } from "./compositionPosterSource";
 
 type Revisions = ReturnType<typeof usePlayerStore.getState>["thumbnailRevisions"];
@@ -17,11 +18,28 @@ interface PendingRead {
 interface PosterFiles {
   pending: Map<string, PendingRead>;
   recent: Map<string, string | null>;
+  ownEdit?: { key: string; version: string; token: string };
 }
 
 // The store replaces this object when content changes. Old responses stay with the old generation.
 const filesByGeneration = new WeakMap<Revisions, PosterFiles>();
 const MAX_RECENT_FILES = 4;
+
+function filesFor(revisions: Revisions): PosterFiles {
+  let files = filesByGeneration.get(revisions);
+  if (!files) {
+    files = { pending: new Map(), recent: new Map() };
+    filesByGeneration.set(revisions, files);
+  }
+  return files;
+}
+
+// A self echo may arrive before its HTTP receipt makes the authored bytes available.
+export function expectPosterFileVersion(projectId: string, path: string, write: { token: string; version: string }) {
+  const state = usePlayerStore.getState();
+  if (state.timelineProjectId !== projectId || path === ".") return;
+  filesFor(state.thumbnailRevisions).ownEdit = { key: JSON.stringify([projectId, state.timelineSessionEpoch, path]), ...write };
+}
 
 export async function readPosterFile(projectId: string, epoch: number, path: string, revision: number, signal: AbortSignal) {
   signal.throwIfAborted();
@@ -46,12 +64,14 @@ export async function readPosterFile(projectId: string, epoch: number, path: str
   }
   if (!isCurrent()) return download(signal);
   const revisions = usePlayerStore.getState().thumbnailRevisions;
-  let files = filesByGeneration.get(revisions);
-  if (!files) {
-    files = { pending: new Map(), recent: new Map() };
-    filesByGeneration.set(revisions, files);
-  }
+  const files = filesFor(revisions);
   const key = JSON.stringify([projectId, epoch, path]);
+  if (files.ownEdit?.key === key && isLatestSourceWrite(files.ownEdit.token)) {
+    const source = confirmedSource(projectId, path);
+    if (source?.version === files.ownEdit.version) {
+      return source.content.length <= MAX_POSTER_SOURCE_LENGTH ? source.content : null;
+    }
+  }
   const cached = files.recent.get(key);
   if (cached !== undefined) return cached;
   const { pending, recent } = files;

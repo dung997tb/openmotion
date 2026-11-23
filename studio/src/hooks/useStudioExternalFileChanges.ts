@@ -4,6 +4,7 @@ import { isUnrelatedPreviewHtmlChange } from "../player/lib/previewHtmlSources";
 import { syncPeerComposition } from "./syncPeerComposition";
 import { createRemoteFileReader } from "./remoteFileReads";
 import { knownCompositionSource } from "../player/lib/compositionPosterSource";
+import { expectPosterFileVersion } from "../player/lib/posterFileRead";
 import { usePlayerStore } from "../player/store/playerStore";
 import { clearStudioSaveFailures } from "../utils/studioSaveState";
 import {
@@ -65,11 +66,12 @@ export function useStudioExternalFileChanges({
   const { drainPendingDomEditSaves, resetDomEditSaveQueueBreaker } = previewPersistence;
   const bumpThumbnailRevisions = usePlayerStore((state) => state.bumpThumbnailRevisions);
   const onAcceptedPersistedFileChange = useCallback(
-    (path: string, affectedCompositions: readonly string[] | null) => {
+    (path: string, affectedCompositions: readonly string[] | null, ownWrite?: { token: string; version: string }) => {
       onOutsideChange?.();
       bumpThumbnailRevisions(affectedCompositions, path);
+      if (projectId && ownWrite) expectPosterFileVersion(projectId, path, ownWrite);
     },
-    [bumpThumbnailRevisions, onOutsideChange],
+    [bumpThumbnailRevisions, onOutsideChange, projectId],
   );
   const filesForChange = useMemo(() => createRemoteFileReader(), []);
   const refreshFileViews = useCallback((payload: unknown, acceptChange: (unaffectedPreview?: string) => void) => {
