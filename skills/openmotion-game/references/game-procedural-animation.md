@@ -2,16 +2,18 @@
 
 # Procedural animation — non-humanoid branch
 
-When Meshy rigging returns `422 — Pose estimation failed` (anything that
-isn't a clear biped: dragons, quadrupeds, snakes, spiders, fish, slimes) and
-no Tripo3D key is available, build the rig and clips yourself in headless
-Blender. **Verified on a dragon** (2026-06-10): 16 bones, distance weights,
-sine-based `idle`/`fly` clips — fully scripted, zero manual steps.
+Humanoid auto-rigging fails or degrades on non-biped creatures (dragons,
+quadrupeds, snakes, spiders, fish, slimes). When a game needs animated
+non-humanoid 3D creatures and no dedicated creature-rigging capability is
+available in OpenMotion, build the rig and clips locally in headless Blender
+(or animate simple blobs/props directly in Three.js code). **Verified on a
+dragon**: 16 bones, distance weights, sine-based `idle`/`fly` clips — fully
+scripted, zero manual steps.
 
 ## Pipeline
 
 ```
-static mesh (Meshy text/image-to-3d, preview mesh is fine)
+static mesh (generated or bundled .glb)
   → proc_rig_dragon.py    skeleton from bounding-box analysis → work.blend
   → proc_weights.py       distance-based skin weights (NOT bone heat)
   → proc_anim_dragon.py   sine clips baked to keyframes → animated GLB
@@ -82,30 +84,9 @@ slow head sway, tail/appendage micro-wave, wing micro-adjust.
 
 ## Texture-swap rule
 
-Never block on Meshy refine (texture) — rig/weights/clips run on the gray
-preview mesh; when the textured mesh arrives, re-run the same three scripts
-on it (bbox-relative skeleton makes this deterministic). See stuck-refine
-recovery in `game-meshy-api.md`.
-
-## Tripo3D alternative (UNVERIFIED — needs API key)
-
-Tripo3D (the UniRig authors; UniRig itself needs a GPU we don't have) has
-creature rigging in the cloud:
-
-1. `animate_prerigcheck` — asks if the model is riggable, returns skeleton
-   type: `biped`, `quadruped`, `hexapod`, `octopod`, `avian`, `serpentine`,
-   `aquatic`.
-2. Rig task for that skeleton type.
-3. `animate_retarget` — locomotion presets per type
-   (`preset:quadruped:walk`, `preset:hexapod:walk`, `preset:octopod:walk`,
-   `preset:serpentine:march`, `preset:aquatic:march`; biped also gets
-   idle/walk/run/jump/slash/shoot/hurt/fall/climb/dive/turn). Up to 5
-   animations per request, GLB/FBX out.
-
-Far fewer presets than Meshy's 680, but for NPC monsters walk + idle is
-usually enough. Hybrid works: generate the mesh in Meshy, rig/animate in
-Tripo via `model_url` — formats are compatible. Mark results as unverified
-until first successful run; keep the procedural branch as fallback.
+Do not block gameplay work on final textures — rig, weights, and clips can run
+on an untextured preview mesh; once the final textured mesh arrives, re-run
+the same three scripts on it (bbox-relative skeletons make this deterministic).
 
 ## Three.js consumption
 

@@ -4,9 +4,9 @@
 
 This reference governs authored game assets, not Studio application styling. Use `openmotion_game_create`, `openmotion_game_get`, `openmotion_game_read_file`, `openmotion_game_write_files`, `openmotion_game_update_meta`, `openmotion_game_capture_cover`, `openmotion_game_playtest`, `openmotion_game_simulate`, `openmotion_game_validate`, `openmotion_game_set_status` and authorized **local** `openmotion_game_publish`. Paths below are game-relative. Use the six-export contract in `shared/game-contract.ts`; the offline starter is `templates/game-kits/coop-3d/` with `vendor/` and `characters/` copied alongside it.
 
-**Tool compatibility:** `openmotion_generate_asset` is a legacy optional route, not exposed by phase-one hosts. Use it only when tools/list actually exposes it. Otherwise use discovered `openmotion_media_use` for inspect/reference/models and `openmotion_assets_use` for authorized generation/job tracking; if unavailable, use existing local assets and report the gap. Do not invent Tool names or forward old CLI flags.
+**Media & capability boundary:** Never invent Tool names, forward historical CLI flags, or direct users to external third-party APIs/accounts (such as Meshy, Tripo, Mixamo, or Suno) outside OpenMotion. Discover configured providers and models with `openmotion_media_use` (`action: "inspect"` and `action: "models"`), obtain explicit spending approval with the chosen provider/model and estimated count, then generate, poll, and inspect through `openmotion_assets_use` (`action: "generate"`, `action: "status"`, `action: "read"`). Follow `openmotion://workflow/media/start` for provider selection and spend consent.
 
-For media, discover the installed model/provider contract first using `openmotion_media_use action=models`; inspect required inputs and current pricing. Use `openmotion_generate_asset` only for an actually available model, with the stated price/cost estimate, quantity and user approval before submission. Track its job and save the resulting asset into the game. Historical model names and costs below are selection criteria and upstream budgets, **not promises of installed models, free quota or current prices**. Unsupported image-to-3D, rigging, animation presets and retexture operations have no generic OpenMotion equivalent: use the bundled CC0 GLBs, supplied assets, or an explicitly provisioned local Blender workflow. Never pretend that image/video generation produces a rigged GLB.
+Unsupported image-to-3D, rigging, animation presets and retexture operations have no generic OpenMotion equivalent yet: use the bundled CC0 GLBs, supplied assets, or an explicitly provisioned local Blender workflow. Never pretend that image/video generation produces a rigged GLB.
 
 Legacy Python/Blender helper names below specify algorithms and optional workflows; those helpers are **not bundled** here. Check for a user-provided installed helper before using its command; otherwise implement the described operation as scoped work or report the missing capability. Do not install software, fetch scripts or contact a raw provider without authorization. The shipped inspector is `node scripts/game-glb-inspect.mjs <file.glb>` (meshes, skins, unique bones, clip names/durations, triangles); it does not check root-scale channels or patch/merge rigs. No inherited claim of a bundled helper overrides this boundary.
 
@@ -162,8 +162,6 @@ Read `game-design-system.md` first (profile, core loop and manifest), then `game
 | Any 3D model / animation | `game-3d-animation.md` |
 | Non-humanoid procedural rigs | `game-procedural-animation.md` |
 | Music, SFX, voice | `game-audio.md` |
-| Historical optional 3D provider recipe and recovery | `game-meshy-api.md` (not a built-in adapter) |
-| Image-to-3D input, pose and polygon budgets | `game-meshy-input-rules.md` |
 
 Upstream rig/texture helper scripts are not included. Use the shipped dependency-free GLB inspector and bundled character kit; optional conversion workflows require separately available tooling. Do not rebuild missing tools from memory and claim they were shipped.
 

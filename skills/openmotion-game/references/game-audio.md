@@ -2,74 +2,24 @@
 
 # Game Audio
 
-Use this reference for music, SFX, ambience, and spoken character lines. Generate through `openmotion_generate_asset` after model discovery, a stated cost and approval, then normalize and mix locally for predictable in-game loudness.
+Use this reference for music, SFX, ambience, and spoken character lines. Discover configured audio models through `openmotion_media_use`, obtain explicit spend approval, generate through `openmotion_assets_use`, and normalize/mix locally for predictable in-game loudness.
 
-## Discover the live contracts
+## Discover and generate via OpenMotion
 
-Run before the first audio job:
+Run read-only discovery before the first audio job:
 
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-DISCOVER/INSPECT available model using openmotion_media_use action=models: --audio --json
-DISCOVER/INSPECT available model using openmotion_media_use action=models: seed_audio
+1. Call `openmotion_media_use` with `action: "inspect"` and `action: "models", modality: "audio"` to see configured providers, supported modes (`text-to-audio` for music/SFX/ambience, `text-to-speech` for spoken lines), voices, and parameter schemas.
+2. Choose the best configured provider/model (OpenDesign account/Cloud first when available, then configured BYOK providers), state the planned clip count, provider/model, and cost (or that cost is unknown), and obtain explicit spending approval before submitting.
+3. Submit each approved clip through `openmotion_assets_use` (`action: "generate"`, `modality: "audio"`, `mode: "text-to-audio"` or `"text-to-speech"`, full `model` ID, `prompt`, `requestId`, and only schema-supported `parameters`). Poll with `action: "status"` using the original `jobId` and inspect with `action: "read"` at the pinned `assetId`/`versionId`.
 
-```
+Example prompts (pass only fields documented by the discovered model):
 
-Use `seed_audio` by default. Use `sonilo_music` or `mirelo_text_to_audio` only when the user requests those specialist models or their live contracts fit better. Use `inworld_text_to_speech` only for explicit TTS with one of its listed voices.
+- **SFX:** `"short isolated sword impact, dry studio recording, no music"`
+- **Instrumental music loop:** `"instrumental cozy forest loop, warm marimba and soft strings, no vocals"`
+- **Ambience:** `"soft night rain on wooden roof, steady seamless ambience, no music, no voice"`
+- **Spoken line (TTS):** `"The gate is open. Move!"` with an exact voice value returned by model discovery.
 
-## Commands
-
-General audio, SFX, or ambience:
-
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: seed_audio \
-  --prompt "short isolated sword impact, dry studio recording, no music" \
-  --wait \
-  --json
-
-```
-
-Specialist instrumental music:
-
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-DISCOVER/INSPECT available model using openmotion_media_use action=models: sonilo_music
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: sonilo_music \
-  --prompt "instrumental cozy forest loop, warm marimba and soft strings, no vocals" \
-  --duration 30 \
-  --wait \
-  --json
-
-```
-
-Specialist legacy SFX:
-
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-DISCOVER/INSPECT available model using openmotion_media_use action=models: mirelo_text_to_audio
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: mirelo_text_to_audio \
-  --prompt "single heavy wooden door slam, close microphone, no ambience" \
-  --duration 2 \
-  --wait \
-  --json
-
-```
-
-Explicit TTS:
-
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-DISCOVER/INSPECT available model using openmotion_media_use action=models: inworld_text_to_speech
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: inworld_text_to_speech \
-  --prompt "The gate is open. Move!" \
-  --voice "<exact voice value from model get>" \
-  --wait \
-  --json
-
-```
-
-Pass only parameters shown by `model get`; do not forward provider-specific keys.
+If no audio generation model is configured or approved, fall back to clean procedural Web Audio synthesis in code and record that choice in `design/assets.csv`. Never invent model IDs, forward legacy CLI flags, or direct users to external audio sites/keys outside OpenMotion.
 
 ## Scope
 

@@ -4,8 +4,9 @@
 
 > **Asset reference for game-generation.** Use for ANY animated 2D asset —
 > characters, objects, effects — delivered as a spritesheet. The pipeline:
-> key-pose image → `openmotion_generate_asset` (after discovery, stated cost and approval) (**`seedance1_5`**) → frame extraction
-> (ffmpeg) → frame selection → per-frame background removal → spritesheet
+> key-pose image → configured image-to-video model (discovered via `openmotion_media_use`,
+> generated via `openmotion_assets_use` after stated cost and approval) → frame extraction
+> (ffmpeg) → frame selection → per-frame background removal / chroma key → spritesheet
 > assembly. Style: the key-pose prompt embeds the STYLE FORMULA per
 > `game-stylization.md` — open it first, as for every asset.
 
@@ -16,34 +17,6 @@ model animates ONE image, so every frame is the same character by
 construction. We then sample the video back into frames. This trades prompt
 control for temporal coherence — the right trade for game sprites.
 
-## Optional AutoSprite route (only if discovered)
-
-Use `autosprite` when present in the live model catalog. It owns animation, frame
-selection, background removal, and sheet assembly:
-
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-DISCOVER/INSPECT available model using openmotion_media_use action=models: autosprite
-REGISTER supplied reference asset locally: ./character.png --json
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: autosprite \
-  --image_url "<stable URL from upload output>" \
-  --kind walk \
-  --video_tier turbo \
-  --frame_count 12 \
-  --frame_size 256 \
-  --remove_bg default \
-  --with_sound false \
-  --is_humanoid true \
-  --wait \
-  --json
-
-```
-
-Supported standard kinds and isometric directions come from `openmotion_media_use action=models (inspect model)
-autosprite`. For `kind=custom`, pass both `--prompt` and `--name`; omit both for
-standard kinds. Use the manual pipeline below only when AutoSprite is unavailable or
-the project requires explicit control over extracted frames.
-
 ---
 
 ## Pipeline at a glance
@@ -51,11 +24,11 @@ the project requires explicit control over extracted frames.
 | # | Stage | Tool | Output |
 |---|---|---|---|
 | 1 | Source image | manifest / user / `game-stylization.md` pipeline | character or object image |
-| 2 | Key-pose image | `openmotion_generate_asset` (after discovery, stated cost and approval) → `flux_2` | full-body pose at the action's mid/peak phase |
-| 3 | Animation video | `openmotion_generate_asset` (after discovery, stated cost and approval) → **`seedance1_5`** | 4 s, 720p, AR = key-pose ratio (explicit); loop: start = end frame |
+| 2 | Key-pose image | `openmotion_media_use` (discover) → `openmotion_assets_use` (`action: "generate"`, `modality: "image"`, pinned `referenceAssets`) | full-body pose at the action's mid/peak phase |
+| 3 | Animation video | `openmotion_media_use` (discover I2V model) → `openmotion_assets_use` (`action: "generate"`, `modality: "video"`, pinned key-pose reference) | short clip (e.g. 4–5 s, 720p), explicit AR = key-pose ratio |
 | 4 | Raw frames | ffmpeg | every frame of the video as PNG |
 | 5 | Frame selection | local script | `frame_count` frames (2–64, default 25), evenly spaced, first + last always kept |
-| 6 | Alpha | `image_background_remover`, per frame | transparent-background PNGs |
+| 6 | Alpha | configured transparent-background edit or local chroma-keying, per frame | transparent-background PNGs |
 | 7 | Spritesheet | local assembly | grid PNG, metadata encoded in the filename |
 
 Hard rules (each one is a known failure when violated):
@@ -64,15 +37,11 @@ Hard rules (each one is a known failure when violated):
   visible empty margin above the head and below the feet. A key pose, a video
   frame, or a sheet cell that clips the subject is a rejected asset —
   regenerate, do not "fix in post".
-- **The video model is `seedance1_5` exactly.** Not `seedance_2_0`, not the
-  current default of `openmotion_generate_asset` (after discovery, stated cost and approval). Verify availability via
-  `openmotion_media_use action=models (discover models)` if a call errors, but do not silently substitute a model.
-- **start = end only for loops.** Looping actions pass the SAME image as both
-  start frame and end frame. One-shot actions (attack, death, hit, cast) pass
-  only the start frame — forcing them back to the start pose ruins the action.
+- **Discover the live video model before submitting.** Call `openmotion_media_use` (`action: "models"`, `modality: "video"`) to pick an available image-to-video model and inspect its supported duration, resolution, aspect ratio, and reference-image limits. Never invent a model ID or silently substitute an unapproved model.
+- **Loop closure vs one-shot.** If the discovered video model supports both start and end frame references, pass the SAME key-pose image as start and end frame **only for looping actions** (never for one-shots like attack/death/hit/cast). When the active I2V model only accepts a single first-frame reference, describe an in-place cyclic motion returning to the starting stance and verify the wrap point during frame selection (or trim to the cleanest loop window).
 - **First and last extracted frames are always kept** in the selection. For
-  loops the last frame is then dropped at sheet assembly (see stage 7) —
-  kept during selection, excluded from the sheet.
+  loops whose start and end match identically, drop the last frame at sheet
+  assembly (see stage 7) — kept during selection, excluded from the sheet.
 - **Background removal runs on FRAMES, one by one** — never on the video.
 
 ---
@@ -88,11 +57,11 @@ If the source already crops the subject (feet cut by the canvas, head at the
 edge), it cannot enter stage 2 as-is — regenerate or outpaint it to full body
 first. A cropped input guarantees a cropped animation.
 
-## Stage 2 — Key-pose generation (`flux_2`)
+## Stage 2 — Key-pose generation (configured reference-capable image model)
 
 **What:** produce the subject in the *mid/peak phase* of the requested action.
 The video model animates *around* the image it is given; starting from the
-action's characteristic phase is what makes 4 seconds of video read as that
+action's characteristic phase is what makes a short clip read as that
 action.
 
 - `idle` → slight lean / relaxed breathing stance
@@ -102,9 +71,7 @@ action.
 - `cast` / `effect` → energy gathered at the hands / pre-release
 - flames, water, props → the shape at its most typical, not its extreme
 
-**How:** `openmotion_generate_asset` (after discovery, stated cost and approval) with model `flux_2`, the source image as media
-reference, the STYLE FORMULA verbatim in the prompt, plus the pose
-instruction. The prompt MUST demand:
+**How:** after discovery via `openmotion_media_use` (`action: "models"`, `modality: "image"`) and spending approval, call `openmotion_assets_use` (`action: "generate"`, `modality: "image"`) with a configured reference-capable model, the source image pinned in `referenceAssets`, the STYLE FORMULA verbatim in the prompt, plus the pose instruction. The prompt MUST demand:
 
 - *full body / full object in frame* — head to feet visible;
 - *empty margin above and below the subject* — the motion needs headroom and
@@ -126,30 +93,24 @@ Gate: subject fully inside the frame with visible margin top and bottom,
 nothing clipped, style matches the FORMULA. Cropped or off-style → reroll
 (regeneration budget per SKILL.md: 2 attempts, then best-of).
 
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: flux_2 \
-  --image ./source-character.png \
-  --prompt "<STYLE FORMULA>. <single key-pose instruction>. Full body in frame with empty margin above the head and below the feet. Clean uniform <key color> background." \
-  --aspect_ratio 1:1 \
-  --resolution 1k \
-  --wait \
-  --json
+Prompt shape (pass only schema-supported parameters for the chosen model):
 
+```text
+<STYLE FORMULA>. <single key-pose instruction>. Full body in frame with empty margin above the head and below the feet. Clean uniform <key color> background.
 ```
 
-## Stage 3 — Video generation (`seedance1_5`)
+## Stage 3 — Video generation (configured image-to-video model)
 
-**Fixed parameters:**
+**Key parameters (map to the discovered video model's actual schema):**
 
-| Param | Value |
+| Param | Guidance |
 |---|---|
-| model | `seedance1_5` |
-| duration | 4 s |
-| resolution | 720p |
+| model | discovered I2V model from `openmotion_media_use` (`modality: "video"`, `supportsImageReference: true`) |
+| duration | shortest supported cycle (typically 4–5 s) |
+| resolution | 720p (or model's clean standard tier) |
 | aspect_ratio | **= the key-pose image's ratio, passed EXPLICITLY on every call** — never omitted |
-| start frame | the stage-2 key pose — always |
-| end frame | the SAME image — **looping actions only** |
+| start frame | pinned `assetId`/`versionId` of the stage-2 key pose — always |
+| end frame | the SAME image **only if supported by the model AND the action is a loop** |
 
 **Aspect ratio is read off the key-pose file and passed explicitly** (a 1:1
 pose → `aspect_ratio: "1:1"`, and so on). "Auto" does not exist as a real
@@ -203,21 +164,10 @@ what to do and stays silent about everything else. Two parts:
 direction-neutral. The ONLY exception: the requested action IS a turn —
    then it is a one-shot (start frame only, `once`), never a loop.
 
-Loop example (omit `--end-image` for a one-shot):
+Prompt shape (submit via `openmotion_assets_use` `action: "generate"`, `modality: "video"`, pinning the key pose in `referenceAssets`, setting `generate_audio: false` when supported, and explicitly passing the key-pose aspect ratio):
 
 ```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: seedance1_5 \
-  --start-image ./key-pose.png \
-  --end-image ./key-pose.png \
-  --prompt "<one action>. Camera locked, no camera movement, no zoom, subject stays fully in frame, plain static background. The character performs ONLY this action; nothing else happens. The subject keeps facing the same direction for the entire video." \
-  --duration 4 \
-  --resolution 720p \
-  --aspect_ratio 1:1 \
-  --generate_audio false \
-  --wait \
-  --json
-
+<one action>. Camera locked, no camera movement, no zoom, subject stays fully in frame, plain static background. The character performs ONLY this action; nothing else happens. The subject keeps facing the same direction for the entire video.
 ```
 
 Gate before moving on: scrub the video — subject never leaves the frame or
@@ -271,24 +221,19 @@ walk is waste. Spend frames only where the silhouette genuinely changes fast.
 
 ## Stage 6 — Background removal (per frame)
 
-Each selected frame: pass its local path to `image_background_remover`; the CLI
-uploads it automatically and the completed job returns the transparent PNG:
-
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: image_background_remover \
-  --image ./selected/0001.png \
-  --wait \
-  --json
-
-```
+Because stage 2 placed the subject on a clean uniform key color absent from the
+subject's palette, prefer **deterministic local chroma-keying** on each extracted
+PNG frame (zero per-frame generation cost, fast, reproducible, and clears enclosed
+key-colored holes such as gaps between limbs). When an image-level transparent-background
+edit capability is configured and approved in OpenMotion, you may run it per frame
+instead (via `openmotion_assets_use` after approval) for complex edges.
 
 **Why per-frame and not the whole video:** the per-image matte is computed
 independently and cleanly per frame; the video path optimizes for temporal
 smoothness and smears edges across frames — on sprites that shows up as a
-halo that flickers. Frames it is, accepting the N calls.
+halo that flickers.
 
-Submit the frames in parallel, poll all to completion (fire-and-forget does
+Process every selected frame to completion (fire-and-forget does
 NOT apply — the sheet needs every frame). Gate: spot-check 3–4 frames at
 2× zoom — no leftover background patches, no eaten thin parts (blades, hair,
 flame tips). A bad matte on the same spot across frames means the stage-2

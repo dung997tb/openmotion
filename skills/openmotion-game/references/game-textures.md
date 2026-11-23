@@ -5,23 +5,25 @@
 > **Asset reference for game-generation.** Use for any seamless / tileable texture
 > with PBR maps (ground, walls, floors — from a reference image or a generated one).
 > The pipeline may be entered at any phase (only the seam fix, or only maps from an
-> existing tile). Generate through `openmotion_generate_asset` (after discovery, stated cost and approval); local image paths are
-> uploaded automatically. Embed the game's STYLE FORMULA
+> existing tile). Discover configured image-edit models via `openmotion_media_use`
+> (`action: "models"`, `modality: "image"`), obtain spending approval, and generate
+> through `openmotion_assets_use` (`action: "generate"` with pinned `referenceAssets`
+> imported via `action: "import"`). Embed the game's STYLE FORMULA
 > (see `game-stylization.md`) in every generation prompt.
 >
 > **The upstream post-process scripts are optional external prerequisites, not bundled in this Skill.** Locate them once per run (see **Locating the scripts** below) and
 > address them as `scripts/pipeline.py`.
 
 Turn a reference image into an engine-ready texture in one pass: a
-**seamless edit** with an available image-edit model (upstream preference: `gpt_image_2`) that keeps the reference's
+**seamless edit** with a configured reference-capable image model (`supportsImageReference: true`) that keeps the reference's
 pixels (material, style and colors survive; only the edges are reconciled),
 then a **deterministic post-process** — one Python command that restores the
 reference's exact palette, guarantees the tiling mathematically and computes
 the PBR map set in code.
 
-The order matters: palette transfer and seam fix run **after** GPT, because
-gpt_image_2 always slightly blurs the outer border and drifts the palette —
-the upstream algorithm exists to cancel exactly those two artifacts.
+The order matters: palette transfer and seam fix run **after** the image-edit pass, because
+image-edit models slightly blur the outer border and drift the palette —
+the deterministic post-process cancels those two artifacts.
 
 Work language: mirror the user's language in chat; keep all generation
 prompts in English.
@@ -68,29 +70,17 @@ working folder). Then:
   `--trim 0`.
 - Pick `{id}`: short, lowercase, one per material (`sand`, `brick_red`).
 
-## Phase 1 — Seamless edit (gpt_image_2)
+## Phase 1 — Seamless edit (configured image-edit model)
 
-- Pass the crop directly with `--image`; the CLI uploads and confirms local paths.
+- Import the cropped reference file into Workspace Assets with `openmotion_assets_use` (`action: "import"`), and discover a configured image model that reports `supportsImageReference: true` via `openmotion_media_use` (`action: "models"`, `modality: "image"`).
 - Fill the EDIT prompt template from the **Prompt templates** section below.
   `{MATERIAL}` = 3–6 concrete words from the
   reference. For structured materials (bricks, planks, tiles) append the
   alignment add-on; for references that are already tiled previews append
   the anti-repetition add-on; for stock images append the watermark add-on.
-- Submit and wait:
-  ```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-  REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: gpt_image_2 \
-    --prompt "<EDIT prompt with STYLE FORMULA>" \
-    --image textures/{id}_ref.png \
-    --aspect_ratio 1:1 \
-    --quality high \
-    --wait \
-    --json
-  
-```
-- Download the result and **look at it with the Read tool next to the
-  reference**. Check: same material, same colors, nothing added or removed,
-  no restyle. If GPT restyled — one retry with a stronger "do not restyle"
+- Obtain spending approval, then submit via `openmotion_assets_use` (`action: "generate"`, `modality: "image"`, full discovered `model` ID, `prompt` containing the EDIT template + STYLE FORMULA, `referenceAssets: [{ assetId, versionId }]`, square `1:1` aspect ratio per the model's supported schema, and a stable `requestId`). Poll with `action: "status"` until complete and inspect with `action: "read"`.
+- Inspect the result **next to the reference**. Check: same material, same colors, nothing added or removed,
+  no restyle. If the model restyled — one retry with a stronger "do not restyle"
   clause. If a structured seam survives the retry, switch to the
   offset-inpaint pass (Prompt templates §2 below) instead of rolling
   the seed again: two identical failures mean the approach is wrong, not
@@ -191,8 +181,8 @@ pipeline.
 
 ## Prompt templates
 
-All prompts go to `gpt_image_2`, aspect `1:1`, quality `high`, with the
-reference attached as a media input (`media_id`, never a raw URL).
+All prompts go to the discovered reference-capable image model (`1:1` square ratio), with the
+reference attached as a pinned Workspace Asset (`referenceAssets`, never a raw external URL).
 
 ## 1. Seamless edit (Phase 1)
 
@@ -225,7 +215,7 @@ Add-ons, appended as extra sentences when they apply:
 Move the seam to the center and have GPT repaint only the cross:
 
 1. `np.roll` the tile by 50% on both axes (the seam becomes a center cross).
-2. Send to gpt_image_2:
+2. Import the rolled PNG into Workspace Assets and send it to the configured image-edit model via `openmotion_assets_use` (`action: "generate"`):
 
 ```
 This {MATERIAL} game texture is damaged along a vertical line and a

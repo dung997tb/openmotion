@@ -65,8 +65,8 @@ Rules:
 
 ### STYLE TOKEN (compressed form)
 
-Some downstream fields are length-limited (e.g. Meshy `texture_prompt`
-≤600 chars — the full formula usually fits; some UI fields may not). When a
+Some downstream fields are length-limited (for example a 3D `texture_prompt`
+capped around 600 chars — the full formula usually fits; some compact fields may not). When a
 consumer cannot take the full formula, it takes the **STYLE TOKEN**: blocks
 1 + 3-condensed + one accent from block 4, ≤120 chars, derived ONCE from the
 approved formula and then also frozen byte-identical. Example:
@@ -90,7 +90,7 @@ Consumers and their obligations:
 | Static asset generation (sprites, tiles, backgrounds, UI) | formula verbatim in every prompt (assembly in section 4) |
 | Character animation (sprite-sheet generation from a base sprite) | formula verbatim in sheet prompts; the animation view parameter MUST match the formula's perspective word (`side-view` → sidescroller view, `top-down` → top-down view) |
 | Environment textures | formula verbatim + seamless suffix (section 4) |
-| 3D (image-to-3D, e.g. Meshy/Tripo) | formula verbatim in concept/reference image prompts; formula (or token if limited) in `texture_prompt`; style fixes via retexture, not mesh regeneration (section 8) |
+| 3D (image-to-3D gateway models, when available) | formula verbatim in concept/reference image prompts; formula (or token if limited) in `texture_prompt`; style fixes via retexture when supported, not mesh regeneration (section 8) |
 | Level/map presentation sheets | formula or token in the sheet prompt so map icons match the asset kit |
 
 ## 4. Prompt assembly for 2D assets
@@ -148,14 +148,16 @@ corners, so corner flood-fill alone misses it).
 
 ## 6. Models and volumes
 
-| What | Model | Params | Volume per game |
-|---|---|---|---|
-| Sprites, tiles, backgrounds, textures | `nano_banana_2` | resolution `1k`; AR `1:1` (sprite/tile/texture/ui), `16:9` (background) | ≤10 assets, `count: 1` each, all submitted in parallel |
-| UI elements | `gpt_image_2` | `high` / `1k`, AR `1:1` | 0–1 |
-| Character animation sheets | `gpt_image_2` (5×5 grid in one image) | AR `1:1` | 2–3 sheets max, hero only |
-| 3D concept/reference images | `gpt_image_2` or `nano_banana_2` | `1k`, AR `1:1` | one per 3D prop |
+Discover configured image models via `openmotion_media_use` (`action: "models"`, `modality: "image"`) and obtain spending approval before generating via `openmotion_assets_use` (`action: "generate"`).
 
-- One primary generator (`nano_banana_2`) across asset kinds is itself a
+| What | Model choice | Params | Volume per game |
+|---|---|---|---|
+| Sprites, tiles, backgrounds, textures | one primary configured image model | resolution `1k`; AR `1:1` (sprite/tile/texture/ui), `16:9` (background) | ≤10 assets, `count: 1` each, submitted in parallel |
+| UI elements | configured image model with crisp text/icon adherence | `1k`, AR `1:1` | 0–1 |
+| Character animation sheets | configured image model (or I2V sprite pipeline in `game-2d-animation.md`) | AR `1:1` | 2–3 sheets max, hero only |
+| 3D concept/reference images | same primary configured image model | `1k`, AR `1:1` | one per 3D prop |
+
+- Reusing **one primary configured image model** across asset kinds is itself a
   cohesion win — don't spread kinds across models without a reason.
 - Pick resolution at generation time; never upscale afterwards.
 - **Regeneration budget: 2 attempts per asset** (style drift / keying /
@@ -190,7 +192,7 @@ corners, so corner flood-fill alone misses it).
 
 3D consumes the same formula but through different mechanics:
 
-| Aspect | 2D | 3D (image-to-3D, e.g. Meshy) |
+| Aspect | 2D | 3D (image-to-3D gateway models, when available) |
 |---|---|---|
 | Style carrier | formula in every asset prompt | formula in the CONCEPT IMAGE prompt; formula/token in `texture_prompt` |
 | Background for subject shots | solid key color (magenta/green) for keying | **pure flat white, no shadow, no ground** — shadows and clutter are the top cause of bad mesh reconstruction; keying is irrelevant, the mesh replaces it |

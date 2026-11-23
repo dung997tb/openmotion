@@ -3,60 +3,45 @@
 # Animated 3D Characters (rigged GLB pipeline)
 
 > **Asset reference for game-generation.** Use for ANIMATED (rigged, multi-clip)
-> GLB characters in 3D games — walk/run/attack clips, FBX→GLB conversion that
-> preserves all clips, CC0 character sources, the Meshy image→3D→rig→animations
-> pipeline, and the procedural branch for non-humanoid creatures. **Mandatory for
-> every 3D asset — creating a model or animating it; never model or animate 3D
-> without this reference.** Static-only meshes follow the same image→3D steps
-> (`game-meshy-api.md`) and stop before the rigging step.
+> GLB characters and static 3D meshes in 3D games — walk/run/attack clips,
+> FBX→GLB conversion that preserves all clips, bundled CC0 character sources,
+> vendor-agnostic 3D input/polycount rules, and the procedural branch for
+> non-humanoid creatures. **Mandatory for every 3D asset — creating a model or
+> animating it; never model or animate 3D without this reference.**
 > Style: concept/reference images for 3D follow the
 > 3D rules in `game-stylization.md` §8 (white background, three-quarter
-> isometric view, formula in the concept prompt, token in `texture_prompt`).
+> isometric view, formula in the concept prompt).
 
-> **OpenMotion replacement:** pick a bundled CC0 character first. The upstream image→3D→rig→animation recipe uses `image_to_3d`, `should_texture`, `enable_rigging`, `enable_animation`, `animation_action_id` and extra clips via `3d_rigging`. There is no built-in equivalent for these model families or animation preset discovery. Only an actually available provider may support such operations; inspect its live schema and price and obtain approval. Otherwise use the bundled GLBs or a supplied local Blender workflow. No raw-provider fallback is authorized automatically, and no shared workspace-credit pool exists.
-
-`sam_3_3d` only makes STATIC meshes. When the user
-needs characters that walk/run/attack in Three.js or a game engine, use this
-pipeline. Verified end-to-end on 2026-06-10 in the Higgsfield sandbox.
-The upstream scripts (not bundled here) are reconstructions of that verified logic —
-smoke-test on a small asset before a long batch run.
+> **OpenMotion boundary:** pick a bundled CC0 character first (`templates/game-kits/characters/`). All external 3D generation or rigging must go through configured OpenMotion providers when available—never ask the user to sign in to third-party web tools or paste external API keys (such as Meshy, Tripo, or Mixamo). If no 3D generation or rigging capability is live on the connected OpenMotion workspace, fall back to bundled CC0 GLBs, procedural Three.js geometry, or a separately installed local Blender setup; 2D image/video models cannot output rigged meshes.
 
 ## Decision table
 
 | Need | Path |
 |---|---|
-| Stylized game character, fast, zero manual steps | CC0 packs (KayKit/Quaternius) → convert → done |
-| CUSTOM character from text/image, zero manual steps, free | 2D→3D rig-transfer pipeline (Step 4 below) — fully local, but skinning quality is rough on image-to-3D meshes; user rejected it for production. Prefer the native 3D tool |
-| Custom-look humanoid, best skinning quality | Generate T-pose ref → user runs Mixamo manually (no API!) → user gives FBX → convert here |
-| Fully automated 2D→animated GLB, best quality, paid | **Optional external 3D recipe (not built in)**: inspect `image_to_3d`, select an action with the available provider animation catalogue (no built-in OpenMotion rigging preset service), then create with texture, rigging, animation, A-pose, and the chosen integer action ID. Extra clips use `3d_rigging` on the result GLB, then merge locally. **Before any submit read `game-meshy-input-rules.md`.** OpenMotion uses configured providers, current quoted prices and approval; there is no built-in 3D/rigging adapter. Use bundled GLBs if unavailable. |
-| Non-humanoid CREATURE (dragon, quadruped, snake, spider, fish) | The auto-rig is humanoid-only (non-bipeds rig poorly or fail). Options: (a) Tripo3D API — rig types quadruped/hexapod/octopod/avian/serpentine/aquatic + locomotion presets (needs Tripo key, unverified); (b) **Procedural branch — VERIFIED on a dragon**: build skeleton+weights+sine-based clips in headless Blender, `game-procedural-animation.md` + `scripts/proc_rig_dragon.py`/`proc_weights.py`/`proc_anim_dragon.py` |
-| Non-rigged props (doors, drones, slimes, turrets) | Procedural animation in Three.js code — no rig needed |
+| Stylized game character, fast, zero manual steps | Bundled CC0 packs (`templates/game-kits/characters/` or KayKit/Quaternius) → inspect with `game-glb-inspect.mjs` → done |
+| Custom 3D character or prop via OpenMotion (when a 3D gateway model is live) | Discover via `openmotion_media_use` first; follow the 3D input, pose, and polycount budgets below before submitting with user approval. If no 3D model is live, report the gap and fall back to bundled CC0 or procedural geometry |
+| Custom static mesh + local rig transfer (requires local Blender) | Local rig-transfer pipeline (Step 4 below) — borrows skeleton + clips from a rigged CC0 donor FBX (skinning quality depends on proportion match; verify before shipping) |
+| Non-humanoid CREATURE (dragon, quadruped, snake, spider, fish) | **Procedural branch**: build skeleton + distance weights + sine-based clips in headless Blender (`game-procedural-animation.md`), or animate simple shapes directly in Three.js code |
+| Non-rigged props & hard surfaces (buildings, roads, doors, drones, slimes, turrets) | Procedural geometry and animation in Three.js code — no rig needed |
 
-**Mixamo has NO official API.** Internal REST API exists but auto-rig marker
-placement is interactive-only; browser automation is fragile (Adobe login,
-captcha). Don't promise Mixamo automation — frame it as "one manual step,
-once per character".
+## 3D reference input, pose & polycount budgets
 
-### Optional provider parameter recipe (no built-in 3D adapter)
+Apply these rules whenever generating or preparing a 3D mesh from a reference image (and whenever budgeting scene geometry):
 
-```text
-Parameter translation brief (not a shell command). Map only supported fields; do not forward historical flags blindly.
-DISCOVER/INSPECT available model using openmotion_media_use action=models: image_to_3d
-OPTIONAL external animation catalogue (not bundled) --query idle --json
-REQUEST via openmotion_generate_asset after supported-schema mapping, stated cost and approval: image_to_3d \
-  --image ./character-reference.png \
-  --should_texture true \
-  --enable_rigging true \
-  --enable_animation true \
-  --pose_mode a-pose \
-  --animation_action_id <integer> \
-  --wait \
-  --json
+1. **One figure per reference image:** image-to-3D reconstructs everything in frame as one merged object. Never submit a multi-view character sheet as a single image; crop to one best view (front or 3/4) or pass aligned same-pose panels only when multi-image 3D input is explicitly supported.
+2. **Framing & clean silhouette:** full body visible with margin, pure flat white/plain background, no ground shadow, no text/watermark, limbs visually separated from the torso (arms not pressed against the body) so geometry and auto-rigging do not fuse.
+3. **Neutral rest pose for rigged characters:** generate/prepare characters in **T-pose** or **A-pose** so skeletons and donor rigs align cleanly.
+4. **Target format & economy:** output `.glb`, and skip extra PBR maps unless the game's lighting actually needs them.
+5. **Polygon budgets per asset class:**
 
-```
+| Asset class | Target triangles |
+|---|---|
+| Hero / player character | 15,000 – 30,000 (bundled KayKit starter characters are ~5,700–7,000) |
+| NPC | 5,000 – 15,000 |
+| Mob / interactive prop | 1,000 – 5,000 |
+| Background filler | 300 – 1,500 |
 
-Inspect `openmotion_media_use action=models (inspect model) 3d_rigging` before requesting extra clips because the
-accepted source-media field is contract-driven.
+Keep total rendered scene triangles ≤ 100,000 and draw calls ≤ 100 (see the performance budget in `game-flow.md`). Any mesh slated for rigging must stay well under rig-vertex limits and be decimated/optimized before shipping.
 
 ## Step 1 — Headless Blender in the sandbox (no root)
 
@@ -102,22 +87,23 @@ to OPAQUE (see Material pitfall below).
 
 ## Step 3 — Verify the GLB
 
-Run `node scripts/game-glb-inspect.mjs output.glb` (no dependencies); for the additional upstream checks use a separately supplied `glb_inspect.py` — prints clip count,
+Run `node scripts/game-glb-inspect.mjs output.glb` (no dependencies); for additional checks use a separately supplied `glb_inspect.py` — prints clip count,
 clip names, skins/meshes/images, material alphaMode, and root-bone scale
 channels per clip. A correct character GLB has skins ≥ 1 and the expected
 clip count. If clips == 1 and the name contains `T-Pose`, the NLA step was
-skipped. If any clip's root scale ≠ 1.0, see the Meshy scale pitfall below.
+skipped. If any clip's root scale ≠ 1.0, see the root-scale pitfall in Step 5 below.
 
-## Step 4 — 2D image → animated GLB (rig transfer, fully automated, verified)
+## Step 4 — Static mesh → animated GLB (local rig transfer)
 
-Full chain with zero manual steps and no external services:
+Fully local path when starting from a static humanoid GLB and a rigged CC0 donor:
 
-1. `z_image` text-to-image: character in **strict T-pose**, 3/4 view, plain
-   white background, full body, matte materials (3d-generation composition
-   rules). T-pose matters — the donor skeleton's rest pose is T-pose.
-2. `sam_3_3d` on that image → static textured GLB (no skins, no anims).
+1. Generate or prepare a character reference in **strict T-pose**, 3/4 view, plain
+   white background, full body, matte materials (follow the input rules above and
+   `game-stylization.md` §8). T-pose matters — the donor skeleton's rest pose is T-pose.
+2. Produce a static textured GLB via a configured 3D gateway model (when live) or
+   local mesh asset.
 3. `scripts/rig_transfer.py` — borrows the skeleton + ALL animations from a
-   rigged donor FBX (KayKit knight or any Mixamo rig):
+   rigged donor FBX (e.g. a bundled CC0 KayKit rig):
    `blender -b -P scripts/rig_transfer.py -- target_static.glb donor.fbx out.glb`
    It scales/aligns the donor armature to the target's bbox, transfers skin
    weights, fixes normals, exports all clips via NLA tracks.
@@ -131,32 +117,31 @@ Full chain with zero manual steps and no external services:
   **ACTIVE → SELECTED** — the weight source must be the ACTIVE object. Getting
   this backwards silently produces 0 weighted verts (and `skins: 0` in the
   exported GLB). Always verify weighted-vert count > 0 before export.
-- One donor (e.g. a one-time manual Mixamo session, or KayKit) animates
+- One donor (e.g. a bundled CC0 KayKit character) animates
   unlimited generated characters — the donor is reusable.
 
 Quality limits to state honestly: skinning quality depends on donor/target
 proportion similarity; humanoid T-pose targets only; thin dangling parts
 (capes, skirts) inherit approximate weights.
 
-## Step 5 — Meshy clip merge + root-scale check (MANDATORY for Meshy)
+## Step 5 — Multi-clip GLB merge + root-scale check
 
-Meshy returns one GLB per animation. Two merge options:
+When an animation source returns one GLB per animation clip, merge them into a
+single GLB so Three.js loads one rig with named clips:
 
-- **No Blender needed (preferred for Meshy outputs, VERIFIED on a live run
-  2026-06-11):** `python3 scripts/glb_merge_anims.py rigged.glb walk.glb:Walk
+- **No Blender needed:** `python3 scripts/glb_merge_anims.py rigged.glb walk.glb:Walk
   run.glb:Run idle.glb:Idle attack.glb:Attack out.glb` — stdlib-only, remaps
   clips by node NAME, applies the root-scale fix and OPAQUE patch
   automatically.
-- Blender path (when the scene needs other edits anyway):
+- **Blender path** (when the scene needs other edits anyway):
   `blender -b -P scripts/merge_anim_glbs.py -- rigged.glb idle.glb:Idle attack.glb:Attack out.glb`.
 
-**Scale pitfall (verified bug):** Meshy *library* animations (via
-`/animations`) can bake a scale factor into the root bone's scale channel
-(observed: `Hips` scale 1.176 on `idle` while walk/run from the rig were 1.0)
-— the character visibly "grows" when that clip plays. Fix after every merge:
-check root-bone scale channels in all clips; if min/max ≠ 1.0, zero the scale
-to 1.0 AND divide the same clip's root translation by the same factor
-(otherwise the character floats). `merge_anim_glbs.py` does this
+**Scale pitfall:** external or retargeted library animations can bake a non-unit
+scale factor into the root bone's scale channel (e.g. `Hips` scale 1.176 on `idle`
+while walk/run are 1.0) — the character visibly "grows" when that clip plays. Fix
+after every merge: check root-bone scale channels in all clips; if min/max ≠ 1.0,
+reset the scale to 1.0 AND divide the same clip's root translation by the same
+factor (otherwise the character floats). `merge_anim_glbs.py` does this
 automatically; `glb_inspect.py` reports it.
 
 ## Material pitfall — alphaMode: BLEND masquerading as inverted normals
@@ -220,13 +205,11 @@ white canvas screenshot.
 - `scripts/glb_inspect.py` — stdlib GLB inspector: clips, skins, alphaMode, root-scale channels.
 - `scripts/glb_patch.py` — stdlib JSON-chunk patcher: force OPAQUE/doubleSided on any GLB.
 - `scripts/rig_transfer.py` — static GLB + rigged donor FBX → animated GLB (Step 4).
-- `scripts/glb_merge_anims.py` — stdlib merger of single-clip GLBs (Meshy outputs) + root-scale fix, no Blender (Step 5, verified live).
+- `scripts/glb_merge_anims.py` — stdlib merger of single-clip GLBs + root-scale fix, no Blender (Step 5).
 - `scripts/merge_anim_glbs.py` — same merge via Blender CLI (when Blender is already in play).
 - `scripts/proc_rig_dragon.py` — procedural skeleton from bbox analysis (non-humanoids).
 - `scripts/proc_weights.py` — distance-based skin weights (ARMATURE_AUTO is broken headless).
 - `scripts/proc_anim_dragon.py` — sine-based idle/fly clips baked to keyframes.
-- `game-meshy-api.md` — verified Meshy API pipeline: image→3D→rig→animations, endpoints, action_id catalog, stuck-refine recovery, costs.
-- `game-meshy-input-rules.md` — MANDATORY pre-submit rules: input-image validation (character sheets MUST be cropped to one figure or split into multi-image views; pose_mode), low-poly paths (`model_type: lowpoly` vs `target_polycount`), polycount budgets per asset class, payload templates. Read BEFORE building any Meshy request.
 - `game-procedural-animation.md` — non-humanoid branch: skeleton/weights/clip recipes per creature type, vision-QC loop, phase-sampling pitfall.
 
 ## Exact offline character-kit path
