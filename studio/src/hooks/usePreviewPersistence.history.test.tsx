@@ -20,6 +20,29 @@ afterEach(() => {
 });
 
 describe("undo that reloads the preview", () => {
+  it("leaves the preview and GSAP caches alone for notes and reloads only affected compositions", async () => {
+    const reloadPreview = vi.fn();
+    const invalidateHistoryCompositions = vi.fn();
+    let sync!: ReturnType<typeof usePreviewPersistence>["syncHistoryPreviewAfterApply"];
+    function Harness() {
+      sync = usePreviewPersistence({
+        showToast: vi.fn(), readOptionalProjectFile: async () => "", writeProjectFile: vi.fn(),
+        recordEdit: vi.fn(), previewIframeRef: { current: null }, activeCompPathRef: { current: "index.html" },
+        reloadPreview, invalidateHistoryCompositions,
+      }).syncHistoryPreviewAfterApply;
+      return null;
+    }
+    mountReactHarness(<Harness />);
+    await act(() => sync({ paths: ["qa-history-1.txt", "motion-assets.json"] }));
+    expect(reloadPreview).not.toHaveBeenCalled();
+    expect(invalidateHistoryCompositions).not.toHaveBeenCalled();
+    await act(() => sync({ paths: ["qa-history-1.txt", "compositions/intro.html"] }));
+    expect(invalidateHistoryCompositions).toHaveBeenLastCalledWith(["compositions/intro.html", "index.html"]);
+    expect(reloadPreview).toHaveBeenCalledTimes(1);
+    await act(() => sync({ paths: [".hyperframes/studio-motion.json", "theme.css"] }));
+    expect(invalidateHistoryCompositions).toHaveBeenLastCalledWith(["index.html"]);
+    expect(reloadPreview).toHaveBeenCalledTimes(2);
+  });
   it("keeps the timeline's clips and selection until the reloaded preview reports its own", async () => {
     const clips = [{ id: "a" }, { id: "b" }] as unknown as TimelineElement[];
     usePlayerStore.getState().setElements(clips);

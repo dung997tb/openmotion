@@ -117,12 +117,17 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const handleDomZIndexReorderCommitRef = useRef<TimelineZIndexReorderCommit | null>(null);
   const pendingTimelineEditPathRef = useRef(new Set<string>());
   const isGestureRecordingRef = useRef(false);
-  const invalidateGsapCacheRef = useRef<(path?: string) => void>(() => {});
-  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string) => {
-    invalidateGsapCacheRef.current(path);
+  const invalidateGsapCacheRef = useRef<(path?: string | readonly string[]) => void>(() => {});
+  const refreshPreviewFrame = useCallback((next: SetStateAction<number>) => {
     requestPreviewReload();
     setRefreshKeyState(next);
   }, []);
+  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string) => {
+    invalidateGsapCacheRef.current(path);
+    refreshPreviewFrame(next);
+  }, [refreshPreviewFrame]);
+  const reloadHistoryPreview = useCallback(() => refreshPreviewFrame(k => k + 1), [refreshPreviewFrame]);
+  const invalidateHistoryCompositions = useCallback((paths: readonly string[]) => invalidateGsapCacheRef.current(paths), []);
   const reloadPreview = useCallback((path?: string) => setRefreshKey((k) => k + 1, path), [setRefreshKey]);
   const fileManagerResult = useFileManager({
     projectId,
@@ -163,7 +168,8 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     recordEdit: editHistory.recordEdit,
     previewIframeRef,
     activeCompPathRef,
-    reloadPreview,
+    reloadPreview: reloadHistoryPreview,
+    invalidateHistoryCompositions,
   });
   const previewPersistence = useStableHandlers(previewPersistenceResult, projectId);
   const externalFileChanges = useStudioExternalFileChanges({
@@ -295,10 +301,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     handleDuplicate,
     onResetKeyframes: () => resetKeyframesRef.current(),
     onDeleteSelectedKeyframes: () => deleteSelectedKeyframesRef.current(),
-    onAfterUndoRedo: (restore) => {
-      invalidateGsapCacheRef.current();
-      timelineEditing.restoreLiveLanes(restore);
-    },
+    onAfterUndoRedo: timelineEditing.restoreLiveLanes,
     onGroupSelection: () => domEditSessionRef.current.handleGroupSelection(),
     onUngroupSelection: () => domEditSessionRef.current.handleUngroupSelection(),
     activeCompPath,

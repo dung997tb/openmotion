@@ -1,3 +1,4 @@
+import { computePreviewImpact } from "../../../shared/preview-impact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryListItem, HistoryResult } from "@hyperframes/studio-server";
 import { studioFileContentVersion, studioWriteHeaders } from "../utils/studioFileVersion";
@@ -334,7 +335,12 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       const pressedAt = own.claimCount();
       own.overtake();
       const attempt = async (target: string | null): Promise<ApplyResult> => {
-        const previous = await readAll(paths, callbacks.readFile);
+        // Cloud restores nonvisual files in its snapshot transaction. Their bytes
+        // are not needed to patch the preview or restore timeline lanes.
+        const previewPaths = (files: string[]) => projectWide
+          ? files.filter(path => computePreviewImpact([path]).affectsPreview)
+          : files;
+        const previous = await readAll(previewPaths(paths), callbacks.readFile);
         const headers = studioWriteHeaders();
         lastStepToken.current = headers["X-Hyperframes-Write-Token"];
         const beforeStep = readSequence.current;
@@ -369,7 +375,7 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
             ok: true,
             label: reply.stepLabel ?? next?.label ?? reply.entry?.label,
             paths: reply.appliedFiles,
-            files: await restoredFiles(reply.appliedFiles, previous, callbacks.readFile),
+            files: await restoredFiles(previewPaths(reply.appliedFiles), previous, callbacks.readFile),
           };
         }
         if (!reply.ok) {

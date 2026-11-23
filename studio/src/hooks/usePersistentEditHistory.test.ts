@@ -95,15 +95,17 @@ it("uses an explicit history read for pending notifications and still refreshes 
 });
 
 it("uses navigation returned by a cloud step and ignores its own history event", async () => {
-  const { hook, readFile } = await studio();
-  const edit = { id: "edit", label: "Edit title", paths: ["index.html"], endedAt: 1000 };
+  const { hook } = await studio();
+  const readFile = vi.fn(async () => "note");
+  const edit = { id: "edit", label: "Edit title", paths: ["qa-history-1.txt"], endedAt: 1000 };
   let token: string | undefined;
   const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
     if (init?.method !== "POST") return Response.json({ currentSeq: 2, back: edit, forward: null, entries: [] });
     token = new Headers(init.headers).get("x-hyperframes-write-token")!;
     hook().refreshAfterEvent(token);
-    return Response.json({ ok: true, stepLabel: edit.label, appliedFiles: ["index.html"],
-      navigation: { currentSeq: 1, back: null, forward: edit } });
+    const undo = JSON.parse(String(init.body)).direction === "back";
+    return Response.json({ ok: true, stepLabel: edit.label, appliedFiles: ["qa-history-1.txt"],
+      navigation: undo ? { currentSeq: 1, back: null, forward: edit } : { currentSeq: 2, back: edit, forward: null } });
   });
   vi.stubGlobal("fetch", fetch);
   await act(() => hook().refresh());
@@ -115,9 +117,12 @@ it("uses navigation returned by a cloud step and ignores its own history event",
     expect(hook().canUndo).toBe(false);
     await act(() => vi.advanceTimersByTimeAsync(100));
     expect(fetch).toHaveBeenCalledTimes(2);
+    await act(() => hook().redo({ readFile }));
+    expect(hook().canUndo).toBe(true);
+    expect(readFile).not.toHaveBeenCalled();
     hook().refreshAfterEvent("another-editor");
     await act(() => vi.advanceTimersByTimeAsync(100));
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(4);
   } finally { vi.useRealTimers(); }
 });
 

@@ -30,7 +30,7 @@ export interface UseDomEditWiringParams {
   previewIframeRef: React.RefObject<HTMLIFrameElement | null>;
   previewIframe: HTMLIFrameElement | null;
   captionEditMode: boolean;
-  gsapChangedPath?: string;
+  gsapChangedPath?: string | readonly string[];
   gsapCacheVersion: number;
   showToast: (message: string, tone?: "error" | "info") => void;
   refreshPreviewDocumentVersion: () => void;
