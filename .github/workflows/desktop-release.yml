@@ -3,47 +3,61 @@ name: Desktop Release Packages
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: Desktop release channel (test or stable)
+        required: true
+        type: choice
+        default: test
+        options:
+          - test
+          - stable
       publish:
-        description: Publish packaged desktop installers to GitHub Releases
+        description: Upload packaged installers directly to releases.open-design.ai object storage (main branch only)
         required: false
         type: boolean
         default: false
-      channel:
-        description: Desktop release channel
-        required: false
-        type: choice
-        default: beta
-        options:
-          - stable
-          - beta
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-desktop:
     name: Build Desktop (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: macOS (arm64 + x64)
+          - label: macOS arm64
             os: macos-15
-            pack_cmd: npm run desktop:pack:mac
-            artifact_name: openmotion-desktop-macos
-          - label: Windows (x64 + arm64)
+            platform: darwin
+            arch: arm64
+            pack_script: pack:mac:arm64
+          - label: macOS x64
+            os: macos-15
+            platform: darwin
+            arch: x64
+            pack_script: pack:mac:x64
+          - label: Windows x64
             os: windows-latest
-            pack_cmd: npm run desktop:pack:win
-            artifact_name: openmotion-desktop-windows
-          - label: Linux (x64 + arm64)
-            os: ubuntu-24.04
-            pack_cmd: npm run desktop:pack:linux
-            artifact_name: openmotion-desktop-linux
+            platform: win32
+            arch: x64
+            pack_script: pack:win:x64
 
     steps:
+      - name: Enforce main-only publish guard
+        shell: bash
+        run: |
+          if [ "${{ inputs.publish }}" = "true" ] && [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::Publishing desktop releases is restricted to refs/heads/main (got ${{ github.ref }})."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -51,49 +65,194 @@ jobs:
           node-version: '26.11.1'
           cache: npm
 
-      - name: Install root dependencies
-        run: npm ci
+      - name: Install root build dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Install desktop Electron dependencies
         run: npm --prefix desktop install --no-audit --no-fund
 
-      - name: Run Studio and backend checks
+      - name: Typecheck and test desktop shell
         run: |
-          npm run check
-          npm run typecheck:backend
-          npm run typecheck:studio
-
-      - name: Build Studio and Desktop shell
-        run: |
-          npm run build:studio
-          npm run desktop:build
-          npm run desktop:test
           npm --prefix desktop run typecheck
+          node --experimental-strip-types --test desktop/tests/updater.test.mjs
 
-      - name: Package desktop installers
+      - name: Package macOS installer (${{ matrix.arch }})
+        if: matrix.platform == 'darwin'
+        shell: bash
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: ${{ matrix.pack_cmd }}
-
-      - name: Upload installer artifacts
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: |
-            desktop/release/*.dmg
-            desktop/release/*.zip
-            desktop/release/*.exe
-            desktop/release/*.AppImage
-            desktop/release/*.deb
-            desktop/release/*.rpm
-            desktop/release/*.yml
-            desktop/release/*.blockmap
-          if-no-files-found: error
-
-      - name: Publish installers to GitHub Release (optional)
-        if: inputs.publish && github.repository == 'nexu-io/openmotion'
-        env:
-          GH_TOKEN: ${{ github.token }}
+          CSC_LINK: ${{ secrets.APPLE_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          OPENMOTION_RELEASE_CHANNEL: ${{ inputs.channel }}
         run: |
-          echo "Publishing channel ${{ inputs.channel }} installers"
-          gh release upload "desktop-v$(node -p "require('./desktop/package.json').version")" desktop/release/*.dmg desktop/release/*.zip desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb desktop/release/*.rpm desktop/release/*.yml --clobber
+          if [ -z "${CSC_LINK:-}" ]; then
+            if [ "${{ inputs.publish }}" = "true" ]; then
+              echo "::error::APPLE_CSC_LINK secret is required when publish=true on macOS."
+              exit 1
+            fi
+            echo "APPLE_CSC_LINK not set; building unsigned verification package."
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          FEED_URL="https://releases.open-design.ai/open-motion/desktop/${{ inputs.channel }}"
+          npm --prefix desktop run "${{ matrix.pack_script }}" -- \
+            -c.publish.provider=generic \
+            -c.publish.url="${FEED_URL}" \
+            -c.publish.channel="${{ inputs.channel }}"
+
+      - name: Package Windows installer (${{ matrix.arch }})
+        if: matrix.platform == 'win32'
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          OPENMOTION_RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          if [ -z "${WIN_CSC_LINK:-}" ]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          FEED_URL="https://releases.open-design.ai/open-motion/desktop/${{ inputs.channel }}"
+          npm --prefix desktop run "${{ matrix.pack_script }}" -- \
+            -c.publish.provider=generic \
+            -c.publish.url="${FEED_URL}" \
+            -c.publish.channel="${{ inputs.channel }}"
+
+      - name: Upload installers directly to release bucket (releases.open-design.ai)
+        if: inputs.publish && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          RELEASE_BUCKET: ${{ secrets.RELEASE_S3_BUCKET }}
+          RELEASE_S3_ENDPOINT: ${{ secrets.RELEASE_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.RELEASE_S3_REGION || 'us-east-1' }}
+          CHANNEL: ${{ inputs.channel }}
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_BUCKET:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::Release bucket credentials (RELEASE_S3_BUCKET, RELEASE_S3_ACCESS_KEY_ID, RELEASE_S3_SECRET_ACCESS_KEY) are required when publish=true."
+            exit 1
+          fi
+
+          DEST_PREFIX="s3://${RELEASE_BUCKET}/open-motion/desktop/${CHANNEL}"
+          AWS_ARGS=()
+          if [ -n "${RELEASE_S3_ENDPOINT:-}" ]; then
+            AWS_ARGS+=(--endpoint-url "${RELEASE_S3_ENDPOINT}")
+          fi
+
+          shopt -s nullglob
+          uploaded=0
+          for file in desktop/release/*.dmg desktop/release/*.zip desktop/release/*.exe desktop/release/*.blockmap; do
+            name="$(basename "$file")"
+            echo "Uploading ${name} -> ${DEST_PREFIX}/${name}"
+            aws "${AWS_ARGS[@]}" s3 cp "$file" "${DEST_PREFIX}/${name}" \
+              --cache-control "public, max-age=31536000, immutable"
+            uploaded=$((uploaded + 1))
+          done
+
+          if [ "$uploaded" -eq 0 ]; then
+            echo "::error::No desktop installer binaries found in desktop/release/"
+            exit 1
+          fi
+
+          if [ "${TARGET_PLATFORM}" = "darwin" ]; then
+            mac_manifest="desktop/release/${CHANNEL}-mac.yml"
+            if [ ! -f "$mac_manifest" ]; then
+              echo "::error::Expected macOS update manifest at ${mac_manifest}"
+              exit 1
+            fi
+            arch_manifest="${CHANNEL}-mac-${TARGET_ARCH}.yml"
+            echo "Uploading per-arch manifest ${arch_manifest} -> ${DEST_PREFIX}/${arch_manifest}"
+            aws "${AWS_ARGS[@]}" s3 cp "$mac_manifest" "${DEST_PREFIX}/${arch_manifest}" \
+              --cache-control "no-cache, max-age=0" \
+              --content-type "text/yaml"
+          else
+            win_manifest="desktop/release/${CHANNEL}.yml"
+            if [ ! -f "$win_manifest" ]; then
+              echo "::error::Expected Windows update manifest at ${win_manifest}"
+              exit 1
+            fi
+            echo "Uploading ${CHANNEL}.yml -> ${DEST_PREFIX}/${CHANNEL}.yml"
+            aws "${AWS_ARGS[@]}" s3 cp "$win_manifest" "${DEST_PREFIX}/${CHANNEL}.yml" \
+              --cache-control "no-cache, max-age=0" \
+              --content-type "text/yaml"
+          fi
+
+  publish-mac-manifest:
+    name: Publish Merged macOS Update Manifest
+    needs: build-desktop
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '26.11.1'
+
+      - name: Merge arm64 and x64 macOS manifests in release bucket
+        shell: bash
+        env:
+          RELEASE_BUCKET: ${{ secrets.RELEASE_S3_BUCKET }}
+          RELEASE_S3_ENDPOINT: ${{ secrets.RELEASE_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.RELEASE_S3_REGION || 'us-east-1' }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_BUCKET:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::Release bucket credentials are required to publish merged macOS manifest."
+            exit 1
+          fi
+
+          DEST_PREFIX="s3://${RELEASE_BUCKET}/open-motion/desktop/${CHANNEL}"
+          AWS_ARGS=()
+          if [ -n "${RELEASE_S3_ENDPOINT:-}" ]; then
+            AWS_ARGS+=(--endpoint-url "${RELEASE_S3_ENDPOINT}")
+          fi
+
+          aws "${AWS_ARGS[@]}" s3 cp "${DEST_PREFIX}/${CHANNEL}-mac-arm64.yml" /tmp/mac-arm64.yml
+          aws "${AWS_ARGS[@]}" s3 cp "${DEST_PREFIX}/${CHANNEL}-mac-x64.yml" /tmp/mac-x64.yml
+
+          node -e '
+            const fs = require("node:fs");
+            const extractFilesBlock = (yaml) => {
+              const lines = yaml.split(/\r?\n/);
+              const start = lines.findIndex((l) => l.trim() === "files:");
+              if (start === -1) return [];
+              const out = [];
+              for (let i = start + 1; i < lines.length; i++) {
+                if (/^[a-zA-Z0-9_-]+:/.test(lines[i])) break;
+                if (lines[i].trim()) out.push(lines[i]);
+              }
+              return out;
+            };
+            const arm64 = fs.readFileSync("/tmp/mac-arm64.yml", "utf8");
+            const x64 = fs.readFileSync("/tmp/mac-x64.yml", "utf8");
+            const x64Files = extractFilesBlock(x64);
+            const armLines = arm64.split(/\r?\n/);
+            const filesIdx = armLines.findIndex((l) => l.trim() === "files:");
+            if (filesIdx === -1) throw new Error("Invalid arm64 manifest: missing files block");
+            let insertAt = filesIdx + 1;
+            while (insertAt < armLines.length && !/^[a-zA-Z0-9_-]+:/.test(armLines[insertAt])) {
+              insertAt++;
+            }
+            const merged = [
+              ...armLines.slice(0, insertAt),
+              ...x64Files,
+              ...armLines.slice(insertAt),
+            ].join("\n").trimEnd() + "\n";
+            fs.writeFileSync("/tmp/mac-merged.yml", merged, "utf8");
+          '
+
+          aws "${AWS_ARGS[@]}" s3 cp /tmp/mac-merged.yml "${DEST_PREFIX}/${CHANNEL}-mac.yml" \
+            --cache-control "no-cache, max-age=0" \
+            --content-type "text/yaml"
+          echo "Published https://releases.open-design.ai/open-motion/desktop/${CHANNEL}/${CHANNEL}-mac.yml"

@@ -1,20 +1,40 @@
+import {
+  DEFAULT_UPDATE_BASE_URL,
+  isUrlInAllowedDomainScope,
+} from '../../shared/desktop-builtin-rules.ts';
+import type { HostReleaseChannel } from '../../shared/desktop-contract.ts';
 import type { DesktopUpdateState } from '../../shared/platform-host.ts';
 
-export const GITHUB_LATEST_RELEASE_API = 'https://api.github.com/repos/nexu-io/openmotion/releases/latest';
-export const GITHUB_RELEASES_PAGE = 'https://github.com/nexu-io/openmotion/releases';
+export type UpdateFeedChannel = 'stable' | 'test';
+
+export type GenericUpdateFeedOptions = {
+  provider: 'generic';
+  url: string;
+  channel: UpdateFeedChannel;
+};
 
 export type AutoUpdaterLike = {
   autoDownload: boolean;
   autoInstallOnAppQuit: boolean;
+  channel?: string | null;
+  setFeedURL: (options: GenericUpdateFeedOptions) => void;
   on: (event: string, listener: (...args: any[]) => void) => unknown;
   checkForUpdates: () => Promise<any>;
   downloadUpdate: () => Promise<any>;
   quitAndInstall: (isSilent?: boolean, isForceRunAfter?: boolean) => void;
 };
 
-export type GitHubLatestRelease = {
-  tag_name?: string;
-  html_url?: string;
+export type DesktopUpdaterControllerOptions = {
+  currentVersion: string;
+  isPackaged: boolean;
+  channel?: HostReleaseChannel;
+  feedUrl?: string;
+  allowLocalDevLoopback?: boolean;
+  autoDownload?: boolean;
+  autoInstallOnAppQuit?: boolean;
+  loadAutoUpdater?: () => Promise<AutoUpdaterLike>;
+  /** @deprecated Retained for call-site compatibility during thin-shell migration; unused. */
+  onOpenReleasePage?: (url: string) => void;
 };
 
 export function normalizeSemver(raw: string): string {
@@ -47,68 +67,128 @@ export function compareSemver(a: string, b: string): number {
   return left.pre.localeCompare(right.pre);
 }
 
+export function normalizeUpdateChannel(channel?: HostReleaseChannel): UpdateFeedChannel {
+  return channel === 'test' || channel === 'dev' ? 'test' : 'stable';
+}
+
+export function resolveUpdateFeedConfig(options?: {
+  channel?: HostReleaseChannel;
+  feedUrl?: string;
+  allowLocalDevLoopback?: boolean;
+}): GenericUpdateFeedOptions {
+  const scopeChannel: HostReleaseChannel = options?.channel ?? 'stable';
+  const feedChannel = normalizeUpdateChannel(scopeChannel);
+  const allowLocalDevLoopback = Boolean(options?.allowLocalDevLoopback);
+  const rawOverride = options?.feedUrl?.trim();
+
+  if (rawOverride) {
+    if (/[\r\n\0]/.test(rawOverride)) {
+      throw new Error('Update feed URL must be single-line text without control characters');
+    }
+    if (!isUrlInAllowedDomainScope(rawOverride, { channel: scopeChannel, allowLocalDevLoopback })) {
+      throw new Error(
+        `Update feed URL is outside allowed domain scope for channel "${scopeChannel}": ${rawOverride}`,
+      );
+    }
+    return {
+      provider: 'generic',
+      url: rawOverride.replace(/\/+$/, ''),
+      channel: feedChannel,
+    };
+  }
+
+  const defaultUrl = `${DEFAULT_UPDATE_BASE_URL.replace(/\/+$/, '')}/${feedChannel}`;
+  if (!isUrlInAllowedDomainScope(defaultUrl, { channel: scopeChannel, allowLocalDevLoopback })) {
+    throw new Error(
+      `Default update feed URL is outside allowed domain scope for channel "${scopeChannel}": ${defaultUrl}`,
+    );
+  }
+  return {
+    provider: 'generic',
+    url: defaultUrl,
+    channel: feedChannel,
+  };
+}
+
 export function resolveElectronAutoUpdater(mod: unknown): AutoUpdaterLike {
   const candidate =
     (mod as any)?.autoUpdater ??
     (mod as any)?.default?.autoUpdater ??
     (mod as any)?.['module.exports']?.autoUpdater;
-  if (!candidate || typeof candidate.checkForUpdates !== 'function') {
+  if (
+    !candidate ||
+    typeof candidate.checkForUpdates !== 'function' ||
+    typeof candidate.setFeedURL !== 'function'
+  ) {
     throw new Error('electron-updater autoUpdater export is unavailable');
   }
   return candidate as AutoUpdaterLike;
 }
 
-function isMissingFeedError(message: string): boolean {
-  return /latest(?:-[a-z0-9-]+)?\.yml|app-update\.yml|No published versions on GitHub|HttpError:\s*404|status code 404|Cannot find latest/i.test(
-    message,
-  );
+function resolveSafeReleaseNotesUrl(
+  info: unknown,
+  channel: HostReleaseChannel,
+  allowLocalDevLoopback: boolean,
+): string | undefined {
+  const candidate = (info as { releaseNotesUrl?: unknown } | null | undefined)?.releaseNotesUrl;
+  if (typeof candidate !== 'string') return undefined;
+  const trimmed = candidate.trim();
+  if (!trimmed) return undefined;
+  return isUrlInAllowedDomainScope(trimmed, { channel, allowLocalDevLoopback }) ? trimmed : undefined;
+}
+
+function formatUpdateError(error: unknown, feedConfig: GenericUpdateFeedOptions): string {
+  const raw = (error instanceof Error ? error.message : String(error)).trim();
+  if (!raw) {
+    return `Update check failed for generic feed ${feedConfig.url}`;
+  }
+  if (/ERR_UPDATER_CHANNEL_FILE_NOT_FOUND|Cannot find channel|latest(?:-[a-z0-9-]+)?\.yml|stable(?:-[a-z0-9-]+)?\.yml|test(?:-[a-z0-9-]+)?\.yml|app-update\.yml|HttpError:\s*404|status code 404/i.test(raw)) {
+    return `Update feed manifest not found at ${feedConfig.url}: ${raw}`;
+  }
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_|fetch failed/i.test(raw)) {
+    return `Update feed unreachable at ${feedConfig.url}: ${raw}`;
+  }
+  return raw;
 }
 
 export class DesktopUpdaterController {
   private readonly isPackaged: boolean;
+  private readonly scopeChannel: HostReleaseChannel;
+  private readonly allowLocalDevLoopback: boolean;
+  private readonly feedConfig: GenericUpdateFeedOptions;
+  private readonly autoDownload: boolean;
+  private readonly autoInstallOnAppQuit: boolean;
   private readonly loadAutoUpdater: () => Promise<AutoUpdaterLike>;
-  private readonly fetchLatestRelease: () => Promise<GitHubLatestRelease>;
-  private readonly onOpenReleasePage?: (url: string) => void;
   private readonly listeners = new Set<(state: DesktopUpdateState) => void>();
   private state: DesktopUpdateState;
   private updaterPromise: Promise<AutoUpdaterLike> | null = null;
   private attached = false;
-  private usingGitHubFallback = false;
 
-  constructor(options: {
-    currentVersion: string;
-    isPackaged: boolean;
-    loadAutoUpdater?: () => Promise<AutoUpdaterLike>;
-    fetchLatestRelease?: () => Promise<GitHubLatestRelease>;
-    onOpenReleasePage?: (url: string) => void;
-  }) {
+  constructor(options: DesktopUpdaterControllerOptions) {
     this.isPackaged = options.isPackaged;
-    this.onOpenReleasePage = options.onOpenReleasePage;
+    this.scopeChannel = options.channel ?? 'stable';
+    this.allowLocalDevLoopback = Boolean(options.allowLocalDevLoopback);
+    this.feedConfig = resolveUpdateFeedConfig({
+      channel: this.scopeChannel,
+      feedUrl: options.feedUrl,
+      allowLocalDevLoopback: this.allowLocalDevLoopback,
+    });
+    this.autoDownload = options.autoDownload ?? true;
+    this.autoInstallOnAppQuit = options.autoInstallOnAppQuit ?? true;
     this.loadAutoUpdater =
       options.loadAutoUpdater ??
       (async () => {
         const mod = await import('electron-updater');
         return resolveElectronAutoUpdater(mod);
       });
-    this.fetchLatestRelease =
-      options.fetchLatestRelease ??
-      (async () => {
-        const res = await fetch(GITHUB_LATEST_RELEASE_API, {
-          headers: {
-            Accept: 'application/vnd.github+json',
-            'User-Agent': `OpenMotion-Desktop/${options.currentVersion}`,
-          },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) {
-          throw new Error(`GitHub release check failed (HTTP ${res.status})`);
-        }
-        return (await res.json()) as GitHubLatestRelease;
-      });
     this.state = {
       status: options.isPackaged ? 'idle' : 'unsupported',
       currentVersion: options.currentVersion,
     };
+  }
+
+  getFeedConfig(): GenericUpdateFeedOptions {
+    return { ...this.feedConfig };
   }
 
   getState(): DesktopUpdateState {
@@ -149,23 +229,32 @@ export class DesktopUpdaterController {
     const updater = await this.updaterPromise;
     if (!this.attached) {
       this.attached = true;
-      updater.autoDownload = false;
-      updater.autoInstallOnAppQuit = false;
+      updater.autoDownload = this.isPackaged ? this.autoDownload : false;
+      updater.autoInstallOnAppQuit = this.isPackaged ? this.autoInstallOnAppQuit : false;
+      updater.channel = this.feedConfig.channel;
+      updater.setFeedURL({
+        provider: 'generic',
+        url: this.feedConfig.url,
+        channel: this.feedConfig.channel,
+      });
+
       updater.on('checking-for-update', () => {
         this.setState({ status: 'checking', message: undefined });
       });
       updater.on('update-available', (info: any) => {
-        this.usingGitHubFallback = false;
         this.setState({
           status: 'available',
           availableVersion: typeof info?.version === 'string' ? info.version : undefined,
-          releaseNotesUrl: GITHUB_RELEASES_PAGE,
+          releaseNotesUrl: resolveSafeReleaseNotesUrl(
+            info,
+            this.scopeChannel,
+            this.allowLocalDevLoopback,
+          ),
           checkedAt: new Date().toISOString(),
           message: undefined,
         });
       });
       updater.on('update-not-available', () => {
-        this.usingGitHubFallback = false;
         this.setState({
           status: 'up-to-date',
           availableVersion: undefined,
@@ -175,57 +264,29 @@ export class DesktopUpdaterController {
         });
       });
       updater.on('download-progress', (progress: any) => {
-        const percent = typeof progress?.percent === 'number' ? Math.round(progress.percent) : undefined;
-        this.setState({ status: 'downloading', progress: percent });
+        const percent =
+          typeof progress?.percent === 'number'
+            ? Math.max(0, Math.min(100, Math.round(progress.percent)))
+            : undefined;
+        this.setState({ status: 'downloading', progress: percent, message: undefined });
       });
       updater.on('update-downloaded', (info: any) => {
         this.setState({
           status: 'downloaded',
-          availableVersion: typeof info?.version === 'string' ? info.version : this.state.availableVersion,
+          availableVersion:
+            typeof info?.version === 'string' ? info.version : this.state.availableVersion,
           progress: 100,
+          message: undefined,
         });
       });
       updater.on('error', (error: unknown) => {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (isMissingFeedError(msg)) {
-          // Handled via GitHub Releases API fallback in checkForUpdates().
-          return;
-        }
         this.setState({
           status: 'error',
-          message: msg,
+          message: formatUpdateError(error, this.feedConfig),
         });
       });
     }
     return updater;
-  }
-
-  private async checkViaGitHubApi(): Promise<DesktopUpdateState> {
-    const release = await this.fetchLatestRelease();
-    const latestVersion = release.tag_name ? normalizeSemver(release.tag_name) : '';
-    if (!latestVersion) {
-      throw new Error('GitHub latest release did not contain a valid version tag');
-    }
-    const releaseNotesUrl = release.html_url || GITHUB_RELEASES_PAGE;
-    const checkedAt = new Date().toISOString();
-    this.usingGitHubFallback = true;
-    if (compareSemver(latestVersion, this.state.currentVersion) > 0) {
-      return this.setState({
-        status: 'available',
-        availableVersion: latestVersion,
-        releaseNotesUrl,
-        checkedAt,
-        message: undefined,
-      });
-    }
-    return this.setState({
-      status: 'up-to-date',
-      availableVersion: undefined,
-      progress: undefined,
-      releaseNotesUrl,
-      checkedAt,
-      message: undefined,
-    });
   }
 
   async checkForUpdates(): Promise<DesktopUpdateState> {
@@ -236,27 +297,15 @@ export class DesktopUpdaterController {
         message: 'Auto-update is available in packaged desktop releases.',
       });
     }
-    this.usingGitHubFallback = false;
     this.setState({ status: 'checking', message: undefined, checkedAt: new Date().toISOString() });
     try {
       const updater = await this.getUpdater();
       await updater.checkForUpdates();
       return this.getState();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (isMissingFeedError(message)) {
-        try {
-          return await this.checkViaGitHubApi();
-        } catch (fallbackError) {
-          return this.setState({
-            status: 'error',
-            message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-          });
-        }
-      }
       return this.setState({
         status: 'error',
-        message,
+        message: formatUpdateError(error, this.feedConfig),
       });
     }
   }
@@ -268,12 +317,10 @@ export class DesktopUpdaterController {
         message: 'Auto-update is available in packaged desktop releases.',
       });
     }
-    if (this.usingGitHubFallback) {
-      const url = this.state.releaseNotesUrl || GITHUB_RELEASES_PAGE;
-      this.onOpenReleasePage?.(url);
+    if (this.state.status === 'downloaded') {
       return this.getState();
     }
-    this.setState({ status: 'downloading', progress: 0, message: undefined });
+    this.setState({ status: 'downloading', progress: this.state.progress ?? 0, message: undefined });
     try {
       const updater = await this.getUpdater();
       await updater.downloadUpdate();
@@ -281,7 +328,7 @@ export class DesktopUpdaterController {
     } catch (error) {
       return this.setState({
         status: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: formatUpdateError(error, this.feedConfig),
       });
     }
   }

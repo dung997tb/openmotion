@@ -55,10 +55,12 @@ export async function buildDesktop() {
     }),
   ]);
 
-  copyFileSync(
-    path.join(desktopDir, 'src', 'splash.html'),
-    path.join(distDir, 'splash.html'),
-  );
+  for (const htmlFile of ['splash.html', 'retry.html']) {
+    const src = path.join(desktopDir, 'src', htmlFile);
+    if (existsSync(src)) {
+      copyFileSync(src, path.join(distDir, htmlFile));
+    }
+  }
 
   const brandSourceDir = path.join(repoRoot, 'packages', 'design-system', 'brand');
   for (const asset of ['loading-mark.svg', 'loading-wordmark.svg', 'openmotion-logo.svg', 'apple-touch-icon.png']) {
