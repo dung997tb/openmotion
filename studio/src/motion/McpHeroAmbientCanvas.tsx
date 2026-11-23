@@ -48,8 +48,8 @@ export function McpHeroAmbientCanvas({ pulseTrigger }: { pulseTrigger: number })
 
     const resolveColors = () => {
       const style = getComputedStyle(host);
-      const glyph = style.getPropertyValue('--motion-mcp-matrix-glyph').trim() || 'rgba(235, 240, 246, 0.08)';
-      const accent = style.getPropertyValue('--motion-mcp-matrix-pulse').trim() || '#00ff08';
+      const glyph = style.getPropertyValue('--motion-mcp-matrix-glyph').trim() || style.color || 'currentColor';
+      const accent = style.getPropertyValue('--motion-mcp-matrix-pulse').trim() || style.getPropertyValue('--brand').trim() || style.color || 'currentColor';
       return { glyph, accent };
     };
 

@@ -1,7 +1,7 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
-import { mcpHeroBeats } from './mcpShowcaseData';
+import { formatMcpAgentPrompt, mcpHeroBeats } from './mcpShowcaseData';
 
 export function McpHeroShowcaseStage({
   enabled,
@@ -14,18 +14,19 @@ export function McpHeroShowcaseStage({
   const [activeBeat, setActiveBeat] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
   const lang = locale === 'zh-CN' ? 'zh-CN' : 'en';
   const current = mcpHeroBeats[activeBeat];
   const currentText = current.content[lang];
+  const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 
   useEffect(() => {
-    if (!enabled || hovered) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    if (!enabled || hovered || reducedMotion) return;
     const timer = window.setInterval(() => {
       if (!document.hidden) setActiveBeat(prev => (prev + 1) % mcpHeroBeats.length);
-    }, 3500);
+    }, 5500);
     return () => window.clearInterval(timer);
-  }, [enabled, hovered]);
+  }, [enabled, hovered, reducedMotion]);
 
   useEffect(() => {
     if (!copied) return;
@@ -34,7 +35,7 @@ export function McpHeroShowcaseStage({
   }, [copied]);
 
   async function handleCopy() {
-    const ok = await onCopyPrompt(`@OpenDesign ${currentText.prompt}`);
+    const ok = await onCopyPrompt(formatMcpAgentPrompt(currentText.prompt, current.target));
     if (ok) setCopied(true);
   }
 
@@ -70,16 +71,34 @@ export function McpHeroShowcaseStage({
           onMouseLeave={() => setHovered(false)}
         >
           <div className="om-mcp-stage-frame">
-            {mcpHeroBeats.map((beat, index) => (
-              <div
-                key={beat.id}
-                className="om-mcp-stage-slide"
-                data-active={index === activeBeat || undefined}
-                aria-hidden={index !== activeBeat}
-              >
-                <img src={beat.image} alt={beat.content[lang].alt} decoding="async" />
-              </div>
-            ))}
+            {mcpHeroBeats.map((beat, index) => {
+              const isActive = index === activeBeat;
+              const playVideo = isActive && enabled && !reducedMotion && Boolean(beat.video) && !videoErrors[beat.id];
+              return (
+                <div
+                  key={beat.id}
+                  className="om-mcp-stage-slide"
+                  data-active={isActive || undefined}
+                  aria-hidden={!isActive}
+                >
+                  {playVideo ? (
+                    <video
+                      src={beat.video}
+                      poster={beat.image}
+                      aria-label={beat.content[lang].alt}
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      onError={() => setVideoErrors(prev => ({ ...prev, [beat.id]: true }))}
+                    />
+                  ) : (
+                    <img src={beat.image} alt={beat.content[lang].alt} decoding="async" />
+                  )}
+                </div>
+              );
+            })}
             <div className="om-mcp-stage-vignette" aria-hidden="true" />
             <div className="om-mcp-stage-dots">
               {mcpHeroBeats.map((beat, index) => (

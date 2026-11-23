@@ -343,7 +343,14 @@
     "More troubleshooting Q&A": "更多开发排障问答",
     "Product & brand films": "商品与品牌大片",
     "Alpha motion & 3D": "透明动效与 3D 运镜",
-    "Viral recreation": "爆款复刻与多轨工程"
+    "Viral recreation": "爆款复刻与多轨工程",
+    "Product & AI launches": "产品与 AI 发布",
+    "Brand & visual motion": "品牌与动效视觉",
+    "Top Skills": "高出片 Skill",
+    "Official Brand Kits": "官方品牌包",
+    "Open template": "在 Studio 打开模板",
+    "Open Skill": "在 Studio 打开 Skill",
+    "Open Brand Kits": "查看官方品牌包"
   },
   "ja": {
     "E-commerce marketing": "ECマーケティング",
@@ -478,7 +485,14 @@
     "More troubleshooting Q&A": "詳細なトラブルシューティング Q&A",
     "Product & brand films": "商品・ブランド映像",
     "Alpha motion & 3D": "透過モーション＆3D カメラ",
-    "Viral recreation": "ヒット動画の再現"
+    "Viral recreation": "ヒット動画の再現",
+    "Product & AI launches": "製品・AIローンチ",
+    "Brand & visual motion": "ブランド・ビジュアル表現",
+    "Top Skills": "定番スキル",
+    "Official Brand Kits": "公式ブランドキット",
+    "Open template": "テンプレートを開く",
+    "Open Skill": "スキルを開く",
+    "Open Brand Kits": "ブランドキットを開く"
   },
   "ko": {
     "E-commerce marketing": "이커머스 마케팅",
@@ -613,7 +627,14 @@
     "More troubleshooting Q&A": "추가 문제 해결 Q&A",
     "Product & brand films": "상품 및 브랜드 영상",
     "Alpha motion & 3D": "투명 모션 및 3D 카메라",
-    "Viral recreation": "인기 영상 복제"
+    "Viral recreation": "인기 영상 복제",
+    "Product & AI launches": "제품 및 AI 출시",
+    "Brand & visual motion": "브랜드 및 비주얼 모션",
+    "Top Skills": "인기 스킬",
+    "Official Brand Kits": "공식 브랜드 키트",
+    "Open template": "템플릿 열기",
+    "Open Skill": "스킬 열기",
+    "Open Brand Kits": "브랜드 키트 열기"
   },
   "de": {
     "E-commerce marketing": "E-Commerce-Marketing",
@@ -748,7 +769,14 @@
     "More troubleshooting Q&A": "Weitere Fehlerbehebungs-FAQ",
     "Product & brand films": "Produkt- & Markenfilme",
     "Alpha motion & 3D": "Alpha-Motion & 3D",
-    "Viral recreation": "Virale Nachbildung"
+    "Viral recreation": "Virale Nachbildung",
+    "Product & AI launches": "Produkt- & KI-Launches",
+    "Brand & visual motion": "Marke & Visual Motion",
+    "Top Skills": "Top-Skills",
+    "Official Brand Kits": "Offizielle Brand Kits",
+    "Open template": "Vorlage öffnen",
+    "Open Skill": "Skill öffnen",
+    "Open Brand Kits": "Brand Kits öffnen"
   },
   "fr": {
     "E-commerce marketing": "Marketing e-commerce",
@@ -883,7 +911,14 @@
     "More troubleshooting Q&A": "Plus de Q&R de dépannage",
     "Product & brand films": "Films produit et marque",
     "Alpha motion & 3D": "Motion alpha et 3D",
-    "Viral recreation": "Recréation virale"
+    "Viral recreation": "Recréation virale",
+    "Product & AI launches": "Lancements produit & IA",
+    "Brand & visual motion": "Marque et motion visuel",
+    "Top Skills": "Skills populaires",
+    "Official Brand Kits": "Kits de marque officiels",
+    "Open template": "Ouvrir le modèle",
+    "Open Skill": "Ouvrir le Skill",
+    "Open Brand Kits": "Ouvrir les Brand Kits"
   },
   "ru": {
     "E-commerce marketing": "Маркетинг для интернет-магазинов",
@@ -1018,7 +1053,14 @@
     "More troubleshooting Q&A": "Дополнительные вопросы и диагностика",
     "Product & brand films": "Рекламные и бренд-ролики",
     "Alpha motion & 3D": "Прозрачная графика и 3D",
-    "Viral recreation": "Воссоздание роликов"
+    "Viral recreation": "Воссоздание роликов",
+    "Product & AI launches": "Запуски продуктов и ИИ",
+    "Brand & visual motion": "Бренд и визуальный моушн",
+    "Top Skills": "Топ-скиллы",
+    "Official Brand Kits": "Официальные бренд-киты",
+    "Open template": "Открыть шаблон",
+    "Open Skill": "Открыть скилл",
+    "Open Brand Kits": "Открыть бренд-киты"
   },
   "es": {
     "E-commerce marketing": "Marketing de comercio electrónico",
@@ -1153,7 +1195,14 @@
     "More troubleshooting Q&A": "Más preguntas técnicas",
     "Product & brand films": "Videos de producto y marca",
     "Alpha motion & 3D": "Motion alfa y 3D",
-    "Viral recreation": "Recreación viral"
+    "Viral recreation": "Recreación viral",
+    "Product & AI launches": "Lanzamientos de producto e IA",
+    "Brand & visual motion": "Marca y motion visual",
+    "Top Skills": "Skills destacados",
+    "Official Brand Kits": "Brand Kits oficiales",
+    "Open template": "Abrir plantilla",
+    "Open Skill": "Abrir Skill",
+    "Open Brand Kits": "Abrir Brand Kits"
   },
   "pt-BR": {
     "E-commerce marketing": "Marketing para e-commerce",
@@ -1288,7 +1337,14 @@
     "More troubleshooting Q&A": "Mais perguntas técnicas",
     "Product & brand films": "Vídeos de produto e marca",
     "Alpha motion & 3D": "Motion alfa e 3D",
-    "Viral recreation": "Recriação viral"
+    "Viral recreation": "Recriação viral",
+    "Product & AI launches": "Lançamentos de produto e IA",
+    "Brand & visual motion": "Marca e motion visual",
+    "Top Skills": "Principais Skills",
+    "Official Brand Kits": "Brand Kits oficiais",
+    "Open template": "Abrir modelo",
+    "Open Skill": "Abrir Skill",
+    "Open Brand Kits": "Abrir Brand Kits"
   },
   "it": {
     "E-commerce marketing": "Marketing e-commerce",
@@ -1423,7 +1479,14 @@
     "More troubleshooting Q&A": "Altre FAQ tecniche",
     "Product & brand films": "Video prodotto e brand",
     "Alpha motion & 3D": "Motion alfa e 3D",
-    "Viral recreation": "Ricreazione virale"
+    "Viral recreation": "Ricreazione virale",
+    "Product & AI launches": "Lanci prodotto e IA",
+    "Brand & visual motion": "Brand e motion visivo",
+    "Top Skills": "Skill in evidenza",
+    "Official Brand Kits": "Brand Kit ufficiali",
+    "Open template": "Apri modello",
+    "Open Skill": "Apri Skill",
+    "Open Brand Kits": "Apri Brand Kit"
   },
   "tr": {
     "E-commerce marketing": "E-ticaret pazarlaması",
@@ -1558,6 +1621,13 @@
     "More troubleshooting Q&A": "Diğer teknik sorun giderme SSS",
     "Product & brand films": "Ürün ve marka filmleri",
     "Alpha motion & 3D": "Alfa hareket ve 3D",
-    "Viral recreation": "Viral yeniden üretim"
+    "Viral recreation": "Viral yeniden üretim",
+    "Product & AI launches": "Ürün ve yapay zeka lansmanları",
+    "Brand & visual motion": "Marka ve görsel hareket",
+    "Top Skills": "Öne çıkan Skill'ler",
+    "Official Brand Kits": "Resmi Marka Kitleri",
+    "Open template": "Şablonu aç",
+    "Open Skill": "Skill'i aç",
+    "Open Brand Kits": "Marka Kitlerini aç"
   }
 }

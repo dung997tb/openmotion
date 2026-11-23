@@ -4,11 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { mcpGalleryPreview } from './mcpGallery';
-import { mcpShowcaseModules, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
+import { formatMcpAgentPrompt, mcpShowcaseModules, type McpCaseTarget, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
 
 type PreviewState = {
   title: string;
   image: string;
+  video?: string;
+  showcaseIframe?: string;
+  target: McpCaseTarget;
   prompt: string;
   id: string;
 };
@@ -31,27 +34,29 @@ function FeatureModuleCarousel({
   const [index, setIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
   const slides = module.slides;
   const total = slides.length;
   const current: McpShowcaseSlide = slides[index];
   const prevSlide = slides[(index - 1 + total) % total];
   const nextSlide = slides[(index + 1) % total];
   const currentText = current.content[lang];
+  const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+  const playVideo = enabled && !reducedMotion && Boolean(current.video) && !videoErrors[current.id];
 
   useEffect(() => {
-    if (!enabled || hovered) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    if (!enabled || hovered || reducedMotion) return;
     let intervalId = 0;
     const delayId = window.setTimeout(() => {
       intervalId = window.setInterval(() => {
         if (!document.hidden) setIndex(prev => (prev + 1) % total);
-      }, 4800);
-    }, moduleIndex * 1600);
+      }, 6000);
+    }, moduleIndex * 1800);
     return () => {
       window.clearTimeout(delayId);
       window.clearInterval(intervalId);
     };
-  }, [enabled, hovered, moduleIndex, total]);
+  }, [enabled, hovered, moduleIndex, reducedMotion, total]);
 
   useEffect(() => {
     if (!copiedId) return;
@@ -62,7 +67,7 @@ function FeatureModuleCarousel({
   const step = (delta: number) => setIndex(prev => (prev + delta + total) % total);
 
   async function handleCopy() {
-    const full = `@OpenDesign ${currentText.prompt}`;
+    const full = formatMcpAgentPrompt(currentText.prompt, current.target);
     if (await onCopy(current.id, full)) setCopiedId(current.id);
   }
 
@@ -90,7 +95,7 @@ function FeatureModuleCarousel({
               data-active={isActive || undefined}
               onClick={() => setIndex(slideIdx)}
             >
-              <img className="om-mcp-carousel-thumb" src={slide.image} alt="" loading="lazy" decoding="async" />
+              <img className="om-mcp-carousel-thumb" src={slide.image} alt="" decoding="async" />
               <span>{slide.content[lang].tabLabel}</span>
             </Button>
           );
@@ -104,7 +109,7 @@ function FeatureModuleCarousel({
           aria-label={t('Previous showcase')}
           onClick={() => step(-1)}
         >
-          <img src={prevSlide.image} alt="" loading="lazy" decoding="async" />
+          <img key={prevSlide.id} src={prevSlide.image} alt="" decoding="async" />
         </Button>
 
         <div className="om-mcp-carousel-shell">
@@ -118,7 +123,23 @@ function FeatureModuleCarousel({
           </Button>
 
           <article className="om-mcp-carousel-card">
-            <img className="om-mcp-carousel-img" src={current.image} alt={currentText.title} decoding="async" />
+            {playVideo ? (
+              <video
+                key={current.id}
+                className="om-mcp-carousel-img"
+                src={current.video}
+                poster={current.image}
+                aria-label={currentText.title}
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                onError={() => setVideoErrors(prev => ({ ...prev, [current.id]: true }))}
+              />
+            ) : (
+              <img className="om-mcp-carousel-img" src={current.image} alt={currentText.title} decoding="async" />
+            )}
             <div className="om-mcp-carousel-scrim" aria-hidden="true" />
             <div className="om-mcp-carousel-content">
               <div className="om-mcp-carousel-top">
@@ -146,7 +167,10 @@ function FeatureModuleCarousel({
                       id: current.id,
                       title: `${currentText.title} · ${t('Studio editable project preview')}`,
                       image: current.image,
-                      prompt: `@OpenDesign ${currentText.prompt}`,
+                      video: current.video,
+                      showcaseIframe: current.showcaseIframe,
+                      target: current.target,
+                      prompt: formatMcpAgentPrompt(currentText.prompt, current.target),
                     }, event.currentTarget)}
                   >
                     <span>{t('Try in Studio')}</span>
@@ -181,7 +205,7 @@ function FeatureModuleCarousel({
           aria-label={t('Next showcase')}
           onClick={() => step(1)}
         >
-          <img src={nextSlide.image} alt="" loading="lazy" decoding="async" />
+          <img key={nextSlide.id} src={nextSlide.image} alt="" decoding="async" />
         </Button>
       </div>
     </div>
@@ -191,15 +215,16 @@ function FeatureModuleCarousel({
 export function McpFeatureCarousels({
   enabled,
   onCopy,
-  openLibrary,
+  onOpenTarget,
 }: {
   enabled: boolean;
   onCopy: (slideId: string, prompt: string) => Promise<boolean>;
-  openLibrary: (trigger?: HTMLElement) => void;
+  onOpenTarget: (target: McpCaseTarget, trigger?: HTMLElement) => void;
 }) {
   const { t, locale } = useI18n();
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [modalCopied, setModalCopied] = useState(false);
+  const [modalVideoFailed, setModalVideoFailed] = useState(false);
   const triggerRef = useRef<HTMLElement>(null);
   const previewContent = mcpGalleryPreview[locale === 'zh-CN' ? 'zh-CN' : 'en'];
 
@@ -212,6 +237,12 @@ export function McpFeatureCarousels({
     const timer = window.setTimeout(() => setModalCopied(false), 1600);
     return () => window.clearTimeout(timer);
   }, [modalCopied]);
+
+  const targetActionLabel = (target: McpCaseTarget) => {
+    if (target.kind === 'skill') return t('Open Skill');
+    if (target.kind === 'brand-kit') return t('Open Brand Kits');
+    return t('Open template');
+  };
 
   return (
     <section className="om-mcp-section" id="showcase" aria-label={t('Featured MCP capabilities')}>
@@ -226,6 +257,7 @@ export function McpFeatureCarousels({
             onOpenPreview={(state, trigger) => {
               triggerRef.current = trigger;
               setModalCopied(false);
+              setModalVideoFailed(false);
               setPreview(state);
             }}
           />
@@ -244,7 +276,28 @@ export function McpFeatureCarousels({
                     <RemixIcon name="close-line" size={18} />
                   </Dialog.Close>
                 </header>
-                <div className="om-mcp-demo-preview"><img src={preview.image} alt="" /></div>
+                <div className="om-mcp-demo-preview">
+                  {preview.showcaseIframe ? (
+                    <iframe
+                      src={preview.showcaseIframe}
+                      title={preview.title}
+                      sandbox="allow-scripts"
+                    />
+                  ) : preview.video && !modalVideoFailed ? (
+                    <video
+                      src={preview.video}
+                      poster={preview.image}
+                      controls
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      onError={() => setModalVideoFailed(true)}
+                    />
+                  ) : (
+                    <img src={preview.image} alt="" />
+                  )}
+                </div>
                 <div className="om-mcp-demo-timeline" role="img" aria-label={t('Studio timeline example')}>
                   {previewContent.tracks.map(([track, ...clips], trackIndex) => (
                     <div key={track} data-track={trackIndex}>
@@ -262,11 +315,12 @@ export function McpFeatureCarousels({
                     variant="plain"
                     className="om-mcp-demo-copy"
                     onClick={event => {
+                      const target = preview.target;
                       setPreview(null);
-                      openLibrary(event.currentTarget);
+                      onOpenTarget(target, event.currentTarget);
                     }}
                   >
-                    {t('Explore templates')}
+                    {targetActionLabel(preview.target)}
                   </Button>
                   <Button
                     variant="plain"

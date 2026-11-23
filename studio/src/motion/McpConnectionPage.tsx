@@ -22,7 +22,7 @@ import { McpSiteFooter } from './McpSiteFooter';
 import { McpTemplateShowcase } from './McpTemplateShowcase';
 import { mcpCapabilities, mcpScenarios, platformExportExample, searchRecoveryExample } from './mcpCapabilities';
 import { mcpClients as clients, supportsLocalConnection, type McpClient } from './mcpClients';
-import { mcpAdvantagePillars, mcpQuickFaq } from './mcpShowcaseData';
+import { mcpAdvantagePillars, mcpQuickFaq, type McpCaseTarget } from './mcpShowcaseData';
 import * as tracking from './pageTracking';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
 import { localizedSkillPrompt, motionSkills, skillShotPrompt, studioSkillDefaults } from './skillCatalog';
@@ -132,6 +132,24 @@ export function McpConnectionPage({
   const openLibrary = (area: 'mcp_start' | 'mcp_templates' | 'mcp_footer') => (trigger?: HTMLElement, template?: GalleryTemplate) => {
     click(area, template ? 'open_detail' : 'open_library', template ? { template: template.id } : {});
     openLibraryRaw(trigger, template);
+  };
+  const openCaseTarget = (area: 'mcp_start' | 'mcp_templates') => (target: McpCaseTarget, trigger?: HTMLElement) => {
+    if (target.kind === 'template') {
+      openLibrary(area)(trigger, {
+        id: target.templateId,
+        title: target.title,
+        posterUrl: target.posterUrl,
+        previewUrl: target.previewUrl,
+      } as GalleryTemplate);
+      return;
+    }
+    if (target.kind === 'skill') {
+      click(area, 'open_detail', { capability: target.skillId });
+      changeRoute({ settings: null, skills: true, skill: target.skillId, templates: false, template: null });
+      return;
+    }
+    click(area, 'open_detail', { capability: target.brandKitId });
+    changeRoute({ settings: 'brand-kit', brandKit: 'official', templates: false, template: null });
   };
   const openProviders = (area: 'mcp_resources' | 'mcp_footer') => () => {
     click(area, 'manage_providers');
@@ -553,7 +571,7 @@ export function McpConnectionPage({
         {/* 3 Higgsfield-Style Centered Cinematic Feature Carousels */}
         <McpFeatureCarousels
           enabled={previewsEnabled}
-          openLibrary={openLibrary('mcp_start')}
+          onOpenTarget={openCaseTarget('mcp_start')}
           onCopy={(slideId, text) => copy(text, { kind: 'capability_example', capability: slideId, includesSetup: false })}
         />
 
@@ -563,6 +581,7 @@ export function McpConnectionPage({
           enabled={previewsEnabled}
           canTry={supported}
           openLibrary={openLibrary('mcp_templates')}
+          onOpenTarget={openCaseTarget('mcp_templates')}
           onCategory={value => click('mcp_templates', 'category_select', { option: value })}
           onPreview={id => click('mcp_templates', 'open_detail', { capability: id })}
           onCopy={async (id, examplePrompt, includeSetup) => {

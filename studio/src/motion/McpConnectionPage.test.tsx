@@ -141,7 +141,7 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   await act(async () => tab('Claude').click());
   await act(async () => button('Copy example prompt').click());
   const example = copy.mock.calls[0][0];
-  expect(example).toMatch(/^@OpenDesign Turn this bottled drink image/);
+  expect(example).toMatch(/^@OpenDesign Adapt template "Glean Agents Launch"/);
   await act(async () => button('Try in Claude Code').click());
   expect(copy.mock.calls[1][0]).toContain('Claude Code');
   expect(copy.mock.calls[1][0]).toContain('https://github.com/nexu-io/openmotion#quick-start');
@@ -212,23 +212,36 @@ it('aborts pending setup discovery when leaving the page', async () => {
   for (const { path, signal } of reads) expect(signal?.aborted, path).toBe(true);
 });
 
-it('shows all twelve examples, filters by section and previews the selected cover and prompt', async () => {
+it('shows all twelve curated examples, filters by section and previews video, brand showcase and prompt', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('Clipboard unavailable'));
-  await mount();
+  const { openLibrary } = await mount();
   const gallery = document.querySelector('#gallery')!;
   expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
-  for (const [label, count] of [['E-commerce marketing (5)', 5], ['Brand & intros (3)', 3], ['Talking-head & editing (2)', 2], ['Creative styles (2)', 2]] as const) {
+  for (const [label, count] of [
+    ['Product & AI launches (4)', 4],
+    ['Brand & visual motion (3)', 3],
+    ['Top Skills (3)', 3],
+    ['Official Brand Kits (2)', 2],
+  ] as const) {
     await act(async () => tab(label).click());
     expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(count);
   }
-  await act(async () => button('Preview template Felt stop-motion explainer').click());
+  await act(async () => button('Preview template Apple official Brand Kit').click());
+  const brandPreview = document.querySelector('[role=dialog]')!;
+  expect(brandPreview.textContent).toContain('Apple official Brand Kit');
+  expect(brandPreview.querySelector('iframe')?.getAttribute('src')).toContain('/motion-api/brand-kits/catalog/apple/showcase');
+  await act(async () => button('Close').click());
+
+  await act(async () => tab('Product & AI launches (4)').click());
+  await act(async () => button('Preview template Glean Agents · Enterprise workflow launch').click());
   const preview = document.querySelector('[role=dialog]')!;
-  expect(preview.textContent).toContain('Felt stop-motion explainer');
-  expect(preview.querySelector('img')?.getAttribute('src')).toContain('felt_stop.webp');
+  expect(preview.textContent).toContain('Glean Agents · Enterprise workflow launch');
+  expect(preview.querySelector('video')?.getAttribute('src')).toContain('https://r.open-design.ai/files/');
   await act(async () => [...preview.querySelectorAll('button')].find(node => node.textContent === 'Copy Prompt')!.click());
   expect(preview.querySelector('textarea')?.value).toBe(copy.mock.calls[0][0]);
-  await act(async () => button('Close').click());
+  await act(async () => [...preview.querySelectorAll('button')].find(node => node.textContent === 'Open template')!.click());
+  expect(openLibrary).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'motion-f6f244d1-c549-4081-8a5d-f0e1e3660044' }));
   expect(document.querySelector('[role=dialog]')).toBeNull();
 });
 
@@ -326,17 +339,17 @@ it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ an
   expect(document.querySelectorAll('.om-mcp-stage-step')).toHaveLength(4);
   const step2 = document.querySelectorAll<HTMLButtonElement>('.om-mcp-stage-step')[1];
   await act(async () => step2.click());
-  expect(document.querySelector('.om-mcp-stage-prompt-text')?.textContent).toContain('白底音箱');
+  expect(document.querySelector('.om-mcp-stage-prompt-text')?.textContent).toContain('Framer 3.0');
   await act(async () => document.querySelector<HTMLButtonElement>('.om-mcp-stage-prompt-copy')!.click());
-  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 把这张白底音箱放进暖光客厅桌面'));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 基于「Framer 3.0 品牌与产品发布」'));
 
   const modules = document.querySelectorAll('#showcase .om-mcp-carousel-module');
   expect(modules).toHaveLength(3);
   const firstMod = modules[0];
   await act(async () => firstMod.querySelectorAll<HTMLButtonElement>('.om-mcp-carousel-tab')[1].click());
-  expect(firstMod.querySelector('.om-mcp-carousel-title')?.textContent).toContain('暗调黑金高级质感发布短片');
+  expect(firstMod.querySelector('.om-mcp-carousel-title')?.textContent).toContain('Aesthetics');
   await act(async () => firstMod.querySelector<HTMLButtonElement>('.om-mcp-carousel-primary')!.click());
-  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 用这张香水瓶实拍图'));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 使用模板「Aesthetics」'));
   await act(async () => firstMod.querySelector<HTMLButtonElement>('.om-mcp-carousel-secondary')!.click());
   expect(document.querySelector('[role=dialog]')?.textContent).toContain('Studio 可编辑工程示例');
   await act(async () => button('关闭').click());
