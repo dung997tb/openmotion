@@ -18,6 +18,7 @@ import { McpDeveloperDrawer } from './McpDeveloperDrawer';
 import { McpFeatureCarousels } from './McpFeatureCarousels';
 import { McpHeroAmbientCanvas } from './McpHeroAmbientCanvas';
 import { McpHeroShowcaseStage } from './McpHeroShowcaseStage';
+import { McpManualConfiguration } from './McpManualConfiguration';
 import { McpSiteFooter } from './McpSiteFooter';
 import { McpTemplateShowcase } from './McpTemplateShowcase';
 import { mcpCapabilities, mcpScenarios, platformExportExample, searchRecoveryExample } from './mcpCapabilities';
@@ -93,7 +94,6 @@ export function McpConnectionPage({
   const [nextStepVisible, setNextStepVisible] = useState(false);
   const [nextStepMessage, setNextStepMessage] = useState('');
   const [setupCopied, setSetupCopied] = useState(false);
-  const [manualCopied, setManualCopied] = useState(false);
 
   const { client: clientId, setup: setupMode } = route ?? localRoute;
   const changeRoute = (patch: Partial<WorkspacePage>) => {
@@ -115,12 +115,6 @@ export function McpConnectionPage({
     const timer = window.setTimeout(() => setSetupCopied(false), 1800);
     return () => window.clearTimeout(timer);
   }, [setupCopied]);
-
-  useEffect(() => {
-    if (!manualCopied) return;
-    const timer = window.setTimeout(() => setManualCopied(false), 1800);
-    return () => window.clearTimeout(timer);
-  }, [manualCopied]);
 
   const click = (
     area: Parameters<typeof tracking.reportMcpClick>[0],
@@ -266,7 +260,6 @@ export function McpConnectionPage({
     setClientId(nextId);
     setNextStepVisible(false);
     setSetupCopied(false);
-    setManualCopied(false);
     click('mcp_client', 'client_tab', { mcp_client: nextId });
   }
 
@@ -275,7 +268,6 @@ export function McpConnectionPage({
     setClientId(nextId);
     setNextStepVisible(false);
     setSetupCopied(false);
-    setManualCopied(false);
     click('mcp_client', 'client_tab', { mcp_client: nextId });
   }
 
@@ -479,47 +471,31 @@ export function McpConnectionPage({
                     ) : !info ? (
                       <SettingsLoading />
                     ) : (
-                      <>
-                        <div className="om-mcp-manual-head">
-                          <span className="om-mcp-manual-title">
-                            {t(
-                              client.host === 'mcp'
-                                ? 'Merge this configuration into your client’s local MCP settings. Preserve your other servers, then reload the connection.'
-                                : 'Run this command in a local terminal, then reload the Agent connection.',
-                            )}
-                          </span>
-                          <Button
-                            variant="plain"
-                            className="om-mcp-manual-copy"
-                            aria-label={t('Copy configuration')}
-                            disabled={!manual}
-                            onClick={() => void copy(manual, { kind: 'manual_config' }).then(ok => { if (ok) setManualCopied(true); })}
-                          >
-                            {t(manualCopied ? 'Copied' : 'Copy configuration')}
-                          </Button>
-                        </div>
-                        <pre className="om-mcp-manual-code">{manual}</pre>
-                        <div className="om-mcp-manual-footer-actions">
-                          <a
-                            className="om-mcp-manual-link"
-                            href={`/connect/config?host=${client.host}`}
-                            download
-                            onClick={() => click('mcp_setup', 'download_config', { setup_method: 'manual' })}
-                          >
-                            {t('Download configuration')}
-                          </a>
-                          <a
-                            className="om-mcp-manual-link"
-                            href={setupGuideUrl(info)}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={() => click('mcp_setup', 'connection_guide', { setup_method: 'manual' })}
-                          >
-                            <span>{t('Connection guide')}</span>
-                            <RemixIcon name="arrow-right-up-line" size={14} />
-                          </a>
-                        </div>
-                      </>
+                      <McpManualConfiguration
+                        key={client.id}
+                        host={client.host}
+                        value={manual}
+                        onCopy={value => copy(value, { kind: 'manual_config' })}
+                      >
+                        <a
+                          className="om-mcp-manual-link"
+                          href={`/connect/config?host=${client.host}`}
+                          download
+                          onClick={() => click('mcp_setup', 'download_config', { setup_method: 'manual' })}
+                        >
+                          {t('Download configuration')}
+                        </a>
+                        <a
+                          className="om-mcp-manual-link"
+                          href={setupGuideUrl(info)}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => click('mcp_setup', 'connection_guide', { setup_method: 'manual' })}
+                        >
+                          <span>{t('Connection guide')}</span>
+                          <RemixIcon name="arrow-right-up-line" size={14} />
+                        </a>
+                      </McpManualConfiguration>
                     )}
 
                     {client.host === 'deepseek' && (

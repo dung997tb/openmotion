@@ -67,11 +67,16 @@
 /* Post-copy bubble & manual config popover */
 .om-mcp-next-step { display: inline-flex; align-items: center; justify-content: space-between; gap: 14px; margin: 18px auto 0; max-width: 640px; padding: 10px 16px; flex-wrap: wrap; }
 .om-mcp-next-step-go { height: 28px; padding-inline: 14px; flex: none; white-space: nowrap; }
-.om-mcp-manual-pop { margin: 18px auto 0; max-width: 680px; text-align: left; padding: 16px 18px; }
-.om-mcp-manual-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.om-mcp-manual-code { margin: 10px 0 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
-.om-mcp-manual-footer-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 12px; }
+.om-mcp-manual-pop { margin: 18px auto 0; max-width: 680px; text-align: left; padding: 16px; }
+.om-mcp-manual-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.om-mcp-manual-copy { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-inline: 14px; min-height: 34px; }
+.om-mcp-manual-code { margin: 12px 0 0; padding: 11px 13px; max-height: min(40vh, 280px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.om-mcp-manual-code[data-preview] { white-space: pre; overflow: hidden; }
+.om-mcp-manual-code > code { display: block; font: inherit; }
+.om-mcp-manual-footer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; margin-top: 10px; }
+.om-mcp-manual-resources { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .om-mcp-manual-link { display: inline-flex; align-items: center; gap: 4px; }
+.om-mcp-manual-expand { padding: 0; min-height: 28px; }
 .om-mcp-manual-note { margin-top: 12px; padding-top: 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .om-mcp-manual-note a { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .om-mcp-unavailable { padding: var(--motion-space-24); text-align: center; }

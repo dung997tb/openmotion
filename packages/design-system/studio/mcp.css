@@ -155,15 +155,34 @@
   font-weight: var(--motion-weight-bold);
 }
 .om-mcp-manual-pop {
-  border-radius: var(--motion-radius-md);
+  border-radius: var(--motion-radius-xl);
   background: var(--motion-mcp-gallery-panel);
   border: 1px solid var(--motion-mcp-gallery-border);
 }
-.om-mcp-manual-title { font-size: 12.5px; color: var(--motion-muted); font-weight: var(--motion-weight-medium); }
-[data-motion-studio] .om-mcp-manual-copy { color: var(--motion-accent); font-size: 12.5px; font-weight: var(--motion-weight-semibold); padding: 0; height: auto; }
-.om-mcp-manual-code { font-family: var(--motion-font-mono); font-size: var(--motion-text-xs); line-height: 1.55; color: var(--motion-text); }
-.om-mcp-manual-link { font-size: 12.5px; color: var(--motion-muted); text-decoration: none; }
-.om-mcp-manual-link:hover { color: var(--motion-strong); }
+.om-mcp-manual-head .om-mcp-manual-title { margin: 0; font-size: var(--motion-text-heading); line-height: 1.35; letter-spacing: normal; color: var(--motion-strong); font-weight: var(--motion-weight-semibold); }
+.om-mcp-manual-head .om-mcp-manual-instructions { margin: 4px 0 0; font-size: var(--motion-text-sm); line-height: 1.45; color: var(--motion-muted); }
+[data-motion-studio] .om-mcp-manual-copy {
+  border-radius: var(--motion-radius-full);
+  background: var(--motion-brand);
+  color: var(--motion-mcp-stage-on-action);
+  font-size: var(--motion-text-md);
+  font-weight: var(--motion-weight-semibold);
+}
+[data-motion-studio] .om-mcp-manual-copy:hover { background: color-mix(in srgb, var(--motion-brand) 90%, var(--motion-mcp-stage-on-action)); }
+.om-mcp-manual-code {
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-mcp-dock-bg);
+  font-family: var(--motion-font-mono);
+  font-size: var(--motion-text-sm);
+  line-height: 1.55;
+  color: var(--motion-text);
+}
+.om-mcp-manual-code[data-preview] > code {
+  color: var(--motion-muted);
+  mask-image: linear-gradient(var(--motion-strong) 42%, color-mix(in srgb, var(--motion-strong) 50%, transparent));
+}
+[data-motion-studio] .om-mcp-manual-link { font-size: var(--motion-text-xs); color: var(--motion-muted); text-decoration: none; }
+[data-motion-studio] .om-mcp-manual-link:hover { color: var(--motion-strong); }
 .om-mcp-manual-note { border-top: 1px solid var(--motion-mcp-gallery-border); font-size: 12.5px; line-height: 1.55; color: var(--motion-muted); }
 .om-mcp-manual-note a { color: var(--motion-strong); font-weight: var(--motion-weight-medium); text-decoration: none; }
 .om-mcp-manual-note a:hover { color: var(--motion-accent); }

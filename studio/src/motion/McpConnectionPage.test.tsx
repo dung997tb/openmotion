@@ -7,7 +7,7 @@ import chineseReadme from '../../../README.zh-CN.md?raw';
 import { I18nProvider, type Locale } from '../i18n/I18n';
 import { McpConnectionPage } from './McpConnectionPage';
 import { formatMcpAgentPrompt, mcpHeroBeats, mcpShowcaseModules } from './mcpShowcaseData';
-import { containerIntegration, type IntegrationInfo } from '../../../shared/integration';
+import { containerIntegration, manualConnection, type IntegrationInfo } from '../../../shared/integration';
 
 // Reporting is covered separately. Its lazy initialization/retries must not
 // add transport requests to this page's discovery and read-only assertions.
@@ -80,13 +80,18 @@ it('loads Docker discovery through the real hook and enables container setup, co
   expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('welcome and video cards'));
   await act(async () => button('Manual setup').click());
   expect([...document.querySelectorAll('a')].find(link => link.textContent?.trim() === 'Connection guide')?.href).toContain('deploy/README.md');
-  for (const [client, host] of [['Codex', 'codex'], ['Claude', 'claude'], ['DeepSeek Harness', 'deepseek'], ['Other MCP clients', 'mcp']]) {
+  for (const [client, host] of [['Codex', 'codex'], ['Claude', 'claude'], ['DeepSeek Harness', 'deepseek'], ['Other MCP clients', 'mcp']] as const) {
     await act(async () => tab(client).click());
     expect(document.body.textContent).not.toContain('Could not load settings');
-    expect(document.querySelector('pre')?.textContent).toContain('docker');
+    const code = document.querySelector('.om-mcp-manual-code')!;
+    expect(code.textContent).not.toContain('docker');
+    const full = manualConnection(docker, host, 'en');
     expect(button('Copy configuration').disabled).toBe(false);
     await act(async () => button('Copy configuration').click());
-    expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('docker'));
+    expect(copy).toHaveBeenLastCalledWith(full);
+    expect(code.textContent).not.toBe(full);
+    await act(async () => button('View full configuration').click());
+    expect(code.textContent).toBe(full);
     expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=' + host);
   }
 });
@@ -136,6 +141,10 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   await act(async () => button('Manual setup').click());
   expect(document.querySelector('pre')?.textContent).toContain('claude mcp add');
   expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
+  await act(async () => button('Claude Desktop').click());
+  expect(document.querySelector('.om-mcp-manual-title')?.textContent).toBe('Copy to your MCP settings');
+  expect(document.querySelector('pre')?.textContent).toContain('"mcpServers"');
+  expect(document.querySelector('pre')?.textContent).not.toContain('/fixture/data');
   await act(async () => tab('DeepSeek Harness').click());
   expect(document.querySelectorAll('.om-mcp-hero-cta-row > *')).toHaveLength(2);
   expect(document.querySelector('.om-mcp-manual-note a')?.getAttribute('href')).toContain('/integrations/dsh');

@@ -1,5 +1,11 @@
 {
   "zh-CN": {
+    "Copy to your local terminal": "复制到本机终端",
+    "Copy to your MCP settings": "复制到 MCP 设置",
+    "Copy to your Harness configuration": "复制到 Harness 配置",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "将这段 YAML 合并到 Harness 配置，保留其他插件，然后重新加载会话。",
+    "View full configuration": "查看完整配置",
+    "Hide full configuration": "收起完整配置",
     "E-commerce marketing": "电商营销",
     "Brand & intros": "品牌与片头",
     "Creative styles": "创意风格化",
@@ -354,6 +360,12 @@
     "Open Brand Kits": "查看官方品牌包"
   },
   "ja": {
+    "Copy to your local terminal": "ローカル端末にコピー",
+    "Copy to your MCP settings": "MCP 設定にコピー",
+    "Copy to your Harness configuration": "Harness の設定にコピー",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "この YAML を Harness の設定にマージし、ほかのプラグインを保持してからセッションを再読み込みしてください。",
+    "View full configuration": "設定の全文を表示",
+    "Hide full configuration": "設定の全文を隠す",
     "E-commerce marketing": "ECマーケティング",
     "Brand & intros": "ブランドとオープニング",
     "Creative styles": "クリエイティブスタイル",
@@ -497,6 +509,12 @@
     "Open Brand Kits": "ブランドキットを開く"
   },
   "ko": {
+    "Copy to your local terminal": "로컬 터미널에 복사",
+    "Copy to your MCP settings": "MCP 설정에 복사",
+    "Copy to your Harness configuration": "Harness 구성에 복사",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "이 YAML을 Harness 구성에 병합하고 다른 플러그인을 유지한 다음 세션을 다시 불러오세요.",
+    "View full configuration": "전체 구성 보기",
+    "Hide full configuration": "전체 구성 접기",
     "E-commerce marketing": "이커머스 마케팅",
     "Brand & intros": "브랜드 및 오프닝",
     "Creative styles": "크리에이티브 스타일",
@@ -640,6 +658,12 @@
     "Open Brand Kits": "브랜드 키트 열기"
   },
   "de": {
+    "Copy to your local terminal": "In das lokale Terminal kopieren",
+    "Copy to your MCP settings": "In die MCP-Einstellungen kopieren",
+    "Copy to your Harness configuration": "In die Harness-Konfiguration kopieren",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Füge dieses YAML in deine Harness-Konfiguration ein, behalte die anderen Plug-ins bei und lade dann die Sitzung neu.",
+    "View full configuration": "Vollständige Konfiguration anzeigen",
+    "Hide full configuration": "Vollständige Konfiguration ausblenden",
     "E-commerce marketing": "E-Commerce-Marketing",
     "Brand & intros": "Marken und Intros",
     "Creative styles": "Kreative Stile",
@@ -783,6 +807,12 @@
     "Open Brand Kits": "Brand Kits öffnen"
   },
   "fr": {
+    "Copy to your local terminal": "Copier dans le terminal local",
+    "Copy to your MCP settings": "Copier dans les paramètres MCP",
+    "Copy to your Harness configuration": "Copier dans la configuration de Harness",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Intégrez ce YAML à votre configuration Harness en conservant les autres extensions, puis rechargez la session.",
+    "View full configuration": "Voir la configuration complète",
+    "Hide full configuration": "Masquer la configuration complète",
     "E-commerce marketing": "Marketing e-commerce",
     "Brand & intros": "Marques et introductions",
     "Creative styles": "Styles créatifs",
@@ -926,6 +956,12 @@
     "Open Brand Kits": "Ouvrir les Brand Kits"
   },
   "ru": {
+    "Copy to your local terminal": "Скопировать в локальный терминал",
+    "Copy to your MCP settings": "Скопировать в настройки MCP",
+    "Copy to your Harness configuration": "Скопировать в конфигурацию Harness",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Объедините этот YAML с конфигурацией Harness, сохранив другие плагины, затем перезагрузите сеанс.",
+    "View full configuration": "Показать всю конфигурацию",
+    "Hide full configuration": "Скрыть полную конфигурацию",
     "E-commerce marketing": "Маркетинг для интернет-магазинов",
     "Brand & intros": "Бренды и заставки",
     "Creative styles": "Творческие стили",
@@ -1069,6 +1105,12 @@
     "Open Brand Kits": "Открыть бренд-киты"
   },
   "es": {
+    "Copy to your local terminal": "Copiar en el terminal local",
+    "Copy to your MCP settings": "Copiar en los ajustes de MCP",
+    "Copy to your Harness configuration": "Copiar en la configuración de Harness",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Integra este YAML en la configuración de Harness, conserva los demás complementos y vuelve a cargar la sesión.",
+    "View full configuration": "Ver la configuración completa",
+    "Hide full configuration": "Ocultar la configuración completa",
     "E-commerce marketing": "Marketing de comercio electrónico",
     "Brand & intros": "Marcas e intros",
     "Creative styles": "Estilos creativos",
@@ -1212,6 +1254,12 @@
     "Open Brand Kits": "Abrir Brand Kits"
   },
   "pt-BR": {
+    "Copy to your local terminal": "Copiar para o terminal local",
+    "Copy to your MCP settings": "Copiar para as configurações de MCP",
+    "Copy to your Harness configuration": "Copiar para a configuração do Harness",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Mescle este YAML à configuração do Harness, preserve os outros plug-ins e recarregue a sessão.",
+    "View full configuration": "Ver configuração completa",
+    "Hide full configuration": "Ocultar configuração completa",
     "E-commerce marketing": "Marketing para e-commerce",
     "Brand & intros": "Marcas e aberturas",
     "Creative styles": "Estilos criativos",
@@ -1355,6 +1403,12 @@
     "Open Brand Kits": "Abrir Brand Kits"
   },
   "it": {
+    "Copy to your local terminal": "Copia nel terminale locale",
+    "Copy to your MCP settings": "Copia nelle impostazioni MCP",
+    "Copy to your Harness configuration": "Copia nella configurazione di Harness",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Integra questo YAML nella configurazione di Harness, mantieni gli altri plug-in e ricarica la sessione.",
+    "View full configuration": "Mostra la configurazione completa",
+    "Hide full configuration": "Nascondi la configurazione completa",
     "E-commerce marketing": "Marketing e-commerce",
     "Brand & intros": "Brand e intro",
     "Creative styles": "Stili creativi",
@@ -1498,6 +1552,12 @@
     "Open Brand Kits": "Apri Brand Kit"
   },
   "tr": {
+    "Copy to your local terminal": "Yerel terminale kopyala",
+    "Copy to your MCP settings": "MCP ayarlarına kopyala",
+    "Copy to your Harness configuration": "Harness yapılandırmasına kopyala",
+    "Merge this YAML into your Harness configuration, preserve your other plugins, then reload the session.": "Bu YAML içeriğini Harness yapılandırmanla birleştir, diğer eklentileri koru ve oturumu yeniden yükle.",
+    "View full configuration": "Tam yapılandırmayı göster",
+    "Hide full configuration": "Tam yapılandırmayı gizle",
     "E-commerce marketing": "E-ticaret pazarlaması",
     "Brand & intros": "Markalar ve açılışlar",
     "Creative styles": "Yaratıcı stiller",

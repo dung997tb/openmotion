@@ -12,6 +12,8 @@ export const mcpClients = [
 
 export type McpClient = typeof mcpClients[number]['id'];
 
-export function supportsLocalConnection(client: typeof mcpClients[number]) {
+type Client = typeof mcpClients[number];
+
+export function supportsLocalConnection(client: Client): client is Exclude<Client, { host: 'chatgpt' }> {
   return client.host !== 'chatgpt';
 }
