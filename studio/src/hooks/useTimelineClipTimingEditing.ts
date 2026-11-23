@@ -1,3 +1,4 @@
+import { holdIsolatedTimelineChanges } from "../player/lib/isolatedTimelineEdits";
 import { previewTimelinePaint } from "./timelinePaintPreview";
 import { saveCloudTimeline, timelineTimingEdits } from "../utils/cloudTimelineEdit";
 import { planClipMove } from "../../../packages/edit-core";
@@ -201,6 +202,9 @@ export function useTimelineClipTimingEditing({
           enqueueEdit(element, "Move timeline clip", buildMovePatches, step).then(() =>
             finishMoveGsapSync(),
           );
+        const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{
+          element, start: updates.start, ...(trackChanged && { track: updates.track }),
+        }]);
         return reorderDone
           .then(() => {
             if (cloud && projectIdRef.current) {
@@ -239,6 +243,7 @@ export function useTimelineClipTimingEditing({
           .then(() => syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument))
           .catch((error) => {
             // Failed persist: revert the optimistic duration readout + live root.
+            releaseTiming();
             rollbackPaint();
             rollbackDuration();
             showToast(getStudioSaveErrorMessage(error), "error");
@@ -283,6 +288,7 @@ export function useTimelineClipTimingEditing({
       patchIframeDomTiming(previewIframeRef.current, element, liveAttrs, activeCompPath);
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{element, ...updates}]);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // Read before the readout sync below: the SDK path (setTiming) can't grow the root duration.
       const needsExtension = extendRootDurationIfNeeded(updates.start + updates.duration);
@@ -350,6 +356,7 @@ export function useTimelineClipTimingEditing({
           : resizeFallback();
       return persistDone.then(() => syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument)).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root.
+        releaseTiming();
         rollbackDuration();
         showToast(getStudioSaveErrorMessage(error), "error");
         throw error;

@@ -83,7 +83,10 @@ export function TimelineHoverPreview() {
   const { iframeRef, timelineSessionEpoch, timelineDisabled, projectId, previewCompositionSize } = useNLEContext();
   const hover = useTimelineHoverStore();
   const isPlaying = usePlayerStore(s => s.isPlaying);
-  const revisions = usePlayerStore(s => s.thumbnailRevisions);
+  // The isolated frame URL changes when the new project snapshot is ready.
+  // Thumbnail notifications can arrive first and would reopen the old URL.
+  const isolated = Boolean(isolatedPreviewOrigin());
+  const revisions = usePlayerStore(s => isolated ? undefined : s.thumbnailRevisions);
   const fps = useCompositionFps();
   const source = iframeRef.current?.getAttribute('src');
   if (hover.time === null || hover.sessionEpoch !== timelineSessionEpoch || timelineDisabled || isPlaying || !source) return null;

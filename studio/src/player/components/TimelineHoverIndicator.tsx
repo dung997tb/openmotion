@@ -42,6 +42,7 @@ export function TimelineHoverIndicator() {
             return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && el.getClientRects().length > 0;
           })) return clear();
       const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('[data-trim-edge]')) return clear();
       if (target?.closest('button, input, [role="slider"]') && !target.closest('[data-clip]')) return clear();
       const rect = viewport.getBoundingClientRect();
       if (event.clientX >= rect.left + viewport.clientWidth || event.clientY >= rect.top + viewport.clientHeight) return clear();
