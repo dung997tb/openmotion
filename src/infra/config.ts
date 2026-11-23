@@ -62,6 +62,7 @@ const rawConfigSchema = z.object({
   S3_PRESIGN_CACHE_WINDOW_SEC: z.coerce.number().int().positive().default(3600),
 
   // Auth & sessions
+  TEXT_PATCH_WRITES: booleanEnv.default(false),
   AUTH_MODE: z.enum(['oidc', 'dev']).default('oidc'),
   ALLOW_INSECURE_DEV_AUTH: booleanEnv.default(false),
   DEV_WORKSPACE_ID: z.string().uuid().default('00000000-0000-4000-8000-000000000001'),

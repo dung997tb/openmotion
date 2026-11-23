@@ -24,7 +24,7 @@ export function formatVersionFromSha256(sha256: string): string {
   return `"sha256:${sha256}"`;
 }
 
-export function formatFileVersion(scope: BlobScope | 'patch', id: string): string {
+export function formatFileVersion(scope: BlobScope, id: string): string {
   return scope === 'patch' ? `"patch:${id}"` : formatVersionFromSha256(id);
 }
 

@@ -17,7 +17,7 @@ import {
 } from '../engine/preview-bundler.ts';
 import {
   PRESIGNED_REDIRECT_HEADERS,
-  formatVersionFromSha256,
+  formatFileVersion,
 } from '../etag.ts';
 import { PREVIEW_BRIDGE_PATH, PREVIEW_BRIDGE_SCRIPT, PREVIEW_BRIDGE_VERSION } from '../engine/preview-bridge.ts';
 import { PreviewBuildBusy, PreviewDocumentCache } from '../engine/preview-document-cache.ts';
@@ -247,7 +247,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
         if (!entry) return c.body(null, 404);
         c.header('Content-Type', entry.mimeType);
         c.header('Content-Length', String(entry.sizeBytes));
-        c.header('ETag', formatVersionFromSha256(entry.sha256));
+        c.header('ETag', formatFileVersion(entry.blobScope, entry.sha256));
         c.header('Accept-Ranges', 'bytes');
         return c.body(null, 200);
       }
@@ -279,7 +279,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
 
     const etag = readyProxy
       ? `"sha256:${file.sha256}:proxy"`
-      : formatVersionFromSha256(file.sha256);
+      : formatFileVersion(file.blobScope, file.sha256);
 
     if (c.req.method === 'HEAD') {
       if (readyProxy) {

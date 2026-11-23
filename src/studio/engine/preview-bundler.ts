@@ -1,3 +1,4 @@
+import { formatFileVersion } from '../etag.ts';
 import { bridgeDocumentTags, previewBuildBusyScript } from './preview-bridge.ts';
 import { posix } from 'node:path';
 import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
@@ -579,7 +580,7 @@ function applyStudioPreviewAugmentations(
   // across revisions, token renewals, nested compositions and other projects.
   if (options.bridgeOrigin) {
     const versions = Object.fromEntries(project.listFiles().filter(file => /\.html?$/i.test(file.path))
-      .map(file => [file.path, file.sha256]));
+      .map(file => [file.path, file.blobScope === 'patch' ? formatFileVersion(file.blobScope, file.sha256) : file.sha256]));
     const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions, options.studioOrigin, options.canRebindTiming);
     out = injectTagsAtHeadStart(out, tags.preload);
     out = insertBeforeCloseTag(out, 'body', tags.script) ?? out + tags.script;

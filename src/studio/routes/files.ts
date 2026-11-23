@@ -1,3 +1,5 @@
+import { TEXT_PATCH_BASE_HEADER } from '../../../shared/text-patch.ts';
+import { isUuid } from '../../../shared/project-validation.ts';
 import { commitProjectEdit } from '../../services/project-edit.ts';
 import path from 'node:path';
 import { Hono, type Context } from 'hono';
@@ -28,6 +30,7 @@ import { rewritePathReferencesInText } from '../engine/source-mutations.ts';
 import {
   DELETED_VERSION,
   createWriteToken,
+  formatFileVersion,
   formatVersionFromSha256,
   getMimeType,
   sha256Hex,
@@ -89,7 +92,7 @@ async function buildConflictPayload(
     path?: string;
     currentVersion?: string | null;
     currentSha256?: string | null;
-    currentBlobScope?: 'workspace' | 'catalog' | null;
+    currentBlobScope?: 'workspace' | 'catalog' | 'patch' | null;
     currentIsText?: boolean;
   };
   let currentContent: string | null = null;
@@ -110,12 +113,13 @@ async function buildConflictPayload(
 export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variables: StudioVariables }> {
   const app = new Hono<{ Variables: StudioVariables }>();
 
-  // GET /api/projects/:id/files/* — Read single text file with strong ETag ("sha256:<hex>").
+  // GET /api/projects/:id/files/* — Read one authorized file at its current version.
   app.get('/api/projects/:id/files/*', async (c) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id');
     const rawPath = extractWildcardPath(c.req.url, '/files/');
     const safePath = normalizeSafeProjectPath(rawPath);
+    if (deps.files.textPatchWrites) c.header('X-OpenMotion-Text-Edits', '1');
     const optional = c.req.query('optional') === '1' || c.req.query('optional') === 'true';
 
     const file = await deps.files.getFile(auth, projectId, safePath);
@@ -132,7 +136,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       return c.json({ error: 'File not found', path: safePath }, 404);
     }
 
-    const version = formatVersionFromSha256(file.sha256);
+    const version = formatFileVersion(file.blobScope, file.sha256);
     if (!file.isText) {
       return c.json(
         {
@@ -147,11 +151,21 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
 
     // Always reauthorize and revalidate private sources. Identical content needs no second body.
     c.header('Cache-Control', 'private, no-cache');
-    c.header('Vary', 'Cookie, Authorization');
+    c.header('Vary', deps.files.textPatchWrites ? `Cookie, Authorization, ${TEXT_PATCH_BASE_HEADER}` : 'Cookie, Authorization');
     const ifNoneMatch = c.req.header('if-none-match');
     if (ifNoneMatch && ifNoneMatch.trim() === version) {
       c.header('ETag', version);
       return c.body(null, 304);
+    }
+
+    const baseVersion = c.req.header(TEXT_PATCH_BASE_HEADER);
+    if (deps.files.textPatchWrites && file.blobScope === 'patch' && baseVersion && /^"(?:sha256|patch):[a-f0-9]{64}"$/.test(baseVersion)) {
+      const patch = await deps.files.readParentPatch(auth.workspaceId, projectId, file.sha256, baseVersion);
+      if (patch) {
+        c.header('X-OpenMotion-Representation', 'text-patch');
+        c.header('ETag', version);
+        return c.json({ path: safePath, baseVersion, version, patch });
+      }
     }
 
     const content = await deps.files.readTextBlob(auth.workspaceId, file.blobScope, file.sha256);
@@ -188,7 +202,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
           error: 'precondition required',
           code: 'PRECONDITION_REQUIRED',
           path: safePath,
-          currentVersion: existing ? formatVersionFromSha256(existing.sha256) : null,
+          currentVersion: existing ? formatFileVersion(existing.blobScope, existing.sha256) : null,
           currentContent,
         },
         428,
@@ -239,20 +253,42 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     }
   });
 
+  app.post('/api/projects/:id/text-edits', bodyLimit({maxSize: 32 * 1024 * 1024}), async c => {
+    const auth = await getAuthContext(c, deps, {scope: 'projects:write', minRole: 'editor'});
+    if (!deps.files.textPatchWrites) return c.json({error: 'Text patch writes are disabled'}, 503);
+    const requestId = c.req.header('idempotency-key') ?? '';
+    const body = await c.req.json().catch(() => null);
+    try {
+      const commit = await deps.files.commitTextEdits(auth, c.req.param('id'), body, {
+        requestId, source: 'studio', writeToken: createWriteToken(c.req.header('x-hyperframes-write-token')),
+      });
+      return c.json({versions: commit.versionsByPath, changedPaths: commit.changedPaths,
+        versionId: commit.versionId, revision: commit.revision, writeToken: commit.writeToken});
+    } catch (error) {
+      if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {
+        const details = error.details ?? {};
+        return c.json({code: error.code, applied: false, path: details.path, currentVersion: details.currentVersion}, 409);
+      }
+      throw error;
+    }
+  });
+
   const handleEdit = async (c: Context<{ Variables: StudioVariables }>, path?: string) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:write', minRole: 'editor' });
     const body = await c.req.json().catch(() => null);
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
     if (!body || typeof body !== 'object' || Array.isArray(body) ||
         (path && (body.kind === 'batch' || (body.compositionPath !== undefined && body.compositionPath !== path))) ||
-        (!path && (!body.versions || typeof body.versions !== 'object' || Array.isArray(body.versions)))) {
+        (!path && (!body.versions || typeof body.versions !== 'object' || Array.isArray(body.versions) ||
+          (body.undoGroup !== undefined && !isUuid(body.undoGroup))))) {
       return c.json({ error: 'Invalid editing command or base versions' }, 400);
     }
     const edit = path ? { ...body, compositionPath: path } : body.edit;
     const versions = path ? { [path]: c.req.header('if-match') ?? (c.req.header('if-none-match') === '*' ? null : '') } : body.versions;
     try {
       const commit = await commitProjectEdit(deps.files, auth, c.req.param('id')!, edit,
-        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window') });
+        c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window'),
+          undoGroup: path ? undefined : body.undoGroup });
       return c.json({ ...(path && { version: commit.versionsByPath[path] ?? versions[path] }),
         versions: { ...versions, ...commit.versionsByPath }, changedPaths: commit.changedPaths, rebased: commit.commandResult?.rebased === true,
         revision: commit.revision, writeToken: commit.writeToken });
@@ -513,7 +549,7 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
         ok: true,
         sourcePath,
         path: destination,
-        version: formatVersionFromSha256(source.sha256),
+        version: formatFileVersion(source.blobScope, source.sha256),
         revision: committed.revision,
         writeToken: committed.writeToken,
       },

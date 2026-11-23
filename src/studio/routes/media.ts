@@ -28,7 +28,7 @@ import {
   type DisklessStudioDeps,
   type StudioVariables,
 } from '../context.ts';
-import { PRESIGNED_REDIRECT_HEADERS, formatVersionFromSha256 } from '../etag.ts';
+import { PRESIGNED_REDIRECT_HEADERS, formatFileVersion } from '../etag.ts';
 import { loadProjectOrThrow, normalizeSafeProjectPath } from '../../services/project-files-service.ts';
 
 function isProbeableMediaAsset(mimeType: string | null | undefined, filePath: string): boolean {
@@ -67,6 +67,19 @@ function parseIntRange(raw: string | undefined, min: number, max: number, fallba
 
 export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variables: StudioVariables }> {
   const app = new Hono<{ Variables: StudioVariables }>();
+  // Media jobs derive keys from a physical content digest.
+  async function resolveMediaFile(workspaceId: string, file: Awaited<ReturnType<typeof deps.files.getFile>>) {
+    if (!file) return null;
+    if (file.blobScope !== 'patch') return { ...file, blobScope: file.blobScope };
+    if (!isProbeableMediaAsset(file.mimeType, file.path)) return null;
+    if (!deps.storage.ensureTextCheckpoint) throw new CloudError('STORAGE_ERROR', 'Text revision store unavailable.', { status: 503 });
+    const sha256 = await deps.storage.ensureTextCheckpoint(workspaceId, file.sha256);
+    return { ...file, sha256, blobScope: 'workspace' as const };
+  }
+
+  async function getMediaFile(...args: Parameters<typeof deps.files.getFile>) {
+    return resolveMediaFile(args[0].workspaceId, await deps.files.getFile(...args));
+  }
 
   // GET /api/projects/:id/media/metadata?path=... — Serve cached ffprobe/Sharp metadata from PG (zero ffprobe on web pod).
   app.get('/api/projects/:id/media/metadata', async (c) => {
@@ -80,11 +93,29 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       });
     }
     const safePath = normalizeSafeProjectPath(rawPath);
-    const file = await deps.files.getFile(auth, projectId, safePath);
-    if (!file) {
-      return c.json({ error: 'Media file not found', path: safePath }, 404);
+    const source = await deps.files.getFile(auth, projectId, safePath);
+    if (!source) return c.json({ error: 'Media file not found', path: safePath }, 404);
+    if (!source.metadata && !isProbeableMediaAsset(source.mimeType, source.path)) {
+      return c.json({
+        path: source.path,
+        sha256: source.blobScope === 'patch' ? null : source.sha256,
+        version: formatFileVersion(source.blobScope, source.sha256),
+        mimeType: source.mimeType,
+        sizeBytes: source.sizeBytes,
+        pending: false,
+        metadata: null,
+        width: null,
+        height: null,
+        duration: null,
+        durationSec: null,
+        fps: null,
+        codec: null,
+        hasAudio: null,
+        hasVideo: null,
+      });
     }
 
+    const file = (await resolveMediaFile(auth.workspaceId, source))!;
     if (file.metadata) {
       return c.json({
         path: file.path,
@@ -101,25 +132,6 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
         codec: file.metadata.codec ?? null,
         hasAudio: file.metadata.hasAudio ?? null,
         hasVideo: file.metadata.hasVideo ?? null,
-      });
-    }
-
-    if (!isProbeableMediaAsset(file.mimeType, file.path)) {
-      return c.json({
-        path: file.path,
-        sha256: file.sha256,
-        mimeType: file.mimeType,
-        sizeBytes: file.sizeBytes,
-        pending: false,
-        metadata: null,
-        width: null,
-        height: null,
-        duration: null,
-        durationSec: null,
-        fps: null,
-        codec: null,
-        hasAudio: null,
-        hasVideo: null,
       });
     }
 
@@ -162,13 +174,13 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const projectId = c.req.param('id') ?? '';
     const rawPath = extractWildcardPath(c.req.url, marker);
     const safePath = normalizeSafeProjectPath(rawPath);
-    const file = await deps.files.getFile(auth, projectId, safePath);
+    const file = await getMediaFile(auth, projectId, safePath);
     if (!file) return c.json({ error: 'Media file not found', path: safePath }, 404);
 
     if (file.metadata?.hasAudio === false) {
       const durationSec = typeof file.metadata.durationSec === 'number' ? file.metadata.durationSec : 0;
       c.header('Cache-Control', 'private, max-age=3600');
-      c.header('ETag', formatVersionFromSha256(file.sha256));
+      c.header('ETag', formatFileVersion(file.blobScope, file.sha256));
       return c.json(
         {
           peaks: [],
@@ -193,7 +205,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       const buf = await deps.storage.getObjectBuffer(derivedKey);
       c.header('Content-Type', 'application/json; charset=utf-8');
       c.header('Cache-Control', 'private, max-age=3600');
-      c.header('ETag', formatVersionFromSha256(file.sha256));
+      c.header('ETag', formatFileVersion(file.blobScope, file.sha256));
       return c.body(buf.toString('utf8'), 200);
     }
 
@@ -225,7 +237,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const projectId = c.req.param('id') ?? '';
     const rawPath = extractWildcardPath(c.req.url, '/sprite/');
     const safePath = normalizeSafeProjectPath(rawPath);
-    const file = await deps.files.getFile(auth, projectId, safePath);
+    const file = await getMediaFile(auth, projectId, safePath);
     if (!file) return c.json({ error: 'Media file not found', path: safePath }, 404);
 
     if (file.metadata?.sprite?.status === 'failed') {
@@ -255,7 +267,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
         })),
       };
       c.header('Cache-Control', 'private, max-age=3600');
-      c.header('ETag', formatVersionFromSha256(file.sha256));
+      c.header('ETag', formatFileVersion(file.blobScope, file.sha256));
       return c.json(hydratedManifest, 200);
     }
 
@@ -296,7 +308,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const marker = `/sprite-sheet/${sheetIndexRaw}/`;
     const rawPath = extractWildcardPath(c.req.url, marker);
     const safePath = normalizeSafeProjectPath(rawPath);
-    const file = await deps.files.getFile(auth, projectId, safePath);
+    const file = await getMediaFile(auth, projectId, safePath);
     if (!file) {
       return c.req.method === 'HEAD' ? c.body(null, 404) : c.json({ error: 'Media file not found', path: safePath }, 404);
     }
@@ -338,7 +350,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
     const projectId = c.req.param('id');
     const rawPath = extractWildcardPath(c.req.url, '/image-thumbnail/');
     const safePath = normalizeSafeProjectPath(rawPath);
-    const file = await deps.files.getFile(auth, projectId, safePath);
+    const file = await getMediaFile(auth, projectId, safePath);
     if (!file) {
       return c.req.method === 'HEAD'
         ? c.body(null, 404)
@@ -485,7 +497,7 @@ export function createStudioMediaRoutes(deps: DisklessStudioDeps): Hono<{ Variab
         applied: false,
       });
     }
-    const file = await deps.files.getFile(auth, projectId, sourcePath);
+    const file = await getMediaFile(auth, projectId, sourcePath);
     if (!file) return c.json({ error: 'Audio source file not found', path: sourcePath }, 404);
 
     const targetPath = normalizeSafeProjectPath(

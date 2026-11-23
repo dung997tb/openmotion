@@ -76,11 +76,13 @@ export function useFileManager({
   projectIdRef.current = projectId;
 
   const pendingSource = useRef<EditorSaveHandle["getPendingCandidate"]>(null);
-  const onSavedContent = useCallback((pid: string, path: string, content: string) => {
+  const acknowledgeSource = useRef<EditorSaveHandle["acknowledgeSource"]>(null);
+  const onSavedContent = useCallback((pid: string, path: string, content: string, submitted = content) => {
+    acknowledgeSource.current?.(pid, path, submitted, content);
     const draft = pendingSource.current?.();
-    if (draft?.path === path && draft.content !== content) return;
+    if (draft?.projectId === pid && draft.path === path && draft.content !== submitted) return;
     if (projectIdRef.current === pid && editingPathRef.current === path) {
-      openFileRef.current = { path, content };
+      openFileRef.current = { path, content, ...(submitted !== content && { submitted }) };
       setEditingFile(openFileRef.current);
     }
   }, []);
@@ -140,8 +142,9 @@ export function useFileManager({
     setRefreshKey,
     showToast,
   });
-  const { saveRafRef, handleContentChange, getPendingCandidate } = editorSave;
+  const { handleContentChange, getPendingCandidate } = editorSave;
   pendingSource.current = getPendingCandidate;
+  acknowledgeSource.current = editorSave.acknowledgeSource;
   const sourceRefreshRef = useRef(0);
   const refreshOpenSource = useCallback((changedPath: string, read?: RemoteFileRead) => {
     const open = openFileRef.current;
@@ -191,28 +194,21 @@ export function useFileManager({
       if (!pid) return;
       revealAbortRef.current?.abort();
       revealAbortRef.current = null;
-      revealRequestIdRef.current++;
-      // Skip fetching binary content for media files — just set the path for preview
-      if (isMediaFile(path)) {
-        setEditingFile({ path, content: null });
-        return;
-      }
-      studioApiFetch(`/api/projects/${encodeURIComponent(pid)}/files/${encodeURIComponent(path)}`)
-        .then((r) => {
-          if (!r.ok) throw new Error(`Failed to load ${path} (${r.status})`);
-          return r.json();
-        })
-        .then((data: { content?: string; version?: string }) => {
-          if (data.content != null) {
-            fileVersions.set(path, data.version ?? null);
-            setEditingFile({ path, content: data.content });
-          }
-        })
-        .catch((err: unknown) => {
+      const requestId = ++revealRequestIdRef.current;
+      setEditingFile({ path, content: null });
+      if (isMediaFile(path)) return;
+      void readProjectFile(path).then(content => {
+        if (projectIdRef.current === pid && requestId === revealRequestIdRef.current) {
+          setEditingFile({ path, content });
+        }
+      }).catch((err: unknown) => {
+        if (projectIdRef.current === pid && requestId === revealRequestIdRef.current) {
+          setEditingFile(null);
           showToast(err instanceof Error ? err.message : `Failed to load ${path}`, "error");
-        });
+        }
+      });
     },
-    [fileVersions, showToast],
+    [readProjectFile, showToast],
   );
 
   // ── Click-to-source ──
@@ -766,7 +762,6 @@ export function useFileManager({
     // Refs
     editingPathRef,
     projectIdRef,
-    saveRafRef,
     flushPendingSourceSave: editorSave.flushPendingSave,
     discardPendingSourceSave: editorSave.discardPendingSave,
     getPendingSourceCandidate: editorSave.getPendingCandidate,

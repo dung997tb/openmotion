@@ -3,12 +3,13 @@ import { it } from "node:test";
 import { runInNewContext } from "node:vm";
 import { parseHTMLContent } from "@hyperframes/core/compiler/html-document";
 import { PREVIEW_INLINE_TEXT } from "../../src/studio/engine/preview-inline-text.ts";
+import { PREVIEW_SOURCE_IDENTITY } from "../../src/studio/engine/preview-bridge.ts";
 
 function pick(html: string, variables?: Record<string, unknown>, scoped?: Record<string, unknown>) {
   const document = parseHTMLContent(html);
   const el = document.getElementById("text")!;
   document.elementFromPoint = () => el;
-  return runInNewContext(PREVIEW_INLINE_TEXT + ';editInlineText({phase:"pick",editId:"1",x:0.5,y:0.5})', {
+  return runInNewContext(PREVIEW_SOURCE_IDENTITY + PREVIEW_INLINE_TEXT + ';editInlineText({phase:"pick",editId:"1",x:0.5,y:0.5})', {
     document, window: { __hfVariables: variables, __hfVariablesByComp: scoped },
     HTMLElement: document.defaultView!.HTMLElement, innerWidth: 100, innerHeight: 100,
     sourceVersions: { "index.html": "sha" },

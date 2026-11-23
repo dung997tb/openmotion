@@ -37,9 +37,17 @@ export function previewBuildBusyScript(projectId: string, retryAfterSeconds: num
  * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
  * same-origin previews keep their existing DOM/runtime fast path.
  */
+export const PREVIEW_SOURCE_IDENTITY = `
+  function sourceIdentity(raw) {
+    if (!raw) return {};
+    return raw.startsWith('"patch:') ? {fileVersion:raw} : {sha256:raw, fileVersion:'"sha256:'+raw+'"'};
+  }
+`;
+
 export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   var settings=JSON.parse(document.currentScript.getAttribute('data-openmotion-preview'));
   var projectId=settings.projectId, compositionPath=settings.compositionPath, sourceVersions=settings.sourceVersions;`, `
+  ${PREVIEW_SOURCE_IDENTITY}
   var pickMode=false, picked=null;
   function player(){ return window.__player || null; }
   ${PREVIEW_FIRST_FRAME}

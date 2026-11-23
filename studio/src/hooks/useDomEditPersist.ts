@@ -1,7 +1,8 @@
+import { isolatedSourceVersion } from "../components/editor/isolatedSourceTarget";
+import { observedSourceVersion } from "../utils/confirmedTextSources";
 import { isolatedEditVersion } from "../utils/isolatedEditVersions";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { submitStudioCommands } from "../utils/projectEditBatch";
-import { studioFileContentVersion } from "../utils/studioFileVersion";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -153,10 +154,10 @@ export function useDomEditPersist({
         coalesceKey: options?.coalesceKey,
         coalesceMs: options?.coalesceMs,
       };
-      const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs) : undefined;
+      const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs, options?.continuous) : undefined;
       if (cloudCommand && selection.isolatedTarget && !options?.prepareContent && !options?.validateContent) {
         const command = { ...cloudCommand, compositionPath: targetPath };
-        const versions = { [targetPath]: '"sha256:' + selection.isolatedTarget.sha256 + '"' };
+        const versions = { [targetPath]: isolatedSourceVersion(selection.isolatedTarget) };
         const result = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
           if (projectIdRef.current !== expectedProjectId) throw new Error("Active project changed before the edit could be saved");
           if (options?.shouldSave && !options.shouldSave()) return null;
@@ -184,8 +185,8 @@ export function useDomEditPersist({
         let patchData: PatchElementResponse;
         if (cloudCommand) {
           if (selection.isolatedTarget) {
-            const shown = isolatedEditVersion(pid, targetPath, '"sha256:' + selection.isolatedTarget.sha256 + '"');
-            if (shown !== await studioFileContentVersion(originalContent)) throw new Error("The selected frame is out of date.");
+            const shown = isolatedEditVersion(pid, targetPath, isolatedSourceVersion(selection.isolatedTarget));
+            if (shown !== await observedSourceVersion(pid, targetPath, originalContent)) throw new Error("The selected frame is out of date.");
           }
           const {applyProjectEdit} = await import("../../../packages/edit-core/commands");
           const {content} = await applyProjectEdit(originalContent, {...cloudCommand,compositionPath:targetPath},new Map());
@@ -194,7 +195,7 @@ export function useDomEditPersist({
             const rebased = await writeEdit(targetPath, content, originalContent, cloudCommand);
             if (rebased) return { rebased };
           }
-          patchData = {matched: true, changed, content, path: targetPath, version: await studioFileContentVersion(content)};
+          patchData = {matched: true, changed, content, path: targetPath, version: await observedSourceVersion(pid, targetPath, content)};
         } else if (
           selection.element?.namespaceURI === "http://www.w3.org/2000/svg" &&
           selection.hfId && !font &&
@@ -212,7 +213,7 @@ export function useDomEditPersist({
           patchData = { matched, changed, content, path: targetPath };
         } else {
           patchData = await postPatchElement(pid, targetPath, patchBody, showToast,
-            selection.isolatedTarget && '"sha256:' + selection.isolatedTarget.sha256 + '"', writeHistory);
+            selection.isolatedTarget && isolatedSourceVersion(selection.isolatedTarget), writeHistory);
         }
         if (!patchData.changed) return { patchData, originalContent, patchedContent: null, finalContent: null };
 

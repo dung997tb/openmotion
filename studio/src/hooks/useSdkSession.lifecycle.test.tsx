@@ -14,6 +14,9 @@ import type { Composition } from "@hyperframes/sdk";
 import { useSdkSession, type SdkSessionHandle } from "./useSdkSession";
 import { usePlayerStore } from "../player/store/playerStore";
 import { notifyExternalFileReload } from "./externalFileReloadBus";
+import { createRemoteFileReader } from "./remoteFileReads";
+import { confirmedSource, forgetSource } from "../utils/confirmedTextSources";
+import { knownCompositionSource } from "../player/lib/compositionPosterSource";
 
 vi.mock("../utils/studioTelemetry", () => ({ trackStudioEvent: vi.fn() }));
 
@@ -192,6 +195,43 @@ describe("useSdkSession ownership", () => {
     await flushAsyncEffects();
     expect(openComposition).toHaveBeenCalledTimes(2);
     act(() => root.unmount());
+  });
+
+  it("uses the same SSE delta read for the SDK, source view and poster, then revalidates its new ETag", async () => {
+    const project = "sdk-peer";
+    const path = "index.html";
+    const base = '"sha256:' + "1".repeat(64) + '"';
+    const next = '"patch:' + "2".repeat(64) + '"';
+    const headers = (version: string) => ({ ETag: version, "X-OpenMotion-Text-Edits": "1" });
+    const fetch = vi.fn<Readonly<typeof globalThis>["fetch"]>()
+      .mockResolvedValueOnce(Response.json({ content: "old" }, { headers: headers(base) }))
+      .mockResolvedValueOnce(Response.json({ baseVersion: base, version: next, patch: [[0, 3, "new"]] },
+        { headers: { ...headers(next), "X-OpenMotion-Representation": "text-patch" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 304, headers: headers(next) }));
+    vi.stubGlobal("fetch", fetch);
+    openComposition.mockImplementation(async () => fakeSession());
+    usePlayerStore.setState({ timelineProjectId: project, previewBooted: true });
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<Probe projectId={project} />));
+      await flushAsyncEffects();
+      const shared = createRemoteFileReader()(project, { path, fileVersions: { [path]: next } });
+      const peerRead = shared(project, path);
+      await act(async () => notifyExternalFileReload(path, shared));
+      await flushAsyncEffects();
+      expect(await peerRead).toEqual({ content: "new", version: next, missing: false });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(new Headers(fetch.mock.calls[1]![1]?.headers).get("X-OpenMotion-Base-Version")).toBe(base);
+      expect(confirmedSource(project, path)).toEqual({ content: "new", version: next });
+      expect(knownCompositionSource(usePlayerStore.getState(), project, path)).toEqual({ content: "new", version: next });
+      await act(async () => notifyExternalFileReload(path));
+      await flushAsyncEffects();
+      expect(new Headers(fetch.mock.calls[2]![1]?.headers).get("If-None-Match")).toBe(next);
+      expect(openComposition.mock.calls.map(([content]) => content)).toEqual(["old", "new", "new"]);
+    } finally {
+      act(() => root.unmount());
+      forgetSource(project, path);
+    }
   });
 });
 

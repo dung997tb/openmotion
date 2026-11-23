@@ -30,7 +30,7 @@ export const PREVIEW_INLINE_TEXT = `
     const sha256 = sourceVersions[sourceFile];
     const htmlRoot = owner === document.documentElement;
     if (!sha256 || (!htmlRoot && !hfId && !elementId)) return null;
-    return { key, attribute, sourceFile, sha256, elementId, hfId, htmlRoot };
+    return { key, attribute, sourceFile, ...sourceIdentity(sha256), elementId, hfId, htmlRoot };
   }
   function editInlineText(m) {
     if (m.phase === 'pick') {
@@ -52,7 +52,7 @@ export const PREVIEW_INLINE_TEXT = `
       // across nested nodes cannot safely represent that single value.
       if (key && (!binding || el.childElementCount)) return null;
       inlineText = { id: m.editId, el, x, y, before: el.innerHTML, editable: el.getAttribute('contenteditable'), binding };
-      return { sourceFile, elementId, hfId, sha256, ...(binding && {binding}) };
+      return { sourceFile, elementId, hfId, ...sourceIdentity(sha256), ...(binding && {binding}) };
     }
     const edit = inlineText;
     if (!edit || m.editId !== edit.id) return;

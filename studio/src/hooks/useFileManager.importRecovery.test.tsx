@@ -15,7 +15,7 @@ vi.mock('../telemetry/ioRecovery', () => ({ beginStudioIo: (action: string, prop
 } }));
 vi.mock('../components/feedback/projectProvenance', () => ({ captureProjectProvenance: vi.fn() }));
 vi.mock('../utils/studioTelemetry', () => ({ trackStudioEvent: vi.fn() }));
-vi.mock('./useEditorSave', () => ({ useEditorSave: () => ({ saveRafRef: { current: null }, handleContentChange: vi.fn() }) }));
+vi.mock('./useEditorSave', () => ({ useEditorSave: () => ({ handleContentChange: vi.fn() }) }));
 vi.mock('../components/sidebar/AudioRow', () => ({ AudioRow: ({ asset }: { asset: string }) => <div data-asset>{asset}</div> }));
 vi.mock('../components/sidebar/AssetCard', () => ({
   AssetCard: ({ asset }: { asset: string }) => <div data-asset>{asset}</div>,

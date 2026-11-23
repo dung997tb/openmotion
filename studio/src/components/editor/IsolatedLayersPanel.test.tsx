@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import { PREVIEW_SOURCE_IDENTITY } from "../../../../src/studio/engine/preview-bridge";
 import { PREVIEW_LAYERS } from "../../../../src/studio/engine/preview-layers";
 import { IsolatedLayersPanel } from "./IsolatedLayersPanel";
 import { PREVIEW_BRIDGE_SOURCE } from "../../player/lib/previewAdapter";
@@ -22,7 +23,7 @@ afterEach(() => {
 it("enumerates the authored hierarchy, distinguishes repeated IDs, and rejects detached and expired handles", () => {
   document.body.innerHTML = '<main data-composition-id="main"><section data-hf-group="titles" data-hf-id="group"><span class="animated-letter">runtime-only</span><div><p id="dupe">First</p></div><p id="dupe">Second</p></section><script id="runtime"></script></main>';
   const post = vi.fn();
-  const bridge = new Function("describe", "post", "let picked;" + PREVIEW_LAYERS +
+  const bridge = new Function("describe", "post", "let picked;" + PREVIEW_SOURCE_IDENTITY + PREVIEW_LAYERS +
     "\nreturn { tree: previewLayerTree, select: selectPreviewLayer };")(
     (el: Element) => ({ text: el.textContent }), post);
   bridge.tree({ subscription: "one", limit: 80 });

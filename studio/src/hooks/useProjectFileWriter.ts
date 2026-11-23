@@ -1,3 +1,6 @@
+import { readVersionedSource } from "../utils/readVersionedSource";
+import { confirmedSource, observeSourceRead } from "../utils/confirmedTextSources";
+import { tryStudioTextEdit, tryStudioCommandPatches, resolveEditSource } from "../utils/studioTextEdits";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import { acceptFileEditReceipt, type RebasedFileEdit } from "../utils/rebasedFileEdit";
@@ -14,16 +17,18 @@ import { trackStudioProjectSave } from "../utils/studioSaveState";
 
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
-  onSavedContent?: (projectId: string, path: string, content: string) => void;
+  onSavedContent?: (projectId: string, path: string, content: string, submitted?: string) => void;
 }
 
 export async function readProjectFileContentWithVersion(projectId: string | null, path: string, query: string) {
   if (!projectId) throw new Error("No active project");
-  const response = await studioApiFetch(
+  const response = await readVersionedSource(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(path)}${query}`,
+    confirmedSource(projectId, path),
   );
   if (!response.ok) throw new Error(`Failed to read ${path}`);
   const data = (await response.json()) as { content?: string; version?: string; missing?: boolean };
+  observeSourceRead(projectId, path, response, data);
   return { content: data.content, version: data.version ?? response.headers.get("etag"), missing: data.missing };
 }
 
@@ -68,9 +73,25 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
     function write(path: string, content: string, expectedContent: string | undefined, command: ProjectEditCommand | undefined, history?: StudioWriteHistory): Promise<void | RebasedFileEdit>;
     async function write(path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory): Promise<void | RebasedFileEdit> {
       if (!projectId) throw new Error("No active project");
+      const source = expectedContent !== undefined && fileVersions.get(path) !== null
+        ? await resolveEditSource(projectId, path, current => current.content === expectedContent, content)
+        : confirmedSource(projectId, path);
+      if (source && (expectedContent === undefined ? fileVersions.get(path) === source.version : expectedContent === source.content)) {
+        const saved = command
+          ? await tryStudioCommandPatches(projectId, [{ ...command, compositionPath: path }], { [path]: source.version }, history, () => content)
+          : await tryStudioTextEdit(projectId, [{ path, before: source.content, after: content }], history);
+        if (saved) {
+          fileVersions.set(path, saved.versions[path]);
+          if (saved.divergent.length) return saved.divergent[0];
+          const accepted = confirmedSource(projectId, path)?.content ?? content;
+          if (accepted === content) onSavedContent?.(projectId, path, content);
+          else onSavedContent?.(projectId, path, accepted, content);
+          return;
+        }
+      }
       return trackStudioProjectSave(projectId, path, async () => {
         const writeProjectId = projectId;
-        let expectedVersion = await studioExpectedFileVersion(fileVersions, path, expectedContent);
+        let expectedVersion = source && source.content === expectedContent ? source.version : await studioExpectedFileVersion(fileVersions, path, expectedContent);
         if (expectedVersion === undefined) {
           const preflight = await studioApiFetch(
             `/api/projects/${encodeURIComponent(writeProjectId)}/files/${encodeURIComponent(path)}`,

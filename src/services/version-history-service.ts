@@ -11,6 +11,7 @@ import { idempotencyReceipts } from '../db/schema/jobs.ts';
 import {
   projectFiles,
   projectHistoryEntries,
+  projectTextRevisions,
   projectVersionFiles,
   projectVersions,
   type HistoryActorKind,
@@ -20,7 +21,7 @@ import { projects } from '../db/schema/projects.ts';
 import { projectChannel } from '../infra/redis.ts';
 import { workspaceBlobKey } from '../infra/storage.ts';
 import { computeProjectRevision, isSha256Hex, isTextProjectPath, isUuid } from '../../shared/project-validation.ts';
-import { computePreviewImpact, createWriteToken, formatFileVersion, formatVersionFromSha256 } from '../studio/etag.ts';
+import { computePreviewImpact, createWriteToken, formatFileVersion } from '../studio/etag.ts';
 import { htmlFileVersions } from './event-file-versions.ts';
 import {
   DEFAULT_HISTORY_COALESCE_WINDOW_MS,
@@ -837,7 +838,7 @@ export class VersionHistoryService {
               sha256: f.sha256.trim(),
               sizeBytes: Number(f.sizeBytes),
               mimeType: f.mimeType,
-              isText: isTextProjectPath(f.path),
+              isText: f.blobScope === 'patch' || isTextProjectPath(f.path),
               updatedAt: now,
             }),
           ),
@@ -1091,7 +1092,7 @@ export class VersionHistoryService {
     versionId: string;
     revision: string;
     files: Record<string, string>;
-    file?: { path: string; content: string; version: string; sha256: string } | null;
+    file?: { path: string; content: string; version: string; sha256: string; blobId: string } | null;
   }> {
     const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
@@ -1118,29 +1119,27 @@ export class VersionHistoryService {
       files[row.path] = row.sha256.trim();
     }
 
-    let singleFile: { path: string; content: string; version: string; sha256: string } | null | undefined;
+    let singleFile: { path: string; content: string; version: string; sha256: string; blobId: string } | null | undefined;
     if (filePath !== undefined) {
       const safePath = normalizeSafeProjectPath(filePath);
       const match = rows.find((r) => r.path === safePath);
       if (!match) {
         singleFile = null;
       } else {
-        const sha = match.sha256.trim();
-        let content: string | null = null;
-        if (this.hotTextCache) {
-          content = await this.hotTextCache.getText(sha).catch(() => null);
+        const blobId = match.sha256.trim();
+        let sha = blobId;
+        if (match.blobScope === 'patch') {
+          // The historical blob endpoint also accepts the content digest returned by peek.
+          if (!this.storage.ensureTextCheckpoint) throw new CloudError('STORAGE_ERROR', 'Text revision store unavailable.', { status: 503 });
+          sha = await this.storage.ensureTextCheckpoint(ctx.workspaceId, blobId);
         }
-        if (content === null) {
-          const key = resolveBlobStorageKey(ctx.workspaceId, match.blobScope, sha);
-          const buf = await this.storage.getObjectBuffer(key);
+        let content = await this.hotTextCache?.getText(sha).catch(() => null);
+        if (content == null) {
+          const scope = match.blobScope === 'patch' ? 'workspace' : match.blobScope;
+          const buf = await this.storage.getObjectBuffer(resolveBlobStorageKey(ctx.workspaceId, scope, sha));
           content = buf.toString('utf8');
         }
-        singleFile = {
-          path: match.path,
-          content,
-          sha256: sha,
-          version: formatVersionFromSha256(sha),
-        };
+        singleFile = { path: match.path, content, sha256: sha, blobId, version: formatFileVersion(match.blobScope, blobId) };
       }
     }
 
@@ -1154,7 +1153,7 @@ export class VersionHistoryService {
   }
 
   /**
-   * Read an immutable historical blob by SHA-256 ONLY if referenced by this project's live files
+   * Read an immutable file reference or content digest only if referenced by this project's live files
    * or version history (enforcing strict tenant + project isolation).
    */
   async readHistoryBlob(
@@ -1165,7 +1164,7 @@ export class VersionHistoryService {
     await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const cleanSha = sha256.trim().toLowerCase();
     if (!isSha256Hex(cleanSha)) {
-      throw new CloudError('INVALID_ARGUMENT', 'History blob hash must be a 64-char hex SHA-256 digest.', {
+      throw new CloudError('INVALID_ARGUMENT', 'History blob identifier must be 64 hexadecimal characters.', {
         status: 400,
         applied: false,
       });
@@ -1183,7 +1182,7 @@ export class VersionHistoryService {
       )
       .limit(1);
 
-    const ref =
+    let ref: { blobScope: BlobScope; mimeType: string } | undefined =
       versionRefs[0] ??
       (
         await this.db
@@ -1198,6 +1197,20 @@ export class VersionHistoryService {
           )
           .limit(1)
       )[0];
+
+    if (!ref && this.storage.ensureTextCheckpoint) {
+      const [alias] = await this.db.select({ mimeType: projectVersionFiles.mimeType }).from(projectTextRevisions)
+        .innerJoin(projectVersionFiles, and(
+          eq(projectVersionFiles.projectId, projectTextRevisions.projectId),
+          eq(projectVersionFiles.blobScope, 'patch'),
+          eq(projectVersionFiles.sha256, projectTextRevisions.id),
+        )).where(and(
+          eq(projectTextRevisions.workspaceId, ctx.workspaceId),
+          eq(projectTextRevisions.projectId, projectId),
+          eq(projectTextRevisions.checkpointSha, cleanSha),
+        )).limit(1);
+      if (alias) ref = { blobScope: 'workspace', mimeType: alias.mimeType };
+    }
 
     if (!ref) {
       throw new CloudError('NOT_FOUND', `History blob ${cleanSha} was not found in this project.`, {
@@ -1399,7 +1412,7 @@ export class VersionHistoryService {
             sha256: f.sha256.trim(),
             sizeBytes: Number(f.sizeBytes),
             mimeType: f.mimeType,
-            isText: isTextProjectPath(f.path),
+            isText: f.blobScope === 'patch' || isTextProjectPath(f.path),
             updatedAt: now,
           }),
         ),
