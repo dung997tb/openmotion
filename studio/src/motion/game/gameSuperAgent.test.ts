@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GameCard } from '../../../../shared/game-contract';
-import { isPlayableAd } from '../../super-agent/ModeComposerControls';
+import { canChoosePlayableAd, isPlayableAd } from '../../super-agent/ModeComposerControls';
 import { buildDirectGamePrompt, GAME_STUDIO_QUICK_IDEAS, toGameArtifact } from './gameSuperAgent';
 
 const game = (patch: Partial<GameCard> = {}): GameCard => ({
@@ -15,6 +15,14 @@ describe('playable ads in Super Agent', () => {
     expect(isPlayableAd({ gameOrientation: 'landscape', gameMultiplayer: false, gamePlayableAd: true })).toBe(false);
     expect(isPlayableAd({ gameOrientation: 'portrait', gameMultiplayer: true, gamePlayableAd: true })).toBe(false);
     expect(isPlayableAd({ gameOrientation: 'portrait', gameMultiplayer: false, gamePlayableAd: false })).toBe(false);
+  });
+
+  it('does not offer the ad option while a local template is selected, because remix copies it unchanged', () => {
+    const base = { gameOrientation: 'portrait' as const, gameMultiplayer: false, gamePlayableAd: true };
+    expect(canChoosePlayableAd({ gameOrientation: 'portrait', gameTemplate: game({ source: 'template' }) })).toBe(false);
+    expect(isPlayableAd({ ...base, gameTemplate: game({ source: 'template' }) })).toBe(false);
+    const community = game({ source: 'community', external: { url: 'https://x.test', author: 'a', postUrl: 'https://x.test/p', model: 'm', embeddable: true } });
+    expect(isPlayableAd({ ...base, gameTemplate: community })).toBe(true);
   });
 
   it('tells the Super Agent turn to follow the playable-ad recipe only for ad drafts', () => {

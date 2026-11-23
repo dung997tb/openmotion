@@ -78,9 +78,14 @@ export type ModeComposerOptions = {
   codingFocus: 'general' | 'debug' | 'refactor' | 'test' | 'review';
 };
 
+/** A local template is copied as it is (remix takes only its id), so the ad option cannot apply to it. */
+export function canChoosePlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gameTemplate'>): boolean {
+  return options.gameOrientation === 'portrait' && !(options.gameTemplate && !options.gameTemplate.external);
+}
+
 /** A portrait, single-player game brief with the ad option on is built as a playable ad. */
-export function isPlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gameMultiplayer' | 'gamePlayableAd'>): boolean {
-  return options.gameOrientation === 'portrait' && options.gamePlayableAd && !options.gameMultiplayer;
+export function isPlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gameMultiplayer' | 'gamePlayableAd'> & Partial<Pick<ModeComposerOptions, 'gameTemplate'>>): boolean {
+  return canChoosePlayableAd({ gameOrientation: options.gameOrientation, gameTemplate: options.gameTemplate ?? null }) && options.gamePlayableAd && !options.gameMultiplayer;
 }
 
 export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
@@ -1046,8 +1051,8 @@ export function ModeComposerTopBar({
                   label: 'Multiplayer',
                   description: 'Shared room link so friends can join live',
                 },
-                // A playable ad is a portrait single-player build, so it is offered only for portrait.
-                ...(options.gameOrientation === 'portrait' ? [{
+                // A playable ad is a portrait single-player build, offered only for portrait briefs that are not a local template copy.
+                ...(canChoosePlayableAd(options) ? [{
                   multiplayer: false,
                   playableAd: true,
                   icon: 'cursor-line',
