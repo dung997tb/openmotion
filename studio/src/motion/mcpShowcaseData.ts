@@ -486,18 +486,18 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
 export const mcpAdvantagePillars: readonly McpAdvantagePillar[] = [
   {
     num: '01',
-    titleKey: 'Deliver editable projects, not throwaway clips',
-    bodyKey: 'Stop re-rolling an entire video just to change one line. Every result saves as a multi-track Studio project so voiceover, captions and single shots stay editable.',
+    titleKey: 'Deliver an editable multi-track project',
+    bodyKey: 'Open the project in Studio to adjust individual shots, captions and voiceover. Reuse the same timeline for your next version.',
   },
   {
     num: '02',
-    titleKey: 'One pipeline from concept to final cut',
-    bodyKey: 'Images, video, alpha motion graphics, voiceover captions and MP4 rendering live in one connected workflow — just describe the outcome you want.',
+    titleKey: 'One workflow from brief to final cut',
+    bodyKey: 'Start with a brief in your Agent. Generate images, video and transparent motion graphics, add voiceover and captions, then render the final cut from the same project.',
   },
   {
     num: '03',
-    titleKey: 'Free to connect and refine; pay only for generation',
-    bodyKey: 'Connection checks, template browsing and local Studio edits cost nothing. Use your OpenDesign account or plug in your own BYOK provider keys.',
+    titleKey: 'Free setup and local editing',
+    bodyKey: 'Check the connection, browse templates and edit locally for free. Cloud generation costs depend on your model and usage. Use your OpenDesign account or your own API key.',
   },
 ];
 

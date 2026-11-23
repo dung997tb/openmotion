@@ -278,6 +278,22 @@ it('offers one MCP entitlement action that opens account settings', async () => 
   expect(page()).toMatchObject({ settings: 'account', provider: null });
 });
 
+it.each([
+  ['3D motion', 'three-js'],
+  ['Viral recreation', 'openmotion-talking-head-recreation'],
+  ['Talking-head & editing', 'openmotion-talking-head-recreation'],
+  ['E-commerce marketing', 'openmotion-splash-float-product'],
+  ['Creative styles', 'openmotion-design-styles'],
+])('opens the matching skill from the MCP footer entry %s', async (label, skill) => {
+  await mount();
+  await openMcp();
+  const footerButtons = container.querySelectorAll<HTMLButtonElement>('.om-mcp-site-footer button');
+  const link = [...footerButtons].find(item => item.textContent?.trim() === label);
+  expect(link).toBeDefined();
+  await act(async () => link!.click());
+  expect(page()).toMatchObject({ skills: true, skill });
+});
+
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
   const detail = 'dialog[aria-label="Template preview"]';
   await mount(); await openMcp(); await click('All 30+ templates');

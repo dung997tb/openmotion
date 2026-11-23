@@ -6,6 +6,7 @@ import { GITHUB_REPOSITORY } from './githubRepository';
 export function McpSiteFooter({
   community,
   onScrollTo,
+  onOpenSkill,
   onOpenLibrary,
   onOpenProviders,
   onCommunityClick,
@@ -14,6 +15,7 @@ export function McpSiteFooter({
 }: {
   community: { href: string; label: string };
   onScrollTo: (id: string) => void;
+  onOpenSkill: (skillId: string) => void;
   onOpenLibrary: (trigger?: HTMLElement) => void;
   onOpenProviders: () => void;
   onCommunityClick: () => void;
@@ -48,9 +50,9 @@ export function McpSiteFooter({
               <h4>{t('Create')}</h4>
               <ul>
                 <li><Button variant="plain" onClick={event => onOpenLibrary(event.currentTarget)}>{t('Template library')}</Button></li>
-                <li><Button variant="plain" onClick={() => onScrollTo('band-ecom')}>{t('Product & brand films')}</Button></li>
-                <li><Button variant="plain" onClick={() => onScrollTo('band-alpha')}>{t('Alpha motion & 3D')}</Button></li>
-                <li><Button variant="plain" onClick={() => onScrollTo('band-recreate')}>{t('Viral recreation')}</Button></li>
+                <li><Button variant="plain" onClick={() => onScrollTo('band-ecom')}>{t('Product launch films')}</Button></li>
+                <li><Button variant="plain" onClick={() => onOpenSkill('three-js')}>{t('3D motion')}</Button></li>
+                <li><Button variant="plain" onClick={() => onOpenSkill('openmotion-talking-head-recreation')}>{t('Viral recreation')}</Button></li>
                 <li><Button variant="plain" onClick={() => onScrollTo('gallery')}>{t('Explore more scene templates')}</Button></li>
               </ul>
             </div>
@@ -82,10 +84,10 @@ export function McpSiteFooter({
               <RemixIcon name="arrow-right-line" size={14} />
             </a>
             <div className="om-mcp-site-footer-skills-row">
-              <Button variant="plain" onClick={() => onScrollTo('band-recreate')}>{t('Talking-head & editing')}</Button>
-              <Button variant="plain" onClick={() => onScrollTo('band-ecom')}>{t('E-commerce marketing')}</Button>
-              <Button variant="plain" onClick={() => onScrollTo('band-alpha')}>{t('Brand & intros')}</Button>
-              <Button variant="plain" onClick={() => onScrollTo('gallery')}>{t('Creative styles')}</Button>
+              <Button variant="plain" onClick={() => onOpenSkill('openmotion-talking-head-recreation')}>{t('Talking-head & editing')}</Button>
+              <Button variant="plain" onClick={() => onOpenSkill('openmotion-splash-float-product')}>{t('E-commerce marketing')}</Button>
+              <Button variant="plain" onClick={() => onScrollTo('band-recreate')}>{t('Brand & intros')}</Button>
+              <Button variant="plain" onClick={() => onOpenSkill('openmotion-design-styles')}>{t('Creative styles')}</Button>
             </div>
           </div>
         </div>

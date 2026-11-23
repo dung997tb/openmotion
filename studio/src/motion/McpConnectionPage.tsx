@@ -124,6 +124,10 @@ export function McpConnectionPage({
     click(area, template ? 'open_detail' : 'open_library', template ? { template: template.id } : {});
     openLibraryRaw(trigger, template);
   };
+  const openSkill = (area: 'mcp_templates' | 'mcp_footer', skillId: string) => {
+    click(area, 'open_detail', { capability: skillId });
+    changeRoute({ settings: null, skills: true, skill: skillId, templates: false, template: null });
+  };
   const openCaseTarget = (target: McpCaseTarget, trigger?: HTMLElement) => {
     const area = 'mcp_templates';
     if (target.kind === 'template') {
@@ -136,8 +140,7 @@ export function McpConnectionPage({
       return;
     }
     if (target.kind === 'skill') {
-      click(area, 'open_detail', { capability: target.skillId });
-      changeRoute({ settings: null, skills: true, skill: target.skillId, templates: false, template: null });
+      openSkill(area, target.skillId);
       return;
     }
     click(area, 'open_detail', { capability: target.brandKitId });
@@ -582,6 +585,7 @@ export function McpConnectionPage({
         <McpSiteFooter
           community={community}
           onScrollTo={scrollTo}
+          onOpenSkill={skillId => openSkill('mcp_footer', skillId)}
           onOpenLibrary={openLibrary('mcp_footer')}
           onOpenProviders={openProviders('mcp_footer')}
           onCommunityClick={() => click('mcp_footer', 'community')}
