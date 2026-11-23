@@ -20,7 +20,8 @@ import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RouteSurfaceFallback } from '../motion/RouteSurfaceFallback';
-import { consumeSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
+import { consumeSuperAgentHandoff, queueSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
+import { readSuperAgentPromptLink, withoutSuperAgentPromptLink } from './superAgentPromptLink';
 import { bundledGames, communityGames, gameApi } from '../motion/game/gameCatalog';
 import { localizedGameTitle, toGameArtifact, toGameResourceAttachment } from '../motion/game/gameSuperAgent';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
@@ -726,6 +727,18 @@ export function SuperAgentWorkspace({
     }
   }, [active, attachments, selection.runtimeId, selection.engine, selection.model, permissionMode, applyChatSnapshot, onChatIdChange, showToast, t]);
 
+  // `/agent?prompt=…` (from an external Agent or a share page): queue it as a
+  // new-chat handoff, prefilled but not sent, and drop it from the address bar.
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return;
+    const link = readSuperAgentPromptLink(window.location.search);
+    if (!link) return;
+    window.history.replaceState(window.history.state, '', withoutSuperAgentPromptLink(window.location.href));
+    // A prompt link always starts a new chat: leave any routed conversation first
+    // so its in-flight load is cancelled and cannot reclaim the composer.
+    if (chatId) onChatIdChange(null, true);
+    queueSuperAgentHandoff(link);
+  }, [active, chatId, onChatIdChange]);
   useEffect(() => {
     applyPendingHandoff();
     return subscribeSuperAgentHandoff(applyPendingHandoff);
