@@ -15,6 +15,7 @@ import { promisify } from 'node:util';
 import { atomicJson, jsonFile } from './phase1-versions.ts';
 import { withProcessLock } from './shared/process-lock.ts';
 import { readProjectZip } from './shared/project-zip.ts';
+import { attachmentDisposition } from './shared/http-header.ts';
 import { zip } from './scripts/zip.mjs';
 import { browserExecutable } from './browser.ts';
 import { validateReviewAnnotation } from './shared/review-comments.ts';
@@ -1900,7 +1901,7 @@ export async function designHttp(
       const result = await service.exportProject(exportMatch[1], body ?? {});
       res.writeHead(200, {
         'Content-Type': result.mime,
-        'Content-Disposition': `attachment; filename="${result.filename.replace(/"/g, '')}"`,
+        'Content-Disposition': attachmentDisposition(result.filename),
         'Content-Length': result.data.length,
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',

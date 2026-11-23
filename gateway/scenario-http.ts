@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { jsonFile } from '../phase1-versions.ts';
+import { attachmentDisposition } from '../shared/http-header.ts';
 import type { WorkspaceStore } from '../workspace.ts';
 
 const BUNDLE_ROUTE_RE = /^\/api\/scenarios\/bundles\/([^/]+)\/file$/;
@@ -45,11 +46,11 @@ export async function scenarioHttp(
       path.join(bundlesDir, `${bundleId}.json`),
       { filename: 'OpenMotion-workflow.zip' },
     );
-    const asciiFallback = metadata.filename.replace(/[^\x20-\x7e]/g, '-').replace(/["\\]/g, '') || 'OpenMotion-workflow.zip';
+    const name = metadata.filename || 'OpenMotion-workflow.zip';
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Length': info.size,
-      'Content-Disposition': `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(metadata.filename)}`,
+      'Content-Disposition': attachmentDisposition(name),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-store',
     });

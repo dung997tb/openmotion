@@ -1,5 +1,6 @@
 import { renderFilenameStem } from './shared/render-name.ts';
 import { BoundedLruCache } from './shared/lifecycle.ts';
+import { attachmentDisposition } from './shared/http-header.ts';
 import { request } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -174,10 +175,7 @@ export async function serveEditorFile(url: URL, res: ServerResponse, req?: Incom
 
 /** Suggest a portable name without changing the immutable render's storage path. */
 export function renderDownloadDisposition(title: string | undefined, extension: string): string {
-  const stem = renderFilenameStem(title);
-  const encoded = encodeURIComponent(stem + extension).replace(/['()*]/g, char =>
-    '%' + char.charCodeAt(0).toString(16).toUpperCase());
-  return `attachment; filename="OpenMotion${extension}"; filename*=UTF-8''${encoded}`;
+  return attachmentDisposition(renderFilenameStem(title) + extension, `OpenMotion${extension}`);
 }
 
 /** Preserve native HTTP semantics (SSE, byte ranges, multipart uploads and optimistic file writes). */
