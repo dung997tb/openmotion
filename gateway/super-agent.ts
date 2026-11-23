@@ -1642,6 +1642,7 @@ export class SuperAgentConversations {
       ...(active.chat.model && active.chat.model !== 'default' ? { model: active.chat.model } : {}),
       ...(active.chat.reasoning && active.chat.reasoning !== 'default' ? { reasoning: active.chat.reasoning } : {}),
       ...(active.chat.threadId ? { threadId: active.chat.threadId } : {}),
+      ...(active.chat.workingDir ? { workingDir: active.chat.workingDir } : {}),
       prompt: fullPrompt,
       instructions: isCoding ? CODING_AGENT_INSTRUCTIONS : SUPER_AGENT_INSTRUCTIONS,
       claudeInstructions: isCoding ? CODING_AGENT_INSTRUCTIONS : CLAUDE_SUPER_AGENT_INSTRUCTIONS,

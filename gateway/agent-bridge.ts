@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -426,6 +426,28 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
 
     const workRoot = await mkdtemp(path.join(os.tmpdir(), 'openmotion-bridge-run-'));
     try {
+      let resolvedWorkingDir: string | undefined;
+      if (typeof dispatch.workingDir === 'string' && dispatch.workingDir.trim()) {
+        const rawDir = dispatch.workingDir.trim();
+        if (rawDir.includes('\0') || rawDir.length > 1024 || !path.isAbsolute(rawDir)) {
+          await sendRunEvent(dispatch.runId, {
+            type: 'turn.failed',
+            error: 'Working directory must be an absolute folder path on the bridge machine',
+          });
+          return;
+        }
+        const st = await stat(rawDir).catch(() => null);
+        if (!st?.isDirectory()) {
+          await sendRunEvent(dispatch.runId, {
+            type: 'turn.failed',
+            error: `Working directory does not exist on ${name}: ${rawDir}`,
+          });
+          return;
+        }
+        resolvedWorkingDir = await realpath(rawDir);
+      }
+      const execCwd = resolvedWorkingDir ?? workRoot;
+
       const def: AgentDefinition | undefined = localAgents.find(item => item.id === dispatch.engine);
       const binName = def?.bin || dispatch.engine;
       const bin = await resolveBin(binName);
@@ -457,7 +479,7 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
 
           rpc = new (options.rpcFactory ?? AssetAgentRpc)(
             bin,
-            workRoot,
+            execCwd,
             async message => {
               const { method, params: p = {}, id } = message;
               try {
@@ -623,9 +645,9 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
             });
             rpc.send({ method: 'initialized' });
             const threadOpts = {
-              cwd: workRoot,
+              cwd: execCwd,
               approvalPolicy: 'on-request',
-              sandbox: 'read-only',
+              sandbox: resolvedWorkingDir ? 'workspace-write' : 'read-only',
               developerInstructions: dispatch.instructions,
               ...(dispatch.model && dispatch.model !== 'default' ? { model: dispatch.model } : {}),
             };
@@ -677,7 +699,7 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
 
         await runner({
           bin,
-          cwd: workRoot,
+          cwd: execCwd,
           prompt: dispatch.prompt,
           model: dispatch.model && dispatch.model !== 'default' ? dispatch.model : undefined,
           threadId: dispatch.threadId,
@@ -821,7 +843,7 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
           await runAcpAdapter({
             agentDef: def,
             bin,
-            cwd: workRoot,
+            cwd: execCwd,
             prompt: dispatch.prompt,
             instructions: dispatch.instructions,
             model,
@@ -837,7 +859,7 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
           if (err instanceof AcpBootstrapError && def.id === 'antigravity' && !runController.signal.aborted) {
             await runAgyPrintStreamAdapter({
               bin,
-              cwd: workRoot,
+              cwd: execCwd,
               prompt: dispatch.prompt,
               instructions: dispatch.instructions,
               model,
@@ -854,7 +876,7 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
       } else if (def?.id === 'pi') {
         await runPiRpcAdapter({
           bin,
-          cwd: workRoot,
+          cwd: execCwd,
           prompt: dispatch.prompt,
           instructions: dispatch.instructions,
           model,
@@ -865,7 +887,7 @@ export async function startAgentBridge(options: AgentBridgeOptions): Promise<Age
         await runCliFallbackAdapter({
           agentDef: def,
           bin,
-          cwd: workRoot,
+          cwd: execCwd,
           prompt: dispatch.prompt,
           instructions: dispatch.instructions,
           model,

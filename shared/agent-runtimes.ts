@@ -107,6 +107,7 @@ export type AgentRunDispatch = {
   model?: string;
   reasoning?: string;
   threadId?: string;
+  workingDir?: string;
   prompt: string;
   instructions: string;
   claudeInstructions?: string;

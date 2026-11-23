@@ -107,7 +107,7 @@ export function renderStandaloneBridgeScript(options: {
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -611,6 +611,22 @@ async function runMain() {
     activeRuns.set(dispatch.runId, { controller: runController, kill: () => kill() });
     const workRoot = await mkdtemp(path.join(os.tmpdir(), 'openmotion-bridge-run-'));
     try {
+      let resolvedWorkingDir;
+      if (typeof dispatch.workingDir === 'string' && dispatch.workingDir.trim()) {
+        const rawDir = dispatch.workingDir.trim();
+        if (rawDir.includes('\\0') || rawDir.length > 1024 || !path.isAbsolute(rawDir)) {
+          await sendEvent(dispatch.runId, { type: 'turn.failed', error: 'Working directory must be an absolute folder path on the bridge machine' });
+          return;
+        }
+        const st = await stat(rawDir).catch(() => null);
+        if (!st?.isDirectory()) {
+          await sendEvent(dispatch.runId, { type: 'turn.failed', error: \`Working directory does not exist on \${name}: \${rawDir}\` });
+          return;
+        }
+        resolvedWorkingDir = await realpath(rawDir);
+      }
+      const execCwd = resolvedWorkingDir || workRoot;
+
       const def = LOCAL_AGENTS.find(item => item.id === dispatch.engine);
       const bin = await resolveBinary(def?.bin || dispatch.engine);
       if (!bin) {
@@ -630,7 +646,7 @@ async function runMain() {
           const onAbort = () => { rpc?.close(); finish(); };
           runController.signal.addEventListener('abort', onAbort, { once: true });
           kill = () => rpc?.close();
-          rpc = new CodexAppRpc(bin, workRoot, async msg => {
+          rpc = new CodexAppRpc(bin, execCwd, async msg => {
             const { method, params: p = {}, id } = msg;
             try {
               if (method === 'item/tool/call' && id !== undefined) {
@@ -648,10 +664,87 @@ async function runMain() {
                 rpc.send({ id, result: { decision: dispatch.permissionMode === 'auto' ? 'accept' : 'decline' } });
               } else if (id !== undefined) {
                 rpc.send({ id, error: { code: -32601, message: 'Unsupported host request in bridge session' } });
+              } else if (method === 'turn/started') {
+                await sendEvent(dispatch.runId, { type: 'status.update', phase: 'thinking' });
+              } else if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
+                await sendEvent(dispatch.runId, { type: 'reasoning.delta', messageId: String(p.itemId || 'reasoning'), delta: String(p.delta ?? '') });
+              } else if (method === 'item/started' && p.item && ['commandExecution', 'fileChange', 'webSearch'].includes(p.item.type)) {
+                const it = p.item;
+                await sendEvent(dispatch.runId, {
+                  type: 'tool.started',
+                  callId: String(it.id || randomUUID()),
+                  tool: String(it.type),
+                  args: it.type === 'commandExecution' ? { command: it.command } : it.type === 'webSearch' ? { query: it.query } : { changes: it.changes },
+                });
               } else if (method === 'item/agentMessage/delta') {
                 await sendEvent(dispatch.runId, { type: 'message.delta', messageId: String(p.itemId || 'assistant'), delta: String(p.delta ?? '') });
               } else if (method === 'item/completed' && p.item?.type === 'agentMessage') {
                 await sendEvent(dispatch.runId, { type: 'message.complete', messageId: String(p.item.id || 'assistant'), text: String(p.item.text ?? '') });
+              } else if (method === 'item/completed' && p.item?.type === 'reasoning') {
+                const summaryParts = Array.isArray(p.item.summary) ? p.item.summary.map(s => String(s?.text ?? s ?? '')).filter(Boolean) : [];
+                const contentParts = Array.isArray(p.item.content) ? p.item.content.map(c => String(c?.text ?? c ?? '')).filter(Boolean) : [];
+                const fullText = [p.item.text, ...summaryParts, ...contentParts].filter(Boolean).join('\\n').trim();
+                if (fullText) {
+                  await sendEvent(dispatch.runId, { type: 'reasoning.complete', messageId: String(p.item.id || 'reasoning'), text: fullText });
+                }
+              } else if (method === 'item/completed' && p.item?.type === 'commandExecution') {
+                const it = p.item;
+                const ok = it.status !== 'failed' && it.status !== 'declined' && (typeof it.exitCode !== 'number' || it.exitCode === 0);
+                await sendEvent(dispatch.runId, {
+                  type: 'tool.finished',
+                  callId: String(it.id),
+                  tool: 'commandExecution',
+                  ok,
+                  category: 'command',
+                  command: typeof it.command === 'string' ? it.command : undefined,
+                  exitCode: typeof it.exitCode === 'number' ? it.exitCode : undefined,
+                  output: it.aggregatedOutput ?? it.stdout ?? it.stderr,
+                  durationMs: typeof it.durationMs === 'number' ? it.durationMs : undefined,
+                });
+              } else if (method === 'item/completed' && p.item?.type === 'fileChange') {
+                const it = p.item;
+                const files = Array.isArray(it.changes)
+                  ? it.changes.filter(c => c && typeof c.path === 'string').map(c => {
+                      const k = String(c.kind || 'update').toLowerCase();
+                      const action = k.includes('add') || k.includes('create') ? 'create' : k.includes('del') ? 'delete' : 'edit';
+                      const diffStr = typeof c.diff === 'string' ? c.diff : '';
+                      let addedLines = 0, removedLines = 0;
+                      for (const line of diffStr.split('\\n')) {
+                        if (line.startsWith('+') && !line.startsWith('+++')) addedLines++;
+                        else if (line.startsWith('-') && !line.startsWith('---')) removedLines++;
+                      }
+                      return { action, path: String(c.path), ...(diffStr ? { addedLines, removedLines, diffPreview: diffStr.slice(0, 4000) } : {}) };
+                    })
+                  : [];
+                await sendEvent(dispatch.runId, {
+                  type: 'tool.finished',
+                  callId: String(it.id),
+                  tool: 'fileChange',
+                  ok: it.status !== 'failed' && it.status !== 'declined',
+                  category: files[0]?.action === 'create' ? 'file_write' : files[0]?.action === 'delete' ? 'file_delete' : 'file_edit',
+                  fileOp: files[0],
+                  files,
+                });
+              } else if (method === 'turn/plan/updated' && Array.isArray(p.plan)) {
+                const entries = p.plan
+                  .filter(e => e && typeof (e.step ?? e.content) === 'string')
+                  .map(e => ({
+                    content: String(e.step ?? e.content),
+                    status: String(e.status || '').toLowerCase() === 'completed'
+                      ? 'completed'
+                      : String(e.status || '').toLowerCase().includes('progress')
+                        ? 'in_progress'
+                        : 'pending',
+                  }));
+                await sendEvent(dispatch.runId, { type: 'plan.update', entries });
+              } else if (method === 'thread/tokenUsage/updated' && p.tokenUsage?.total) {
+                const t = p.tokenUsage.total;
+                const usage = {
+                  ...(typeof t.inputTokens === 'number' ? { inputTokens: t.inputTokens } : {}),
+                  ...(typeof t.outputTokens === 'number' ? { outputTokens: t.outputTokens } : {}),
+                  ...(typeof t.totalTokens === 'number' ? { totalTokens: t.totalTokens } : {}),
+                };
+                await sendEvent(dispatch.runId, { type: 'usage.update', usage });
               } else if (method === 'turn/completed') {
                 await sendEvent(dispatch.runId, p.turn?.error?.message ? { type: 'turn.failed', error: String(p.turn.error.message) } : { type: 'turn.completed' });
                 rpc.close();
@@ -669,7 +762,7 @@ async function runMain() {
           void (async () => {
             await rpc.request('initialize', { clientInfo: { name: 'openmotion_bridge', title: 'OpenMotion Bridge', version: BRIDGE_VERSION }, capabilities: { experimentalApi: true } });
             rpc.send({ method: 'initialized' });
-            const opts = { cwd: workRoot, approvalPolicy: 'on-request', sandbox: 'read-only', developerInstructions: dispatch.instructions, ...(dispatch.model && dispatch.model !== 'default' ? { model: dispatch.model } : {}) };
+            const opts = { cwd: execCwd, approvalPolicy: 'on-request', sandbox: resolvedWorkingDir ? 'workspace-write' : 'read-only', developerInstructions: dispatch.instructions, ...(dispatch.model && dispatch.model !== 'default' ? { model: dispatch.model } : {}) };
             const thr = dispatch.threadId ? await rpc.request('thread/resume', { ...opts, threadId: dispatch.threadId }) : await rpc.request('thread/start', { ...opts, dynamicTools: dispatch.dynamicTools });
             if (thr?.thread?.id) await sendEvent(dispatch.runId, { type: 'thread.started', threadId: String(thr.thread.id) });
             await rpc.request('turn/start', { threadId: thr.thread.id, effort: dispatch.reasoning && dispatch.reasoning !== 'default' ? dispatch.reasoning : null, input: [{ type: 'text', text: dispatch.prompt }] });
@@ -702,7 +795,7 @@ async function runMain() {
         let msgId = randomUUID();
         const toolInputs = new Map();
         await new Promise((resolve, reject) => {
-          const child = spawn(bin, cliArgs, { cwd: workRoot, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+          const child = spawn(bin, cliArgs, { cwd: execCwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
           let buf = '', stderr = '', settled = false, processing = Promise.resolve();
           const fail = err => { if (!settled) { settled = true; reject(err); } };
           const onAbort = () => { child.kill('SIGTERM'); fail(new Error('Agent conversation stopped')); };
@@ -769,7 +862,7 @@ async function runMain() {
       if (dispatch.model && dispatch.model !== 'default' && def?.modelFlag) cliArgs.push(def.modelFlag, dispatch.model);
       const msgId = randomUUID();
       await new Promise((resolve, reject) => {
-        const child = spawn(bin, cliArgs, { cwd: workRoot, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+        const child = spawn(bin, cliArgs, { cwd: execCwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         let stdout = '', stderr = '';
         const onAbort = () => { try { child.kill('SIGTERM'); } catch {} };
         runController.signal.addEventListener('abort', onAbort, { once: true });

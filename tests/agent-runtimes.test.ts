@@ -543,3 +543,126 @@ test('Windows PowerShell bridge installer and LocalAgentDirectory warmup work ac
     await running.close();
   }
 }));
+
+test('standalone bridge script stays in Codex event and workingDir parity with gateway/agent-bridge.ts', async () => {
+  const bridgeSource = await readFile(path.resolve('gateway/agent-bridge.ts'), 'utf8');
+  const standaloneScript = renderStandaloneBridgeScript({ defaultServerUrl: 'https://cloud.example.com' });
+
+  const extractCodexMethods = (src: string) =>
+    [...new Set([...src.matchAll(/method\s*===\s*'([^']+)'/g)].map(m => m[1]))]
+      .filter(m => m.startsWith('item/') || m.startsWith('turn/') || m.startsWith('thread/') || m === 'error')
+      .sort();
+
+  const bridgeMethods = extractCodexMethods(bridgeSource);
+  const standaloneMethods = extractCodexMethods(standaloneScript);
+  assert.ok(bridgeMethods.includes('turn/plan/updated'));
+  assert.ok(bridgeMethods.includes('thread/tokenUsage/updated'));
+  assert.deepEqual(standaloneMethods, bridgeMethods);
+
+  for (const itemType of ['agentMessage', 'reasoning', 'commandExecution', 'fileChange']) {
+    assert.ok(standaloneScript.includes(`p.item?.type === '${itemType}'`), `standalone bridge must handle item/completed for ${itemType}`);
+  }
+  assert.ok(standaloneScript.includes('dispatch.workingDir'), 'standalone bridge must support dispatch.workingDir');
+  assert.ok(standaloneScript.includes("'workspace-write'"), 'standalone bridge must enable workspace-write sandbox for validated workingDir');
+});
+
+test('local bridge forwards Coding workingDir and validates it on the bridge machine', () => fixture(async store => {
+  const workDir = await mkdtemp(path.join(os.tmpdir(), 'openmotion-bridge-coding-'));
+  const running = await startServer(store, 0, { editor: false });
+  const port = (running.server.address() as { port: number }).port;
+  const origin = `http://127.0.0.1:${port}`;
+  let capturedCwd = '';
+  let capturedThreadOpts: Record<string, unknown> = {};
+
+  class WorkingDirCodexRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, cwd: string, onNotification: (msg: any) => void) {
+      capturedCwd = cwd;
+      this.onNotification = onNotification;
+    }
+    async request(method: string, params: Record<string, unknown> = {}) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') {
+        capturedThreadOpts = params;
+        return { thread: { id: 'codex-wd-thread-1' } };
+      }
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({ method: 'item/completed', params: { item: { id: 'a1', type: 'agentMessage', text: 'Edited inside workingDir.' } } });
+          this.onNotification({ method: 'turn/completed', params: { turn: { id: 't1', status: 'completed' } } });
+        });
+        return { turn: { id: 't1' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+  }
+
+  let bridgeHandle: Awaited<ReturnType<typeof startAgentBridge>> | undefined;
+  try {
+    const createRes = await fetch(`${origin}${AGENT_RUNTIMES_API}/bridge/tokens`, {
+      method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'Coding Laptop' }),
+    });
+    const bundle = (await createRes.json()) as any;
+    bridgeHandle = await startAgentBridge({
+      serverUrl: origin,
+      token: bundle.token,
+      name: 'Coding Laptop',
+      discoverAgents: async () => [{
+        id: 'codex',
+        label: 'Codex',
+        bin: 'codex',
+        icon: 'openai',
+        website: 'https://openai.com',
+        installed: true,
+        auth: 'signed-in',
+        models: [{ id: 'gpt-5', label: 'GPT-5', source: 'cli' }],
+      }],
+      resolveBin: async () => '/usr/local/bin/codex',
+      rpcFactory: WorkingDirCodexRpc as any,
+    });
+
+    const createChat = await fetch(`${origin}${SUPER_AGENT_API}/chats`, {
+      method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runtimeId: bridgeHandle.runtimeId, engine: 'codex', intent: 'coding', workingDir: workDir }),
+    });
+    assert.equal(createChat.status, 200);
+    const { conversation: createdChat } = await createChat.json() as any;
+
+    const startTurn = await fetch(`${origin}${SUPER_AGENT_API}/chats/${createdChat.id}/turn`, {
+      method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'bridge-wd-req-1',
+        runtimeId: bridgeHandle.runtimeId,
+        engine: 'codex',
+        mode: 'coding',
+        workingDir: workDir,
+        text: 'Inspect this project folder',
+      }),
+    });
+    assert.equal(startTurn.status, 200);
+
+    let finalChat: any;
+    for (let i = 0; i < 80; i++) {
+      const poll = await fetch(`${origin}${SUPER_AGENT_API}/chats/${createdChat.id}`);
+      finalChat = (await poll.json() as any).conversation;
+      if (finalChat.state === 'idle' || finalChat.state === 'failed') break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+
+    assert.equal(finalChat.state, 'idle');
+    assert.equal(capturedCwd, await (await import('node:fs/promises')).realpath(workDir));
+    assert.equal(capturedThreadOpts.cwd, capturedCwd);
+    assert.equal(capturedThreadOpts.sandbox, 'workspace-write');
+  } finally {
+    await bridgeHandle?.stop();
+    await agentRuntimesFor(store.directory).close();
+    await running.close();
+    await rm(workDir, { recursive: true, force: true });
+  }
+}));
