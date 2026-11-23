@@ -1,9 +1,10 @@
 import { useId, useState, type ReactNode } from 'react';
 import { Button } from 'open-design-ui/button';
+import { defaultCapabilities, findCapability, listCapabilitiesForChannel, type CapabilityDefinition } from '../../../shared/capability-registry';
 import type { Model } from '../../../shared/gateway';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { sceneDestination, studioScenes, supportsScene, type StudioDestination, type StudioScene } from './creativeStudios';
+import { capabilityScene, sceneDestination, studioScenes, supportsScene, type StudioDestination, type StudioScene } from './creativeStudios';
 import { sceneExamples } from './sceneShowcase';
 import { editImageScene, imageMenuModels, imageModelBadge, imageScene, type ModelFamily } from './imageMenuModels';
 import { ModelAvatar } from './settingsPrimitives';
@@ -56,13 +57,6 @@ export function ModelMenuColumn({ families, onOpen }: { families: ModelFamily[];
 const findScene = (id: StudioScene['id']) => studioScenes.find(scene => scene.id === id)!;
 const characterScene = findScene('character');
 const sceneCards = [imageScene, editImageScene] as const;
-const featureScenes = [findScene('remove-background'), findScene('relight')];
-const upcomingFeatures = [
-  ['Inpaint', 'edit-line'],
-  ['Expand image', 'expand-horizontal-line'],
-  ['Batch', 'layout-grid-line'],
-  ['Image layers', 'stack-line'],
-] as const;
 
 function ImageMenuArt({ scene }: { scene: typeof sceneCards[number]['id'] }) {
   const demo = scene === 'text-to-image' ? 'image' : 'edit';
@@ -82,17 +76,32 @@ function ImageMenuArt({ scene }: { scene: typeof sceneCards[number]['id'] }) {
   </span>;
 }
 
+function capabilityTargetScene(cap: CapabilityDefinition): StudioScene {
+  return studioScenes.find(scene => scene.id === cap.id) ?? capabilityScene(cap);
+}
+
 export function ImageMegaMenu({ catalog, destination, onNavigate }: {
   catalog?: ReturnType<typeof useMediaCatalog>['catalog'];
   destination: StudioDestination | null;
   onNavigate: (destination: StudioDestination) => void;
 }) {
   const { t } = useI18n();
+  const capabilities = catalog?.capabilities ?? defaultCapabilities;
   const rows = imageMenuModels(catalog?.models ?? [], catalog?.status.providers ?? []);
   const pinned = catalog?.models.find(model => model.id === destination?.model);
   // Non-feature image scenes keep a compatible pinned model; feature scenes open without a pin so OpenDesign defaults apply.
   const openScene = (scene: StudioScene) => onNavigate(sceneDestination(scene, destination, pinned && supportsScene(pinned, scene) ? pinned.id : null));
   const openFeature = (scene: StudioScene) => onNavigate(sceneDestination(scene, destination, null));
+
+  const upscaleCap = findCapability('upscale-4k', capabilities);
+  const upscaleLive = Boolean(upscaleCap && upscaleCap.status === 'live' && upscaleCap.channels.gui);
+
+  const imageFeatureCaps = listCapabilitiesForChannel(capabilities, 'gui', {
+    modality: 'image',
+    includeComingSoon: true,
+  }).filter(cap => !['text-to-image', 'image-edit', 'character', 'shot-image', 'upscale-4k'].includes(cap.id));
+  const liveFeatureCaps = imageFeatureCaps.filter(cap => cap.status === 'live');
+  const upcomingFeatureCaps = imageFeatureCaps.filter(cap => cap.status === 'coming_soon');
 
   return <div className="om-media-mega">
     <div className="om-media-menu-grid om-media-mega-entries">
@@ -111,9 +120,12 @@ export function ImageMegaMenu({ catalog, destination, onNavigate }: {
         </span>
         <strong>{t(characterScene.label)}</strong>
       </Button>
-      <Button variant="plain" className="om-scene-tile om-scene-tile-disabled" disabled aria-disabled="true">
+      <Button variant="plain" className={upscaleLive ? 'om-scene-tile' : 'om-scene-tile om-scene-tile-disabled'}
+        disabled={!upscaleLive} aria-disabled={!upscaleLive || undefined}
+        aria-current={upscaleLive && destination?.scene.id === upscaleCap!.id ? 'page' : undefined}
+        onClick={upscaleLive ? () => openFeature(capabilityTargetScene(upscaleCap!)) : undefined}>
         <span className="om-scene-tile-art om-upscale-demo">
-          <MenuBadge label="Soon" />
+          {!upscaleLive && <MenuBadge label="Soon" />}
           <span className="om-upscale-split" aria-hidden="true">
             <img className="om-upscale-low" src={lunarStill} alt="" />
             <img className="om-upscale-high" src={lunarStill} alt="" />
@@ -127,11 +139,18 @@ export function ImageMegaMenu({ catalog, destination, onNavigate }: {
     </div>
     <div className="om-media-mega-columns">
       <MegaMenuColumn title={t('Features')} items={[
-        ...featureScenes.map(scene => <Button key={scene.id} variant="plain" className="om-nav-item om-media-mega-row" aria-current={destination?.scene.id === scene.id ? 'page' : undefined} onClick={() => openFeature(scene)}>
-          <span className="om-image-menu-icon"><RemixIcon name={scene.icon} size={16} /></span><span className="om-media-mega-label">{t(scene.label)}</span>
-        </Button>),
-        ...upcomingFeatures.map(([title, icon]) => <Button key={title} variant="plain" className="om-nav-item om-media-mega-row" disabled aria-disabled="true">
-          <span className="om-image-menu-icon"><RemixIcon name={icon} size={16} /></span><span className="om-media-mega-label">{t(title)}</span><MenuBadge label="Soon" />
+        ...liveFeatureCaps.map(cap => {
+          const target = capabilityTargetScene(cap);
+          return <Button key={cap.id} variant="plain" className="om-nav-item om-media-mega-row"
+            aria-current={destination?.scene.id === target.id ? 'page' : undefined} onClick={() => openFeature(target)}>
+            <span className="om-image-menu-icon"><RemixIcon name={cap.icon} size={16} /></span>
+            <span className="om-media-mega-label">{t(cap.title)}</span>
+          </Button>;
+        }),
+        ...upcomingFeatureCaps.map(cap => <Button key={cap.id} variant="plain" className="om-nav-item om-media-mega-row" disabled aria-disabled="true">
+          <span className="om-image-menu-icon"><RemixIcon name={cap.icon} size={16} /></span>
+          <span className="om-media-mega-label">{t(cap.title)}</span>
+          <MenuBadge label="Soon" />
         </Button>),
       ]} />
       <ModelMenuColumn families={rows} onOpen={model => onNavigate(sceneDestination(imageScene, destination, model.id))} />

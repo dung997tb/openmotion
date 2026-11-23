@@ -487,10 +487,10 @@ export function RouteViewport({
             requestedMode={gameStudioActive ? 'game' : (page.superAgentMode ?? null)}
             requestedGameId={gameStudioActive ? (page.gameId ?? null) : null}
             onBack={gameStudioActive ? returnToExplore : undefined}
-            onExitRequestedMode={() => {
+            onChangeRequestedMode={mode => {
               navigatePage(
-                { superAgent: true, superAgentChat: gameStudioActive ? null : page.superAgentChat, superAgentMode: null, templates: false },
-                !gameStudioActive,
+                { superAgent: true, superAgentChat: gameStudioActive ? null : page.superAgentChat, superAgentMode: mode, templates: false },
+                !gameStudioActive && mode === null,
               );
             }}
             onChatIdChange={(chat, replace) =>

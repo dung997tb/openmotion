@@ -20,6 +20,7 @@ import { MCP_HTTP_PATH } from './shared/mcp-http.ts';
 import { superAgentConversations } from './gateway/super-agent.ts';
 import { collectWorkspaceResources } from './gateway/super-agent-resources.ts';
 import { assetHttp } from './gateway/asset-http.ts';
+import { capabilityDiscover, capabilityRun, loadCapabilityCatalog, syncCapabilityRemoteConfig } from './gateway/capability-center.ts';
 import { getWorkflow } from './shared/workflow.ts';
 import { attachmentDisposition } from './shared/http-header.ts';
 import { isMain } from './shared/entry.ts';
@@ -284,13 +285,15 @@ async function invokePhase1WithTracking(
   store: WorkspaceStore,
   context: Service,
   originUrl: string,
-  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string },
+  data: { name: string; arguments?: any; trackingHost?: unknown; trackingContext?: string; channel?: unknown },
 ) {
   if (!context.runtimeRoot) throw new Error('RUNTIME_NOT_READY');
   const phase1 = ensurePhase1(store, context, originUrl);
   const host = validHostContext(data.trackingHost) ? data.trackingHost : unknownHost;
+  const channel: 'gui' | 'mcp' = data.channel === 'gui' ? 'gui' : 'mcp';
   let result = await phase1.call(data.name, data.arguments ?? {}, host, {
     attributeEntry: Object.hasOwn(data, 'trackingHost'),
+    channel,
   });
   if (host.host_agent !== 'unknown' && context.tracking?.enabled() && (result.previewUrl || result.previewHandoff)) {
     const hosts = context.trackingHosts ??= new Map();
@@ -470,7 +473,11 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       if (projectHeader !== undefined && projectHeader !== id) return json(res, 400, { error: 'PROJECT_SCOPE_MISMATCH' });
       store = store.forProject(id);
     }
-    if (context.ensureStudio && !isStandaloneSpaPath(url.pathname, url.search) && (isSpaRoutePath(url.pathname) || url.pathname.startsWith('/sessions/'))) {
+    const needsRuntimeCaps = url.pathname.startsWith('/create/') || url.searchParams.get('page') === 'create';
+    const routeCapabilities = needsRuntimeCaps
+      ? await loadCapabilityCatalog(store.workspaceStore ?? store).catch(() => undefined)
+      : undefined;
+    if (context.ensureStudio && !isStandaloneSpaPath(url.pathname, url.search, '', routeCapabilities) && (isSpaRoutePath(url.pathname) || url.pathname.startsWith('/sessions/'))) {
       const projectId = editorProjectIdFromPath(url.pathname) ?? url.searchParams.get('project');
       const sessionId = url.searchParams.get('session');
       if (projectId !== null) {
@@ -1119,6 +1126,48 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       if (url.pathname === '/api/settings/account/logout' && req.method === 'POST') return json(res, 200, await gateway.account.logout());
       if (url.pathname === '/api/settings/account/subscription' && req.method === 'POST') return json(res, 200, await gateway.account.openSubscription());
       return json(res, 404, { error: 'Settings endpoint not found' });
+    }
+    if (motionRequest && url.pathname.startsWith('/api/capabilities')) {
+      if (url.pathname === '/api/capabilities' && req.method === 'GET') {
+        const action = url.searchParams.get('action') ?? undefined;
+        const capabilityId = url.searchParams.get('capabilityId') ?? undefined;
+        const modality = url.searchParams.get('modality') ?? undefined;
+        const includeComingSoon = url.searchParams.get('includeComingSoon') !== 'false';
+        const refresh = url.searchParams.get('refresh') === 'true';
+        const offsetParam = url.searchParams.get('offset');
+        const limitParam = url.searchParams.get('limit');
+        const offset = offsetParam !== null ? Number(offsetParam) : undefined;
+        const limit = limitParam !== null ? Number(limitParam) : undefined;
+        if (action === 'catalog') {
+          if (refresh) await syncCapabilityRemoteConfig(store).catch(() => {});
+          return json(res, 200, { capabilities: await loadCapabilityCatalog(store) });
+        }
+        return json(
+          res,
+          200,
+          await capabilityDiscover(
+            store,
+            action === 'quote' && capabilityId
+              ? { action: 'quote', capabilityId, model: url.searchParams.get('model') ?? undefined }
+              : capabilityId
+                ? { action: 'describe', capabilityId, refresh }
+                : { action: 'list', modality, includeComingSoon, refresh, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) },
+            context.tracking,
+            'gui',
+          ),
+        );
+      }
+      if (url.pathname === '/api/capabilities/sync' && req.method === 'POST') {
+        const synced = await syncCapabilityRemoteConfig(store);
+        return json(res, 200, { total: synced.length });
+      }
+      if (url.pathname === '/api/capabilities/run' && req.method === 'POST') {
+        const body = await input(req);
+        const isDryRun = body?.dryRun === true;
+        if (!isDryRun && !context.studio?.alive()) return json(res, 503, { error: 'Open the Studio before generating media' });
+        return json(res, isDryRun ? 200 : 202, await capabilityRun(store, { action: 'run', ...body }, context.tracking, 'gui'));
+      }
+      return json(res, 404, { error: 'Unknown capability center operation' });
     }
     if (motionRequest && (url.pathname.startsWith('/api/models') || url.pathname.startsWith('/api/generations'))) {
       const gateway = gatewayFor(store, context.tracking);

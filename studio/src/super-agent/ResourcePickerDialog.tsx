@@ -1,9 +1,12 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useRef, useState } from 'react';
+import { findDesignScenario } from '../../../shared/design-project';
 import type { SuperAgentResourceAttachment, SuperAgentResourceCatalog, SuperAgentResourceKind } from '../../../shared/super-agent';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useI18n } from '../i18n/I18n';
+import type { Translate } from '../i18n/manifest';
 import { RemixIcon } from '../icons/RemixIcons';
+import { genreLabels } from '../motion/game/gameCatalog';
 import { uploadLibraryAsset } from '../motion/assetClient';
 import { assetMediaUrl, assetVersion } from '../../../shared/asset-library';
 import { fetchWorkspaceResources } from './superAgentClient';
@@ -25,7 +28,7 @@ const CATEGORY_TABS: { id: ResourceCategoryTab; label: string; icon: string }[] 
   { id: 'brand-kit', label: 'Brand Kits', icon: 'palette-line' },
   { id: 'motion-template', label: 'Motion templates', icon: 'movie-line' },
   { id: 'design-template', label: 'Design templates', icon: 'layout-line' },
-  { id: 'skills', label: 'Skills', icon: 'sparkling-line' },
+  { id: 'skills', label: 'Skill library', icon: 'sparkling-line' },
   { id: 'projects', label: 'Projects', icon: 'stack-line' },
   { id: 'workflow', label: 'Workflows', icon: 'route-line' },
   { id: 'model', label: 'Models', icon: 'robot-line' },
@@ -72,6 +75,30 @@ export function resourceKindLabel(kind: SuperAgentResourceKind): string {
     case 'browser-annotation': return 'Browser annotation';
     default: return 'Resource';
   }
+}
+
+export function resourceDisplayTitle({ kind, title }: SuperAgentResourceAttachment, t: Translate): string {
+  return kind === 'skill' || kind === 'design-skill' || kind === 'workflow' ? t(title) : title;
+}
+
+export function resourceDisplaySubtitle({ kind, subtitle, scenario, modality }: SuperAgentResourceAttachment, t: Translate): string | undefined {
+  if (!subtitle) return undefined;
+  if (kind === 'model' || kind === 'browser-annotation') return subtitle;
+  if (kind === 'asset') {
+    if (subtitle === 'upload') return t('Local upload');
+    if (subtitle === 'generated') return t('AI generated');
+    if (subtitle !== modality) return subtitle;
+    return t(modality === 'image' ? 'Image' : modality === 'video' ? 'Video' : 'Audio');
+  }
+
+  const scenarioLabel = findDesignScenario(scenario)?.label;
+  return subtitle.split(' · ').map(part => {
+    if (scenarioLabel && part === scenario) return t(scenarioLabel);
+    if (kind === 'game-project' && Object.hasOwn(genreLabels, part)) {
+      return t(genreLabels[part as keyof typeof genreLabels]);
+    }
+    return t(part);
+  }).join(' · ');
 }
 
 export function ResourcePickerPanel({
@@ -234,6 +261,7 @@ export function ResourcePickerPanel({
         ) : (
           catalog.items.map(item => {
             const isSelected = selectedKeys.has(resourceKey(item));
+            const subtitle = resourceDisplaySubtitle(item, t);
             const showThumb = item.previewUrl && (item.kind === 'motion-template' || item.kind === 'brand-kit' || (item.kind === 'asset' && item.modality === 'image'));
             return (
               <Button
@@ -259,8 +287,8 @@ export function ResourcePickerPanel({
                   )}
                 </div>
                 <div className="om-sa-resource-meta">
-                  <strong>{item.title}</strong>
-                  <small>{t(resourceKindLabel(item.kind))}{item.subtitle ? ` · ${item.subtitle}` : ''}</small>
+                  <strong>{resourceDisplayTitle(item, t)}</strong>
+                  <small>{t(resourceKindLabel(item.kind))}{subtitle ? ` · ${subtitle}` : ''}</small>
                 </div>
                 <span className="om-sa-resource-check" aria-hidden="true">
                   {isSelected && <RemixIcon name="check-line" size={14} />}
