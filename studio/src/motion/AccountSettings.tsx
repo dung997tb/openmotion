@@ -13,6 +13,11 @@ import { gatewayRequest, type CloudApiError } from './gatewayClient';
 import { notifyProvidersChanged } from './useProviderDirectory';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
+import {
+  isDesktopApp,
+  openBillingAndRefreshOnFocus,
+  startDesktopBrowserLogin,
+} from '../utils/platformHost';
 
 export interface CloudWorkspaceSummary {
   id: string;
@@ -276,8 +281,15 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
   function subscriptionLink(source: string, element: 'manage_subscription' | 'view_plans') {
     const consoleUrl = state.account!.consoleUrl;
     const open = (event: MouseEvent<HTMLAnchorElement>) => {
-      if (event.detail === 0 && event.button === 0) event.currentTarget.href = subscriptionUrl(consoleUrl, source);
+      const targetUrl = subscriptionUrl(consoleUrl, source);
+      if (event.detail === 0 && event.button === 0) event.currentTarget.href = targetUrl;
       tracking.reportSettingsClick('account', element);
+      if (isDesktopApp() && event.button === 0) {
+        event.preventDefault();
+        void openBillingAndRefreshOnFocus(targetUrl, () => {
+          void state.refresh(true);
+        });
+      }
     };
     return {
       href: subscriptionUrl(consoleUrl, source),
@@ -291,7 +303,12 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
 
   function signInWithOidc() {
     tracking.reportSettingsClick('account', 'sign_in');
-    window.location.assign(buildLoginUrl());
+    const loginUrl = buildLoginUrl();
+    if (isDesktopApp()) {
+      void startDesktopBrowserLogin({ loginUrl });
+      return;
+    }
+    window.location.assign(loginUrl);
   }
 
   async function signOut() {

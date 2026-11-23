@@ -36,6 +36,7 @@ import { studioSkillDefaults, skillShotPrompt, localizedSkillPrompt, motionSkill
 import { mcpCapabilities, mcpScenarios, searchRecoveryExample, platformExportExample, mcpBenefits, mcpReviewGuide, mcpFaq, mcpWorkflowComparison, mcpClientComparison } from './mcpCapabilities';
 import { mcpClients as clients, supportsConnection } from './mcpClients';
 import { readWorkspacePage, type WorkspacePage } from './workspacePageRouting';
+import { DesktopConnectPanel } from './DesktopConnectPanel';
 import * as tracking from './pageTracking';
 import './McpConnectionPage.css';
 
@@ -177,6 +178,9 @@ export function McpConnectionPage({
                 : [info.transport.auth.oauth2 && 'OAuth 2.1', info.transport.auth.pat && 'PAT'].filter(Boolean).join(' · ')}
             </span>
           </div>
+        )}
+        {info && isStreamableHttpTransport(info.transport) && (client.host === 'codex' || client.host === 'claude') && (
+          <DesktopConnectPanel mcpUrl={info.transport.url} />
         )}
           {clients.map(item => <TabPanel value={item.id} key={item.id}>
             <div className="om-mcp-setup-tray">

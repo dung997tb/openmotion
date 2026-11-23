@@ -30,6 +30,7 @@ import { MotionStudioHost } from "./motion/MotionStudioHost";
 import { StudioRouterProvider } from "./router/createAppRouter";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
+import { bindDesktopHost } from './utils/platformHost';
 import { warmCloudDisklessMode } from './utils/cloudRuntime';
 import { bindVitePreloadErrorReload, lazyWithChunkReload } from './utils/chunkReload';
 import { ensureLocaleLoaded, isLocaleLoaded, readLocale } from './i18n/I18n';
@@ -47,6 +48,9 @@ import.meta.hot?.dispose(unbindPreloadErrorReload);
 
 const unbindHostTheme = bindEmbeddedStudioTheme();
 import.meta.hot?.dispose(unbindHostTheme);
+
+const unbindDesktopHost = bindDesktopHost();
+import.meta.hot?.dispose(unbindDesktopHost);
 
 const stopDiagnostics = initializeDiagnostics();
 import.meta.hot?.dispose(stopDiagnostics);

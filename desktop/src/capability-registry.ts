@@ -388,6 +388,12 @@ export function createWindowCapabilityModule(deps: WindowCapabilityDeps): Capabi
           return hostOk({ ok: true });
         },
       },
+      rendererReady: {
+        handler: async () => {
+          await deps.notifyRendererReady();
+          return hostOk({ ok: true });
+        },
+      },
       retryStartup: {
         handler: async () => {
           if (!deps.retryStartup) {
@@ -475,6 +481,9 @@ export function createDiagnosticsCapabilityModule(
       exportLogs: {
         handler: async () => hostOk(await deps.exportLogs()),
       },
+      exportBundle: {
+        handler: async () => hostOk(await deps.exportLogs()),
+      },
       openLogsFolder: {
         handler: async () => hostOk(await deps.openLogsFolder()),
       },
@@ -511,7 +520,10 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
       },
       startBrowserLogin: {
         validate: params => {
-          const base = validateStartSignInParams(params);
+          const candidate = params.returnPath !== undefined ? params.returnPath : params.returnTo;
+          const base = validateStartSignInParams(
+            candidate !== undefined ? { returnPath: candidate } : {},
+          );
           if (!base.ok) return base;
           const switchAccount = params.switchAccount === true;
           return { ok: true, value: { ...base.value, switchAccount } };

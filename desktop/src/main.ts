@@ -731,6 +731,9 @@ function createMainWindow(): BrowserWindow {
   win.on('leave-full-screen', broadcastChromeState);
   win.on('maximize', broadcastChromeState);
   win.on('unmaximize', broadcastChromeState);
+  win.on('focus', () => {
+    registry.emit(HOST_CAPABILITIES.WINDOW, 'focus', { focused: true });
+  });
 
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || input.alt || input.shift) return;
