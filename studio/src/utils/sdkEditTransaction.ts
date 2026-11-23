@@ -1,3 +1,4 @@
+import type { MoveClip } from "../../../packages/edit-core";
 import type { EditContextTarget } from "./studioFileHistory";
 import { openComposition, type Composition } from "@hyperframes/sdk";
 import { hashContent, markSelfWrite } from "../hooks/sdkSelfWriteRegistry";
@@ -12,7 +13,7 @@ import {
 
 export type CutoverResult =
   | { status: "declined"; reason: string }
-  | { status: "committed"; version: string; before: string; after: string }
+  | { status: "committed"; version: string; before: string; after: string; command?: MoveClip }
   | { status: "failed"; error: Error };
 
 export interface SdkSessionPublication {
@@ -42,7 +43,7 @@ export interface CutoverDeps {
    * Must be bound to one project. Its identity plus path scopes the shared
    * mutation queue used by every whole-file writer in that project.
    */
-  writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
+  writeProjectFile: (path: string, content: string, expectedContent?: string, command?: MoveClip) => Promise<void>;
   reloadPreview: () => void;
   refresh?: (after: string) => void;
   compositionPath?: string | null;
@@ -58,6 +59,7 @@ export interface CutoverDeps {
 }
 
 export interface CutoverOptions {
+  command?: MoveClip;
   targets?: EditContextTarget[];
   label?: string;
   coalesceKey?: string;
@@ -253,7 +255,8 @@ async function writeAndRecord(
 ): Promise<Error | null> {
   markSelfWrite(targetPath, after);
   try {
-    await deps.writeProjectFile(targetPath, after, originalContent);
+    if (options?.command) await deps.writeProjectFile(targetPath, after, originalContent, options.command);
+    else await deps.writeProjectFile(targetPath, after, originalContent);
   } catch (error) {
     return asCutoverError(error);
   }
@@ -317,6 +320,7 @@ async function commitCandidateEdit(
     version: hashContent(edit.after),
     before: originalContent,
     after: edit.after,
+    ...(options?.command && { command: options.command }),
   };
 }
 

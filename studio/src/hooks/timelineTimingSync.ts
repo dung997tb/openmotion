@@ -421,7 +421,10 @@ export function sdkTimingGsapSync(
     });
     return findTimelineScript(scripts)?.textContent ?? null;
   };
-  if (timelineText(result.before) === timelineText(result.after)) return null;
+  if (timelineText(result.before) === timelineText(result.after)) {
+    // The shared move already inspected the animation script during the commit.
+    return result.command ? UNMUTATED : null;
+  }
   return { mutated: true, scriptText: extractGsapScriptText(result.after), after: result.after };
 }
 

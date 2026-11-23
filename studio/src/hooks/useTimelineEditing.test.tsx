@@ -3,6 +3,8 @@
 
 import React, { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { useProjectFileWriter } from "./useProjectFileWriter";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { openComposition } from "@hyperframes/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { usePlayerStore, type TimelineElement } from "../player";
@@ -124,6 +126,7 @@ function renderTimelineEditingHook(input: {
   iframe: HTMLIFrameElement;
   onZIndexCommit: (entries: ZIndexEntry[]) => Promise<void>;
   projectId?: string | null;
+  useFileWriter?: boolean;
   writeProjectFile?: (path: string, content: string) => Promise<void>;
   recordEdit?: (input: {
     label: string;
@@ -168,12 +171,13 @@ function renderTimelineEditingHook(input: {
   function Harness() {
     const commitRef = useRef(input.onZIndexCommit);
     commitRef.current = input.onZIndexCommit;
+    const writer = useProjectFileWriter({ projectId: input.projectId ?? null });
     const hook = useTimelineEditing({
       projectId: input.projectId ?? null,
       activeCompPath: input.activeCompPath ?? "index.html",
       timelineElements: input.timelineElements,
       showToast: input.showToast ?? vi.fn(),
-      writeProjectFile: input.writeProjectFile ?? vi.fn(),
+      writeProjectFile: input.writeProjectFile ?? (input.useFileWriter ? writer.writeProjectFile : vi.fn()),
       recordEdit: input.recordEdit ?? vi.fn(),
       reloadPreview: input.reloadPreview ?? vi.fn(),
       previewIframeRef: { current: input.iframe },
@@ -500,6 +504,49 @@ describe("useTimelineEditing timeline z-index reorder", () => {
     expect(write).toHaveBeenCalled();
     expect(usePlayerStore.getState().elements[0]).toMatchObject({ start: updates.start, duration: updates.duration });
     hook.unmount();
+  });
+
+  it("shows a cloud move before the save completes and sends just the move command", async () => {
+    setCachedCloudDisklessMode(true);
+    const source = ROOT_DURATION_FALLBACK_SOURCE;
+    const iframe = createPreviewIframe();
+    iframe.contentDocument!.body.innerHTML = source;
+    const clip = timelineElement({ id: "clip", track: 0, zIndex: 0 });
+    usePlayerStore.setState({ elements: [clip], duration: 4 });
+    const session = await openComposition(source);
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        expect(requestUrl(input)).toBe("/api/projects/p1/edits/index.html");
+        expect(JSON.parse(String(init.body))).toEqual({ kind: "moveClip", hfId: "hf-clip", start: 1 });
+        expect(new Headers(init.headers).get("if-match")).toMatch(/^"sha256:/);
+        expect(new Headers(init.headers).get("idempotency-key")).toBeTruthy();
+        await pending;
+        return jsonResponse({ version: "saved" });
+      }
+      return jsonResponse({ content: source });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const history = vi.fn(async () => {});
+    const hook = renderTimelineEditingHook({ timelineElements: [clip], iframe, projectId: "p1", useFileWriter: true,
+      onZIndexCommit: vi.fn(), recordEdit: history, sdkSession: session,
+      publishSdkSession: () => "rejected-active-target" });
+    try {
+      const saving = hook.move(clip, { start: 1, track: 0 });
+      expect(iframe.contentDocument!.getElementById("clip")!.getAttribute("data-start")).toBe("1");
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+      expect(history).not.toHaveBeenCalled();
+      release();
+      await act(() => saving);
+      expect(history).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    } finally {
+      release();
+      hook.unmount();
+      session.dispose();
+      setCachedCloudDisklessMode(null);
+    }
   });
 
   it("extends root duration through the fallback path when an SDK-backed move passes the end", async () => {

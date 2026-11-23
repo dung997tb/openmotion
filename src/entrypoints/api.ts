@@ -23,6 +23,8 @@ import {
   buildBrowserObservabilityConfig,
   injectRuntimeConfigIntoHtml,
 } from '../../packages/observability/config.ts';
+import type { MoveClip } from '../../packages/edit-core/index.ts';
+import { commitClipMove } from '../services/clip-move.ts';
 import { compositionCanvasSource, type CanvasFit, type CanvasRatio } from '../../shared/composition-canvas.ts';
 import {
   agentGuide,
@@ -1271,6 +1273,10 @@ function createMcpDomainPorts(deps: {
         const expectedVersionId = String(args.expectedVersionId ?? '');
         const ops: ProjectFileOp[] = [];
 
+        if (args.edit !== undefined && ['files', 'canvas', 'assetNames', 'requirements', 'namingLanguage'].some(key => args[key] !== undefined)) {
+          throw new CloudError('INVALID_ARGUMENT', 'Submit an editing command separately from file and metadata changes.', { status: 400 });
+        }
+
         if (Array.isArray(args.files)) {
           for (const item of args.files) {
             if (item && typeof item === 'object') {
@@ -1318,7 +1324,11 @@ function createMcpDomainPorts(deps: {
         }
 
         let committed = null;
-        if (ops.length > 0 || args.requirements !== undefined || args.namingLanguage !== undefined) {
+        if (args.edit !== undefined) {
+          const move = args.edit as MoveClip & { compositionPath: string };
+          committed = await commitClipMove(deps.files, auth, projectId, move.compositionPath, move, requestId,
+            { source: 'agent', expectedRevision, expectedVersionId });
+        } else if (ops.length > 0 || args.requirements !== undefined || args.namingLanguage !== undefined) {
           committed = await deps.files.commitChanges(auth, {
             projectId,
             ops,
@@ -1379,7 +1389,10 @@ function createMcpDomainPorts(deps: {
           });
         }
 
-        const project = await deps.workspace.getProject(auth, projectId);
+        const latest = await deps.workspace.getProject(auth, projectId);
+        // A retried move points to the committed version even after subsequent edits.
+        const project = args.edit && committed ? { ...latest, revision: committed.revision,
+          currentVersionId: committed.versionId, currentVersionNumber: committed.versionNumber } : latest;
         return {
           projectId: project.id,
           sessionId: project.sessionId,

@@ -1,3 +1,5 @@
+import { canMoveClip, moveClip, type MoveClip } from "../../../packages/edit-core";
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import type { Composition, GsapTweenSpec } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { PatchOperation } from "./sourcePatcher";
@@ -149,14 +151,18 @@ export async function sdkTimingPersist(
   if (wrongCompositionFile(deps, targetPath))
     return declinedCutover("wrong_composition_file", "timing");
   try {
+    const move: MoveClip | undefined = timingUpdate.start !== undefined && timingUpdate.duration === undefined &&
+      timingUpdate.trackIndex === undefined && getCachedCloudDisklessMode()
+      ? { kind: "moveClip", hfId, start: timingUpdate.start } : undefined;
+    const command = move && canMoveClip(sdkSession, move) ? move : undefined;
     const serializedBefore = sdkSession.serialize();
     const result = await persistSdkCandidateMutation(
       sdkSession,
       targetPath,
       serializedBefore,
       deps,
-      (session) => session.setTiming(hfId, timingUpdate),
-      options,
+      (session) => command ? moveClip(session, command) : session.setTiming(hfId, timingUpdate),
+      command ? { ...options, command } : options,
       serializedBefore,
     );
     trackCutoverResult(result, "timing", { hfId, opCount: 1 });
