@@ -607,33 +607,26 @@ export function ScenarioStage({
       </div>
     );
 
-    if (item.kind === 'image' && item.ref.type === 'asset') {
+    if (item.ref.type === 'asset' && (item.kind === 'image' || item.kind === 'video')) {
       const src = assetMediaUrl(item.ref.assetId, item.ref.versionId);
       return (
-        <>
-          <StagePosterImage src={src} alt={item.label} />
+        <div className="om-scenario-stage-asset-card">
           {topBar}
-        </>
-      );
-    }
-
-    if (item.kind === 'video' && item.ref.type === 'asset') {
-      const src = assetMediaUrl(item.ref.assetId, item.ref.versionId);
-      const showVideo = videoFailedId !== currentSlide.id;
-      return (
-        <>
-          {showVideo ? (
-            <StageVideoPlayer
-              src={src}
-              active={active}
-              title={item.label}
-              onFallback={() => setVideoFailedId(currentSlide.id)}
-            />
-          ) : (
-            <CoverPlaceholder fill />
-          )}
-          {topBar}
-        </>
+          <div className="om-scenario-stage-asset-frame">
+            {item.kind === 'image' ? (
+              <StagePosterImage src={src} alt={item.label} />
+            ) : videoFailedId === currentSlide.id ? (
+              <CoverPlaceholder fill />
+            ) : (
+              <StageVideoPlayer
+                src={src}
+                active={active}
+                title={item.label}
+                onFallback={() => setVideoFailedId(currentSlide.id)}
+              />
+            )}
+          </div>
+        </div>
       );
     }
 

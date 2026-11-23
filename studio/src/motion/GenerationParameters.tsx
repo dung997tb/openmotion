@@ -62,20 +62,23 @@ export function parameterInputImageRatio(model: Model, draft: ParameterDraft, ha
   return modelReferenceLimit(model) > 0 && usesInputImageRatio(model, hasInputImage, parameters);
 }
 
-function DurationControl({
+export function DurationControl({
   field,
   currentValue,
   inputId,
+  showInput = true,
   onCommit,
 }: {
   field: GenerationOption;
   currentValue: number | undefined;
   inputId?: string;
+  showInput?: boolean;
   onCommit: (next: number | undefined) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const generatedId = useId();
   const [preview, setPreview] = useState<number | null>(null);
+  const seconds = new Intl.NumberFormat(locale ?? 'en', { style: 'unit', unit: 'second', unitDisplay: 'narrow' });
 
   if (field.kind === 'choice') {
     return (
@@ -88,7 +91,7 @@ function DurationControl({
             aria-pressed={currentValue === option.value}
             onClick={() => onCommit(Number(option.value))}
           >
-            {typeof option.value === 'number' && option.value > 0 ? `${option.value}s` : t(option.label)}
+            {typeof option.value === 'number' && option.value > 0 ? seconds.format(option.value) : t(option.value === -1 ? 'Auto' : option.label)}
           </Button>
         ))}
       </div>
@@ -105,8 +108,8 @@ function DurationControl({
   return (
     <div className="om-duration-control">
       <div className="om-creation-row om-duration-header">
-        <span className="om-duration-readout">{displayValue !== undefined ? `${displayValue}s` : t('Auto')}</span>
-        <label className="om-field om-duration-input">
+        <span className="om-duration-readout">{displayValue !== undefined ? seconds.format(displayValue) : t('Auto')}</span>
+        {showInput && <label className="om-field om-duration-input">
           <input
             id={inputId ?? generatedId}
             aria-label={t(field.label)}
@@ -121,7 +124,7 @@ function DurationControl({
               onCommit(e.target.value === '' ? undefined : Number(e.target.value));
             }}
           />
-        </label>
+        </label>}
       </div>
       <div className="om-duration-track">
         <Slider

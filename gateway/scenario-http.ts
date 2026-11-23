@@ -50,7 +50,7 @@ export async function scenarioHttp(
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Length': info.size,
-      'Content-Disposition': attachmentDisposition(name),
+      'Content-Disposition': attachmentDisposition(name, /^[\x20-\x7e]+$/.test(name) ? name : 'OpenMotion-workflow.zip'),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-store',
     });

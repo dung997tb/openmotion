@@ -1101,6 +1101,7 @@ it.each([
       ? Promise.resolve(Response.json({ ...catalog, activeId }))
       : fallback(input, init));
   await mount();
+  await click('Featured · Motion Studio');
   await click('Open in Motion Editor');
   expect(page()).toMatchObject({ explore: false, motion: false, templates: false });
   expect(container.querySelector('[aria-label="Editor draft"]')?.getAttribute('data-project')).toBe(activeId);

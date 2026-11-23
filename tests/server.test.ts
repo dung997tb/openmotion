@@ -120,11 +120,13 @@ test('SPA route allowlist serves Studio HTML while reserved backend and unknown 
   // Standalone SPA routes must not trigger native Studio startup even when ?project is attached.
   assert.equal(ensureCalls, 0);
 
-  // Reserved backend / cloud MCP / unknown paths must never return SPA HTML.
-  // GET /mcp opens a long-lived Streamable HTTP SSE stream; DELETE without a session returns 404 JSON.
-  const mcpDelete = await request('/mcp', { method: 'DELETE' });
-  assert.equal(mcpDelete.status, 404, 'expected 404 JSON for /mcp without session');
-  assert.doesNotMatch(await mcpDelete.text(), /data-motion-studio/);
+  // The live MCP stream is open-ended. An unknown session exercises its
+  // routing with a finite response that the in-memory transport can read.
+  const mcp = await request('/mcp', { headers: { 'Mcp-Session-Id': 'unknown-session' } });
+  assert.equal(mcp.status, 404);
+  assert.deepEqual(await mcp.json(), { error: 'MCP session not found' });
+
+  // Reserved backend and unknown paths must never return SPA HTML.
   for (const route of ['/mcp/stream', '/unknown-page', '/workspace.ts']) {
     const response = await request(route);
     assert.equal(response.status, 404, `expected 404 for ${route}`);
