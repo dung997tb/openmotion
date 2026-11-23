@@ -12,7 +12,7 @@ it("shows the release position through stale frame reports and accepts a new pre
   const releaseSecond = update(7);
   releaseFirst();
   // The clip's timing is optimistic. Other frame fields continue to reflect playback.
-  expect(applyHeldTrims(frame, [{ ...element, muted: true }])[0]).toMatchObject({duration: 7, muted: true});
+  expect(applyHeldTrims(frame, [{ ...element, muted: true, playbackStart: 4 }])[0]).toMatchObject({duration: 7, muted: true, playbackStart: 4});
   releaseSecond();
   expect(applyHeldTrims(frame, [element])[0]).toBe(element);
   update(10);

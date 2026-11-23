@@ -20,7 +20,7 @@ export function holdIsolatedTrims(frame: HTMLIFrameElement | null, changes: read
   const { clips } = snapshot;
   const entries = changes.map(({ element, start, duration, playbackStart }) => {
     const key = element.key ?? element.id;
-    const trim = { start, duration, playbackStart };
+    const trim = { start, duration, ...(playbackStart !== undefined && { playbackStart }) };
     clips.set(key, trim);
     return { key, trim };
   });
