@@ -1,18 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { isSha256Hex, isUuid, projectPath } from '../shared/project-validation.ts';
-import { boundedMediaBody, cmsUrl } from '../shared/repository-media.ts';
-import { maxLfsAssetBytes } from '../shared/repository-template-catalog.ts';
-import { BUILTIN_TEMPLATES, mimeTypeForPath, validateTemplateId } from '../src/services/catalog-service.ts';
-import type { PreparedCatalogFile, PreparedCatalogTemplate } from './sync-catalog-cas.ts';
+import { isSha256Hex, isUuid, projectPath } from '../../shared/project-validation.ts';
+import { boundedMediaBody, cmsUrl } from '../../shared/repository-media.ts';
+import { maxLfsAssetBytes } from '../../shared/repository-template-catalog.ts';
+import { BUILTIN_TEMPLATES, mimeTypeForPath, validateTemplateId } from './catalog-service.ts';
+import type { PreparedCatalogFile, PreparedCatalogTemplate } from '../../scripts/sync-catalog-cas.ts';
 
+export type { PreparedCatalogFile, PreparedCatalogTemplate };
 export type PrismEnvironment = 'dev' | 'prod';
 
 const resourceId = '1500c9af-186b-457f-b74d-a58113f657d8';
-const origins = { dev: 'https://r.powerformer.net', prod: 'https://r.open-design.ai' };
 const maxPublicationBytes = 64 * 1024 * 1024;
-const builtinIds = new Set(BUILTIN_TEMPLATES.map(template => template.id));
 const localeName = z.string().max(63).regex(/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/);
 const cmsFile = z.string().transform(cmsUrl);
 const optionalFile = cmsFile.nullish();
@@ -87,6 +86,7 @@ type LocaleEntry = Pick<z.infer<typeof entry>, 'original' | 'motionDocumentUrl' 
 export function parsePrismMotionPublication(value: unknown, environment: PrismEnvironment): PreparedCatalogTemplate[] {
   const data = publication.parse(value);
   assert.equal(data.environment, environment, 'Unexpected Prism environment');
+  const builtinIds = new Set(BUILTIN_TEMPLATES.map(template => template.id));
   const primary = data.content[data.defaultLocale];
   assert(primary?.templates.length, 'Missing default locale templates');
   const localesById = new Map<string, Record<string, LocaleEntry>>();
@@ -119,13 +119,12 @@ export function parsePrismMotionPublication(value: unknown, environment: PrismEn
   });
 }
 
-export async function loadPrismMotionTemplates(
+async function readPublication(
   environment: PrismEnvironment,
-  fetchImpl: typeof fetch = fetch,
-  isCurrent?: (catalogVersion: string) => Promise<boolean>,
-): Promise<PreparedCatalogTemplate[]> {
-  assert(Object.hasOwn(origins, environment), 'Unknown Prism environment');
-  const origin = origins[environment];
+  origin: string,
+  fetchImpl: typeof fetch,
+  cached?: readonly PreparedCatalogTemplate[],
+): Promise<readonly PreparedCatalogTemplate[]> {
   const channelPath = `/resources/${resourceId}/channels/default`;
   const controller = new AbortController();
   const options = { redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]) } as const;
@@ -151,7 +150,7 @@ export async function loadPrismMotionTemplates(
     assert(manifest.contents.some(entry => entry.locale === manifest.defaultLocale), 'Default locale missing from manifest');
     assert(totalBytes <= maxPublicationBytes, 'Prism publication exceeds maximum bytes');
 
-    if (isCurrent && await isCurrent(`prism:${environment}:${manifest.publicationId}`)) return [];
+    if (cached?.[0]?.catalogVersion === `prism:${environment}:${manifest.publicationId}`) return cached;
     const content: Record<string, unknown> = {};
     const pending = manifest.contents.values();
     async function readLocales() {
@@ -167,5 +166,73 @@ export async function loadPrismMotionTemplates(
     return parsePrismMotionPublication({ ...manifest, content }, environment);
   } finally {
     controller.abort();
+  }
+}
+
+interface PrismMotionCatalogOptions {
+  publicOrigin?: string;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  ttlMs?: number;
+  retryMs?: number;
+  onRefreshError?: (error: unknown) => void;
+}
+
+/** Per API instance and environment. Access triggers checks; no timer runs between requests. */
+export class PrismMotionCatalog {
+  private readonly environment: PrismEnvironment;
+  private readonly origin: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly now: () => number;
+  private readonly ttlMs: number;
+  private readonly retryMs: number;
+  private readonly onRefreshError?: (error: unknown) => void;
+  private cached?: readonly PreparedCatalogTemplate[];
+  private pending?: Promise<readonly PreparedCatalogTemplate[]>;
+  private checkAfter = 0;
+  private lastError?: unknown;
+
+  constructor(environment: PrismEnvironment, options: PrismMotionCatalogOptions = {}) {
+    assert(environment === 'dev' || environment === 'prod', 'Unknown Prism environment');
+    const configuredOrigin = options.publicOrigin ?? (environment === 'prod' ? 'https://r.open-design.ai' : undefined);
+    assert(configuredOrigin, 'Set PRISM_PUBLIC_ORIGIN for the dev catalog');
+    const url = new URL(configuredOrigin);
+    assert(url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash,
+      'PRISM_PUBLIC_ORIGIN must be an HTTPS origin');
+    this.environment = environment;
+    this.origin = url.origin;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? Date.now;
+    this.ttlMs = options.ttlMs ?? 5 * 60_000;
+    this.retryMs = options.retryMs ?? 30_000;
+    this.onRefreshError = options.onRefreshError;
+  }
+
+  async getTemplates(): Promise<readonly PreparedCatalogTemplate[]> {
+    if (!this.cached) {
+      if (this.now() < this.checkAfter) throw this.lastError;
+      return this.pending ?? this.refresh();
+    }
+    if (!this.pending && this.now() >= this.checkAfter) {
+      void this.refresh().catch(error => this.onRefreshError?.(error));
+    }
+    return this.cached;
+  }
+
+  private refresh(): Promise<readonly PreparedCatalogTemplate[]> {
+    this.pending = readPublication(this.environment, this.origin, this.fetchImpl, this.cached)
+      .then(templates => {
+        this.cached = templates;
+        this.lastError = undefined;
+        this.checkAfter = this.now() + this.ttlMs;
+        return templates;
+      })
+      .catch(error => {
+        this.lastError = error;
+        this.checkAfter = this.now() + this.retryMs;
+        throw error;
+      })
+      .finally(() => { this.pending = undefined; });
+    return this.pending;
   }
 }

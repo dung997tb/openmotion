@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { loadPrismMotionTemplates, parsePrismMotionPublication } from '../../scripts/prism-motion-publication.ts';
+import { setImmediate } from 'node:timers/promises';
+import { PrismMotionCatalog, parsePrismMotionPublication, type PrismEnvironment } from '../../src/services/prism-motion-catalog.ts';
+
+const loadPrismMotionTemplates = (environment: PrismEnvironment, fetchImpl: typeof fetch) =>
+  new PrismMotionCatalog(environment, { publicOrigin: 'https://cms-test.example', fetchImpl }).getTemplates();
 
 const resourceId = '1500c9af-186b-457f-b74d-a58113f657d8';
 const publicationId = '121e747a-bb51-48d6-a44b-56ea20d07c98';
@@ -51,7 +55,7 @@ test('reads the canonical publication, normalizing editable projects, references
     const path = new URL(String(input)).pathname;
     return path.endsWith('/manifest.json') ? Response.json(manifest) : new Response(payloads.get(path)!.toString());
   });
-  const origin = 'https://r.powerformer.net';
+  const origin = 'https://cms-test.example';
   assert.deepEqual(requests, [origin + '/resources/' + resourceId + '/channels/default/manifest.json', ...manifest.contents.map(e => origin + e.contentUrl)]);
   const [project, reference] = result;
   assert.equal(project.catalogVersion, 'prism:dev:' + publicationId);
@@ -143,14 +147,105 @@ test('verifies every locale against the single manifest before accepting the pub
   }
 });
 
-test('a fully imported publication needs one manifest request on a scheduled check', async () => {
-  const { manifest } = delivery();
+function fakeCms(environment: PrismEnvironment = 'dev') {
+  const data = delivery();
+  data.manifest.environment = environment;
   const requests: string[] = [];
-  const templates = await loadPrismMotionTemplates('dev', async url => {
-    requests.push(String(url));
-    return Response.json(manifest);
-  }, async version => version === `prism:dev:${manifest.publicationId}`);
-  assert.deepEqual(templates, []);
-  assert.equal(requests.length, 1);
-  assert.match(requests[0], /manifest\.json$/);
+  let now = 0;
+  let hold: Promise<void> | undefined;
+  let fail = false;
+  const errors: unknown[] = [];
+  const catalog = new PrismMotionCatalog(environment, {
+    publicOrigin: environment === 'dev' ? 'https://cms-test.example' : undefined,
+    now: () => now, ttlMs: 100, retryMs: 10, onRefreshError: error => errors.push(error),
+    fetchImpl: async input => {
+      const url = new URL(String(input));
+      requests.push(url.href);
+      if (hold) await hold;
+      if (fail) return new Response(null, { status: 503 });
+      if (url.pathname.endsWith('/manifest.json')) return Response.json(data.manifest);
+      return new Response(data.payloads.get(url.pathname)!.toString());
+    },
+  });
+  return {
+    catalog, data, requests, errors,
+    advance(ms: number) { now += ms; },
+    pause() {
+      const gate = Promise.withResolvers<void>();
+      hold = gate.promise;
+      return () => { hold = undefined; gate.resolve(); };
+    },
+    fail(value: boolean) { fail = value; },
+  };
+}
+
+test('concurrent cold callers share one download; stale reads use the previous snapshot during the manifest check', async () => {
+  const cms = fakeCms();
+  const release = cms.pause();
+  const cold = Array.from({ length: 20 }, () => cms.catalog.getTemplates());
+  assert.equal(cms.requests.length, 1);
+  release();
+  const [snapshot, ...others] = await Promise.all(cold);
+  assert(others.every(items => items === snapshot));
+  assert.equal(cms.requests.length, 3);
+  cms.advance(99);
+  assert.equal(await cms.catalog.getTemplates(), snapshot);
+  assert.equal(cms.requests.length, 3);
+  cms.advance(1);
+  const finishCheck = cms.pause();
+  const stale = await Promise.all(Array.from({ length: 20 }, () => cms.catalog.getTemplates()));
+  assert(stale.every(items => items === snapshot));
+  assert.equal(cms.requests.length, 4);
+  finishCheck();
+  await setImmediate();
+  assert.equal(await cms.catalog.getTemplates(), snapshot);
+  assert.equal(cms.requests.length, 4, 'unchanged publication must not re-download locale content');
+});
+
+test('publishes a changed edition only after every language has been verified; failed refreshes back off', async () => {
+  const cms = fakeCms();
+  const original = await cms.catalog.getTemplates();
+  cms.advance(100);
+  cms.data.manifest.publicationId = '121e747a-bb51-48d6-a44b-56ea20d07c99';
+  const locale = cms.data.manifest.contents[1];
+  const correct = locale.sha256;
+  locale.sha256 = '0'.repeat(64);
+  assert.equal(await cms.catalog.getTemplates(), original);
+  await setImmediate();
+  assert.equal(cms.errors.length, 1);
+  const failedRequests = cms.requests.length;
+  cms.advance(9);
+  assert.equal(await cms.catalog.getTemplates(), original);
+  assert.equal(cms.requests.length, failedRequests);
+  locale.sha256 = correct;
+  cms.advance(1);
+  assert.equal(await cms.catalog.getTemplates(), original);
+  await setImmediate();
+  const updated = await cms.catalog.getTemplates();
+  assert.notEqual(updated, original);
+  assert.equal(updated[0].catalogVersion, `prism:dev:${cms.data.manifest.publicationId}`);
+  assert.equal(cms.requests.length - failedRequests, 3);
+});
+
+test('a failed initial read can be retried and caches never cross their deployment environment', async () => {
+  const dev = fakeCms('dev'), prod = fakeCms('prod');
+  dev.fail(true);
+  await assert.rejects(Promise.all([dev.catalog.getTemplates(), dev.catalog.getTemplates()]), /503/);
+  assert.equal(dev.requests.length, 1);
+  dev.fail(false);
+  await assert.rejects(dev.catalog.getTemplates(), /503/);
+  assert.equal(dev.requests.length, 1);
+  dev.advance(10);
+  const [devResult, prodResult] = await Promise.all([dev.catalog.getTemplates(), prod.catalog.getTemplates()]);
+  assert.equal(devResult[0].catalogVersion, 'prism:dev:' + publicationId);
+  assert.equal(prodResult[0].catalogVersion, 'prism:prod:' + publicationId);
+  assert(dev.requests.every(url => new URL(url).hostname === 'cms-test.example'));
+  assert(prod.requests.every(url => new URL(url).hostname === 'r.open-design.ai'));
+});
+
+test('requires an explicit HTTPS origin in the test environment', () => {
+  assert.throws(() => new PrismMotionCatalog('dev'), /PRISM_PUBLIC_ORIGIN/);
+  for (const publicOrigin of ['http://cms.example', 'https://user@cms.example', 'https://cms.example/path']) {
+    assert.throws(() => new PrismMotionCatalog('dev', { publicOrigin }), /HTTPS origin/);
+  }
 });
