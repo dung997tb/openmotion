@@ -351,7 +351,10 @@ function GameTile({ game, locale, onOpen }: { game: GameCard; locale: string; on
   const label = pending(game) || game.status === 'failed' ? t('Show the Agent instruction for {title}', { title }) : t('Play {title}', { title });
   return <article className="om-game-tile" data-status={game.status} data-orientation={game.orientation === 'portrait' ? 'portrait' : undefined}>
     <Button variant="plain" className="om-game-tile-cover" onClick={onOpen} aria-label={label}>
+      {/* Portrait games share the 16:9 card: the cover sits whole in the middle over a blurred copy of itself. */}
+      {cover && game.orientation === 'portrait' && <img className="om-game-tile-backdrop" src={cover} alt="" loading="lazy" decoding="async" />}
       {cover ? <img src={cover} alt="" loading="lazy" decoding="async" /> : <span className="om-game-tile-placeholder">{title}</span>}
+      {game.orientation === 'portrait' && !game.multiplayer && <span className="om-game-badge"><RemixIcon name="smartphone-line" size={13} />{t('Portrait')}</span>}
       {status && <span className="om-game-status" data-tone={game.status}>{game.status === 'building' && <RemixIcon name="loader-4-line" size={13} />}{t(status)}</span>}
       {game.external && !game.external.embeddable && <span className="om-game-status"><RemixIcon name="external-link-line" size={13} />{t('External link')}</span>}
       {game.multiplayer && <span className="om-game-badge"><RemixIcon name="group-line" size={13} />{t('{count} players', { count: game.maxPlayers })}</span>}

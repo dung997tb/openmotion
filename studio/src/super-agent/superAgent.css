@@ -7109,8 +7109,21 @@
   cursor: pointer;
 }
 
-.om-sa-game-tile[data-orientation="portrait"] .om-sa-game-tile-cover {
-  aspect-ratio: 9 / 16;
+/* Portrait games keep the 16:9 card so both shapes line up in one grid; the 9:16 cover is shown whole over a blurred fill. */
+.om-sa-game-tile-cover .om-sa-game-tile-backdrop {
+  position: absolute;
+  inset: 0;
+  filter: blur(18px) brightness(0.55);
+  transform: scale(1.2);
+}
+
+.om-sa-game-tile:hover .om-sa-game-tile-cover .om-sa-game-tile-backdrop {
+  transform: scale(1.2);
+}
+
+.om-sa-game-tile[data-orientation="portrait"] .om-sa-game-tile-cover img:not(.om-sa-game-tile-backdrop) {
+  position: relative;
+  object-fit: contain;
 }
 
 .om-sa-game-tile-cover img {
