@@ -21,6 +21,8 @@ import { StudioProductPicker } from './StudioProductPicker';
 
 const AUTOSAVE_DELAY_MS = 800;
 const hiddenStudioPresets = new Set(['bf-keyboard']);
+/** Brief fields a picked product owns; an example never overwrites them. */
+const productFieldIds = new Set(['productName', 'productDescription', 'pageUrl']);
 const INPUT_WIDTH_KEY = 'openmotion.studio.inputWidth.v1';
 const DEFAULT_INPUT_WIDTH = 400;
 const MIN_INPUT_WIDTH = 280;
@@ -51,6 +53,8 @@ export type ScenarioStudioViewProps = {
   onAddPoolItems(items: { ref: PoolRef; label?: string; tags?: string[]; stepId?: string | null; source: PoolItem['source'] }[]): Promise<string[]>;
   /** Resolves false when the brief could not be copied, so the hand-off note is not shown. */
   onRemovePoolItem(poolItemId: string): Promise<void>;
+  /** Lets the workspace save the typed brief before it switches runs or views. */
+  onRegisterFlush?(flush: (() => Promise<boolean>) | null): void;
   onOpenDesignProject(id: string): void;
   onOpenMotionProject(id: string): Promise<boolean>;
   onCopyAgentPrompt(customPrompt?: string): Promise<boolean>;
@@ -175,7 +179,7 @@ function DeliverableTab({ step, state, cover, example, selected, onSelect }: {
 }
 
 export function ScenarioStudioView({
-  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onOpenDesignProject, onOpenMotionProject, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
+  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onRegisterFlush, onOpenDesignProject, onOpenMotionProject, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
 }: ScenarioStudioViewProps) {
   const { t, locale } = useI18n();
   const studio = scenarioStudio(scenario.id);
@@ -248,6 +252,13 @@ export function ScenarioStudioView({
 
   const flushRef = useRef(flush);
   flushRef.current = flush;
+  useEffect(() => {
+    onRegisterFlush?.(async () => {
+      const synced = await productSyncRef.current();
+      return synced && flushRef.current();
+    });
+    return () => onRegisterFlush?.(null);
+  }, [onRegisterFlush]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); if (dirty.current.size) void flushRef.current(); }, []);
 
   const update = (patch: Record<string, string>) => {
@@ -300,10 +311,18 @@ export function ScenarioStudioView({
   const poolRef = useRef(poolItems);
   poolRef.current = poolItems;
   const productSync = useRef<Promise<boolean>>(Promise.resolve(true));
+  // Waits for the product photo sync; a failed sync is retried rather than blocking every later hand-off.
+  const productSyncRef = useRef(async () => true);
   const selectProduct = (next: StudioProduct) => {
     setProduct(next);
     update(productBrief(next, briefFieldIds));
     productSync.current = productSync.current.then(() => syncProductPhotos(next));
+    return productSync.current;
+  };
+  productSyncRef.current = async () => {
+    if (await productSync.current) return true;
+    if (!product) return true;
+    productSync.current = syncProductPhotos(product);
     return productSync.current;
   };
   const syncProductPhotos = async (next: StudioProduct) => {
@@ -340,7 +359,7 @@ export function ScenarioStudioView({
 
   /** Leave the studio only after the typed brief is saved, so nothing typed is lost. */
   const leaveAfterSave = async (leave: () => void) => {
-    if ((await productSync.current) && (await flush())) { leave(); return; }
+    if ((await productSyncRef.current()) && (await flush())) { leave(); return; }
     toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
   };
 
@@ -360,7 +379,7 @@ export function ScenarioStudioView({
     setMaking(true);
     try {
       // Only hand over a brief the run has saved, so the Agent never gets stale fields.
-      if (!(await productSync.current)) return;
+      if (!(await productSyncRef.current())) return;
       if (!(await flush())) {
         toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
         return;
@@ -436,7 +455,7 @@ export function ScenarioStudioView({
           <span>{t('Try:')}</span>
           {presets.map(preset => (
             <Button key={preset.id} variant="plain" size="sm" className="om-studio-preset"
-              onClick={() => update(Object.fromEntries(Object.entries(preset.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string')))}>
+              onClick={() => update(Object.fromEntries(Object.entries(preset.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && !(product && productFieldIds.has(entry[0])))))}>
               {preset.label}
             </Button>
           ))}
