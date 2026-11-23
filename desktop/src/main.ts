@@ -73,10 +73,12 @@ const distDir = path.dirname(__filename);
 const platform: HostPlatform = normalizeDesktopPlatform(process.platform);
 
 app.setName(DESKTOP_PRODUCT_NAME);
-try {
-  app.setPath('userData', path.join(app.getPath('appData'), 'OpenMotion'));
-} catch {
-  // Ignore custom userData override failure on restricted hosts.
+if (!process.argv.some(arg => arg.startsWith('--user-data-dir'))) {
+  try {
+    app.setPath('userData', path.join(app.getPath('appData'), 'OpenMotion'));
+  } catch {
+    // Ignore custom userData override failure on restricted hosts.
+  }
 }
 
 const singleLock = app.requestSingleInstanceLock();
@@ -415,7 +417,7 @@ function revealMainWindow(): void {
 
 async function showRetryPage(info: { code?: string; message?: string; detail?: string }): Promise<void> {
   const win = mainWindow;
-  if (!win || win.isDestroyed()) return;
+  if (!win || win.isDestroyed() || showingRetryPage) return;
   showingRetryPage = true;
   rendererReady = false;
   const query: Record<string, string> = { theme: currentTheme };

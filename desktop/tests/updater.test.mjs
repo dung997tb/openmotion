@@ -341,13 +341,18 @@ test('desktop/electron-builder.yml defines thin-shell packaging, openmotion prot
   assert.match(builderYml, /name:\s*OpenDesign/);
   assert.match(builderYml, /-\s*openmotion\b/);
 
-  // macOS notarization and arm64 + x64 dmg/zip targets.
+  // macOS notarization and dmg/zip targets (arch selected per CLI job: --arm64 or --x64).
   assert.match(builderYml, /^mac:\s*$/m);
   assert.match(builderYml, /^\s+notarize:\s*true$/m);
   assert.match(builderYml, /target:\s*dmg/);
   assert.match(builderYml, /target:\s*zip/);
-  assert.match(builderYml, /-\s*arm64/);
-  assert.match(builderYml, /-\s*x64/);
+  const macBlockMatch = builderYml.match(/^mac:\n([\s\S]*?)^\S/m);
+  assert.ok(macBlockMatch, 'Expected mac section in electron-builder.yml');
+  assert.equal(
+    macBlockMatch[1].includes('arch:'),
+    false,
+    'mac target must inherit single --arm64 / --x64 CLI arch flag instead of forcing multi-arch on one runner',
+  );
 
   // Windows nsis + portable x64 targets only.
   assert.match(builderYml, /^win:\s*$/m);
