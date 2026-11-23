@@ -31,8 +31,8 @@ it('lets Image blend browse all three examples and use the selected one', async 
   expect(onPrompt).toHaveBeenCalledExactlyOnceWith(examples[2].prompt);
 });
 
-it('keeps single-example workbench scenes free of an example switcher', async () => {
+it('shows one comparison image and no example switcher in the Image edit guide', async () => {
   await act(async () => root.render(<StudioIdeas destination={mediaEditorDestination('image-edit')} onPrompt={vi.fn()} />));
-  expect(container.querySelector('.om-scene-hero')).not.toBeNull();
+  expect(container.querySelectorAll('.om-scene-comparison img')).toHaveLength(1);
   expect(container.querySelector('.om-scene-hero-examples')).toBeNull();
 });
