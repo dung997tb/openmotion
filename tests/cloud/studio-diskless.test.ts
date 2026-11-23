@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { McpToolDispatcher } from '../../src/mcp/tool-dispatcher.ts';
+import { parseConfig } from '../../src/infra/config.ts';
+import { parseHTMLContent } from '@hyperframes/core/compiler';
 import { ensureHfIds } from '@hyperframes/parsers/hf-ids';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -890,6 +893,54 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.deepEqual((await retry.json()).written, written);
     assert.equal(fetcher.mock.callCount(), downloads);
     assert.equal((await env.files.readTextFile(env.auth, projectId, written[0]))?.content, 'edited');
+  });
+
+  it('installs the same mountable fragment via Studio and MCP, bundles nested references and undoes each installation', async t => {
+    const env = createStudioTestEnv();
+    const mcp = new McpToolDispatcher(parseConfig({
+      NODE_ENV: 'test', AUTH_MODE: 'dev', MODEL_GATEWAY_MODE: 'mock', DATABASE_URL: 'postgres://test:test@localhost/openmotion',
+      REDIS_URL: 'redis://localhost:6379', SESSION_SECRET: '0'.repeat(32),
+    }), { componentFiles: env.files });
+    const call = (args: Record<string, unknown>) => mcp.dispatch('openmotion_assets_use', args,
+      { auth: env.auth, supportsMcpAppsUi: false });
+    const listed = await call({ action: 'list_components', query: 'blur-in' });
+    assert(!listed.isError, JSON.stringify(listed.structuredContent));
+    assert((listed.structuredContent?.items as { name: string }[]).some(card => card.name === 'blur-in'));
+
+    const snippet = await readFile(path.join(REPO_ROOT, 'tests/fixtures/motion-components/blur-in.html'), 'utf8');
+    t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL) => {
+      assert(new URL(String(input)).pathname.endsWith('/registry/components/blur-in/blur-in.html'));
+      return new Response(snippet);
+    });
+    const sources = [];
+    for (const adapter of ['studio', 'mcp']) {
+      const { projectId } = await env.workspace.createProject(env.auth);
+      const composition = (id: string, child: string, src: string) => `<!doctype html><html><body><div data-composition-id="${id}" data-width="1920" data-height="1080" data-duration="5"><div data-composition-id="${child}" data-composition-src="${src}" data-start="0" data-duration="5" data-track-index="0"></div></div></body></html>`;
+      await env.files.commitChanges(env.auth, { projectId, ops: [
+        { op: 'upsert_text', path: 'index.html', content: composition('root', 'scene', 'compositions/scene.html') },
+        { op: 'upsert_text', path: 'compositions/scene.html', content: composition('scene', 'blur-in', 'components/blur-in.html') },
+      ] });
+      const args = { action: 'install_component', projectId, requestId: 'install-' + projectId, name: 'blur-in' };
+      const result = adapter === 'studio'
+        ? await (await env.studioApp.request(`/api/projects/${projectId}/registry/install`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blockName: 'blur-in' }),
+        })).json() : (await call(args)).structuredContent;
+      const file = 'compositions/components/blur-in.html';
+      assert.deepEqual(result.written, [file], JSON.stringify(result));
+      const virtual = await env.files.loadVirtualProject(env.auth, projectId);
+      const installed = virtual.readText(file);
+      assert(installed?.includes(snippet), 'original fragment contents retained');
+      sources.push(installed);
+      const bundled = await bundlePreviewInMemory(virtual, { runtimeUrl: '/api/runtime.js', skipDeterministicFonts: true });
+      assert(bundled);
+      assert.match(parseHTMLContent(bundled).querySelector('.hf-ui-blur-in')?.textContent ?? '', /Design/);
+      const lint = await lintProjectInMemory(virtual);
+      assert(!lint.results.some(row => row.result.findings.some(finding => finding.code === 'missing_or_empty_sub_composition')));
+      if (adapter === 'mcp') assert(!(await call(args)).isError);
+      await env.history.step(env.auth, projectId, 'back');
+      assert(!(await env.files.listFiles(env.auth, projectId)).some(record => record.path === file));
+    }
+    assert.equal(sources[0], sources[1]);
   });
 
   it('revalidates editor lint findings independently of unrelated source changes', async () => {

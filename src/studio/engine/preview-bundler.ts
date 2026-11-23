@@ -1,4 +1,6 @@
 import { bridgeDocumentTags, previewBuildBusyScript } from './preview-bridge.ts';
+import { posix } from 'node:path';
+import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
 import { createHash } from 'node:crypto';
 import {
   AFTER_FONTS_SCRIPT_TYPE,
@@ -78,6 +80,7 @@ import {
 import { repairCodeExtrudeMaterial } from '../../../shared/registry-material-compat.ts';
 import {
   normalizeVirtualPath,
+  resolveCompositionReference,
   resolveVirtualPath,
   virtualDirname,
   type VirtualProjectReader,
@@ -116,6 +119,25 @@ export interface BundlePreviewOptions {
 function isRelativeUrl(url: string): boolean {
   const trimmed = url.trim();
   return Boolean(trimmed) && !isNonRelativeUrl(trimmed) && !trimmed.startsWith('/');
+}
+
+/** The compiler asks for every nested host from the entry's directory. Translate
+ * the authored relative path before the host is lifted out of its own file. */
+function scopeNestedSources(project: VirtualProjectReader, owner: string, entryDir: string, html: string): string {
+  if (!/data-composition-src/i.test(html)) return html;
+  const parts: string[] = [];
+  let start = 0;
+  for (const tag of scanHtmlOpeningTags(html)) {
+    const att = tag.attributes.find(attr => attr.name === 'data-composition-src');
+    if (att?.kind !== 'value' || !isRelativeUrl(att.value)) continue;
+    const target = resolveCompositionReference(project, owner, decodedUrlPath(decodeAuthoredAttribute(att.value)));
+    if (!target) continue;
+    const scoped = encodeUrlPath(posix.relative('/' + entryDir, '/' + target));
+    if (scoped === att.value) continue;
+    parts.push(html.slice(start, att.valueStart), scoped);
+    start = att.valueEnd;
+  }
+  return parts.length ? parts.join('') + html.slice(start) : html;
 }
 
 function isProjectLocalMediaUrl(url: string): boolean {
@@ -681,7 +703,7 @@ export async function bundlePreviewInMemory(
       const resolved = resolveVirtualPath(sourceDir, decodedUrlPath(srcPath));
       if (!resolved) return null;
       const html = project.readText(resolved);
-      return html === null ? null : ensureHfIds(html);
+      return html === null ? null : scopeNestedSources(project, resolved, sourceDir, ensureHfIds(html));
     },
     parseHtml: parseHTMLContent,
     hostIdentityMap,

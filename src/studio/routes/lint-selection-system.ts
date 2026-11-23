@@ -17,7 +17,7 @@ import {
 } from '../context.ts';
 import { infoInMemory, timelineInMemory } from '../engine/inspect.ts';
 import { lintProjectInMemory } from '../engine/lint-project.ts';
-import { installMotionComponent, motionComponentCards } from '../motion-component-registry.ts';
+import { installMotionComponent, motionComponentCards } from '../../services/motion-component-registry.ts';
 import { createWriteToken, getMimeType } from '../etag.ts';
 
 const SAFE_VENDOR_PATH_RE = /^[a-zA-Z0-9._/@-]{1,200}$/;
@@ -377,7 +377,7 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
     const body = await c.req.json().catch(() => null);
     if (typeof body?.blockName !== 'string' || !body.blockName) return c.json({ error: 'blockName is required' }, 400);
     return c.json(await installMotionComponent(auth, deps.files, c.req.param('id'), body.blockName,
-      createWriteToken(c.req.header('x-hyperframes-write-token'))));
+      { writeToken: createWriteToken(c.req.header('x-hyperframes-write-token')) }));
   });
 
   return app;
