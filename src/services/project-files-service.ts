@@ -1079,6 +1079,7 @@ export class ProjectFilesService {
       if (
         shouldCreateVersion &&
         hasFileChanges &&
+        safeWindowId !== null &&
         this.historyCoalesceWindowMs > 0 &&
         isInteractiveStudioEdit &&
         currentVersionId !== null &&
@@ -1132,7 +1133,7 @@ export class ProjectFilesService {
           project.currentHistorySeq === maxHistorySeq &&
           headEntry.actorKind === actor.actorKind &&
           headEntry.actorName === actor.actorName &&
-          (safeWindowId === null || headEntry.windowId === safeWindowId)
+          headEntry.windowId === safeWindowId
         ) {
           const headReferenceMs = Math.min(headEntry.startedAt.getTime(), headEntry.endedAt.getTime());
           const elapsedMs = now.getTime() - headReferenceMs;

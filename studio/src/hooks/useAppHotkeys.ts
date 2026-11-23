@@ -174,6 +174,7 @@ export function useAppHotkeys({
 
   const applyHistory = useCallback(
     async (direction: "undo" | "redo") => {
+      if (editHistory.projectWide) return fileHistory[direction]();
       // Caption edits live in their own in-memory stack. While caption edit
       // mode is active, ⌘Z must revert the caption edit — not an unrelated
       // earlier file edit (which would ALSO leave the caption change intact).
@@ -196,7 +197,7 @@ export function useAppHotkeys({
 
       await fileHistory[direction]();
     },
-    [editHistory.state, fileHistory, showToast],
+    [editHistory.projectWide, editHistory.state, fileHistory, showToast],
   );
 
   const handleUndo = useCallback(() => applyHistory("undo"), [applyHistory]);

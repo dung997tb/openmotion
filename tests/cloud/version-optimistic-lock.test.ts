@@ -1365,6 +1365,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
   });
 
   it('coalesces 5 rapid Studio edits within 4s into 1 project_versions row with delta project_version_files and exact CAS refcounts, and splits on export-ref / pin / MCP / >4s (c2)', async () => {
+    const windowId = randomUUID();
     let clockMs = Date.parse('2026-11-20T12:00:00.000Z');
     const h = createHarness({
       historyCoalesceWindowMs: 4000,
@@ -1413,7 +1414,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const edit1 = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">drag-1</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'Drag step 1',
     });
     assert.equal(edit1.versionNumber, 2);
@@ -1424,7 +1425,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const edit2 = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">drag-2</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'Drag step 2',
     });
     assert.equal(edit2.versionId, edit1.versionId);
@@ -1440,7 +1441,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
         { op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">drag-3</div>' },
         { op: 'upsert_text', path: 'extra.css', content: '/* added-during-burst */' },
       ],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'Drag step 3',
     });
     assert.equal(edit3.versionId, edit1.versionId);
@@ -1453,7 +1454,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
         { op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">drag-4</div>' },
         { op: 'delete', path: 'b.css' },
       ],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'Drag step 4',
     });
     assert.equal(edit4.versionId, edit1.versionId);
@@ -1463,7 +1464,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const edit5 = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">drag-5</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'Drag step 5',
     });
     assert.equal(edit5.versionId, edit1.versionId);
@@ -1518,7 +1519,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const afterExportCol = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">post-export-1</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'After export col ref',
     });
     assert.equal(afterExportCol.coalesced, false);
@@ -1543,7 +1544,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const afterExportPayload = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">post-export-2</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'After export payload ref',
     });
     assert.equal(afterExportPayload.coalesced, false);
@@ -1558,7 +1559,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const afterPin = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">post-pin</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'After pin',
     });
     assert.equal(afterPin.coalesced, false);
@@ -1581,7 +1582,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const studioAfterMcp = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">studio-after-mcp</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'Studio after agent',
     });
     assert.equal(studioAfterMcp.coalesced, false);
@@ -1592,7 +1593,7 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     const afterWindow = await h.files.commitChanges(h.authA, {
       projectId: proj.projectId,
       ops: [{ op: 'upsert_text', path: 'index.html', content: '<div data-composition-id="main">after-4s</div>' }],
-      source: 'studio',
+      source: 'studio', windowId,
       summary: 'After window elapsed',
     });
     assert.equal(afterWindow.coalesced, false);

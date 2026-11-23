@@ -99,6 +99,25 @@ it("uses the files actually restored by cloud history in both directions", async
   expect(redo.files).toEqual({ "index.html": { previous: "A", restored: "B" } });
 });
 
+it("cloud saves need no claim and a stale tab always steps the latest project edit", async () => {
+  const { hook, readFile } = await studio();
+  const own = { id: "title", label: "Edit title", paths: ["index.html"], endedAt: 1000 };
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      expect(url).toMatch(/\/history\/step$/);
+      expect(JSON.parse(String(init.body))).toEqual({ direction: "back" });
+      return Response.json({ ok: true, appliedFiles: ["captions.srt"], stepLabel: "Edit subtitles" });
+    }
+    return Response.json({ currentSeq: 2, back: own, forward: null, entries: [] });
+  });
+  vi.stubGlobal("fetch", fetch);
+  await act(() => hook().refresh());
+  await act(() => hook().recordEdit({ label: "Edit title", files: { "index.html": { before: "A", after: "B" } } }));
+  const result = await act(() => hook().undo({ readFile, claimedAfter: 0 }));
+  expect(result).toMatchObject({ ok: true, label: "Edit subtitles", paths: ["captions.srt"] });
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+
 it("reads a multi-file history step concurrently without waiting once per file", async () => {
   const { dir, hook, save, readFile } = await studio({ initialFiles: { "other.html": "X" } });
   save("B"); writeFileSync(join(dir, "other.html"), "Y");

@@ -28,6 +28,7 @@ interface HistoryFileCallbacks {
   claimedAfter?: number;
 }
 export interface EditHistoryHandle {
+  projectWide?: boolean;
   canUndo: boolean;
   canRedo: boolean;
   undo: (cb: HistoryFileCallbacks) => Promise<HistoryResult>;
@@ -41,7 +42,7 @@ export interface EditHistoryHandle {
 }
 
 export interface UseEditHistoryActionsOptions {
-  editHistory: Pick<EditHistoryHandle, "undo" | "redo" | "predict" | "claims" | "canUndo" | "canRedo">;
+  editHistory: Pick<EditHistoryHandle, "undo" | "redo" | "predict" | "claims" | "projectWide" | "canUndo" | "canRedo">;
   readOptionalProjectFile: (path: string) => Promise<string>;
   readProjectFile: (path: string) => Promise<string>;
   writeProjectFile: (path: string, content: string) => Promise<void>;
@@ -92,18 +93,19 @@ export function useEditHistoryActions({
       // One result per step the person asked for; the step itself never waits on this.
       const report = (outcome: "success" | "unavailable" | "failure") =>
         reportHistoryStep(direction, outcome, projectId, method);
-      if (direction === "undo" && cancelNewestStudioWaitingPress()) return report("success");
+      const projectWide = historyRef.current.projectWide;
+      if (!projectWide && direction === "undo" && cancelNewestStudioWaitingPress()) return report("success");
       const available = direction === "undo" ? historyRef.current.canUndo : historyRef.current.canRedo;
       if (!available && !(direction === "undo" && hasStudioPendingEdits())) return report("unavailable");
       // An edit still saving is newer than any step this tab predicts, so it paints back first.
-      const pendingEditShown = direction === "undo" ? paintBackNewestStudioPendingEdit() : null;
+      const pendingEditShown = !projectWide && direction === "undo" ? paintBackNewestStudioPendingEdit() : null;
       const predicted = pendingEditShown ? null : (editHistory.predict?.(direction) ?? null);
       const predictedShown = predicted ? (showHistoryRestoreNow?.(predicted.files) ?? null) : null;
       const shownLanded = predictedShown ? beginStudioShownRestore() : null;
       const putBack = predictedShown ?? pendingEditShown?.showAgain;
       const claimedAfter =
         pendingEditShown?.claimsAtBegin ??
-        (direction === "undo" && hasStudioPendingEdits() ? editHistory.claims?.() : undefined);
+        (!projectWide && direction === "undo" && hasStudioPendingEdits() ? editHistory.claims?.() : undefined);
       let result: HistoryResult = { ok: false, reason: "failed" };
       let serverSteppedShown = false;
       let revertIsTheUndo = false;

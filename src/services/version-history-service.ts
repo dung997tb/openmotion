@@ -114,6 +114,7 @@ export interface HistoryMutationResult {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly appliedFiles: string[];
+  readonly stepLabel?: string;
   readonly writeToken: string;
   readonly entry?: HistoryListItem | null;
   readonly replayed?: boolean;
@@ -370,89 +371,6 @@ export class VersionHistoryService {
     };
   }
 
-  /**
-   * Claim or label the latest Studio edit entry (`POST /api/projects/:id/history/claim`).
-   * Coalesces with the current active entry when `windowId` matches or updates its human label.
-   */
-  async claimEdit(
-    ctx: AuthContext,
-    projectId: string,
-    input: { label?: string; windowId?: string | null; actorKind?: HistoryActorKind; actorName?: string } = {},
-  ): Promise<{
-    claimed: { id: string; seq: number; label: string } | null;
-    seq: number;
-    canUndo: boolean;
-    canRedo: boolean;
-  }> {
-    const label = input.label?.trim().slice(0, 256);
-    const windowId = input.windowId && isUuid(input.windowId) ? input.windowId : null;
-    const actor = mapActor(ctx, input.actorKind, input.actorName);
-
-    const claimed = await this.db.transaction(async (tx) => {
-      const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
-        allowTrashed: false,
-        forUpdate: true,
-        auth: ctx,
-      });
-
-      const currentRows = await tx
-        .select()
-        .from(projectHistoryEntries)
-        .where(
-          and(
-            eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-            eq(projectHistoryEntries.projectId, project.id),
-            eq(projectHistoryEntries.seq, project.currentHistorySeq),
-          ),
-        );
-      const current = currentRows[0];
-      if (!current) return null;
-
-      const now = new Date();
-      const nextLabel = label || current.label;
-      await tx
-        .update(projectHistoryEntries)
-        .set(
-          asUpdate(projectHistoryEntries, {
-            label: nextLabel,
-            actorKind: actor.actorKind,
-            actorName: actor.actorName,
-            ...(windowId ? { windowId } : {}),
-            endedAt: now,
-          }),
-        )
-        .where(
-          and(
-            eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-            eq(projectHistoryEntries.id, current.id),
-          ),
-        );
-
-      if (label && current.versionId) {
-        await tx
-          .update(projectVersions)
-          .set(asUpdate(projectVersions, { summary: nextLabel }))
-          .where(
-            and(
-              eq(projectVersions.workspaceId, ctx.workspaceId),
-              eq(projectVersions.projectId, project.id),
-              eq(projectVersions.id, current.versionId),
-            ),
-          );
-      }
-
-      return { id: current.id, seq: current.seq, label: nextLabel };
-    });
-
-    const summary = await this.listHistory(ctx, projectId);
-    return {
-      claimed,
-      seq: summary.currentSeq,
-      canUndo: summary.canUndo,
-      canRedo: summary.canRedo,
-    };
-  }
-
   /** Create an explicit named checkpoint snapshot of the current project working tree. */
   async checkpoint(
     ctx: AuthContext,
@@ -655,6 +573,7 @@ export class VersionHistoryService {
         .orderBy(asc(projectHistoryEntries.seq));
 
       let targetEntry: typeof projectHistoryEntries.$inferSelect | undefined;
+      let stepLabel: string;
       if (direction === 'back') {
         const active = entries.filter((e) => !e.undone && e.seq <= project.currentHistorySeq);
         if (active.length <= 1) {
@@ -662,6 +581,7 @@ export class VersionHistoryService {
         }
         const currentEntry = active[active.length - 1];
         targetEntry = active[active.length - 2];
+        stepLabel = currentEntry.label;
 
         await tx
           .update(projectHistoryEntries)
@@ -678,6 +598,7 @@ export class VersionHistoryService {
           throw new CloudError('INVALID_ARGUMENT', 'Nothing to redo.', { status: 400, applied: false });
         }
         targetEntry = undone[0];
+        stepLabel = targetEntry.label;
 
         await tx
           .update(projectHistoryEntries)
@@ -731,6 +652,7 @@ export class VersionHistoryService {
         versionId: targetVersion.id,
         versionNumber: targetVersion.versionNumber,
         seq: targetEntry.seq,
+        stepLabel,
         appliedFiles,
       };
     });
@@ -756,132 +678,7 @@ export class VersionHistoryService {
       canUndo: list.canUndo,
       canRedo: list.canRedo,
       appliedFiles: txResult.appliedFiles,
-      writeToken,
-      entry: list.entries.find((e) => e.seq === txResult.seq) ?? null,
-    };
-  }
-
-  /** Undo a specific history entry (marks it and any newer active entries undone, restoring its parent version). */
-  async undoEntry(
-    ctx: AuthContext,
-    projectId: string,
-    entryId: string,
-    options: { writeToken?: string | null } = {},
-  ): Promise<HistoryMutationResult> {
-    assertValidUuid(entryId, 'entryId');
-    const writeToken = createWriteToken(options.writeToken);
-
-    const txResult = await this.db.transaction(async (tx) => {
-      const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
-        allowTrashed: false,
-        forUpdate: true,
-        auth: ctx,
-      });
-
-      const entries = await tx
-        .select()
-        .from(projectHistoryEntries)
-        .where(
-          and(
-            eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-            eq(projectHistoryEntries.projectId, project.id),
-          ),
-        )
-        .orderBy(asc(projectHistoryEntries.seq));
-
-      const targetIndex = entries.findIndex((e) => e.id === entryId);
-      if (targetIndex < 0) {
-        throw new CloudError('NOT_FOUND', `History entry ${entryId} not found.`, {
-          status: 404,
-          applied: false,
-        });
-      }
-      const target = entries[targetIndex];
-      const priorActive = entries.filter((e) => !e.undone && e.seq < target.seq);
-      const restoreEntry = priorActive[priorActive.length - 1];
-      if (!restoreEntry) {
-        throw new CloudError('INVALID_ARGUMENT', 'Cannot undo the initial baseline entry.', {
-          status: 400,
-          applied: false,
-        });
-      }
-
-      const toUndoIds = entries.filter((e) => !e.undone && e.seq >= target.seq).map((e) => e.id);
-      if (toUndoIds.length > 0) {
-        await tx
-          .update(projectHistoryEntries)
-          .set(asUpdate(projectHistoryEntries, { undone: true }))
-          .where(
-            and(
-              eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-              inArray(projectHistoryEntries.id, toUndoIds),
-            ),
-          );
-      }
-
-      const [restoreVersion] = await tx
-        .select()
-        .from(projectVersions)
-        .where(
-          and(
-            eq(projectVersions.workspaceId, ctx.workspaceId),
-            eq(projectVersions.id, restoreEntry.versionId),
-          ),
-        );
-      if (!restoreVersion) {
-        throw new CloudError('NOT_FOUND', 'Restore target version not found.', { status: 404, applied: false });
-      }
-
-      const { appliedFiles, revision } = await this.applySnapshotToLiveFiles(
-        tx,
-        ctx.workspaceId,
-        project.id,
-        restoreVersion.id,
-      );
-
-      await tx
-        .update(projects)
-        .set(
-          asUpdate(projects, {
-            revision,
-            currentVersionId: restoreVersion.id,
-            currentVersionNumber: restoreVersion.versionNumber,
-            currentHistorySeq: restoreEntry.seq,
-            updatedAt: new Date(),
-          }),
-        )
-        .where(and(eq(projects.id, project.id), eq(projects.workspaceId, ctx.workspaceId)));
-
-      return {
-        revision,
-        versionId: restoreVersion.id,
-        versionNumber: restoreVersion.versionNumber,
-        seq: restoreEntry.seq,
-        appliedFiles,
-      };
-    });
-
-    await this.publishProjectAndHistory(
-      ctx.workspaceId,
-      projectId,
-      txResult.revision,
-      txResult.versionId,
-      txResult.seq,
-      txResult.appliedFiles,
-      writeToken,
-    );
-
-    const list = await this.listHistory(ctx, projectId);
-    return {
-      ok: true,
-      projectId,
-      revision: txResult.revision,
-      versionId: txResult.versionId,
-      versionNumber: txResult.versionNumber,
-      seq: txResult.seq,
-      canUndo: list.canUndo,
-      canRedo: list.canRedo,
-      appliedFiles: txResult.appliedFiles,
+      stepLabel: txResult.stepLabel,
       writeToken,
       entry: list.entries.find((e) => e.seq === txResult.seq) ?? null,
     };

@@ -1433,6 +1433,53 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
 // ---------------------------------------------------------------------------
 
 describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, WorkspaceStatus, /phase1/call, /generations, /tracking/preferences)', () => {
+  it('names writes at commit and steps one project history across Studio and the agent', async () => {
+    const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = async (url: string, body: unknown) => {
+      const response = await app.request(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      assert.ok(response.ok, await response.clone().text());
+      return response.json();
+    };
+    const { projectId } = await post('/motion-api/projects', { title: 'Shared undo' });
+    const base = `/api/projects/${projectId}`;
+    const file = base + '/files/title.txt';
+    const history = async () => (await app.request(base + '/history')).json();
+    const write = async (title: string, headers: Record<string, string>) => {
+      const saved = await app.request(file, { method: 'PUT', headers, body: title });
+      assert.equal(saved.status, 200);
+      return saved.json();
+    };
+
+    const first = await write('First title', { 'If-None-Match': '*' });
+    const second = await write('New title', { 'If-Match': first.version });
+    const beforeAgent = await history();
+    assert.equal(beforeAgent.currentSeq, 3);
+    const args = { projectId, requestId: 'save-caption', expectedRevision: second.revision,
+      expectedVersionId: second.versionId, files: [{ path: 'captions.srt', content: 'Hello' }] };
+    const agentEdit = () => post('/motion-api/phase1/call', { name: 'openmotion_edit_project', arguments: args });
+    await agentEdit();
+    assert.equal((await agentEdit()).replayed, true);
+    await post(base + '/history/claim', { label: 'Late title label' });
+    const afterAgent = await history();
+    assert.equal(afterAgent.currentSeq, 4);
+    assert.equal(afterAgent.back.label, 'Edited captions.srt');
+    assert.equal(afterAgent.entries[0].who.kind, 'agent');
+
+    const undo = await post(base + '/history/undo', { entryId: beforeAgent.back.id });
+    assert.equal(undo.stepLabel, 'Edited captions.srt');
+    assert.equal(undo.seq, 3);
+    assert.equal((await (await app.request(file)).json()).content, 'New title');
+    assert.equal((await app.request(base + '/files/captions.srt')).status, 404);
+    const step = (direction: string) => post(base + '/history/step', { direction });
+    assert.equal((await step('back')).seq, 2);
+    assert.equal((await (await app.request(file)).json()).content, 'First title');
+    assert.equal((await step('forward')).seq, 3);
+    assert.equal((await step('forward')).stepLabel, 'Edited captions.srt');
+    assert.equal((await (await app.request(base + '/files/captions.srt')).json()).content, 'Hello');
+  });
+
   it('replays caption commands with the original track and guards both project versions', async () => {
     const { app } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (path: string, data: unknown) => app.request('/motion-api/' + path, {

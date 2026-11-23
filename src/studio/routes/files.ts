@@ -215,7 +215,6 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
           },
         ],
         source: 'studio',
-        summary: `Saved ${safePath}`,
         writeToken,
       });
 
