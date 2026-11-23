@@ -141,29 +141,6 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
               </div>}
             </div>
           </TabPanel>)}
-        {info?.httpTransport && (
-          <div className="om-card om-mcp-http-card">
-            <div className="om-mcp-http-meta">
-              <RemixIcon name="plug-line" size={18} />
-              <div>
-                <strong>{t('Remote MCP (Streamable HTTP)')}</strong>
-                <p className="om-muted"><code>{info.httpTransport.url}</code> · {t(info.httpTransport.authRequired ? 'Bearer token required' : 'Bearer or local access')}</p>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              className="om-button h-auto"
-              onClick={() => {
-                void navigator.clipboard.writeText(info.httpTransport!.url)
-                  .then(() => toast.showToast(t('Copied endpoint URL'), 'info', 'feedback'))
-                  .catch(() => toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback'));
-              }}
-            >
-              <RemixIcon name="file-copy-line" size={14} />
-              {t('Copy endpoint URL')}
-            </Button>
-          </div>
-        )}
       </section>
 
       <McpTemplateShowcase scroller={page} enabled={previewsEnabled} canCopy={Boolean(info && supported)} openLibrary={openLibrary('mcp_templates')} onCategory={value => click('mcp_templates', 'category_select', { option: value })} onCopy={template => { if (info) void copy(`${prompt}\n\n${templatePrompt(info, client.host, template, locale)}`, { kind: 'template', template: template.id, includesSetup: true }); }} />

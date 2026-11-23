@@ -1,5 +1,5 @@
 const legacyAssetActions = ['list', 'get', 'import', 'update', 'generate', 'jobs', 'status', 'cancel', 'retry_save', 'resume', 'import_to_project'] as const;
-export const assetActions = [...legacyAssetActions, 'read', 'brand_kit', 'transcript', 'scenario', 'batch', 'trigger', 'web_publish'] as const;
+export const assetActions = [...legacyAssetActions, 'read', 'brand_kit', 'transcript', 'scenario'] as const;
 const actionSets = {
   openmotion_game_trailer: ['start', 'status'],
   openmotion_assets_use: assetActions,
@@ -10,7 +10,7 @@ const actionSets = {
   openmotion_project_archive: ['export', 'import'],
   openmotion_manage_project: ['comments', 'info', 'rename', 'duplicate', 'reveal', 'trash', 'restore', 'delete'],
   openmotion_design_catalog: ['list_scenarios', 'list_templates', 'get_template', 'list_skills', 'get_skill', 'list_design_systems', 'get_design_system', 'get_craft'],
-  openmotion_design_project: ['create', 'list', 'get', 'rename', 'duplicate', 'trash', 'restore', 'delete', 'open', 'open_in', 'export', 'import', 'deploy', 'deploy_status', 'unpublish'],
+  openmotion_design_project: ['create', 'list', 'get', 'rename', 'duplicate', 'trash', 'restore', 'delete', 'open', 'open_in', 'export', 'import'],
   openmotion_design_edit: ['read_file', 'write', 'list_versions', 'restore_version', 'import_asset'],
   openmotion_design_comments: ['list', 'create', 'update', 'delete'],
 } as const;

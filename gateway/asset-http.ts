@@ -37,7 +37,7 @@ export async function assetHttp(req: IncomingMessage, res: ServerResponse, url: 
     } finally { await rm(filename, { force: true }); }
     return true;
   }
-  const media = url.pathname.match(/^\/api\/assets\/([^/]+)\/versions\/([^/]+)\/(?:file|media)$/);
+  const media = url.pathname.match(/^\/api\/assets\/([^/]+)\/versions\/([^/]+)\/file$/);
   if (!media || !['GET', 'HEAD'].includes(req.method ?? '')) return false;
   if (!libraryId(media[1]) || !libraryId(media[2])) throw new Error('ASSET_VERSION_UNAVAILABLE');
   const { filename, version } = await library.resolve({ assetId: media[1], versionId: media[2] }, true);
@@ -57,7 +57,7 @@ export async function assetHttp(req: IncomingMessage, res: ServerResponse, url: 
     const title = url.searchParams.get('title');
     const downloadName = title?.trim() ? mediaFilename(title, path.extname(version.filename)) : version.filename;
     const plainDownloadName = /^[\x20-\x7e]+$/.test(downloadName) ? downloadName : version.filename;
-    res.writeHead(status, { 'Access-Control-Allow-Origin': '*', 'Content-Type': version.mimeType, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes',
+    res.writeHead(status, { 'Content-Type': version.mimeType, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes',
       'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff',
       ...(url.searchParams.has('download') ? { 'Content-Disposition': attachmentDisposition(downloadName, plainDownloadName) } : {}) });
     if (req.method === 'HEAD') res.end();

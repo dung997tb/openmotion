@@ -165,21 +165,6 @@ export const mcpScenarios = [animeOpeningScenario, {
   description: 'Copy a pinned image version from Workspace assets into a Design Studio HTML project as a local project file and reference it from HTML, creating a new revision-checked version.',
   tools: ['openmotion_assets_use', 'openmotion_design_edit'],
   prompt: 'List or inspect the target image version with openmotion_assets_use to confirm its assetId and versionId. Import that pinned version into my Design Studio project with openmotion_design_edit (action=import_asset, expectedRevision, requestId), then reference the returned project-relative path in index.html with openmotion_design_edit (action=write).',
-}, {
-  id: 'batch-optimization', icon: 'stack-line', title: 'Optimize content variants in batch',
-  description: 'Generate, adapt, and polish up to 50 content variants in parallel through MCP pipelines, Super Agent optimization rubrics, or Scenario Workflow matrices, then export one ZIP bundle.',
-  tools: ['openmotion_assets_use'],
-  prompt: 'Use openmotion_assets_use with action=batch and batch={command:"catalog"} to list batch content optimization recipes. Create and run a batch with batch={command:"create", autoStart:true, title:"...", mode:"mcp-pipeline"|"agent-optimize"|"scenario-matrix", items:[...]} and poll progress with command="get" before exporting results via command="export".',
-}, {
-  id: 'automation-triggers', icon: 'flashlight-line', title: 'Automate workflows with webhook & schedule triggers',
-  description: 'Register authenticated incoming webhooks or recurring interval schedules that invoke OpenMotion MCP tools, Batch Content Optimization jobs, or Super Agent runs automatically.',
-  tools: ['openmotion_assets_use'],
-  prompt: 'Manage automation triggers via openmotion_assets_use with action=trigger and trigger={command:"list"|"create"|"fire"|"runs", ...}. Create a webhook or interval trigger targeting an MCP tool, content batch, or Super Agent prompt and inspect execution logs via command="runs".',
-}, {
-  id: 'design-deploy', icon: 'global-line', title: 'Publish HTML prototypes, games, and pages to live Open Design Cloud links',
-  description: 'Bundle and publish any HTML-expressed OpenMotion work (Design Studio pages, playable games, Motion HTML bundles, or standalone HTML files) together with referenced local workspace media assets and relative scripts/styles directly to Open Design Cloud using your signed-in account, tracking content freshness and producing a unique HTTPS share URL that can be updated, paused, or resumed via MCP or Studio.',
-  tools: ['openmotion_assets_use', 'openmotion_design_project'],
-  prompt: 'Publish any HTML-expressed project, game, or static HTML page via openmotion_assets_use with action="web_publish" and webPublish={command:"publish"|"status"|"unpublish"|"list", targetKind:"design"|"game"|"html"|"motion", ...}, or publish a Design Studio project via openmotion_design_project action=deploy (passing projectId). Use deploy_status/status to inspect live status and freshness, or unpublish to pause sharing.',
 }] as const;
 
 export const platformExportExample = (locale: string, workspace?: Pick<IntegrationInfo, 'previewUrl' | 'dataDirectory'>) => platformExportPrompt({ target: defaultPlatformExportTarget(locale), goal: 'adapt', locale, workspace });

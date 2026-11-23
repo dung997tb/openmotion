@@ -9,8 +9,8 @@ export default mergeConfig(studioConfig, defineConfig({
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const pathname = new URL(req.url || '/', 'http://localhost').pathname;
-        // Never allow Vite's SPA HTML fallback to swallow reserved backend or MCP sub-endpoints.
-        if (pathname.startsWith('/mcp/')) {
+        // Never allow Vite's SPA HTML fallback to swallow reserved backend or MCP endpoints.
+        if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
           res.statusCode = 404;
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({ error: 'Not found' }));
@@ -43,7 +43,6 @@ export default mergeConfig(studioConfig, defineConfig({
           host: '127.0.0.1',
           proxy: {
             '^/(?:api|motion-api|design-api)/': backendProxy,
-            '^/mcp$': backendProxy,
             '^/__hyperframes_config$': backendProxy,
             '^/connect/': backendProxy,
             '/guide-assets/': backendProxy,

@@ -19,12 +19,10 @@ import { attachmentDisposition } from './shared/http-header.ts';
 import { zip } from './scripts/zip.mjs';
 import { browserExecutable } from './browser.ts';
 import { validateReviewAnnotation } from './shared/review-comments.ts';
-import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/preview-bridge.ts';
 import { designCatalog } from './shared/design-catalog.ts';
-import { designDeployFor } from './gateway/design-deploy.ts';
 import {
   designEditorHref, designExportFormats, designRoutes, designScenarios, findDesignScenario, isDesignScenario,
-  type DesignComment, type DesignCommentAnchor, type DesignDeployMode, type DesignEditorApp, type DesignExportFormat,
+  type DesignComment, type DesignCommentAnchor, type DesignEditorApp, type DesignExportFormat,
   type DesignFile, type DesignProject, type DesignProjectDetail, type DesignScenarioId, type DesignVersion,
 } from './shared/design-project.ts';
 
@@ -69,15 +67,7 @@ const MIME_BY_EXT: Record<string, string> = {
   wasm: 'application/wasm', pdf: 'application/pdf', mp3: 'audio/mpeg', wav: 'audio/wav', mp4: 'video/mp4', webm: 'video/webm',
 };
 
-export type DesignErrorCode =
-  | 'INVALID_ARGUMENT'
-  | 'NOT_FOUND'
-  | 'VERSION_CONFLICT'
-  | 'COMMENT_CONFLICT'
-  | 'UNSUPPORTED'
-  | 'AUTH_REQUIRED'
-  | 'DEPLOY_CONFLICT'
-  | 'DEPLOY_FAILED';
+export type DesignErrorCode = 'INVALID_ARGUMENT' | 'NOT_FOUND' | 'VERSION_CONFLICT' | 'COMMENT_CONFLICT' | 'UNSUPPORTED';
 
 export class DesignError extends Error {
   readonly code: DesignErrorCode;
@@ -85,36 +75,8 @@ export class DesignError extends Error {
   constructor(code: DesignErrorCode, message: string, status?: number) {
     super(`${code}: ${message}`);
     this.code = code;
-    this.status = status ?? (
-      code === 'NOT_FOUND' ? 404
-        : code === 'VERSION_CONFLICT' || code === 'COMMENT_CONFLICT' || code === 'DEPLOY_CONFLICT' ? 409
-          : code === 'AUTH_REQUIRED' ? 401
-            : code === 'UNSUPPORTED' ? 501
-              : code === 'DEPLOY_FAILED' ? 502
-                : 400
-    );
+    this.status = status ?? (code === 'NOT_FOUND' ? 404 : code === 'VERSION_CONFLICT' || code === 'COMMENT_CONFLICT' ? 409 : code === 'UNSUPPORTED' ? 501 : 400);
   }
-}
-
-function mapDeployError(error: unknown): never {
-  if (error instanceof DesignError) throw error;
-  const raw = error instanceof Error ? error.message : String(error);
-  if (raw.startsWith('OPENDESIGN_SIGN_IN_REQUIRED')) {
-    throw new DesignError('AUTH_REQUIRED', raw.replace(/^OPENDESIGN_SIGN_IN_REQUIRED:\s*/, ''));
-  }
-  if (raw.startsWith('SHARE_STOPPED_RESUME_REQUIRED')) {
-    throw new DesignError('DEPLOY_CONFLICT', raw.replace(/^SHARE_STOPPED_RESUME_REQUIRED:\s*/, ''));
-  }
-  if (raw.startsWith('NOT_FOUND:')) {
-    throw new DesignError('NOT_FOUND', raw.replace(/^NOT_FOUND:\s*/, ''));
-  }
-  if (raw.startsWith('INVALID_ARGUMENT:')) {
-    throw new DesignError('INVALID_ARGUMENT', raw.replace(/^INVALID_ARGUMENT:\s*/, ''));
-  }
-  if (raw.startsWith('DEPLOY_FAILED:')) {
-    throw new DesignError('DEPLOY_FAILED', raw.replace(/^DEPLOY_FAILED:\s*/, ''));
-  }
-  throw new DesignError('DEPLOY_FAILED', raw || 'Web deployment failed');
 }
 
 type StoredProject = Omit<DesignProject, 'revision' | 'versionId' | 'versionLabel'>;
@@ -1615,7 +1577,7 @@ async function readMultipartZip(req: IncomingMessage, maxBytes = MAX_IMPORT_BYTE
 }
 
 /** HTTP adapter mounted by server.ts for /motion-api/design/* (rewritten to /api/design/*). */
-const THUMB_PERF_SCRIPT = `<style data-om-thumb-style>html:not([data-om-thumb-play="1"]) *,html:not([data-om-thumb-play="1"]) *::before,html:not([data-om-thumb-play="1"]) *::after{animation-play-state:paused!important;transition:none!important;}</style><script data-om-thumb-guard>(function(){try{Object.defineProperty(window,'devicePixelRatio',{get:function(){return 1;},configurable:true});}catch(e){}var nRaf=window.requestAnimationFrame.bind(window),nCaf=window.cancelAnimationFrame.bind(window),nSetInt=window.setInterval.bind(window),nClearInt=window.clearInterval.bind(window);var playing=false,budget=3,q=[],nextId=1,intervals=[],glContexts=[];try{var origGetContext=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type){var ctx=origGetContext.apply(this,arguments);if(ctx&&(type==='webgl'||type==='webgl2'||type==='experimental-webgl')){if(glContexts.indexOf(ctx)===-1)glContexts.push(ctx);}return ctx;};}catch(e){}window.requestAnimationFrame=function(cb){if(playing||budget>0){if(!playing)budget--;return nRaf(cb);}var id=nextId++;if(q.length<64)q.push({id:id,cb:cb});return id;};window.cancelAnimationFrame=function(id){nCaf(id);q=q.filter(function(x){return x.id!==id;});};window.setInterval=function(fn,delay){if(typeof fn!=='function'){var rawId=nSetInt.apply(window,arguments);intervals.push(rawId);return rawId;}var args=Array.prototype.slice.call(arguments,2);var id=nSetInt(function(){if(playing)fn.apply(window,args);},delay);intervals.push(id);return id;};window.clearInterval=function(id){nClearInt(id);var idx=intervals.indexOf(id);if(idx!==-1)intervals.splice(idx,1);};function dispose(){playing=false;q.length=0;while(intervals.length){try{nClearInt(intervals.pop());}catch(e){}}while(glContexts.length){var ctx=glContexts.pop();try{var ext=ctx&&ctx.getExtension&&ctx.getExtension('WEBGL_lose_context');if(ext&&ext.loseContext)ext.loseContext();}catch(e){}}}window.addEventListener('pagehide',dispose,{once:true});window.addEventListener('message',function(e){var d=e.data;if(!d)return;if(d.type==='om:thumb-dispose'){dispose();return;}if(d.type!=='om:thumb-play')return;playing=Boolean(d.play);document.documentElement.setAttribute('data-om-thumb-play',playing?'1':'0');if(playing&&q.length){var batch=q.splice(0,q.length);for(var i=0;i<batch.length;i++)nRaf(batch[i].cb);}});})();</script>`;
+const THUMB_PERF_SCRIPT = `<style data-om-thumb-style>html:not([data-om-thumb-play="1"]) *,html:not([data-om-thumb-play="1"]) *::before,html:not([data-om-thumb-play="1"]) *::after{animation-play-state:paused!important;transition:none!important;}</style><script data-om-thumb-guard>(function(){try{Object.defineProperty(window,'devicePixelRatio',{get:function(){return 1;},configurable:true});}catch(e){}var nRaf=window.requestAnimationFrame.bind(window),nCaf=window.cancelAnimationFrame.bind(window);var playing=false,budget=3,q=[],nextId=1;window.requestAnimationFrame=function(cb){if(playing||budget>0){if(!playing)budget--;return nRaf(cb);}var id=nextId++;q.push({id:id,cb:cb});return id;};window.cancelAnimationFrame=function(id){nCaf(id);q=q.filter(function(x){return x.id!==id;});};window.addEventListener('message',function(e){var d=e.data;if(!d||d.type!=='om:thumb-play')return;playing=Boolean(d.play);document.documentElement.setAttribute('data-om-thumb-play',playing?'1':'0');if(playing&&q.length){var batch=q.splice(0,q.length);for(var i=0;i<batch.length;i++)nRaf(batch[i].cb);}});})();</script>`;
 
 const THUMB_READY_SCRIPT = `<script data-om-thumb-ready>window.addEventListener('load',function(){window.parent.postMessage({type:'om:thumb-ready'},'*');},{once:true});</script>`;
 
@@ -1694,31 +1656,6 @@ export async function designHttp(
     if (error instanceof DesignError) return sendJson(error.status, { error: { code: error.code, message: error.message.replace(/^[A-Z_]+:\s*/, '') } });
     return sendJson(500, { error: { code: 'INVALID_ARGUMENT', message: (error as Error)?.message ?? 'Internal error' } });
   };
-  const sendPreviewPreflight = () => {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Range',
-      'Cache-Control': 'no-store',
-    });
-    res.end();
-    return true;
-  };
-  const sendPreviewResponse = (body: Buffer, mime: string, cacheControl: string) => {
-    const headers: Record<string, string> = {
-      // Sandboxed preview frames run without allow-same-origin (origin 'null'), so relative fetches need ACAO.
-      'Access-Control-Allow-Origin': '*',
-      'Content-Type': mime,
-      'Cache-Control': cacheControl,
-      'X-Content-Type-Options': 'nosniff',
-    };
-    if (mime.startsWith('text/html')) {
-      headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
-    }
-    res.writeHead(200, headers);
-    res.end(req.method === 'HEAD' ? undefined : body);
-    return true;
-  };
 
   try {
     const sub = url.pathname.slice('/api/design/'.length);
@@ -1736,18 +1673,19 @@ export async function designHttp(
       }));
     }
     const tplPreview = /^catalog\/templates\/([^/]+)\/preview\/(.*)$/.exec(sub);
-    if (tplPreview) {
-      if (req.method === 'OPTIONS') return sendPreviewPreflight();
-      if (req.method === 'GET' || req.method === 'HEAD') {
-        const id = decodeURIComponent(tplPreview[1]);
-        const rel = decodeURIComponent(tplPreview[2]);
-        const file = catalog.templateFile(id, rel);
-        if (!file) return sendJson(404, { error: { code: 'NOT_FOUND', message: 'Template preview file not found' } });
-        const mime = mimeFor(file);
-        let data: Buffer = await readFile(file);
-        if (url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')) data = injectThumbPerfGuard(data, url.searchParams.get('thumbReady') === '1');
-        return sendPreviewResponse(data, mime, 'private, max-age=300');
-      }
+    if (tplPreview && req.method === 'GET') {
+      const id = decodeURIComponent(tplPreview[1]);
+      const rel = decodeURIComponent(tplPreview[2]);
+      const file = catalog.templateFile(id, rel);
+      if (!file) return sendJson(404, { error: { code: 'NOT_FOUND', message: 'Template preview file not found' } });
+      const mime = mimeFor(file);
+      let data: Buffer = await readFile(file);
+      if (url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')) data = injectThumbPerfGuard(data, url.searchParams.get('thumbReady') === '1');
+      const headers: Record<string, string> = { 'Content-Type': mime, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' };
+      if (mime.startsWith('text/html')) headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
+      res.writeHead(200, headers);
+      res.end(data);
+      return true;
     }
     const tplDetail = /^catalog\/templates\/([^/]+)$/.exec(sub);
     if (tplDetail && req.method === 'GET') {
@@ -1784,18 +1722,14 @@ export async function designHttp(
 
     // --- Raw static preview (current or historical ?version=) ---
     const rawMatch = /^raw\/([^/]+)\/(.*)$/.exec(sub);
-    if (rawMatch) {
-      if (req.method === 'OPTIONS') return sendPreviewPreflight();
-      if (req.method === 'GET' || req.method === 'HEAD') {
-        const { body, mime } = await service.readRawFile(rawMatch[1], decodeURIComponent(rawMatch[2]), url.searchParams.get('version'));
-        const bridgeToken = url.searchParams.get('omBridge');
-        const out = url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')
-          ? injectThumbPerfGuard(body)
-          : mime.startsWith('text/html') && isValidPreviewBridgeToken(bridgeToken)
-            ? injectPreviewBridgeHtml(body, bridgeToken)
-            : body;
-        return sendPreviewResponse(out, mime, 'no-store');
-      }
+    if (rawMatch && req.method === 'GET') {
+      const { body, mime } = await service.readRawFile(rawMatch[1], decodeURIComponent(rawMatch[2]), url.searchParams.get('version'));
+      const out = url.searchParams.get('thumb') === '1' && mime.startsWith('text/html') ? injectThumbPerfGuard(body) : body;
+      const headers: Record<string, string> = { 'Content-Type': mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+      if (mime.startsWith('text/html')) headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
+      res.writeHead(200, headers);
+      res.end(out);
+      return true;
     }
 
     // --- Projects collection ---
@@ -1908,72 +1842,6 @@ export async function designHttp(
       });
       res.end(result.data);
       return true;
-    }
-
-    const deployMatch = /^projects\/([^/]+)\/deploy$/.exec(sub);
-    if (deployMatch) {
-      const id = deployMatch[1];
-      const deployService = designDeployFor(dataDirectory);
-      try {
-        if (req.method === 'GET') {
-          const reqFilePath = url.searchParams.get('filePath') ?? undefined;
-          let project: { id: string; entry: string; path?: string; title?: string };
-          try {
-            project = await service.get(id, origin);
-          } catch (error) {
-            if (error instanceof DesignError && error.code === 'NOT_FOUND') {
-              const storedEntry = await deployService.webPublish.findStoredEntryPath('design', id, reqFilePath);
-              if (storedEntry) {
-                project = { id, entry: storedEntry };
-              } else {
-                throw error;
-              }
-            } else {
-              throw error;
-            }
-          }
-          const status = await deployService.status(project, {
-            filePath: reqFilePath,
-            refresh: url.searchParams.get('refresh') === '1',
-          });
-          return sendJson(200, status);
-        }
-        if (req.method === 'POST') {
-          const project = await service.get(id, origin);
-          const body = await input(req, 32 * 1024).catch(() => ({}));
-          const result = await deployService.deploy(project, project.path, {
-            filePath: typeof body?.filePath === 'string' ? body.filePath : undefined,
-            workspaceId: typeof body?.workspaceId === 'string' ? body.workspaceId : undefined,
-            mode: body?.deployMode as DesignDeployMode | undefined,
-            name: typeof body?.name === 'string' ? body.name : undefined,
-          });
-          return sendJson(200, result);
-        }
-        if (req.method === 'DELETE') {
-          const body = await input(req, 16 * 1024).catch(() => ({}));
-          const filePath = url.searchParams.get('filePath')
-            ?? (typeof body?.filePath === 'string' ? body.filePath : undefined);
-          let project: { id: string; entry: string };
-          try {
-            project = await service.get(id, origin);
-          } catch (error) {
-            if (error instanceof DesignError && error.code === 'NOT_FOUND') {
-              const storedEntry = await deployService.webPublish.findStoredEntryPath('design', id, filePath);
-              if (storedEntry) {
-                project = { id, entry: storedEntry };
-              } else {
-                throw error;
-              }
-            } else {
-              throw error;
-            }
-          }
-          const result = await deployService.unpublish(project, { filePath });
-          return sendJson(200, result);
-        }
-      } catch (error) {
-        mapDeployError(error);
-      }
     }
 
     return sendJson(404, { error: { code: 'NOT_FOUND', message: `Unknown design endpoint: ${url.pathname}` } });
@@ -2094,73 +1962,6 @@ export async function dispatchDesignTool(
         if (!args.sourcePath) throw new DesignError('INVALID_ARGUMENT', 'sourcePath is required');
         const projects = await service.importPath(args.sourcePath, { titleHint: args.title, origin });
         return { projects };
-      }
-      case 'deploy': {
-        if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
-        const project = await service.get(args.projectId, origin);
-        try {
-          return await designDeployFor(dataDirectory).deploy(project, project.path, {
-            filePath: args.filePath,
-            workspaceId: args.workspaceId,
-            mode: args.deployMode,
-            name: args.title,
-          });
-        } catch (error) {
-          mapDeployError(error);
-        }
-      }
-      case 'deploy_status': {
-        if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
-        const deployService = designDeployFor(dataDirectory);
-        let project: { id: string; entry: string; path?: string; title?: string };
-        try {
-          project = await service.get(args.projectId, origin);
-        } catch (error) {
-          if (error instanceof DesignError && error.code === 'NOT_FOUND') {
-            const storedEntry = await deployService.webPublish.findStoredEntryPath('design', args.projectId, args.filePath);
-            if (storedEntry) {
-              project = { id: args.projectId, entry: storedEntry };
-            } else {
-              throw error;
-            }
-          } else {
-            throw error;
-          }
-        }
-        try {
-          return await deployService.status(project, {
-            filePath: args.filePath,
-            refresh: args.refresh === true,
-          });
-        } catch (error) {
-          mapDeployError(error);
-        }
-      }
-      case 'unpublish': {
-        if (!args.projectId) throw new DesignError('INVALID_ARGUMENT', 'projectId is required');
-        const deployService = designDeployFor(dataDirectory);
-        let project: { id: string; entry: string };
-        try {
-          project = await service.get(args.projectId, origin);
-        } catch (error) {
-          if (error instanceof DesignError && error.code === 'NOT_FOUND') {
-            const storedEntry = await deployService.webPublish.findStoredEntryPath('design', args.projectId, args.filePath);
-            if (storedEntry) {
-              project = { id: args.projectId, entry: storedEntry };
-            } else {
-              throw error;
-            }
-          } else {
-            throw error;
-          }
-        }
-        try {
-          return await deployService.unpublish(project, {
-            filePath: args.filePath,
-          });
-        } catch (error) {
-          mapDeployError(error);
-        }
       }
       default: throw new DesignError('INVALID_ARGUMENT', `Unknown project action: ${args.action}`);
     }

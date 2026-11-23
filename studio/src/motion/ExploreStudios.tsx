@@ -24,7 +24,7 @@ import { useTemplatePlayback } from './useTemplatePlayback';
 import { editingPresets, motionSkills, skillCategories, type SkillCategory, type MotionSkill } from './skillCatalog';
 import { useWorkspaceChrome } from './WorkspaceChromeContext';
 import { ExploreActionLabel, ExploreTemplateCard, TemplatePromptAction, useExploreTemplates, useExploreTemplateShelf, type ExploreTemplateFilter } from './ExploreTemplates';
-import { ClaudeStories, ExploreHighlights, GameStories, ModelCollection } from './ExploreStories';
+import { ClaudeStories, ExploreHighlights, ModelCollection } from './ExploreStories';
 import { gptImageStory, seedanceStory } from './exploreModelStories';
 import { ExploreSpotlight, featuredSceneIds } from './ExploreSpotlight';
 import { SkillMedia } from './SkillMedia';
@@ -87,8 +87,6 @@ type ExploreProps = {
   onOpenDesignProject?: (projectId: string) => void;
   onStartScenario?: (id: ScenarioId) => void;
   onOpenScenarioHub?: () => void;
-  onOpenGameStudio?: (gameId?: string) => void;
-  onBuildGameInSuperAgent?: () => void;
   active: boolean;
   filters: ExploreFilters;
 };
@@ -188,8 +186,8 @@ function TemplateSpotlight({ item, onTry }: { item: GalleryTemplate; onTry: (pro
   </Button><TemplatePromptAction item={item} onTry={prompt => { track('explore_featured', 'try_prompt', { template: item.id }); onTry(prompt); }} /></article>;
 }
 
-function StudioCollection({ active, studio, medium, onChooseStudio, onSkill, onNavigate, onSelectDesignScene, onOpenDesignProject, ...playback }: FeedPlayback & {
-  active: boolean; studio: CreativeStudio; medium: ExploreFilters['medium'];
+function StudioCollection({ studio, medium, onChooseStudio, onSkill, onNavigate, onSelectDesignScene, onOpenDesignProject, ...playback }: FeedPlayback & {
+  studio: CreativeStudio; medium: ExploreFilters['medium'];
 } & Pick<ExploreProps, 'onChooseStudio' | 'onSkill' | 'onNavigate' | 'onSelectDesignScene' | 'onOpenDesignProject'>) {
   const { t } = useI18n();
   const community = exploreCommunities.find(item => item.studios[0] === studio.id);
@@ -240,7 +238,7 @@ function StudioCollection({ active, studio, medium, onChooseStudio, onSkill, onN
       <header className="om-discovery-heading"><div><h2>{t(studio.title)}</h2></div>
         <Button variant="ghost" className="om-button h-auto" onClick={() => { track('explore_collection', 'open_studio', { studio: studio.id, collection: studio.id }); onChooseStudio(studio); }}>{t(studio.title)}<RemixIcon name="arrow-right-line" size={16} /></Button>
       </header>
-      <ExploreDesignSection active={active} onSelectDesignScene={onSelectDesignScene} onOpenProject={onOpenDesignProject} />
+      <ExploreDesignSection onSelectDesignScene={onSelectDesignScene} onOpenProject={onOpenDesignProject} />
     </section>
   </>;
 }
@@ -442,22 +440,7 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
   for (let i = 0; i < Math.max(sceneCards.length, firstTemplates.length, skillCards.length); i++) {
     firstGroup.push(firstTemplates[i], sceneCards[i], skillCards[i]);
   }
-  const openGameStudio = (gameId?: string) => {
-    track('explore_featured', 'open_studio', { studio: 'game' });
-    if (props.onOpenGameStudio) {
-      props.onOpenGameStudio(gameId);
-      return;
-    }
-    const studio = findTechniqueStudio('game');
-    if (studio) onChooseStudio(studio);
-  };
-  const openGameInSuperAgent = props.onBuildGameInSuperAgent
-    ? () => {
-        track('explore_featured', 'open_studio', { studio: 'game', navTarget: 'super_agent' });
-        props.onBuildGameInSuperAgent!();
-      }
-    : undefined;
-  const studioSection = (studio: CreativeStudio) => <StudioCollection key={studio.id} active={active} studio={studio} medium={medium}
+  const studioSection = (studio: CreativeStudio) => <StudioCollection key={studio.id} studio={studio} medium={medium}
     onSelectDesignScene={props.onSelectDesignScene} onOpenDesignProject={props.onOpenDesignProject}
     onNavigate={onNavigate} onChooseStudio={onChooseStudio} onSkill={onSkill} playing={playing} onPriority={setPriority} />;
   const initialLoading = templates.loading && !firstTemplatePage;
@@ -470,8 +453,7 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
     {!medium && <div className="om-explore-features" data-split={Boolean(featuredTemplate || initialTemplateError || initialLoading)}>
       {community ? <CommunitySpotlight community={community} skill={skills[0]} onChooseStudio={onChooseStudio} /> :
         <ExploreSpotlight active={active} onOpenBlackFriday={props.onOpenBlackFriday} onNavigate={onNavigate}
-          onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} onStartScenario={props.onStartScenario}
-          onOpenGameStudio={openGameStudio} onBuildGameInSuperAgent={openGameInSuperAgent} />}
+          onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} onStartScenario={props.onStartScenario} />}
       {featuredTemplate && <TemplateSpotlight item={featuredTemplate} onTry={tryVideoPrompt} />}
       {initialTemplateError && templateError}
       {initialLoading && <CoverPlaceholder className="om-featured-template-skeleton" />}
@@ -481,7 +463,6 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
         <ScenarioHighlights onStartScenario={props.onStartScenario} onOpenHub={props.onOpenScenarioHub} />
       )}
       <ExploreHighlights onChooseStudio={onChooseStudio} onOpenBlackFriday={props.onOpenBlackFriday} />
-      <GameStories onOpenGameStudio={openGameStudio} onBuildGameInSuperAgent={openGameInSuperAgent} />
       <ClaudeStories onClaude={example => props.onMcp('claude', example)} />
     </>}
     {showCommunityPicks && <section aria-labelledby="explore-community">

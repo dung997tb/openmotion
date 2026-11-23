@@ -47,8 +47,6 @@ export function createAppRouteObjects(shellElement: ReactNode): RouteObject[] {
         { index: true, handle: handleFor('explore'), element: <LegacyQueryRedirect /> },
         leaf('explore', 'explore'),
         leaf('explore/:community', 'explore'),
-        leaf('agent', 'agent'),
-        leaf('agent/:chatId', 'agent'),
         leaf('create/:scene', 'studio'),
         leaf('motion', 'motion'),
         leaf('cinema', 'cinema'),
