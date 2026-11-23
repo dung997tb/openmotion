@@ -135,6 +135,7 @@ jobs:
         run: |
           npm run check
           npm run design:test
+          npm run models:test
           node --test tests/source-build-state.test.ts
           npm run typecheck:studio
           npm run typecheck:backend
