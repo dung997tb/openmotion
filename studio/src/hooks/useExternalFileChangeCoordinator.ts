@@ -10,6 +10,7 @@ import {
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import type { ExternalConflictSnapshot } from "../utils/externalConflictStorage";
 import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
+import { onRebasedFileEdit } from "../utils/rebasedFileEdit";
 import { consumeStudioWriteToken } from "../utils/studioFileVersion";
 import { logReload } from "../utils/reloadDebug";
 import { notifyProjectActivity } from "../motion/workspaceRefresh";
@@ -52,6 +53,7 @@ interface ExternalFileChangeCoordinatorOptions {
   discardPendingChanges: () => void;
   reloadPreview: (path?: string) => void;
   reloadSdkSession: (path: string) => void;
+  refreshOpenSource?: (path: string) => void;
   persistConflictSnapshot: (projectId: string, conflict: StudioFileConflictError) => Promise<void>;
   persistFailureSnapshot?: (
     projectId: string,
@@ -213,6 +215,7 @@ export function useExternalFileChangeCoordinator({
   discardPendingChanges,
   reloadPreview,
   reloadSdkSession,
+  refreshOpenSource,
   persistConflictSnapshot,
   persistFailureSnapshot,
   loadConflictSnapshot,
@@ -318,6 +321,7 @@ export function useExternalFileChangeCoordinator({
       });
       if (affectsPreview) reloadPreview(path);
       reloadSdkSession(path);
+      refreshOpenSource?.(path);
       // Fire-and-forget: a failed refresh leaves the tree as stale as it was,
       // which is the status quo this exists to improve on, not a new failure
       // mode to surface. The `absent`-triggered fallback in useSdkSession
@@ -325,7 +329,7 @@ export function useExternalFileChangeCoordinator({
       // a watcher event the SSE never delivered).
       if (readFileTreeChanged(owed)) void refreshFileTree?.();
     },
-    [onAcceptedPersistedFileChange, reloadPreview, reloadSdkSession, refreshFileTree],
+    [onAcceptedPersistedFileChange, reloadPreview, reloadSdkSession, refreshFileTree, refreshOpenSource],
   );
 
   const persistSnapshotInOrder = useCallback(async (write: () => Promise<void>) => {
@@ -526,6 +530,11 @@ export function useExternalFileChangeCoordinator({
 
   const processChangeRef = useRef(processChange);
   processChangeRef.current = processChange;
+  // Our own SSE echo can arrive before the command receipt and is suppressed.
+  // A divergent receipt needs the same scoped refresh as another editor's write.
+  useEffect(() => onRebasedFileEdit((pid, file) => {
+    processChangeRef.current({ projectId: pid, path: file.path, fileTreeChanged: false });
+  }), []);
   const processHistoryChange = useCallback(
     (delivery?: unknown) => {
       const payload = decodeFileChange(delivery);

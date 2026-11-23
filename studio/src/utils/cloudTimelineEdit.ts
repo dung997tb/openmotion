@@ -9,12 +9,7 @@ import { readProjectFileContent } from './studioFileHistory';
 import { serializeStudioFileMutations } from './studioFileMutationCoordinator';
 import { commitStudioEditBatch } from './projectEditBatch';
 
-type Writer = (
-  path: string,
-  after: string,
-  before?: string,
-  command?: TimelineCommand | MoveClip,
-) => Promise<void>;
+type Writer = import('./studioFileHistory').ProjectFileWriter;
 type ClipLocator = { hfId?: string; domId?: string; selector?: string; selectorIndex?: number };
 type ResolveClip = (clip: ClipLocator) => string;
 export type TimelineFileEdit = {
@@ -145,11 +140,13 @@ export async function saveCloudTimeline(
       const changes = pending.filter((file) => file.before !== file.after);
       if (!changes.length) return [];
       const [only] = changes;
-      if (changes.length === 1 && only) await write(only.path, only.after, only.before, only.command);
-      else await commitStudioEditBatch(projectId, changes);
+      const needsRefresh = changes.length === 1 && only
+        ? Boolean(await write(only.path, only.after, only.before, only.command))
+        : (await commitStudioEditBatch(projectId, changes))?.length;
+
       const files = Object.fromEntries(changes.map(({ path, before, after }) => [path, { before, after }]));
       await recordEdit({ label, files });
-      if (onSaved) await onSaved(files);
+      if (onSaved && !needsRefresh) await onSaved(files);
       return Object.keys(files);
     },
   );

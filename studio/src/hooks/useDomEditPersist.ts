@@ -164,8 +164,8 @@ export function useDomEditPersist({
         });
         if (!result) return;
         const changed = result.changedPaths.includes(targetPath);
-        if (changed) {
-          await editHistory.recordEdit({ ...history, files: {} });
+        if (changed) await editHistory.recordEdit({ ...history, files: {} });
+        if (changed && !result.divergent.length) {
           forceReloadSdkSession?.();
           reloadPreview();
         }
@@ -190,7 +190,10 @@ export function useDomEditPersist({
           const {applyProjectEdit} = await import("../../../packages/edit-core/commands");
           const {content} = await applyProjectEdit(originalContent, {...cloudCommand,compositionPath:targetPath},new Map());
           const changed = content !== originalContent;
-          if (changed) await writeEdit(targetPath, content, originalContent, cloudCommand);
+          if (changed) {
+            const rebased = await writeEdit(targetPath, content, originalContent, cloudCommand);
+            if (rebased) return { rebased };
+          }
           patchData = {matched: true, changed, content, path: targetPath, version: await studioFileContentVersion(content)};
         } else if (
           selection.element?.namespaceURI === "http://www.w3.org/2000/svg" &&
@@ -220,7 +223,7 @@ export function useDomEditPersist({
               targetPath,
               patchedContent,
               prepare,
-              writeEdit,
+              (path, content, expected) => writeProjectFile(path, content, expected, undefined, writeHistory).then(() => {}),
               showToast,
             )
           : { content: patchedContent, failed: false };
@@ -245,6 +248,10 @@ export function useDomEditPersist({
         return { patchData, originalContent, patchedContent, finalContent };
       });
       if (saved === null) return;
+      if (saved.rebased) {
+        // The coordinator refreshes the preview and SDK from the merged source.
+        return { sourceFile: targetPath, version: saved.rebased.version, changed: saved.rebased.changed };
+      }
       const { patchData, originalContent, patchedContent, finalContent } = saved;
 
       if (finalContent === null) {

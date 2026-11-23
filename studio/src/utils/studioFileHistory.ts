@@ -29,7 +29,10 @@ export interface DomEditCommitBaseParams {
 }
 
 export type StudioWriteHistory = { label: string; windowId: string };
-export type ProjectFileWriter = (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory) => Promise<void>;
+export interface ProjectFileWriter {
+  (path: string, content: string, expectedContent?: string): Promise<void>;
+  (path: string, content: string, expectedContent: string | undefined, command: ProjectEditCommand | undefined, history?: StudioWriteHistory): Promise<void | import("./rebasedFileEdit").RebasedFileEdit>;
+}
 
 const lastWindow = new WeakMap<ProjectFileWriter, { key: string | undefined; id: string; startedAt: number }>();
 

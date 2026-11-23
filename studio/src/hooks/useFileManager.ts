@@ -10,7 +10,7 @@ import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import { serializeStudioFileMutation } from "../utils/studioFileMutationCoordinator";
 import { useFileTree } from "./useFileTree";
 import { useEditorSave } from "./useEditorSave";
-import { useProjectFileWriter } from "./useProjectFileWriter";
+import { readProjectFileContentWithVersion, useProjectFileWriter } from "./useProjectFileWriter";
 import { studioApiFetch } from "../utils/studioApiFetch";
 import { importErrorCategory, reportAssetImport, reportEdit, setProjectInventory, type ImportEntryPoint, type ImportErrorCategory } from "../motion/editorTracking";
 import { encodeUrlPath } from "@hyperframes/parsers";
@@ -71,14 +71,20 @@ export function useFileManager({
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
+  const onSavedContent = useCallback((pid: string, path: string, content: string) => {
+    if (projectIdRef.current === pid && editingPathRef.current === path) {
+      setEditingFile({ path, content });
+    }
+  }, []);
+
   const importedFontAssetsRef = useRef<ImportedFontAsset[]>([]);
   const {
     fileVersions,
     readProjectFile,
-    writeProjectFile: writeProjectFileRaw,
+    writeProjectFile,
     readOptionalProjectFile,
     observeProjectFileVersion,
-  } = useProjectFileWriter({ projectId });
+  } = useProjectFileWriter({ projectId, onSavedContent });
 
   // ── File tree ──
 
@@ -116,21 +122,6 @@ export function useFileManager({
     }
   }, []);
 
-  // Studio's own editor tab mirrors whatever it just wrote, on top of the
-  // shared writer — a host mounting useProjectFileWriter directly has no
-  // editor tab and does not need this.
-  const writeProjectFile = useCallback(
-    async (...args: Parameters<typeof writeProjectFileRaw>): Promise<void> => {
-      const [path, content] = args;
-      const writeProjectId = projectIdRef.current;
-      await writeProjectFileRaw(...args);
-      if (projectIdRef.current === writeProjectId && editingPathRef.current === path) {
-        setEditingFile({ path, content });
-      }
-    },
-    [writeProjectFileRaw],
-  );
-
   // ── Editor save (debounced content change) ──
 
   const editorSave = useEditorSave({
@@ -142,7 +133,26 @@ export function useFileManager({
     setRefreshKey,
     showToast,
   });
-  const { saveRafRef, handleContentChange } = editorSave;
+  const { saveRafRef, handleContentChange, getPendingCandidate } = editorSave;
+  const sourceRefreshRef = useRef(0);
+  const openFileRef = useRef(editingFile);
+  openFileRef.current = editingFile;
+  const refreshOpenSource = useCallback((changedPath: string) => {
+    const open = openFileRef.current;
+    if (!open || open.content == null || (changedPath !== "." && changedPath !== open.path)) return;
+    const pid = projectIdRef.current;
+    if (!pid || getPendingCandidate()) return;
+    const request = ++sourceRefreshRef.current;
+    void readProjectFileContentWithVersion(pid, open.path, "").then(({ content, version }) => {
+      if (request !== sourceRefreshRef.current || projectIdRef.current !== pid ||
+        openFileRef.current !== open || getPendingCandidate() || typeof content !== "string") return;
+      fileVersions.set(open.path, version);
+      setEditingFile({ path: open.path, content });
+    }).catch((error: unknown) => {
+      if (request === sourceRefreshRef.current && projectIdRef.current === pid && openFileRef.current === open)
+        showToast(error instanceof Error ? error.message : `Failed to refresh ${open.path}`, "error");
+    });
+  }, [fileVersions, getPendingCandidate, showToast]);
 
   const overwriteExternalConflict = useCallback(
     async (conflict: StudioFileConflictError) => {
@@ -753,6 +763,7 @@ export function useFileManager({
     flushPendingSourceSave: editorSave.flushPendingSave,
     discardPendingSourceSave: editorSave.discardPendingSave,
     getPendingSourceCandidate: editorSave.getPendingCandidate,
+    refreshOpenSource,
     importedFontAssetsRef,
 
     // Core I/O
