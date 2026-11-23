@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { build as esbuild } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,10 +10,34 @@ import { openmotionI18nPlugin } from './vite-i18n-plugin';
 
 const local = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 
+function openmotionBootLoadingPlugin() {
+  return {
+    name: 'openmotion-boot-loading',
+    apply: 'build' as const,
+    transformIndexHtml: {
+      order: 'pre' as const,
+      async handler(html: string) {
+        const tag = '<script type="module" src="/src/bootLoading.ts"></script>';
+        if (!html.includes(tag)) return html;
+        const result = await esbuild({
+          entryPoints: [local('./src/bootLoading.ts')],
+          bundle: true,
+          minify: true,
+          format: 'iife',
+          write: false,
+          loader: { '.svg': 'dataurl' },
+        });
+        const code = result.outputFiles[0]?.text ?? '';
+        return html.replace(tag, `<script>${code.replace(/<\/script>/gi, '<\\/script>')}</script>`);
+      },
+    },
+  };
+}
+
 export default defineConfig({
   base: '/',
   root: local('./'),
-  plugins: [react(), tailwindcss(), openmotionI18nPlugin(), {
+  plugins: [openmotionBootLoadingPlugin(), react(), tailwindcss(), openmotionI18nPlugin(), {
     name: 'openmotion-design-system',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {

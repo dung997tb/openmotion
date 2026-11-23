@@ -18,7 +18,7 @@ import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { GameMasonry, interleavePortrait } from './GameMasonry';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
-import { buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
+import { buildGameContextTags, buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import './gameStudio.css';
 
 type Menu = 'genre' | 'style' | 'setting';
@@ -152,6 +152,7 @@ export function GameStudio({
       const handoff = buildSuperAgentHandoff(toGameCapabilityRef(created.game, displayTitle), {
         prompt: buildGameUserPrompt(created.game, locale),
         hiddenInstructions: buildGameHiddenInstructions(created.game, created.agentInstruction),
+        contextTags: buildGameContextTags(created.game, t),
         locale,
         newChat: true,
         autoSend: true,
@@ -169,6 +170,7 @@ export function GameStudio({
     const handoff = buildSuperAgentHandoff(toGameCapabilityRef(game, displayTitle), {
       prompt: buildGameUserPrompt(game, locale),
       hiddenInstructions: buildGameHiddenInstructions(game, instruction),
+      contextTags: buildGameContextTags(game, t),
       locale,
       newChat: true,
       autoSend: true,
@@ -324,7 +326,7 @@ const localized = (game: GameCard, field: 'description' | 'controls', locale: st
 export function useGameTitle() {
   const { t, locale } = useI18n();
   return (game: GameCard) => game.i18n?.[locale]?.title ? game.i18n[locale]!.title!
-    : game.source === 'mine' && /^Make an original game in the spirit of "([^"]+)"/.test(game.title) ? t('Make one like this') + ' · ' + /"([^"]+)"/.exec(game.title)![1]
+    : game.source === 'mine' && /^Make an original game in the spirit of "([^"]+)"/.test(game.title) ? t('Remix') + ' · ' + /"([^"]+)"/.exec(game.title)![1]
     : game.source === 'mine' && /\b(style|setting)\b|with multiplayer/.test(game.title)
     ? [game.setting && t(settingLabels[game.setting]), game.style && t(styleLabels[game.style]), t(genreLabels[game.genre]), game.multiplayer && t('Multiplayer')].filter(Boolean).join(' · ')
     : game.title;
@@ -433,7 +435,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
   const popout = () => { if (url) window.open(url.startsWith('blob:') ? url : new URL(url, location.href).href, '_blank', 'noopener'); };
   return <div className="om-game-project" role="dialog" aria-modal="true" aria-label={game.title}>
     <header className="om-game-project-top">
-      <IconButton ref={close} variant="ghost" className="motion-icon-button" aria-label={t('Back to the game market')} onClick={onClose} icon={<RemixIcon name="arrow-left-line" size={18} />} />
+      <IconButton ref={close} variant="ghost" className="motion-icon-button" aria-label={t('All games')} onClick={onClose} icon={<RemixIcon name="arrow-left-line" size={18} />} />
       <h1 className="om-subtitle">{gameTitle(game)}</h1>
     </header>
     <aside className="om-game-project-side">
@@ -450,28 +452,28 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
         {/* While the Agent works, the panel shows only status and facts; the instruction stays out of the way. */}
       </div>
       {game.external && <footer className="om-game-actions">
-        <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Make one like this')}</Button>
+        <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Remix')}</Button>
         <a className="om-button h-auto" href={game.external.postUrl} target="_blank" rel="noopener noreferrer"><RemixIcon name="external-link-line" size={15} />{t('Made by {author} · {model}', { author: game.external.author, model: game.external.model })}</a></footer>}
       {canTrailer && <div className="om-game-trailer">
         {trailerBusy ? <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" disabled><RemixIcon name="loader-4-line" size={16} />{t(trailerSteps[trailer!.status])}{typeof trailer!.progress === 'number' ? ` · ${Math.round(trailer!.progress * 100)}%` : ''}</Button>
           : trailerReady ? <>
-            <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => setView('trailer')}><RemixIcon name="film-line" size={16} />{t('Watch the trailer')}</Button>
+            <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => setView('trailer')}><RemixIcon name="film-line" size={16} />{t('Trailer')}</Button>
             <span className="om-game-actions">
               {trailer!.projectId && <Button variant="ghost" className="om-button h-auto" onClick={openTrailerProject}><RemixIcon name="edit-line" size={15} />{t('Edit in Motion')}</Button>}
-              <Button variant="ghost" className="om-button h-auto" onClick={() => void startTrailer()}><RemixIcon name="refresh-line" size={15} />{t('Make again')}</Button>
+              <Button variant="ghost" className="om-button h-auto" onClick={() => void startTrailer()}><RemixIcon name="refresh-line" size={15} />{t('Regenerate')}</Button>
             </span></>
-          : <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => void startTrailer()}><RemixIcon name="film-line" size={16} />{t('Make a trailer')}</Button>}
+          : <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => void startTrailer()}><RemixIcon name="film-line" size={16} />{t('Create trailer')}</Button>}
         {trailer?.status === 'failed' && <p className="om-game-trailer-error">{t('The trailer could not be made: {reason}', { reason: trailer.error ?? '' })}</p>}
       </div>}
       {playable && !game.external && !mine && <footer className="om-game-actions" role="toolbar" aria-label={t('Game actions')}>
-        <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Make one like this')}</Button>
+        <Button variant="ghost" className="om-button h-auto" data-primary onClick={onRemix}><RemixIcon name="add-line" size={16} />{t('Remix')}</Button>
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.favorite} aria-label={game.favorite ? t('Remove from favorites') : t('Add to favorites')} onClick={() => act(() => gameApi.favorite(game.id, !game.favorite))} icon={<RemixIcon name={game.favorite ? 'bookmark-fill' : 'bookmark-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.reaction === 1} aria-label={t('Like')} onClick={() => act(() => gameApi.react(game.id, game.reaction === 1 ? 0 : 1))} icon={<RemixIcon name={game.reaction === 1 ? 'thumb-up-fill' : 'thumb-up-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-pressed={game.reaction === -1} aria-label={t('Dislike')} onClick={() => act(() => gameApi.react(game.id, game.reaction === -1 ? 0 : -1))} icon={<RemixIcon name={game.reaction === -1 ? 'thumb-down-fill' : 'thumb-down-line'} size={17} />} />
         <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Copy link')} onClick={() => void share()} icon={<RemixIcon name="share-forward-line" size={17} />} />
       </footer>}
       {playable && !game.external && mine && <footer className="om-game-actions" role="toolbar" aria-label={t('Game actions')}>
-        {onEditInSuperAgent && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onEditInSuperAgent}><RemixIcon name="gamepad-line" size={16} />{t('Edit & optimize in Super Agent')}</Button>}
+        {onEditInSuperAgent && <Button variant="ghost" className="om-button h-auto" data-primary onClick={onEditInSuperAgent}><RemixIcon name="gamepad-line" size={16} />{t('Edit in Agent')}</Button>}
         <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Copy link')} onClick={() => void share()} icon={<RemixIcon name="share-forward-line" size={17} />} />
       </footer>}
     </aside>
@@ -495,7 +497,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
           )}
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Reload game')} disabled={!playable} onClick={() => { setSource(null); setReload(value => value + 1); }} icon={<RemixIcon name="refresh-line" size={17} />} />
           <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Full screen')} disabled={!url} onClick={() => void (view === 'preview' ? frame.current : stage.current)?.requestFullscreen?.()} icon={<RemixIcon name="fullscreen-line" size={17} />} />
-          <Button variant="ghost" className="om-button h-auto" disabled={!url} onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open in new window')}</Button>
+          <Button variant="ghost" className="om-button h-auto" disabled={!url} onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open external')}</Button>
         </span>
       </header>
       <div ref={stage} className="om-game-stage" data-orientation={game.orientation === 'portrait' && playable && view === 'preview' ? 'portrait' : undefined}>
@@ -509,7 +511,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
           : game.external && !game.external.embeddable ? <div className="om-game-external">
               {coverUrl(game) && <img src={coverUrl(game)!} alt="" />}
               <div><strong>{t('This game only runs on the creator’s site.')}</strong>
-                <Button variant="ghost" className="om-button h-auto" data-primary onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Play on the creator’s page')}</Button></div>
+                <Button variant="ghost" className="om-button h-auto" data-primary onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open original')}</Button></div>
             </div>
           : url ? <iframe key={reload} ref={frame} src={url} title={game.title} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-pointer-lock'} allow="fullscreen; gamepad; autoplay; clipboard-write" />
           : <span className="om-muted">{t('Loading game…')}</span>}

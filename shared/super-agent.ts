@@ -128,6 +128,10 @@ export type SuperAgentFileOperation = {
   addedLines?: number;
   removedLines?: number;
   diffPreview?: string;
+  artifactId?: string;
+  binary?: boolean;
+  sizeBytes?: number;
+  previewUrl?: string;
 };
 
 export type SuperAgentPlanEntry = {
@@ -172,6 +176,13 @@ export type SuperAgentToolEvent = {
   finishedAt?: number;
 };
 
+export type SuperAgentContextTag = {
+  kind: 'mode' | 'param' | 'skill';
+  label: string;
+  icon?: string;
+  tone?: 'coding' | 'agent' | 'image' | 'video' | 'audio';
+};
+
 export type SuperAgentMessage = {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'reasoning';
@@ -180,6 +191,7 @@ export type SuperAgentMessage = {
   status?: 'streaming' | 'completed';
   durationMs?: number;
   attachments?: SuperAgentResourceAttachment[];
+  contextTags?: SuperAgentContextTag[];
   toolEvent?: SuperAgentToolEvent;
   artifactIds?: string[];
 };
@@ -224,12 +236,17 @@ export type SuperAgentApprovalDisplay = {
   technicalDetail: string;
 };
 
+export type SuperAgentProjectKind = 'custom' | 'game' | 'design' | 'motion' | 'workspace';
+
 export type SuperAgentChat = {
   id: string;
   title: string;
   titleCustomized?: boolean;
   intent?: SuperAgentIntent;
   workingDir?: string;
+  projectDir?: string;
+  projectKind?: SuperAgentProjectKind;
+  turnChangedFiles?: Record<string, SuperAgentFileOperation[]>;
   pinned?: boolean;
   runtimeId?: string;
   engine: SuperAgentEngine;
@@ -277,6 +294,7 @@ export type SuperAgentTurnInput = {
   reasoning?: string;
   permissionMode?: SuperAgentPermissionMode;
   attachments?: SuperAgentResourceAttachment[];
+  contextTags?: SuperAgentContextTag[];
 };
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -599,6 +617,70 @@ function shortTargetName(filePath: string): string {
   return parts.at(-1) || filePath;
 }
 
+const BINARY_FILE_RE = /\.(?:png|jpe?g|webp|gif|avif|ico|bmp|mp3|wav|ogg|m4a|mp4|webm|woff2?|ttf|otf|wasm|glb|pdf|zip)$/i;
+
+export function isBinaryFilePath(filePath: string): boolean {
+  return BINARY_FILE_RE.test(filePath.trim());
+}
+
+function extractBatchFileOperations(
+  args: Record<string, unknown>,
+  defaultAction: 'create' | 'edit' | 'delete' = 'edit',
+): SuperAgentFileOperation[] {
+  const ops: SuperAgentFileOperation[] = [];
+  const seen = new Set<string>();
+  const pushEntry = (
+    rawPath: unknown,
+    rawContent: unknown,
+    encoding: unknown,
+    entryAction: 'create' | 'edit' | 'delete' = defaultAction,
+  ) => {
+    if (typeof rawPath !== 'string') return;
+    const cleanPath = rawPath.trim();
+    if (!cleanPath || seen.has(cleanPath)) return;
+    seen.add(cleanPath);
+    const binary = encoding === 'base64' || isBinaryFilePath(cleanPath);
+    const content = !binary && typeof rawContent === 'string' ? rawContent : undefined;
+    if (entryAction === 'delete') {
+      ops.push({ action: 'delete', path: cleanPath, ...(binary ? { binary: true } : {}) });
+      return;
+    }
+    if (content !== undefined) {
+      const preview = buildUnifiedDiffPreview('', content);
+      ops.push({
+        action: entryAction,
+        path: cleanPath,
+        ...(binary ? { binary: true } : {}),
+        addedLines: preview.addedLines,
+        ...(preview.diffPreview ? { diffPreview: preview.diffPreview } : {}),
+      });
+      return;
+    }
+    ops.push({
+      action: entryAction,
+      path: cleanPath,
+      ...(binary ? { binary: true } : {}),
+    });
+  };
+
+  if (Array.isArray(args.files)) {
+    for (const item of args.files.slice(0, 200)) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as Record<string, unknown>;
+      const itemAction = entry.delete === true || entry.action === 'delete'
+        ? 'delete'
+        : entry.action === 'create'
+          ? 'create'
+          : defaultAction;
+      pushEntry(entry.path, entry.content, entry.encoding, itemAction);
+    }
+  }
+  if (!ops.length && typeof args.path === 'string') {
+    pushEntry(args.path, args.content, args.encoding, defaultAction);
+  }
+  return ops;
+}
+
 export function classifySuperAgentTool(
   tool: string,
   args: Record<string, unknown> = {},
@@ -639,33 +721,86 @@ export function classifySuperAgentTool(
   if (normalized.startsWith('openmotion_')) {
     const humanLabel = formatSuperAgentToolLabel(normalized, args);
     if (normalized === 'openmotion_design_edit') {
-      const filePath = firstString(args.path, Array.isArray(args.files) ? (args.files[0] as any)?.path : undefined);
-      if (action === 'write' && filePath) {
-        const content = firstString(args.content);
-        const op: SuperAgentFileOperation = {
-          action: 'edit',
-          path: filePath,
-          ...(content ? { addedLines: content.split('\n').length } : {}),
-        };
-        return { category: 'file_edit', label: humanLabel, summary: filePath, fileOp: op, files: [op] };
+      if (action === 'read_file') {
+        const filePath = firstString(args.path, Array.isArray(args.files) ? (args.files[0] as any)?.path : undefined);
+        if (filePath) {
+          const op: SuperAgentFileOperation = { action: 'read', path: filePath };
+          return { category: 'file_read', label: humanLabel, summary: filePath, fileOp: op };
+        }
       }
-      if (action === 'read_file' && filePath) {
-        const op: SuperAgentFileOperation = { action: 'read', path: filePath };
-        return { category: 'file_read', label: humanLabel, summary: filePath, fileOp: op };
+      if (action === 'delete' || action === 'delete_file') {
+        const files = extractBatchFileOperations(args, 'delete');
+        if (files.length) {
+          return {
+            category: 'file_delete',
+            label: humanLabel,
+            summary: files.length === 1 ? files[0].path : `${files.length} files`,
+            fileOp: files[0],
+            files,
+          };
+        }
+      }
+      if (action === 'write' || Array.isArray(args.files) || typeof args.path === 'string') {
+        const files = extractBatchFileOperations(args, 'edit');
+        if (files.length) {
+          return {
+            category: 'file_edit',
+            label: humanLabel,
+            summary: files.length === 1 ? files[0].path : `${files.length} files`,
+            fileOp: files[0],
+            files,
+          };
+        }
       }
     }
     if (normalized === 'openmotion_game_write_files' || normalized === 'openmotion_game_read_file') {
-      const filePath = firstString(args.path, Array.isArray(args.files) ? (args.files[0] as any)?.path : undefined);
       const isRead = normalized === 'openmotion_game_read_file';
-      const op: SuperAgentFileOperation | undefined = filePath
-        ? { action: isRead ? 'read' : 'edit', path: filePath }
-        : undefined;
+      if (isRead) {
+        const filePath = firstString(args.path, Array.isArray(args.files) ? (args.files[0] as any)?.path : undefined);
+        const op: SuperAgentFileOperation | undefined = filePath
+          ? { action: 'read', path: filePath }
+          : undefined;
+        return {
+          category: 'file_read',
+          label: humanLabel,
+          ...(filePath ? { summary: filePath } : {}),
+          ...(op ? { fileOp: op } : {}),
+        };
+      }
+      const files = extractBatchFileOperations(args, 'edit');
+      const fileOp = files[0];
       return {
-        category: isRead ? 'file_read' : 'file_edit',
+        category: 'file_edit',
         label: humanLabel,
-        ...(filePath ? { summary: filePath } : {}),
-        ...(op ? { fileOp: op, ...(!isRead ? { files: [op] } : {}) } : {}),
+        ...(files.length ? { summary: files.length === 1 ? files[0].path : `${files.length} files` } : {}),
+        ...(fileOp ? { fileOp, files } : {}),
       };
+    }
+    if (normalized === 'openmotion_game_capture_cover') {
+      const op: SuperAgentFileOperation = {
+        action: 'create',
+        path: 'assets/cover.png',
+        binary: true,
+      };
+      return {
+        category: 'file_write',
+        label: humanLabel,
+        summary: 'assets/cover.png',
+        fileOp: op,
+        files: [op],
+      };
+    }
+    if (normalized === 'openmotion_edit_project') {
+      const files = extractBatchFileOperations(args, 'edit');
+      if (files.length) {
+        return {
+          category: 'file_edit',
+          label: humanLabel,
+          summary: files.length === 1 ? files[0].path : `${files.length} files`,
+          fileOp: files[0],
+          files,
+        };
+      }
     }
     return {
       category: 'mcp',

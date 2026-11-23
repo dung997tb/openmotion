@@ -1,4 +1,4 @@
-import type { SuperAgentArtifact, SuperAgentResourceAttachment } from './super-agent.ts';
+import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentResourceAttachment } from './super-agent.ts';
 
 export type CapabilityDomainId =
   | 'motion'
@@ -235,6 +235,8 @@ export type SuperAgentHandoffPayload = {
   /** Optional Skill/workflow execution context passed to the Agent behind the scenes without cluttering the user's visible message. */
   hiddenInstructions?: string;
   attachments?: SuperAgentResourceAttachment[];
+  /** Concise mode/skill and parameter tags displayed above the user message bubble. */
+  contextTags?: SuperAgentContextTag[];
   initialArtifact?: Partial<SuperAgentArtifact>;
   mode?: 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
   title?: string;
@@ -491,6 +493,7 @@ export function buildSuperAgentHandoff(
   options: {
     prompt?: string;
     hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
     locale?: string;
     autoSend?: boolean;
     newChat?: boolean;
@@ -574,6 +577,7 @@ export function buildSuperAgentHandoff(
     prompt,
     ...(hiddenInstructions ? { hiddenInstructions } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(options.contextTags?.length ? { contextTags: options.contextTags } : {}),
     ...(options.initialArtifact ? { initialArtifact: options.initialArtifact } : {}),
     mode: defaultModeForRef(ref),
     title: ref.title,

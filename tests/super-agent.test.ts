@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { designHttp, designProjectsFor } from '../design-projects.ts';
 import { gameHttp, gameProjectsFor } from '../game-projects.ts';
@@ -12,18 +13,23 @@ import {
   formatBrowserAnnotationsContext,
   superAgentConversations,
 } from '../gateway/super-agent.ts';
+import {
+  captureWorkspaceSnapshot,
+  collectTaskProjectRoots,
+  diffWorkspaceSnapshots,
+  resolveTaskProjectDir,
+} from '../gateway/super-agent-workspace.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
 import {
   registerCapabilityScriptExecutor,
   saveCapabilityOverrides,
   unregisterCapabilityScriptExecutor,
 } from '../gateway/capability-center.ts';
-import { classifySuperAgentTool, formatSuperAgentToolLabel } from '../shared/super-agent.ts';
+import { classifySuperAgentTool, describeSuperAgentApproval, formatSuperAgentToolLabel } from '../shared/super-agent.ts';
 import { execute } from '../hyperframes.ts';
 import { verificationBinaries } from '../scripts/verify-export.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
 import { buildSuperAgentHandoff } from '../shared/capability-hub.ts';
-import { describeSuperAgentApproval } from '../shared/super-agent.ts';
 import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
 
@@ -1440,6 +1446,12 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
       text: '我想做一个2024小游戏',
       hiddenInstructions: 'Use the openmotion-game Skill. Read openmotion://workflow/game/start.',
       mode: 'game',
+      contextTags: [
+        { kind: 'mode', label: 'Game', icon: 'gamepad-line', tone: 'agent' },
+        { kind: 'param', label: 'Casual' },
+        { kind: 'param', label: '9:16' },
+        { kind: 'param', label: 'Single player' },
+      ],
     },
     { origin: 'http://127.0.0.1:4173', phase1: () => phase1 },
   );
@@ -1453,7 +1465,9 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
   assert.equal(waitingSnap.approvals[0].target, 'bgm.wav');
   assert.equal(waitingSnap.messages[0].text, '我想做一个2024小游戏');
   assert.equal(waitingSnap.messages[0].text.includes('openmotion-game'), false);
+  assert.deepEqual(waitingSnap.messages[0].contextTags?.map(tag => tag.label), ['Game', 'Casual', '9:16', 'Single player']);
   assert.ok(receivedAgentPrompt.includes('<openmotion-task-instructions>'));
+  assert.ok(receivedAgentPrompt.includes('Mode/Skill: game | Selected parameters: Casual · 9:16 · Single player'));
   assert.ok(receivedAgentPrompt.includes('openmotion://workflow/game/start'));
 
   // Approve with alwaysAllow=true -> switches chat.permissionMode to 'auto' and auto-approves req #42
@@ -1682,4 +1696,167 @@ test('SuperAgentConversations gates openmotion_capability_run approvals, skips a
     unregisterCapabilityScriptExecutor(scriptId);
     await service.close();
   }
+}));
+
+test('classifySuperAgentTool extracts every file in multi-file Game, Design, and Motion batches plus capture_cover', () => {
+  const gameBatch = classifySuperAgentTool('mcp__openmotion__openmotion_game_write_files', {
+    id: 'g-1',
+    files: [
+      { path: 'assets/icon.svg', content: '<svg></svg>' },
+      { path: 'index.html', content: '<!doctype html>\n<html></html>' },
+      { path: 'style.css', content: 'body { margin: 0; }\ncanvas { display: block; }' },
+      { path: 'logic.js', content: 'export const meta = {};' },
+      { path: 'client.js', content: 'console.log("ok");' },
+    ],
+  });
+  assert.equal(gameBatch.category, 'file_edit');
+  assert.equal(gameBatch.summary, '5 files');
+  assert.deepEqual(gameBatch.files?.map(f => f.path), [
+    'assets/icon.svg',
+    'index.html',
+    'style.css',
+    'logic.js',
+    'client.js',
+  ]);
+  assert.equal(gameBatch.files?.[1].addedLines, 2);
+  assert.ok(gameBatch.files?.[1].diffPreview?.includes('+<!doctype html>'));
+
+  const designWrite = classifySuperAgentTool('openmotion_design_edit', {
+    action: 'write',
+    files: [
+      { path: 'index.html', content: '<h1>Hi</h1>' },
+      { path: 'app.js', content: 'const a = 1;' },
+    ],
+  });
+  assert.deepEqual(designWrite.files?.map(f => f.path), ['index.html', 'app.js']);
+
+  const designDelete = classifySuperAgentTool('openmotion_design_edit', {
+    action: 'delete',
+    files: [{ path: 'old.css' }],
+  });
+  assert.equal(designDelete.category, 'file_delete');
+  assert.deepEqual(designDelete.files?.map(f => ({ path: f.path, action: f.action })), [
+    { path: 'old.css', action: 'delete' },
+  ]);
+
+  const cover = classifySuperAgentTool('openmotion_game_capture_cover', { id: 'g-1' });
+  assert.equal(cover.category, 'file_write');
+  assert.deepEqual(cover.files, [{ action: 'create', path: 'assets/cover.png', binary: true }]);
+});
+
+test('per-task projectDir, checkpoint diffing, and legacy hydration track all deliverable files accurately', () => fixture(async store => {
+  const service = new SuperAgentConversations(store);
+  const created = await service.create({ intent: 'coding', engine: 'claude' });
+  assert.equal(created.projectKind, 'workspace');
+  assert.equal(created.projectDir, path.join(store.directory, 'super-agent', 'work', created.id));
+  const workDirStat = await stat(created.projectDir!);
+  assert.ok(workDirStat.isDirectory());
+
+  const resolvedCustom = resolveTaskProjectDir(store.directory, {
+    id: created.id,
+    workingDir: '/tmp/custom-repo',
+    artifacts: [{
+      id: 'game:g1',
+      kind: 'game-project',
+      title: 'G1',
+      projectId: 'g1',
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  });
+  assert.deepEqual(resolvedCustom, { projectDir: '/tmp/custom-repo', projectKind: 'custom' });
+
+  // Create a game project with all 9 real deliverable files plus internal scratch/metadata noise
+  const { game } = await gameProjectsFor(store.directory).create({
+    prompt: 'Action game',
+    genre: 'casual',
+    multiplayer: true,
+  });
+  await gameProjectsFor(store.directory).write(game.id, [
+    { path: 'index.html', content: '<!doctype html>\n<title>Action</title>' },
+    { path: 'style.css', content: 'body { color: white; }' },
+    { path: 'logic.js', content: 'export const meta = { minPlayers: 1, maxPlayers: 2, tickRate: 20 };' },
+    { path: 'client.js', content: 'console.log("ready");' },
+    { path: 'assets/icon.svg', content: '<svg></svg>' },
+    { path: 'design/plan.md', content: '# Plan' },
+    { path: 'design/assets.csv', content: 'name,type\ncover,png' },
+    { path: 'design/verification.md', content: '# Verification' },
+  ]);
+  const gameDir = path.join(store.directory, 'games', game.id);
+  await mkdir(path.join(gameDir, 'assets'), { recursive: true });
+  await writeFile(
+    path.join(gameDir, 'assets', 'cover.png'),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  );
+  await mkdir(path.join(gameDir, 'assets', 'playtests'), { recursive: true });
+  await writeFile(path.join(gameDir, 'assets', 'playtests', 'ephemeral.png'), Buffer.from([1, 2, 3]));
+  await mkdir(path.join(gameDir, 'trailer'), { recursive: true });
+  await writeFile(path.join(gameDir, 'trailer', 'clip.mp4'), Buffer.from([4, 5, 6]));
+
+  // Snapshot captures exact 9 deliverable files and excludes internal game metadata/noise
+  const chatWithGame = await service.create({
+    engine: 'claude',
+    initialArtifact: {
+      id: `game:${game.id}`,
+      kind: 'game-project',
+      title: game.title,
+      projectId: game.id,
+      url: `/motion-api/games/${game.id}/play/index.html`,
+    },
+  });
+  assert.equal(chatWithGame.projectKind, 'game');
+  assert.equal(chatWithGame.projectDir, gameDir);
+
+  const roots = collectTaskProjectRoots(store.directory, chatWithGame);
+  const snap = await captureWorkspaceSnapshot(roots);
+  const diffOps = diffWorkspaceSnapshots(undefined, snap);
+  assert.deepEqual(diffOps.map(op => op.path), [
+    'assets/cover.png',
+    'assets/icon.svg',
+    'client.js',
+    'design/assets.csv',
+    'design/plan.md',
+    'design/verification.md',
+    'index.html',
+    'logic.js',
+    'style.css',
+  ]);
+  const coverOp = diffOps.find(op => op.path === 'assets/cover.png');
+  assert.equal(coverOp?.binary, true);
+  assert.equal(coverOp?.previewUrl, `/motion-api/games/${encodeURIComponent(game.id)}/play/assets/cover.png`);
+  assert.equal(coverOp?.artifactId, `game:${game.id}`);
+
+  // Legacy chat persisted without turnChangedFiles is hydrated on get()
+  const chatFile = await service.file(chatWithGame.id);
+  const parsed = JSON.parse(await (await import('node:fs/promises')).readFile(chatFile, 'utf8'));
+  parsed.messages = [{ id: 'turn-u1', role: 'user', text: 'Build game', createdAt: 100 }];
+  delete parsed.turnChangedFiles;
+  await writeFile(chatFile, JSON.stringify(parsed));
+
+  const loaded = await service.get(chatWithGame.id);
+  assert.equal(loaded.turnChangedFiles?.['turn-u1']?.length, 9);
+  assert.ok(loaded.turnChangedFiles?.['turn-u1']?.some(op => op.path === 'index.html'));
+
+  // Run + stop with custom mock agent persists turnChangedFiles in work/<chatId>
+  const runChat = await service.create({ intent: 'coding', engine: 'claude' });
+  const runService = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/fake/claude',
+    runClaude: async ({ cwd, onEvent }) => {
+      await writeFile(path.join(cwd, 'notes.md'), '# Task Notes\nReady\n');
+      await onEvent({ type: 'result', subtype: 'success', result: 'Created notes.' });
+    },
+  });
+  await runService.start(
+    runChat.id,
+    { requestId: 'req-turn-snap-1', text: 'Write notes.md' },
+    { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) },
+  );
+  const finished = await runService.waitForChat(runChat.id);
+  const firstUserMsg = finished.messages.find(m => m.role === 'user');
+  assert.ok(firstUserMsg);
+  assert.equal(finished.turnChangedFiles?.[firstUserMsg!.id]?.[0]?.path, 'notes.md');
+  assert.equal(finished.turnChangedFiles?.[firstUserMsg!.id]?.[0]?.action, 'create');
+
+  await runService.close();
+  await service.close();
 }));
