@@ -19,6 +19,8 @@
     "../shared/signed-config.ts",
     "../shared/engine-command-contract.ts",
     "../shared/desktop-auth-handoff.ts",
-    "../shared/connect-script-protocol.ts"
+    "../shared/connect-script-protocol.ts",
+    "../packages/local-atoms/**/*.ts",
+    "../packages/signed-config/**/*.ts"
   ]
 }

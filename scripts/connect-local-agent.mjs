@@ -1,76 +1,137 @@
 #!/usr/bin/env node
 /**
- * OpenMotion Web Connect Script CLI Entrypoint (K9 Step 1).
+ * OpenMotion Web Connect Script CLI Entrypoint (K9 Step 1 — Wired to K7 + K8).
  *
  * Usage:
  *   node --experimental-strip-types scripts/connect-local-agent.mjs --connect [codex|claude|all]
  *   node --experimental-strip-types scripts/connect-local-agent.mjs --serve [--port 43118]
  *
- * Wave 2 Integration Hook:
- *   Automatically loads `packages/local-atoms/index.ts` (and optional
- *   `packages/signed-config/index.ts`) when present in the workspace, and falls
- *   back cleanly to `createStubConnectBridge` when running standalone before
- *   Wave 2 wiring.
+ * Runs the exact same shared five atomic capabilities (`packages/local-atoms`)
+ * and two-tier signed config verification (`packages/signed-config`) as the
+ * Electron desktop thin shell.
  */
 
+import os from 'node:os';
+import path, { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
 import {
-  createStubConnectBridge,
-  runConnectCli,
-} from '../packages/connect-script/index.ts';
+  DEFAULT_STUDIO_URLS,
+  DESKTOP_DATA_LAYOUT_VERSION,
+} from '../shared/desktop-builtin-rules.ts';
+import {
+  HOST_CONTRACT_VERSION,
+  hostErr,
+} from '../shared/desktop-contract.ts';
+import { runConnectCli } from '../packages/connect-script/index.ts';
+import { createLocalAtomsRuntime } from '../packages/local-atoms/index.ts';
+import { SignedConfigManager } from '../packages/signed-config/index.ts';
 
-const REPO_ROOT = resolve(import.meta.dirname, '..');
+const CONNECT_SCRIPT_VERSION = '0.2.1';
 
-async function tryImportOptional(relativePath) {
-  const fullUrl = pathToFileURL(resolve(REPO_ROOT, relativePath)).href;
-  try {
-    return await import(fullUrl);
-  } catch (err) {
-    if (
-      err &&
-      typeof err === 'object' &&
-      'code' in err &&
-      (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'ENOENT')
-    ) {
-      return null;
-    }
-    throw err;
+function resolveConnectDataDir() {
+  const override = process.env.OPENMOTION_CONNECT_DATA_DIR?.trim();
+  if (override) return override;
+  return path.join(os.homedir(), '.openmotion', 'connect-script');
+}
+
+function normalizeHostPlatform(platform) {
+  if (platform === 'darwin' || platform === 'win32' || platform === 'linux') {
+    return platform;
   }
+  return 'linux';
 }
 
 /**
- * Adapter hook resolving the concrete `UniversalHostBridge` for Wave 2.
- * Falls back cleanly to `createStubConnectBridge` when `packages/local-atoms`
- * has not yet been merged/wired.
+ * Builds the concrete `UniversalHostBridge` backed by `SignedConfigManager` (K8)
+ * and `createLocalAtomsRuntime` (K7).
  */
 export async function resolveConnectBridge(options) {
-  const localAtomsMod = await tryImportOptional('packages/local-atoms/index.ts');
-  const signedConfigMod = await tryImportOptional('packages/signed-config/index.ts');
+  const channel = options?.channel ?? 'stable';
+  const allowLocalDevLoopback = Boolean(options?.allowLocalDevLoopback);
+  const dataDir = options?.dataDir ?? resolveConnectDataDir();
 
-  if (localAtomsMod) {
-    const factory =
-      localAtomsMod.createConnectScriptBridge ??
-      localAtomsMod.createLocalAtomsBridge ??
-      localAtomsMod.createHostBridge;
-    if (typeof factory === 'function') {
-      const signedConfig =
-        signedConfigMod && typeof signedConfigMod.loadSignedConfig === 'function'
-          ? await signedConfigMod.loadSignedConfig({ channel: options.channel })
-          : undefined;
-      return await factory({
-        hostKind: 'connect-script',
-        channel: options.channel,
-        allowLocalDevLoopback: options.allowLocalDevLoopback,
-        confirm: options.confirm,
-        signedConfig,
-      });
-    }
+  const signedConfig = new SignedConfigManager({
+    dataDir,
+    channel,
+    allowLocalDevLoopback,
+    ...(options?.rootPublicKey ? { rootPublicKey: options.rootPublicKey } : {}),
+    ...(options?.fetchFn ? { fetchFn: options.fetchFn } : {}),
+  });
+
+  if (options?.refreshSignedConfig) {
+    await signedConfig.fetchAndApply().catch(() => {});
   }
 
-  return createStubConnectBridge({
-    channel: options.channel,
+  const studioUrl =
+    options?.studioUrl ??
+    signedConfig.getActiveConfig().studioUrl ??
+    DEFAULT_STUDIO_URLS[channel];
+  const expectedMcpUrl =
+    options?.expectedMcpUrl ?? `${studioUrl.replace(/\/+$/, '')}/mcp`;
+
+  const atomsRuntime = createLocalAtomsRuntime({
+    dataDir,
+    homeDir: options?.homeDir,
+    platform: normalizeHostPlatform(process.platform),
+    arch: process.arch,
+    channel,
+    allowLocalDevLoopback,
+    expectedMcpUrl,
+    getSignedConfig: () => signedConfig.getActiveConfig(),
+    confirmCallback: async request => {
+      if (typeof options?.confirm === 'function') {
+        return await options.confirm(request);
+      }
+      return false;
+    },
+    ...(options?.commandRunner ? { commandRunner: options.commandRunner } : {}),
+    ...(options?.engineHttpProbe ? { engineHttpProbe: options.engineHttpProbe } : {}),
+    ...(options?.pathResolver ? { pathResolver: options.pathResolver } : {}),
   });
+
+  return {
+    async info() {
+      return {
+        hostKind: 'connect-script',
+        shellVersion: CONNECT_SCRIPT_VERSION,
+        contractVersion: HOST_CONTRACT_VERSION,
+        platform: normalizeHostPlatform(process.platform),
+        arch: process.arch,
+        releaseChannel: channel,
+        isPackaged: false,
+        nodeVersion: process.versions.node,
+        dataDir,
+        dataLayoutVersion: DESKTOP_DATA_LAYOUT_VERSION,
+      };
+    },
+    async capabilities() {
+      return [
+        {
+          name: 'signedConfig',
+          version: '1.0.0',
+          status: 'available',
+          methods: ['getStatus', 'refresh'],
+        },
+        ...atomsRuntime.descriptors(),
+      ];
+    },
+    async invoke(capability, method, params) {
+      if (capability === 'signedConfig') {
+        if (method === 'getStatus') {
+          return { ok: true, data: signedConfig.getStatus() };
+        }
+        if (method === 'refresh') {
+          const result = await signedConfig.fetchAndApply();
+          return { ok: true, data: result };
+        }
+        return hostErr('UNSUPPORTED', `Unknown method "${method}" for signedConfig`);
+      }
+      return await atomsRuntime.invoke(capability, method, params);
+    },
+    subscribe() {
+      return () => {};
+    },
+  };
 }
 
 async function main() {

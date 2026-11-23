@@ -433,7 +433,13 @@ export function createUpdaterCapabilityModule(deps: UpdaterCapabilityDeps): Capa
       check: {
         handler: async () => hostOk(await deps.checkForUpdates()),
       },
+      checkForUpdates: {
+        handler: async () => hostOk(await deps.checkForUpdates()),
+      },
       download: {
+        handler: async () => hostOk(await deps.downloadUpdate()),
+      },
+      downloadUpdate: {
         handler: async () => hostOk(await deps.downloadUpdate()),
       },
       installNow: {
@@ -477,9 +483,15 @@ export function createDiagnosticsCapabilityModule(
 }
 
 export type AccountCapabilityDeps = {
-  startSignIn: (params?: { returnPath?: string }) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  startSignIn: (params?: {
+    returnPath?: string;
+    switchAccount?: boolean;
+  }) => Record<string, unknown> | Promise<Record<string, unknown>>;
   cancelSignIn: () => Record<string, unknown> | Promise<Record<string, unknown>>;
   refreshAccount: () => Record<string, unknown> | Promise<Record<string, unknown>>;
+  getLoginState?: () => Record<string, unknown> | Promise<Record<string, unknown>>;
+  openBillingPortal?: (params: { url: string }) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>;
+  openInWindowLogin?: (params?: { returnPath?: string }) => Record<string, unknown> | Promise<Record<string, unknown>>;
   signOut?: () => Record<string, unknown> | Promise<Record<string, unknown>>;
   status?: HostCapabilityStatus;
   reason?: string;
@@ -491,14 +503,49 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
     version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ACCOUNT],
     status: deps.status ?? 'available',
     ...(deps.reason !== undefined ? { reason: deps.reason } : {}),
-    events: ['state'],
+    events: ['state', 'login-state'],
     methods: {
       startSignIn: {
         validate: validateStartSignInParams,
         handler: async (params: { returnPath?: string }) => hostOk(await deps.startSignIn(params)),
       },
+      startBrowserLogin: {
+        validate: params => {
+          const base = validateStartSignInParams(params);
+          if (!base.ok) return base;
+          const switchAccount = params.switchAccount === true;
+          return { ok: true, value: { ...base.value, switchAccount } };
+        },
+        handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>
+          hostOk(await deps.startSignIn(params)),
+      },
       cancelSignIn: {
         handler: async () => hostOk(await deps.cancelSignIn()),
+      },
+      cancelLogin: {
+        handler: async () => hostOk(await deps.cancelSignIn()),
+      },
+      getLoginState: {
+        handler: async () =>
+          hostOk(deps.getLoginState ? await deps.getLoginState() : await deps.refreshAccount()),
+      },
+      openBillingPortal: {
+        validate: validateExternalUrlParams,
+        handler: async ({ url }: { url: string }) => {
+          if (!deps.openBillingPortal) {
+            return hostErr('UNSUPPORTED', 'Billing portal open is not supported in this host');
+          }
+          return hostOk(await deps.openBillingPortal({ url }));
+        },
+      },
+      openInWindowLogin: {
+        validate: validateStartSignInParams,
+        handler: async (params: { returnPath?: string }) => {
+          if (!deps.openInWindowLogin) {
+            return hostErr('UNSUPPORTED', 'In-window login fallback is not supported in this host');
+          }
+          return hostOk(await deps.openInWindowLogin(params));
+        },
       },
       refresh: {
         handler: async () => hostOk(await deps.refreshAccount()),

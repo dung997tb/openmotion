@@ -25,14 +25,15 @@ const SK_RE = /\bsk-[A-Za-z0-9_-]{8,}\b/g;
 
 function compilePathMatchers(extraPaths: Array<string | undefined>): RegExp[] {
   const unique = new Set<string>();
-  const matchers: RegExp[] = [];
+  const normalized: string[] = [];
   for (const raw of [os.homedir(), ...extraPaths]) {
     const trimmed = raw?.trim();
     if (!trimmed || trimmed.length <= 1 || unique.has(trimmed)) continue;
     unique.add(trimmed);
-    matchers.push(new RegExp(escapeRegex(trimmed), 'gi'));
+    normalized.push(trimmed);
   }
-  return matchers;
+  normalized.sort((a, b) => b.length - a.length);
+  return normalized.map(value => new RegExp(escapeRegex(value), 'gi'));
 }
 
 function redactWithMatchers(text: string, pathMatchers: readonly RegExp[]): string {

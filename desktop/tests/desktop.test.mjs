@@ -208,7 +208,7 @@ test('buildDesktopMenuTemplate binds CmdOrCtrl+W minimize, CmdOrCtrl+M hide, and
   }
 });
 
-test('DesktopUpdaterController transitions cleanly and stops sidecar before quitAndInstall', async () => {
+test('DesktopUpdaterController transitions cleanly and runs beforeQuit hook before quitAndInstall', async () => {
   const unpackaged = new DesktopUpdaterController({ currentVersion: '0.1.0', isPackaged: false });
   const unsupported = await unpackaged.checkForUpdates();
   assert.equal(unsupported.status, 'unsupported');
@@ -216,13 +216,18 @@ test('DesktopUpdaterController transitions cleanly and stops sidecar before quit
   const handlers = new Map();
   let quitAndInstallCalled = false;
   let beforeQuitDone = false;
+  let configuredFeed = null;
 
   const packaged = new DesktopUpdaterController({
     currentVersion: '0.1.0',
     isPackaged: true,
+    channel: 'stable',
     loadAutoUpdater: async () => ({
       autoDownload: true,
       autoInstallOnAppQuit: true,
+      setFeedURL(feed) {
+        configuredFeed = feed;
+      },
       on(event, fn) {
         handlers.set(event, fn);
       },
@@ -235,7 +240,7 @@ test('DesktopUpdaterController transitions cleanly and stops sidecar before quit
         handlers.get('update-downloaded')?.({ version: '0.2.0' });
       },
       quitAndInstall() {
-        assert.equal(beforeQuitDone, true, 'Sidecar must stop before quitAndInstall');
+        assert.equal(beforeQuitDone, true, 'beforeQuit hook must complete before quitAndInstall');
         quitAndInstallCalled = true;
       },
     }),
@@ -244,6 +249,7 @@ test('DesktopUpdaterController transitions cleanly and stops sidecar before quit
   const avail = await packaged.checkForUpdates();
   assert.equal(avail.status, 'available');
   assert.equal(avail.availableVersion, '0.2.0');
+  assert.equal(configuredFeed?.provider, 'generic');
 
   const downloaded = await packaged.downloadUpdate();
   assert.equal(downloaded.status, 'downloaded');
@@ -256,19 +262,19 @@ test('DesktopUpdaterController transitions cleanly and stops sidecar before quit
   assert.equal(quitAndInstallCalled, true);
 });
 
-test('DesktopUpdaterController resolves CJS default autoUpdater export and falls back to GitHub Releases when feed yml is absent', async () => {
+test('DesktopUpdaterController resolves CJS default autoUpdater export and reports error without GitHub fallback when feed is missing', async () => {
   const fakeAutoUpdater = {
     autoDownload: true,
     autoInstallOnAppQuit: true,
+    setFeedURL() {},
     on() {},
     async checkForUpdates() {
-      throw new Error('HttpError: 404 "Cannot find latest-mac.yml in the latest release artifacts"');
+      throw new Error('HttpError: 404 "Cannot find latest-mac.yml"');
     },
     async downloadUpdate() {},
     quitAndInstall() {},
   };
 
-  // ESM/CJS interop: electron-updater exposes autoUpdater under default when imported from ESM.
   assert.equal(resolveElectronAutoUpdater({ default: { autoUpdater: fakeAutoUpdater } }), fakeAutoUpdater);
   assert.equal(resolveElectronAutoUpdater({ autoUpdater: fakeAutoUpdater }), fakeAutoUpdater);
 
@@ -276,36 +282,15 @@ test('DesktopUpdaterController resolves CJS default autoUpdater export and falls
   assert.ok(compareSemver('0.2.2', '0.2.1') > 0);
   assert.ok(compareSemver('0.2.1', '0.2.1-beta.1') > 0);
 
-  const upToDate = new DesktopUpdaterController({
+  const missing = new DesktopUpdaterController({
     currentVersion: '0.2.1',
     isPackaged: true,
+    channel: 'stable',
     loadAutoUpdater: async () => fakeAutoUpdater,
-    fetchLatestRelease: async () => ({
-      tag_name: 'v0.2.1',
-      html_url: 'https://github.com/nexu-io/openmotion/releases/tag/v0.2.1',
-    }),
   });
-  const resSame = await upToDate.checkForUpdates();
-  assert.equal(resSame.status, 'up-to-date');
-
-  let openedUrl = '';
-  const hasNewer = new DesktopUpdaterController({
-    currentVersion: '0.2.1',
-    isPackaged: true,
-    loadAutoUpdater: async () => fakeAutoUpdater,
-    fetchLatestRelease: async () => ({
-      tag_name: 'v0.3.0',
-      html_url: 'https://github.com/nexu-io/openmotion/releases/tag/v0.3.0',
-    }),
-    onOpenReleasePage: url => {
-      openedUrl = url;
-    },
-  });
-  const resNewer = await hasNewer.checkForUpdates();
-  assert.equal(resNewer.status, 'available');
-  assert.equal(resNewer.availableVersion, '0.3.0');
-  await hasNewer.downloadUpdate();
-  assert.equal(openedUrl, 'https://github.com/nexu-io/openmotion/releases/tag/v0.3.0');
+  const resMissing = await missing.checkForUpdates();
+  assert.equal(resMissing.status, 'error');
+  assert.ok(resMissing.message);
 });
 
 test('splash.html contains retry, log export, and WebGL disposal controls and stageDesktopApp stages runtime allowlist', () => {
