@@ -26,7 +26,6 @@ import { MotionStudioHost } from "./motion/MotionStudioHost";
 import { StudioRouterProvider } from "./router/createAppRouter";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
-import { bindDesktopHost, notifyDesktopRendererReady } from './utils/platformHost';
 import { bindVitePreloadErrorReload, lazyWithChunkReload } from './utils/chunkReload';
 import { ensureLocaleLoaded, isLocaleLoaded, readLocale } from './i18n/I18n';
 
@@ -39,9 +38,6 @@ import.meta.hot?.dispose(unbindPreloadErrorReload);
 
 const unbindHostTheme = bindEmbeddedStudioTheme();
 import.meta.hot?.dispose(unbindHostTheme);
-
-const unbindDesktopHost = bindDesktopHost({ deferReady: true });
-import.meta.hot?.dispose(unbindDesktopHost);
 
 const stopDiagnostics = initializeDiagnostics();
 import.meta.hot?.dispose(stopDiagnostics);
@@ -160,16 +156,6 @@ function mountStudio() {
       </IconContext.Provider>
     </StrictMode>,
   );
-
-  // Reveal the native desktop window only after the initial React commit has painted
-  // (with a wall-clock fallback if requestAnimationFrame is throttled while hidden).
-  const revealFallback = window.setTimeout(notifyDesktopRendererReady, 1200);
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => {
-      window.clearTimeout(revealFallback);
-      notifyDesktopRendererReady();
-    });
-  });
 }
 
 const initialLocale = readLocale();

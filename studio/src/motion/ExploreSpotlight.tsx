@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { ExploreCoverImage } from './ExploreCoverImage';
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { mediaEditorDestination, motionStudio, type StudioDestination, type StudioScene } from './creativeStudios';
@@ -9,10 +9,8 @@ import { findModelHub } from './modelHubs';
 import { motionSkills, motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
-import { releaseMediaElement } from '../utils/releaseMediaElement';
 import type { ScenarioId } from '../../../shared/scenarios';
 import aiInfluencerMarketing from './scene-art/ai-influencer-marketing.webp';
-import lanternfallPoster from './game/community/lanternfall.jpg';
 import './scenarioNavigation.css';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
@@ -30,20 +28,9 @@ interface FeaturedSlide {
   hub?: string;
   /** Launches the matching end-to-end scenario workflow. */
   scenario?: ScenarioId;
-  /** Highlights Game Studio with both Super Agent and direct Game Studio entry points. */
-  game?: true;
 }
 const geminiHub = findModelHub('gemini-4')!;
 const slides: FeaturedSlide[] = [{
-  id: 'game',
-  title: 'Game Studio',
-  subtitle: 'Playable web games',
-  icon: 'gamepad-line',
-  hint: 'Pick a genre, style and setting, describe your game in one line and your Agent builds a playable web game.',
-  poster: lanternfallPoster,
-  credit: '@loktar00',
-  game: true,
-}, {
   id: motionStudio.id, title: motionStudio.title, subtitle: 'Motion design', icon: motionStudio.icon,
   hint: 'Animate type and shapes, then edit their timing on the timeline.', poster: motionStudioCover?.poster ?? '', clip: motionStudioCover?.video,
   scenario: 'motion-full-chain',
@@ -82,21 +69,15 @@ function FeaturedClip({ src, playing }: { src: string; playing: boolean }) {
     if (playing) void video.play().catch(() => { /* The poster remains available if autoplay is blocked. */ });
     else video.pause();
   }, [playing, videoSource]);
-  useEffect(() => {
-    const video = player.current;
-    return () => releaseMediaElement(video);
-  }, [videoSource, failed]);
   return videoSource && !failed ? <video ref={player} src={videoSource} muted loop playsInline preload="none" aria-hidden="true"
     style={{ opacity: ready ? 1 : 0 }} onLoadedData={() => setReady(true)} onError={() => setFailed(true)} /> : null;
 }
 
-export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub, onStartScenario, onOpenGameStudio, onBuildGameInSuperAgent }: {
+export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub, onStartScenario }: {
   active: boolean; onNavigate: (target: StudioDestination, prompt: string) => void;
   onOpenMotionEditor: () => void; motionEditorDisabled: boolean;
   onOpenBlackFriday: (trigger: HTMLButtonElement) => void; onModelHub: (id: string) => void;
   onStartScenario?: (id: ScenarioId) => void;
-  onOpenGameStudio?: (gameId?: string) => void;
-  onBuildGameInSuperAgent?: () => void;
 }) {
   const { t } = useI18n();
   const root = useRef<HTMLElement>(null);
@@ -148,24 +129,10 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
       const scene = slide.scene;
       const blackFriday = slide.id === 'black-friday';
       const motionSlide = slide.id === motionStudio.id;
-      const gameSlide = Boolean(slide.game);
       const showWorkflowPrimary = Boolean(slide.scenario && onStartScenario);
-      const slideClickHandler = slide.hub
-        ? (event: MouseEvent<HTMLDivElement>) => {
-            if ((event.target as Element).closest('button')) return;
-            track('slide_action', { slide: slide.id, position: i });
-            onModelHub(slide.hub!);
-          }
-        : gameSlide && onOpenGameStudio
-          ? (event: MouseEvent<HTMLDivElement>) => {
-              if ((event.target as Element).closest('button')) return;
-              track('slide_action', { slide: slide.id, position: i, studio: 'game' });
-              onOpenGameStudio();
-            }
-          : undefined;
-      // A hub or game slide is clickable as a whole; its buttons stay the keyboard entries.
-      return <div key={slide.id} className="om-feature-slide" data-scene={slide.id} data-clickable={slideClickHandler ? 'true' : undefined} aria-hidden={!current} inert={!current}
-        onClick={slideClickHandler}>
+      // A hub slide is clickable as a whole; its button stays the keyboard entry.
+      return <div key={slide.id} className="om-feature-slide" data-scene={slide.id} data-clickable={slide.hub ? 'true' : undefined} aria-hidden={!current} inert={!current}
+        onClick={slide.hub ? event => { if ((event.target as Element).closest('button')) return; track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); } : undefined}>
         <div className="om-feature-art" aria-hidden="true"><div className="om-feature-camera">
           <ExploreCoverImage src={slide.poster} eager={current} />
           {current && active && visible && slide.clip && <FeaturedClip src={slide.clip} playing={playing} />}
@@ -181,18 +148,7 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
             }}>
               {t('Start workflow')}<RemixIcon name="arrow-right-line" size={16} />
             </Button>}
-            {gameSlide && onBuildGameInSuperAgent && <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="game-agent" data-primary="media" onClick={() => {
-              track('slide_action', { slide: slide.id, position: i, studio: 'game', navTarget: 'super_agent' });
-              onBuildGameInSuperAgent();
-            }}>
-              {t('Build with Super Agent')}<RemixIcon name="arrow-right-line" size={16} />
-            </Button>}
-            {gameSlide && onOpenGameStudio ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={onBuildGameInSuperAgent ? undefined : 'media'} onClick={() => {
-              track('slide_action', { slide: slide.id, position: i, studio: 'game' });
-              onOpenGameStudio();
-            }}>
-              {t('Open Game Studio')}<RemixIcon name="arrow-right-line" size={16} />
-            </Button> : slide.hub ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} onClick={() => { track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); }}>
+            {slide.hub ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} onClick={() => { track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); }}>
               {t('Try {model} now', { model: slide.title })}<RemixIcon name="arrow-right-line" size={16} />
             </Button> : blackFriday ? <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="destination" data-primary={showWorkflowPrimary ? undefined : 'media'} onClick={event => { track('slide_action', { slide: slide.id, position: i }); onOpenBlackFriday(event.currentTarget); }}>
               {t('View collection')}<RemixIcon name="arrow-right-line" size={16} />

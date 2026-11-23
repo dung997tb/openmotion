@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { scenarioPromptLocales } from '../../../shared/scenario-prompt-locales';
+import scenarioMediaTitles from '../../../shared/scenario-media-titles.json';
 import { scenarioCategories, scenarioDefinitions, socialPlatforms } from '../../../shared/scenarios';
 import { isKnownMessage, languages, translate } from './messages';
 import scenarioUi from './scenario-ui.json';
@@ -10,6 +12,42 @@ const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map(matc
 const mcpTools = (text: string) => (text.match(/openmotion_\w+/g) ?? []).sort();
 
 describe('scenario workflow i18n resources', () => {
+  it('shares localized workflow and audio/video titles with the generation service', () => {
+    expect(Object.keys(scenarioMediaTitles).sort()).toEqual([...nonEnglishLocales].sort());
+    for (const locale of nonEnglishLocales) {
+      const titles: Record<string, string> = scenarioMediaTitles[locale];
+      for (const scenario of scenarioDefinitions) {
+        const mediaSteps = scenario.steps.filter(step => step.type === 'audio' || step.type === 'video');
+        for (const source of [scenario.title, ...mediaSteps.map(step => step.title)]) {
+          expect(titles[source]?.trim(), `${locale}: ${source}`).toBeTruthy();
+          expect(translate(locale, source)).toBe(titles[source]);
+        }
+      }
+    }
+  });
+
+  it('localizes every automatically seeded media prompt and its brief terms', () => {
+    expect(Object.keys(scenarioPromptLocales).sort()).toEqual(languages.map(({ locale }) => locale).sort());
+    for (const scenario of scenarioDefinitions) {
+      for (const step of scenario.steps) {
+        if (!('promptTemplate' in step)) continue;
+        const fieldIds = Array.from(step.promptTemplate.matchAll(/\{(\w+)\}/g), match => match[1]);
+        const fields = scenario.briefFields.filter(field => fieldIds.includes(field.id));
+        for (const { locale } of languages) {
+          const { actions, terms } = scenarioPromptLocales[locale];
+          expect(actions[step.id]?.trim(), `${locale}: ${step.id}`).toBeTruthy();
+          if (locale === 'en') continue;
+          expect(actions[step.id], `${locale}: ${step.id}`).not.toBe(scenarioPromptLocales.en.actions[step.id]);
+          for (const field of fields) {
+            for (const label of [field.label, ...(field.options?.map(option => option.label) ?? [])]) {
+              expect(terms[label]?.trim(), `${locale}: ${label}`).toBeTruthy();
+            }
+          }
+        }
+      }
+    }
+  });
+
   it('keeps identical key sets, non-empty translations and matching placeholders across all 10 non-English locales', () => {
     expect(Object.keys(scenarioUi).sort()).toEqual([...nonEnglishLocales].sort());
     const keys = Object.keys(scenarioUi['zh-CN']).sort();

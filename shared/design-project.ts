@@ -6,12 +6,6 @@
  */
 import type { ReviewAnnotation } from './review-comments.ts';
 import { guideUrl, setupGuideUrl, setupReadmeUrl, setupSkillUrl, type IntegrationInfo } from './integration.ts';
-import type {
-  WebPublicationRecord,
-  WebPublishMode,
-  WebPublishStatus,
-  WebPublishStatusResponse,
-} from './web-publish.ts';
 
 export const DESIGN_API = '/motion-api/design';
 export const DESIGN_TOOL_NAMES = ['openmotion_design_catalog', 'openmotion_design_project', 'openmotion_design_edit', 'openmotion_design_comments'] as const;
@@ -69,11 +63,6 @@ export type DesignViewportId = typeof designViewports[number]['id'];
 
 export const designExportFormats = ['zip', 'open-design', 'html', 'pdf', 'png', 'pptx'] as const;
 export type DesignExportFormat = typeof designExportFormats[number];
-
-export type DesignDeployMode = WebPublishMode;
-export type DesignDeploymentStatus = WebPublishStatus;
-export type DesignDeploymentRecord = WebPublicationRecord;
-export type DesignDeployStatusResponse = WebPublishStatusResponse;
 
 export type DesignProject = {
   id: string; title: string; scenario: DesignScenarioId; entry: string;
@@ -139,7 +128,6 @@ export const designRoutes = {
   comments: (id: string) => `${DESIGN_API}/projects/${id}/comments`, // GET · POST {requestId, text, anchor, expectedRevision}
   comment: (id: string, commentId: string) => `${DESIGN_API}/projects/${id}/comments/${commentId}`, // PATCH {status|text, expectedCommentRevision} · DELETE
   exportProject: (id: string) => `${DESIGN_API}/projects/${id}/export`, // POST {format, versionId?, filePath?} → binary download
-  deploy: (id: string) => `${DESIGN_API}/projects/${id}/deploy`, // GET status · POST {filePath?, workspaceId?, deployMode?} · DELETE unpublish
   importProjects: `${DESIGN_API}/import`,                         // POST multipart file (zip) or JSON {sourcePath}
   editors: `${DESIGN_API}/editors`,                               // GET DesignEditorApp[]
   events: (id: string) => `${DESIGN_API}/projects/${id}/state`,   // GET {revision, versionId, openComments} for cheap polling

@@ -23,7 +23,6 @@ import {
 } from './agent-discovery.ts';
 import { readSettings, writeSettings } from './settings-storage.ts';
 import { launchTerminal, terminalCommand } from './agent-terminal.ts';
-import { BoundedLruCache } from '../shared/lifecycle.ts';
 
 type AgentDiscoverers = {
   acp: (bin: string, args: string[], options?: AcpDiscoveryOptions) => Promise<AcpDiscoveryResult>;
@@ -43,30 +42,11 @@ const BIN_ALIASES: Record<string, string[]> = Object.fromEntries(
   localAgents.filter(agent => agent.binAliases?.length).map(agent => [agent.bin, [agent.bin, ...agent.binAliases!]]),
 );
 
-const RESOLVE_CACHE_TTL_MS = 30_000;
-const resolveCache = new BoundedLruCache<string, { resolved: string | null; expiresAt: number }>({
-  maxEntries: 64,
-});
-
-export function clearLocalAgentResolveCache(): void {
-  resolveCache.clear();
-}
-
 export async function resolveLocalAgent(bin: string): Promise<string | null> {
-  const pathKey = `${bin}\0${process.env.PATH || ''}`;
-  const now = Date.now();
-  const hit = resolveCache.get(pathKey);
-  if (hit && hit.expiresAt > now) {
-    return hit.resolved;
-  }
-
   const names = BIN_ALIASES[bin] ?? [bin];
   for (const name of names) {
     const found = await resolveAgent(name);
-    if (found) {
-      resolveCache.set(pathKey, { resolved: found, expiresAt: now + RESOLVE_CACHE_TTL_MS });
-      return found;
-    }
+    if (found) return found;
   }
   const home = os.homedir();
   const dirs = [
@@ -86,13 +66,8 @@ export async function resolveLocalAgent(bin: string): Promise<string | null> {
   ];
   for (const dir of dirs) for (const name of names) for (const suffix of process.platform === 'win32' ? ['.exe', '.cmd'] : ['']) {
     const file = path.join(dir, name + suffix);
-    try {
-      await access(file, constants.X_OK);
-      resolveCache.set(pathKey, { resolved: file, expiresAt: now + RESOLVE_CACHE_TTL_MS });
-      return file;
-    } catch { /* next */ }
+    try { await access(file, constants.X_OK); return file; } catch { /* next */ }
   }
-  resolveCache.set(pathKey, { resolved: null, expiresAt: now + RESOLVE_CACHE_TTL_MS });
   return null;
 }
 
@@ -157,22 +132,6 @@ export class LocalAgentDirectory {
       return { ...agent, ...(installed ? cached : undefined), installed, auth: installed ? cached?.auth ?? 'unknown' : 'unknown', models: [...(installed ? cached?.models ?? [] : []), ...normalizeAgentModels(prefs.custom[agent.id] ?? [], 'custom')].filter((item, index, all) => all.findIndex(other => other.id === item.id) === index) } as LocalAgent;
     }));
     return { agents, default: prefs.default };
-  }
-  private warmupPromise: Promise<AgentDirectory> | null = null;
-  async warmup(options: { eagerIds?: readonly string[] } = {}): Promise<AgentDirectory> {
-    if (this.warmupPromise) return this.warmupPromise;
-    const eagerIds = options.eagerIds ?? ['codex', 'claude', 'opencode', 'cursor-agent'];
-    this.warmupPromise = (async () => {
-      const directory = await this.list();
-      const targets = directory.agents
-        .filter(agent => agent.installed && eagerIds.includes(agent.id) && !this.cache.has(agent.id))
-        .slice(0, 4);
-      await Promise.allSettled(targets.map(agent => this.inspect(agent.id)));
-      return this.list();
-    })().finally(() => {
-      this.warmupPromise = null;
-    });
-    return this.warmupPromise;
   }
   inspect(id: string): Promise<LocalAgent> {
     if (this.pending.has(id)) return this.pending.get(id)!;
@@ -367,20 +326,4 @@ export class LocalAgentDirectory {
   }
 }
 const directories = new Map<string, LocalAgentDirectory>();
-export function localAgentsFor(directory: string) {
-  const key = path.resolve(directory);
-  let value = directories.get(key);
-  if (!value) {
-    value = new LocalAgentDirectory(key);
-    directories.set(key, value);
-  }
-  return value;
-}
-export function closeLocalAgentsFor(directory: string): void {
-  const key = path.resolve(directory);
-  const inst = directories.get(key);
-  if (!inst) return;
-  inst.cache.clear();
-  inst.pending.clear();
-  directories.delete(key);
-}
+export function localAgentsFor(directory: string) { let value = directories.get(directory); if (!value) { value = new LocalAgentDirectory(directory); directories.set(directory, value); } return value; }

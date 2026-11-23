@@ -87,14 +87,14 @@ async function renderNav(overrides: Partial<CreativeNavigationProps> = {}) {
   return props;
 }
 
-it('places Workflows right after Super Agent without a badge, opens scene tabs over all 5 workflow cards and recent runs', async () => {
+it('places Workflows right after MCP without a badge, opens scene tabs over all 5 workflow cards and recent runs', async () => {
   const props = await renderNav();
   const slots = [...container.querySelectorAll<HTMLElement>('.om-creative-strip > [data-nav-slot]')];
   const labels = slots.map(slot => {
     const btn = slot.querySelector<HTMLButtonElement>('button:not([aria-expanded])');
     return btn?.getAttribute('aria-label') ?? btn?.textContent?.trim();
   });
-  expect(labels.slice(0, 7)).toEqual(['Explore', 'Image', 'Video', 'Audio', 'MCP', 'Super Agent', 'Workflows']);
+  expect(labels.slice(0, 6)).toEqual(['Explore', 'Image', 'Video', 'Audio', 'MCP', 'Workflows']);
   const workflowsSlot = slots[labels.indexOf('Workflows')];
 
   const workflowsBtn = workflowsSlot.querySelector<HTMLButtonElement>('button[aria-label="Workflows"]')!;

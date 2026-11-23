@@ -21,10 +21,6 @@ import { brandKitOperation } from './gateway/brand-kit-operation.ts';
 import { brandKitsFor } from './gateway/brand-kits.ts';
 import { AssetLibrary } from './gateway/asset-library.ts';
 import { scenarioOperation, scenarioRunsFor } from './gateway/scenario-runs.ts';
-import { contentBatchOperation, contentBatchesFor } from './gateway/content-batch.ts';
-import { triggerOperation, triggersFor } from './gateway/triggers.ts';
-import { webPublishOperation } from './gateway/web-publish-ops.ts';
-import { createAutomationHost } from './gateway/automation-host.ts';
 import { designProjectsFor, dispatchDesignTool } from './design-projects.ts';
 import { MAX_ASSET_BYTES, isAssetFileWithinLimit } from './shared/asset-limits.ts';
 import { createHash } from 'node:crypto';
@@ -405,27 +401,6 @@ export class Phase1Service {
           createMotionProject: input => this.dispatch('motion_create_project', input),
           exportMotionArchive: input => projectArchive(this.store, input, this.runtimeRoot),
         });
-      }
-      if (args.action === 'batch') {
-        const host = createAutomationHost({
-          store: this.store,
-          origin: this.context.origin,
-          phase1: () => this,
-          runtimeRoot: this.runtimeRoot,
-        });
-        return contentBatchOperation(contentBatchesFor(this.store), args.batch, host);
-      }
-      if (args.action === 'trigger') {
-        const host = createAutomationHost({
-          store: this.store,
-          origin: this.context.origin,
-          phase1: () => this,
-          runtimeRoot: this.runtimeRoot,
-        });
-        return triggerOperation(triggersFor(this.store), args.trigger, host);
-      }
-      if (args.action === 'web_publish') {
-        return webPublishOperation(this.store, args.webPublish, this.context.origin());
       }
       if (args.action === 'transcript') {
         const input = args.transcript;

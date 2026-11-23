@@ -34,8 +34,8 @@ export type CreativeNavigationProps = {
   onOpenScenarioHub?: () => void;
   onNavigate: (destination: StudioDestination | null) => void;
   onNavigateSound?: (destination: StudioDestination, soundTab?: SoundTabId | null) => void;
-  currentPage: 'explore' | 'mcp' | 'agent' | null;
-  onOpenPage: (page: 'explore' | 'mcp' | 'agent', client?: McpClient) => void;
+  currentPage: 'explore' | 'mcp' | null;
+  onOpenPage: (page: 'explore' | 'mcp', client?: McpClient) => void;
   /** The page this navigation is shown on, so its clicks segment by where the user was. */
   trackingPage: CreativePage;
 };
@@ -143,12 +143,10 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
   ];
   // Order: Explore, the media menus and MCP, Super Agent, then Workflows, then the studios.
   const splitStart = 1;
-  const mediaCount = menuDestinations.length - (hasWorkflows ? 1 : 0);
-  const agentIndex = splitStart + mediaCount;
-  const workflowsIndex = hasWorkflows ? agentIndex + 1 : -1;
-  const studioStart = agentIndex + 1 + (hasWorkflows ? 1 : 0);
-  const destinationAt = (index: number) => menuDestinations[index === workflowsIndex ? menuDestinations.length - 1 : index - splitStart];
-  const indexOfDestination = (id: string) => id === 'workflows' ? workflowsIndex : splitStart + menuDestinations.findIndex(entry => entry.id === id);
+  const studioStart = splitStart + menuDestinations.length;
+  // Workflows is the last menu entry, so it sits right after MCP and before the studios.
+  const destinationAt = (index: number) => menuDestinations[index - splitStart];
+  const indexOfDestination = (id: string) => splitStart + menuDestinations.findIndex(entry => entry.id === id);
   const count = studioStart + creativeStudios.length;
   const hasMore = visibleCount < count || Boolean(overflowActions);
 
@@ -247,11 +245,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
       aria-current={currentPage === 'explore' ? 'page' : undefined} onPointerEnter={() => preloadWorkspacePage('explore')} onFocus={() => preloadWorkspacePage('explore')} onClick={() => { track('nav_explore', { navTarget: 'explore', inOverflow: inPanel }); choose(() => onOpenPage('explore')); }}>
       <RemixIcon name="global-line" size={17} /><span>{t('Explore')}</span>
     </Button>;
-    if (index < agentIndex || index === workflowsIndex) return splitItem(index, inPanel);
-    if (index === agentIndex) return <Button variant="plain" className="om-nav-item om-super-agent-nav-link" aria-label={t('Super Agent')}
-      aria-current={currentPage === 'agent' ? 'page' : undefined} onPointerEnter={() => preloadWorkspacePage('agent')} onFocus={() => preloadWorkspacePage('agent')} onClick={() => choose(() => onOpenPage('agent'))}>
-      <RemixIcon name="sparkling-fill" size={14} /><span>{t('Super Agent')}</span>
-    </Button>;
+    if (index < studioStart) return splitItem(index, inPanel);
     const studio = creativeStudios[index - studioStart];
     const isCurrent = studio.surface === 'editor' ? motionActive
       : (studio.id === 'design' && Boolean(designActive)) || (studio.id === 'cinema' && Boolean(cinemaActive))

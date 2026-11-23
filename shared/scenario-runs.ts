@@ -76,6 +76,19 @@ export type ScenarioStepState = {
   links: { designProjectId?: string; motionProjectId?: string; motionSessionId?: string };
 };
 
+export function findOutputIteration(
+  step: Pick<ScenarioStepState, 'iterations' | 'activeIterationId'> | undefined,
+  type: IterationOutput['type'],
+): StepIteration | undefined {
+  if (!step) return undefined;
+  const providesOutput = (iter: StepIteration) => iter.outputs.some(out => out.type === type);
+  const active = step.iterations.find(iter => iter.id === step.activeIterationId && providesOutput(iter));
+  if (active) return active;
+  for (let i = step.iterations.length - 1; i >= 0; i -= 1) {
+    if (providesOutput(step.iterations[i])) return step.iterations[i];
+  }
+}
+
 export type ScenarioRun = {
   schemaVersion: 1;
   id: string;
@@ -228,7 +241,7 @@ export const scenarioToolArguments = {
     offset: { type: 'integer', minimum: 0, maximum: 10_000 },
     limit: { type: 'integer', minimum: 1, maximum: 100 },
     title: { type: 'string', minLength: 1, maxLength: 120 },
-    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    locale: { type: 'string', minLength: 2, maxLength: 35, description: 'Draft locale on create, or the locale for generated and exported media names. Generation and export default to the saved draft locale.' },
     brief: { type: 'object', additionalProperties: true },
     changes: obj({
       title: { type: 'string', minLength: 1, maxLength: 120 },

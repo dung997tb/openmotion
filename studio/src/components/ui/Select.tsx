@@ -77,7 +77,7 @@ export function Select({
           fieldBase,
           "w-full cursor-pointer justify-between text-left",
           "data-[popup-open]:border-border-strong",
-          rich && "om-select-trigger",
+          appearance === "standard" && rich && "om-select-trigger",
           className,
         )}
         data-preview-state={previewState}

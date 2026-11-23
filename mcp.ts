@@ -55,12 +55,7 @@ const serverIcons = ['light', 'dark'].map(theme => ({
   mimeType: 'image/svg+xml', sizes: ['any'], theme,
 }));
 
-export type McpRpcOptions = {
-  authorizeToolCall?: (tool: { name: string; annotations?: { readOnlyHint?: boolean } }, args: unknown) => void;
-  callPhase1?: (payload: { name: string; arguments: any; trackingHost: HostContext; trackingContext?: string }) => Promise<any>;
-};
-
-export async function rpc(message: any, store = new WorkspaceStore(), registry = releaseRegistry, connection?: { selection: Selection }, clientState?: McpClientState, options?: McpRpcOptions) {
+export async function rpc(message: any, store = new WorkspaceStore(), registry = releaseRegistry, connection?: { selection: Selection }, clientState?: McpClientState) {
   if (message?.jsonrpc === '2.0' && message.id !== undefined && message.method === 'initialize') {
     connectionHosts.set(connection ?? store, identifyHost(message.params?.clientInfo, process.env));
   }
@@ -76,7 +71,7 @@ export async function rpc(message: any, store = new WorkspaceStore(), registry =
   const trackingContext = contexts.get(hostKey)!;
   const name = legacyToolName(message?.params?.name);
   if (message?.jsonrpc !== '2.0' || message.id === undefined || message.method !== 'tools/call'
-    || registry.profile !== 'phase1' || !(mcpToolNames as readonly unknown[]).includes(name)) return invokeRpc(message, store, registry, connection, host, trackingContext, clientState, options);
+    || registry.profile !== 'phase1' || !(mcpToolNames as readonly unknown[]).includes(name)) return invokeRpc(message, store, registry, connection, host, trackingContext, clientState);
   const tracking = await trackingFor(store), started = performance.now(), callId = crypto.randomUUID();
   const publicName = publicToolName(message.params.name);
   const definition = phase1Tools.find(tool => tool.name === publicName)
@@ -90,7 +85,7 @@ export async function rpc(message: any, store = new WorkspaceStore(), registry =
   const fields = { tool_name: name as typeof mcpToolNames[number], call_id: callId, accepted, ...toolInputFields(publicName, args),
     ...(typeof args?.requestId === 'string' && uuid.test(args.requestId) ? { operation_id: args.requestId } : {}) };
   if (accepted) tracking.track('mcp_tool_started', fields, undefined, undefined, host);
-  const response = await invokeRpc(message, store, registry, connection, host, trackingContext, clientState, options);
+  const response = await invokeRpc(message, store, registry, connection, host, trackingContext, clientState);
   const value = (response as any)?.result;
   const content = value?.structuredContent;
   if (name === 'motion_open_preview' && value && !value.isError && message.params?.arguments?.target === 'providers') {
@@ -110,7 +105,7 @@ export async function rpc(message: any, store = new WorkspaceStore(), registry =
   return response;
 }
 
-async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnType<typeof mcpRegistry>, connection?: { selection: Selection }, host: HostContext = unknownHost, trackingContext?: string, clientState?: McpClientState, options?: McpRpcOptions) {
+async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnType<typeof mcpRegistry>, connection?: { selection: Selection }, host: HostContext = unknownHost, trackingContext?: string, clientState?: McpClientState) {
   if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string') return { jsonrpc: '2.0', id: message?.id ?? null, error: { code: -32600, message: 'Invalid request' } };
   if (message.id === undefined) return null;
   const result = (value: unknown) => ({ jsonrpc: '2.0', id: message.id, result: value });
@@ -161,7 +156,6 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
       const name = publicToolName(message.params?.name);
       const exposed = effectiveRegistry.tools.find(tool => tool.name === name);
       if (!exposed) throw new Error('MCP_TOOL_NOT_EXPOSED: ' + String(message.params?.name));
-      options?.authorizeToolCall?.(exposed, message.params?.arguments ?? {});
       if (name === templatePresentationName && clientState?.presentation) {
         validateInput(exposed.inputSchema, message.params.arguments ?? {});
         const value = showTemplateRecommendations(clientState.presentation, message.params.arguments);
@@ -189,21 +183,14 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
         }
         const transportName = finalVideo ? 'openmotion_get_project' : name;
         const transportArgs = finalVideo ? { projectId: args.projectId, workId: args.workId, includeVideo: true } : args;
-        let raw: any;
-        let responseOk = true;
-        if (options?.callPhase1) {
-          raw = await options.callPhase1({ name: transportName, arguments: transportArgs, trackingHost: host, trackingContext });
-        } else {
-          const service = await ensureService(store, undefined, transportName), origin = new URL(service.previewUrl).origin;
-          const response = await fetch(origin + '/motion-api/phase1/call', { method: 'POST', headers: await editorHeaders(store, origin),
-            body: JSON.stringify({ name: phase1TransportTool(service, transportName) ?? transportName, arguments: transportArgs,
-              trackingHost: host, trackingContext }), signal: AbortSignal.timeout(600_000) });
-          raw = await response.json();
-          responseOk = response.ok;
-        }
-        const normalized = responseOk && transportName === 'openmotion_get_project' && transportArgs.workId ? normalizeInlineResult(raw) : undefined;
+        const service = await ensureService(store, undefined, transportName), origin = new URL(service.previewUrl).origin;
+        const response = await fetch(origin + '/motion-api/phase1/call', { method: 'POST', headers: await editorHeaders(store, origin),
+          body: JSON.stringify({ name: phase1TransportTool(service, transportName) ?? transportName, arguments: transportArgs,
+            trackingHost: host, trackingContext }), signal: AbortSignal.timeout(600_000) });
+        const raw = await response.json();
+        const normalized = response.ok && transportName === 'openmotion_get_project' && transportArgs.workId ? normalizeInlineResult(raw) : undefined;
         const value = publicToolResult(normalized?.structuredContent ?? raw);
-        if (!responseOk) throw Object.assign(new Error(value.error || 'Tool failed'), {
+        if (!response.ok) throw Object.assign(new Error(value.error || 'Tool failed'), {
           code: value.code, details: value.runtime, invalid_field: value.invalid_field, validation_rule: value.validation_rule, ...(value.applied === false ? { applied: false } : {}),
         });
         if (finalVideo && (!value.inlineWork?.playable || value.inlineWork.state !== 'completed' || !normalized?._meta?.inlineVideo?.video))
@@ -230,21 +217,11 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
       } else value = await callTool(name, message.params?.arguments || {}, store, await trackingFor(store));
       return result({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value });
     } catch (error) {
-      if (typeof (error as any)?.jsonRpcCode === 'number') {
-        return {
-          jsonrpc: '2.0',
-          id: message.id,
-          error: {
-            code: (error as any).jsonRpcCode,
-            message: error instanceof Error ? error.message : 'Forbidden',
-          },
-        };
-      }
-      const errorMessage = error instanceof Error ? error.message : 'Tool failed';
-      const code = (error as any).code || /^([A-Z][A-Z_]+):?/.exec(errorMessage)?.[1] || 'TOOL_FAILED';
+      const message = error instanceof Error ? error.message : 'Tool failed';
+      const code = (error as any).code || /^([A-Z][A-Z_]+):?/.exec(message)?.[1] || 'TOOL_FAILED';
       const { invalid_field, validation_rule } = toolFailureFields(error);
       const runtimeFailure = ['MCP_RUNTIME_RELOAD_REQUIRED', 'EDITOR_RUNTIME_INCOMPATIBLE', 'NATIVE_RUNTIME_NOT_READY'].includes(code);
-      return result({ isError: true, content: [{ type: 'text', text: errorMessage }], structuredContent: { error: { code, message: errorMessage,
+      return result({ isError: true, content: [{ type: 'text', text: message }], structuredContent: { error: { code, message,
         ...(invalid_field ? { invalid_field, validation_rule } : {}),
         ...(runtimeFailure && (error as any).details ? { details: (error as any).details } : {}),
         applied: (error as any).applied === false || runtimeFailure || /^(NATIVE_RUNTIME_NOT_READY|INVALID_|VERSION_CONFLICT|VERSION_NOT_RESTORABLE|PROJECT_NOT_|PROJECT_SESSION_|REQUEST_ID_CONFLICT|MCP_TOOL_NOT_EXPOSED|EXPORT_NOT_|TEMPLATE_NOT_)/.test(code) ? false : 'unknown' } } });

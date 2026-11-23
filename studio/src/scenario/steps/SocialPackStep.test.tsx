@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { StepIteration } from '../../../../shared/scenario-runs';
+import { assetMediaUrl } from '../../../../shared/asset-library';
+import type { PoolItem, StepIteration } from '../../../../shared/scenario-runs';
 import { SocialPackStep } from './SocialPackStep';
 import { createStepProps, makeBaseRun, mountStep, setFieldValue } from './stepTestHelpers';
 
@@ -24,6 +25,46 @@ afterEach(() => {
 });
 
 describe('SocialPackStep', () => {
+  it('plays the pinned lead video and switches the preview when media is reordered', async () => {
+    const video: PoolItem = {
+      id: 'video', kind: 'video', label: 'Vertical film', source: 'agent',
+      ref: { type: 'asset', assetId: 'video-asset', versionId: 'video-version' },
+      stepId: 'motion-film', tags: [], pinned: false, addedAt: 1700000000000,
+    };
+    const image: PoolItem = {
+      ...video, id: 'image', kind: 'image', label: 'Storyboard',
+      ref: { type: 'asset', assetId: 'image-asset', versionId: 'image-version' },
+    };
+    const iteration: StepIteration = {
+      id: 'social-version', number: 1, createdAt: 1700000000000, source: 'agent', inputs: [],
+      outputs: [{
+        type: 'social',
+        posts: [{ id: 'draft', platform: 'xiaohongshu', text: 'Launch draft', hashtags: [], mediaPoolItemIds: [video.id, image.id], aspect: '9:16' }],
+      }],
+    };
+    const run = makeBaseRun('motion-full-chain', {
+      pool: [video, image],
+      steps: { social: { iterations: [iteration], activeIterationId: iteration.id } },
+    });
+    const { props } = createStepProps('motion-full-chain', 'social', { run });
+    const mounted = await mountStep(<SocialPackStep {...props} />);
+    try {
+      const frame = mounted.container.querySelector('.om-step-social-preview-frame')!;
+      const player = frame.querySelector('video')!;
+      expect(player.getAttribute('src')).toBe(assetMediaUrl(video.ref.assetId, video.ref.versionId));
+      expect(player.controls).toBe(true);
+      expect(player.autoplay).toBe(false);
+      expect(frame.getAttribute('data-aspect')).toBe('9:16');
+
+      const moveRight = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Move right"]')!;
+      await act(async () => { moveRight.click(); });
+      expect(frame.querySelector('video')).toBeNull();
+      expect(frame.querySelector('img')?.getAttribute('src')).toBe(assetMediaUrl(image.ref.assetId, image.ref.versionId));
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('drafts per platform, warns above character limit, regenerates new variants, and copies Markdown with Toast', async () => {
     const clipboardSpy = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
