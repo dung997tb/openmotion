@@ -478,6 +478,16 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     await mkdir(path.join(located.dir, 'trailer'), { recursive: true });
     await writeFile(path.join(located.dir, 'trailer', 'clip.mp4'), 'trailer-placeholder');
 
+    await mkdir(path.join(located.dir, 'assets', 'playtests'), { recursive: true });
+    await writeFile(path.join(located.dir, 'assets', 'playtests', 'private.png'), pngBytes);
+    await writeFile(path.join(located.dir, 'assets', 'runtime.png'), pngBytes);
+    await writeFile(path.join(located.dir, 'assets', 'cover.png'), pngBytes);
+    await mkdir(path.join(located.dir, 'Design'), { recursive: true });
+    await writeFile(path.join(located.dir, 'Design', 'plan.md'), 'Internal uppercase plan');
+    await mkdir(path.join(located.dir, 'designs'), { recursive: true });
+    await writeFile(path.join(located.dir, 'designs', 'keep.txt'), 'Public sibling directory');
+    await games.write(created.id, [{path: 'design/verification.md', content: 'Internal test notes'}]);
+
     const bundle = await buildPublishBundle({
       dataDirectory: store.directory,
       kind: 'game',
@@ -502,6 +512,11 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     assert.match(logicFile.data.toString('utf8'), new RegExp(`"\\./_shared-assets/${asset.id}-${assetVersionId}\\.png"`));
     assert.ok(!bundle.files.some(f => f.file.toLowerCase() === 'game.json'), 'game.json must not be staged');
     assert.ok(!bundle.files.some(f => f.file.toLowerCase().startsWith('trailer/')), 'trailer/ must not be staged');
+
+    assert.ok(!bundle.files.some(f => /^(assets\/playtests|design)\//i.test(f.file)));
+    assert.ok(bundle.files.some(f => f.file === 'assets/runtime.png'));
+    assert.ok(bundle.files.some(f => f.file === 'assets/cover.png'));
+    assert.ok(bundle.files.some(f => f.file === 'designs/keep.txt'));
 
     // Original files on disk remain untouched.
     const diskHtml = await readFile(path.join(located.dir, 'index.html'), 'utf8');
@@ -560,6 +575,158 @@ test('buildPublishBundle and WebPublishService rewrite local assets/routes into 
     const designHtml = designBundle.files.find(f => f.file === 'index.html');
     assert.ok(designHtml);
     assert.match(designHtml.data.toString('utf8'), /src="\.\/app\.js\?v=1"/);
+
+    // Large >=256 KiB PNG assets are automatically transcoded to lossless WebP when an exact encoder is available,
+    // preserving decoded RGBA pixels (including RGB under alpha=0) and keeping original PNG otherwise.
+    const zlib = await import('node:zlib');
+    const makeLargePng = (w: number, h: number, withAlpha: boolean): Buffer => {
+      const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+      const crcTable = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        crcTable[i] = c >>> 0;
+      }
+      const crc32 = (buf: Buffer) => {
+        let c = 0xffffffff;
+        for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+        return (c ^ 0xffffffff) >>> 0;
+      };
+      const chunk = (type: string, data: Buffer) => {
+        const t = Buffer.from(type, 'ascii');
+        const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0);
+        const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
+        return Buffer.concat([len, t, data, crc]);
+      };
+      const channels = withAlpha ? 4 : 3;
+      const ihdr = Buffer.alloc(13);
+      ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+      ihdr[8] = 8; ihdr[9] = withAlpha ? 6 : 2; // 8-bit RGBA or RGB
+      const raw = Buffer.alloc((w * channels + 1) * h);
+      let seed = 1337;
+      for (let y = 0; y < h; y++) {
+        const row = y * (w * channels + 1);
+        raw[row] = 0;
+        for (let x = 0; x < w; x++) {
+          seed = (seed * 1664525 + 1013904223) >>> 0;
+          const off = row + 1 + x * channels;
+          raw[off] = (x + (seed & 0x3f)) & 0xff;
+          raw[off + 1] = (y + ((seed >>> 8) & 0x3f)) & 0xff;
+          raw[off + 2] = ((x ^ y) + ((seed >>> 16) & 0x3f)) & 0xff;
+          if (withAlpha) raw[off + 3] = x < 32 ? 0 : x < 64 ? 128 : 255;
+        }
+      }
+      const idat = zlib.deflateSync(raw, { level: 1 });
+      return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
+    };
+    const bigPng = makeLargePng(384, 384, true);
+    assert.ok(bigPng.length >= 256 * 1024, `expected RGBA fixture PNG >= 256 KiB, got ${bigPng.length}`);
+    const bigPath = path.join(store.directory, 'big-sky.png');
+    await writeFile(bigPath, bigPng);
+    const bigAsset = await new AssetLibrary(store).importFile(bigPath, { requestId: 'big-sky-1', name: 'Big Sky' });
+    const bigUrl = `/motion-api/assets/${bigAsset.id}/versions/${bigAsset.currentVersionId!}/media`;
+    const bigGame = (await games.create({ prompt: 'Big Asset Compression Test', multiplayer: false })).game;
+    const bigLoc = await games.locate(bigGame.id);
+    await writeFile(path.join(bigLoc.dir, 'index.html'), `<!doctype html><html><body><img src="${bigUrl}"></body></html>`);
+    const bigBundle = await buildPublishBundle({
+      dataDirectory: store.directory,
+      kind: 'game',
+      targetId: bigGame.id,
+      sourcePath: bigLoc.dir,
+      entryPath: 'index.html',
+    });
+    const bigBundled = bigBundle.files.find(f => f.file.startsWith('_shared-assets/'));
+    assert.ok(bigBundled);
+    const bigHtml = bigBundle.files.find(f => f.file === 'index.html')!.data.toString('utf8');
+    if (bigBundled.file.endsWith('.webp')) {
+      assert.ok(bigBundled.data.length < bigPng.length * 0.95, 'compressed lossless WebP must be smaller than original PNG');
+      assert.match(bigHtml, /\.webp/);
+      // Verify decoded RGBA pixels (including non-zero RGB under alpha=0) are preserved bit-for-bit identically.
+      const { execFileSync } = await import('node:child_process');
+      const { verificationBinaries } = await import('../scripts/verify-export.ts');
+      const webpTmp = path.join(store.directory, 'big-sky-check.webp');
+      await writeFile(webpTmp, bigBundled.data);
+      try {
+        const { ffmpeg } = verificationBinaries();
+        const origRgba = execFileSync(ffmpeg, ['-v', 'error', '-nostdin', '-i', bigPath, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 4 * 1024 * 1024 });
+        const webpRgba = execFileSync(ffmpeg, ['-v', 'error', '-nostdin', '-i', webpTmp, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 4 * 1024 * 1024 });
+        assert.equal(Buffer.compare(origRgba, webpRgba), 0, 'lossless PNG->WebP must preserve exact decoded RGBA pixels');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+      }
+    } else {
+      assert.equal(bigBundled.data.length, bigPng.length);
+    }
+
+    // Without cwebp, an RGBA PNG must keep its original bytes (FFmpeg libwebp cannot preserve RGB beneath alpha=0),
+    // while an opaque RGB PNG falls back to configured HYPERFRAMES_FFMPEG_PATH via execute().
+    const prevCwebp = process.env.CWEBP_PATH;
+    const prevFfmpeg = process.env.HYPERFRAMES_FFMPEG_PATH;
+    process.env.CWEBP_PATH = path.join(store.directory, 'missing-cwebp-binary');
+    try {
+      const alphaFallbackBundle = await buildPublishBundle({
+        dataDirectory: store.directory,
+        kind: 'game',
+        targetId: bigGame.id,
+        sourcePath: bigLoc.dir,
+        entryPath: 'index.html',
+      });
+      const alphaFallbackAsset = alphaFallbackBundle.files.find(f => f.file.startsWith('_shared-assets/'));
+      assert.ok(alphaFallbackAsset && alphaFallbackAsset.file.endsWith('.png'), 'RGBA PNG must stay .png when cwebp is unavailable');
+      assert.equal(alphaFallbackAsset.data.length, bigPng.length);
+
+      if (process.platform !== 'win32') {
+        const opaquePng = makeLargePng(420, 420, false);
+        assert.ok(opaquePng.length >= 256 * 1024, `expected opaque fixture PNG >= 256 KiB, got ${opaquePng.length}`);
+        const opaquePath = path.join(store.directory, 'opaque-sky.png');
+        await writeFile(opaquePath, opaquePng);
+        const opaqueAsset = await new AssetLibrary(store).importFile(opaquePath, { requestId: 'opaque-sky-1', name: 'Opaque Sky' });
+        const opaqueUrl = `/motion-api/assets/${opaqueAsset.id}/versions/${opaqueAsset.currentVersionId!}/media`;
+        await writeFile(path.join(bigLoc.dir, 'index.html'), `<!doctype html><html><body><img src="${opaqueUrl}"></body></html>`);
+
+        // Test real configured FFmpeg fallback if libwebp is supported, then deterministic wrapper verification.
+        const realFallbackBundle = await buildPublishBundle({
+          dataDirectory: store.directory,
+          kind: 'game',
+          targetId: bigGame.id,
+          sourcePath: bigLoc.dir,
+          entryPath: 'index.html',
+        });
+        const realFallbackAsset = realFallbackBundle.files.find(f => f.file.startsWith('_shared-assets/'));
+        assert.ok(realFallbackAsset);
+        if (realFallbackAsset.file.endsWith('.webp')) {
+          const { execFileSync } = await import('node:child_process');
+          const { verificationBinaries } = await import('../scripts/verify-export.ts');
+          const outTmp = path.join(store.directory, 'opaque-real-check.webp');
+          await writeFile(outTmp, realFallbackAsset.data);
+          const { ffmpeg } = verificationBinaries();
+          const origRgba = execFileSync(ffmpeg, ['-v', 'error', '-nostdin', '-i', opaquePath, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 4 * 1024 * 1024 });
+          const webpRgba = execFileSync(ffmpeg, ['-v', 'error', '-nostdin', '-i', outTmp, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: 4 * 1024 * 1024 });
+          assert.equal(Buffer.compare(origRgba, webpRgba), 0, 'opaque PNG FFmpeg fallback must preserve exact decoded RGBA pixels');
+        }
+
+        const { chmod } = await import('node:fs/promises');
+        const fakeFfmpeg = path.join(store.directory, 'fake-ffmpeg.sh');
+        await writeFile(fakeFfmpeg, '#!/bin/sh\nfor last; do :; done\nprintf "RIFF\\x10\\x00\\x00\\x00WEBPVP8 " > "$last"\n');
+        await chmod(fakeFfmpeg, 0o755);
+        process.env.HYPERFRAMES_FFMPEG_PATH = fakeFfmpeg;
+        const ffmpegBundle = await buildPublishBundle({
+          dataDirectory: store.directory,
+          kind: 'game',
+          targetId: bigGame.id,
+          sourcePath: bigLoc.dir,
+          entryPath: 'index.html',
+        });
+        const ffmpegAsset = ffmpegBundle.files.find(f => f.file.startsWith('_shared-assets/'));
+        assert.ok(ffmpegAsset && ffmpegAsset.file.endsWith('.webp'), 'HYPERFRAMES_FFMPEG_PATH fallback must produce .webp for opaque PNG');
+        assert.ok(ffmpegAsset.data.length < opaquePng.length * 0.95);
+        const ffmpegHtml = ffmpegBundle.files.find(f => f.file === 'index.html')!.data.toString('utf8');
+        assert.match(ffmpegHtml, /\.webp/);
+      }
+    } finally {
+      if (prevCwebp === undefined) delete process.env.CWEBP_PATH; else process.env.CWEBP_PATH = prevCwebp;
+      if (prevFfmpeg === undefined) delete process.env.HYPERFRAMES_FFMPEG_PATH; else process.env.HYPERFRAMES_FFMPEG_PATH = prevFfmpeg;
+    }
   }));
 
 test('WebPublishService migrates legacy cloud-shares records and preserves cloudProjectId/slug', () =>

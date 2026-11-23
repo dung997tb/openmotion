@@ -8,6 +8,8 @@ import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from '../shared/pr
 import { Phase1Service } from '../phase1.ts';
 import { pluginRoot } from '../hyperframes.ts';
 import {
+  CLAUDE_SUPER_AGENT_INSTRUCTIONS,
+  SUPER_AGENT_INSTRUCTIONS,
   SuperAgentConversations,
   extractLocalDevServerUrl,
   formatBrowserAnnotationsContext,
@@ -19,6 +21,7 @@ import {
   diffWorkspaceSnapshots,
   resolveTaskProjectDir,
 } from '../gateway/super-agent-workspace.ts';
+import { gameAssetInstructions } from '../shared/game-contract.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
 import {
   registerCapabilityScriptExecutor,
@@ -1866,3 +1869,11 @@ test('per-task projectDir, checkpoint diffing, and legacy hydration track all de
   await runService.close();
   await service.close();
 }));
+
+test('Codex and Claude Super Agent prompts share unified gameAssetInstructions without stale optional-generate guidance', () => {
+  for (const prompt of [SUPER_AGENT_INSTRUCTIONS, CLAUDE_SUPER_AGENT_INSTRUCTIONS]) {
+    assert.ok(prompt.includes(gameAssetInstructions), 'Super Agent prompt must embed gameAssetInstructions');
+    assert.doesNotMatch(prompt, /optionally generate visual/i);
+    assert.doesNotMatch(prompt, /openmotion_generate_asset/);
+  }
+});
