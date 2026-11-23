@@ -831,10 +831,14 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(document.body.textContent).toContain('Checked Node');
   expect(document.body.textContent).toContain('exit 0');
 
-  // Deliverable card & viewer link button & file chip
-  const deliverableBtn = document.querySelector<HTMLButtonElement>('.om-sa-deliverable-card')!;
+  // Deliverable card & guided actions & viewer link button & file chip
+  const deliverableBtn = document.querySelector<HTMLButtonElement>('.om-sa-deliverable-main')!;
   await act(async () => deliverableBtn.click());
   expect(onOpenArtifactId).toHaveBeenCalledWith('design:d-99');
+  const deliverableActions = document.querySelector('.om-sa-deliverable-actions');
+  expect(deliverableActions?.textContent).toContain('Preview');
+  expect(deliverableActions?.textContent).toContain('Cloud deploy');
+  expect(deliverableActions?.textContent).toContain('Export');
 
   const viewerLinkBtn = document.querySelector<HTMLButtonElement>('.om-sa-link-viewer-btn')!;
   await act(async () => viewerLinkBtn.click());
@@ -1781,7 +1785,8 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     expect(createChatBody?.intent).toBe('game');
     expect(turnBody?.mode).toBe('game');
     expect(turnBody?.attachments?.some((att: any) => att.kind === 'game-project' && att.id === CREATED_GAME_ID)).toBe(true);
-    expect(turnBody?.text).toContain('openmotion_present_artifact');
+    expect(turnBody?.text).toBe('Co-op pixel shooter in space');
+    expect(turnBody?.hiddenInstructions).toContain('openmotion_present_artifact');
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -2478,4 +2483,297 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   await act(async () => listPlayBtn.click());
   await flush();
   expect(container.querySelector('.om-sa-viewer')).toBeTruthy();
+});
+
+it('consumes Cloud deploy requests across viewer remounts and aborts deploy when opening a game fails', async () => {
+  let failPatch = false;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/motion-api/web-publish/')) {
+      return new Response(
+        JSON.stringify({
+          targetKind: 'game',
+          targetId: 'community-little-prince',
+          projectId: 'community-little-prince',
+          accountSignedIn: false,
+          accountState: 'signed-out',
+          publications: [],
+          deployments: [],
+          active: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.includes('/motion-api/settings/account')) {
+      return new Response(JSON.stringify({ state: 'signed-out' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}` && init?.method === 'PATCH' && failPatch) {
+      return new Response(JSON.stringify({ error: 'Network unavailable' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+    return origFetch(input, init);
+  }) as any;
+
+  // 1) Deploy once, close viewer (unmounts WebPublishPopover), then Play another game -> popover must NOT auto-open again
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          requestedMode="game"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  const deployBtn = container.querySelector('.om-sa-game-fan-actions .om-sa-game-tile-deploy') as HTMLButtonElement;
+  expect(deployBtn).toBeTruthy();
+  await act(async () => deployBtn.click());
+  await flush();
+  expect(document.querySelector('.om-web-publish-popover')).toBeTruthy();
+
+  // Close the viewer so WebPublishPopover unmounts
+  const closeViewerBtn = container.querySelector('button[aria-label="Close viewer"]') as HTMLButtonElement;
+  expect(closeViewerBtn).toBeTruthy();
+  await act(async () => closeViewerBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-viewer')).toBeNull();
+  expect(document.querySelector('.om-web-publish-popover')).toBeNull();
+
+  // Click Play on a masonry game card -> viewer remounts, but Cloud share popover must stay closed
+  const playBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
+  expect(playBtn).toBeTruthy();
+  await act(async () => playBtn.click());
+  await flush();
+  expect(container.querySelector('.om-sa-viewer')).toBeTruthy();
+  expect(document.querySelector('.om-web-publish-popover')).toBeNull();
+
+  // 2) With an active chat that has game A selected, failing PATCH on Cloud deploy for game B must NOT open game A's popover
+  const emptyGameChat: SuperAgentChat = {
+    ...sampleChat,
+    messages: [],
+    artifacts: [
+      {
+        id: 'game:game-a',
+        kind: 'game-project',
+        title: 'Game A',
+        projectId: 'game-a',
+        url: '/motion-api/games/game-a/play/index.html',
+        createdAt: 1000,
+        updatedAt: 1000,
+      },
+    ],
+    activeArtifactId: 'game:game-a',
+  };
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}` && (!init?.method || init.method === 'GET')) {
+      return new Response(JSON.stringify({ conversation: emptyGameChat }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return prevFetch(input, init);
+  }) as any;
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={CHAT_ID}
+          requestedMode="game"
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  failPatch = true;
+  const deployGameBBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-deploy') as HTMLButtonElement;
+  expect(deployGameBBtn).toBeTruthy();
+  await act(async () => deployGameBBtn.click());
+  await flush();
+  expect(document.querySelector('.om-web-publish-popover')).toBeNull();
+});
+
+it('keeps Skill handoff instructions out of visible user messages and renders human-readable approval cards with collapsed technical details', async () => {
+  let turnBody: any = null;
+  let approveBody: any = null;
+  const APPROVAL_CHAT_ID = '66666666-6666-4666-8666-666666666666';
+  const rawScriptDetail = JSON.stringify({
+    command: 'python3 - <<\'OPENMOTION_SCORE\'\nfrom pathlib import Path\ndestination = Path("欢快背景音乐.wav")\nOPENMOTION_SCORE',
+    availableDecisions: ['accept', 'cancel'],
+  }, null, 2);
+
+  let currentChat: SuperAgentChat = {
+    id: APPROVAL_CHAT_ID,
+    title: '2024小游戏',
+    intent: 'game',
+    engine: 'codex',
+    permissionMode: 'on-request',
+    createdAt: 1000,
+    updatedAt: 2000,
+    state: 'idle',
+    messages: [],
+    artifacts: [],
+    approvals: [],
+  };
+
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method || 'GET';
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    if (url.startsWith('/motion-api/settings/agents')) {
+      return json({ agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }] });
+    }
+    if (url.startsWith('/motion-api/settings/agent-runtimes')) {
+      return json({
+        localDirectAvailable: true,
+        defaultRuntimeId: 'local:direct',
+        runtimes: [{
+          id: 'local:direct',
+          kind: 'local-direct',
+          name: 'This computer',
+          status: 'online',
+          agents: [{ id: 'codex', label: 'Codex', installed: true, auth: 'signed-in', models: [] }],
+          runnableAgentIds: ['codex'],
+        }],
+      });
+    }
+    if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
+      return json({
+        counts: { assets: 0, brandKits: 0, officialBrandKits: 0, motionTemplates: 0, designTemplates: 0, skills: 0, designSkills: 0, designProjects: 0, motionProjects: 0, mediaProvidersAvailable: 0, workflows: 0, models: 0, games: 0 },
+        items: [],
+        generatedAt: Date.now(),
+      });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'GET') {
+      return json({ conversations: [] });
+    }
+    if (url === `${SUPER_AGENT_API}/chats` && method === 'POST') {
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${APPROVAL_CHAT_ID}` && method === 'GET') {
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${APPROVAL_CHAT_ID}/turn` && method === 'POST') {
+      turnBody = JSON.parse(String(init?.body || '{}'));
+      currentChat = {
+        ...currentChat,
+        state: 'waiting',
+        messages: [
+          {
+            id: 'msg-u1',
+            role: 'user',
+            text: turnBody.text,
+            createdAt: 2001,
+            attachments: turnBody.attachments,
+          },
+        ],
+        approvals: [
+          {
+            id: 'appr-audio-1',
+            kind: 'command',
+            title: 'Command approval',
+            detail: rawScriptDetail,
+          },
+        ],
+      };
+      return json({ conversation: currentChat });
+    }
+    if (url === `${SUPER_AGENT_API}/chats/${APPROVAL_CHAT_ID}/approve` && method === 'POST') {
+      approveBody = JSON.parse(String(init?.body || '{}'));
+      currentChat = {
+        ...currentChat,
+        state: 'idle',
+        permissionMode: approveBody.alwaysAllow ? 'auto' : currentChat.permissionMode,
+        approvals: [],
+      };
+      return json({ conversation: currentChat });
+    }
+    return json({});
+  }) as any;
+
+  queueSuperAgentHandoff(buildSuperAgentHandoff(
+    { kind: 'game-project', id: 'game-2024', title: '2024小游戏', genre: 'casual' },
+    {
+      prompt: '我想做一个2024小游戏',
+      hiddenInstructions: 'Use the openmotion-game Skill to build game game-2024. Read openmotion://workflow/game/start.',
+      locale: 'zh-CN',
+      autoSend: true,
+      newChat: true,
+    },
+  ));
+
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active
+          chatId={null}
+          onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()}
+          onOpenMotionProject={vi.fn()}
+          onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()}
+          onOpenAgentSettings={vi.fn()}
+          onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  await flush();
+
+  // Hidden Skill instructions go to the backend turn payload, never into the visible user bubble
+  expect(turnBody?.text).toBe('我想做一个2024小游戏');
+  expect(turnBody?.hiddenInstructions).toContain('openmotion-game Skill');
+  const userBubble = container.querySelector('.om-sa-user-bubble');
+  expect(userBubble?.textContent).toContain('我想做一个2024小游戏');
+  expect(userBubble?.textContent).not.toContain('openmotion-game Skill');
+  expect(userBubble?.textContent).not.toContain('openmotion://workflow/game/start');
+
+  // Approval card renders plain-language summary + target chip, with technical details collapsed by default
+  const approvalCard = container.querySelector('.om-sa-approval')!;
+  expect(approvalCard).toBeTruthy();
+  expect(approvalCard.querySelector('.om-sa-approval-title')?.textContent).toBe('Create audio file');
+  expect(approvalCard.querySelector('.om-sa-approval-target')?.textContent).toBe('欢快背景音乐.wav');
+  expect(approvalCard.querySelector('.om-sa-approval-summary')?.textContent).toContain('欢快背景音乐.wav');
+  const detailsEl = approvalCard.querySelector('details.om-sa-approval-details') as HTMLDetailsElement;
+  expect(detailsEl).toBeTruthy();
+  expect(detailsEl.open).toBe(false);
+  expect(detailsEl.querySelector('.om-sa-approval-pre')?.textContent).not.toContain('availableDecisions');
+
+  // Clicking "Always allow in this task" sends alwaysAllow: true and clears the card
+  const alwaysAllowBtn = [...approvalCard.querySelectorAll('button')].find(
+    b => b.textContent?.trim() === 'Always allow in this task',
+  ) as HTMLButtonElement;
+  expect(alwaysAllowBtn).toBeTruthy();
+  await act(async () => alwaysAllowBtn.click());
+  await flush();
+  expect(approveBody).toEqual({
+    approvalId: 'appr-audio-1',
+    accepted: true,
+    alwaysAllow: true,
+  });
+  expect(container.querySelector('.om-sa-approval')).toBeNull();
 });

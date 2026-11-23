@@ -15,6 +15,7 @@ export function ConversationSidebar({
   loading,
   agentStatus,
   onSelect,
+  onPrefetch,
   onCreate,
   onTogglePin,
   onRename,
@@ -27,6 +28,7 @@ export function ConversationSidebar({
   loading: boolean;
   agentStatus: { label: string; detail?: string; ready: boolean; count: number; loading?: boolean };
   onSelect: (id: string) => void;
+  onPrefetch?: (id: string) => void;
   onCreate: () => void;
   onTogglePin: (id: string, pinned: boolean) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
@@ -111,6 +113,8 @@ export function ConversationSidebar({
           type="button"
           className="om-sa-chat-row-btn"
           aria-current={isActive ? 'page' : undefined}
+          onPointerEnter={() => onPrefetch?.(item.id)}
+          onFocus={() => onPrefetch?.(item.id)}
           onClick={() => onSelect(item.id)}
         >
           <span className="om-sa-chat-icon-wrap" aria-hidden="true">
@@ -311,6 +315,8 @@ export function ConversationSidebar({
                       type="button"
                       className="om-sa-search-modal-item"
                       data-active={isActive || undefined}
+                      onPointerEnter={() => onPrefetch?.(item.id)}
+                      onFocus={() => onPrefetch?.(item.id)}
                       onClick={() => {
                         onSelect(item.id);
                         setSearchOpen(false);

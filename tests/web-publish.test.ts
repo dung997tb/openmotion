@@ -273,6 +273,17 @@ test('Unified /motion-api/web-publish HTTP routes and Streamable HTTP openmotion
       assert.equal(gameStatus.targetId, createdGame.id);
       assert.equal(gameStatus.active, null);
 
+      // 2b. Game ZIP export returns a valid archive containing index.html (without game.json)
+      const gameExportRes = await fetch(`${origin}/motion-api/games/${encodeURIComponent(createdGame.id)}/export`);
+      assert.equal(gameExportRes.status, 200);
+      assert.equal(gameExportRes.headers.get('content-type'), 'application/zip');
+      assert.match(gameExportRes.headers.get('content-disposition') ?? '', /attachment; filename=/i);
+      const zipBuf = Buffer.from(await gameExportRes.arrayBuffer());
+      const { unzip } = await import('../scripts/template-library.ts');
+      const extracted = unzip(zipBuf);
+      assert.ok(extracted.has('index.html'));
+      assert.equal(extracted.has('game.json'), false);
+
       // 3. Invalid targetKind & unknown game map to 400 / 404
       const badKindRes = await fetch(`${origin}/motion-api/web-publish/unknown-kind/abc`);
       assert.equal(badKindRes.status, 400);
@@ -361,6 +372,38 @@ test('Unified /motion-api/web-publish HTTP routes and Streamable HTTP openmotion
       };
       assert.equal(parsedGameStatus.targetKind, 'game');
       assert.equal(parsedGameStatus.targetId, createdGame.id);
+
+      // Validated MCP adapter accepts embedUrl for community games
+      const mcpEmbedStatus = await mcpRpc(
+        writeToken,
+        {
+          jsonrpc: '2.0',
+          id: 4,
+          method: 'tools/call',
+          params: {
+            name: 'openmotion_assets_use',
+            arguments: {
+              action: 'web_publish',
+              webPublish: {
+                command: 'status',
+                targetKind: 'game',
+                targetId: 'community-demo',
+                embedUrl: 'https://example.com/play/',
+                title: 'Community Demo',
+              },
+            },
+          },
+        },
+        initWrite.sessionId,
+      );
+      assert.equal(mcpEmbedStatus.payload.error, undefined);
+      assert.notEqual(mcpEmbedStatus.payload.result?.isError, true);
+      const parsedEmbedStatus = JSON.parse(mcpEmbedStatus.payload.result.content[0].text) as {
+        targetKind: string;
+        targetId: string;
+      };
+      assert.equal(parsedEmbedStatus.targetKind, 'game');
+      assert.equal(parsedEmbedStatus.targetId, 'community-demo');
 
       // Read-scoped token cannot call openmotion_assets_use action=web_publish
       const initRead = await mcpRpc(readToken, {

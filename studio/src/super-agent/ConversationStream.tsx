@@ -16,6 +16,7 @@ import {
   type SuperAgentResourceCounts,
 } from '../../../shared/super-agent';
 import { assetMediaUrl, assetVersion } from '../../../shared/asset-library';
+import { OpenDesignLoadingMark } from '../components/ui/OpenDesignLoadingMark';
 import { Popover } from '../components/ui/Popover';
 import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -30,7 +31,8 @@ import {
   rememberInstruction,
 } from '../motion/game/gameCatalog';
 import {
-  buildDirectGamePrompt,
+  buildGameHiddenInstructions,
+  buildGameUserPrompt,
   localizedGameTitle,
   toGameArtifact,
   toGameResourceAttachment,
@@ -128,6 +130,12 @@ export function ConversationStream({
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
+  onNotify,
+  onOpenAccountSettings,
+  onOpenInDesignStudio,
+  onOpenInMotionStudio,
+  onOpenInAssets,
+  onOpenInBrandKit,
   onOpenAgentSettings,
   onOpenRuntimeSettings,
   onOpenModelSettings,
@@ -146,7 +154,7 @@ export function ConversationStream({
   viewerOpen: boolean;
   counts: SuperAgentResourceCounts | null;
   attachments: SuperAgentResourceAttachment[];
-  draftSeed?: { id: number; text: string; mode?: SuperAgentCreationModeId } | null;
+  draftSeed?: { id: number; text: string; hiddenInstructions?: string; mode?: SuperAgentCreationModeId } | null;
   gameTemplateSeed?: { id: number; game: GameCard } | null;
   agents: LocalAgent[];
   agentsLoaded?: boolean;
@@ -167,6 +175,7 @@ export function ConversationStream({
   onSend: (
     text: string,
     meta?: {
+      hiddenInstructions?: string;
       mode?: SuperAgentCreationModeId;
       workingDir?: string;
       overrideAttachments?: SuperAgentResourceAttachment[];
@@ -174,13 +183,19 @@ export function ConversationStream({
     },
   ) => Promise<boolean>;
   onStop: () => void;
-  onApprove: (approvalId: string, accepted: boolean) => void;
+  onApprove: (approvalId: string, accepted: boolean, alwaysAllow?: boolean) => void;
   onResourcesUploaded?: () => void;
   onAttachmentsChange: (next: SuperAgentResourceAttachment[]) => void;
   onOpenArtifactId: (artifactId: string) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
+  onNotify?: (message: string, tone?: 'info' | 'error') => void;
+  onOpenAccountSettings?: () => void;
+  onOpenInDesignStudio?: (projectId: string) => void;
+  onOpenInMotionStudio?: (projectId: string) => void;
+  onOpenInAssets?: (assetId: string, versionId?: string) => void;
+  onOpenInBrandKit?: (kitId?: string) => void;
   onOpenAgentSettings: () => void;
   onOpenRuntimeSettings?: () => void;
   onOpenModelSettings?: () => void;
@@ -224,10 +239,12 @@ export function ConversationStream({
   }, [selection.engine]);
 
   const appliedDraftSeedRef = useRef<number | null>(null);
+  const pendingHiddenInstructionsRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
     appliedDraftSeedRef.current = draftSeed.id;
     setText(draftSeed.text);
+    pendingHiddenInstructionsRef.current = draftSeed.hiddenInstructions?.trim() || undefined;
     if (draftSeed.mode && !chat?.messages.length) {
       setActiveModeId(draftSeed.mode);
     } else if (!draftSeed.mode) {
@@ -387,6 +404,7 @@ export function ConversationStream({
       setActiveModeId(requestedMode);
     } else if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
       setActiveModeId(null);
+      pendingHiddenInstructionsRef.current = undefined;
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     followRef.current = true;
@@ -451,19 +469,25 @@ export function ConversationStream({
         rememberInstruction(created.game.id, created.agentInstruction);
         const displayTitle = localizedGameTitle(created.game, locale);
         const ready = created.game.status === 'ready' || created.game.status === 'published';
-        const promptBody = buildDirectGamePrompt(
+        const userVisiblePrompt = text.trim()
+          || (selectedTemplate
+            ? t('Based on {title}', { title: localizedGameTitle(selectedTemplate, locale) })
+            : buildGameUserPrompt(created.game, locale));
+        const hiddenInstructions = buildGameHiddenInstructions(
           created.game,
           created.agentInstruction,
           selectedTemplate && text.trim() ? text.trim() : undefined,
         );
         const nextAttachments = [...attachments, toGameResourceAttachment(created.game, displayTitle)];
-        const ok = await onSend(promptBody, {
+        const ok = await onSend(userVisiblePrompt, {
+          hiddenInstructions,
           mode: 'game',
           overrideAttachments: nextAttachments,
           ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
         });
         if (ok) {
           setText('');
+          pendingHiddenInstructionsRef.current = undefined;
           setActiveModeId(null);
           updateModeOptions({ gameTemplate: null });
           followRef.current = true;
@@ -486,8 +510,9 @@ export function ConversationStream({
       .join('\n')
       || (hasBrowserAnnotation ? t('Update the page based on the attached browser preview annotations.') : '');
     const rawBody = text.trim() || annotationSummary;
-    const promptBody = prefix ? `${prefix} ${rawBody}` : rawBody;
-    const ok = await onSend(promptBody, {
+    const hiddenInstructions = [prefix, pendingHiddenInstructionsRef.current].filter(Boolean).join('\n\n') || undefined;
+    const ok = await onSend(rawBody, {
+      ...(hiddenInstructions ? { hiddenInstructions } : {}),
       ...(activeMode ? { mode: activeMode.id } : {}),
       ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
         ? { workingDir: modeOptions.codingWorkdir.trim() }
@@ -495,6 +520,7 @@ export function ConversationStream({
     });
     if (ok) {
       setText('');
+      pendingHiddenInstructionsRef.current = undefined;
       setActiveModeId(null);
       updateModeOptions({ gameTemplate: null });
       followRef.current = true;
@@ -683,9 +709,8 @@ export function ConversationStream({
       >
         {loading ? (
           <div className="om-sa-loading" role="status" aria-label={t('Loading conversation…')}>
-            <Skeleton style={{ width: '55%', height: 24 }} />
-            <Skeleton style={{ width: '100%', height: 84 }} />
-            <Skeleton style={{ width: '80%', height: 84 }} />
+            <OpenDesignLoadingMark height={26} />
+            <span className="om-muted">{t('Loading conversation…')}</span>
           </div>
         ) : loadFailed ? (
           <div className="om-empty om-sa-empty-state" role="alert">
@@ -696,8 +721,10 @@ export function ConversationStream({
               <span>{t('Retry')}</span>
             </Button>
           </div>
-        ) : !chat?.messages.length ? (
-          activeMode ? (
+        ) : (
+          <div key={chat?.id ?? (activeMode?.id ?? 'welcome')} className="om-sa-stream-transition">
+            {!chat?.messages.length ? (
+              activeMode ? (
             <ModeResourceShowcase
               active={active}
               mode={activeMode}
@@ -824,9 +851,17 @@ export function ConversationStream({
             onPreviewAttachment={onPreviewAttachment}
             onOpenWebUrl={onOpenWebUrl}
             onCopyText={onCopyText}
+            onNotify={onNotify}
+            onOpenAccountSettings={onOpenAccountSettings}
+            onOpenInDesignStudio={onOpenInDesignStudio}
+            onOpenInMotionStudio={onOpenInMotionStudio}
+            onOpenInAssets={onOpenInAssets}
+            onOpenInBrandKit={onOpenInBrandKit}
             onApprove={onApprove}
             onContinue={() => void onSend(t('Continue from where you stopped and finish the task.'))}
           />
+            )}
+          </div>
         )}
       </div>
 

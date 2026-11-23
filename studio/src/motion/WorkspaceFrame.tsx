@@ -51,6 +51,7 @@ import { OverlayLayer } from '../router/OverlayLayer';
 import { StudioRouterProvider } from '../router/createAppRouter';
 import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
 import { preloadAllWorkspacePages, preloadStudioRoute } from '../router/lazyPages';
+import { scheduleIdleRouteWarmup } from '../router/routePrefetch';
 
 export type { WorkspaceSurfaceKey } from './WorkspaceChromeContext';
 
@@ -85,6 +86,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const { t, locale } = useI18n();
   const routerLocation = useLocation();
   const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname));
+  const [navPage, setNavPage] = useState(page);
   const [source, setSource] = useState(() => readLocationWorkspaceSource(routerLocation.state));
   const [isRoutePending, startRouteTransition] = useTransition();
   const sourceUrl = source ? new URL(source.href) : null;
@@ -118,6 +120,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
       if (libraryOpen.current && !next.templates) libraryClosed.current?.();
       libraryOpen.current = next.templates;
       const nextSource = locationState !== undefined ? readLocationWorkspaceSource(locationState) : workspaceHistorySource();
+      setNavPage(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
       startRouteTransition(() => {
         setPage(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
         setSource(previous => previous?.index === nextSource?.index && previous?.href === nextSource?.href ? previous : nextSource);
@@ -130,6 +133,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
       window.removeEventListener(WORKSPACE_LOCATION_CHANGED, onLocationChanged);
     };
   }, [routerLocation]);
+  useEffect(() => scheduleIdleRouteWarmup(), []);
   useEffect(() => {
     if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }), true);
   }, [page]);
@@ -503,6 +507,15 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     openProject: (id: string) => workspace.open('projects', id),
     openTemplate: openTemplateFromOverlay,
   };
+  const navTemplatesPage = navPage.templates && !hostChrome;
+  const navConnectionsOpen = navPage.templates || (Boolean(navPage.template) && !navPage.templates);
+  const navStandaloneMcp = navPage.settings === 'mcp' && !navPage.mcpInSettings;
+  const navSettings = navTemplatesPage || navStandaloneMcp ? null : navPage.settings;
+  const navSuperAgentActive = navPage.superAgent && !navSettings && !navTemplatesPage;
+  const navCurrentPage = navTemplatesPage || navPage.explore || (navPage.skills && !navSettings) ? 'explore' : navStandaloneMcp ? 'mcp' : navSuperAgentActive ? 'agent' : null;
+  const navEditorRoute = !navSettings && !isWorkspacePageOpen(navPage, navTemplatesPage);
+  const navEditorActive = navEditorRoute && !navConnectionsOpen;
+
   return <WorkspaceChromeContext.Provider value={value}>
     <StudioToastViewport {...navigationToast} />
     <StudioConnectionToast reconnecting={reconnecting} />
@@ -510,12 +523,12 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     <Dialog.Root open={sidebarOpen && narrow && editorActive} onOpenChange={setSidebarOpen}>
     <div ref={applicationRef} className="om-application" data-embedded={presentation.embedded} data-host-chrome={hostChrome} data-has-bf-banner={bfBannerVisible || undefined} data-navigation-collapsed={navigationCollapsed}>
       {bfBannerVisible && <BlackFridayTopBanner trackingPage={navTrackingPage} onClose={closeBfBanner} onExpire={expireBfBanner} />}
-      <ApplicationHeader atExploreHome={page.explore && !page.community && !page.medium && !connectionsOpen}
-        specialty={page.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
+      <ApplicationHeader atExploreHome={navPage.explore && !navPage.community && !navPage.medium && !navConnectionsOpen}
+        specialty={navPage.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
         openAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion, templates: false })}
-        onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={currentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={visibleSettings} destination={templatesPage ? null : page.studio} soundTab={templatesPage ? null : page.soundTab ?? null} motionActive={!templatesPage && (page.motion || editorActive)}
-        designActive={!templatesPage && Boolean(page.designScene)} cinemaActive={!templatesPage && page.cinemaLanding}
-        scenarioActive={!templatesPage && !settings ? (page.scenario ?? (page.scenarioHub ? 'hub' : null)) : null}
+        onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={navCurrentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={navSettings} destination={navTemplatesPage ? null : navPage.studio} soundTab={navTemplatesPage ? null : navPage.soundTab ?? null} motionActive={!navTemplatesPage && (navPage.motion || navEditorActive)}
+        designActive={!navTemplatesPage && Boolean(navPage.designScene)} cinemaActive={!navTemplatesPage && navPage.cinemaLanding}
+        scenarioActive={!navTemplatesPage && !navSettings ? (navPage.scenario ?? (navPage.scenarioHub ? 'hub' : null)) : null}
         onOpenScenario={(id, runId) => openScenario(id, runId)}
         onOpenScenarioHub={() => openScenarioHub()}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />

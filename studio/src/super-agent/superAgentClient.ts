@@ -10,6 +10,96 @@ import {
   type SuperAgentResourceCatalog,
   type SuperAgentTurnInput,
 } from '../../../shared/super-agent';
+import { isClientCacheEnabled } from '../utils/clientCacheMode';
+
+const MAX_CACHED_CHATS = 24;
+const CHAT_CACHE_TTL_MS = 30_000;
+const CHAT_LIST_TTL_MS = 15_000;
+const RESOURCES_TTL_MS = 30_000;
+
+let chatCacheGeneration = 0;
+let listCacheGeneration = 0;
+let resourcesCacheGeneration = 0;
+
+const chatCache = new Map<string, { value: SuperAgentChat; expiresAt: number }>();
+const inflightChats = new Map<string, Promise<{ conversation: SuperAgentChat }>>();
+
+let chatListCache: { value: SuperAgentChatSummary[]; expiresAt: number } | null = null;
+let inflightChatList: Promise<{ conversations: SuperAgentChatSummary[] }> | null = null;
+
+const resourcesCache = new Map<string, { value: SuperAgentResourceCatalog; expiresAt: number }>();
+const inflightResources = new Map<string, Promise<SuperAgentResourceCatalog>>();
+
+function resourcesCacheKey(params: { kind?: string; query?: string; limit?: number } = {}): string {
+  return JSON.stringify([params.kind && params.kind !== 'all' ? params.kind : 'all', params.query?.trim() ?? '', params.limit ?? null]);
+}
+
+function touchChatCache(chat: SuperAgentChat): void {
+  if (!isClientCacheEnabled()) return;
+  chatCache.delete(chat.id);
+  chatCache.set(chat.id, { value: chat, expiresAt: Date.now() + CHAT_CACHE_TTL_MS });
+  while (chatCache.size > MAX_CACHED_CHATS) {
+    const oldest = chatCache.keys().next().value;
+    if (!oldest) break;
+    chatCache.delete(oldest);
+  }
+}
+
+function invalidateChatListCache(): void {
+  listCacheGeneration++;
+  chatListCache = null;
+  inflightChatList = null;
+}
+
+export function clearSuperAgentCache(): void {
+  chatCacheGeneration++;
+  listCacheGeneration++;
+  resourcesCacheGeneration++;
+  chatCache.clear();
+  inflightChats.clear();
+  chatListCache = null;
+  inflightChatList = null;
+  resourcesCache.clear();
+  inflightResources.clear();
+}
+
+export function peekCachedSuperAgentChat(id: string): SuperAgentChat | undefined {
+  if (!isClientCacheEnabled()) return undefined;
+  return chatCache.get(id)?.value;
+}
+
+export function seedCachedSuperAgentChat(chat: SuperAgentChat): void {
+  touchChatCache(chat);
+}
+
+export function prefetchSuperAgentChat(id: string): void {
+  if (!isClientCacheEnabled() || !id) return;
+  const cached = chatCache.get(id);
+  if (cached && cached.expiresAt > Date.now()) return;
+  void getSuperAgentChat(id).catch(() => {});
+}
+
+export function peekCachedSuperAgentChatList(): SuperAgentChatSummary[] | undefined {
+  if (!isClientCacheEnabled()) return undefined;
+  return chatListCache?.value;
+}
+
+export function peekCachedWorkspaceResources(params: { kind?: string; query?: string; limit?: number } = {}): SuperAgentResourceCatalog | undefined {
+  if (!isClientCacheEnabled()) return undefined;
+  return resourcesCache.get(resourcesCacheKey(params))?.value;
+}
+
+export function prefetchSuperAgentWorkspace(): void {
+  if (!isClientCacheEnabled()) return;
+  if (!chatListCache || chatListCache.expiresAt <= Date.now()) {
+    void listSuperAgentChats().catch(() => {});
+  }
+  const resKey = resourcesCacheKey({ limit: 48 });
+  const resCached = resourcesCache.get(resKey);
+  if (!resCached || resCached.expiresAt <= Date.now()) {
+    void fetchWorkspaceResources({ limit: 48 }).catch(() => {});
+  }
+}
 
 async function saRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${SUPER_AGENT_API}${path}`, {
@@ -30,16 +120,48 @@ async function saRequest<T>(path: string, method = 'GET', body?: unknown): Promi
 }
 
 export async function fetchWorkspaceResources(params: { kind?: string; query?: string; limit?: number } = {}) {
+  const key = resourcesCacheKey(params);
+  if (isClientCacheEnabled()) {
+    const cached = resourcesCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+  }
+  const pending = inflightResources.get(key);
+  if (pending) return pending;
+
   const search = new URLSearchParams();
   if (params.kind && params.kind !== 'all') search.set('kind', params.kind);
   if (params.query?.trim()) search.set('query', params.query.trim());
   if (params.limit) search.set('limit', String(params.limit));
   const qs = search.toString();
-  return saRequest<SuperAgentResourceCatalog>(`/resources${qs ? `?${qs}` : ''}`);
+  const gen = resourcesCacheGeneration;
+  const run = saRequest<SuperAgentResourceCatalog>(`/resources${qs ? `?${qs}` : ''}`).then(res => {
+    if (isClientCacheEnabled() && gen === resourcesCacheGeneration) {
+      resourcesCache.set(key, { value: res, expiresAt: Date.now() + RESOURCES_TTL_MS });
+    }
+    return res;
+  });
+  inflightResources.set(key, run);
+  return run.finally(() => {
+    if (inflightResources.get(key) === run) inflightResources.delete(key);
+  });
 }
 
 export async function listSuperAgentChats() {
-  return saRequest<{ conversations: SuperAgentChatSummary[] }>('/chats');
+  if (isClientCacheEnabled() && chatListCache && chatListCache.expiresAt > Date.now()) {
+    return { conversations: chatListCache.value };
+  }
+  if (inflightChatList) return inflightChatList;
+  const gen = listCacheGeneration;
+  const run = saRequest<{ conversations: SuperAgentChatSummary[] }>('/chats').then(res => {
+    if (isClientCacheEnabled() && gen === listCacheGeneration && Array.isArray(res?.conversations)) {
+      chatListCache = { value: res.conversations, expiresAt: Date.now() + CHAT_LIST_TTL_MS };
+    }
+    return res;
+  });
+  inflightChatList = run;
+  return run.finally(() => {
+    if (inflightChatList === run) inflightChatList = null;
+  });
 }
 
 export async function createSuperAgentChat(body: {
@@ -51,11 +173,33 @@ export async function createSuperAgentChat(body: {
   model?: string;
   permissionMode?: SuperAgentPermissionMode;
 } = {}) {
-  return saRequest<{ conversation: SuperAgentChat }>('/chats', 'POST', body);
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>('/chats', 'POST', body);
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
 }
 
 export async function getSuperAgentChat(id: string) {
-  return saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}`);
+  if (isClientCacheEnabled()) {
+    const cached = chatCache.get(id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { conversation: cached.value };
+    }
+  }
+  const existing = inflightChats.get(id);
+  if (existing) return existing;
+
+  const gen = chatCacheGeneration;
+  const run = saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}`).then(res => {
+    if (isClientCacheEnabled() && gen === chatCacheGeneration && res?.conversation) {
+      seedCachedSuperAgentChat(res.conversation);
+    }
+    return res;
+  });
+  inflightChats.set(id, run);
+  return run.finally(() => {
+    if (inflightChats.get(id) === run) inflightChats.delete(id);
+  });
 }
 
 export async function updateSuperAgentChat(
@@ -69,26 +213,47 @@ export async function updateSuperAgentChat(
     removeArtifactId?: string;
   },
 ) {
-  return saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}`, 'PATCH', patch);
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}`, 'PATCH', patch);
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
 }
 
 export async function deleteSuperAgentChat(id: string) {
+  chatCache.delete(id);
+  inflightChats.delete(id);
+  invalidateChatListCache();
   return saRequest<{ deleted: boolean }>(`/chats/${encodeURIComponent(id)}`, 'DELETE');
 }
 
 export async function startSuperAgentTurn(id: string, input: SuperAgentTurnInput) {
-  return saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/turn`, 'POST', input);
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/turn`, 'POST', input);
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
 }
 
 export async function stopSuperAgentChat(id: string) {
-  return saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/stop`, 'POST', {});
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/stop`, 'POST', {});
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
 }
 
-export async function approveSuperAgentAction(id: string, approvalId: string, accepted: boolean) {
-  return saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/approve`, 'POST', {
+export async function approveSuperAgentAction(
+  id: string,
+  approvalId: string,
+  accepted: boolean,
+  alwaysAllow = false,
+) {
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/approve`, 'POST', {
     approvalId,
     accepted,
+    ...(alwaysAllow ? { alwaysAllow: true } : {}),
   });
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
 }
 
 export function subscribeSuperAgentChat(
@@ -101,6 +266,7 @@ export function subscribeSuperAgentChat(
   source.addEventListener('chat', event => {
     try {
       const next = JSON.parse((event as MessageEvent).data) as SuperAgentChat;
+      seedCachedSuperAgentChat(next);
       onChat(next);
     } catch {
       /* ignore malformed frame */

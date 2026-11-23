@@ -14,6 +14,8 @@ import {
 } from '../gateway/super-agent.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
+import { buildSuperAgentHandoff } from '../shared/capability-hub.ts';
+import { describeSuperAgentApproval } from '../shared/super-agent.ts';
 import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
 
@@ -1320,4 +1322,141 @@ test('SuperAgentConversations marks interrupted shutdown runs failed and resets 
   assert.equal(afterClose.state, 'failed');
   assert.match(afterClose.error || '', /Server restarted while the Agent was running/);
   await reloaded.close();
+}));
+
+test('hiddenInstructions stay hidden from stored user messages while reaching the Agent, and approvals summarize cleanly with alwaysAllow', () => fixture(async store => {
+  // 1) buildSuperAgentHandoff keeps user prompt concise while moving directives into hiddenInstructions
+  const zhHandoff = buildSuperAgentHandoff(
+    { kind: 'motion-template', id: 'tpl-launch-1', title: 'Product Launch' },
+    { hiddenInstructions: 'Read openmotion://workflow/template/start and recreate tpl-launch-1.', locale: 'zh-CN' },
+  );
+  assert.equal(zhHandoff.prompt, '基于「Product Launch」模板制作一个动效视频。');
+  assert.ok(zhHandoff.hiddenInstructions?.includes('openmotion://workflow/template/start'));
+  assert.equal(zhHandoff.prompt.includes('openmotion://'), false);
+
+  // 2) describeSuperAgentApproval turns raw Codex Python-script JSON into a clear 1-line summary
+  const pythonAudioDetail = JSON.stringify({
+    command: 'python3 - <<\'OPENMOTION_SCORE\'\nfrom pathlib import Path\ndestination = Path("欢快背景音乐.wav")\nOPENMOTION_SCORE',
+    availableDecisions: ['accept', 'cancel'],
+  }, null, 2);
+  const describedAudio = describeSuperAgentApproval({
+    kind: 'command',
+    title: 'Command approval',
+    detail: pythonAudioDetail,
+  });
+  assert.equal(describedAudio.headingKey, 'Create audio file');
+  assert.equal(describedAudio.target, '欢快背景音乐.wav');
+  assert.equal(describedAudio.summaryKey, 'Run a {runtime} script to create "{target}".');
+  assert.deepEqual(describedAudio.summaryVars, { runtime: 'Python', target: '欢快背景音乐.wav' });
+  assert.equal(describedAudio.technicalDetail.includes('availableDecisions'), false);
+  assert.ok(describedAudio.technicalDetail.includes('destination = Path("欢快背景音乐.wav")'));
+
+  const describedFiles = describeSuperAgentApproval({
+    kind: 'file',
+    title: 'File edit approval',
+    detail: JSON.stringify({ changes: [{ path: 'src/index.html' }, { path: 'src/game.js' }] }),
+  });
+  assert.equal(describedFiles.headingKey, 'Edit files');
+  assert.equal(describedFiles.target, 'index.html');
+  assert.deepEqual(describedFiles.summaryVars, { count: 2, target: 'index.html' });
+
+  const describedGen = describeSuperAgentApproval({
+    kind: 'generation',
+    title: 'Generate media asset',
+    detail: JSON.stringify({ modality: 'image', model: 'seedream-4', prompt: 'Neon arcade background' }),
+  });
+  assert.equal(describedGen.headingKey, 'Generate image');
+  assert.equal(describedGen.target, 'seedream-4');
+  assert.equal(describedGen.summaryText, 'Neon arcade background');
+
+  // 3) Backend injects hiddenInstructions into Agent prompt without storing them in user chat message,
+  //    and answer(..., true, true) switches permissionMode to auto and auto-approves subsequent steps.
+  let receivedAgentPrompt = '';
+  const decisions: string[] = [];
+  class ApprovalCodexRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string, params?: any) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-hidden-approval' } };
+      if (method === 'turn/start') {
+        receivedAgentPrompt = String(params?.input?.[0]?.text || '');
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 41,
+            method: 'item/commandExecution/requestApproval',
+            params: {
+              command: 'python3 -c \'from pathlib import Path; Path("bgm.wav").write_bytes(b"RIFF")\'',
+            },
+          });
+        });
+        return { turn: { id: 'turn-hidden-approval' } };
+      }
+      return {};
+    }
+    send(msg: any) {
+      if (msg?.id === 41) {
+        decisions.push(String(msg.result?.decision || ''));
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 42,
+            method: 'item/commandExecution/requestApproval',
+            params: { command: 'npm test' },
+          });
+        });
+      } else if (msg?.id === 42) {
+        decisions.push(String(msg.result?.decision || ''));
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-hidden-approval', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const phase1: any = { call: async () => ({ ok: true }) };
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: ApprovalCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const chat = await service.create({ engine: 'codex', intent: 'game', permissionMode: 'on-request' });
+  await service.start(
+    chat.id,
+    {
+      requestId: 'req-hidden-1',
+      text: '我想做一个2024小游戏',
+      hiddenInstructions: 'Use the openmotion-game Skill. Read openmotion://workflow/game/start.',
+      mode: 'game',
+    },
+    { origin: 'http://127.0.0.1:4173', phase1: () => phase1 },
+  );
+
+  let waitingSnap = await service.get(chat.id);
+  for (let i = 0; i < 60 && waitingSnap.approvals.length === 0; i++) {
+    await new Promise(resolve => setTimeout(resolve, 15));
+    waitingSnap = await service.get(chat.id);
+  }
+  assert.equal(waitingSnap.approvals.length, 1);
+  assert.equal(waitingSnap.approvals[0].target, 'bgm.wav');
+  assert.equal(waitingSnap.messages[0].text, '我想做一个2024小游戏');
+  assert.equal(waitingSnap.messages[0].text.includes('openmotion-game'), false);
+  assert.ok(receivedAgentPrompt.includes('<openmotion-task-instructions>'));
+  assert.ok(receivedAgentPrompt.includes('openmotion://workflow/game/start'));
+
+  // Approve with alwaysAllow=true -> switches chat.permissionMode to 'auto' and auto-approves req #42
+  await service.answer(chat.id, waitingSnap.approvals[0].id, true, true);
+  let doneSnap = await service.get(chat.id);
+  for (let i = 0; i < 60 && doneSnap.state !== 'idle'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 15));
+    doneSnap = await service.get(chat.id);
+  }
+  assert.equal(doneSnap.state, 'idle');
+  assert.equal(doneSnap.permissionMode, 'auto');
+  assert.deepEqual(decisions, ['accept', 'accept']);
+  await service.close();
 }));

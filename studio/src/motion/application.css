@@ -754,10 +754,9 @@
   .om-runtime-protocol-doc[open] > .om-code-block { animation: none; transition: none; }
 }
 
-.om-route-fallback { display: flex; flex: 1 1 auto; width: 100%; height: 100%; min-height: 280px; padding: var(--motion-space-24); background: var(--motion-bg); box-sizing: border-box; }
+.om-route-fallback { display: flex; flex: 1 1 auto; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 280px; padding: var(--motion-space-24); background: var(--motion-bg); box-sizing: border-box; }
 .om-route-fallback-compact { min-height: 180px; padding: var(--motion-space-16); }
-.om-route-fallback-inner { display: grid; gap: var(--motion-space-16); width: 100%; max-width: 1120px; margin: 0 auto; align-content: start; }
-.om-route-fallback-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--motion-space-16); }
+.om-route-fallback-inner { display: grid; place-items: center; gap: var(--motion-space-12); width: 100%; max-width: 480px; margin: auto; }
 
 .om-capability-action-bar { display: inline-flex; align-items: center; gap: var(--motion-space-8); flex-wrap: wrap; }
 .om-capability-action-bar[data-variant="compact"] { gap: var(--motion-space-6); }

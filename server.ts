@@ -898,7 +898,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
             });
           }
           if (action === 'stop') return json(res, 200, { conversation: await superAgent.stop(id) });
-          if (action === 'approve') return json(res, 200, { conversation: await superAgent.answer(id, data.approvalId, data.accepted) });
+          if (action === 'approve') return json(res, 200, { conversation: await superAgent.answer(id, data.approvalId, data.accepted, Boolean(data.alwaysAllow)) });
         }
       }
       return json(res, 405, { error: 'Unsupported Super Agent request' });

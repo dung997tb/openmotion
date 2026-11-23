@@ -210,6 +210,18 @@ export type SuperAgentApproval = {
   kind: 'generation' | 'command' | 'file' | 'tool';
   title: string;
   detail: string;
+  summary?: string;
+  target?: string;
+};
+
+export type SuperAgentApprovalDisplay = {
+  headingKey: string;
+  headingFallback?: string;
+  summaryKey: string;
+  summaryVars?: Record<string, string | number>;
+  summaryText?: string;
+  target?: string;
+  technicalDetail: string;
 };
 
 export type SuperAgentChat = {
@@ -256,6 +268,7 @@ export type SuperAgentChatSummary = {
 export type SuperAgentTurnInput = {
   requestId: string;
   text: string;
+  hiddenInstructions?: string;
   mode?: SuperAgentModeId;
   workingDir?: string;
   runtimeId?: string;
@@ -1154,4 +1167,280 @@ export function superAgentIntentMeta(intent?: SuperAgentIntent): {
     default:
       return { icon: 'chat-1-line', tone: 'neutral', label: 'Chat' };
   }
+}
+
+function tryParseApprovalJson(detail: string): Record<string, unknown> | null {
+  const trimmed = detail.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Plain text detail
+  }
+  return null;
+}
+
+function clipApprovalText(value: string, maxLen: number): string {
+  const clean = value.replace(/\s+/g, ' ').trim();
+  if (clean.length <= maxLen) return clean;
+  return `${clean.slice(0, Math.max(1, maxLen - 1)).trimEnd()}…`;
+}
+
+function basenameOfPath(rawPath: string): string {
+  const clean = rawPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const idx = clean.lastIndexOf('/');
+  return idx >= 0 ? clean.slice(idx + 1) : clean;
+}
+
+function extractCommandString(parsed: Record<string, unknown> | null, fallbackDetail: string): string {
+  const readCmd = (value: unknown): string => {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (Array.isArray(value)) {
+      const parts = value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+      if (parts.length) return parts.join(' ');
+    }
+    return '';
+  };
+  if (parsed) {
+    const rawInput = parsed.rawInput && typeof parsed.rawInput === 'object'
+      ? (parsed.rawInput as Record<string, unknown>)
+      : null;
+    const input = parsed.input && typeof parsed.input === 'object'
+      ? (parsed.input as Record<string, unknown>)
+      : null;
+    const candidates = [
+      parsed.command,
+      parsed.argv,
+      parsed.cmd,
+      parsed.parsedCmd,
+      rawInput?.command,
+      rawInput?.argv,
+      rawInput?.cmd,
+      input?.command,
+      input?.cmd,
+    ];
+    for (const candidate of candidates) {
+      const text = readCmd(candidate);
+      if (text) return text;
+    }
+  }
+  return fallbackDetail.trim();
+}
+
+function detectScriptOutputTarget(scriptText: string): string | undefined {
+  const patterns: RegExp[] = [
+    /Path\(\s*["']([^"'\n]{1,180}\.[a-z0-9]{1,8})["']\s*\)/i,
+    /wave\.open\(\s*(?:str\(\s*)?["']([^"'\n]{1,180}\.[a-z0-9]{1,8})["']/i,
+    /open\(\s*["']([^"'\n]{1,180}\.[a-z0-9]{1,8})["']\s*,\s*["'][wa]/i,
+    /writeFile(?:Sync)?\(\s*["'`]([^"'`\n]{1,180}\.[a-z0-9]{1,8})["'`]/i,
+    /(?:^|\s)-o\s+["']?([^\s"']{1,180}\.[a-z0-9]{1,8})["']?/i,
+    /(?:^|\s)>\s*["']?([^\s"';&|]{1,180}\.[a-z0-9]{1,8})["']?/i,
+  ];
+  for (const re of patterns) {
+    const match = scriptText.match(re);
+    if (match?.[1]) {
+      const base = basenameOfPath(match[1]);
+      if (base && !base.startsWith('-')) return base;
+    }
+  }
+  return undefined;
+}
+
+function detectScriptRuntime(cmdText: string): string | null {
+  const firstLine = cmdText.split('\n')[0]?.trim() ?? '';
+  const isMultilineOrInline = cmdText.includes('\n') || /\s-(?:c|e)\s/.test(firstLine) || firstLine.includes('<<');
+  if (!isMultilineOrInline) return null;
+  if (/(?:^|\s|\/)python3?(?:\s|$)/.test(firstLine)) return 'Python';
+  if (/(?:^|\s|\/)node(?:\s|$)/.test(firstLine)) return 'Node.js';
+  if (/(?:^|\s|\/)(?:bash|zsh|sh)(?:\s|$)/.test(firstLine)) return 'Shell';
+  if (cmdText.includes('\n')) return 'Shell';
+  return null;
+}
+
+function extractApprovalFilePaths(parsed: Record<string, unknown> | null): string[] {
+  if (!parsed) return [];
+  const out: string[] = [];
+  const pushPath = (value: unknown) => {
+    if (typeof value === 'string' && value.trim()) {
+      const normalized = value.trim();
+      if (!out.includes(normalized)) out.push(normalized);
+    }
+  };
+  const inspectContainer = (obj: Record<string, unknown>) => {
+    pushPath(obj.path);
+    pushPath(obj.filePath);
+    pushPath(obj.file_path);
+    if (Array.isArray(obj.files)) {
+      for (const item of obj.files) {
+        if (typeof item === 'string') pushPath(item);
+        else if (item && typeof item === 'object') {
+          pushPath((item as Record<string, unknown>).path ?? (item as Record<string, unknown>).file_path);
+        }
+      }
+    }
+    if (Array.isArray(obj.locations)) {
+      for (const item of obj.locations) {
+        if (item && typeof item === 'object') pushPath((item as Record<string, unknown>).path);
+      }
+    }
+    if (Array.isArray(obj.changes)) {
+      for (const item of obj.changes) {
+        if (typeof item === 'string') pushPath(item);
+        else if (item && typeof item === 'object') {
+          pushPath((item as Record<string, unknown>).path ?? (item as Record<string, unknown>).filePath);
+        }
+      }
+    } else if (obj.changes && typeof obj.changes === 'object') {
+      for (const key of Object.keys(obj.changes as Record<string, unknown>)) {
+        pushPath(key);
+      }
+    }
+  };
+  inspectContainer(parsed);
+  if (parsed.rawInput && typeof parsed.rawInput === 'object') {
+    inspectContainer(parsed.rawInput as Record<string, unknown>);
+  }
+  if (parsed.input && typeof parsed.input === 'object') {
+    inspectContainer(parsed.input as Record<string, unknown>);
+  }
+  return out;
+}
+
+/**
+ * Produces a concise, plain-language summary and cleaned technical detail for
+ * any Super Agent approval request (both structured approvals and raw RPC JSON).
+ */
+export function describeSuperAgentApproval(
+  approval: Pick<SuperAgentApproval, 'kind' | 'title' | 'detail' | 'summary' | 'target'>,
+): SuperAgentApprovalDisplay {
+  const rawDetail = typeof approval.detail === 'string' ? approval.detail.trim() : '';
+  const parsed = tryParseApprovalJson(rawDetail);
+  const rawInput = parsed?.rawInput && typeof parsed.rawInput === 'object'
+    ? (parsed.rawInput as Record<string, unknown>)
+    : null;
+  const descriptionRaw = [parsed?.description, parsed?.reason, rawInput?.description]
+    .find((val): val is string => typeof val === 'string' && val.trim().length > 0 && val.trim().length <= 160);
+  const description = descriptionRaw ? clipApprovalText(descriptionRaw, 140) : undefined;
+
+  if (approval.kind === 'generation') {
+    const modality = typeof parsed?.modality === 'string' ? parsed.modality.trim().toLowerCase() : '';
+    const model = typeof parsed?.model === 'string' && parsed.model.trim()
+      ? parsed.model.trim()
+      : approval.target;
+    const prompt = typeof parsed?.prompt === 'string' && parsed.prompt.trim()
+      ? clipApprovalText(parsed.prompt, 140)
+      : undefined;
+    const headingKey = modality === 'image'
+      ? 'Generate image'
+      : modality === 'video'
+        ? 'Generate video'
+        : modality === 'audio'
+          ? 'Generate audio'
+          : 'Generate media';
+    return {
+      headingKey,
+      summaryKey: 'Generate a media asset using your configured model.',
+      ...(prompt ? { summaryText: prompt } : approval.summary ? { summaryText: approval.summary } : {}),
+      ...(model ? { target: model } : modality ? { target: modality } : {}),
+      technicalDetail: rawDetail,
+    };
+  }
+
+  if (approval.kind === 'command') {
+    const cmdText = extractCommandString(parsed, rawDetail);
+    const technicalDetail = cmdText || rawDetail;
+    const runtime = detectScriptRuntime(cmdText);
+    if (runtime) {
+      const outputTarget = detectScriptOutputTarget(cmdText) ?? approval.target;
+      if (outputTarget) {
+        const lower = outputTarget.toLowerCase();
+        const headingKey = /\.(wav|mp3|ogg|m4a|flac|aac)$/.test(lower)
+          ? 'Create audio file'
+          : /\.(png|jpe?g|webp|svg|gif)$/.test(lower)
+            ? 'Create image file'
+            : /\.(mp4|mov|webm)$/.test(lower)
+              ? 'Create video file'
+              : 'Run script';
+        return {
+          headingKey,
+          summaryKey: 'Run a {runtime} script to create "{target}".',
+          summaryVars: { runtime, target: outputTarget },
+          target: outputTarget,
+          technicalDetail,
+        };
+      }
+      return {
+        headingKey: 'Run script',
+        summaryKey: 'Run a {runtime} script in the workspace.',
+        summaryVars: { runtime },
+        ...(description ? { summaryText: description } : {}),
+        target: approval.target ?? runtime,
+        technicalDetail,
+      };
+    }
+
+    const singleLine = cmdText.replace(/\s+/g, ' ').trim();
+    const shortCmd = singleLine ? clipApprovalText(singleLine, 84) : '';
+    const firstToken = singleLine ? basenameOfPath(singleLine.split(' ')[0] || '') : undefined;
+    return {
+      headingKey: 'Run command',
+      summaryKey: shortCmd ? 'Run command: {command}' : 'Run a command in the workspace.',
+      ...(shortCmd ? { summaryVars: { command: shortCmd } } : {}),
+      ...(description ? { summaryText: description } : {}),
+      ...(approval.target || firstToken ? { target: approval.target || firstToken } : {}),
+      technicalDetail,
+    };
+  }
+
+  if (approval.kind === 'file') {
+    const paths = extractApprovalFilePaths(parsed);
+    const firstPath = paths[0];
+    const firstBase = firstPath ? basenameOfPath(firstPath) : approval.target;
+    const diffText = typeof parsed?.diff === 'string' && parsed.diff.trim()
+      ? parsed.diff.trim()
+      : typeof parsed?.patch === 'string' && parsed.patch.trim()
+        ? parsed.patch.trim()
+        : rawDetail;
+    if (paths.length === 1 && firstBase) {
+      return {
+        headingKey: 'Edit file',
+        summaryKey: 'Apply changes to "{target}".',
+        summaryVars: { target: firstBase },
+        target: firstBase,
+        technicalDetail: diffText,
+      };
+    }
+    if (paths.length > 1 && firstBase) {
+      return {
+        headingKey: 'Edit files',
+        summaryKey: 'Apply changes to {count} files, including "{target}".',
+        summaryVars: { count: paths.length, target: firstBase },
+        target: firstBase,
+        technicalDetail: diffText,
+      };
+    }
+    return {
+      headingKey: 'Edit files',
+      summaryKey: 'Apply proposed file edits in the workspace.',
+      ...(description ? { summaryText: description } : approval.summary ? { summaryText: approval.summary } : {}),
+      ...(firstBase ? { target: firstBase } : {}),
+      technicalDetail: diffText,
+    };
+  }
+
+  // Generic tool approval
+  const paths = extractApprovalFilePaths(parsed);
+  const toolTarget = approval.target ?? (paths[0] ? basenameOfPath(paths[0]) : undefined);
+  const titleClean = approval.title?.trim();
+  return {
+    headingKey: 'Confirm action',
+    ...(titleClean && titleClean !== 'Permission requested' ? { headingFallback: titleClean } : {}),
+    summaryKey: 'Allow this step to continue.',
+    ...(description ? { summaryText: description } : approval.summary ? { summaryText: approval.summary } : {}),
+    ...(toolTarget ? { target: toolTarget } : {}),
+    technicalDetail: rawDetail,
+  };
 }

@@ -472,6 +472,13 @@
   background: light-dark(var(--motion-hover), var(--motion-chrome-active));
   color: var(--motion-accent);
 }
+@media (prefers-reduced-motion: no-preference) {
+  [data-motion-studio] .om-app-header .om-creative-strip :is(.om-nav-item, .om-creative-split) {
+    transition:
+      background-color var(--motion-duration-fast) var(--motion-ease-out),
+      color var(--motion-duration-fast) var(--motion-ease-out);
+  }
+}
 [data-motion-studio] .om-creation-mode { padding: var(--motion-space-2); }
 [data-motion-studio] .om-creation-mode .om-nav-item { padding-block: var(--motion-space-4); }
 [data-motion-studio] .om-generation-settings .om-nav-item { min-height: var(--motion-control-sm); padding-block: var(--motion-space-4); font-size: var(--motion-text-sm); }

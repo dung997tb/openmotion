@@ -148,7 +148,9 @@ export function CreativeWorkspace({ destination, soundTab, skill, visit, onNavig
       {onOpenBrandKit && <div className="om-control-row om-studio-library-link"><WorkspaceResourceActions onBrandKit={onOpenBrandKit} /></div>}
     </header>
     </>}
+    <div key={`${studio.id}:${scene.modality}`} className="om-creative-workspace-body om-route-surface">
     <AssetsPage key={isSoundStudio ? `sound/${visit}${destination.home ? ':home' : ''}` : draftKey + visit} active={active} hasProject={hasProject} studio={{ destination, catalog, draftKey, soundTab: activeSoundTab, selectSoundTab, useAsFirstFrame, reuseInScene, initialDraft,
       remember: draft => drafts.current.set(draftKey, draft), chooseModel: model => onNavigate({ ...destination, model }, activeSoundTab === 'music' || activeSoundTab === 'speech' ? null : activeSoundTab), openCreate }} />
+    </div>
   </div>;
 }

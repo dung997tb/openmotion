@@ -18,7 +18,7 @@ import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { GameMasonry, interleavePortrait } from './GameMasonry';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
-import { buildDirectGamePrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
+import { buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import './gameStudio.css';
 
 type Menu = 'genre' | 'style' | 'setting';
@@ -147,7 +147,8 @@ export function GameStudio({
       const ready = created.game.status === 'ready' || created.game.status === 'published';
       setOpenIdState(null);
       const handoff = buildSuperAgentHandoff(toGameCapabilityRef(created.game, displayTitle), {
-        prompt: buildDirectGamePrompt(created.game, created.agentInstruction),
+        prompt: buildGameUserPrompt(created.game, locale),
+        hiddenInstructions: buildGameHiddenInstructions(created.game, created.agentInstruction),
         locale,
         newChat: true,
         autoSend: true,
@@ -163,7 +164,8 @@ export function GameStudio({
     const displayTitle = getGameTitle(game);
     setOpenIdState(null);
     const handoff = buildSuperAgentHandoff(toGameCapabilityRef(game, displayTitle), {
-      prompt: buildDirectGamePrompt(game, instruction),
+      prompt: buildGameUserPrompt(game, locale),
+      hiddenInstructions: buildGameHiddenInstructions(game, instruction),
       locale,
       newChat: true,
       autoSend: true,

@@ -1,20 +1,30 @@
 import type { GatewayStatus, Model, GenerationJob, GenerateInput } from '../../../shared/gateway';
+import { isClientCacheEnabled } from '../utils/clientCacheMode';
+import {
+  clearGatewayCacheState,
+  getFreshCachedGateway,
+  getGatewayCacheGeneration,
+  peekCachedGateway,
+  saveCachedGateway,
+} from './gatewayCache';
 export type { GatewayStatus, Model, GenerationJob, GenerateInput, Modality, GeneratedAsset } from '../../../shared/gateway';
+export { peekCachedGateway } from './gatewayCache';
 
-const GATEWAY_CACHE_TTL_MS = 5_000;
-const cacheEnabled = typeof process === 'undefined' || (!process.env?.VITEST && process.env?.NODE_ENV !== 'test');
-
-let cacheGeneration = 0;
-let cachedGateway: { value: { status: GatewayStatus; models: Model[] }; expiresAt: number } | null = null;
 let inflightModels: Promise<Model[]> | null = null;
 let inflightGateway: Promise<{ status: GatewayStatus; models: Model[] }> | null = null;
 let gatewayListenerRegistered = false;
 
 export function invalidateGatewayCache(): void {
-  cacheGeneration++;
-  cachedGateway = null;
+  clearGatewayCacheState();
   inflightModels = null;
   inflightGateway = null;
+}
+
+/** Warms the gateway catalog cache in the background when missing or expired. */
+export function prefetchGateway(): void {
+  if (!isClientCacheEnabled()) return;
+  if (getFreshCachedGateway()) return;
+  void loadGateway().catch(() => {});
 }
 
 function ensureGatewayInvalidationListener(): void {
@@ -50,17 +60,14 @@ export async function loadModels(): Promise<Model[]> {
 
 export async function loadGateway() {
   ensureGatewayInvalidationListener();
-  if (cacheEnabled && cachedGateway && cachedGateway.expiresAt > Date.now()) {
-    return cachedGateway.value;
-  }
+  const cached = getFreshCachedGateway();
+  if (cached) return cached;
   if (inflightGateway) return inflightGateway;
-  const generation = cacheGeneration;
+  const generation = getGatewayCacheGeneration();
   const run = Promise.all([gatewayRequest<GatewayStatus>('models/capabilities'), loadModels()]).then(
     ([status, models]) => {
       const result = { status, models };
-      if (cacheEnabled && generation === cacheGeneration) {
-        cachedGateway = { value: result, expiresAt: Date.now() + GATEWAY_CACHE_TTL_MS };
-      }
+      saveCachedGateway(result, generation);
       return result;
     },
   );

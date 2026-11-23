@@ -16,7 +16,7 @@ import { reportCreativeClick } from '../../motion/exploreTracking';
 import designArtwork from '../../motion/scene-art/studio-glass-sculpture.jpg';
 import { useIntegrationInfo } from '../../motion/useIntegrationInfo';
 import { BrandKitPicker, type SelectedBrandKit } from '../BrandKitPicker';
-import { designClient } from '../designClient';
+import { designClient, peekCachedDesignSkills, peekCachedDesignTemplates } from '../designClient';
 import { DesignProjectList } from '../DesignProjectList';
 import { DesignTemplateDetailModal } from '../DesignTemplateDetailModal';
 import { ScaledPreviewThumb } from '../ScaledPreviewThumb';
@@ -55,15 +55,16 @@ export function DesignScenePage({
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [selectedBrandKit, setSelectedBrandKit] = useState<SelectedBrandKit | null>(null);
 
-  const [skills, setSkills] = useState<DesignSkillSummary[]>([]);
+  const initialTemplates = scenario ? peekCachedDesignTemplates({ scenario: scenario.id, limit: 24 })?.items : undefined;
+  const [skills, setSkills] = useState<DesignSkillSummary[]>(() => peekCachedDesignSkills() ?? []);
   const [skillQuery, setSkillQuery] = useState('');
   const [selectedSkills, setSelectedSkills] = useState<DesignSkillSummary[]>([]);
   const [skillOpen, setSkillOpen] = useState(false);
 
   const [selectedTemplates, setSelectedTemplates] = useState<DesignTemplateSummary[]>([]);
-  const [templates, setTemplates] = useState<DesignTemplateSummary[]>([]);
+  const [templates, setTemplates] = useState<DesignTemplateSummary[]>(() => initialTemplates ?? []);
   const [templateQuery, setTemplateQuery] = useState('');
-  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesLoading, setTemplatesLoading] = useState(() => Boolean(scenario && !initialTemplates));
   const [templatesFailed, setTemplatesFailed] = useState(false);
   const [templateRetry, setTemplateRetry] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -122,12 +123,21 @@ export function DesignScenePage({
   useEffect(() => {
     if (!scenario) return;
     let cancelled = false;
-    setTemplatesLoading(true);
+    const trimmedQuery = templateQuery.trim() || undefined;
+    const cached = !trimmedQuery && templateRetry === 0
+      ? peekCachedDesignTemplates({ scenario: scenario.id, limit: 24 })
+      : undefined;
+    if (cached) {
+      setTemplates(cached.items);
+      setTemplatesLoading(false);
+    } else {
+      setTemplatesLoading(true);
+    }
     setTemplatesFailed(false);
-    designClient.listTemplates({ scenario: scenario.id, q: templateQuery.trim() || undefined, limit: 24 })
+    designClient.listTemplates({ scenario: scenario.id, q: trimmedQuery, limit: 24 })
       .then(res => { if (!cancelled) setTemplates(Array.isArray(res?.items) ? res.items : []); })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || cached) return;
         setTemplates([]);
         setTemplatesFailed(true);
       })

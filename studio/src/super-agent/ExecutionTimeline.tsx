@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import type {
-  SuperAgentArtifact,
-  SuperAgentChat,
-  SuperAgentFileOperation,
-  SuperAgentMessage,
-  SuperAgentResourceAttachment,
-  SuperAgentToolCategory,
-  SuperAgentToolEvent,
+import {
+  describeSuperAgentApproval,
+  type SuperAgentApproval,
+  type SuperAgentArtifact,
+  type SuperAgentChat,
+  type SuperAgentFileOperation,
+  type SuperAgentMessage,
+  type SuperAgentResourceAttachment,
+  type SuperAgentToolCategory,
+  type SuperAgentToolEvent,
 } from '../../../shared/super-agent';
 import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
+import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
 import { resourceIcon, resourceKey } from './ResourcePickerDialog';
 import { SimpleMarkdown } from './SimpleMarkdown';
 
@@ -111,54 +114,6 @@ function categoryIcon(category: SuperAgentToolCategory | undefined, status: Supe
       return 'code-s-slash-line';
   }
 }
-
-function artifactDeliverableMeta(artifact: SuperAgentArtifact): {
-  icon: string;
-  tone: 'coding' | 'image' | 'video' | 'audio' | 'agent';
-  typeLabel: string;
-} {
-  switch (artifact.kind) {
-    case 'design-project':
-      if (artifact.scenario === 'deck' || artifact.scenario === 'document') {
-        return { icon: 'slideshow-line', tone: 'audio', typeLabel: 'Slides & Docs' };
-      }
-      return { icon: 'layout-line', tone: 'agent', typeLabel: 'Interactive Prototype' };
-    case 'motion-project':
-      return { icon: 'movie-line', tone: 'video', typeLabel: 'Motion Video' };
-    case 'motion-export':
-      return { icon: 'clapperboard-line', tone: 'video', typeLabel: 'Motion Video' };
-    case 'asset-image':
-      return { icon: 'image-line', tone: 'image', typeLabel: 'Image Artwork' };
-    case 'asset-video':
-      return { icon: 'film-line', tone: 'video', typeLabel: 'Video Asset' };
-    case 'asset-audio':
-      return { icon: 'music-2-line', tone: 'audio', typeLabel: 'Audio Track' };
-    case 'brand-kit':
-      return { icon: 'palette-line', tone: 'image', typeLabel: 'Brand Kit' };
-    case 'game-project':
-      return { icon: 'sparkling-line', tone: 'agent', typeLabel: 'HTML Game' };
-    case 'web':
-      return { icon: 'global-line', tone: 'coding', typeLabel: 'Web Page' };
-    default:
-      return { icon: 'file-line', tone: 'agent', typeLabel: 'Artifact' };
-  }
-}
-
-const RAW_ARTIFACT_SUBTITLES = new Set([
-  'prototype',
-  'website',
-  'deck',
-  'document',
-  'game',
-  'motion',
-  'video',
-  'image',
-  'audio',
-  'brand-kit',
-  'design-project',
-  'motion-project',
-  'game-project',
-]);
 
 function collectTurnFiles(workItems: SuperAgentMessage[]): SuperAgentFileOperation[] {
   const byPath = new Map<string, SuperAgentFileOperation>();
@@ -883,6 +838,12 @@ export function ExecutionTimeline({
   onPreviewAttachment,
   onOpenWebUrl,
   onCopyText,
+  onNotify,
+  onOpenAccountSettings,
+  onOpenInDesignStudio,
+  onOpenInMotionStudio,
+  onOpenInAssets,
+  onOpenInBrandKit,
   onApprove,
   onContinue,
 }: {
@@ -896,7 +857,13 @@ export function ExecutionTimeline({
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
-  onApprove: (approvalId: string, accepted: boolean) => void;
+  onNotify?: (message: string, tone?: 'info' | 'error') => void;
+  onOpenAccountSettings?: () => void;
+  onOpenInDesignStudio?: (projectId: string) => void;
+  onOpenInMotionStudio?: (projectId: string) => void;
+  onOpenInAssets?: (assetId: string, versionId?: string) => void;
+  onOpenInBrandKit?: (kitId?: string) => void;
+  onApprove: (approvalId: string, accepted: boolean, alwaysAllow?: boolean) => void;
   onContinue?: () => void;
 }) {
   const { t } = useI18n();
@@ -991,37 +958,20 @@ export function ExecutionTimeline({
 
             {turn.artifacts.length > 0 && (
               <div className="om-sa-deliverables" data-count={turn.artifacts.length === 1 ? 'single' : 'multi'}>
-                {turn.artifacts.map(artifact => {
-                  const meta = artifactDeliverableMeta(artifact);
-                  const rawSub = (artifact.subtitle ?? '').trim();
-                  const subDetail = rawSub && !RAW_ARTIFACT_SUBTITLES.has(rawSub.toLowerCase()) ? rawSub : '';
-                  const subtitleText = subDetail ? `${t(meta.typeLabel)} · ${subDetail}` : t(meta.typeLabel);
-                  return (
-                    <Button
-                      key={artifact.id}
-                      variant="plain"
-                      type="button"
-                      className="om-sa-deliverable-card"
-                      onClick={() => onOpenArtifactId(artifact.id)}
-                    >
-                      <span className="om-sa-deliverable-icon" data-tone={meta.tone} aria-hidden="true">
-                        {artifact.kind === 'asset-image' && artifact.url ? (
-                          <img className="om-sa-deliverable-thumb" src={artifact.url} alt="" />
-                        ) : (
-                          <RemixIcon name={meta.icon} size={20} />
-                        )}
-                      </span>
-                      <span className="om-sa-deliverable-meta">
-                        <strong>{artifact.title}</strong>
-                        <small>{subtitleText}</small>
-                      </span>
-                      <span className="om-sa-deliverable-action" aria-hidden="true">
-                        <span>{t('Open')}</span>
-                        <RemixIcon name="arrow-right-up-line" size={14} />
-                      </span>
-                    </Button>
-                  );
-                })}
+                {turn.artifacts.map(artifact => (
+                  <ArtifactDeliverableCard
+                    key={artifact.id}
+                    artifact={artifact}
+                    onOpenArtifactId={onOpenArtifactId}
+                    onCopyText={onCopyText}
+                    onNotify={onNotify}
+                    onOpenAccountSettings={onOpenAccountSettings}
+                    onOpenInDesignStudio={onOpenInDesignStudio}
+                    onOpenInMotionStudio={onOpenInMotionStudio}
+                    onOpenInAssets={onOpenInAssets}
+                    onOpenInBrandKit={onOpenInBrandKit}
+                  />
+                ))}
               </div>
             )}
 
@@ -1111,39 +1061,102 @@ export function ExecutionTimeline({
       )}
 
       {chat.approvals.map(approval => (
-        <section key={approval.id} className="om-creation-approval om-sa-approval">
-          <div className="om-creation-row">
-            <span className="om-creation-icon" data-tone="audio">
-              <RemixIcon name="shield-check-line" size={18} />
-            </span>
-            <div>
-              <h3 className="om-subtitle">{t(approval.title)}</h3>
-              <p className="om-muted">{t('Review this action before it runs.')}</p>
-            </div>
-          </div>
-          <pre className="om-code-block">{approval.detail}</pre>
-          <div className="om-asset-actions">
-            <Button
-              variant="ghost"
-              className="om-button h-auto"
-              disabled={sending}
-              onClick={() => onApprove(approval.id, false)}
-            >
-              {t('Decline')}
-            </Button>
-            <Button
-              variant="ghost"
-              className="om-button h-auto"
-              data-primary
-              disabled={sending}
-              onClick={() => onApprove(approval.id, true)}
-            >
-              <RemixIcon name="check-line" size={15} />
-              <span>{t('Approve')}</span>
-            </Button>
-          </div>
-        </section>
+        <ApprovalCard
+          key={approval.id}
+          approval={approval}
+          sending={sending}
+          onApprove={onApprove}
+        />
       ))}
     </div>
+  );
+}
+
+function approvalKindIcon(kind: SuperAgentApproval['kind']): string {
+  switch (kind) {
+    case 'command':
+      return 'terminal-box-fill';
+    case 'file':
+      return 'file-code-line';
+    case 'generation':
+      return 'sparkling-line';
+    default:
+      return 'shield-check-line';
+  }
+}
+
+function ApprovalCard({
+  approval,
+  sending,
+  onApprove,
+}: {
+  approval: SuperAgentApproval;
+  sending: boolean;
+  onApprove: (approvalId: string, accepted: boolean, alwaysAllow?: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const display = useMemo(() => describeSuperAgentApproval(approval), [approval]);
+  const heading = display.headingFallback ? t(display.headingFallback) : t(display.headingKey);
+  const summaryText = display.summaryText ?? t(display.summaryKey, display.summaryVars);
+
+  return (
+    <section className="om-sa-approval" aria-label={heading}>
+      <div className="om-sa-approval-head">
+        <span className="om-sa-approval-icon" data-kind={approval.kind}>
+          <RemixIcon name={approvalKindIcon(approval.kind)} size={17} />
+        </span>
+        <div className="om-sa-approval-copy">
+          <div className="om-sa-approval-title-row">
+            <h3 className="om-sa-approval-title">{heading}</h3>
+            {display.target && (
+              <span className="om-sa-approval-target" title={display.target}>
+                {display.target}
+              </span>
+            )}
+          </div>
+          <p className="om-sa-approval-summary">{summaryText}</p>
+        </div>
+      </div>
+
+      {display.technicalDetail && (
+        <details className="om-sa-approval-details">
+          <summary className="om-sa-approval-details-toggle">
+            <span>{t('View details')}</span>
+            <RemixIcon name="arrow-down-s-line" size={14} />
+          </summary>
+          <pre className="om-sa-approval-pre">{display.technicalDetail}</pre>
+        </details>
+      )}
+
+      <div className="om-sa-approval-actions">
+        <Button
+          variant="plain"
+          className="om-sa-approval-btn"
+          data-primary
+          disabled={sending}
+          onClick={() => onApprove(approval.id, true)}
+        >
+          <RemixIcon name="check-line" size={15} />
+          <span>{t('Approve')}</span>
+        </Button>
+        <Button
+          variant="plain"
+          className="om-sa-approval-btn"
+          disabled={sending}
+          onClick={() => onApprove(approval.id, true, true)}
+        >
+          <span>{t('Always allow in this task')}</span>
+        </Button>
+        <Button
+          variant="plain"
+          className="om-sa-approval-btn"
+          data-quiet
+          disabled={sending}
+          onClick={() => onApprove(approval.id, false)}
+        >
+          <span>{t('Decline')}</span>
+        </Button>
+      </div>
+    </section>
   );
 }

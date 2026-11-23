@@ -63,7 +63,11 @@ export function CapabilityActionBar({
   };
 
   const handleRunInSuperAgent = () => {
-    const handoff = buildSuperAgentHandoff(resource, { prompt: agentPrompt, locale });
+    const handoff = buildSuperAgentHandoff(resource, {
+      prompt: agentPrompt,
+      hiddenInstructions: mcpPrompt?.trim() || undefined,
+      locale,
+    });
     onBeforeNavigate?.();
     if (chrome?.openInSuperAgent) {
       chrome.openInSuperAgent(handoff);

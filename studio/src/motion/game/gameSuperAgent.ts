@@ -53,7 +53,18 @@ export function toGameResourceAttachment(game: GameCard, displayTitle: string): 
   };
 }
 
-export function buildDirectGamePrompt(game: GameCard, instruction: string, userNotes?: string): string {
+export function buildGameUserPrompt(game: GameCard, locale: string, userNotes?: string): string {
+  const notes = userNotes?.trim();
+  if (notes) return notes;
+  const desc = localizedGameDescription(game, locale)?.trim();
+  if (desc) return desc;
+  const title = localizedGameTitle(game, locale)?.trim() || game.title;
+  return locale.toLowerCase().startsWith('zh')
+    ? `帮我制作小游戏「${title}」。`
+    : `Build the game "${title}".`;
+}
+
+export function buildGameHiddenInstructions(game: GameCard, instruction: string, userNotes?: string): string {
   const layout = game.orientation === 'portrait' ? 'portrait 9:16 phone layout (390x844)' : 'landscape 16:9 widescreen layout';
   const trimmedNotes = userNotes?.trim();
   const extraNotes = trimmedNotes && trimmedNotes !== game.description.trim()
@@ -71,6 +82,10 @@ export function buildDirectGamePrompt(game: GameCard, instruction: string, userN
     extraNotes,
     `Game Studio context: ${contextParts.join(', ')}. Proceed directly to building and testing without unnecessary questions. If custom visual sprites, textures, music, or sound effects will elevate the game, you may generate reusable assets via openmotion_assets_use(action="generate") and reference their /motion-api/assets/<assetId>/versions/<versionId>/media URLs. Always finish by calling openmotion_present_artifact(kind="game-project", projectId="${game.id}") so the playable result opens in the Browser Artifact Viewer.`,
   ].filter(Boolean).join('\n\n');
+}
+
+export function buildDirectGamePrompt(game: GameCard, instruction: string, userNotes?: string): string {
+  return buildGameHiddenInstructions(game, instruction, userNotes);
 }
 
 export type GameQuickIdea = {

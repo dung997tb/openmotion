@@ -88,7 +88,7 @@ export function KeepAliveSlot({
 
   return (
     <div
-      className={className}
+      className={className ? `${className} om-route-surface` : 'om-route-surface'}
       hidden={!active}
       aria-hidden={!active}
       inert={!active}

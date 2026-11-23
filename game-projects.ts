@@ -16,6 +16,8 @@ import { execute, pluginRoot, HYPERFRAMES_VERSION } from './hyperframes.ts';
 import { verificationBinaries } from './scripts/verify-export.ts';
 import type { Duplex } from 'node:stream';
 import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/preview-bridge.ts';
+import { attachmentDisposition } from './shared/http-header.ts';
+import { zip } from './scripts/zip.mjs';
 import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
 
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
@@ -430,6 +432,25 @@ export class GameProjects {
     const state = await jsonFile<Record<string, Viewer>>(path.join(this.root, '.state.json'), {}); delete state[id]; await saveJson(path.join(this.root, '.state.json'), state); return { deleted: true, id };
   }); }
   async detail(id: string) { const game = await this.get(id); return { ...game, files: await inventory((await this.locate(id)).dir) }; }
+  async exportZip(id: string): Promise<{ filename: string; data: Buffer }> {
+    const game = await this.get(id);
+    const { dir } = await this.locate(id);
+    const files = await inventory(dir);
+    let total = 0;
+    const entries: { name: string; data: Buffer }[] = [];
+    for (const item of files) {
+      total += item.bytes;
+      if (total > 64 * 1024 * 1024) throw new GameError('Game export exceeds 64 MiB limit', 413);
+      const file = await safeFile(dir, item.path);
+      entries.push({ name: item.path, data: await readFile(file) });
+    }
+    const slug = (game.title || game.id)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || game.id;
+    return { filename: `${slug}.zip`, data: zip(entries) };
+  }
   async read(id: string, relative: string) {
     if (!textExtensions.test(relative) || relative.toLowerCase() === 'game.json' || relative.toLowerCase().startsWith('trailer/')) throw new GameError('Only game text source may be read');
     const file = await safeFile((await this.locate(id)).dir, relative);
@@ -998,6 +1019,18 @@ export async function gameHttp(req: IncomingMessage, res: ServerResponse, url: U
     if (action === 'trailer' && !rest.length && req.method==='GET')return json(200,await service.trailer(id));
     if (action === 'handoff' && !rest.length && req.method==='GET')return json(200,await service.handoff(id));
     if (action === 'files' && !rest.length && req.method==='GET')return json(200,{ files: (await service.detail(id)).files });
+    if (action === 'export' && !rest.length && req.method === 'GET') {
+      const archive = await service.exportZip(id);
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Length': archive.data.length,
+        'Content-Disposition': attachmentDisposition(archive.filename, `${id}.zip`),
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(archive.data);
+      return true;
+    }
     if (action === 'play' && req.method === 'GET') {
       const entry=!rest.length||(rest.length===1&&rest[0]==='index.html');
       if(entry&&!url.searchParams.has('room')&&(await service.get(id)).multiplayer){

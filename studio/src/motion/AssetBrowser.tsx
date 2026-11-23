@@ -15,6 +15,7 @@ import { AssetHoverVideo } from './AssetHoverVideo';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import { SettingsDialog } from './settingsPrimitives';
 import { assetRequest } from './assetClient';
+import { peekCachedAssetList, runCachedAssetList, type AssetListArgs, type AssetListResult } from './assetCache';
 export const assetKinds = [{ id: 'all', label: 'All assets', icon: 'folder-open-line' }, { id: 'image', label: 'Images', icon: 'image-line' }, { id: 'video', label: 'Videos', icon: 'movie-line' }, { id: 'audio', label: 'Audio', icon: 'music-2-line' }] as const;
 export type AssetKind = typeof assetKinds[number]['id'] | 'trash';
 export const AssetPreview = memo(function AssetPreview({ asset, version = assetVersion(asset)!, controls = false, previewing = false, autoPlay = false }: { asset: LibraryAsset; version?: AssetVersion; controls?: boolean; previewing?: boolean; autoPlay?: boolean }) {
@@ -55,37 +56,55 @@ export function useAssetBrowser({ kind, revision = 0, active = true, lockedSourc
   const [query, setQuery] = useState(''), [sourceState, setSource] = useState('all'), [sort, setSort] = useState('newest');
   const [audioKind, setAudioKind] = useState<'all' | AudioKind>('all');
   const source = lockedSource ?? sourceState;
-  const [result, setResult] = useState<{ key: string; assets: LibraryAsset[]; total: number; nextOffset: number | null }>();
-  const [error, setError] = useState(false), [loading, setLoading] = useState(true), [retry, setRetry] = useState(0), [page, setPage] = useState(0);
   const effectiveAudioKind = kind === 'audio' ? audioKind : 'all';
   const signature = `${kind}|${effectiveAudioKind}|${query}|${source}|${sort}|${revision}`;
+  const [previous, setPrevious] = useState(signature);
+  const [page, setPage] = useState(0);
+  if (previous !== signature) { setPrevious(signature); setPage(0); }
   const requestKey = `${signature}|${page}`;
+  const listArgs = useMemo<AssetListArgs>(() => ({
+    ...(kind !== 'all' && kind !== 'trash' ? { modality: kind } : {}),
+    ...(kind === 'audio' && effectiveAudioKind !== 'all' ? { audioKind: effectiveAudioKind } : {}),
+    trash: kind === 'trash',
+    query,
+    ...(source !== 'all' ? { source } : {}),
+    sort,
+    offset: page * 40,
+    limit: 40,
+  }), [kind, effectiveAudioKind, query, source, sort, page]);
+  const initialCached = !query ? peekCachedAssetList(listArgs) : undefined;
+  const [result, setResult] = useState<{ key: string; assets: LibraryAsset[]; total: number; nextOffset: number | null } | undefined>(() =>
+    initialCached ? { ...initialCached, key: requestKey } : undefined,
+  );
+  const [error, setError] = useState(false), [loading, setLoading] = useState(() => !initialCached), [retry, setRetry] = useState(0);
   // Keep the last settled collection visible while a new filter or tab request
   // is in flight. Skeleton cards are reserved for the initial load, so tab
   // changes do not flash a second loading surface over the existing gallery.
   const data = result;
   const stale = Boolean(data && data.key !== requestKey);
-  const [previous, setPrevious] = useState(signature);
-  if (previous !== signature) { setPrevious(signature); setPage(0); }
   useEffect(() => {
     if (!active) return;
-    let cancelled = false; setLoading(true); setError(false);
+    let cancelled = false;
+    const cached = !query && revision === 0 && retry === 0 ? peekCachedAssetList(listArgs) : undefined;
+    if (cached) {
+      setResult({ ...cached, key: requestKey });
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    setError(false);
     const timer = setTimeout(() => {
-      void assetRequest<{ assets: LibraryAsset[]; total: number; nextOffset: number | null }>({
-        action: 'list',
-        ...(kind !== 'all' && kind !== 'trash' ? { modality: kind } : {}),
-        ...(kind === 'audio' && effectiveAudioKind !== 'all' ? { audioKind: effectiveAudioKind } : {}),
-        trash: kind === 'trash',
-        query,
-        ...(source !== 'all' ? { source } : {}),
-        sort,
-        offset: page * 40,
-        limit: 40,
-      })
-        .then(result => { if (!cancelled) setResult({ ...result, key: requestKey }); }).catch(() => { if (!cancelled) setError(true); }).finally(() => { if (!cancelled) setLoading(false); });
+      void runCachedAssetList(
+        listArgs,
+        normalized => assetRequest<AssetListResult>({ action: 'list', ...normalized }),
+        { force: revision > 0 || retry > 0 },
+      )
+        .then(result => { if (!cancelled) setResult({ ...result, key: requestKey }); })
+        .catch(() => { if (!cancelled && !cached) setError(true); })
+        .finally(() => { if (!cancelled) setLoading(false); });
     }, query ? 180 : 0);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [active, kind, effectiveAudioKind, query, source, sort, page, revision, retry, requestKey]);
+  }, [active, listArgs, query, revision, retry, requestKey]);
   return { kind, audioKind: effectiveAudioKind, setAudioKind, query, setQuery, source, setSource, sort, setSort, data, stale, loading: loading || (stale && !error), error, page, setPage, retry: () => setRetry(v => v + 1) };
 }
 type BrowserActions = {

@@ -26,9 +26,13 @@ export interface WebPublishPopoverProps {
   title?: string;
   revisionKey?: string;
   compact?: boolean;
+  lazy?: boolean;
   disabled?: boolean;
   triggerLabel?: string;
-  autoOpenSeq?: number;
+  triggerIcon?: string;
+  triggerClassName?: string;
+  autoOpen?: boolean;
+  onAutoOpenConsumed?: () => void;
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
   onNotify?: (message: string, variant?: 'info' | 'error') => void;
@@ -80,9 +84,13 @@ export function WebPublishPopover({
   title,
   revisionKey,
   compact = false,
+  lazy = false,
   disabled = false,
   triggerLabel,
-  autoOpenSeq,
+  triggerIcon = 'share-forward-line',
+  triggerClassName,
+  autoOpen = false,
+  onAutoOpenConsumed,
   side = 'bottom',
   align = 'end',
   onNotify,
@@ -91,7 +99,7 @@ export function WebPublishPopover({
 }: WebPublishPopoverProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const { account, refresh: refreshAccount, setAccount } = useAccountSummary();
+  const { account, refresh: refreshAccount, setAccount } = useAccountSummary({ eager: !lazy });
   const [status, setStatus] = useState<WebPublishStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeOp, setActiveOp] = useState<ActiveOp>(null);
@@ -101,7 +109,6 @@ export function WebPublishPopover({
   const [prepublishEnabled, setPrepublishEnabled] = useState(true);
   const deployAfterSignInRef = useRef(false);
   const prevAccountStateRef = useRef<AccountSummary['state'] | undefined>(undefined);
-  const lastAutoOpenSeqRef = useRef<number | undefined>(undefined);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -113,10 +120,10 @@ export function WebPublishPopover({
   }, [targetKind, targetId, filePath]);
 
   useEffect(() => {
-    if (!autoOpenSeq || lastAutoOpenSeqRef.current === autoOpenSeq) return;
-    lastAutoOpenSeqRef.current = autoOpenSeq;
+    if (!autoOpen) return;
     setOpen(true);
-  }, [autoOpenSeq, targetId]);
+    onAutoOpenConsumed?.();
+  }, [autoOpen, onAutoOpenConsumed]);
 
   useEffect(() => () => {
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
@@ -289,15 +296,21 @@ export function WebPublishPopover({
           variant={compact ? 'plain' : 'ghost'}
           type="button"
           disabled={disabled}
-          className={compact ? 'om-web-publish-trigger om-web-publish-trigger--compact' : 'om-button om-web-publish-trigger'}
-          data-primary={compact ? undefined : true}
+          className={
+            triggerClassName
+              ? triggerClassName
+              : compact
+                ? 'om-web-publish-trigger om-web-publish-trigger--compact'
+                : 'om-button om-web-publish-trigger'
+          }
+          data-primary={compact || triggerClassName ? undefined : true}
           data-active={open || undefined}
           data-live={isPublished || undefined}
           aria-label={triggerLabel ?? t('Share')}
           title={triggerLabel ?? t('Share')}
           aria-expanded={open}
         >
-          <RemixIcon name="share-forward-line" size={compact ? 14 : 14} />
+          <RemixIcon name={triggerIcon} size={14} />
           <span className="om-web-publish-trigger-label">{triggerLabel ?? t('Share')}</span>
           {isPublished && <span className="om-web-publish-dot" aria-hidden="true" />}
         </Button>

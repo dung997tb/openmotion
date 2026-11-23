@@ -13,6 +13,42 @@ import {
   type StepIteration,
 } from '../../../shared/scenario-runs';
 import type { ScenarioDefinition, ScenarioId, scenarioCategories, socialPlatforms } from '../../../shared/scenarios';
+import { isClientCacheEnabled } from '../utils/clientCacheMode';
+
+export type ScenarioListArgs = { scenarioId?: ScenarioId; includeArchived?: boolean; offset?: number; limit?: number };
+export type ScenarioListResult = { runs: ScenarioRunSummary[]; nextOffset: number | null };
+
+const SCENARIO_LIST_CACHE_TTL_MS = 20_000;
+let scenarioListGeneration = 0;
+const scenarioListCache = new Map<string, { value: ScenarioListResult; expiresAt: number }>();
+const inflightScenarioLists = new Map<string, Promise<ScenarioListResult>>();
+
+function scenarioListKey(args: ScenarioListArgs = {}): string {
+  return JSON.stringify([
+    args.scenarioId ?? 'all',
+    Boolean(args.includeArchived),
+    args.offset ?? 0,
+    args.limit ?? 6,
+  ]);
+}
+
+export function clearScenarioListCache(): void {
+  scenarioListGeneration++;
+  scenarioListCache.clear();
+  inflightScenarioLists.clear();
+}
+
+export function peekCachedScenarioList(args: ScenarioListArgs = {}): ScenarioListResult | undefined {
+  if (!isClientCacheEnabled()) return undefined;
+  return scenarioListCache.get(scenarioListKey(args))?.value;
+}
+
+export function prefetchScenarioHub(): void {
+  if (!isClientCacheEnabled()) return;
+  const cached = scenarioListCache.get(scenarioListKey({ offset: 0, limit: 6 }));
+  if (cached && cached.expiresAt > Date.now()) return;
+  void scenarioClient.list({ offset: 0, limit: 6 }).catch(() => {});
+}
 
 export class ScenarioApiError extends Error {
   readonly code: string;
@@ -25,6 +61,9 @@ export class ScenarioApiError extends Error {
 }
 
 export async function scenarioRequest<T>(command: ScenarioCommand, args: Record<string, unknown> = {}): Promise<T> {
+  if (command !== 'catalog' && command !== 'list' && command !== 'get') {
+    clearScenarioListCache();
+  }
   const response = await fetch('/motion-api/phase1/call', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -68,8 +107,29 @@ export const scenarioClient = {
       platforms: typeof socialPlatforms;
     }>('catalog'),
 
-  list: (args: { scenarioId?: ScenarioId; includeArchived?: boolean; offset?: number; limit?: number } = {}) =>
-    scenarioRequest<{ runs: ScenarioRunSummary[]; nextOffset: number | null }>('list', args),
+  list: (args: ScenarioListArgs = {}) => {
+    const key = scenarioListKey(args);
+    if (isClientCacheEnabled()) {
+      const cached = scenarioListCache.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        return Promise.resolve(cached.value);
+      }
+    }
+    const existing = inflightScenarioLists.get(key);
+    if (existing) return existing;
+
+    const gen = scenarioListGeneration;
+    const run = scenarioRequest<ScenarioListResult>('list', args).then(result => {
+      if (isClientCacheEnabled() && gen === scenarioListGeneration) {
+        scenarioListCache.set(key, { value: result, expiresAt: Date.now() + SCENARIO_LIST_CACHE_TTL_MS });
+      }
+      return result;
+    });
+    inflightScenarioLists.set(key, run);
+    return run.finally(() => {
+      if (inflightScenarioLists.get(key) === run) inflightScenarioLists.delete(key);
+    });
+  },
 
   get: (runId: string) =>
     scenarioRequest<{ run: ScenarioRun }>('get', { runId }),

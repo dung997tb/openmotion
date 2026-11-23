@@ -21,6 +21,7 @@ import { AssetComposer, type AssetDraft } from './AssetComposer';
 import { AssetGenerationPlaceholder } from './AssetGenerationPlaceholder';
 import { MediaGenerationHistory } from './MediaGenerationHistory';
 import { assetRequest, uploadLibraryAsset } from './assetClient';
+import { peekCachedAssetHistory, saveCachedAssetHistory } from './assetCache';
 import { AssetUploadError } from './assetUploadError';
 import { assetUploadMessage, type AssetUploadSummary } from '../i18n/assetUploadMessages';
 import { AssetDetailWorkspace } from './AssetDetailWorkspace';
@@ -39,7 +40,8 @@ import { AssetGalleryToolbar } from './AssetGalleryToolbar';
 import './assets.css';
 export function AssetsPage({ active, hasProject = false, studio, routeId, routeVersion, onAssetRoute }: { routeId?: string | null; routeVersion?: string | null; onAssetRoute?: (id: string | null, version: string | null) => void; active: boolean; hasProject?: boolean; studio?: StudioCreation }) {
   const { t } = useI18n(), toast = useToast();
-  const [kind, setKind] = useState<AssetKind>(studio?.destination.scene.modality ?? 'all'), [revision, setRevision] = useState(0), [creating, setCreating] = useState(Boolean(studio) && !studio?.openCreate), [picking, setPicking] = useState(false), [uploading, setUploading] = useState(false), [selected, setSelected] = useState<LibraryAsset>(), [versionId, setVersionId] = useState(''), [jobs, setJobs] = useState<GenerationJob[]>([]), [sessionJobIds, setSessionJobIds] = useState<string[]>([]), [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
+  const initialHistory = peekCachedAssetHistory();
+  const [kind, setKind] = useState<AssetKind>(studio?.destination.scene.modality ?? 'all'), [revision, setRevision] = useState(0), [creating, setCreating] = useState(Boolean(studio) && !studio?.openCreate), [picking, setPicking] = useState(false), [uploading, setUploading] = useState(false), [selected, setSelected] = useState<LibraryAsset>(), [versionId, setVersionId] = useState(''), [jobs, setJobs] = useState<GenerationJob[]>(() => initialHistory?.jobs ?? []), [sessionJobIds, setSessionJobIds] = useState<string[]>([]), [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
   const [draft, setDraft] = useState<AssetDraft>(() => studio?.initialDraft ?? { modality: studio?.destination.scene.modality ?? 'image', prompt: '', references: [] });
   const [draftKeyState, setDraftKeyState] = useState(studio?.draftKey);
   if (studio?.draftKey && studio.draftKey !== draftKeyState) {
@@ -51,7 +53,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const [mobileView, setMobileView] = useState<'library' | 'create'>('create');
   const [agentReferences, setAgentReferences] = useState<AssetDraft['references']>([]);
   const [mode, setMode] = useState<AssetTaskMode>('direct'), [taskIds, setTaskIds] = useState<{ direct?: string; agent?: string }>({}), [taskEpoch, setTaskEpoch] = useState(0);
-  const [conversations, setConversations] = useState<AssetChatSummary[]>([]), [historyLoading, setHistoryLoading] = useState(true), [historyError, setHistoryError] = useState<string>(), [historyRetry, setHistoryRetry] = useState(0), [selectingTask, setSelectingTask] = useState(false);
+  const [conversations, setConversations] = useState<AssetChatSummary[]>(() => initialHistory?.conversations ?? []), [historyLoading, setHistoryLoading] = useState(() => !initialHistory), [historyError, setHistoryError] = useState<string>(), [historyRetry, setHistoryRetry] = useState(0), [selectingTask, setSelectingTask] = useState(false);
   const studioForm = studio && !selected ? studio : undefined;
   const scoped = Boolean(studio), lastStudioDraft = useRef(draft);
   useLayoutEffect(() => {
@@ -90,7 +92,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
     if ((current.find(item => item.id === chat.id)?.updatedAt ?? -1) > chat.updatedAt) return current;
     return [chat, ...current.filter(item => item.id !== chat.id)];
   }), []);
-  const referenceUpload = useRef<HTMLInputElement>(null), upload = useRef<HTMLInputElement>(null), replace = useRef<HTMLInputElement>(null), knownJobs = useRef<GenerationJob[]>([]);
+  const referenceUpload = useRef<HTMLInputElement>(null), upload = useRef<HTMLInputElement>(null), replace = useRef<HTMLInputElement>(null), knownJobs = useRef<GenerationJob[]>(initialHistory?.jobs ?? []);
   const refresh = useCallback(() => setRevision(v => v + 1), []), onError = useCallback((message: string) => toast.showToast(message), [toast.showToast]);
   const missingVersion = t('Asset version unavailable');
   const clearPreview = useCallback(() => {
@@ -134,16 +136,22 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
     });
     return () => { selectionRequest.current++; };
   }, [active, routeId, routeVersion, onAssetRoute, onError, clearPreview, selectVersion, missingVersion]);
+  const knownConversations = useRef<AssetChatSummary[]>(initialHistory?.conversations ?? []);
+  knownConversations.current = conversations;
   useVisibilityPolling(
     async signal => {
       try {
         const [jobResult, chatResult] = await Promise.allSettled([assetRequest<{ jobs: GenerationJob[] }>({ action: 'jobs' }), gatewayRequest<{ conversations: AssetChatSummary[] }>('assets/conversations')]);
         if (signal.aborted) return;
-        if (chatResult.status === 'fulfilled') setConversations(current => {
-          const merged = new Map(current.map(chat => [chat.id, chat]));
-          for (const chat of chatResult.value.conversations) if ((merged.get(chat.id)?.updatedAt ?? 0) <= chat.updatedAt) merged.set(chat.id, chat);
-          return [...merged.values()];
-        });
+        let latestConversations = knownConversations.current;
+        if (chatResult.status === 'fulfilled') {
+          latestConversations = chatResult.value.conversations;
+          setConversations(current => {
+            const merged = new Map(current.map(chat => [chat.id, chat]));
+            for (const chat of chatResult.value.conversations) if ((merged.get(chat.id)?.updatedAt ?? 0) <= chat.updatedAt) merged.set(chat.id, chat);
+            return [...merged.values()];
+          });
+        }
         setHistoryError(jobResult.status === 'rejected' || chatResult.status === 'rejected' ? 'Could not load task history' : undefined);
         if (jobResult.status === 'rejected') return;
         const next = mergeAssetJobs(knownJobs.current, jobResult.value.jobs);
@@ -152,6 +160,10 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
           knownJobs.current = next; setJobs(next);
           if (outputsChanged) refresh();
         }
+        saveCachedAssetHistory({
+          jobs: next,
+          conversations: latestConversations,
+        });
       } catch {
         if (!signal.aborted) setHistoryError('Could not load task history');
       } finally {

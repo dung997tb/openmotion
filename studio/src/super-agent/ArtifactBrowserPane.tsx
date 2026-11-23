@@ -25,6 +25,7 @@ import {
   type SuperAgentArtifactKind,
   type SuperAgentResourceAttachment,
 } from '../../../shared/super-agent';
+import { OpenDesignLoadingMark } from '../components/ui/OpenDesignLoadingMark';
 import { Popover } from '../components/ui/Popover';
 import { WebPublishPopover } from '../components/WebPublishPopover';
 import { Select } from '../components/ui/Select';
@@ -1141,9 +1142,7 @@ function GameProjectArtifactView({
   if (isBuilding && mode === 'preview') {
     return (
       <div className="om-sa-game-draft-stage">
-        <span className="om-sa-head-spinner" aria-hidden="true">
-          <RemixIcon name="loader-4-line" size={24} />
-        </span>
+        <OpenDesignLoadingMark height={28} />
         <strong>{t('Agent is running…')}</strong>
         <p className="om-muted">{t('The game will load here when it is ready.')}</p>
       </div>
@@ -1451,7 +1450,8 @@ export function ArtifactBrowserPane({
   onClosePane,
   onAttachArtifact,
   onUseGameInAgent,
-  deployOpenSeq,
+  pendingDeployArtifactId,
+  onConsumeDeployRequest,
   onOpenAccountSettings,
   onAttachBrowserAnnotation,
   onNotify,
@@ -1478,7 +1478,8 @@ export function ArtifactBrowserPane({
   onClosePane: () => void;
   onAttachArtifact: (artifact: SuperAgentArtifact) => void;
   onUseGameInAgent?: (artifact: SuperAgentArtifact) => void;
-  deployOpenSeq?: number;
+  pendingDeployArtifactId?: string | null;
+  onConsumeDeployRequest?: () => void;
   onOpenAccountSettings?: () => void;
   onAttachBrowserAnnotation?: (attachment: SuperAgentResourceAttachment, sendImmediately?: boolean) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
@@ -1502,6 +1503,7 @@ export function ArtifactBrowserPane({
   const [pendingWebUrl, setPendingWebUrl] = useState<string | null>(null);
   const [annotateActive, setAnnotateActive] = useState(false);
   const [annotTool, setAnnotTool] = useState<AnnotationOverlayTool>('select');
+  const [viewModeMenuOpen, setViewModeMenuOpen] = useState(false);
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const [webDevicePreset, setWebDevicePreset] = useState<WebDevicePresetId>('responsive');
   const [webDeviceRotated, setWebDeviceRotated] = useState(false);
@@ -1535,6 +1537,7 @@ export function ArtifactBrowserPane({
     setPendingWebUrl(null);
     setAnnotateActive(false);
     setAnnotTool('select');
+    setViewModeMenuOpen(false);
     setDeviceMenuOpen(false);
     setBrowserMenuOpen(false);
     setConsoleEntries([]);
@@ -2136,46 +2139,73 @@ export function ArtifactBrowserPane({
             const isConstrainedViewport = activeArtifact?.kind === 'web'
               ? webDevicePreset !== 'responsive'
               : viewport !== 'desktop';
+            const showRemixGameAction = !showNewTab
+              && activeArtifact?.kind === 'game-project'
+              && Boolean(onUseGameInAgent)
+              && !activeArtifact.projectId
+              && gameSourceKind !== 'mine';
+            const viewModeOptions: Array<{ id: 'preview' | 'code' | 'trailer'; label: string; icon: string }> = [
+              { id: 'preview', label: t('Preview'), icon: 'eye-line' },
+              { id: 'code', label: t('Code'), icon: 'code-s-slash-line' },
+              ...(activeArtifact?.kind === 'game-project' && gameTrailerUrl
+                ? [{ id: 'trailer' as const, label: t('Trailer'), icon: 'film-line' }]
+                : []),
+            ];
+            const activeViewModeOption = viewModeOptions.find(opt => opt.id === viewMode) ?? viewModeOptions[0];
             return (
               <>
                 {hasModeSwitch && (
-                  <div className="om-sa-segmented" role="group" aria-label={t('View mode')}>
-                    <Button
-                      variant="plain"
-                      type="button"
-                      aria-label={t('Preview')}
-                      title={t('Preview')}
-                      data-active={viewMode === 'preview' || undefined}
-                      onClick={() => setViewMode('preview')}
-                    >
-                      <RemixIcon name="eye-line" size={13} />
-                      <span>{t('Preview')}</span>
-                    </Button>
-                    <Button
-                      variant="plain"
-                      type="button"
-                      aria-label={t('Code')}
-                      title={t('Code')}
-                      data-active={viewMode === 'code' || undefined}
-                      onClick={() => setViewMode('code')}
-                    >
-                      <RemixIcon name="code-s-slash-line" size={13} />
-                      <span>{t('Code')}</span>
-                    </Button>
-                    {activeArtifact?.kind === 'game-project' && gameTrailerUrl && (
+                  <Popover
+                    open={viewModeMenuOpen}
+                    onOpenChange={setViewModeMenuOpen}
+                    side="bottom"
+                    align="end"
+                    initialFocus={false}
+                    aria-label={t('View mode')}
+                    tooltip={`${t('View mode')}: ${activeViewModeOption.label}`}
+                    className="om-sa-view-mode-popover"
+                    trigger={
                       <Button
                         variant="plain"
                         type="button"
-                        aria-label={t('Trailer')}
-                        title={t('Trailer')}
-                        data-active={viewMode === 'trailer' || undefined}
-                        onClick={() => setViewMode('trailer')}
+                        className="om-sa-device-trigger om-sa-view-mode-trigger"
+                        data-active={viewModeMenuOpen || undefined}
+                        data-constrained={viewMode !== 'preview' || undefined}
+                        aria-label={`${t('View mode')}: ${activeViewModeOption.label}`}
+                        aria-expanded={viewModeMenuOpen}
                       >
-                        <RemixIcon name="film-line" size={13} />
-                        <span>{t('Trailer')}</span>
+                        <RemixIcon name={activeViewModeOption.icon} size={15} />
+                        <RemixIcon name="arrow-down-s-line" size={13} className="om-sa-device-caret" />
                       </Button>
-                    )}
-                  </div>
+                    }
+                  >
+                    <div className="om-sa-device-menu" role="menu" aria-label={t('View mode')}>
+                      {viewModeOptions.map(opt => {
+                        const isActive = viewMode === opt.id;
+                        return (
+                          <Button
+                            key={opt.id}
+                            variant="plain"
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={isActive}
+                            className="om-sa-device-menu-item"
+                            data-active={isActive || undefined}
+                            onClick={() => {
+                              setViewMode(opt.id);
+                              setViewModeMenuOpen(false);
+                            }}
+                          >
+                            <RemixIcon name={opt.icon} size={14} />
+                            <span className="om-sa-device-menu-label">{opt.label}</span>
+                            <span className="om-sa-device-menu-check" aria-hidden="true">
+                              {isActive && <RemixIcon name="check-line" size={14} />}
+                            </span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </Popover>
                 )}
 
                 {hasModeSwitch && supportsAnnotate && (
@@ -2345,27 +2375,27 @@ export function ArtifactBrowserPane({
                   </div>
                 )}
 
-                {!showNewTab && activeArtifact?.kind === 'game-project' && onUseGameInAgent && (
+                {showRemixGameAction && onUseGameInAgent && activeArtifact && (
                   <>
                     {(hasModeSwitch || supportsAnnotate) && (
                       <span className="om-sa-toolbar-divider" aria-hidden="true" />
                     )}
-                    <Tooltip label={gameSourceKind === 'mine' ? t('Attach to Chat') : t('Make one like this')}>
+                    <Tooltip label={t('Make one like this')}>
                       <Button
                         variant="plain"
                         type="button"
                         className="om-sa-toolbar-btn om-sa-game-use-btn"
-                        aria-label={gameSourceKind === 'mine' ? t('Attach to Chat') : t('Make one like this')}
+                        aria-label={t('Make one like this')}
                         onClick={() => onUseGameInAgent(activeArtifact)}
                       >
                         <RemixIcon name="sparkling-line" size={14} />
-                        <span>{gameSourceKind === 'mine' ? t('Attach to Chat') : t('Make one like this')}</span>
+                        <span>{t('Make one like this')}</span>
                       </Button>
                     </Tooltip>
                   </>
                 )}
 
-                {canCloudShare && (hasModeSwitch || supportsAnnotate || (activeArtifact?.kind === 'game-project' && Boolean(onUseGameInAgent))) && (
+                {canCloudShare && (hasModeSwitch || supportsAnnotate || showRemixGameAction) && (
                   <span className="om-sa-toolbar-divider" aria-hidden="true" />
                 )}
 
@@ -2377,8 +2407,9 @@ export function ArtifactBrowserPane({
                     embedUrl={gameEmbedUrl}
                     filePath={activeArtifact.entry}
                     title={activeArtifact.title}
-                    triggerLabel={activeArtifact.kind === 'game-project' ? t('Cloud deploy') : undefined}
-                    autoOpenSeq={activeArtifact.kind === 'game-project' ? deployOpenSeq : undefined}
+                    triggerClassName="om-sa-share-trigger"
+                    autoOpen={activeArtifact.kind === 'game-project' && pendingDeployArtifactId === activeArtifact.id}
+                    onAutoOpenConsumed={onConsumeDeployRequest}
                     revisionKey={activeArtifact.revision ?? String(activeArtifact.updatedAt)}
                     onOpenAccount={onOpenAccountSettings}
                     onNotify={onNotify}

@@ -2,6 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { RemixIcon } from '../../../../packages/design-system/react/RemixIcons';
 import { designScenarios, type DesignScenarioId } from '../../../../shared/design-project';
 import { useI18n } from '../../i18n/I18n';
+import { prefetchDesignScene } from '../designClient';
 import '../design.css';
 
 export type DesignTabId = DesignScenarioId | 'projects';
@@ -39,6 +40,8 @@ export function DesignSceneTabs({
           className="om-nav-item"
           icon={<RemixIcon name={scenario.icon} size={14} />}
           aria-current={activeTab === scenario.id ? 'page' : undefined}
+          onPointerEnter={() => prefetchDesignScene(scenario.id)}
+          onFocus={() => prefetchDesignScene(scenario.id)}
           onClick={() => onSelectDesignScene(scenario.id)}
         >
           {t(scenario.label)}

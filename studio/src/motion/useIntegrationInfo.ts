@@ -1,13 +1,26 @@
 import { useEffect, useState } from 'react';
 import { isIntegrationInfo, type IntegrationInfo } from '../../../shared/integration';
+import { isClientCacheEnabled } from '../utils/clientCacheMode';
 
-const INTEGRATION_CACHE_TTL_MS = 10_000;
-const cacheEnabled = typeof process === 'undefined' || (!process.env?.VITEST && process.env?.NODE_ENV !== 'test');
+const INTEGRATION_CACHE_TTL_MS = 30_000;
 
 let cachedIntegration: { value: IntegrationInfo; expiresAt: number } | null = null;
 let inflightIntegration: { promise: Promise<IntegrationInfo>; controller: AbortController; subscribers: number } | null = null;
 
+export function clearIntegrationInfoCache(): void {
+  inflightIntegration?.controller.abort();
+  inflightIntegration = null;
+  cachedIntegration = null;
+}
+
+export function prefetchIntegrationInfo(): void {
+  if (!isClientCacheEnabled()) return;
+  if (cachedIntegration && cachedIntegration.expiresAt > Date.now()) return;
+  void subscribeIntegration(false).promise.catch(() => {});
+}
+
 function subscribeIntegration(forceRefresh: boolean): { promise: Promise<IntegrationInfo>; cancel: () => void } {
+  const cacheEnabled = isClientCacheEnabled();
   if (!cacheEnabled) {
     const controller = new AbortController();
     const promise = (async () => {
@@ -32,7 +45,9 @@ function subscribeIntegration(forceRefresh: boolean): { promise: Promise<Integra
         if (!response.ok) throw new Error('Unavailable');
         const value = await response.json() as IntegrationInfo;
         if (!isIntegrationInfo(value)) throw new Error('Invalid integration');
-        cachedIntegration = { value, expiresAt: Date.now() + INTEGRATION_CACHE_TTL_MS };
+        if (isClientCacheEnabled()) {
+          cachedIntegration = { value, expiresAt: Date.now() + INTEGRATION_CACHE_TTL_MS };
+        }
         return value;
       })(),
     };
@@ -60,7 +75,7 @@ function subscribeIntegration(forceRefresh: boolean): { promise: Promise<Integra
 
 export function useIntegrationInfo() {
   const [info, setInfo] = useState<IntegrationInfo | null>(() =>
-    cacheEnabled && cachedIntegration && cachedIntegration.expiresAt > Date.now()
+    isClientCacheEnabled() && cachedIntegration
       ? cachedIntegration.value
       : null,
   );
@@ -68,14 +83,17 @@ export function useIntegrationInfo() {
   useEffect(() => {
     let cancelled = false;
     const forceRefresh = attempt > 0;
-    if (forceRefresh || !cacheEnabled || !cachedIntegration || cachedIntegration.expiresAt <= Date.now()) {
+    const staleCached = !forceRefresh && isClientCacheEnabled() ? cachedIntegration?.value ?? null : null;
+    if (staleCached) {
+      setInfo(staleCached);
+    } else if (forceRefresh || !isClientCacheEnabled()) {
       setInfo(null);
     }
     setFailed(false);
     const sub = subscribeIntegration(forceRefresh);
     void sub.promise
       .then(value => { if (!cancelled) setInfo(value); })
-      .catch(() => { if (!cancelled) setFailed(true); });
+      .catch(() => { if (!cancelled && !staleCached) setFailed(true); });
     return () => {
       cancelled = true;
       sub.cancel();

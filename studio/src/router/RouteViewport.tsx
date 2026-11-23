@@ -1,7 +1,7 @@
 import { Suspense, type ReactNode, type RefObject } from 'react';
 import { creativeStudios, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import { findScenario, type ScenarioId } from '../../../shared/scenarios';
-import { Skeleton } from '../components/ui/Skeleton';
+import { OpenDesignLoadingMark } from '../components/ui/OpenDesignLoadingMark';
 import { useI18n } from '../i18n/I18n';
 import type { AssetDraft } from '../motion/AssetComposer';
 import type { CinemaTemplate } from '../motion/cinemaTemplates';
@@ -41,15 +41,7 @@ import { resolveActiveWorkspaceRoute } from './routeRegistry';
 function RouteLoadingFallback() {
   return (
     <div className="motion-route-skeleton" role="status" aria-busy="true">
-      <div className="motion-route-skeleton-header">
-        <Skeleton style={{ width: '220px', maxWidth: '45%', height: 'var(--motion-space-24)' }} />
-        <Skeleton style={{ width: '360px', maxWidth: '70%', height: 'var(--motion-space-14)' }} />
-      </div>
-      <div className="motion-route-skeleton-grid">
-        {Array.from({ length: 6 }, (_, index) => (
-          <Skeleton key={index} className="motion-route-skeleton-card" />
-        ))}
-      </div>
+      <OpenDesignLoadingMark height={32} />
     </div>
   );
 }
@@ -231,7 +223,7 @@ export function RouteViewport({
       </KeepAliveSlot>
 
       {page.scenarioHub && !templatesPage && !settings && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyScenarioHub
               category={page.scenarioCategory}
@@ -245,7 +237,7 @@ export function RouteViewport({
       )}
 
       {page.scenario && !templatesPage && !settings && (
-        <div className="om-assets-host om-scenario-host" style={{ padding: 0 }}>
+        <div className="om-assets-host om-scenario-host om-route-surface" style={{ padding: 0 }}>
           <RouteSurface>
             <LazyScenarioWorkspace
               key={page.scenario}
@@ -297,7 +289,7 @@ export function RouteViewport({
       )}
 
       {page.cinemaLanding && !templatesPage && !settings && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyCinemaStudioPage
               onStart={() => openStudio(mediaEditorDestination('text-to-video'), undefined, true)}
@@ -325,7 +317,7 @@ export function RouteViewport({
       )}
 
       {motionTemplatesOpen && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyMotionStudioPage
               active={!connectionsOpen}
@@ -339,7 +331,7 @@ export function RouteViewport({
       )}
 
       {page.modelHub && !templatesPage && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyModelHub
               id={page.modelHub}
@@ -358,7 +350,7 @@ export function RouteViewport({
       )}
 
       {page.modelOverview && !templatesPage && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyModelOverview
               id={page.modelOverview}
@@ -439,7 +431,7 @@ export function RouteViewport({
       )}
 
       {page.designScene && !templatesPage && (
-        <div className="om-assets-host" style={{ padding: 0 }}>
+        <div className="om-assets-host om-route-surface" style={{ padding: 0 }}>
           <RouteSurface>
             {page.designProject ? (
               <LazyDesignProjectEditor
@@ -528,7 +520,7 @@ export function RouteViewport({
         !(page.specialty?.id === 'game' && !skillsOpen) &&
         !settings &&
         !templatesPage && (
-          <div className="om-skills-host">
+          <div className="om-skills-host om-route-surface">
             <RouteSurface>
               <LazySkillsPage
                 previewsEnabled={!connectionsOpen}
