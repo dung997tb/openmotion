@@ -93,6 +93,7 @@ export interface HistoryStepTarget {
 }
 
 export interface HistoryListResult {
+  readonly lastSavedAt?: number;
   readonly projectId: string;
   readonly revision: string;
   readonly currentVersionId: string | null;
@@ -115,6 +116,7 @@ export interface HistoryMutationResult {
   readonly canRedo: boolean;
   readonly appliedFiles: string[];
   readonly stepLabel?: string;
+  readonly navigation?: Pick<HistoryListResult, 'currentSeq' | 'back' | 'forward'>;
   readonly writeToken: string;
   readonly entry?: HistoryListItem | null;
   readonly replayed?: boolean;
@@ -252,7 +254,7 @@ export class VersionHistoryService {
   }
 
   /** Unified PG history ledger for Studio History UI (`GET /api/projects/:id/history`). */
-  async listHistory(ctx: AuthContext, projectId: string): Promise<HistoryListResult> {
+  async listHistory(ctx: AuthContext, projectId: string, window?: { includeSeq?: number }): Promise<HistoryListResult> {
     const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
     const entryRows = await this.db
@@ -266,7 +268,21 @@ export class VersionHistoryService {
       )
       .orderBy(asc(projectHistoryEntries.seq));
 
-    const versionIds = [...new Set(entryRows.map((e) => e.versionId))];
+    const active = entryRows.filter(row => !row.undone && row.seq <= project.currentHistorySeq);
+    const next = entryRows.find(row => row.undone && row.seq > project.currentHistorySeq);
+    const current = active.at(-1);
+    const back = active.length > 1 ? current : undefined;
+    const visibleRows = window
+      ? entryRows.filter(row => row === current || row === next || row.seq === window.includeSeq)
+      : entryRows;
+    const entryById = new Map(entryRows.map(row => [row.id, row]));
+    const parentById = new Map(entryRows.map((row, i) => [
+      row.id, row.parentEntryId ? entryById.get(row.parentEntryId) : entryRows[i - 1],
+    ]));
+    const versionIds = [...new Set(visibleRows.flatMap(row => {
+      const parent = parentById.get(row.id);
+      return parent ? [row.versionId, parent.versionId] : [row.versionId];
+    }))];
     const versionMap = new Map<string, typeof projectVersions.$inferSelect>();
     if (versionIds.length > 0) {
       const versionRows = await this.db
@@ -303,11 +319,10 @@ export class VersionHistoryService {
       }
     }
 
-    const entryById = new Map(entryRows.map((row) => [row.id, row]));
-    const items: HistoryListItem[] = entryRows.map((row, idx) => {
+    const items: HistoryListItem[] = visibleRows.map(row => {
       const ver = versionMap.get(row.versionId);
       const currSnapshot = filesByVersion.get(row.versionId) ?? new Map<string, string>();
-      const parentEntry = row.parentEntryId ? entryById.get(row.parentEntryId) : idx > 0 ? entryRows[idx - 1] : undefined;
+      const parentEntry = parentById.get(row.id);
       const prevSnapshot = parentEntry ? (filesByVersion.get(parentEntry.versionId) ?? null) : null;
       const files = diffSnapshots(prevSnapshot, currSnapshot);
 
@@ -330,19 +345,17 @@ export class VersionHistoryService {
       };
     });
 
-    const activeItems = items.filter((item) => !item.undone && item.seq <= project.currentHistorySeq);
-    const undoneItems = items.filter((item) => item.undone && item.seq > project.currentHistorySeq);
-
-    const canUndo = activeItems.length > 1;
-    const canRedo = undoneItems.length > 0;
-    const backItem = canUndo ? activeItems[activeItems.length - 1] : null;
-    const forwardItem = canRedo ? undoneItems[0] : null;
+    const backItem = back && items.find(item => item.id === back.id);
+    const forwardItem = next && items.find(item => item.id === next.id);
+    const canUndo = Boolean(backItem);
+    const canRedo = Boolean(forwardItem);
 
     return {
       projectId: project.id,
       revision: project.revision.trim(),
       currentVersionId: project.currentVersionId ?? null,
       currentSeq: project.currentHistorySeq,
+      ...(window && { lastSavedAt: entryRows.reduce((last, row) => Math.max(last, row.endedAt.getTime()), 0) }),
       canUndo,
       canRedo,
       back: backItem
@@ -667,7 +680,7 @@ export class VersionHistoryService {
       writeToken,
     );
 
-    const list = await this.listHistory(ctx, projectId);
+    const list = await this.listHistory(ctx, projectId, { includeSeq: txResult.seq });
     return {
       ok: true,
       projectId,
@@ -679,6 +692,7 @@ export class VersionHistoryService {
       canRedo: list.canRedo,
       appliedFiles: txResult.appliedFiles,
       stepLabel: txResult.stepLabel,
+      navigation: { currentSeq: list.currentSeq, back: list.back, forward: list.forward },
       writeToken,
       entry: list.entries.find((e) => e.seq === txResult.seq) ?? null,
     };
@@ -1399,6 +1413,7 @@ export class VersionHistoryService {
     revision: string,
     versionId: string | null,
     historySeq: number,
+    writeToken?: string,
   ): Promise<void> {
     if (!this.eventBus) return;
     const event: ProjectEvent = {
@@ -1408,6 +1423,7 @@ export class VersionHistoryService {
       revision,
       versionId: versionId ?? undefined,
       historySeq,
+      writeToken,
       ts: Date.now(),
     };
     await this.eventBus.publish(projectChannel(workspaceId, projectId), event).catch(() => {});
@@ -1440,7 +1456,7 @@ export class VersionHistoryService {
       };
       await this.eventBus.publish(channel, fileEvent).catch(() => {});
     }
-    await this.publishHistoryChanged(workspaceId, projectId, revision, versionId, historySeq);
+    await this.publishHistoryChanged(workspaceId, projectId, revision, versionId, historySeq, writeToken);
   }
 }
 

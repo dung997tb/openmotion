@@ -115,6 +115,14 @@ export function resolveVirtualPath(fromDir: string, relativeRef: string): string
   return resolved.join('/');
 }
 
+/** Older projects sometimes stored project-relative references inside nested compositions. */
+export function resolveCompositionReference(project: VirtualProjectReader, owner: string, ref: string): string | null {
+  const local = resolveVirtualPath(virtualDirname(owner), ref);
+  if (!local || project.exists(local)) return local;
+  const legacy = resolveVirtualPath('', ref);
+  return legacy && project.exists(legacy) ? legacy : local;
+}
+
 export function normalizeVirtualPath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/^\.\//, '');
 }

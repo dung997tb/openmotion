@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { STUDIO_MANIFESTS } from '../../shared/project-validation.ts';
+export { computePreviewImpact, type PreviewImpact } from '../../shared/preview-impact.ts';
 
 /** Strong ETag sentinel used when a file has been deleted. */
 export const DELETED_VERSION = '"deleted"';
@@ -101,81 +101,6 @@ const MIME_BY_EXT: Readonly<Record<string, string>> = {
 export function getMimeType(filePath: string): string {
   const ext = path.posix.extname(filePath).toLowerCase();
   return MIME_BY_EXT[ext] ?? 'application/octet-stream';
-}
-
-const PREVIEW_AFFECTING_EXT = new Set([
-  '.html',
-  '.htm',
-  '.css',
-  '.js',
-  '.mjs',
-  '.json',
-  '.svg',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
-  '.gif',
-  '.avif',
-  '.mp4',
-  '.mov',
-  '.webm',
-  '.mp3',
-  '.wav',
-  '.m4a',
-  '.ogg',
-  '.woff',
-  '.woff2',
-  '.ttf',
-  '.otf',
-  '.ttc',
-  '.cube',
-  '.glsl',
-  '.vert',
-  '.frag',
-]);
-
-const NON_PREVIEW_FILES = new Set(['motion-project.json', 'motion-assets.json', 'LICENSE', 'NOTICE.md']);
-
-export interface PreviewImpact {
-  affectsPreview: boolean;
-  affectedCompositions: string[];
-}
-
-/**
- * Determine whether a set of modified paths affects preview rendering and which compositions are affected.
- * Pure in-memory equivalent of Hyperframes' project-signature / preview-read tracking.
- */
-export function computePreviewImpact(paths: readonly string[]): PreviewImpact {
-  let affectsPreview = false;
-  const compositions = new Set<string>();
-
-  for (const rawPath of paths) {
-    const normalized = rawPath.replace(/^\/+/, '');
-    if (NON_PREVIEW_FILES.has(normalized)) continue;
-    if (STUDIO_MANIFESTS.includes(normalized) || normalized === 'hyperframes.json') {
-      affectsPreview = true;
-      compositions.add('index.html');
-      continue;
-    }
-    const ext = path.posix.extname(normalized).toLowerCase();
-    if (PREVIEW_AFFECTING_EXT.has(ext)) {
-      affectsPreview = true;
-    }
-    if (ext === '.html' || ext === '.htm') {
-      compositions.add(normalized);
-      if (normalized !== 'index.html') {
-        compositions.add('index.html');
-      }
-    } else if (PREVIEW_AFFECTING_EXT.has(ext)) {
-      compositions.add('index.html');
-    }
-  }
-
-  return {
-    affectsPreview,
-    affectedCompositions: [...compositions].sort((a, b) => a.localeCompare(b)),
-  };
 }
 
 /** Standard headers required on every 302 Presigned GET redirect per Spike 1 §6.1 & #11 §4. */

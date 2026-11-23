@@ -21,6 +21,7 @@ type FileManager = Pick<
   | "overwriteExternalConflict"
   | "readProjectFile"
   | "updateEditingFileContent"
+  | "refreshOpenSource"
   | "refreshFileTree"
 >;
 
@@ -38,7 +39,7 @@ interface UseStudioExternalFileChangesOptions {
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
   reloadPreview: (path?: string) => void;
   onOutsideChange?: () => void;
-  onHistoryChanged?: () => void | Promise<void>;
+  onHistoryChanged?: (writeToken?: string) => void | Promise<void>;
 }
 
 /** Connects the app's save queues, recovery storage, and reload surfaces to one owner. */
@@ -85,6 +86,7 @@ export function useStudioExternalFileChanges({
     discardPendingChanges,
     reloadPreview,
     reloadSdkSession: notifyExternalFileReload,
+    refreshOpenSource: fileManager.refreshOpenSource,
     persistConflictSnapshot: persistExternalConflictSnapshot,
     persistFailureSnapshot: persistExternalFailureSnapshot,
     loadConflictSnapshot: loadExternalConflictSnapshot,

@@ -627,7 +627,7 @@ export class CatalogService implements CatalogPort {
   private async getPreparedTemplateForClone(id: string): Promise<PreparedCatalogTemplate> {
     const builtin = await getBuiltinTemplateSource(id);
     if (builtin) return builtin;
-    const template = (await this.prismCatalog!.getTemplates()).find(item => item.id === id);
+    const template = (await this.prismCatalog!.getTemplates({ requirePublication: true })).find(item => item.id === id);
     if (!template) throw new CloudError('NOT_FOUND', `Template '${id}' not found`, { status: 404, applied: false });
     return template;
   }

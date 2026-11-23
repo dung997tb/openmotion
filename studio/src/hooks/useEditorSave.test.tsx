@@ -23,9 +23,8 @@ async function mountEditorSave(writeProjectFile: WriteProjectFile) {
 
   function Probe() {
     captured.handle = useEditorSave({
-      editingPathRef: { current: "index.html" },
+      editingFileRef: { current: { path: "index.html", content: "before" } },
       projectIdRef: { current: "project-a" },
-      readProjectFile: vi.fn(async () => "before"),
       writeProjectFile,
       recordEdit: vi.fn(async () => undefined),
       setRefreshKey: vi.fn(),
@@ -77,7 +76,7 @@ describe("useEditorSave pending work", () => {
     const mounted = await mountEditorSave(writeProjectFile);
     act(() => mounted.handle.handleContentChange("studio candidate"));
 
-    expect(mounted.handle.getPendingCandidate()).toEqual({
+    expect(mounted.handle.getPendingCandidate()).toMatchObject({
       projectId: "project-a",
       path: "index.html",
       content: "studio candidate",
@@ -118,6 +117,27 @@ describe("useEditorSave pending work", () => {
     await expect(drained).resolves.toEqual({ status: "clean" });
     expect(writeProjectFile).toHaveBeenCalledOnce();
     await mounted.unmount();
+  });
+
+  it("queues rapid keystrokes against the displayed source, then advances only after the preceding save", async () => {
+    let finish!: () => void;
+    const write = vi.fn<WriteProjectFile>()
+      .mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce(undefined);
+    const mounted = await mountEditorSave(write);
+    try {
+      act(() => mounted.handle.handleContentChange("human edit"));
+      const one = mounted.handle.flushPendingSave();
+      await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+      act(() => mounted.handle.handleContentChange("continued human edit"));
+      const two = mounted.handle.flushPendingSave();
+      finish();
+      await Promise.all([one, two]);
+      expect(write.mock.calls).toEqual([
+        ["index.html", "human edit", "before"],
+        ["index.html", "continued human edit", "human edit"],
+      ]);
+    } finally { await mounted.unmount(); }
   });
 
   it("preserves conflict details when flushing a buffered source candidate", async () => {

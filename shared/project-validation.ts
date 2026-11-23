@@ -1,3 +1,5 @@
+import { STUDIO_MANIFESTS } from './preview-impact.ts';
+export { STUDIO_MANIFESTS } from './preview-impact.ts';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { portableNameProblem } from './project-name.ts';
@@ -25,13 +27,6 @@ export const TEXT_PROJECT_EXTENSIONS: ReadonlySet<string> = new Set([
   '.vert',
   '.frag',
 ]);
-
-// Hyperframes 0.9.7 includes these native Studio manifests in render inputs.
-// Everything else in .hyperframes is cache metadata and must not affect revision hashes.
-export const STUDIO_MANIFESTS: readonly string[] = [
-  '.hyperframes/studio-manual-edits.json',
-  '.hyperframes/studio-motion.json',
-];
 
 export type SourceFile = { path: string; size: number; hash: string };
 export type FileEdit = { path: string; content: string };

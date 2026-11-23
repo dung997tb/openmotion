@@ -27,6 +27,7 @@ export interface StudioRightPanelsProps extends StudioEditPersistenceProps {
   recordingDuration?: number;
   onToggleRecording?: () => void;
   /** Dependencies for the Slideshow persist callback, threaded from App.tsx. */
+  sdkSourcePath: string | null;
   sdkSession: Composition | null;
   publishSdkSession: NonNullable<UseSlideshowPersistParams["publishSdkSession"]>;
   /** Refresh the active composition after a variable edit through a separate source-file session. */

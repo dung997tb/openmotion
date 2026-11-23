@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
@@ -1546,7 +1546,7 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
   });
 
   it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
-    const { app, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const { app, config, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
       app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const { projectId } = await (await post('/motion-api/projects', { title: 'Clip move parity' })).json();
@@ -1564,7 +1564,10 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     const first = await studio('drag');
     assert.equal(first.status, 200, await first.clone().text());
     assert.equal((await (await studio('drag')).json()).version, (await first.json()).version);
-    assert.equal((await studio('stale-drag')).status, 409);
+    const noop = await (await studio('stale-drag')).json();
+    assert.equal(noop.rebased, true);
+    assert.deepEqual(noop.changedPaths, []);
+    assert.equal(noop.version, (await app.request(file('ui.html'))).headers.get('etag'));
     const { content } = await (await app.request(file('ui.html'))).json();
     assert.match(content, /data-start="5"/);
     assert.match(content, /duration:0.5},5.25\)/);
@@ -1589,7 +1592,100 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     const replay = (await tool('openmotion_edit_project', args)).structuredContent;
     assert.equal(replay.replayed, true);
     assert.deepEqual(replay.version, moved.structuredContent.version);
-    assert.equal((await tool('openmotion_edit_project', { ...args, requestId: 'stale-agent' })).isError, true);
+    assert.equal((await tool('openmotion_edit_project', { ...args, requestId: 'stale-agent' })).isError, undefined);
+
+    // Template imports can preserve the raw HTML, while the preview stamps the
+    // headline as hf-933r. Another MCP write moves the project base only.
+    const introPath = 'compositions/intro.html';
+    const intro = readFileSync(new URL('../../template-library/openmotion-welcome/compositions/intro.html', import.meta.url), 'utf8');
+    assert.doesNotMatch(intro, /data-hf-id="hf-933r"/);
+    const auth: AuthContext = { workspaceId: config.DEV_WORKSPACE_ID, userId: config.DEV_USER_ID, role: 'owner',
+      scopes: [...DEFAULT_PAT_SCOPES], authMode: 'dev', authMethod: 'dev_bypass' };
+    const imported = await services.files.commitChanges(auth, { projectId, source: 'studio',
+      ops: [{ op: 'upsert_text', path: introPath, content: intro }] });
+    const observedBase = { projectId, expectedRevision: imported.revision, expectedVersionId: imported.versionId };
+    const note = await tool('openmotion_edit_project', { ...observedBase, requestId: 'separate-note',
+      files: [{ path: 'qa-note.txt', content: 'Another editor wrote here' }] });
+    assert.equal(note.isError, undefined);
+    const headline = await tool('openmotion_edit_project', { ...observedBase, requestId: 'welcome-headline',
+      edit: { kind: 'editElements', compositionPath: introPath, patches: [
+        { target: { id: 'intro-headline', hfId: 'hf-933r' }, operations: [{ type: 'inline-style', property: 'color', value: 'red' }] },
+      ] } });
+    assert.equal(headline.isError, undefined, JSON.stringify(headline));
+    assert.equal(headline.structuredContent.rebased, true);
+    const updated = (await (await app.request(file(introPath))).json()).content;
+    assert.match(updated.match(/<div[^>]*id="intro-headline"[^>]*>/)?.[0] ?? '', /color:\s*red/);
+  });
+
+  it('reapplies a competing audio trim to the current file and replays the original acknowledgements', async () => {
+    const { app, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    const { projectId } = await (await post('/motion-api/projects', { title: 'Concurrent audio trims' })).json();
+    const base = '/api/projects/' + projectId;
+    const path = 'scene.html';
+    const file = base + '/files/' + path;
+    const html = '<html><body><main data-composition-id="scene" data-duration="10"><span id="other"></span><span id="other"></span><audio id="singer" data-hf-id="song" src="music.mp3" data-start="0" data-duration="10"></audio></main></body></html>';
+    assert.equal((await app.request(file, { method: 'PUT', headers: { 'If-None-Match': '*' }, body: html })).status, 200);
+    const etag = (await app.request(file)).headers.get('etag')!;
+    const edit = (requestId: string, command: unknown) => post(base + '/edits/' + path, command,
+      { 'If-Match': etag, 'Idempotency-Key': requestId });
+    const trim = (seconds: number) => ({ kind: 'trimClips', changes: [{ hfId: 'song', start: 0, duration: seconds }] });
+    const starting = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const commit = services.files.commitChanges.bind(services.files);
+    let attempts = 0;
+    services.files.commitChanges = async (ctx, input) => {
+      if (input.requestId === 'six' && ++attempts === 1) {
+        starting.resolve();
+        await release.promise;
+      }
+      return commit(ctx, input);
+    };
+    const later = edit('six', trim(6));
+    await starting.promise;
+    let eight;
+    try {
+      eight = await edit('eight', trim(8));
+      assert.equal(eight.status, 200);
+      const color = await edit('color', { kind: 'editElements', patches: [
+        { target: { hfId: 'song' }, operations: [{ type: 'inline-style', property: 'color', value: 'red' }] },
+      ] });
+      assert.equal(color.status, 200, await color.clone().text());
+      assert.equal((await color.json()).rebased, true);
+    } finally { release.resolve(); }
+    const six = await later;
+    assert.equal(six.status, 200, await six.clone().text());
+    const ack = await six.json();
+    assert.equal(attempts, 2);
+    assert.equal(ack.rebased, true);
+    assert.deepEqual(ack.changedPaths, [path]);
+    assert.deepEqual(await (await edit('eight', trim(8))).json(), await eight.json());
+    assert.deepEqual(await (await edit('six', trim(6))).json(), ack);
+    assert.equal((await edit('six', trim(4))).status, 409);
+    const oldSelector = await edit('selector-only', { kind: 'editElements', patches: [{
+      target: { selector: 'audio', selectorIndex: 0 },
+      operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
+    }] });
+    assert.equal(oldSelector.status, 409);
+    const oldRanks = await edit('stale-ranks', { kind: 'moveClips', changes: [{ hfId: 'song', start: 0 }],
+      stacking: { ranks: [{ hfId: 'song', zIndex: 3 }] } });
+    assert.equal(oldRanks.status, 409);
+    const ambiguous = await edit('ambiguous-id', { kind: 'editElements', patches: [{
+      target: { id: 'other' }, operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
+    }] });
+    assert.equal(ambiguous.status, 409);
+    const previousId = await edit('reused-id', { kind: 'editElements', patches: [{
+      target: { hfId: 'song', id: 'other' },
+      operations: [{ type: 'inline-style', property: 'color', value: 'blue' }],
+    }] });
+    assert.equal(previousId.status, 409);
+    const final = await (await app.request(file)).json();
+    const audio = final.content.match(/<audio[^>]*>/)?.[0] ?? '';
+    assert.match(audio, /data-duration="6"/);
+    assert.match(audio, /color:\s*red/);
+    assert.equal(final.version, ack.version);
+    assert.equal((await app.request(file, { method: 'PUT', headers: { 'If-Match': etag }, body: html })).status, 409);
   });
 
   it('creates, replays and updates beat grids over HTTP while rejecting invalid project media', async () => {

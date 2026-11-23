@@ -428,6 +428,7 @@ ${projectEditExample}
 ## Cloud Asset Import & Unified OpenDesign Model Gateway
 
 - Use \`openmotion_import_assets\` in one of three cloud modes: (1) presigned upload (\`action=prepare_upload\` + \`upload_ticket\`), (2) SSRF-checked public HTTPS \`url\`, or (3) zero-copy workspace \`library_asset\` (\`assetId\` + \`versionId\`). Local host paths (\`sourcePath\`) are unsupported in cloud mode.
+- For cloud Studio motion effects, use \`openmotion_assets_use\` with \`action=list_components\` and a search query, then \`action=install_component\` with the selected name, projectId and a stable requestId. Use the first returned HTML path to mount the effect in the project's composition.
 - For NEW generated media, use \`openmotion_media_use\` (\`inspect\` / \`reference\` / \`models\` / \`schema\`) to discover the unified OpenDesign Model Gateway, then \`openmotion_assets_use generate\` with the full model ID, \`status\` / \`cancel\` / \`resume\` with the original \`jobId\` and a stable \`requestId\`, and \`import_to_project\` for chosen versions. Media generation is provisioned through OpenDesign without BYOK API keys in workspace settings.
 - Explicit guide-example continuation is a separate, user-selected scope from recreating a reference. ${templateGuideContinuationInstruction}
 

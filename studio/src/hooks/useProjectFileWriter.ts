@@ -1,6 +1,6 @@
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import type { StudioWriteHistory } from "../utils/studioFileHistory";
-import { acknowledgeFileEdit } from "../utils/isolatedEditVersions";
+import { acceptFileEditReceipt, type RebasedFileEdit } from "../utils/rebasedFileEdit";
 import { useCallback, useMemo } from "react";
 import {
   createStudioSaveHttpError,
@@ -14,9 +14,10 @@ import { trackStudioProjectSave } from "../utils/studioSaveState";
 
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
+  onSavedContent?: (projectId: string, path: string, content: string) => void;
 }
 
-async function fetchProjectFile(projectId: string | null, path: string, query: string) {
+export async function readProjectFileContentWithVersion(projectId: string | null, path: string, query: string) {
   if (!projectId) throw new Error("No active project");
   const response = await studioApiFetch(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(path)}${query}`,
@@ -29,7 +30,7 @@ async function fetchProjectFile(projectId: string | null, path: string, query: s
 // The etag-guarded project-file read/write pair every Studio save path
 // shares. A host mounting hand editing outside Studio needs only this, not
 // the full file manager (file tree, editor tabs, uploads, font assets).
-export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions) {
+export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFileWriterOptions) {
   const fileVersionScope = useMemo(
     () => ({ projectId, versions: new Map<string, string | null>() }),
     [projectId],
@@ -45,7 +46,7 @@ export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions)
 
   const readProjectFile = useCallback(
     async (path: string): Promise<string> => {
-      const { content, version } = await fetchProjectFile(projectId, path, "");
+      const { content, version } = await readProjectFileContentWithVersion(projectId, path, "");
       if (typeof content !== "string") throw new Error(`Missing file contents for ${path}`);
       fileVersions.set(path, version);
       return content;
@@ -55,15 +56,17 @@ export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions)
 
   const readOptionalProjectFile = useCallback(
     async (path: string): Promise<string> => {
-      const { content, version } = await fetchProjectFile(projectId, path, "?optional=1");
+      const { content, version } = await readProjectFileContentWithVersion(projectId, path, "?optional=1");
       fileVersions.set(path, version);
       return typeof content === "string" ? content : "";
     },
     [fileVersions, projectId],
   );
 
-  const writeProjectFile = useCallback(
-    async (path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory): Promise<void> => {
+  const writeProjectFile = useMemo(() => {
+    function write(path: string, content: string, expectedContent?: string): Promise<void>;
+    function write(path: string, content: string, expectedContent: string | undefined, command: ProjectEditCommand | undefined, history?: StudioWriteHistory): Promise<void | RebasedFileEdit>;
+    async function write(path: string, content: string, expectedContent?: string, command?: ProjectEditCommand, history?: StudioWriteHistory): Promise<void | RebasedFileEdit> {
       if (!projectId) throw new Error("No active project");
       return trackStudioProjectSave(projectId, path, async () => {
         const writeProjectId = projectId;
@@ -88,7 +91,7 @@ export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions)
         }
         const requestId = command ? crypto.randomUUID() : undefined;
         // fallow-ignore-next-line complexity
-        await retryStudioSave(async () => {
+        const divergent = await retryStudioSave(async () => {
           // Each request gets its own receipt identity. If a committed request loses its response,
           // the retry can produce a second filesystem receipt that must be suppressed independently.
           let response: Response;
@@ -129,17 +132,23 @@ export function useProjectFileWriter({ projectId }: UseProjectFileWriterOptions)
             });
           }
           if (!response.ok) throw await createStudioSaveHttpError(response, `Failed to save ${path}`);
-          const result = (await response.json()) as { version?: string };
+          const result = (await response.json()) as { version?: string; rebased?: boolean; changedPaths?: string[] };
           const version = result.version ?? response.headers.get("etag");
           if (!version)
             throw new Error(`Save response for ${path} did not include a content version`);
-          acknowledgeFileEdit(writeProjectId, path, expectedVersion, version);
+          const rebased = await acceptFileEditReceipt(writeProjectId, path, expectedVersion, content, version, result);
+          if (rebased) {
+            fileVersions.delete(path);
+            return rebased;
+          }
           fileVersions.set(path, version);
         });
+        if (divergent) return divergent;
+        onSavedContent?.(writeProjectId, path, content);
       });
-    },
-    [fileVersions, projectId],
-  );
+    }
+    return write;
+  }, [fileVersions, onSavedContent, projectId]);
 
   return useMemo(
     () => ({

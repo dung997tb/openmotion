@@ -1,3 +1,5 @@
+import { walkCompositionDescendants } from '@hyperframes/parsers/hf-ids';
+import { parseSourceDocument, type SourceMutationTarget } from '@hyperframes/studio-server/source-mutation';
 import { hasRelativeLutSource } from '../../packages/edit-core/color-grading.ts';
 import { applyProjectEdit, locateEdit, type CompositionEdit, type EditRequest } from '../../packages/edit-core/commands.ts';
 import { contentDependencies, isContentCommand } from '../../packages/edit-core/content-schema.ts';
@@ -38,6 +40,64 @@ function dependencies(command: CompositionEdit) {
   return isContentCommand(command) ? contentDependencies(command) : [];
 }
 
+// On a newer base, address the same element. A selector or positional fallback
+// can point at a different child after another editor restructures the HTML.
+function stableTarget(target: { hfId?: string; id?: string | null }) {
+  return target.hfId || target.id ? { hfId: target.hfId, id: target.id } : undefined;
+}
+
+function targetsStillMatch(source: string, targets: SourceMutationTarget[]): boolean {
+  // Match within nested composition templates as well. An SDK fallback to the
+  // first DOM match would silently retarget ambiguous edits after restructuring.
+  const identities = targets.map(target => [
+    ...(target.hfId ? ['hf:' + target.hfId] : []),
+    ...(target.id ? ['id:' + target.id] : []),
+  ]);
+  const matches = new Map<string, Element | null | undefined>(identities.flat().map(key => [key, undefined]));
+  // The preview and source parser mint identical hfIds for unstamped templates.
+  const { document } = parseSourceDocument(source);
+  walkCompositionDescendants(document, element => {
+    const record = (key: string) => {
+      if (matches.has(key)) matches.set(key, matches.get(key) === undefined ? element : null);
+    };
+    record('hf:' + (element.getAttribute('data-hf-id') ?? ''));
+    record('id:' + (element.getAttribute('id') ?? ''));
+  });
+  return identities.every(keys => {
+    const first = matches.get(keys[0]);
+    return Boolean(first) && keys.every(key => matches.get(key) === first);
+  });
+}
+
+const snapshotAttributes = new Set(['style', 'class', 'id', 'data-hf-id', 'data-composition-variables', 'data-variable-values']);
+
+function onNewBase(command: CompositionEdit): CompositionEdit | undefined {
+  switch (command.kind) {
+    case 'moveClips':
+      // Absolute paint ranks describe the entire observed order.
+      return command.stacking && 'ranks' in command.stacking ? undefined : command;
+    case 'moveClip':
+    case 'trimClips':
+    case 'setClipState':
+      return command;
+    case 'setCanvasBox':
+    case 'moveCanvasElement': {
+      const target = stableTarget(command.target);
+      return target && { ...command, target };
+    }
+    case 'editElements': {
+      const patches = [];
+      for (const patch of command.patches) {
+        const target = stableTarget(patch.target);
+        if (!target || patch.operations.some(op => op.childSelector !== undefined || op.childIndex !== undefined ||
+            op.type === 'rich-text' || (op.type !== 'inline-style' && snapshotAttributes.has(op.property.toLowerCase())))) return;
+        patches.push({ ...patch, target });
+      }
+      return { ...command, patches };
+    }
+  }
+}
+
 export async function commitProjectEdit(files: ProjectFilesService, auth: AuthContext, projectId: string,
   input: unknown, requestId: string, guard: EditGuard) {
   validateEdit(input);
@@ -55,7 +115,8 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
     // A required dependency on an optional sidecar requires an existing text file.
     requested.set(path, existing && existing !== kind ? 'text' : kind);
   };
-  const plan = commands.map(command => ({ command, inputs: dependencies(command) }));
+  const plan = commands.map(command => ({ command, inputs: dependencies(command), rebasedCommand: onNewBase(command) }));
+  const canRebase = plan.every(item => item.rebasedCommand !== undefined);
   for (const { command, inputs } of plan) {
     const path = commandPath(command.compositionPath, true);
     if (command.kind !== 'setBeatGrid' && !/\.html?$/i.test(path)) throw invalid('A composition must be an HTML file');
@@ -85,61 +146,88 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
     : sha256Hex(JSON.stringify([input, base], (_key, value) =>
       value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value));
-  const snapshot = await files.readEditInputs(auth, projectId, requested, scope, requestId, hash,
-    guard.source === 'agent' ? guard : undefined);
-  if (snapshot.kind === 'replay') return snapshot.commit;
-  for (const command of commands) {
-    if (command.kind !== 'setBeatGrid') continue;
-    const source = snapshot.filesByPath.get(command.assetPath);
-    const genericMedia = source?.mimeType === 'application/octet-stream' && (AUDIO_EXT.test(command.assetPath) || VIDEO_EXT.test(command.assetPath));
-    if (!source || source.isText || (!/^(?:audio|video)\//i.test(source.mimeType) && !genericMedia)) {
-      throw invalid('Beat markers require a project audio or video asset');
-    }
-  }
-  const { sources, versions } = snapshot;
-  if (guard.source === 'studio') {
-    for (const [path, expected] of Object.entries(guard.versions)) {
-      if (versions.get(path) !== expected) throw new CloudError('VERSION_CONFLICT', 'Project file changed before the edit', {
-        status: 409, applied: false, details: { path, currentVersion: versions.get(path), currentContent: sources.get(path) },
-      });
-    }
-  }
-  const changed = new Map<string, string>();
-  const labels = new Set<string>();
-  for (const { command, inputs } of plan) {
-    const path = command.compositionPath;
-    for (const dependency of inputs) {
-      if (dependency.type !== 'text') continue;
-      await readCompositionDependencies(path, dependency.path, async child => {
-        if (!sources.has(child)) {
-          const read = await files.readTextFile(auth, projectId, child);
-          if (!read) return null;
-          sources.set(child, read.content);
-          versions.set(child, read.version);
-        }
-        return { content: sources.get(child)!, version: versions.get(child)! };
-      });
-    }
-    try {
-      const before = sources.get(path)!;
-      const edited = await applyProjectEdit(before, command, sources);
-      if (edited.content !== before) {
-        sources.set(path, edited.content);
-        changed.set(path, edited.content);
-        labels.add(edited.label);
+  // Persist with the exact input versions we evaluated. A racing commit may
+  // invalidate them between read and write, even if the client base was fresh.
+  async function applyCurrent() {
+    const snapshot = await files.readEditInputs(auth, projectId, requested, scope, requestId, hash,
+      !canRebase && guard.source === 'agent' ? guard : undefined);
+    if (snapshot.kind === 'replay') return snapshot.commit;
+    for (const command of commands) {
+      if (command.kind !== 'setBeatGrid') continue;
+      const source = snapshot.filesByPath.get(command.assetPath);
+      const genericMedia = source?.mimeType === 'application/octet-stream' && (AUDIO_EXT.test(command.assetPath) || VIDEO_EXT.test(command.assetPath));
+      if (!source || source.isText || (!/^(?:audio|video)\//i.test(source.mimeType) && !genericMedia)) {
+        throw invalid('Beat markers require a project audio or video asset');
       }
+    }
+    const { versions } = snapshot;
+    const sources = new Map(snapshot.sources);
+    const rebased = guard.source === 'agent'
+      ? snapshot.revision !== guard.expectedRevision || snapshot.versionId !== guard.expectedVersionId
+      : Object.entries(guard.versions).some(([path, expected]) => versions.get(path) !== expected);
+    if (!canRebase && guard.source === 'studio') {
+      for (const [path, expected] of Object.entries(guard.versions)) {
+        if (versions.get(path) !== expected) throw new CloudError('VERSION_CONFLICT', 'Project file changed before the edit', {
+          status: 409, applied: false, details: { path, currentVersion: versions.get(path), currentContent: sources.get(path) },
+        });
+      }
+    }
+    const changed = new Map<string, string>();
+    const labels = new Set<string>();
+    for (const item of plan) {
+      const { inputs } = item;
+      const command = rebased ? item.rebasedCommand! : item.command;
+      const path = command.compositionPath;
+      for (const dependency of inputs) {
+        if (dependency.type !== 'text') continue;
+        await readCompositionDependencies(path, dependency.path, async child => {
+          if (!sources.has(child)) {
+            const read = await files.readTextFile(auth, projectId, child);
+            if (!read) return null;
+            sources.set(child, read.content);
+            versions.set(child, read.version);
+          }
+          return { content: sources.get(child)!, version: versions.get(child)! };
+        });
+      }
+      try {
+        const before = sources.get(path)!;
+        if (rebased) {
+          const targets = command.kind === 'editElements' ? command.patches.map(patch => patch.target)
+            : command.kind === 'setCanvasBox' || command.kind === 'moveCanvasElement' ? [command.target] : [];
+          if (targets.length && !targetsStillMatch(before, targets)) {
+            throw new CloudError('VERSION_CONFLICT', 'The edited canvas element changed identity.', {
+              status: 409, applied: false, details: { path, currentVersion: versions.get(path), currentContent: snapshot.sources.get(path) },
+            });
+          }
+        }
+        const edited = await applyProjectEdit(before, command, sources);
+        if (edited.content !== before) {
+          sources.set(path, edited.content);
+          changed.set(path, edited.content);
+          labels.add(edited.label);
+        }
+      } catch (error) {
+        if (isCloudError(error)) throw error;
+        throw invalid(error instanceof Error ? error.message : 'Invalid project edit');
+      }
+    }
+    return files.commitChanges(auth, {
+      projectId, requestId, idempotencyScope: scope, commandReceipt: { inputHash: hash, result: { rebased } },
+      ops: Array.from(changed, ([path, content]) => ({ op: 'upsert_text', path, content, stampHfIds: /\.html?$/i.test(path) })),
+      filePreconditions: Array.from(versions, ([path, version]) => version === null
+        ? { path, ifNoneMatch: '*' as const } : { path, ifMatch: version }),
+      source: guard.source, summary: labels.size === 1 ? [...labels][0] : 'Edit project',
+      ...(guard.source === 'studio' ? { writeToken: guard.writeToken, windowId: guard.windowId } :
+        { actorKind: 'agent', ...(!canRebase && { expectedRevision: guard.expectedRevision, expectedVersionId: guard.expectedVersionId }) }),
+    });
+  }
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await applyCurrent();
     } catch (error) {
-      if (isCloudError(error)) throw error;
-      throw invalid(error instanceof Error ? error.message : 'Invalid project edit');
+      if (!canRebase || attempt >= 5 || !isCloudError(error) ||
+          error.code !== 'VERSION_CONFLICT' || error.details?.code !== 'VERSION_MISMATCH') throw error;
     }
   }
-  return files.commitChanges(auth, {
-    projectId, requestId, idempotencyScope: scope, commandReceipt: { inputHash: hash, result: {} },
-    ops: Array.from(changed, ([path, content]) => ({ op: 'upsert_text', path, content, stampHfIds: /\.html?$/i.test(path) })),
-    filePreconditions: Array.from(versions, ([path, version]) => version === null
-      ? { path, ifNoneMatch: '*' as const } : { path, ifMatch: version }),
-    source: guard.source, summary: labels.size === 1 ? [...labels][0] : 'Edit project',
-    ...(guard.source === 'studio' ? { writeToken: guard.writeToken, windowId: guard.windowId } :
-      { actorKind: 'agent', expectedRevision: guard.expectedRevision, expectedVersionId: guard.expectedVersionId }),
-  });
 }

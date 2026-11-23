@@ -17,9 +17,8 @@ interface RecordEditInput {
 }
 
 interface UseEditorSaveOptions {
-  editingPathRef: React.RefObject<string | undefined>;
+  editingFileRef: React.RefObject<{ path: string; content: string | null } | null>;
   projectIdRef: React.RefObject<string | null>;
-  readProjectFile: (path: string) => Promise<string>;
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   recordEdit: (input: RecordEditInput) => Promise<void>;
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
@@ -31,6 +30,9 @@ export interface EditorSaveCandidate {
   path: string;
   content: string;
 }
+
+// Keystrokes buffered behind an in-flight save share the last accepted source.
+type SourceDraft = EditorSaveCandidate & { baseline: { content: string } };
 
 export type EditorSaveDrainResult = StudioSaveDrainResult;
 
@@ -46,9 +48,8 @@ export interface EditorSaveHandle {
 }
 
 export function useEditorSave({
-  editingPathRef,
+  editingFileRef,
   projectIdRef,
-  readProjectFile,
   writeProjectFile,
   recordEdit,
   setRefreshKey,
@@ -60,9 +61,9 @@ export function useEditorSave({
   // and error toasts persist until dismissed, so don't stack duplicates.
   const lastFailureToastAtRef = useRef<number | null>(null);
   const lastFailureReportRef = useRef<{ fingerprint: string; emittedAt: number } | null>(null);
-  const pendingCandidateRef = useRef<EditorSaveCandidate | null>(null);
+  const pendingCandidateRef = useRef<SourceDraft | null>(null);
   const inFlightRef = useRef<Promise<EditorSaveDrainResult> | null>(null);
-  const inFlightCandidateRef = useRef<EditorSaveCandidate | null>(null);
+  const inFlightCandidateRef = useRef<SourceDraft | null>(null);
 
   const reportFailure = useCallback(
     (path: string, error: unknown) => {
@@ -103,15 +104,18 @@ export function useEditorSave({
   );
 
   const persistCandidate = useCallback(
-    (candidate: EditorSaveCandidate): Promise<EditorSaveDrainResult> => {
+    (candidate: SourceDraft): Promise<EditorSaveDrainResult> => {
       const task = saveProjectFilesWithHistory({
         projectId: candidate.projectId,
         label: "Edit source",
         coalesceKey: `source:${candidate.path}`,
         files: { [candidate.path]: () => candidate.content },
-        readFile: readProjectFile,
+        readFile: async () => candidate.baseline.content,
         writeFile: writeProjectFile,
-        recordEdit,
+        recordEdit: async entry => {
+          candidate.baseline.content = candidate.content;
+          await recordEdit(entry);
+        },
       })
         .then<EditorSaveDrainResult>(() => {
           if (pendingCandidateRef.current === candidate) pendingCandidateRef.current = null;
@@ -136,17 +140,19 @@ export function useEditorSave({
       inFlightCandidateRef.current = candidate;
       return task;
     },
-    [readProjectFile, recordEdit, reportFailure, setRefreshKey, writeProjectFile],
+    [recordEdit, reportFailure, setRefreshKey, writeProjectFile],
   );
 
   const handleContentChange = useCallback(
     (content: string) => {
       const pid = projectIdRef.current;
       if (!pid) return;
-      const path = editingPathRef.current;
-      if (!path) return;
-
-      const candidate = { projectId: pid, path, content };
+      const open = editingFileRef.current;
+      if (!open || open.content == null) return;
+      const { path } = open;
+      const pending = pendingCandidateRef.current;
+      const baseline = pending?.projectId === pid && pending.path === path ? pending.baseline : { content: open.content };
+      const candidate = { projectId: pid, path, content, baseline };
       pendingCandidateRef.current = candidate;
 
       if (saveRafRef.current != null) cancelAnimationFrame(saveRafRef.current);
@@ -155,7 +161,7 @@ export function useEditorSave({
         void persistCandidate(candidate);
       });
     },
-    [editingPathRef, projectIdRef, persistCandidate],
+    [editingFileRef, projectIdRef, persistCandidate],
   );
 
   const flushPendingSave = useCallback(async (): Promise<EditorSaveDrainResult> => {

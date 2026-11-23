@@ -1,5 +1,6 @@
-import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { isolatedEditVersion } from "../utils/isolatedEditVersions";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { submitStudioCommands } from "../utils/projectEditBatch";
 import { studioFileContentVersion } from "../utils/studioFileVersion";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
@@ -153,6 +154,23 @@ export function useDomEditPersist({
         coalesceMs: options?.coalesceMs,
       };
       const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs) : undefined;
+      if (cloudCommand && selection.isolatedTarget && !options?.prepareContent && !options?.validateContent) {
+        const command = { ...cloudCommand, compositionPath: targetPath };
+        const versions = { [targetPath]: '"sha256:' + selection.isolatedTarget.sha256 + '"' };
+        const result = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
+          if (projectIdRef.current !== expectedProjectId) throw new Error("Active project changed before the edit could be saved");
+          if (options?.shouldSave && !options.shouldSave()) return null;
+          return submitStudioCommands(pid, [command], versions, writeHistory);
+        });
+        if (!result) return;
+        const changed = result.changedPaths.includes(targetPath);
+        if (changed) await editHistory.recordEdit({ ...history, files: {} });
+        if (changed && !result.divergent.length) {
+          forceReloadSdkSession?.();
+          reloadPreview();
+        }
+        return { sourceFile: targetPath, version: result.versions[targetPath], changed };
+      }
       const writeEdit = writeHistory
         ? (path: string, content: string, expected?: string, command?: ProjectEditCommand) => writeProjectFile(path, content, expected, command, writeHistory)
         : writeProjectFile;
@@ -172,7 +190,10 @@ export function useDomEditPersist({
           const {applyProjectEdit} = await import("../../../packages/edit-core/commands");
           const {content} = await applyProjectEdit(originalContent, {...cloudCommand,compositionPath:targetPath},new Map());
           const changed = content !== originalContent;
-          if (changed) await writeEdit(targetPath, content, originalContent, cloudCommand);
+          if (changed) {
+            const rebased = await writeEdit(targetPath, content, originalContent, cloudCommand);
+            if (rebased) return { rebased };
+          }
           patchData = {matched: true, changed, content, path: targetPath, version: await studioFileContentVersion(content)};
         } else if (
           selection.element?.namespaceURI === "http://www.w3.org/2000/svg" &&
@@ -202,7 +223,7 @@ export function useDomEditPersist({
               targetPath,
               patchedContent,
               prepare,
-              writeEdit,
+              async (path, content, expected) => { await writeEdit(path, content, expected); },
               showToast,
             )
           : { content: patchedContent, failed: false };
@@ -227,6 +248,10 @@ export function useDomEditPersist({
         return { patchData, originalContent, patchedContent, finalContent };
       });
       if (saved === null) return;
+      if (saved.rebased) {
+        // The coordinator refreshes the preview and SDK from the merged source.
+        return { sourceFile: targetPath, version: saved.rebased.version, changed: saved.rebased.changed };
+      }
       const { patchData, originalContent, patchedContent, finalContent } = saved;
 
       if (finalContent === null) {

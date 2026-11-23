@@ -1713,3 +1713,30 @@ describe("persistMoveEdits convergence", () => {
     expect(updateElement).toHaveBeenCalledTimes(2);
   });
 });
+
+it.each(["saved", "rejected"])("keeps video and audio on separate display rows while a track insert is %s", async (outcome) => {
+  const intro = el("intro", 0, 0, 3);
+  const reel = el("reel", 0, 3, 4);
+  const audio = { ...el("audio", 1, 0, 20, "audio"), authoredTrack: 0 };
+  const elements = [intro, reel, audio];
+  const tracks = () => usePlayerStore.getState().elements.map(e => e.track);
+  const pending = Promise.withResolvers<void>();
+  const save = vi.fn((_moves: TimelineMoveEdit[]) => pending.promise);
+  usePlayerStore.setState({ elements });
+  try {
+    commitDraggedClipMove(drag(reel, { previewStart: 3, previewTrack: 0, insertRow: 0 }), {
+      elements, trackOrder: [0, 1], updateElement: usePlayerStore.getState().updateElement, onMoveElements: save,
+    });
+    expect(tracks()).toEqual([1, 0, 2]);
+    expect(save.mock.calls[0][0].map(move => move.element.id)).not.toContain("audio");
+    expect(usePlayerStore.getState().elements[2].authoredTrack).toBe(0);
+    if (outcome === "saved") pending.resolve();
+    else pending.reject(new Error("save rejected"));
+    await flushMicrotasks();
+    expect(tracks()).toEqual(outcome === "saved" ? [1, 0, 2] : [0, 0, 1]);
+  } finally {
+    pending.resolve();
+    await flushMicrotasks();
+    usePlayerStore.getState().reset();
+  }
+});

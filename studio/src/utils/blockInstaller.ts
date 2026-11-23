@@ -4,6 +4,7 @@ import type { TimelineElement } from "../player";
 import {
   insertTimelineAssetIntoSource,
   resolveTimelineAssetCompositionSize,
+  resolveTimelineAssetSrc,
 } from "./timelineAssetDrop";
 import { collectHtmlIds } from "./studioHelpers";
 import { generateId } from "./generateId";
@@ -237,7 +238,7 @@ export async function addBlockToProject(
       }
       const subComposition = buildSubCompositionHtml({
         id: hostId,
-        compositionFile,
+        compositionFile: resolveTimelineAssetSrc(targetPath, compositionFile),
         start,
         duration,
         track,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineElement } from "../store/playerStore";
-import { classifyZone, normalizeToZones } from "./timelineZones";
+import { classifyZone, displayAuthoredTimelineLanes, normalizeToZones } from "./timelineZones";
 
 function el(id: string, tag: string, track: number, duration = 2): TimelineElement {
   return { id, tag, start: 0, duration, track };
@@ -252,4 +252,14 @@ describe("normalizeToZones — legacy file with scattered z (requirement 6)", ()
   it("is idempotent on the scattered-z legacy shape (no drift on re-discovery)", () => {
     expectZoningIdempotent(legacy());
   });
+});
+
+
+it("keeps full-duration implicit text above a track-zero clip when rebuilding moved lanes", () => {
+  const title = { ...el("z-title", "h1", 0, 12), implicitTextTiming: true, authoredTrack: 0 };
+  const video = { ...el("a-video", "video", 1, 12), authoredTrack: 0 };
+  const audio = { ...el("audio", "audio", 2), authoredTrack: 0 };
+  const result = displayAuthoredTimelineLanes([video, title, audio]);
+  expect(result.map(clip => clip.track)).toEqual([1, 0, 2]);
+  expect(result.map(clip => clip.authoredTrack)).toEqual([0, 0, 0]);
 });

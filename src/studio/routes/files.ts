@@ -255,7 +255,8 @@ export function createStudioFilesRoutes(deps: DisklessStudioDeps): Hono<{ Variab
       const commit = await commitProjectEdit(deps.files, auth, c.req.param('id')!, edit,
         c.req.header('idempotency-key') ?? '', { source: 'studio', versions, writeToken, windowId: c.req.header('x-openmotion-edit-window') });
       return c.json({ ...(path && { version: commit.versionsByPath[path] ?? versions[path] }),
-        versions: { ...versions, ...commit.versionsByPath }, revision: commit.revision, writeToken: commit.writeToken });
+        versions: { ...versions, ...commit.versionsByPath }, changedPaths: commit.changedPaths, rebased: commit.commandResult?.rebased === true,
+        revision: commit.revision, writeToken: commit.writeToken });
     } catch (error) {
       if (isCloudError(error) && error.code === 'VERSION_CONFLICT') {
         if (typeof error.details?.currentContent === 'string') return c.json(error.details, 409);

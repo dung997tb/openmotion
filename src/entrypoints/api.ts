@@ -1083,6 +1083,7 @@ function createMcpDomainPorts(deps: {
   };
 
   return {
+    componentFiles: deps.files,
     projects: {
       async getProject(auth, args) {
         const projectId = typeof args.projectId === 'string' ? args.projectId : undefined;
@@ -1420,6 +1421,7 @@ function createMcpDomainPorts(deps: {
             versionId: assetNamesResult?.versionId ?? committed?.versionId ?? project.currentVersionId,
             versionNumber: project.currentVersionNumber,
           },
+          ...(args.edit !== undefined && { rebased: committed?.commandResult?.rebased === true }),
           changedFiles: committed?.changedPaths ?? (assetNamesResult ? ['motion-assets.json'] : []),
           replayed: committed?.replayed ?? false,
           ...buildProjectPreviewHandoff(deps.config.APP_PUBLIC_ORIGIN, project, {

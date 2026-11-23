@@ -14,6 +14,7 @@ export type ProjectEvent =
     }
   | {
       type: 'history-changed';
+      writeToken?: string;
       workspaceId: string;
       projectId: string;
       revision: string;

@@ -242,8 +242,8 @@ export function useGsapAnimationsForElement(
 }
 
 export function useGsapCacheVersion() {
-  const [change, setChange] = useState<{ version: number; changedPath?: string }>({ version: 0 });
-  const bump = useCallback((changedPath?: string) => {
+  const [change, setChange] = useState<{ version: number; changedPath?: string | readonly string[] }>({ version: 0 });
+  const bump = useCallback((changedPath?: string | readonly string[]) => {
     setChange(previous => ({ version: previous.version + 1, changedPath }));
   }, []);
   return { ...change, bump };
@@ -260,7 +260,7 @@ export function usePopulateKeyframeCacheForFile(
   sourceFile: string,
   version: number,
   iframeRef?: React.RefObject<HTMLIFrameElement | null>,
-  changedPath?: string,
+  changedPath?: string | readonly string[],
 ): void {
   const elementCount = usePlayerStore((s) => s.elements.length);
   // Every sub-composition file the timeline shows rows for. The cache is loaded
@@ -297,11 +297,12 @@ export function usePopulateKeyframeCacheForFile(
       // A request started before a write (or before leaving and reopening a
       // project) must not satisfy the new generation, even if still in flight.
       const previous = source.current;
-      const path = typeof changedPath === "string" && projectCompositionPath(changedPath, projectId);
+      const paths = (typeof changedPath === "string" ? [changedPath] : changedPath ?? [])
+        .map(path => projectCompositionPath(path, projectId));
       // Reuse other files only when the entire change since our last read is known.
-      const scoped = path && previous?.projectId === projectId && previous.version + 1 === version;
+      const scoped = paths.length > 0 && paths.every(Boolean) && previous?.projectId === projectId && previous.version + 1 === version;
       const reads = scoped ? previous.reads : new Map();
-      if (scoped) reads.delete(path);
+      if (scoped) for (const path of paths) reads.delete(path!);
       source.current = { projectId, version, fresh: previous !== null, reads };
     }
     if (!projectId) return;
