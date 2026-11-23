@@ -789,6 +789,25 @@ test('WebPublish deploys embeddable community games via an OpenDesign Cloud wrap
   const wrapperAfterStatus = await readFile(path.join(target.sourcePath, 'index.html'), 'utf8');
   assert.ok(wrapperAfterStatus.includes('<title>Turbo Kart Rally · OpenDesign</title>'));
 
+  // 2c. Status with a changed embedUrl reports outdated without rewriting the cached wrapper on disk
+  const statusChangedEmbed = (await webPublishOperation(
+    store,
+    {
+      command: 'status',
+      targetKind: 'game',
+      targetId: 'community-turbo-kart',
+      embedUrl: 'https://bridge-mind.github.io/turbo-kart-rally-v2/',
+      title: 'Turbo Kart Rally',
+    },
+    'http://127.0.0.1:4173',
+    service,
+  )) as any;
+  assert.equal(statusChangedEmbed.freshness, 'outdated');
+  const wrapperAfterChangedEmbed = await readFile(path.join(target.sourcePath, 'index.html'), 'utf8');
+  assert.equal(wrapperAfterChangedEmbed, wrapperAfterStatus);
+  assert.ok(wrapperAfterChangedEmbed.includes('https://bridge-mind.github.io/turbo-kart-rally/'));
+  assert.ok(!wrapperAfterChangedEmbed.includes('turbo-kart-rally-v2'));
+
   // 3. Non-https and credential-bearing embedUrl values are rejected
   await assert.rejects(
     () =>

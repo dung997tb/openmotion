@@ -21,6 +21,8 @@ export type WebPublishTarget = {
   sourceRevision: string;
   /** Directory containing the HTML bundle, or a direct .html / .htm file path. */
   sourcePath: string;
+  /** Optional in-memory entry HTML used for read-only freshness checks without mutating disk cache. */
+  virtualEntryHtml?: string;
   multiplayer?: boolean;
 };
 

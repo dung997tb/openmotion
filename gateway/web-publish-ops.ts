@@ -96,26 +96,37 @@ function renderCloudGameWrapperHtml(embedUrl: string, title: string): string {
 `;
 }
 
+function extractCloudGameWrapperTitle(html: string | null): string | null {
+  if (!html) return null;
+  const match = html.match(/<title>([^<]*?)\s+·\s+OpenDesign<\/title>/);
+  if (!match) return null;
+  return match[1]
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
 async function ensureCloudGameWrapper(
   rootDir: string,
   targetId: string,
   embedUrl: string,
   title: string,
   readOnly = false,
-): Promise<{ dir: string; revision: string }> {
+): Promise<{ dir: string; revision: string; virtualHtml?: string }> {
   if (!SAFE_GAME_TARGET_ID.test(targetId)) {
     throw new Error('INVALID_ARGUMENT: Invalid game targetId');
   }
   const wrapperDir = path.join(rootDir, 'web-publish-cache', 'games', targetId);
   const indexFile = path.join(wrapperDir, 'index.html');
   const existing = await readFile(indexFile, 'utf8').catch(() => null);
-  if (readOnly) {
-    const html = existing ?? renderCloudGameWrapperHtml(embedUrl, title || targetId);
-    const revision = createHash('sha256').update(html, 'utf8').digest('hex').slice(0, 16);
-    return { dir: wrapperDir, revision };
-  }
-  const html = renderCloudGameWrapperHtml(embedUrl, title || targetId);
+  const effectiveTitle = title.trim() || extractCloudGameWrapperTitle(existing) || targetId;
+  const html = renderCloudGameWrapperHtml(embedUrl, effectiveTitle);
   const revision = createHash('sha256').update(html, 'utf8').digest('hex').slice(0, 16);
+  if (readOnly) {
+    return { dir: wrapperDir, revision, virtualHtml: html };
+  }
   await mkdir(wrapperDir, { recursive: true });
   if (existing !== html) {
     await writeFile(indexFile, html, 'utf8');
@@ -182,15 +193,16 @@ export async function resolveWebPublishTarget(
 
     const validEmbedUrl = normalizeEmbedHttpsUrl(input.embedUrl);
     if (validEmbedUrl) {
-      const cleanTitle = input.title?.trim() || targetId;
-      const wrapper = await ensureCloudGameWrapper(rootDir, targetId, validEmbedUrl, cleanTitle, input.readOnly === true);
+      const explicitTitle = input.title?.trim() || '';
+      const wrapper = await ensureCloudGameWrapper(rootDir, targetId, validEmbedUrl, explicitTitle, input.readOnly === true);
       return {
         kind: 'game',
         id: targetId,
-        title: cleanTitle,
+        title: explicitTitle || targetId,
         entryPath: 'index.html',
         sourceRevision: wrapper.revision,
         sourcePath: wrapper.dir,
+        ...(wrapper.virtualHtml !== undefined ? { virtualEntryHtml: wrapper.virtualHtml } : {}),
       };
     }
 

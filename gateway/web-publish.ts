@@ -516,7 +516,7 @@ export class WebPublishService {
 
   async status(
     target: Pick<WebPublishTarget, 'kind' | 'id' | 'entryPath'>
-      & Partial<Pick<WebPublishTarget, 'sourcePath' | 'title' | 'multiplayer'>>,
+      & Partial<Pick<WebPublishTarget, 'sourcePath' | 'title' | 'multiplayer' | 'virtualEntryHtml'>>,
     options: { filePath?: string; refresh?: boolean } = {},
   ): Promise<WebPublishStatusResponse> {
     const accountSignedIn = await this.account.isSignedIn();
@@ -569,13 +569,14 @@ export class WebPublishService {
       ?? null;
 
     let bundle: PublishBundle | null = null;
-    if (target.sourcePath) {
+    if (target.sourcePath || target.virtualEntryHtml !== undefined) {
       bundle = await buildPublishBundle({
         dataDirectory: this.dataDirectory,
         kind: target.kind,
         targetId: target.id,
-        sourcePath: target.sourcePath,
+        sourcePath: target.sourcePath ?? '',
         entryPath: targetEntry,
+        ...(target.virtualEntryHtml !== undefined ? { virtualEntryHtml: target.virtualEntryHtml } : {}),
       }).catch(() => null);
     }
 

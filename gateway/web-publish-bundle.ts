@@ -159,8 +159,11 @@ export async function buildPublishBundle(input: {
   targetId: string;
   sourcePath: string;
   entryPath: string;
+  virtualEntryHtml?: string;
 }): Promise<PublishBundle> {
-  const rawFiles = await collectSourceFiles(input.sourcePath, input.entryPath, input.kind);
+  const rawFiles = input.virtualEntryHtml !== undefined
+    ? [{ path: input.entryPath, data: Buffer.from(input.virtualEntryHtml, 'utf8') }]
+    : await collectSourceFiles(input.sourcePath, input.entryPath, input.kind);
 
   let assetLibrary: AssetLibrary | null = null;
   const getAssetLibrary = () => {
