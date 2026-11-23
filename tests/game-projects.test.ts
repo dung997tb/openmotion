@@ -107,6 +107,10 @@ test('multiplayer validation, determinism, contract errors, CDN rules and public
   for(const host of ['wss://evil.example/room','https://evil.example/track','//evil.example/track','https://cdn.jsdelivr.net.evil.example/a.js']) {
     await service.write(game.id,[{path:'index.html',content:`<script src="${host}"></script>`}]); assert.equal((await service.validate(game.id)).passed,false);
   }
+  // XML namespace identifiers are not network requests; a script loaded from the same host still is.
+  await service.write(game.id,[{path:'index.html',content:'<script>document.createElementNS("http://www.w3.org/1999/xhtml","canvas");document.createElementNS("http://www.w3.org/2000/svg","svg")</script>'}]);
+  assert.equal((await service.validate(game.id)).passed,true);
+  await service.write(game.id,[{path:'index.html',content:'<script src="http://www.w3.org/1999/xhtml/evil.js"></script>'}]); assert.equal((await service.validate(game.id)).passed,false);
   await service.write(game.id,[{path:'index.html',content:'<script>\n//rendering comment\n</script>'},{path:'logic.js',content:starterLogic.replace('maxPlayers: 4','maxPlayers: 2')}]);
   assert.equal((await service.validate(game.id)).passed,true); assert.equal((await service.publish(game.id)).game.maxPlayers,2);
   const a=new GameRuntime(starterLogic,'same'),b=new GameRuntime(starterLogic,'same');

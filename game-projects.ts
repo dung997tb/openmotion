@@ -21,6 +21,7 @@ import { gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, ty
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
 const kitsRoot = fileURLToPath(new URL('./templates/game-kits/', import.meta.url));
 const LIMIT = 8 * 1024 * 1024;
+const xmlNamespaces = new Set(['http://www.w3.org/1999/xhtml','http://www.w3.org/2000/svg','http://www.w3.org/1999/xlink','http://www.w3.org/1998/Math/MathML','http://www.w3.org/XML/1998/namespace','http://www.w3.org/2000/xmlns/']);
 const textExtensions = /\.(html|htm|css|js|mjs|cjs|json|map|txt|md|svg|csv|yaml|yml|glsl|vert|frag)$/i;
 const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.mp4': 'video/mp4', '.webm': 'video/webm', '.wasm': 'application/wasm', '.htm': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.cjs': 'text/javascript; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.csv': 'text/csv; charset=utf-8', '.avif': 'image/avif', '.ttf': 'font/ttf', '.otf': 'font/otf', '.m4a': 'audio/mp4', '.map': 'application/json', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json' };
 export class GameError extends Error {
@@ -547,6 +548,8 @@ export class GameProjects {
       const source = (await this.read(id, relative)).content;
       if(game.multiplayer)for(const message of gameRoomEntryErrors(source))diagnostics.push({path:relative,message});
       for (const match of source.matchAll(/(?:[a-z][a-z0-9+.-]*:\/\/|(?<=["'`(=])\/\/)[^\s"'<>`\\)]+/gi)) {
+        // XML namespace URIs (createElementNS, SVG markup) are identifiers, never requested, and appear in bundled libraries such as Three.js.
+        if (xmlNamespaces.has(match[0])) continue;
         const host = new URL(match[0].startsWith('//') ? 'https:' + match[0] : match[0]).hostname;
         // A playable ad may name its app-store pages: they are only opened on the CTA tap, never loaded by the page.
         const stores = game.playableAd ? ['apps.apple.com','itunes.apple.com','play.google.com'] : [];
