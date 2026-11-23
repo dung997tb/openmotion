@@ -14,3 +14,8 @@ export function repairCodeExtrudeMaterial(source: string): string {
           });
 `);
 }
+
+/** Remove the catalog demo backdrop when placing a stock overlay on another composition. */
+export function componentOverlaySource(source: string): string {
+  return source.replace(/background:\s*(?:#(?:0a0a0a|000000|000|0a0805)|rgba?\([^)]*\))\s*;/g, 'background: transparent;');
+}

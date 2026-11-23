@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
+import { componentOverlaySource } from '../../shared/registry-material-compat.ts';
 import { MAX_PATCH_BYTES, type TextPatch } from '../../shared/text-patch.ts';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
@@ -13,6 +14,7 @@ import {
   canonicalInputHash, loadProjectOrThrow, MAX_TEXT_FILE_BYTES, normalizeSafeProjectPath, readCommitReceipt,
   type CommitProjectFilesResult, type ProjectFileOp, type ProjectFilesService,
 } from './project-files-service.ts';
+import { primaryFile } from './motion-component-source.ts';
 import { getMotionComponent, prepareMotionComponent } from './motion-component-registry.ts';
 import { validateTextPatch } from './text-patch-boundaries.ts';
 
@@ -140,6 +142,11 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
       guards.set(path, row ? formatFileVersion(row.blobScope, row.sha256) : null);
     }
     ops.push(...await prepareMotionComponent(item, new Set(rows.keys()), true));
+    const installed = rows.get(primaryFile(item).target);
+    if (installed && installed.blobScope !== 'patch' && installed.sha256 === item.opaqueSourceSha256) {
+      const source = await files.readTextBlob(ctx.workspaceId, installed.blobScope, installed.sha256);
+      ops.push({ op: 'upsert_text', path: installed.path, content: componentOverlaySource(source), mimeType: installed.mimeType });
+    }
   }
   return files.commitChanges(ctx, {
     projectId, requestId: identity.requestId, idempotencyScope: scope, source: identity.source,

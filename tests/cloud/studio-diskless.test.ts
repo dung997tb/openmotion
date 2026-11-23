@@ -981,6 +981,44 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(fetcher.mock.callCount(), downloads);
   });
 
+  it('places preinstalled stock overlays and leaves edited backgrounds untouched', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const host = 'index.html', effect = 'compositions/components/chat-message.html';
+    const source = await readFile(path.join(REPO_ROOT, 'tests/fixtures/motion-components/chat-message.html'), 'utf8');
+    const downloads = t.mock.method(globalThis, 'fetch', async () => new Response(source));
+    const post = (route: string, body: unknown) => env.studioApp.request(`/api/projects/${projectId}/${route}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(body),
+    });
+    const read = (path: string) => env.files.readTextFile(env.auth, projectId, path);
+    const base = '<main data-composition-id="root"></main>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: host, content: base }] });
+    const version = (await read(host))!.version;
+    const place = () => post('text-edits', { installComponent: 'chat-message', files: [{
+      path: host, baseVersion: version, content: base.replace('</main>', `<div data-composition-src="${effect}"></div></main>`),
+    }] });
+    assert.equal((await place()).status, 200);
+    const placed = (await read(effect))!;
+    assert.doesNotMatch(placed.content, /background: #000;/);
+    await env.history.step(env.auth, projectId, 'back');
+
+    assert.equal((await post('registry/install', { blockName: 'chat-message' })).status, 200);
+    const installed = (await read(effect))!;
+    assert.match(installed.content, /background: #000;/);
+    const fetchCount = downloads.mock.callCount();
+    assert.equal((await place()).status, 200);
+    assert.equal((await read(effect))?.version, placed.version);
+    await env.history.step(env.auth, projectId, 'back');
+    assert.equal((await read(effect))?.version, installed.version);
+    assert.equal((await read(host))?.version, version);
+
+    const custom = installed.content + '\n<style>.favorite { background: #000; }</style>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: effect, content: custom }] });
+    assert.equal((await place()).status, 200);
+    assert.equal((await read(effect))?.content, custom);
+    assert.equal(downloads.mock.callCount(), fetchCount);
+  });
+
   it('installs the same mountable fragment via Studio and MCP, bundles nested references and undoes each installation', async t => {
     const env = createStudioTestEnv();
     const mcp = new McpToolDispatcher(parseConfig({

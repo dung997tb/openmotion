@@ -1,3 +1,4 @@
+import { componentOverlaySource } from "../../../shared/registry-material-compat";
 import { buildProjectApiPath } from "./projectRouting";
 import type { RegistryItem } from "@hyperframes/core/registry";
 import type { TimelineElement } from "../player";
@@ -104,10 +105,7 @@ async function makeComponentBackgroundTransparent(
   if (block.type !== "hyperframes:component") return;
   await serializeStudioFileMutation(writeProjectFile, compositionFile, async () => {
     const content = await readProjectFile(compositionFile);
-    const transparentContent = content.replace(
-      /background:\s*(?:#(?:0a0a0a|000000|000|0a0805)|rgba?\([^)]*\))\s*;/g,
-      "background: transparent;",
-    );
+    const transparentContent = componentOverlaySource(content);
     if (transparentContent !== content) await writeProjectFile(compositionFile, transparentContent);
   });
 }
