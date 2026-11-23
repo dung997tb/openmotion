@@ -1,9 +1,9 @@
 {
-  "revision": "c4833a98e20a2d77b5764d9da3dbf03eb035612c",
+  "revision": "ca47798c57e21a40491b123515e14191e97b7a19",
   "images": {
-    "api": "sha256:3b07be06bc0591446d82256e80ddb4e829a9e3d49221411ede8f32b9c045702c",
-    "worker-media": "sha256:cc4fe4130590aad0d2026658f020b1311b0ebeef7466b0ddbf6b33dea9ee077b",
-    "worker-render": "sha256:83a874e12cfb79ec1ce1643891b0289394cb87f626a379d8ad3754e5a1f94fa6",
-    "catalog-sync": "sha256:b982f67122b41195cbd4ed5b83b22b5d922789a7ccf2fbc13cc87f57f779a144"
+    "api": "sha256:0d8509db6e1d5b83421132bf88e4c6a2fcf9520e02742b00640170c94c76eba2",
+    "worker-media": "sha256:7a5eac5acb4d8599ccaf9194295b090ae10177486dbbcfe5c1e872db0ad1ca26",
+    "worker-render": "sha256:b0f15e8df22a24f34fdd807cd0aee3f7416106ace8b629cc2d5e883fbfeeeff7",
+    "catalog-sync": "sha256:ea628abf69c45382c21a8d90e0396e8f9caf359ffc088f2ff9b14f08efe78f82"
   }
 }
