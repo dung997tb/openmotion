@@ -41,7 +41,7 @@ export interface UseDomEditCommitsParams {
   importedFontAssetsRef: React.MutableRefObject<ImportedFontAsset[]>;
   projectId: string | null;
   projectIdRef: React.MutableRefObject<string | null>;
-  reloadPreview: () => void;
+  reloadPreview: (changedPaths?: string | readonly string[]) => void;
 
   // From useDomSelection
   domEditSelection: DomEditSelection | null;
@@ -169,7 +169,7 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changed, reconcileFromServer } = await serializeStudioFileMutations(
+          const { allMatched, changedPaths, reconcileFromServer } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
@@ -179,7 +179,7 @@ export function useDomEditCommits({
                 const result = await submitStudioCommands(pid, intent.commands, intent.versions, history);
                 const changed = result.changedPaths.length > 0;
                 if (changed) await editHistory.recordEdit({ ...options, files: {} });
-                return { allMatched: true, changed, reconcileFromServer: result.divergent.length > 0 };
+                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0 };
               }
               const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
@@ -215,11 +215,12 @@ export function useDomEditCommits({
               return {
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
-                changed: anyChanged,
+                changedPaths: Object.keys(files),
                 reconcileFromServer: false,
               };
             },
           );
+          const changed = changedPaths.length > 0;
           if (reconcileFromServer) return { durable: true, allMatched, changed };
           if (changed) forceReloadSdkSession?.();
           const durable = allMatched;
@@ -231,7 +232,8 @@ export function useDomEditCommits({
           // doesn't hold — reload so the preview reconverges.
           const skipSafe =
             options.skipReload === true && batchesAreInlineStyleOnly(batches) && durable;
-          if (!durable || (changed && !skipSafe)) reloadPreview();
+          if (!durable) reloadPreview();
+          else if (changed && !skipSafe) reloadPreview(changedPaths);
           return { durable, allMatched, changed };
         },
       ).catch((error) => {

@@ -53,7 +53,7 @@ export interface UseDomEditSessionParams extends DomEditTimelineParams {
     (iframe: HTMLIFrameElement) => Promise<void>
   >;
   syncPreviewHotkeys: (iframe: HTMLIFrameElement | null) => void;
-  reloadPreview: () => void;
+  reloadPreview: (changedPaths?: string | readonly string[]) => void;
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   openSourceForSelection?: (sourceFile: string, target: PatchTarget) => void;
   sdkSession?: Composition | null;
