@@ -1,7 +1,7 @@
 import type { PrismMotionCatalog, PreparedCatalogTemplate } from './prism-motion-catalog.ts';
 import { builtinTemplateMetadata, getBuiltinTemplateSource } from './builtin-template-source.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import path from 'node:path';
+import { mimeTypeForPath, normalizeCatalogAssetPath } from './catalog-template-source.ts';
 import { and, asc, eq } from 'drizzle-orm';
 import {
   hasMinRole,
@@ -53,183 +53,23 @@ import {
 } from '../../shared/template-guide.ts';
 import { catalogLocale } from '../../shared/template-locale.ts';
 
-// ---------------------------------------------------------------------------
-// Canonical Built-in Template & Welcome Definitions (Zero Legacy FS Coupling)
-// ---------------------------------------------------------------------------
-
-export const WELCOME_TEMPLATE_ID = 'openmotion-welcome';
-export const WELCOME_PROJECT_TITLE = 'OpenMotion 示例短片';
-export const WELCOME_PROJECT_TITLE_KEY = 'OpenMotion Sample Video' as const;
-export const GSAP_CDN_URL = 'https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js';
-
-export const NATIVE_PROJECT_CONFIG = {
-  $schema: 'https://hyperframes.heygen.com/schema/hyperframes.json',
-  paths: { blocks: 'compositions', components: 'compositions/components', assets: 'assets' },
-} as const;
-
-export const WELCOME_SHARED_ASSETS: readonly (readonly [string, string])[] = [
-  ['packages/design-system/brand/loading-mark.svg', 'assets/brand-mark.svg'],
-  ['packages/design-system/fonts/AlbertSans-VariableFont_wght.ttf', 'assets/fonts/AlbertSans.ttf'],
-  ['packages/design-system/fonts/Albert-Sans-OFL.txt', 'assets/fonts/Albert-Sans-OFL.txt'],
-  ['packages/design-system/opendesign-logo-SOURCE.md', 'assets/brand-NOTICE.md'],
-  ['library/skills/openmotion-design-remix/vendor/fonts/libre-baskerville-f5bc4341f15d.ttf', 'assets/fonts/serif.ttf'],
-  ['library/skills/openmotion-design-remix/vendor/fonts/libre-baskerville-OFL.txt', 'assets/fonts/Libre-Baskerville-OFL.txt'],
-  ['library/skills/openmotion-design-remix/vendor/three-0.147.0/build/three.min.js', 'assets/three.min.js'],
-  ['library/skills/openmotion-design-remix/vendor/three-0.147.0/LICENSE', 'assets/three-LICENSE.txt'],
-] as const;
-
-export interface BuiltinTemplateDefinition {
-  readonly id: string;
-  readonly sortOrder: number;
-  readonly title: string;
-  readonly label: string;
-  readonly description: string;
-  readonly duration: number;
-  readonly width: number;
-  readonly height: number;
-  readonly posterTime: number;
-  readonly author: string;
-  readonly sourceUrl: string;
-}
-
-/**
- * Built-in templates ordered with `openmotion-welcome` first so even `--limit 1`
- * sync runs always ingest the welcome template required by workspace bootstrap.
- */
-export const BUILTIN_TEMPLATES: readonly BuiltinTemplateDefinition[] = [
-  {
-    id: WELCOME_TEMPLATE_ID,
-    sortOrder: 0,
-    title: 'OpenMotion Welcome',
-    label: 'Official welcome',
-    description:
-      'An editable brand welcome with kinetic typography, a motion gallery and a three-dimensional closing mark.',
-    duration: 37.3,
-    width: 1920,
-    height: 1080,
-    posterTime: 3.8,
-    author: 'OpenMotion',
-    sourceUrl: 'https://github.com/nexu-io/openmotion/tree/main/template-library/openmotion-welcome',
-  },
-  {
-    id: 'product-promo',
-    sortOrder: 1,
-    title: 'Product Promo',
-    label: '产品宣传',
-    description: '从图标开场到多人协作，查看多场景动画与字幕编排。',
-    duration: 20,
-    width: 1920,
-    height: 1080,
-    posterTime: 7,
-    author: 'Hyperframes',
-    sourceUrl:
-      'https://github.com/heygen-com/hyperframes/tree/3baf81f9a92615507f76fe8de33e489034ee77ec/registry/examples/product-promo',
-  },
-  {
-    id: 'nyt-graph',
-    sortOrder: 2,
-    title: 'NYT Graph',
-    label: '数据叙事',
-    description: '报刊风格的动态图表，查看数据、标注与图形的节奏。',
-    duration: 15,
-    width: 1920,
-    height: 1080,
-    posterTime: 9,
-    author: 'Hyperframes',
-    sourceUrl:
-      'https://github.com/heygen-com/hyperframes/tree/3baf81f9a92615507f76fe8de33e489034ee77ec/registry/examples/nyt-graph',
-  },
-  {
-    id: 'decision-tree',
-    sortOrder: 3,
-    title: 'Decision Tree',
-    label: '流程动画',
-    description: '逐步展开的决策树，查看节点、连线与分支动画。',
-    duration: 10,
-    width: 1920,
-    height: 1080,
-    posterTime: 7,
-    author: 'Hyperframes',
-    sourceUrl:
-      'https://github.com/heygen-com/hyperframes/tree/3baf81f9a92615507f76fe8de33e489034ee77ec/registry/examples/decision-tree',
-  },
-] as const;
-
-const MIME_BY_EXT: Readonly<Record<string, string>> = {
-  '.html': 'text/html; charset=utf-8',
-  '.htm': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.md': 'text/markdown; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-  '.vtt': 'text/vtt; charset=utf-8',
-  '.srt': 'text/plain; charset=utf-8',
-  '.glsl': 'text/plain; charset=utf-8',
-  '.vert': 'text/plain; charset=utf-8',
-  '.frag': 'text/plain; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.gif': 'image/gif',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.woff': 'font/woff',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.mp4': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.m4v': 'video/mp4',
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.ogg': 'audio/ogg',
-  '.m4a': 'audio/mp4',
-  '.aac': 'audio/aac',
-  '.flac': 'audio/flac',
-};
+export {
+  BUILTIN_TEMPLATES, GSAP_CDN_URL, NATIVE_PROJECT_CONFIG, WELCOME_PROJECT_TITLE,
+  WELCOME_PROJECT_TITLE_KEY, WELCOME_SHARED_ASSETS, WELCOME_TEMPLATE_ID,
+  type BuiltinTemplateDefinition,
+} from './builtin-template-source.ts';
+export { mimeTypeForPath, normalizeCatalogAssetPath } from './catalog-template-source.ts';
 
 const TEMPLATE_ID_REGEX = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
 const DEFAULT_PRESIGN_GET_TTL_SEC = 300;
 const REDIRECT_CACHE_CONTROL = 'private, max-age=60';
 const REDIRECT_VARY = 'Origin, Cookie';
 
-export function mimeTypeForPath(filePath: string): string {
-  const ext = path.posix.extname(filePath).toLowerCase();
-  return MIME_BY_EXT[ext] ?? 'application/octet-stream';
-}
-
 export function validateTemplateId(value: string): string {
   if (typeof value !== 'string' || !TEMPLATE_ID_REGEX.test(value)) {
     throw new CloudError('INVALID_ARGUMENT', 'Invalid template ID', { status: 400, applied: false });
   }
   return value;
-}
-
-export function normalizeCatalogAssetPath(rawPath: string): string {
-  if (
-    typeof rawPath !== 'string' ||
-    !rawPath ||
-    rawPath.length > 240 ||
-    rawPath.startsWith('/') ||
-    rawPath.includes('\\') ||
-    rawPath.includes(':') ||
-    /[\x00-\x1f]/.test(rawPath)
-  ) {
-    throw new CloudError('INVALID_PATH', 'Invalid catalog asset path', { status: 400, applied: false });
-  }
-  const parts = rawPath.split('/');
-  if (parts.some((part) => !part || part === '.' || part === '..')) {
-    throw new CloudError('INVALID_PATH', 'Catalog asset path contains invalid segments or traversal', {
-      status: 400,
-      applied: false,
-    });
-  }
-  return rawPath;
 }
 
 export function formatStrongShaEtag(sha256: string): string {

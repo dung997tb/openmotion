@@ -107,6 +107,7 @@ COPY --from=deps-build /app/packages/observability/dist ./packages/observability
 # Target 1: api — stateless, diskless HTTP/SSE/MCP server (NO Chromium/FFmpeg)
 # -----------------------------------------------------------------------------
 FROM prod-base AS api
+COPY --chown=node:node template-library/ ./template-library/
 COPY --from=fonts-catalog --chown=node:node /app/fonts /app/fonts
 
 ENV NODE_ENV=production \
