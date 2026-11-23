@@ -1,5 +1,7 @@
 import { instantTolerance } from "@hyperframes/core/clip-facts";
 
+export const DEFAULT_COMPOSITION_DURATION_SECONDS = 5;
+
 // Native timing mutations round start and duration independently to milliseconds.
 // Their summed end can drift by up to 1 ms from an adjacent authored frame boundary.
 // This is an editor comparison tolerance, not a change to source or playback time.
