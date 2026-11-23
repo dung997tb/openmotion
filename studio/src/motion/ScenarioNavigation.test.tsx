@@ -114,23 +114,22 @@ it('opens Super Agent creation modes and launches game creation from the navigat
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
 });
 
-it('places Workflows with a New badge directly after Explore, opens scene tabs over all 5 workflow cards and recent runs', async () => {
+it('places Workflows right after Super Agent without a badge, opens scene tabs over all 5 workflow cards and recent runs', async () => {
   const props = await renderNav();
   const slots = [...container.querySelectorAll<HTMLElement>('.om-creative-strip > [data-nav-slot]')];
   const labels = slots.map(slot => {
     const btn = slot.querySelector<HTMLButtonElement>('button:not([aria-expanded])');
     return btn?.getAttribute('aria-label') ?? btn?.textContent?.trim();
   });
-  expect(labels[0]).toBe('Explore');
-  expect(labels[1]).toBe('Workflows');
-  expect(labels[2]).toBe('Image');
+  expect(labels.slice(0, 7)).toEqual(['Explore', 'Image', 'Video', 'Audio', 'MCP', 'Super Agent', 'Workflows']);
+  const workflowsSlot = slots[labels.indexOf('Workflows')];
 
-  const workflowsBtn = slots[1].querySelector<HTMLButtonElement>('button[aria-label="Workflows"]')!;
-  expect(workflowsBtn.querySelector('[data-nav-badge="New"]')?.textContent).toBe('New');
+  const workflowsBtn = workflowsSlot.querySelector<HTMLButtonElement>('button[aria-label="Workflows"]')!;
+  expect(workflowsBtn.querySelector('[data-nav-badge]')).toBeNull();
   expect(workflowsBtn.getAttribute('aria-current')).toBeNull();
 
   // Open mega menu via trigger button.
-  const trigger = slots[1].querySelector<HTMLButtonElement>('button[aria-label="Workflows · Topics, campaigns and roles"]')!;
+  const trigger = workflowsSlot.querySelector<HTMLButtonElement>('button[aria-label="Workflows · Topics, campaigns and roles"]')!;
   await act(async () => {
     trigger.click();
     await new Promise(resolve => setTimeout(resolve, 0));
