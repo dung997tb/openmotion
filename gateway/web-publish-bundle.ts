@@ -12,6 +12,26 @@ export const MAX_PUBLISH_FILES = 500;
 export const MAX_PUBLISH_BYTES = 50 * 1024 * 1024;
 const WEBP_COMPRESS_MIN_BYTES = 256 * 1024;
 
+function pngMayHaveTransparency(bytes: Buffer): boolean {
+  // PNG signature (8) + IHDR length (4) + "IHDR" (4) + width (4) + height (4) + bitDepth (1) + colorType (1)
+  if (bytes.length < 26 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) {
+    return true;
+  }
+  const colorType = bytes[25];
+  // Color types 4 (grayscale+alpha) and 6 (RGBA) have an alpha channel; palette (3) or others may use tRNS.
+  if (colorType === 4 || colorType === 6 || colorType === 3) return true;
+  // Scan chunk headers before IDAT for an optional tRNS chunk.
+  let offset = 8;
+  while (offset + 8 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString('ascii', offset + 4, offset + 8);
+    if (type === 'tRNS') return true;
+    if (type === 'IDAT' || type === 'IEND') return false;
+    offset += 12 + length;
+  }
+  return false;
+}
+
 async function maybeCompressRasterForPublish(
   sourcePath: string,
   originalBytes: Buffer,
@@ -33,7 +53,9 @@ async function maybeCompressRasterForPublish(
       : ['-quiet', '-q', '82', sourcePath, '-o', outputPath];
     const cwebpRes = await execute(cwebpBin, cwebpArgs, tempDir, 15_000).catch(() => null);
     let encoded = cwebpRes?.code === 0;
-    if (!encoded) {
+    // FFmpeg's libwebp encoder does not expose `-exact`, so it discards RGB beneath alpha=0 pixels.
+    // Only use FFmpeg for JPEGs or guaranteed-opaque PNGs so PNG RGBA bytes remain bit-for-bit exact.
+    if (!encoded && (!isPng || !pngMayHaveTransparency(originalBytes))) {
       const { ffmpeg } = verificationBinaries();
       const ffmpegArgs = isPng
         ? ['-y', '-loglevel', 'error', '-nostdin', '-i', sourcePath, '-pix_fmt', 'bgra', '-c:v', 'libwebp', '-lossless', '1', '-compression_level', '6', outputPath]
