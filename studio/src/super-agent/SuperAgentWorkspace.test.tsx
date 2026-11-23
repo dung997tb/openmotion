@@ -423,11 +423,11 @@ it('keeps background task status in one slot and shows a dot only for an unread 
   };
 
   const onChatIdChange = vi.fn();
-  const render = (chatId: string | null, key = 'workspace') => act(async () => {
+  const render = (chatId: string | null, key = 'workspace', active = true) => act(async () => {
     root.render(
       <I18nProvider key={key} initialLocale="en">
         <SuperAgentWorkspace
-          active
+          active={active}
           chatId={chatId}
           onChatIdChange={onChatIdChange}
           onOpenDesignProject={vi.fn()}
@@ -472,6 +472,10 @@ it('keeps background task status in one slot and shows a dot only for an unread 
     expect(status.querySelector('svg')).toBeNull();
     expect(row.querySelector('.om-sa-chat-icon-wrap .om-sa-chat-dot')).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(getTask).toHaveBeenCalledTimes(2);
+    await render(null, 'workspace', false);
+    await render(null);
+    expect(pinnedRow().querySelector('.om-sa-chat-dot')).toBeTruthy();
     expect(getTask).toHaveBeenCalledTimes(2);
     clearSuperAgentCache();
     setClientCacheOverrideForTest(null);
