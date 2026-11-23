@@ -2,6 +2,10 @@
 
 OpenMotion is a standalone container-first application at the repository root (stateless Hono API server `src/entrypoints/api.ts`, workload-split `api` / `worker-media` / `worker-render` / `catalog-sync` services backed by PostgreSQL, Redis/BullMQ, and S3 content-addressed storage, plus the diskless Studio SPA). Run commands here with the Node version pinned in `.github/workflows/ci.yml`. Preserve `package-lock.json` and `scripts/runtime-lock.json`; do not introduce workspace-only dependencies. Follow the [migration guide](docs/repository-migration.md), keep user data and credentials outside the checkout, and preserve third-party licenses.
 
+## Project editing
+
+Follow the [project editing contract](docs/product/edit-core.md) for changes to persisted edits. Keep action semantics in edit-core, route Studio HTTP and remote MCP through the same cloud executor, and verify identical saved results and project undo behavior.
+
 ## Local validation
 
 Before publishing a branch, select local checks for the changed boundary. Run `npm ci` when dependencies or lockfiles change, or installed dependencies are missing or stale; otherwise reuse the existing installation.

@@ -4,6 +4,8 @@ Read and follow [AGENTS.md](AGENTS.md) before working in this repository. It is 
 
 Use `CLAUDE.md` as the Claude Code instruction entry. Record future repository-rule updates here and keep them aligned with `AGENTS.md`.
 
+Follow the [project editing contract](docs/product/edit-core.md) when changing Studio, cloud or headless editing behavior.
+
 ## Branch workflow
 
 Branch new work from the latest `main` and target all pull requests at `main`. Merge reviewed changes directly into `main` when authorized; do not use `feature/motion` as an intermediate integration branch.
