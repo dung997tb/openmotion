@@ -6,6 +6,7 @@ import englishReadme from '../../../README.md?raw';
 import chineseReadme from '../../../README.zh-CN.md?raw';
 import { I18nProvider, type Locale } from '../i18n/I18n';
 import { McpConnectionPage } from './McpConnectionPage';
+import { formatMcpAgentPrompt, mcpHeroBeats, mcpShowcaseModules } from './mcpShowcaseData';
 import { containerIntegration, type IntegrationInfo } from '../../../shared/integration';
 
 // Reporting is covered separately. Its lazy initialization/retries must not
@@ -332,6 +333,14 @@ it.each(['en', 'zh-CN'] as const)('copies the Black Friday campaign workflow han
   expect(card.querySelector('textarea')?.value).toBe(instruction);
 });
 
+it('uses a different case for every workflow step and feature slide', () => {
+  const cases = [...mcpHeroBeats, ...mcpShowcaseModules.flatMap(module => module.slides)];
+  const caseIds = cases.map(item => formatMcpAgentPrompt('Preview', item.target));
+  const media = cases.map(item => item.video ?? item.image);
+  expect(new Set(caseIds).size).toBe(cases.length);
+  expect(new Set(media).size).toBe(cases.length);
+});
+
 it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ and collapsed developer drawer', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
@@ -347,9 +356,10 @@ it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ an
   expect(modules).toHaveLength(3);
   const firstMod = modules[0];
   await act(async () => firstMod.querySelectorAll<HTMLButtonElement>('.om-mcp-carousel-tab')[1].click());
-  expect(firstMod.querySelector('.om-mcp-carousel-title')?.textContent).toContain('Aesthetics');
+  expect(firstMod.querySelector('.om-mcp-carousel-title')?.textContent).toContain('Harvey II');
   await act(async () => firstMod.querySelector<HTMLButtonElement>('.om-mcp-carousel-primary')!.click());
-  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 使用模板「Aesthetics」'));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('@OpenDesign 用「Harvey II」模板'));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining('[OpenMotion template: motion-4cab572a-4d2a-4058-8a06-84cf3fda0df0]'));
   await act(async () => firstMod.querySelector<HTMLButtonElement>('.om-mcp-carousel-secondary')!.click());
   expect(document.querySelector('[role=dialog]')?.textContent).toContain('Studio 可编辑工程示例');
   await act(async () => button('关闭').click());
