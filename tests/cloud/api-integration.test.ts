@@ -2681,6 +2681,11 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     const bridgeAsset = await app.request(bridgeSrc, { headers: previewHeaders });
     assert.equal(bridgeAsset.status, 200);
     assert.match(bridgeAsset.headers.get('cache-control') ?? '', /immutable/);
+    const snapdomAsset = await app.request('/api/vendor/snapdom.js', { headers: previewHeaders });
+    assert.equal(snapdomAsset.status, 200);
+    assert.match(snapdomAsset.headers.get('content-type') ?? '', /javascript/);
+    assert.equal(snapdomAsset.headers.get('set-cookie'), null);
+    assert.match(await snapdomAsset.text(), /window\.snapdom/);
     const script = await bridgeAsset.text();
     assert.equal(createHash('sha256').update(script).digest('hex'), bridgeUrl.searchParams.get('v'));
     assert.ok(!script.includes(minted.token) && !script.includes(projectA));

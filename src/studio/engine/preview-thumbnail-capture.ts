@@ -21,6 +21,51 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     });
     return snapdomPromise;
   }
+  function waitTwoFrames(){
+    return new Promise(function(resolve){
+      var settled=false;
+      var timer=setTimeout(function(){
+        if(settled) return;
+        settled=true;
+        resolve();
+      },250);
+      requestAnimationFrame(function(){
+        if(settled) return;
+        requestAnimationFrame(function(){
+          if(settled) return;
+          settled=true;
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    });
+  }
+  function withPreviewRedirectSafeFetch(run){
+    var origFetch=window.fetch;
+    if(typeof origFetch!=='function') return run();
+    window.fetch=function(input,init){
+      if(init&&init.credentials==='include'){
+        try {
+          var rawUrl=typeof input==='string'?input:(input&&typeof input.url==='string'?input.url:'');
+          if(rawUrl){
+            var parsed=new URL(rawUrl,location.href);
+            if(parsed.origin===location.origin&&/^\\/api\\/projects\\/[^/]+\\/preview\\//.test(parsed.pathname)){
+              init=Object.assign({},init,{credentials:'same-origin'});
+            }
+          }
+        } catch(_){}
+      }
+      return origFetch.call(this,input,init);
+    };
+    function restore(){ if(window.fetch!==origFetch) window.fetch=origFetch; }
+    var pending;
+    try { pending=Promise.resolve(run()); }
+    catch(err){ restore(); return Promise.reject(err); }
+    return pending.then(
+      function(val){ restore(); return val; },
+      function(err){ restore(); throw err; }
+    );
+  }
   function waitForCaptureMedia(timeoutMs){
     var done=false;
     var tasks=[];
@@ -72,6 +117,7 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     if(!times.length) return Promise.resolve({frames:[],mimeType:'image/jpeg',width:240,height:135,aspect:16/9});
     var p=player();
     if(!p||typeof p.seek!=='function') return Promise.reject(new Error('Preview player is not ready'));
+    if(typeof p.pause==='function') p.pause();
     var root=document.querySelector('[data-composition-id]')||document.body;
     var target=root;
     if(message.selector){
@@ -98,14 +144,16 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
         (function(t){
           chain=chain.then(function(){
             p.seek(Math.max(0,Number(t)||0));
-            return new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(r); }); });
+            return waitTwoFrames();
           }).then(function(){
             var pureCanvas=findPureCanvasTarget(target,stageW,stageH);
             if(pureCanvas) return canvasToJpegBuffer(pureCanvas,outW,outH);
             return loadSnapdom().then(function(fn){
-              return fn(target,{scale:scale,fast:true,embedFonts:false,exclude:'video'});
-            }).then(function(res){ return res.toCanvas(); })
-              .then(function(cv){ return canvasToJpegBuffer(cv,outW,outH); });
+              return withPreviewRedirectSafeFetch(function(){
+                return fn(target,{scale:scale,fast:true,embedFonts:false,exclude:'video'})
+                  .then(function(res){ return res.toCanvas(); });
+              });
+            }).then(function(cv){ return canvasToJpegBuffer(cv,outW,outH); });
           }).then(function(buf){
             frames.push(buf);
             return new Promise(function(r){ setTimeout(r,0); });
