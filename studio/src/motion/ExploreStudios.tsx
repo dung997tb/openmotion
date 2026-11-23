@@ -407,7 +407,7 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
     (community.source === 'templates' && community.scenes.some(id => id === scene.id))));
   const showMotion = !medium || medium === 'video';
   const showTemplates = showMotion && !specialty;
-  const templates = useExploreTemplates(community?.source === 'techniques' ? undefined : community?.category ?? 'all', locale, '', community ? templatePreviewLimit : templatePreviewLimit + 2, firstPages);
+  const templates = useExploreTemplates(community?.source === 'techniques' ? undefined : community?.category ?? 'all', locale, { limit: community ? templatePreviewLimit : templatePreviewLimit + 2, firstPages });
   const showShelves = !community && showMotion;
   const shelf = useExploreTemplateShelf(templateFilter, locale, showShelves, active, templates, templatePreviewLimit);
   const shelfItems = shelf.items;

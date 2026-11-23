@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
@@ -18,212 +16,27 @@ import { asInsert, asUpdate } from '../src/db/helpers.ts';
 import {
   catalogTemplateFiles,
   catalogTemplates,
-  type CatalogTemplateKind,
 } from '../src/db/schema/blobs-assets.ts';
 import { createLogger, type Logger } from '../src/infra/logger.ts';
 import { StorageService, catalogBlobKey } from '../src/infra/storage.ts';
+import { assembleBuiltinTemplate, BUILTIN_TEMPLATES } from '../src/services/builtin-template-source.ts';
 import {
-  BUILTIN_TEMPLATES,
-  GSAP_CDN_URL,
-  NATIVE_PROJECT_CONFIG,
-  WELCOME_SHARED_ASSETS,
-  WELCOME_TEMPLATE_ID,
-  mimeTypeForPath,
-  normalizeCatalogAssetPath,
-  type BuiltinTemplateDefinition,
-} from '../src/services/catalog-service.ts';
+  extractCatalogFileMetadata, mimeTypeForPath, normalizeCatalogAssetPath, sha256Hex,
+  type MediaMetadataHints, type PreparedCatalogFile, type PreparedCatalogTemplate,
+} from '../src/services/catalog-template-source.ts';
+
+export { assembleBuiltinTemplate } from '../src/services/builtin-template-source.ts';
+export {
+  extractCatalogFileMetadata, type MediaMetadataHints, type PreparedCatalogFile, type PreparedCatalogTemplate,
+} from '../src/services/catalog-template-source.ts';
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const DEFAULT_CONCURRENCY = 8;
 const MAX_CONCURRENCY = 32;
 
-function sha256Hex(content: Buffer | string): string {
-  return createHash('sha256').update(content).digest('hex');
-}
-
 function envBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined || value.trim() === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
-}
-
-// ---------------------------------------------------------------------------
-// Pure-Node Image / Media Metadata Sniffer (Zero External Binary Dependency)
-// ---------------------------------------------------------------------------
-
-function readPngDimensions(bytes: Buffer): { width: number; height: number } | null {
-  if (
-    bytes.byteLength >= 24 &&
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47
-  ) {
-    const width = bytes.readUInt32BE(16);
-    const height = bytes.readUInt32BE(20);
-    if (width > 0 && height > 0) return { width, height };
-  }
-  return null;
-}
-
-function readJpegDimensions(bytes: Buffer): { width: number; height: number } | null {
-  if (bytes.byteLength < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
-  let offset = 2;
-  while (offset + 4 <= bytes.byteLength) {
-    while (offset < bytes.byteLength && bytes[offset] !== 0xff) offset++;
-    while (offset < bytes.byteLength && bytes[offset] === 0xff) offset++;
-    if (offset >= bytes.byteLength) break;
-    const marker = bytes[offset];
-    offset++;
-    if (marker === 0xd9 || marker === 0xda) break; // EOI or SOS
-    if (offset + 2 > bytes.byteLength) break;
-    const segmentLength = bytes.readUInt16BE(offset);
-    if (segmentLength < 2 || offset + segmentLength > bytes.byteLength) break;
-    const isSof =
-      (marker >= 0xc0 && marker <= 0xc3) ||
-      (marker >= 0xc5 && marker <= 0xc7) ||
-      (marker >= 0xc9 && marker <= 0xcb) ||
-      (marker >= 0xcd && marker <= 0xcf);
-    if (isSof && segmentLength >= 7) {
-      const height = bytes.readUInt16BE(offset + 3);
-      const width = bytes.readUInt16BE(offset + 5);
-      if (width > 0 && height > 0) return { width, height };
-      return null;
-    }
-    offset += segmentLength;
-  }
-  return null;
-}
-
-function readWebpDimensions(bytes: Buffer): { width: number; height: number } | null {
-  if (
-    bytes.byteLength < 30 ||
-    bytes.subarray(0, 4).toString('ascii') !== 'RIFF' ||
-    bytes.subarray(8, 12).toString('ascii') !== 'WEBP'
-  ) {
-    return null;
-  }
-  const chunk = bytes.subarray(12, 16).toString('ascii');
-  if (chunk === 'VP8X' && bytes.byteLength >= 30) {
-    const width = 1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16));
-    const height = 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16));
-    return width > 0 && height > 0 ? { width, height } : null;
-  }
-  if (chunk === 'VP8 ' && bytes.byteLength >= 30 && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
-    const width = bytes.readUInt16LE(26) & 0x3fff;
-    const height = bytes.readUInt16LE(28) & 0x3fff;
-    return width > 0 && height > 0 ? { width, height } : null;
-  }
-  if (chunk === 'VP8L' && bytes.byteLength >= 25 && bytes[20] === 0x2f) {
-    const bits = bytes.readUInt32LE(21);
-    const width = (bits & 0x3fff) + 1;
-    const height = ((bits >> 14) & 0x3fff) + 1;
-    return width > 0 && height > 0 ? { width, height } : null;
-  }
-  return null;
-}
-
-function readSvgDimensions(bytes: Buffer): { width: number; height: number } | null {
-  const head = bytes.subarray(0, Math.min(bytes.byteLength, 2048)).toString('utf8');
-  const viewBox = head.match(/\bviewBox=["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)\s*["']/i);
-  if (viewBox) {
-    const width = Math.round(Number(viewBox[1]));
-    const height = Math.round(Number(viewBox[2]));
-    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-      return { width, height };
-    }
-  }
-  const w = head.match(/\bwidth=["']([\d.]+)(?:px)?["']/i);
-  const h = head.match(/\bheight=["']([\d.]+)(?:px)?["']/i);
-  if (w && h) {
-    const width = Math.round(Number(w[1]));
-    const height = Math.round(Number(h[1]));
-    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-      return { width, height };
-    }
-  }
-  return null;
-}
-
-export interface MediaMetadataHints {
-  width?: number;
-  height?: number;
-  fps?: number;
-  durationSec?: number;
-}
-
-export function extractCatalogFileMetadata(
-  filePath: string,
-  bytes: Buffer | null,
-  mimeType: string,
-  hints?: MediaMetadataHints,
-): BlobMetadata | null {
-  const baseMime = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
-  if (baseMime.startsWith('image/')) {
-    let dims: { width: number; height: number } | null = null;
-    if (bytes) {
-      if (baseMime === 'image/png') dims = readPngDimensions(bytes);
-      else if (baseMime === 'image/jpeg') dims = readJpegDimensions(bytes);
-      else if (baseMime === 'image/webp') dims = readWebpDimensions(bytes);
-      else if (baseMime === 'image/svg+xml') dims = readSvgDimensions(bytes);
-    }
-    return {
-      modality: 'image',
-      mimeType: baseMime,
-      ...(dims ? { width: dims.width, height: dims.height } : {}),
-    };
-  }
-  if (baseMime.startsWith('video/')) {
-    return {
-      modality: 'video',
-      mimeType: baseMime,
-      hasVideo: true,
-      ...(hints?.width ? { width: hints.width } : {}),
-      ...(hints?.height ? { height: hints.height } : {}),
-      ...(hints?.fps ? { fps: hints.fps } : {}),
-      ...(hints?.durationSec ? { durationSec: hints.durationSec } : {}),
-    };
-  }
-  if (baseMime.startsWith('audio/')) {
-    return {
-      modality: 'audio',
-      mimeType: baseMime,
-      hasAudio: true,
-      ...(hints?.durationSec ? { durationSec: hints.durationSec } : {}),
-    };
-  }
-  // Suppress unused warning while keeping filePath available for future container inspection
-  void filePath;
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Prepared Catalog Model
-// ---------------------------------------------------------------------------
-
-export interface PreparedCatalogFile {
-  path: string;
-  sha256: string;
-  sizeBytes: number;
-  mimeType: string;
-  metadata: BlobMetadata | null;
-  isProjectFile: boolean;
-  isAvailable: boolean;
-  bytes: Buffer | null;
-  remoteUrl?: string;
-  metadataHints?: MediaMetadataHints;
-}
-
-export interface PreparedCatalogTemplate {
-  id: string;
-  kind: CatalogTemplateKind;
-  catalogVersion: string;
-  sortOrder: number;
-  featuredOrder: number | null;
-  hasHtmlProject: boolean;
-  metadata: Record<string, unknown>;
-  instructionsMd: string | null;
-  motionMd: string | null;
-  files: PreparedCatalogFile[];
 }
 
 export interface SyncCatalogOptions {
@@ -312,124 +125,6 @@ export function parseSyncCatalogArgs(argv: readonly string[]): SyncCatalogOption
     options.templateIds = [...new Set(templateIds)];
   }
   return options;
-}
-
-// ---------------------------------------------------------------------------
-// Built-in Template Assembly (Mirroring template-library.ts copyTemplate)
-// ---------------------------------------------------------------------------
-
-interface RegistryItemManifest {
-  files: Array<{ path: string; target: string; type?: string }>;
-}
-
-export async function assembleBuiltinTemplate(
-  definition: BuiltinTemplateDefinition,
-  repoRoot = DEFAULT_REPO_ROOT,
-  runtimeRoot = repoRoot,
-): Promise<PreparedCatalogTemplate> {
-  const templateDir = path.join(repoRoot, 'template-library', definition.id);
-  const manifest = JSON.parse(
-    await readFile(path.join(templateDir, 'registry-item.json'), 'utf8'),
-  ) as RegistryItemManifest;
-
-  const fileMap = new Map<string, PreparedCatalogFile>();
-  const addFile = (rawPath: string, bytes: Buffer, isProjectFile: boolean, hints?: MediaMetadataHints) => {
-    const normalized = normalizeCatalogAssetPath(rawPath);
-    const mimeType = mimeTypeForPath(normalized);
-    fileMap.set(normalized, {
-      path: normalized,
-      sha256: sha256Hex(bytes),
-      sizeBytes: bytes.byteLength,
-      mimeType,
-      metadata: extractCatalogFileMetadata(normalized, bytes, mimeType, hints),
-      isProjectFile,
-      isAvailable: true,
-      bytes,
-    });
-  };
-
-  for (const item of manifest.files) {
-    const target = normalizeCatalogAssetPath(item.target);
-    const sourcePath = path.join(templateDir, item.path);
-    if (target.endsWith('.html')) {
-      const relativeGsap = path.posix.relative(path.posix.dirname(target), 'assets/gsap.min.js');
-      const rawHtml = await readFile(sourcePath, 'utf8');
-      const rewritten = rawHtml.replaceAll(GSAP_CDN_URL, relativeGsap);
-      addFile(target, Buffer.from(rewritten, 'utf8'), true);
-    } else {
-      const bytes = await readFile(sourcePath);
-      const audioHints =
-        definition.id === WELCOME_TEMPLATE_ID && target === 'assets/soundtrack.m4a'
-          ? { durationSec: definition.duration }
-          : undefined;
-      addFile(target, bytes, true, audioHints);
-    }
-  }
-
-  if (definition.id === WELCOME_TEMPLATE_ID) {
-    for (const [sourceRel, targetRel] of WELCOME_SHARED_ASSETS) {
-      const bytes = await readFile(path.join(repoRoot, sourceRel));
-      addFile(targetRel, bytes, true);
-    }
-  }
-
-  const gsapBytes = await readFile(path.join(runtimeRoot, 'node_modules/gsap/dist/gsap.min.js'));
-  addFile('assets/gsap.min.js', gsapBytes, true);
-
-  const licenseBytes = await readFile(path.join(repoRoot, 'template-library/LICENSE'));
-  addFile('LICENSE', licenseBytes, true);
-
-  if (definition.id !== WELCOME_TEMPLATE_ID) {
-    const noticeBytes = await readFile(path.join(repoRoot, 'template-library/NOTICE.md'));
-    addFile('NOTICE.md', noticeBytes, true);
-  }
-
-  addFile('hyperframes.json', Buffer.from(JSON.stringify(NATIVE_PROJECT_CONFIG, null, 2), 'utf8'), true);
-
-  // Poster stored in catalog CAS as a non-project asset so cloning never pollutes project_files.
-  const posterBytes = await readFile(path.join(templateDir, 'poster.jpg'));
-  addFile('poster.jpg', posterBytes, false);
-
-  let instructionsMd: string | null = null;
-  try {
-    instructionsMd = await readFile(path.join(templateDir, 'TEMPLATE.md'), 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-
-  const files = [...fileMap.values()].sort((a, b) => a.path.localeCompare(b.path));
-  const versionHash = createHash('sha256')
-    .update(JSON.stringify(files.map((f) => ({ path: f.path, sha256: f.sha256, bytes: f.sizeBytes }))))
-    .digest('hex');
-
-  return {
-    id: definition.id,
-    kind: 'builtin',
-    catalogVersion: `builtin:${versionHash}`,
-    sortOrder: definition.sortOrder,
-    featuredOrder: null,
-    hasHtmlProject: files.some((f) => f.isProjectFile && f.path === 'index.html'),
-    metadata: {
-      title: definition.title,
-      label: definition.label,
-      subtitle: `${definition.label} · ${definition.author}`,
-      description: definition.description,
-      author: definition.author,
-      collection: 'builtin',
-      tags: [definition.label],
-      duration: definition.duration,
-      width: definition.width,
-      height: definition.height,
-      ratio: '16:9',
-      posterTime: definition.posterTime,
-      sourceUrl: definition.sourceUrl,
-      posterPath: 'poster.jpg',
-      localMedia: { poster: 'poster.jpg' },
-    },
-    instructionsMd,
-    motionMd: null,
-    files,
-  };
 }
 
 // ---------------------------------------------------------------------------

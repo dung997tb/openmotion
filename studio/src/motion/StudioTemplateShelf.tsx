@@ -32,7 +32,7 @@ export function StudioTemplateShelf({ studio, root, active }: {
   const tag = studio === '3d' ? threeDimensionalTags[locale] : null;
   const query = tag ?? (studio === 'explainer' ? explainerTerms[locale] : '');
   // 3D loads every tag match at once (the catalogue's 60-item page) and reveals eight at a time.
-  const templates = useExploreTemplates(collections[studio], locale, query, tag ? 60 : shelfSize);
+  const templates = useExploreTemplates(collections[studio], locale, { search: query, limit: tag ? 60 : shelfSize });
   const [shown, setShown] = useState(shelfSize);
   const loaded = templates.pages.flatMap(page => page.items);
   const matching = tag ? loaded.filter(item => item.tags.includes(tag)) : loaded;

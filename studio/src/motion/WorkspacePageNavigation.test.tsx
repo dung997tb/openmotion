@@ -653,6 +653,42 @@ it('browses the complete Motion catalog in batches and filters by its existing t
   expect(cards()).toHaveLength(16);
 });
 
+it('lists editable Motion projects without posters and appends later pages with their original template IDs', async () => {
+  const fallback = fetcher.getMockImplementation()!;
+  const firstBatch = Array.from({ length: 16 }, (_, index) => ({
+    id: index === 0 ? 'motion-cms-first' : `motion-cms-item-${index}`,
+    title: index === 0 ? 'motion-cms-first' : `Motion CMS ${index}`,
+    kind: 'prism', collection: 'example', hasHtmlProject: true, tags: [],
+  }));
+  const secondId = 'motion-cms-later';
+  const pageOffsets: number[] = [];
+  fetcher.mockImplementation(async (input, init) => {
+    const url = new URL(input, location.origin);
+    if (!url.pathname.endsWith('/template-catalog') || url.searchParams.get('category') !== 'all')
+      return fallback(input, init);
+    expect(url.searchParams.get('covered')).not.toBe('true');
+    const offset = Number(url.searchParams.get('offset'));
+    pageOffsets.push(offset);
+    return Response.json(offset === 0
+      ? { items: firstBatch, next: 16, total: 17 }
+      : { items: [{ id: secondId, title: secondId, kind: 'prism', collection: 'example', hasHtmlProject: true, tags: [] }], next: null, total: 17 });
+  });
+  await mount();
+  await click('Motion Studio');
+  const cards = () => [...container.querySelectorAll<HTMLElement>('.om-studio-template-grid article[data-template-id]')].map(card => card.dataset.templateId);
+  expect(pageOffsets).toEqual([0, 16]);
+  expect(cards()).toHaveLength(16);
+  expect(cards()[0]).toBe('motion-cms-first');
+  expect(container.querySelector('.om-gallery-poster-fallback')).toBeTruthy();
+  await click('More templates');
+  expect(cards()).toHaveLength(17);
+  expect(cards().at(-1)).toBe(secondId);
+  expect(container.querySelector('.om-shelf-more')).toBeNull();
+  const card = container.querySelector<HTMLButtonElement>(`article[data-template-id="${secondId}"] button`)!;
+  await act(async () => card.click());
+  expect(new URL(location.href).searchParams.get('template')).toBe(secondId);
+});
+
 it('restores the narrow Motion Studio landing and opens the editor from its banner', async () => {
   vi.stubGlobal('innerWidth', 700);
   history.replaceState(null, '', firstUrl.replace('#', '&page=motion#'));

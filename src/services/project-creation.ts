@@ -63,6 +63,10 @@ export async function createOrCloneProject(
     });
   }
 
+  if (input.projectType === 'template' && !deps.catalog) {
+    throw new CloudError('SERVICE_UNAVAILABLE', 'The template catalog is unavailable', { status: 503, applied: false });
+  }
+
   let fallbackTemplateId = templateId;
   if (templateId && deps.catalog) {
     try {
@@ -85,7 +89,7 @@ export async function createOrCloneProject(
         revision: cloned.revision,
         versionId: cloned.versionId,
         versionNumber: cloned.versionNumber,
-        replayed: false,
+        replayed: cloned.replayed === true,
         payload: cloned,
       };
     } catch (error) {
@@ -136,12 +140,12 @@ export function formatProjectCreationHttpResponse(result: CreateOrCloneProjectRe
 } {
   if (result.kind === 'cloned') {
     return {
-      status: 201,
+      status: result.replayed ? 200 : 201,
       body: {
         ...result.payload,
         project: result.payload,
         projectTitle: result.title,
-        replayed: false,
+        replayed: result.replayed,
         exportJob: null,
       },
     };

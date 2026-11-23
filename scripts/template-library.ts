@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
 import { loadRepositoryCatalog, lfsPointer, repositoryAssetFile, repositoryMediaFile } from '../shared/repository-template-catalog.ts';
 import { isMain } from '../shared/entry.ts';
-import { mediaOrigin, validateMediaLock } from '../shared/repository-media.ts';
+import { cmsUrl, mediaOrigin, validateMediaLock } from '../shared/repository-media.ts';
+
+export { cmsUrl } from '../shared/repository-media.ts';
 
 export const catalogRoot = fileURLToPath(new URL('../library/templates/catalog/', import.meta.url));
 export const textFile = /\.(?:md|json|html?|css|[cm]?[jt]sx?|txt|ya?ml|toml|xml)$/i;
@@ -51,20 +53,6 @@ export function safePath(name: string): string {
     'Unsafe template path: ' + name,
   );
   return name;
-}
-export function cmsUrl(value: unknown): string {
-  assert(typeof value === 'string', 'Missing CMS URL');
-  const url = new URL(value);
-  assert(
-    url.origin === 'https://r.open-design.ai' &&
-      /^\/files\/[a-f0-9]{64}$/.test(url.pathname) &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash,
-    'Require a public, content-addressed CMS file URL',
-  );
-  return value;
 }
 export function publicAssetUrl(value: unknown): string {
   assert(typeof value === 'string', 'Missing public asset URL');
