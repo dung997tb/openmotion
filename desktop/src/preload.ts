@@ -1,60 +1,82 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
-  DesktopBridgeApi,
-  DesktopChromeInsets,
-  DesktopMenuAction,
-  DesktopUpdateState,
-} from '../../shared/platform-host.ts';
+  HostCapabilityDescriptor,
+  HostInvokeResult,
+  HostRuntimeInfo,
+  UniversalHostBridge,
+} from '../../shared/desktop-contract.ts';
+import { HOST_IPC_CHANNELS } from './ipc-guard.ts';
 
-const bridge: DesktopBridgeApi = {
-  getAppInfo: () => ipcRenderer.invoke('openmotion:get-app-info'),
-  getChromeState: () => ipcRenderer.invoke('openmotion:get-chrome-state'),
-  subscribeChromeState: callback => {
-    const handler = (_event: unknown, state: DesktopChromeInsets) => {
-      callback(state);
-    };
-    ipcRenderer.on('openmotion:chrome-state', handler);
-    return () => ipcRenderer.removeListener('openmotion:chrome-state', handler);
-  },
-  setTheme: theme => ipcRenderer.invoke('openmotion:set-theme', theme),
-  windowMinimize: () => ipcRenderer.invoke('openmotion:window-minimize'),
-  windowToggleMaximize: () => ipcRenderer.invoke('openmotion:window-toggle-maximize'),
-  windowClose: () => ipcRenderer.invoke('openmotion:window-close'),
-  checkForUpdates: () => ipcRenderer.invoke('openmotion:check-updates'),
-  downloadUpdate: () => ipcRenderer.invoke('openmotion:download-update'),
-  installUpdateNow: () => ipcRenderer.invoke('openmotion:install-update-now'),
-  getUpdateState: () => ipcRenderer.invoke('openmotion:get-update-state'),
-  subscribeUpdateState: callback => {
-    const handler = (_event: unknown, state: DesktopUpdateState) => {
-      callback(state);
-    };
-    ipcRenderer.on('openmotion:update-state', handler);
-    return () => ipcRenderer.removeListener('openmotion:update-state', handler);
-  },
-  exportDesktopLogs: () => ipcRenderer.invoke('openmotion:export-logs'),
-  openLogsFolder: () => ipcRenderer.invoke('openmotion:open-logs-folder'),
-  openExternal: url => ipcRenderer.invoke('openmotion:open-external', url),
-  subscribeMenuActions: callback => {
-    const handler = (_event: unknown, action: DesktopMenuAction) => {
-      callback(action);
-    };
-    ipcRenderer.on('openmotion:menu-action', handler);
-    return () => ipcRenderer.removeListener('openmotion:menu-action', handler);
-  },
-  notifyRendererReady: () => {
-    ipcRenderer.send('openmotion:renderer-ready');
-  },
-  retryDesktopStartup: () => ipcRenderer.invoke('openmotion:splash-retry'),
-  splashContinueToStudio: () => ipcRenderer.invoke('openmotion:splash-continue'),
-  splashStartSignIn: () => ipcRenderer.invoke('openmotion:splash-sign-in'),
-  splashCancelSignIn: () => ipcRenderer.invoke('openmotion:splash-cancel-sign-in'),
-  splashRefreshAccount: () => ipcRenderer.invoke('openmotion:splash-refresh-account'),
+type HostEventEnvelope = {
+  capability?: unknown;
+  event?: unknown;
+  payload?: unknown;
 };
 
-contextBridge.exposeInMainWorld('__OPENMOTION_DESKTOP__', bridge);
+function isTopLevelFrame(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.top === window && window.self === window;
+  } catch {
+    return false;
+  }
+}
 
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  window.addEventListener('fullscreenchange', () => {
-    ipcRenderer.send('openmotion:dom-fullscreen', Boolean(document.fullscreenElement));
-  });
+function isAllowedBridgeLocation(): boolean {
+  if (typeof window === 'undefined' || !window.location) return false;
+  const protocol = window.location.protocol;
+  if (protocol === 'https:') return true;
+  if (protocol === 'http:') {
+    const hostname = window.location.hostname.toLowerCase();
+    return hostname === '127.0.0.1' || hostname === 'localhost';
+  }
+  return false;
+}
+
+if (isTopLevelFrame() && isAllowedBridgeLocation()) {
+  const bridge: UniversalHostBridge = {
+    info: () => ipcRenderer.invoke(HOST_IPC_CHANNELS.INFO) as Promise<HostRuntimeInfo>,
+    capabilities: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.CAPABILITIES) as Promise<HostCapabilityDescriptor[]>,
+    invoke: <T = unknown>(
+      capability: string,
+      method: string,
+      params?: Record<string, unknown>,
+    ): Promise<HostInvokeResult<T>> =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.INVOKE, {
+        capability,
+        method,
+        params,
+      }) as Promise<HostInvokeResult<T>>,
+    subscribe: (capability, event, callback) => {
+      if (
+        typeof capability !== 'string' ||
+        !capability ||
+        typeof event !== 'string' ||
+        !event ||
+        typeof callback !== 'function'
+      ) {
+        return () => {};
+      }
+      const handler = (_ipcEvent: unknown, message: unknown) => {
+        if (!message || typeof message !== 'object') return;
+        const envelope = message as HostEventEnvelope;
+        if (envelope.capability === capability && envelope.event === event) {
+          callback(envelope.payload);
+        }
+      };
+      ipcRenderer.on(HOST_IPC_CHANNELS.EVENT, handler);
+      return () => {
+        ipcRenderer.removeListener(HOST_IPC_CHANNELS.EVENT, handler);
+      };
+    },
+  };
+
+  contextBridge.exposeInMainWorld('__OPENMOTION_HOST__', bridge);
+
+  if (typeof document !== 'undefined') {
+    window.addEventListener('fullscreenchange', () => {
+      ipcRenderer.send(HOST_IPC_CHANNELS.DOM_FULLSCREEN, Boolean(document.fullscreenElement));
+    });
+  }
 }
