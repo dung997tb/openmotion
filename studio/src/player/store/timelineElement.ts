@@ -206,3 +206,8 @@ export interface SubCompositionHostState {
   fxChain?: string;
   automation?: string;
 }
+
+/** Assign root text a temporary lane above authored clips before display normalization. */
+export function implicitTextLane(index: number): number {
+  return -100000 + index;
+}

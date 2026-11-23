@@ -1,3 +1,4 @@
+import { implicitTextLane } from "../store/timelineElement";
 import { timelineSpansOverlap } from "./timelineTimeBounds";
 import type { TimelineElement } from "../store/playerStore";
 import { isAudioTimelineElement } from "../../utils/timelineInspector";
@@ -160,9 +161,10 @@ export function normalizeToZones(elements: TimelineElement[]): TimelineElement[]
 
 /** Rebuild display lanes from the same authored tracks discovery will see after a write. */
 export function displayAuthoredTimelineLanes(elements: TimelineElement[]): TimelineElement[] {
-  return normalizeToZones(elements.map(element =>
-    element.authoredTrack == null || element.authoredTrack === element.track
-      ? element
-      : { ...element, track: element.authoredTrack },
-  ));
+  return normalizeToZones(elements.map(element => {
+    const track = element.implicitTextTiming
+      ? (element.track < 0 ? element.track : implicitTextLane(element.track))
+      : element.authoredTrack ?? element.track;
+    return track === element.track ? element : { ...element, track };
+  }));
 }
