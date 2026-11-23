@@ -118,6 +118,11 @@
       "source": "lobe",
       "path": "packages/static-svg/icons/codex-color.svg"
     },
+    "codex-mark.svg": {
+      "source": "lobe",
+      "path": "packages/static-svg/icons/codex-color.svg",
+      "modifications": "Removed the tile and adjusted the viewBox for inline use."
+    },
     "grok.svg": {
       "source": "lobe",
       "path": "packages/static-svg/icons/grok.svg"

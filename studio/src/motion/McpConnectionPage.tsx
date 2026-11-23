@@ -348,7 +348,7 @@ export function McpConnectionPage({
             click('mcp_resources', 'sign_in');
             changeRoute({ settings: 'account', assets: false, skills: false, templates: false });
           }}>
-            {t('Sign in now')} <span aria-hidden="true">→</span>
+            {t('Claim now')} <span aria-hidden="true">→</span>
           </Button>
           <Button variant="plain" className="om-mcp-entitlement-byok" onClick={openProviders('mcp_resources')}>
             {t('Already have an API key? Use BYOK')}
@@ -367,7 +367,7 @@ export function McpConnectionPage({
                 const avatarClient = clients.find(entryClient => entryClient.id === item.clientId)!;
                 return (
                   <Tab value={item.id} key={item.id} className="om-mcp-client-tab">
-                    <span className="om-mcp-client-ico"><McpClientAvatar client={avatarClient} /></span>
+                    <span className="om-mcp-client-ico"><McpClientAvatar client={avatarClient} inDock /></span>
                     <span>{t(item.labelKey)}</span>
                   </Tab>
                 );

@@ -37,7 +37,7 @@
 .om-mcp-client-tab { height: 36px; padding-inline: 13px; display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; }
 .om-mcp-client-ico { width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 [data-motion-studio] .om-mcp-client-ico .om-avatar { width: 17px; height: 17px; }
-.om-mcp-client-ico svg, .om-mcp-client-ico img { width: 17px; height: 17px; display: block; }
+.om-mcp-client-ico svg, .om-mcp-client-ico img { width: 16px; height: 16px; display: block; }
 
 /* Spacious Hero Centerpiece */
 .om-mcp-hero-top { padding: 120px 0 116px; text-align: center; max-width: 920px; margin-inline: auto; }

@@ -232,6 +232,9 @@ export const providerIcons = Object.freeze({
   "codex": {
     "file": "providers/codex-color.svg"
   },
+  "codex-mark": {
+    "file": "providers/codex-mark.svg"
+  },
   "opendesign": {
     "file": "providers/opendesign.svg"
   },

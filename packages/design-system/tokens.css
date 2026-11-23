@@ -159,7 +159,7 @@
   --motion-mcp-stage-dot: rgba(255, 255, 255, 0.30);
   --motion-mcp-dock-bg: rgba(18, 19, 22, 0.04);
   --motion-mcp-dock-active: rgba(18, 19, 22, 0.09);
-  --motion-mcp-dock-hover: rgba(18, 19, 22, 0.06);
+  --motion-mcp-dock-hover: rgba(18, 19, 22, 0.04);
   --motion-mcp-page-bg: var(--motion-workspace);
   --motion-mcp-banner-bg: rgb(0 113 6 / 4%);
   --motion-mcp-banner-border: rgba(0, 113, 6, 0.20);
@@ -296,9 +296,9 @@
   --motion-mcp-stage-action-hover: #e6e8e4;
   --motion-mcp-stage-on-action: #0b0c0d;
   --motion-mcp-stage-dot: rgba(255, 255, 255, 0.30);
-  --motion-mcp-dock-bg: rgba(255, 255, 255, 0.03);
-  --motion-mcp-dock-active: rgba(255, 255, 255, 0.11);
-  --motion-mcp-dock-hover: rgba(255, 255, 255, 0.055);
+  --motion-mcp-dock-bg: rgba(255, 255, 255, 0.04);
+  --motion-mcp-dock-active: rgba(255, 255, 255, 0.13);
+  --motion-mcp-dock-hover: rgba(255, 255, 255, 0.04);
   --motion-mcp-page-bg: #111214;
   --motion-mcp-banner-bg: rgb(0 255 8 / 4%);
   --motion-mcp-banner-border: rgba(0, 255, 8, 0.22);
@@ -436,9 +436,9 @@
     --motion-mcp-stage-action-hover: #e6e8e4;
     --motion-mcp-stage-on-action: #0b0c0d;
     --motion-mcp-stage-dot: rgba(255, 255, 255, 0.30);
-    --motion-mcp-dock-bg: rgba(255, 255, 255, 0.03);
-    --motion-mcp-dock-active: rgba(255, 255, 255, 0.11);
-    --motion-mcp-dock-hover: rgba(255, 255, 255, 0.055);
+    --motion-mcp-dock-bg: rgba(255, 255, 255, 0.04);
+    --motion-mcp-dock-active: rgba(255, 255, 255, 0.13);
+    --motion-mcp-dock-hover: rgba(255, 255, 255, 0.04);
     --motion-mcp-page-bg: #111214;
     --motion-mcp-banner-bg: rgb(0 255 8 / 4%);
     --motion-mcp-banner-border: rgba(0, 255, 8, 0.22);

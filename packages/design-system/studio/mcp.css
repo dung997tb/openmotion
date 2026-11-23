@@ -33,7 +33,6 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-[data-motion-studio] .om-mcp-entitlement-cta:hover { color: var(--motion-accent-hover); }
 [data-motion-studio] .om-mcp-entitlement-byok { color: var(--motion-muted); font-size: 12px; }
 [data-motion-studio] .om-mcp-entitlement-byok:hover { color: var(--motion-strong); }
 
