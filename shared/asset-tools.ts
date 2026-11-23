@@ -36,13 +36,21 @@ export const assetUseTool = {
     .map(([action, required]) => ({ type: 'object', properties: { action: { enum: [action] } }, required, additionalProperties: true })),
   },
 };
+const workspaceActions = {
+  brand_kit: ['brandKit'],
+  transcript: ['transcript'],
+  list_components: [],
+  install_component: ['projectId', 'requestId', 'name'],
+};
 export const workspaceAssetUseTool = {
   ...assetUseTool,
-  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription,
+  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription + ' In cloud Studio, list_components searches motion effects by query (offset and limit paginate). install_component takes the selected name, projectId and requestId, preserves existing files, and returns project-relative paths. Mount the first path to place it in a composition.',
   annotations: { ...assetUseTool.annotations, destructiveHint: true },
   inputSchema: {
     ...assetUseTool.inputSchema, properties: { ...assetUseTool.inputSchema.properties,
-      action: { enum: [...assetUseTool.inputSchema.properties.action.enum, 'brand_kit', 'transcript'] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments },
-    oneOf: [...assetUseTool.inputSchema.oneOf, ...['brand_kit', 'transcript'].map(action => ({ type: 'object', properties: { action: { enum: [action] } }, required: [action === 'brand_kit' ? 'brandKit' : 'transcript'], additionalProperties: true }))],
+      action: { enum: [...assetUseTool.inputSchema.properties.action.enum, ...Object.keys(workspaceActions)] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments },
+    oneOf: [...assetUseTool.inputSchema.oneOf, ...Object.entries(workspaceActions).map(([action, required]) => ({
+      type: 'object', properties: { action: { enum: [action] } }, required, additionalProperties: true,
+    }))],
   },
 };

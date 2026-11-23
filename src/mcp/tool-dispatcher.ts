@@ -1,3 +1,4 @@
+import { installMotionComponent, listMotionComponents, type MotionComponentFiles } from '../services/motion-component-registry.ts';
 import { readFile } from 'node:fs/promises';
 import { assetReadToolResult, type AssetReadResult } from '../../shared/asset-library.ts';
 import { designScenarios } from '../../shared/design-project.ts';
@@ -38,6 +39,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface McpDomainPorts {
+  componentFiles?: MotionComponentFiles;
   projects?: {
     getProject(auth: AuthContext, args: Record<string, unknown>): Promise<Record<string, unknown>>;
     createProject(auth: AuthContext, args: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -695,6 +697,17 @@ export class McpToolDispatcher {
     compatAlias: boolean,
   ): Promise<Record<string, unknown>> {
     const action = String(args.action ?? '');
+
+    if (action === 'list_components') {
+      requireToolScopes(auth, ['projects:read']);
+      return listMotionComponents(args.query as string | undefined, args.offset as number | undefined, args.limit as number | undefined);
+    }
+    if (action === 'install_component') {
+      requireToolScopes(auth, ['projects:write']);
+      if (!hasMinRole(auth, 'editor')) throw new CloudError('FORBIDDEN', 'Editor access is required to install components', { status: 403 });
+      if (!this.ports.componentFiles) throw new CloudError('SERVICE_UNAVAILABLE', 'Project file service is not wired', { status: 503 });
+      return installMotionComponent(auth, this.ports.componentFiles, String(args.projectId), String(args.name), { requestId: String(args.requestId) });
+    }
 
     // P2 explicit gating for headless Brand Kit website capture.
     if (action === 'brand_kit') {

@@ -1,5 +1,8 @@
 {
   "zh-CN": {
+    "Install motion effects": "安装动效组件",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "在 Studio 组件目录中搜索，将可编辑的动效装入已有的云端项目。",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "用 openmotion_assets_use 的 list_components 搜索模糊效果。我选好后，用组件名、projectId 和固定的 requestId 调用 install_component，然后用 openmotion_edit_project 将返回的 HTML 放入合成。",
     "MCP": "MCP",
     "Current project": "当前项目",
     "Copy the instruction to another conversation to continue editing this project.": "复制指令到其他会话，继续编辑此项目。",
@@ -350,6 +353,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "读取当前合成和元素的稳定标识。一次编辑的所有修改一起提交。如果同一次操作涉及多个合成，请使用批量命令。"
   },
   "ja": {
+    "Install motion effects": "モーション効果を追加",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Studio のカタログで検索し、既存のクラウドプロジェクトに編集可能な効果を追加します。",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "openmotion_assets_use の list_components でぼかし効果を探してください。選択後、その名前、projectId、固定の requestId で install_component を実行し、openmotion_edit_project で返された HTML を配置してください。",
     "Create and reuse assets": "アセットを作成して再利用",
     "How do I start from a template?": "テンプレートから始めるには？",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "テンプレートをプレビューし、接続した Agent に指示を送ってください。編集可能なテンプレートは変更することも、そのまま HTML プロジェクトと MP4 として書き出すこともでき、書き出したファイルを確認します。参考映像のみの項目は再制作が必要です。",
@@ -488,6 +494,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "現在のコンポジションと要素の固定 ID を読み取ります。一度の編集に含まれる変更をまとめて適用し、複数のコンポジションにまたがる場合はバッチを使います。"
   },
   "ko": {
+    "Install motion effects": "모션 효과 설치",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Studio 카탈로그에서 검색하여 기존 클라우드 프로젝트에 편집 가능한 효과를 설치하세요.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "openmotion_assets_use의 list_components로 흐림 효과를 찾으세요. 선택하면 이름, projectId 및 고정 requestId로 install_component를 실행하고 openmotion_edit_project로 반환된 HTML을 배치하세요.",
     "Create and reuse assets": "에셋 생성 및 재사용",
     "How do I start from a template?": "템플릿으로 시작하려면 어떻게 하나요?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "템플릿을 미리 본 뒤 연결된 Agent에 프롬프트를 보내세요. 편집 가능한 템플릿은 수정하거나 원본 그대로 HTML 프로젝트와 MP4로 내보낼 수 있으며, 내보낸 파일을 확인합니다. 참고 영상만 제공하는 항목은 다시 제작해야 합니다.",
@@ -626,6 +635,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "현재 컴포지션과 요소의 고정 ID를 읽으세요. 한 번의 편집에 속하는 변경 사항은 함께 적용하세요. 한 동작이 여러 컴포지션을 변경하면 일괄 명령을 사용하세요."
   },
   "de": {
+    "Install motion effects": "Bewegungseffekte installieren",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Den Studio-Katalog durchsuchen und bearbeitbare Effekte in einem vorhandenen Cloud-Projekt installieren.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "Suche mit openmotion_assets_use und list_components nach Unschärfeeffekten. Nutze nach meiner Auswahl install_component mit Name, projectId und fester requestId. Binde das gelieferte HTML mit openmotion_edit_project ein.",
     "Create and reuse assets": "Assets erstellen und wiederverwenden",
     "How do I start from a template?": "Wie beginne ich mit einer Vorlage?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Sieh dir eine Vorlage an und sende ihre Anweisung an deinen verbundenen Agent. Bearbeitbare Vorlagen lassen sich anpassen oder unverändert als HTML-Projekt und MP4 exportieren; die exportierte Datei wird geprüft. Reine Referenzbeispiele müssen nachgebaut werden.",
@@ -764,6 +776,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Lies die aktuelle Komposition und ihre stabilen Element-IDs. Übernimm zusammengehörige Änderungen gemeinsam. Ändert eine Geste mehrere Kompositionen, nutze einen Batch."
   },
   "fr": {
+    "Install motion effects": "Installer des effets animés",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Recherchez dans le catalogue Studio et installez des effets modifiables dans un projet cloud existant.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "Cherche des effets de flou avec list_components dans openmotion_assets_use. Après mon choix, appelle install_component avec le nom, projectId et un requestId stable. Insère le HTML renvoyé avec openmotion_edit_project.",
     "Create and reuse assets": "Créer et réutiliser des ressources",
     "How do I start from a template?": "Comment commencer avec un modèle ?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Prévisualisez un modèle, puis envoyez sa consigne à votre Agent connecté. Les modèles modifiables peuvent être adaptés ou exportés tels quels en projet HTML et en MP4, avec vérification du fichier exporté. Les exemples fournis uniquement comme références doivent être recréés.",
@@ -902,6 +917,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Lisez la composition et les identifiants stables de ses éléments. Regroupez les changements d’une même modification. Utilisez un lot si un geste modifie plusieurs compositions."
   },
   "ru": {
+    "Install motion effects": "Установить эффекты анимации",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Найдите в каталоге Studio редактируемые эффекты и установите их в существующий облачный проект.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "Найди эффекты размытия через list_components в openmotion_assets_use. После моего выбора вызови install_component с именем, projectId и постоянным requestId. Вставь полученный HTML через openmotion_edit_project.",
     "Create and reuse assets": "Создавайте и используйте ресурсы повторно",
     "How do I start from a template?": "Как начать с шаблона?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Просмотрите шаблон и отправьте его инструкцию подключённому Agent. Редактируемые шаблоны можно адаптировать или экспортировать без изменений как HTML-проект и MP4 с проверкой экспортированного файла. Примеры, доступные только как референсы, нужно воссоздать.",
@@ -1040,6 +1058,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Прочитайте текущую композицию и постоянные ID её элементов. Применяйте вместе изменения одного действия. Если оно затрагивает несколько композиций, используйте пакет."
   },
   "es": {
+    "Install motion effects": "Instalar efectos de movimiento",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Busca en el catálogo de Studio e instala efectos editables en un proyecto existente en la nube.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "Busca efectos de desenfoque con list_components en openmotion_assets_use. Cuando elija uno, llama a install_component con el nombre, projectId y un requestId fijo. Inserta el HTML devuelto con openmotion_edit_project.",
     "Create and reuse assets": "Crear y reutilizar recursos",
     "How do I start from a template?": "¿Cómo empiezo con una plantilla?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Previsualiza una plantilla y envía sus instrucciones a tu Agent conectado. Las plantillas editables pueden adaptarse o exportarse sin cambios como proyecto HTML y MP4, con comprobación del archivo exportado. Los ejemplos que solo sirven de referencia deben recrearse.",
@@ -1178,6 +1199,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Lee la composición actual y los identificadores estables de sus elementos. Aplica juntos los cambios de una edición. Usa un lote si un gesto modifica varias composiciones."
   },
   "pt-BR": {
+    "Install motion effects": "Instalar efeitos de movimento",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Pesquise no catálogo do Studio e instale efeitos editáveis em um projeto existente na nuvem.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "Procure efeitos de desfoque com list_components em openmotion_assets_use. Após minha escolha, use install_component com o nome, projectId e um requestId fixo. Insira o HTML retornado com openmotion_edit_project.",
     "Create and reuse assets": "Crie e reutilize recursos",
     "How do I start from a template?": "Como começo com um modelo?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Visualize um modelo e envie as instruções ao seu Agent conectado. Os modelos editáveis podem ser adaptados ou exportados sem alterações como projeto HTML e MP4, com verificação do arquivo exportado. Os exemplos que servem apenas de referência precisam ser recriados.",
@@ -1316,6 +1340,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Leia a composição atual e os IDs estáveis dos elementos. Aplique juntas as mudanças de uma edição. Use um lote quando um gesto alterar várias composições."
   },
   "it": {
+    "Install motion effects": "Installare effetti di movimento",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Cerca nel catalogo di Studio e installa effetti modificabili in un progetto cloud esistente.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "Cerca effetti di sfocatura con list_components in openmotion_assets_use. Dopo la mia scelta, usa install_component con il nome, projectId e un requestId stabile. Inserisci il codice HTML restituito con openmotion_edit_project.",
     "Create and reuse assets": "Crea e riutilizza risorse",
     "How do I start from a template?": "Come inizio da un modello?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Visualizza un modello e invia le istruzioni al tuo Agent connesso. I modelli modificabili possono essere adattati o esportati senza modifiche come progetto HTML e MP4, con verifica del file esportato. Gli esempi disponibili solo come riferimento devono essere ricreati.",
@@ -1454,6 +1481,9 @@
     "Read the current composition and its stable element IDs. Apply all changes belonging to one edit together. Use a batch when one gesture changes several compositions.": "Leggi la composizione e gli ID stabili degli elementi. Applica insieme le modifiche di una singola operazione. Usa un batch se un gesto modifica più composizioni."
   },
   "tr": {
+    "Install motion effects": "Hareket efektleri yükle",
+    "Search the Studio catalog and install editable effects into an existing cloud project.": "Studio kataloğunda arama yapın ve mevcut bir bulut projesine düzenlenebilir efektler yükleyin.",
+    "Use openmotion_assets_use list_components to find blur effects. After I choose one, run install_component with its name, projectId and a stable requestId. Mount the returned HTML with openmotion_edit_project.": "openmotion_assets_use içindeki list_components ile bulanıklaştırma efektlerini bul. Seçimimden sonra ad, projectId ve sabit bir requestId ile install_component çağır. Dönen HTML içeriğini openmotion_edit_project ile yerleştir.",
     "Create and reuse assets": "Varlık oluşturun ve yeniden kullanın",
     "How do I start from a template?": "Bir şablonla nasıl başlayabilirim?",
     "Preview a template and send its prompt to your connected Agent. Ready-to-edit templates can be adapted or exported unchanged as an HTML project and MP4, with the exported file checked. Reference-only entries need reconstruction.": "Bir şablonu önizleyin ve yönergesini bağlı Agent’a gönderin. Düzenlenebilir şablonlar uyarlanabilir veya değiştirilmeden HTML projesi ve MP4 olarak dışa aktarılabilir; dışa aktarılan dosya kontrol edilir. Yalnızca referans olarak sunulan örneklerin yeniden oluşturulması gerekir.",

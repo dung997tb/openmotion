@@ -77,6 +77,7 @@ COPY shared/ ./shared/
 COPY gateway/ ./gateway/
 COPY tracking/ ./tracking/
 COPY skills/ ./skills/
+COPY library/components/registry/ ./library/components/registry/
 COPY library/design/ ./library/design/
 COPY library/skills/ ./library/skills/
 COPY docs/transcripts.md ./docs/transcripts.md

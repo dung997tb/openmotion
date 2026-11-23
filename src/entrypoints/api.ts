@@ -1083,6 +1083,7 @@ function createMcpDomainPorts(deps: {
   };
 
   return {
+    componentFiles: deps.files,
     projects: {
       async getProject(auth, args) {
         const projectId = typeof args.projectId === 'string' ? args.projectId : undefined;

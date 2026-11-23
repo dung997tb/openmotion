@@ -128,6 +128,10 @@ The MCP `initialize` instructions and the `openmotion_list_skills` description c
 - **No side effects**: listing, recommending or reading a Skill does not authorize project creation, downloads or export.
 
 
+### Cloud motion components
+
+Search the Studio effects catalog with `openmotion_assets_use({"action":"list_components","query":"blur","limit":10})`. Select an item by its exact `name`. As a project editor, call `openmotion_assets_use({"action":"install_component","name":"blur-in","projectId":"<project UUID>","requestId":"install-blur-1"})`. The server returns the component manifest and project-relative `written` paths with the mountable HTML first. Reference that file from the containing composition with `data-composition-src` to place it. Project history can undo the installation. Retrying with the same request ID preserves existing files. If a download fails, retry once connectivity returns.
+
 ### openmotion_create_project
 
 必填 requestId、projectType、title、requirements；可选 sessionId 归入已有会话。projectType 为 natural_language/template/reference_video。template 必须给实际可复制的 builtin 或 Prism templateId；reference_video 必须给已知目录 referenceVideoId 或 HTTP(S) referenceUrl。

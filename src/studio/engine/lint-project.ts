@@ -31,6 +31,7 @@ import {
 import { resolveReferencedDuration, resolveReferencedStart } from '@hyperframes/parsers/reference-resolver';
 import {
   normalizeVirtualPath,
+  resolveCompositionReference,
   resolveVirtualPath,
   virtualDirname,
   type VirtualProjectReader,
@@ -354,20 +355,21 @@ function lintBlankRootWithStandaloneVirtual(
 function lintMissingOrEmptySubCompositionsVirtual(
   project: VirtualProjectReader,
   rootHtml: string,
+  entryFile: string,
 ): HyperframeLintFinding[] {
   const visited = new Set<string>();
   const findings: HyperframeLintFinding[] = [];
   const subSrcRe = /\bdata-composition-src\s*=\s*(?:"([^"]+)"|'([^']+)')/gi;
 
-  const walk = (html: string) => {
+  const walk = (html: string, containingPath: string) => {
     for (const match of html.matchAll(subSrcRe)) {
       const srcPath = (match[1] ?? match[2] ?? '').trim();
       if (!srcPath || isPlaceholder(srcPath) || isRemoteOrInlineUrl(srcPath)) continue;
-      const normalized = normalizeVirtualPath(srcPath);
-      if (visited.has(normalized)) continue;
-      visited.add(normalized);
-      const subHtml = project.readText(normalized);
-      if (subHtml === null) {
+      const normalized = resolveCompositionReference(project, containingPath, decodedUrlPath(srcPath));
+      if (normalized && visited.has(normalized)) continue;
+      if (normalized) visited.add(normalized);
+      const subHtml = normalized ? project.readText(normalized) : null;
+      if (subHtml === null || !normalized) {
         findings.push({
           code: 'missing_or_empty_sub_composition',
           severity: 'error',
@@ -386,16 +388,17 @@ function lintMissingOrEmptySubCompositionsVirtual(
         });
         continue;
       }
-      walk(subHtml);
+      walk(subHtml, normalized);
     }
   };
-  walk(rootHtml);
+  walk(rootHtml, entryFile);
   return findings;
 }
 
 function lintDuplicateAudioTracksVirtual(
   project: VirtualProjectReader,
   rootHtml: string,
+  entryFile: string,
 ): HyperframeLintFinding[] {
   interface AudioSpan {
     trackIndex: number;
@@ -457,8 +460,8 @@ function lintDuplicateAudioTracksVirtual(
         const nextOrigin = compositionOriginSeconds(localStart, el);
         const subSrc = el.getAttribute('data-composition-src')?.trim();
         if (subSrc && !isPlaceholder(subSrc) && !isRemoteOrInlineUrl(subSrc)) {
-          const normalized = normalizeVirtualPath(subSrc);
-          if (!mounting.includes(normalized)) {
+          const normalized = resolveCompositionReference(project, mounting.at(-1)!, decodedUrlPath(subSrc));
+          if (normalized && !mounting.includes(normalized)) {
             const subHtml = project.readText(normalized);
             if (subHtml) {
               const subDoc = parseHTMLContent(subHtml);
@@ -477,7 +480,7 @@ function lintDuplicateAudioTracksVirtual(
   };
 
   const rootDoc = parseHTMLContent(rootHtml);
-  visit(rootDoc, rootDoc, new Map(), 0, [], []);
+  visit(rootDoc, rootDoc, new Map(), 0, [], [entryFile]);
 
   const findings: HyperframeLintFinding[] = [];
   for (let i = 0; i < spans.length; i++) {
@@ -659,8 +662,8 @@ export async function lintProjectInMemory(
     ...lintStylesheetAndMaskAssetsVirtual(project, allHtmlSources),
     ...(!options.entryFile ? lintMultipleRootCompositionsVirtual(project) : []),
     ...(!options.entryFile ? lintBlankRootWithStandaloneVirtual(rootHtml, allHtmlSources) : []),
-    ...lintDuplicateAudioTracksVirtual(project, rootHtml),
-    ...lintMissingOrEmptySubCompositionsVirtual(project, rootHtml),
+    ...lintDuplicateAudioTracksVirtual(project, rootHtml, entryFile),
+    ...lintMissingOrEmptySubCompositionsVirtual(project, rootHtml, entryFile),
     ...lintVideoMetadataVirtual(project, allHtmlSources),
   ];
 
