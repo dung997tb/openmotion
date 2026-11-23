@@ -1,4 +1,4 @@
-import { holdIsolatedTrims } from "../player/lib/isolatedTrimPreview";
+import { holdIsolatedTimelineChanges } from "../player/lib/isolatedTimelineEdits";
 import { previewTimelinePaint } from "./timelinePaintPreview";
 import { saveCloudTimeline, timelineTimingEdits, type TimelinePaintPlan } from "../utils/cloudTimelineEdit";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
@@ -287,6 +287,7 @@ export function useTimelineGroupEditing({
       const maxEnd = Math.max(...changes.map((change) => change.start + change.element.duration));
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, changes);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // needsExtension gates the SDK path (setTiming can't grow the root duration),
       // so read the store BEFORE the readout sync below optimistically updates it.
@@ -365,6 +366,7 @@ export function useTimelineGroupEditing({
         // Failed persist: revert the optimistic duration readout + live root
         // alongside the gesture owner's store rollback.
         preview.rollback();
+        releaseTiming();
         rollbackDuration();
         if (options?.suppressFailureToast) {
           console.error("[Timeline] group move failed to persist", error);
@@ -413,7 +415,7 @@ export function useTimelineGroupEditing({
       const maxEnd = Math.max(...changes.map((change) => change.start + change.duration));
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
-      const releaseTrim = holdIsolatedTrims(previewIframeRef.current, changes);
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, changes);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // needsExtension gates the SDK path (setTiming can't grow the root duration),
       // so read the store BEFORE the readout sync below optimistically updates it.
@@ -480,7 +482,7 @@ export function useTimelineGroupEditing({
       }).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root
         // alongside the gesture owner's store rollback.
-        releaseTrim();
+        releaseTiming();
         rollbackDuration();
         showToast(getStudioSaveErrorMessage(error), "error");
         throw error;

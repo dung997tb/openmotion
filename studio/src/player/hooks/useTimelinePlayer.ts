@@ -1,4 +1,4 @@
-import { applyHeldTrims } from "../lib/isolatedTrimPreview";
+import { applyHeldTimelineChanges } from "../lib/isolatedTimelineEdits";
 import { useRef, useCallback, useEffect } from "react";
 import { usePlayerStore, liveTime, type TimelineElement } from "../store/playerStore";
 import { useMountEffect } from "../../hooks/useMountEffect";
@@ -102,7 +102,7 @@ export function useTimelinePlayer({
         applyCachedSourceDurations(
           mergeTimelineElementsPreservingDowngrades(
             state.elements,
-            applyHeldTrims(iframeRef.current, elements),
+            applyHeldTimelineChanges(iframeRef.current, elements),
             state.duration,
             resolvedDuration,
             (element) =>
