@@ -104,24 +104,38 @@ it('keeps the confirmed source for unrelated 409s and retries temporary storage 
   } finally { stop(); }
 });
 
-it('reads a patch-version source with one GET and retains the write capability', async () => {
+it.each(['', 'W/'])('reads a patch-version source with one GET for a %s validator', async prefix => {
   const fetch = vi.fn().mockResolvedValueOnce(Response.json({ baseVersion:version(1), version:version(2), patch:[[0,1,'新']] },
-    { headers: { ETag:version(2), 'X-OpenMotion-Representation':'text-patch', 'X-OpenMotion-Text-Edits':'1' } }));
+    { headers: { ETag:prefix + version(2), 'X-OpenMotion-Representation':'text-patch', 'X-OpenMotion-Text-Edits':'1' } }));
   vi.stubGlobal('fetch',fetch);
   const res = await readVersionedSource('/api/file',{content:'x文',version:version(1)});
-  expect((await res.json()).content).toBe('新文');
+  expect(await res.json()).toMatchObject({ content: '新文', version: version(2) });
+  expect(res.headers.get('etag')).toBe(version(2));
   expect(res.headers.get('X-OpenMotion-Text-Edits')).toBe('1');
   expect(fetch).toHaveBeenCalledOnce();
 });
 
-it('keeps its confirmed source when revalidation returns 304', async () => {
+it.each(['', 'W/'])('keeps the confirmed source for a 304 with a %s validator', async prefix => {
   const base = { content: 'same', version: version(1) };
-  const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 304, headers: { ETag: base.version } }));
+  const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 304, headers: { ETag: prefix + base.version } }));
   vi.stubGlobal('fetch', fetch);
   const response = await readVersionedSource('/api/file', base);
   expect(await response.json()).toEqual({ ...base, missing: false });
   expect(fetch.mock.calls[0][1].headers['If-None-Match']).toBe(base.version);
   expect(fetch).toHaveBeenCalledOnce();
+});
+
+it.each([200, 304])('refetches the full source for a mismatched weak ETag on a %i read', async status => {
+  const headers = { ETag: 'W/' + version(3), 'X-OpenMotion-Representation': 'text-patch' };
+  const conditional = status === 304
+    ? new Response(null, { status, headers })
+    : Response.json({ baseVersion: version(1), version: version(2), patch: [[0, 1, 'y']] }, { headers });
+  const fetch = vi.fn().mockResolvedValueOnce(conditional)
+    .mockResolvedValueOnce(Response.json({ content: 'authoritative', version: version(3) }));
+  vi.stubGlobal('fetch', fetch);
+  const response = await readVersionedSource('/api/file', { content: 'x', version: version(1) });
+  expect(await response.json()).toEqual({ content: 'authoritative', version: version(3) });
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it('changes only the title style in an authored composition with large, unrelated SVG', async () => {
