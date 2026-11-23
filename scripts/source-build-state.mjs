@@ -6,7 +6,7 @@ import { lstat, mkdir, readFile, readdir, readlink, writeFile } from 'node:fs/pr
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const inputs = ['package.json', 'package-lock.json', 'studio', 'shared', 'tracking', 'packages/design-system', 'packages/open-design-ui', 'packages/observability', 'mcp-ui', 'web',
+const inputs = ['package.json', 'package-lock.json', 'studio', 'shared', 'tracking', 'packages/design-system', 'packages/edit-core', 'packages/open-design-ui', 'packages/observability', 'mcp-ui', 'web',
   'scripts/diagnostic-redaction.mjs',
   'scripts/build-inline-ui.mjs', 'scripts/build-template-cards.mjs', 'scripts/source-build-state.mjs'];
 const outputs = ['studio/build', 'mcp-ui/template-recommendations/build', 'web/inline-video.html'];

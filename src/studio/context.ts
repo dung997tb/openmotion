@@ -131,3 +131,14 @@ export function handleStudioError(c: Context, error: unknown): Response {
   const message = error instanceof Error ? error.message : 'Internal studio error';
   return c.json({ code: 'INTERNAL_ERROR', error: message }, 500);
 }
+
+/** Older clients omit these headers and use the service's default file or command label. */
+export function studioWriteHistory(headers: Headers, fallback?: string) {
+  const encoded = headers.get('x-openmotion-edit-label');
+  try {
+    return { summary: encoded ? decodeURIComponent(encoded).trim().slice(0, 256) || fallback : fallback,
+      windowId: headers.get('x-openmotion-edit-window') };
+  } catch {
+    throw new CloudError('INVALID_ARGUMENT', 'Malformed edit label', { status: 400, applied: false });
+  }
+}

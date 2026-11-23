@@ -8,6 +8,7 @@ import { asInsert, asUpdate } from '../../db/helpers.ts';
 import { jobs } from '../../db/schema/jobs.ts';
 import { normalizeSafeProjectPath, type ProjectFileOp } from '../../services/project-files-service.ts';
 import {
+  studioWriteHistory,
   extractWildcardPath,
   getAuthContext,
   type DisklessStudioDeps,
@@ -113,7 +114,7 @@ export function createStudioFileMutationsRoutes(
           ops: [{ op: 'upsert_text', path: filePath, content: nextHtml, stampHfIds: true }],
           filePreconditions: [{ path: filePath, ifMatch: currentVersion }],
           source: 'studio',
-          summary: `Patched element in ${filePath}`,
+          ...studioWriteHistory(c.req.raw.headers, `Patched element in ${filePath}`),
           writeToken,
         });
         version = committed.versionsByPath[filePath] ?? version;

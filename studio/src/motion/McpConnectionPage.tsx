@@ -1,3 +1,4 @@
+import { clipMoveExample } from '../../../shared/clip-move-guide.ts';
 import { McpClientAvatar } from './McpClientAvatar';
 import { WorkspaceBack } from './WorkspaceBack';
 import { Button } from 'open-design-ui/button';
@@ -128,6 +129,7 @@ export function McpConnectionPage({
       const example = motionSkills.find(entry => entry.id === studio.techniques[0])!;
       instruction = [prompt, t(item.prompt), skillShotPrompt(example, studioSkillDefaults(studio.id), t)].join('\n\n');
     } else if (item.id === 'review-comments') instruction = reviewCommentsPrompt({ projectId, dataDirectory: info?.dataDirectory, previewUrl: info?.previewUrl });
+    else if (item.id === 'clip-move') instruction = [prompt, t(item.prompt), clipMoveExample].join('\n\n');
     else if (item.id === 'transcript') instruction = `${prompt}\n\n${transcriptExamplePrompt(info, locale)}`;
     else if (item.id === 'anime-opening') instruction = [prompt, t(item.prompt)].join('\n\n');
     else if (item.id === 'search-recovery') instruction = `${prompt}\n\n${searchRecoveryExample(t)}`;

@@ -1,3 +1,4 @@
+import { clipMoveExample } from '../shared/clip-move-guide.ts';
 import { reviewCommentsPrompt } from '../shared/review-comments.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -60,6 +61,23 @@ test('Streamable HTTP /mcp integration info validates and configures all clients
   assert.match(chatgptCfg.text, /"authentication": "oauth2"/);
   assert.match(chatgptCfg.text, /https:\/\/motion\.open-design\.ai\/mcp/);
   assert.match(manualConnection(cloudHttps, 'chatgpt', 'en'), /OAuth 2\.1/);
+});
+
+test('cloud clip move example uses the public edit contract in the handbook and guide', () => {
+  const card = mcpCapabilities.find(item => item.id === 'clip-move')!;
+  const locales = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
+  for (const strings of Object.values(locales) as Record<string, string>[]) {
+    for (const key of [card.title, card.description, card.prompt]) assert.ok(strings[key]);
+  }
+  const guide = agentGuide(buildCloudIntegrationInfo({
+    publicOrigin: 'https://motion.example.com', version: '1', workspaceId: 'w', authMode: 'dev', tools: phase1Tools,
+  }), 'codex');
+  for (const text of [card.prompt, card.description, clipMoveExample]) assert.ok(guide.includes(text));
+  const args = JSON.parse(clipMoveExample.slice('openmotion_edit_project('.length, -1));
+  assert.deepEqual(Object.keys(args).sort(), ['edit', 'expectedRevision', 'expectedVersionId', 'projectId', 'requestId']);
+  assert.deepEqual(args.edit, { kind: 'moveClip', compositionPath: 'index.html', hfId: '<data-hf-id>', start: 5 });
+  const reference = readFileSync(new URL('../docs/mcp-phase1-tools.md', import.meta.url), 'utf8');
+  assert.ok(reference.includes(clipMoveExample));
 });
 
 test('every capability and benefit has a real shared icon', () => {

@@ -1,3 +1,4 @@
+import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
 import {
   createStudioSaveHttpError,
@@ -194,6 +195,7 @@ export async function postPatchElement(
   body: unknown,
   showToast: ShowToast,
   ifMatch?: string,
+  history?: StudioWriteHistory,
 ): Promise<PatchElementResponse> {
   const expected = ifMatch && isolatedEditVersion(projectId, targetPath, ifMatch);
   const response = await studioApiFetch(
@@ -203,7 +205,7 @@ export async function postPatchElement(
     ),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders(), ...(expected && { "If-Match": expected }) },
+      headers: { "Content-Type": "application/json", ...studioWriteHeaders(history), ...(expected && { "If-Match": expected }) },
       body: JSON.stringify(body),
     },
   );

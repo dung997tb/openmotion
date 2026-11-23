@@ -81,6 +81,7 @@ COPY library/design/ ./library/design/
 COPY library/skills/ ./library/skills/
 COPY docs/transcripts.md ./docs/transcripts.md
 COPY packages/design-system/ ./packages/design-system/
+COPY packages/edit-core/ ./packages/edit-core/
 COPY packages/motion-package/ ./packages/motion-package/
 COPY packages/observability/ ./packages/observability/
 COPY templates/ ./templates/

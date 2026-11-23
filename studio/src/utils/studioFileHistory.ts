@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
+import type { MoveClip } from "../../../packages/edit-core";
 import type { HistoryTarget } from "@hyperframes/studio-server";
 import { buildProjectApiPath } from "./projectRouting";
 import type { MutableRefObject } from "react";
@@ -26,7 +28,20 @@ export interface DomEditCommitBaseParams {
   clearDomSelection: () => void;
 }
 
-type ProjectFileWriter = (path: string, content: string, expectedContent?: string) => Promise<void>;
+export type StudioWriteHistory = { label: string; windowId: string };
+export type ProjectFileWriter = (path: string, content: string, expectedContent?: string, command?: MoveClip, history?: StudioWriteHistory) => Promise<void>;
+
+const lastWindow = new WeakMap<ProjectFileWriter, { key: string | undefined; id: string; startedAt: number }>();
+
+/** A writer belongs to one Studio project. A different gesture starts a new history entry. */
+export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, key?: string, coalesceMs = 4000): StudioWriteHistory {
+  const now = Date.now();
+  const previous = lastWindow.get(writer);
+  if (key && previous?.key === key && now - previous.startedAt < coalesceMs) return { label, windowId: previous.id };
+  const id = crypto.randomUUID();
+  lastWindow.set(writer, { key, id, startedAt: now });
+  return { label, windowId: id };
+}
 
 interface SaveProjectFilesWithHistoryInput {
   projectId: string;
@@ -127,10 +142,13 @@ export async function writeProjectFilesWithHistoryInQueue({
   const changedPaths = Object.keys(snapshots);
   if (changedPaths.length === 0) return [];
 
+  const history = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeFile, label, coalesceKey, coalesceMs) : null;
   const writtenPaths: string[] = [];
   try {
     for (const path of changedPaths) {
-      await writeFile(path, snapshots[path].after, diskContent?.[path] ?? snapshots[path].before);
+      const before = diskContent?.[path] ?? snapshots[path].before;
+      if (history) await writeFile(path, snapshots[path].after, before, undefined, history);
+      else await writeFile(path, snapshots[path].after, before);
       writtenPaths.push(path);
     }
 

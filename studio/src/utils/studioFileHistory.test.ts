@@ -1,8 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
+import { setCachedCloudDisklessMode } from "./cloudRuntime";
 import { saveProjectFilesWithHistory } from "./studioFileHistory";
 import { serializeStudioFileMutation } from "./studioFileMutationCoordinator";
 
 describe("saveProjectFilesWithHistory", () => {
+  it("passes each cloud action label and reuses a window only for the same coalescible action", async () => {
+    const writeFile = vi.fn();
+    const save = (label: string, coalesceKey?: string) => saveProjectFilesWithHistory({
+      projectId: "p", files: { "index.html": () => "edited" }, readFile: async () => "original",
+      writeFile, recordEdit: async () => {}, label, coalesceKey,
+    });
+    setCachedCloudDisklessMode(true);
+    try {
+      await save("Edit source", "source:index.html");
+      await save("Edit source", "source:index.html");
+      await save("Split clip");
+      await save("Edit source", "source:index.html");
+      const histories = writeFile.mock.calls.map(args => args[4]);
+      expect(histories[0]).toEqual({label: "Edit source", windowId: expect.any(String)});
+      expect(histories[1]).toEqual(histories[0]);
+      expect(histories[2].label).toBe("Split clip");
+      expect(new Set([histories[1].windowId, histories[2].windowId, histories[3].windowId]).size).toBe(3);
+    } finally {
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
   it("reads before content, writes after content, and records a history entry", async () => {
     const reads: Record<string, string> = { "index.html": "before" };
     const writes: Record<string, string> = {};
