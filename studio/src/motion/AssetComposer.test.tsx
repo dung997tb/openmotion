@@ -286,7 +286,7 @@ it('keeps the prompt and pinned reference while switching providers serving the 
   await act(async () => option('OpenDesign Cloud').click());
   expect(container.querySelector('button[aria-label="Generation model"]')!.textContent).toContain('Seedream 5.5');
   const submit = () => container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!;
-  expect(container.querySelector<HTMLTextAreaElement>('.om-image-prompt')!.value).toBe(props.draft.prompt);
+  expect(container.querySelector<HTMLTextAreaElement>('.om-media-prompt')!.value).toBe(props.draft.prompt);
   expect(generate).not.toHaveBeenCalled();
   generate.mockResolvedValue({ job: { id: 'new' } });
   await act(async () => submit().click());
@@ -387,6 +387,31 @@ it('disables image generation and keeps setup actions in the provider picker', a
   await openSetup('OpenDesign');
   expect(chrome.openAccountSettings).toHaveBeenCalledTimes(1);
   expect(generate).not.toHaveBeenCalled();
+});
+
+it('disables video generation when the provider needs setup and keeps the provider action available', async () => {
+  const { mediaEditorDestination } = await import('./creativeStudios');
+  const video: Model = {
+    id: 'opendesign:wan-2.7', provider: 'opendesign', modelId: 'wan-2.7', label: 'Wan 2.7',
+    modality: 'video', mode: 'text-to-video', source: 'live',
+  };
+  const catalog = { models: [video], status: { providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: false }], routes: {} } };
+  await act(async () => root.render(<AssetComposer {...props} draft={{ modality: 'video', prompt: 'A slow dolly in', references: [] }} studio={{
+    catalog: { catalog, failed: false, retry: vi.fn() }, chooseModel: vi.fn(), remember: vi.fn(),
+    destination: mediaEditorDestination('text-to-video', video.id),
+  }} />));
+
+  const submit = container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!;
+  expect(submit.textContent).toBe('Generate video');
+  expect(submit.disabled).toBe(true);
+  expect(submit.querySelector('[data-remix-icon="sparkling-fill"]')).not.toBeNull();
+  await act(async () => submit.click());
+  expect(generate).not.toHaveBeenCalled();
+  expect(chrome.openProviderSettings).not.toHaveBeenCalled();
+
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Provider"]')!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.om-picker-setup')!.click());
+  expect(chrome.openProviderSettings).toHaveBeenCalledExactlyOnceWith('opendesign');
 });
 
 it('defaults Shorts Studio to 9:16 on OpenDesign video models publishing ratios and filters paired image resolutions', async () => {
@@ -692,7 +717,7 @@ it('offers only OpenDesign providers for feature entries and keeps the prompt wh
   expect(submit.disabled).toBe(true);
   await act(async () => submit.click());
   expect(chrome.openProviderSettings).not.toHaveBeenCalled();
-  expect(container.querySelector<HTMLTextAreaElement>('.om-image-prompt')!.value).toBe('Neon skyline');
+  expect(container.querySelector<HTMLTextAreaElement>('.om-media-prompt')!.value).toBe('Neon skyline');
   expect(generate).not.toHaveBeenCalled();
 });
 
@@ -760,7 +785,7 @@ it('removes a background with GPT Image 2.6 on either OpenDesign route, an optio
   const submit = container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!;
   expect(settings.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(picker.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(submit.parentElement).toBe(container.querySelector('.om-asset-direct-scroll > .om-image-submit:last-child'));
+  expect(submit.parentElement).toBe(container.querySelector('.om-asset-direct-scroll > .om-media-submit:last-child'));
   expect(submit.disabled).toBe(false);
   generate.mockResolvedValue({ job: { id: 'job' } });
   await act(async () => submit.click());
@@ -826,7 +851,7 @@ it('relights one image with Seedream 5.5 by default and writes the chosen light 
   expect([...container.querySelectorAll('.om-relight-field .om-eyebrow')].map(node => node.textContent)).toEqual(['Light direction', 'Color temperature', 'Lighting mood']);
   expect(container.querySelectorAll('.om-relight-field [data-form-control="boxed"]')).toHaveLength(3);
   expect(container.querySelectorAll('.om-creation-model .om-picker-trigger[data-form-control="boxed"]')).toHaveLength(2);
-  const promptInput = container.querySelector<HTMLTextAreaElement>('.om-image-prompt')!;
+  const promptInput = container.querySelector<HTMLTextAreaElement>('.om-media-prompt')!;
   expect(promptInput.labels?.[0]?.textContent).toBe('Detailed description');
   expect(promptInput.parentElement?.getAttribute('data-form-field')).toBe('intrinsic');
   expect([...promptInput.parentElement!.children]).toEqual([promptInput]);
@@ -876,6 +901,12 @@ it('seeds 10s duration and composes camera/multi-shot prompts on video feature s
     destination: sceneDestination(studioScenes.find(item => item.id === 'video-multi-shot')!),
   }} />));
   expect([...container.querySelectorAll('.om-relight-field .om-eyebrow')].map(node => node.textContent)).toEqual(['Shot count', 'Shot progression']);
+  expect(container.querySelectorAll('.om-relight-field [data-form-control="boxed"]')).toHaveLength(2);
+  expect(container.querySelectorAll('.om-creation-model .om-picker-trigger[data-form-control="boxed"]')).toHaveLength(2);
+  expect(container.querySelector('button[aria-label="Duration"]')?.getAttribute('data-form-control')).toBe('boxed');
+  expect(container.querySelector<HTMLTextAreaElement>('.om-media-prompt')?.labels?.[0].textContent).toBe('Detailed description');
+  expect(container.querySelector('.om-media-submit .om-creation-submit-button')).not.toBeNull();
+  expect(container.querySelector('.om-creation-billing')).toBeNull();
   expect(container.querySelector('.om-scene-source')?.textContent).toContain('First frame');
   generate.mockResolvedValue({ job: { id: 'video-job' } });
   await act(async () => container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.click());
