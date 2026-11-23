@@ -1162,6 +1162,22 @@ describe('Cloud Optimistic Locking, Idempotency & CAS Refcounts', () => {
     assert.equal(entry2.who.kind, 'person');
     await h.history.pinEntry(h.authA, created.projectId, entry2.id, true);
 
+    const pinEvent = h.eventBus.published.at(-1);
+    assert.equal(pinEvent?.channel, `om:project:${h.authA.workspaceId}:${created.projectId}`);
+    assert.deepEqual(pinEvent?.payload, {
+      type: 'history-changed', workspaceId: h.authA.workspaceId, projectId: created.projectId,
+      revision: c3.revision, versionId: c3.versionId, historySeq: c3.historySeq,
+      writeToken: undefined, ts: (pinEvent?.payload as { ts: number }).ts,
+    });
+    const countAfterPin = h.eventBus.published.length;
+    await h.history.pinEntry(h.authA, created.projectId, entry2.id, true);
+    await assert.rejects(() => h.history.pinEntry(h.authA, created.projectId, randomUUID(), true),
+      (err: unknown) => isCloudError(err) && err.code === 'NOT_FOUND');
+    assert.equal(h.eventBus.published.length, countAfterPin);
+    await h.history.pinEntry(h.authA, created.projectId, entry2.id, false);
+    assert.equal(h.eventBus.published.length, countAfterPin + 1);
+    assert.equal((h.eventBus.published.at(-1)?.payload as { type: string }).type, 'history-changed');
+
     const peek = await h.history.peekPoint(h.authA, created.projectId, entry2.versionId, 'index.html');
     assert.equal(peek.file?.content, v2Html);
     const blob = await h.history.readHistoryBlob(h.authA, created.projectId, peek.file!.sha256);

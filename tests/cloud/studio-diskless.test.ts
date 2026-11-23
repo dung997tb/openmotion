@@ -855,6 +855,36 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('acknowledges the project event stream after its subscriptions are ready', async () => {
+    const env = createStudioTestEnv();
+    const project = await env.workspace.createProject(env.auth, { title: 'History stream' });
+    const entered = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    const subscribe = env.eventBus.subscribe.bind(env.eventBus);
+    let channelCount = 0;
+    env.eventBus.subscribe = async (channel, listener) => {
+      entered.resolve();
+      await proceed.promise;
+      const stop = await subscribe(channel, listener);
+      channelCount++;
+      return stop;
+    };
+    const response = await env.studioApp.request(`/api/events?projectId=${project.projectId}`);
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    try {
+      const first = reader.read().then(({ value }) => ({ text: new TextDecoder().decode(value), channelCount }));
+      await entered.promise;
+      proceed.resolve();
+      const acknowledgement = await first;
+      assert.match(acknowledgement.text, /event: connected/);
+      assert.equal(acknowledgement.channelCount, 3);
+    } finally {
+      proceed.resolve();
+      await reader.cancel();
+    }
+  });
+
   it('lists the packaged registry and installs its project files atomically without replacing user changes', async t => {
     const env = createStudioTestEnv();
     const { projectId } = await env.workspace.createProject(env.auth);
