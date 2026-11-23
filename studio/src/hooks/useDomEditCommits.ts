@@ -1,4 +1,4 @@
-import { submitStudioCommands } from "../utils/projectEditBatch";
+import { submitIsolatedCanvasEdit } from "./submitIsolatedCanvasEdit";
 import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
@@ -169,17 +169,17 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changedPaths, reconcileFromServer } = await serializeStudioFileMutations(
+          const { allMatched, changedPaths, reconcileFromServer, previewApplied } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
               const history = cloudHistoryForWrite(writeProjectFile, options);
               const intent = history && isolatedCanvasCommands(batches);
               if (intent) {
-                const result = await submitStudioCommands(pid, intent.commands, intent.versions, history);
+                const result = await submitIsolatedCanvasEdit(pid, intent.commands, intent.versions, history, previewIframeRef, options.coalesceKey);
                 const changed = result.changedPaths.length > 0;
                 if (changed) await editHistory.recordEdit({ ...options, files: {} });
-                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0 };
+                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0, previewApplied: result.previewApplied };
               }
               const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
@@ -216,7 +216,7 @@ export function useDomEditCommits({
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
                 changedPaths: Object.keys(files),
-                reconcileFromServer: false,
+                reconcileFromServer: false, previewApplied: false,
               };
             },
           );
@@ -233,7 +233,7 @@ export function useDomEditCommits({
           const skipSafe =
             options.skipReload === true && batchesAreInlineStyleOnly(batches) && durable;
           if (!durable) reloadPreview();
-          else if (changed && !skipSafe) reloadPreview(changedPaths);
+          else if (changed && !skipSafe && !previewApplied) reloadPreview(changedPaths);
           return { durable, allMatched, changed };
         },
       ).catch((error) => {
@@ -258,6 +258,7 @@ export function useDomEditCommits({
     [
       editHistory,
       forceReloadSdkSession,
+      previewIframeRef,
       projectIdRef,
       queueDomEditSave,
       reloadPreview,

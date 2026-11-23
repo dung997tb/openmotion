@@ -1,5 +1,5 @@
 import { createPreviewAdapter } from "./lib/previewAdapter";
-import { TIMING_ATTRIBUTES, type PreviewTimingChange } from "../../../shared/preview-timing";
+import { TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
@@ -26,8 +26,32 @@ function elements(doc: Document | DocumentFragment): Element[] {
     node instanceof HTMLTemplateElement ? [node, ...elements(node.content)] : [node]);
 }
 
-/** Accept only numeric authored timing changes. Keep scripts, styles, text, tree and identities equal. */
-export function diffPreviewTiming(previous: string, current: string): PreviewTimingChange[] | null {
+const presentationTags = new Set<string>(PRESENTATION_TAGS);
+
+function simpleText(element: Element): Text | null {
+  const node = element.firstChild;
+  return node?.nodeType === Node.TEXT_NODE && !node.nextSibling ? node as Text : null;
+}
+
+/** Compare the browser's CSS declarations, including fallback order and shorthands. */
+function changedStyles(left: HTMLElement, right: HTMLElement): PreviewChange["styles"] | null {
+  const next = right.style;
+  const projected = left.cloneNode(false) as HTMLElement;
+  const styles: NonNullable<PreviewChange["styles"]> = [];
+  for (const name of PRESENTATION_STYLES) {
+    const from = left.style.getPropertyValue(name);
+    const to = next.getPropertyValue(name);
+    if (from === to) continue;
+    if (left.style.getPropertyPriority(name) || next.getPropertyPriority(name)) return null;
+    styles.push([name, from, to]);
+    if (to) projected.style.setProperty(name, to);
+    else projected.style.removeProperty(name);
+  }
+  return styles.length && projected.style.cssText === next.cssText ? styles : null;
+}
+
+/** Strip only supported changes, then compare the entire remaining document before touching the player. */
+export function diffPreviewChanges(previous: string, current: string): PreviewChange[] | null {
   // This optional fast path runs on the UI thread; large source rewrites use the regular loader.
   if (previous === current || Math.max(previous.length, current.length) > 128 * 1024) return null;
   const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
@@ -38,12 +62,12 @@ export function diffPreviewTiming(previous: string, current: string): PreviewTim
   const a = elements(before);
   const b = elements(after);
   if (a.length !== b.length) return null;
-  const changes: PreviewTimingChange[] = [];
+  const changes: PreviewChange[] = [];
   for (let i = 0; i < a.length; i++) {
     const left = a[i]!;
     const right = b[i]!;
     if (left.localName !== right.localName) return null;
-    const attributes: PreviewTimingChange["attributes"] = [];
+    const attributes: PreviewChange["attributes"] = [];
     for (const name of TIMING_ATTRIBUTES) {
       const from = left.getAttribute(name);
       const to = right.getAttribute(name);
@@ -53,32 +77,51 @@ export function diffPreviewTiming(previous: string, current: string): PreviewTim
       left.removeAttribute(name);
       right.removeAttribute(name);
     }
-    if (!attributes.length) continue;
+    let styles: PreviewChange["styles"];
+    let text: PreviewChange["text"];
+    if (presentationTags.has(left.localName) && left instanceof HTMLElement && right instanceof HTMLElement) {
+      if (left.getAttribute("style") !== right.getAttribute("style")) {
+        styles = changedStyles(left, right) ?? undefined;
+        if (!styles) return null;
+        left.removeAttribute("style");
+        right.removeAttribute("style");
+      }
+      const from = simpleText(left), to = simpleText(right);
+      if (from && to && from.data !== to.data) {
+        if (Math.max(from.length, to.length) > MAX_PREVIEW_TEXT_LENGTH) return null;
+        text = [from.data, to.data];
+        from.data = to.data;
+      }
+    }
+    if (!attributes.length && !styles && !text) continue;
     const hfId = left.getAttribute("data-hf-id");
     const compositionId = left.getAttribute("data-composition-id");
     if (!hfId && !left.id && !compositionId) return null;
-    changes.push({ hfId, id: left.id, compositionId, tag: left.localName, attributes });
+    changes.push({ hfId, id: left.id, compositionId, tag: left.localName, attributes, styles, text });
   }
   if (!changes.length || changes.length > 32 || before.documentElement.outerHTML !== after.documentElement.outerHTML) return null;
   return changes;
 }
 
-export async function tryApplyPeerTiming(
+export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
   isCurrent: () => boolean,
+  localSave?: { gestureId?: string },
 ): Promise<boolean> {
   if (!frame || !isCurrent()) return false;
   const adapter = createPreviewAdapter({ iframe: frame });
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
-  const changes = diffPreviewTiming(update.previous.content, update.current.content);
+  const changes = diffPreviewChanges(update.previous.content, update.current.content);
   if (!changes || !isCurrent()) return false;
+  const presentation = changes.some(c => c.styles || c.text);
+  if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;
   try {
-    const applied = await adapter.request<boolean>("peer-timing", {
+    const applied = await adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
-      changes, expiresAt: Date.now() + timeout,
+      changes, ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
     return applied === true && document.id === documents.get(frame)?.id && isCurrent();
   } catch { return false; }

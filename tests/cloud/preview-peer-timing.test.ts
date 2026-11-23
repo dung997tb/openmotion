@@ -10,7 +10,7 @@ const root = { compositionId: 'root', tag: 'main', attributes: [['data-duration'
 const clip = { id: 'clip', tag: 'audio', attributes: [['data-start', '2', '3'], ['data-media-start', null, '1']] };
 
 function preview() {
-  const document = parseHTMLContent('<html><body><main data-composition-id="root" data-hf-authored-duration="15"><audio id="clip" data-start="2"></audio></main></body></html>');
+  const document = parseHTMLContent('<html><body><main data-composition-id="root" data-hf-authored-duration="15"><audio id="clip" data-start="2"></audio><div id="title" style="left:10px">Hello</div></main></body></html>');
   const script = document.createElement('script');
   script.setAttribute('data-openmotion-preview', JSON.stringify({
     projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1) }, studioOrigin: 'https://studio.test', canRebindTiming: true,
@@ -51,6 +51,43 @@ it('applies a complete version once, preserves the media node and rebinds at the
   assert.equal(send(reverse), true);
   assert.equal(audio.hasAttribute('data-media-start'), false);
   assert.equal(send({ ...reverse, before: reverse.after, after: etag(4), changes: [clip] }), false);
+});
+
+it('updates text and placement on the same live nodes without seeking or replacing media', () => {
+  const { send, document, hooks } = preview();
+  const node = document.getElementById('title')!;
+  const text = node.firstChild;
+  const change = { id: 'title', tag: 'div', attributes: [], text: ['Hello', 'Hi!'],
+    styles: [['left', '10px', '40px'], ['top', '', '12px'], ['font-size', '', '52px']] };
+  const message = { type: 'peer-presentation', changes: [change] };
+  assert.equal(send({ ...message, changes: [change, { ...change, text: ['stale', 'new'] }] }), false);
+  assert.equal(node.textContent, 'Hello');
+  assert.equal(node.style.left, '10px');
+  assert.equal(send(message), true);
+  assert.equal(node.firstChild, text);
+  assert.equal(node.textContent, 'Hi!');
+  assert.equal(node.style.left, '40px');
+  assert.equal(node.style.top, '12px');
+  assert.equal(node.style.fontSize, '52px');
+  assert.deepEqual(hooks, []);
+  assert.equal(send(message), false);
+});
+
+it('confirms an optimistic inspector value only for the writer and only on its displayed base', () => {
+  const { send, document } = preview();
+  const node = document.getElementById('title')!;
+  const message = { type: 'peer-presentation', changes: [{
+    id: 'title', tag: 'div', attributes: [], styles: [['left', '10px', '30px']],
+  }] };
+  node.style.left = '30px';
+  assert.equal(send(message), false);
+  assert.equal(send({ ...message, localSave: true, before: etag(3) }), false);
+  node.style.left = '50px';
+  assert.equal(send({ ...message, localSave: true }), false);
+  assert.equal(node.style.left, '50px');
+  node.style.left = '30px';
+  assert.equal(send({ ...message, localSave: true }), true);
+  assert.equal(node.style.left, '30px');
 });
 
 it('refuses expired, stale, unauthenticated, structural, ambiguous or incomplete work without a partial write', () => {

@@ -1,32 +1,67 @@
-import { TIMING_ATTRIBUTES } from '../../../shared/preview-timing.ts';
+import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH } from '../../../shared/preview-timing.ts';
 
 // Runs inside the token-scoped iframe. Source text and animation scripts never cross this channel.
 export const PREVIEW_PEER_TIMING = `
   const timingAttributes = new Set(${JSON.stringify(TIMING_ATTRIBUTES)});
+  const presentationTags = new Set(${JSON.stringify(PRESENTATION_TAGS)});
+  const presentationStyles = new Set(${JSON.stringify(PRESENTATION_STYLES)});
   const timingDocumentId = settings.canRebindTiming === true ? globalThis.crypto?.randomUUID?.() : undefined;
   function timingVersion(tag) {
     if (typeof tag !== 'string') return null;
     const match = /^"(sha256|patch):([a-f0-9]{64})"$/.exec(tag);
     return match ? (match[1] === 'patch' ? tag : match[2]) : null;
   }
+  function stagePresentation(node, change, effects, local, pending) {
+    if (!change.styles && !change.text) return true;
+    if (!presentationTags.has(node.localName)) return false;
+    if (change.styles) {
+      if (!Array.isArray(change.styles) || !change.styles.length || change.styles.length > presentationStyles.size) return false;
+      for (const [name, from, to] of change.styles) {
+        const actual = node.style.getPropertyValue(name) || '';
+        const applied = pending?.element === node ? pending.applied?.[name] : undefined;
+        if (!presentationStyles.has(name) || typeof from !== 'string' || typeof to !== 'string' ||
+            Math.max(from.length,to.length) > 256 || (actual !== from && !(local && (actual === to || actual === applied))) ||
+            (typeof node.style.getPropertyPriority === 'function' && node.style.getPropertyPriority(name))) return false;
+        effects.push(forward => {
+          const value = forward ? to : actual;
+          if (value) node.style.setProperty(name, value);
+          else node.style.removeProperty(name);
+        });
+      }
+    }
+    if (change.text) {
+      const text = node.firstChild;
+      if (!Array.isArray(change.text) || change.text.length !== 2 || change.text.some(value =>
+          typeof value !== 'string' || value.length > ${MAX_PREVIEW_TEXT_LENGTH}) ||
+          text?.nodeType !== 3 || text.nextSibling || (text.data !== change.text[0] && !(local && text.data === change.text[1]))) return false;
+      const actual = text.data;
+      effects.push(forward => { text.data = forward ? change.text[1] : actual; });
+    }
+    return true;
+  }
   function applyPeerTiming(m) {
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
+    const local = m.type === 'peer-presentation' && m.localSave === true;
+    const pending = local && pendingDrags.get(m.gestureId);
+    const base = pending && pending.selection.sourceFile === m.path ? pending.sha256 : sourceVersions[m.path];
     if (!timingDocumentId || m.documentId !== timingDocumentId || m.path !== compositionPath ||
-        !before || !after || before !== sourceVersions[m.path] ||
+        !before || !after || before !== base ||
         !Number.isFinite(m.expiresAt) || Date.now() >= m.expiresAt ||
-        drag || pendingDrags.size || inlineText || !p || typeof p.seek !== 'function' ||
+        drag || pendingDrags.size > (pending ? 1 : 0) ||
+        (inlineText && !(local && inlineText.id === m.gestureId && inlineText.after !== undefined)) || !p || typeof p.seek !== 'function' ||
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
         !Array.isArray(m.changes) || !m.changes.length || m.changes.length > 32) return false;
-    const edits = [];
+    const edits = [], effects = [];
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
-          !change.attributes.length || change.attributes.length > timingAttributes.size) return false;
+          (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > timingAttributes.size) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
       const matches = Array.from(document.querySelectorAll(selector)).filter(node =>
         node.localName === change.tag && sourceFileForElement(node) === m.path);
       if (matches.length !== 1 || matches[0].closest('[data-hf-parked-scene]')) return false;
       const node = matches[0];
+      if (!stagePresentation(node, change, effects, local, pending)) return false;
       for (const [name, from, to] of change.attributes) {
         if (!timingAttributes.has(name) || [from,to].some(value => value !== null &&
             (typeof value !== 'string' || !/^\\d+(?:\\.\\d+)?$/.test(value) || !Number.isFinite(Number(value))))) return false;
@@ -44,6 +79,8 @@ export const PREVIEW_PEER_TIMING = `
         if (e[key] === null) e.node.removeAttribute(e.attr);
         else e.node.setAttribute(e.attr,e[key]);
       }
+      for (const effect of effects) effect(key === 'to');
+      if (!edits.length) return;
       p.seek(time);
       window.__hfForceTimelineRebind();
       window.__hfStudioManualEditsApply?.();
