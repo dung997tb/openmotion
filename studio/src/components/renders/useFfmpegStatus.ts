@@ -138,9 +138,6 @@ export function useFfmpegStatus(): {
 
   useEffect(() => {
     void run();
-    const refresh = () => { void run(); };
-    window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
   }, [run]);
 
   const recheck = useCallback((_retry = true) => {

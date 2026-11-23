@@ -56,13 +56,15 @@ export function watchWorkspaceRead(
   }
 
   const resume = () => schedule(0);
-  document.addEventListener('visibilitychange', resume);
+  const onVisibilityChange = () => schedule(Infinity);
+  document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('online', resume);
   signal.addEventListener('abort', () => {
     clearTimeout(timer);
-    document.removeEventListener('visibilitychange', resume);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('online', resume);
   }, { once: true });
-  void run();
+  if (canRead()) void run();
+  else schedule(0);
   return schedule;
 }

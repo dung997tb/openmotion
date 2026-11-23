@@ -52,13 +52,12 @@ export function useReviewComments(projectId: string, active: boolean) {
       if (running.current || document.hidden || deferredRef.current) return;
       void refresh().catch(() => {});
     };
-    // Keep the badge useful with one initial read and focus refreshes. Only
+    // Keep the badge useful with one initial read and refreshes when returning to the tab. Only
     // visible review surfaces need a recurring source-revision scan.
     if (active || initializedProject.current !== projectId) poll();
     const timer = active ? window.setInterval(poll, 5000) : undefined;
-    window.addEventListener('focus', poll);
     document.addEventListener('visibilitychange', poll);
-    return () => { clearInterval(timer); window.removeEventListener('focus', poll); document.removeEventListener('visibilitychange', poll); read.current?.abort(); };
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', poll); read.current?.abort(); };
   }, [active, projectId, refresh, deferred]);
   async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
     if (running.current) return;
