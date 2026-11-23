@@ -7,8 +7,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HistoryListItem } from '@hyperframes/studio-server/history';
 import { useStudioShellContext } from '../contexts/StudioContext';
 import { studioWriteHeaders } from '../utils/studioFileVersion';
+import { useCloudDisklessMode } from '../utils/cloudRuntime';
 import { MotionIcon } from './icons';
 import { useMotionHistoryOperation } from './MotionHistoryState';
+import { subscribeProjectActivity } from './workspaceRefresh';
 
 type PanelEntry = Pick<HistoryListItem, 'id' | 'label' | 'who' | 'pinned' | 'undone' | 'restoredTo'> & {
   endedAt: number | string;
@@ -32,12 +34,20 @@ export async function historyRequest<T>(projectId: string, action = '', body?: o
 const reloadProject = () => window.location.reload();
 
 /** Reads and restores Studio's own history; no parallel snapshot store or undo stack. */
-export function MotionHistoryPanel({ onRestored = reloadProject, compact = false, allowPinning = true }: { onRestored?: () => void; compact?: boolean; allowPinning?: boolean }) {
+type HistoryPanelProps = { onRestored?: () => void; compact?: boolean; allowPinning?: boolean };
+export function MotionHistoryPanel(props: HistoryPanelProps) {
+  const { projectId } = useStudioShellContext();
+  return <ProjectHistoryPanel key={projectId} {...props} />;
+}
+
+function ProjectHistoryPanel({ onRestored = reloadProject, compact = false, allowPinning = true }: HistoryPanelProps) {
   const { t, formatDate } = useI18n();
   const { projectId, waitForPendingDomEditSaves, writeBlockedReason, renderQueue, showToast } = useStudioShellContext();
   const historyOperation = useMotionHistoryOperation();
+  const cloud = useCloudDisklessMode();
   const [entries, setEntries] = useState<PanelEntry[]>([]);
-  const [currentSeq, setCurrentSeq] = useState<number>();
+  // An absent sequence in a successful response identifies the legacy history server.
+  const [currentSeq, setCurrentSeq] = useState<number | null>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [onlyPinned, setOnlyPinned] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -46,25 +56,35 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
   const running = useRef(false);
   const activeRead = useRef<AbortController | null>(null);
   const mounted = useRef(false);
+  const pending = useRef(false);
+  const scheduleRead = useRef<() => void>(() => {});
 
   const refresh = useCallback(async () => {
+    pending.current = false;
     activeRead.current?.abort();
     const controller = new AbortController();
     activeRead.current = controller;
-    const result = await historyRequest<HistoryResponse>(projectId, '', undefined, controller.signal);
-    const chronological = result.currentSeq === undefined ? result.entries : [...result.entries].reverse();
-    if (!controller.signal.aborted && mounted.current) {
-      setEntries(chronological);
-      setCurrentSeq(result.currentSeq);
-      setLoading(false);
+    try {
+      const result = await historyRequest<HistoryResponse>(projectId, '', undefined, controller.signal);
+      const chronological = result.currentSeq === undefined ? result.entries : [...result.entries].reverse();
+      if (!controller.signal.aborted && mounted.current) {
+        setEntries(chronological);
+        setCurrentSeq(result.currentSeq ?? null);
+        setError('');
+        setLoading(false);
+      }
+      return chronological;
+    } finally {
+      if (activeRead.current === controller) activeRead.current = null;
+      if (pending.current && !running.current) scheduleRead.current();
     }
-    return chronological;
   }, [projectId]);
 
   useEffect(() => {
     mounted.current = true;
-    const poll = async () => {
-      if (running.current) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = async () => {
+      if (!pending.current || running.current || activeRead.current) return;
       try { await refresh(); }
       catch (cause) {
         if (mounted.current && !(cause instanceof DOMException && cause.name === 'AbortError')) {
@@ -73,10 +93,28 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
         }
       }
     };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 3000);
-    return () => { mounted.current = false; clearInterval(timer); activeRead.current?.abort(); };
-  }, [refresh]);
+    scheduleRead.current = () => {
+      pending.current = true;
+      if (timer !== undefined || running.current || activeRead.current) return;
+      timer = setTimeout(() => { timer = undefined; void read(); }, 75);
+    };
+    const unsubscribe = subscribeProjectActivity((id, event) => {
+      if (id === projectId && (event === 'history-changed' || event === 'connected')) scheduleRead.current();
+    });
+    pending.current = true;
+    void read();
+    return () => {
+      mounted.current = false; pending.current = false; scheduleRead.current = () => {};
+      unsubscribe(); clearTimeout(timer); activeRead.current?.abort();
+      activeRead.current = null;
+    };
+  }, [projectId, refresh]);
+
+  useEffect(() => {
+    if (cloud || currentSeq !== null) return;
+    const timer = window.setInterval(() => scheduleRead.current(), 3000);
+    return () => clearInterval(timer);
+  }, [cloud, currentSeq]);
 
   // An operation returns false when it had nothing to do; only work that happened is reported as a success.
   const run = async (operation: () => Promise<void | boolean>, action?: 'keep_current' | 'pin' | 'unpin' | 'restore') => {
@@ -87,12 +125,17 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
     setBusy(true); setError('');
     try { if (await operation() !== false && action) trackVersionHistoryResult(action, 'success', projectId); }
     catch (cause) { if (action) trackVersionHistoryResult(action, 'failure', projectId); if (mounted.current) showToast(cause instanceof Error ? cause.message : 'Version operation failed', 'error'); }
-    finally { running.current = false; historyOperation.setBusy(false); if (mounted.current) setBusy(false); }
+    finally {
+      running.current = false; historyOperation.setBusy(false);
+      if (mounted.current) setBusy(false);
+      if (pending.current) scheduleRead.current();
+    }
   };
   const keepCurrent = () => run(async () => {
     await waitForPendingDomEditSaves();
     await historyRequest(projectId, '/checkpoint', {});
     const current = (await refresh()).at(-1);
+    if (!mounted.current) return false;
     if (!current) {
       if (mounted.current) showToast('You can pin a version after your first saved edit.', 'info');
       return false;
@@ -112,7 +155,7 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
     await waitForPendingDomEditSaves();
     await historyRequest(projectId, '/checkpoint', {});
     await historyRequest(projectId, '/restore', { point: entry.id });
-    onRestored();
+    if (mounted.current) onRestored();
   }, 'restore');
 
   const shown = [...entries].reverse().filter(entry => !allowPinning || !onlyPinned || entry.pinned);
@@ -153,7 +196,7 @@ export function MotionHistoryPanel({ onRestored = reloadProject, compact = false
         <span>{file.status === 'added' || file.before === null ? t('Created') : file.status === 'deleted' || file.after === null ? t("Deleted") : t("Modified")}</span></li>)}</ul></>}
       <div className="motion-history-detail-actions">
         {allowPinning && <Button variant="plain" type="button" className="motion-button" disabled={disabled} onClick={() => { trackStudioClick('version_history', 'pin_version', projectId, undefined, selected.pinned ? 'off' : 'on'); void pin(selected); }}>{selected.pinned ? t("Unpin version") : t("Keep this version")}</Button>}
-        <Button variant="plain" type="button" className="motion-button motion-button-primary" disabled={disabled || (currentSeq === undefined ? selected.id === entries.at(-1)?.id : selected.seq === currentSeq)}
+        <Button variant="plain" type="button" className="motion-button motion-button-primary" disabled={disabled || (currentSeq == null ? selected.id === entries.at(-1)?.id : selected.seq === currentSeq)}
           onClick={() => { trackStudioClick('version_history', 'restore_version', projectId); void restore(selected); }}>{t("Restore this version")}</Button>
       </div>
       {!compact && <p>{t("Restoring creates a new entry and keeps your current changes in history.")}</p>}

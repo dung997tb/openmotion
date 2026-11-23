@@ -9,6 +9,7 @@ import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import { acceptFileEditReceipt } from "../utils/rebasedFileEdit";
 import { markStudioWriteToken, resetStudioWriteTokens, studioFileContentVersion } from "../utils/studioFileVersion";
 import { markSelfWrite, resetSelfWriteRegistry } from "./sdkSelfWriteRegistry";
+import { subscribeProjectActivity } from "../motion/workspaceRefresh";
 import {
   useExternalFileChangeCoordinator,
   type ExternalFileChangeCoordinatorHandle,
@@ -118,17 +119,22 @@ describe("external file change coordinator", () => {
         source.dispatchEvent(new MessageEvent("file-change", { data: JSON.stringify(payload) }));
       });
 
-    it("refreshes history for a matching history-changed event", async () => {
+    it("forwards this project's history events, including our own writes, to the history panel", async () => {
       const onHistoryChanged = vi.fn();
+      const activity = vi.fn();
+      const unsubscribe = subscribeProjectActivity(activity);
+      const writeToken = "this-editor";
+      markStudioWriteToken(writeToken);
       await mountCoordinator({ onHistoryChanged });
-      await act(async () => {
-        source.dispatchEvent(
-          new MessageEvent("history-changed", {
-            data: JSON.stringify({ projectId: "project-a", revision: "rev-2", historySeq: 2 }),
-          }),
-        );
-      });
-      expect(onHistoryChanged).toHaveBeenCalledOnce();
+      try {
+        await act(async () => {
+          source.dispatchEvent(new MessageEvent("history-changed", {
+            data: JSON.stringify({ projectId: "project-a", revision: "rev-2", historySeq: 2, writeToken }),
+          }));
+        });
+        expect(onHistoryChanged).toHaveBeenCalledExactlyOnceWith(writeToken);
+        expect(activity).toHaveBeenCalledExactlyOnceWith("project-a", "history-changed");
+      } finally { unsubscribe(); }
     });
 
     it("ignores history-changed events for another project", async () => {
@@ -142,6 +148,25 @@ describe("external file change coordinator", () => {
         );
       });
       expect(onHistoryChanged).not.toHaveBeenCalled();
+    });
+
+    it("signals the history panel when the server confirms each subscription", async () => {
+      const activity = vi.fn();
+      const unsubscribe = subscribeProjectActivity(activity);
+      try {
+        await mountCoordinator();
+        const ready = () => act(async () => {
+          source.dispatchEvent(new MessageEvent("connected", { data: JSON.stringify({ projectId: "project-a" }) }));
+        });
+        await open();
+        expect(activity).not.toHaveBeenCalled();
+        await ready();
+        await open();
+        await ready();
+        expect(activity.mock.calls).toEqual([
+          ["project-a", "connected"], ["project-a", "reconnected"], ["project-a", "connected"],
+        ]);
+      } finally { unsubscribe(); }
     });
 
     it("delivers the held reconnect scope when a queued clean drain precedes React's commit", async () => {

@@ -147,6 +147,10 @@ export function sseFileChangeChannel(
     const eventSource = new EventSource(studioProjectUrl('/api/events'));
     eventSource.addEventListener("file-change", onDelivery);
     eventSource.addEventListener("history-changed", onHistoryChanged);
+    eventSource.addEventListener("connected", event => {
+      const projectId = readFileChangeField(decodeFileChange(event), "projectId");
+      if (projectId) notifyProjectActivity(projectId, "connected");
+    });
     eventSource.addEventListener("catalog-changed", (event) => {
       const projectId = readFileChangeField(decodeFileChange(event), "projectId");
       if (projectId) notifyProjectActivity(projectId, "catalog-changed");
@@ -536,11 +540,12 @@ export function useExternalFileChangeCoordinator({
     processChangeRef.current({ projectId: pid, path: file.path, fileTreeChanged: false });
   }), []);
   const processHistoryChange = useCallback(
-    (delivery?: unknown) => {
+    (delivery?: unknown, publishActivity = true) => {
       const payload = decodeFileChange(delivery);
       if (!payload || !projectId) return;
       const deliveredProjectId = readFileChangeField(payload, "projectId");
       if (deliveredProjectId && deliveredProjectId !== projectId) return;
+      if (publishActivity) notifyProjectActivity(projectId, "history-changed");
       void Promise.resolve(onHistoryChanged?.(readFileChangeField(payload, "writeToken") ?? undefined)).catch((error) => {
         console.warn("Studio could not refresh project history after an external change.", error);
       });
@@ -569,7 +574,7 @@ export function useExternalFileChangeCoordinator({
     const catchUp = () => {
       if (projectId) notifyProjectActivity(projectId, "reconnected");
       processChangeRef.current({ path: "." });
-      processHistoryChangeRef.current({ projectId });
+      processHistoryChangeRef.current({ projectId }, false);
     };
     return sseFileChangeChannel(handler, catchUp, historyHandler);
   }, [projectId]);
