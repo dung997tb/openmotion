@@ -173,10 +173,14 @@ function extractRequestToken(
   return undefined;
 }
 
-function setSecurityHeaders(res: ServerResponse, allowedOrigin?: string): void {
+function setSecurityHeaders(
+  res: ServerResponse,
+  allowedOrigin?: string,
+  options?: { allowPrivateNetwork?: boolean },
+): void {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Vary', 'Origin');
+  res.setHeader('Vary', 'Origin, Access-Control-Request-Private-Network');
   if (allowedOrigin) {
     res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -184,6 +188,9 @@ function setSecurityHeaders(res: ServerResponse, allowedOrigin?: string): void {
       'Access-Control-Allow-Headers',
       `Content-Type, Authorization, ${CONNECT_SCRIPT_TOKEN_HEADER}`,
     );
+    if (options?.allowPrivateNetwork) {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
     res.setHeader('Access-Control-Max-Age', '600');
   }
 }
@@ -404,7 +411,10 @@ export function createConnectScriptServer(options: ConnectScriptServerOptions): 
       return;
     }
 
-    setSecurityHeaders(res, rawOrigin);
+    const requestedPrivateNetwork =
+      extractSingleHeader(req.headers['access-control-request-private-network'])?.trim().toLowerCase() ===
+      'true';
+    setSecurityHeaders(res, rawOrigin, { allowPrivateNetwork: requestedPrivateNetwork });
 
     const method = (req.method ?? 'GET').toUpperCase();
     if (method === 'OPTIONS') {

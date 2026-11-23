@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,9 +27,14 @@ import type {
   DesktopDiagnosticExportResult,
   DesktopMenuAction,
 } from '../../shared/platform-host.ts';
-import { createLocalAtomsRuntime } from '../../packages/local-atoms/index.ts';
+import {
+  createEncryptedFileSecretStore,
+  createLocalAtomsRuntime,
+  createMacOsKeychainSecretStore,
+} from '../../packages/local-atoms/index.ts';
 import { SignedConfigManager } from '../../packages/signed-config/index.ts';
 import { DesktopAuthHandoffManager } from './auth-handoff.ts';
+import { createElectronSafeSecretStore } from './safe-secret-store.ts';
 import {
   CapabilityRegistry,
   createAccountCapabilityModule,
@@ -268,6 +273,15 @@ async function confirmFeatureWithDialog(request: HostConfirmationRequest): Promi
   return response === 1;
 }
 
+const desktopSecretStore = createElectronSafeSecretStore({
+  dataDir,
+  safeStorage,
+  fallbackStore:
+    platform === 'darwin'
+      ? createMacOsKeychainSecretStore()
+      : createEncryptedFileSecretStore(path.join(dataDir, 'credentials.enc')),
+});
+
 const atomsRuntime = createLocalAtomsRuntime({
   dataDir,
   platform,
@@ -279,6 +293,7 @@ const atomsRuntime = createLocalAtomsRuntime({
   shellVersion: app.getVersion(),
   getSignedConfig: () => signedConfig.getActiveConfig(),
   confirmCallback: confirmFeatureWithDialog,
+  secretStore: desktopSecretStore,
 });
 
 const registry = new CapabilityRegistry({

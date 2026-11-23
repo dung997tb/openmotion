@@ -240,9 +240,13 @@ describe('Web Connect Script Loopback Server', () => {
 
       const evilPreflight = await fetch(`${server.baseUrl}${CONNECT_SCRIPT_ENDPOINTS.INVOKE}`, {
         method: 'OPTIONS',
-        headers: { Origin: EVIL_ORIGIN },
+        headers: {
+          Origin: EVIL_ORIGIN,
+          'Access-Control-Request-Private-Network': 'true',
+        },
       });
       assert.equal(evilPreflight.status, 403);
+      assert.equal(evilPreflight.headers.get('access-control-allow-private-network'), null);
 
       // Staging origin rejected on stable channel
       const stagingOnStable = await fetch(`${server.baseUrl}${CONNECT_SCRIPT_ENDPOINTS.HEALTH}`, {
@@ -250,13 +254,18 @@ describe('Web Connect Script Loopback Server', () => {
       });
       assert.equal(stagingOnStable.status, 403);
 
-      // Allowed Origin -> 204 on OPTIONS preflight with CORS headers
+      // Allowed Origin -> 204 on OPTIONS preflight with CORS + PNA headers when requested
       const allowedPreflight = await fetch(`${server.baseUrl}${CONNECT_SCRIPT_ENDPOINTS.INVOKE}`, {
         method: 'OPTIONS',
-        headers: { Origin: ALLOWED_ORIGIN },
+        headers: {
+          Origin: ALLOWED_ORIGIN,
+          'Access-Control-Request-Private-Network': 'true',
+        },
       });
       assert.equal(allowedPreflight.status, 204);
       assert.equal(allowedPreflight.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+      assert.equal(allowedPreflight.headers.get('access-control-allow-private-network'), 'true');
+      assert.match(allowedPreflight.headers.get('vary') ?? '', /Access-Control-Request-Private-Network/i);
       assert.match(
         allowedPreflight.headers.get('access-control-allow-headers') ?? '',
         new RegExp(CONNECT_SCRIPT_TOKEN_HEADER, 'i'),

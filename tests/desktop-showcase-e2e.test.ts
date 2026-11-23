@@ -1002,6 +1002,17 @@ process.exit(0);
       assert.equal(hashParams.get('connect_token'), server.token);
       assert.equal(parsedPair.search, '', 'Pairing token must NEVER appear in query string');
 
+      // Verify Chromium Private Network Access (PNA) preflight from HTTPS Studio -> 127.0.0.1
+      const pnaPreflight = await fetch(`${server.baseUrl}/v1/invoke`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://studio.open-design.ai',
+          'Access-Control-Request-Private-Network': 'true',
+        },
+      });
+      assert.equal(pnaPreflight.status, 204);
+      assert.equal(pnaPreflight.headers.get('access-control-allow-private-network'), 'true');
+
       const invokeRes = await fetch(`${server.baseUrl}/v1/invoke`, {
         method: 'POST',
         headers: {
