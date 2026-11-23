@@ -2,6 +2,7 @@ import { useCallback, useMemo, type MutableRefObject } from "react";
 import { changedFilePaths, readFileChangeAffectsPreview } from "../components/editor/manualEditsParsing";
 import { syncPeerComposition } from "./syncPeerComposition";
 import { createRemoteFileReader } from "./remoteFileReads";
+import { knownCompositionSource } from "../player/lib/compositionPosterSource";
 import { usePlayerStore } from "../player/store/playerStore";
 import { clearStudioSaveFailures } from "../utils/studioSaveState";
 import {
@@ -70,12 +71,18 @@ export function useStudioExternalFileChanges({
     [bumpThumbnailRevisions, onOutsideChange],
   );
   const filesForChange = useMemo(() => createRemoteFileReader(), []);
-  const refreshFileViews = useCallback((payload: unknown) => {
+  const refreshFileViews = useCallback((payload: unknown, acceptChange: () => void) => {
+    const activePath = activeCompPath ?? masterCompPath;
+    const previous = projectId && activePath
+      ? knownCompositionSource(usePlayerStore.getState(), projectId, activePath)
+      : null;
+    // Capture the displayed source first. All readers below belong to the new thumbnail revision.
+    acceptChange();
     if (!projectId) return;
     const paths = changedFilePaths(payload);
     const read = filesForChange(projectId, payload);
     const preview = readFileChangeAffectsPreview(payload)
-      ? syncPeerComposition(projectId, activeCompPath ?? masterCompPath, paths, read, previewIframeRef)
+      ? syncPeerComposition(projectId, activePath, paths, read, previewIframeRef, previous)
       : undefined;
     for (const path of paths ?? ["."]) {
       notifyExternalFileReload(path, read);

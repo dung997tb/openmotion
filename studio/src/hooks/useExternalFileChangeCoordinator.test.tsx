@@ -17,7 +17,18 @@ import {
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type HotHandler = (payload?: unknown) => void;
-type CoordinatorOptions = Parameters<typeof useExternalFileChangeCoordinator>[0];
+type CoordinatorOptions = Omit<Parameters<typeof useExternalFileChangeCoordinator>[0], "refreshFileViews"> & {
+  refreshFileViews: (payload: unknown) => Promise<boolean> | void;
+};
+function acceptingFileViews(options: CoordinatorOptions) {
+  return {
+    ...options,
+    refreshFileViews(payload: unknown, acceptChange: () => void) {
+      acceptChange();
+      return options.refreshFileViews(payload);
+    },
+  };
+}
 const roots: Array<ReturnType<typeof createRoot>> = [];
 let handler: HotHandler | null;
 
@@ -40,7 +51,7 @@ async function mountCoordinator(overrides: Partial<CoordinatorOptions> = {}) {
   const root = createRoot(document.createElement("div"));
   roots.push(root);
   function Probe() {
-    captured.handle = useExternalFileChangeCoordinator(options);
+    captured.handle = useExternalFileChangeCoordinator(acceptingFileViews(options));
     return null;
   }
   await act(async () => root.render(<Probe />));
@@ -595,7 +606,7 @@ describe("external file change coordinator", () => {
       },
     });
     await act(async () => handler?.({ path: "index.html", content: "external", version: "v2" }));
-    expect(order).toEqual(["drain", "sdk", "thumbnail", "preview", "tree"]);
+    expect(order).toEqual(["drain", "thumbnail", "sdk", "preview", "tree"]);
     expect(captured.handle?.blocked).toBeNull();
   });
 
@@ -607,7 +618,7 @@ describe("external file change coordinator", () => {
     const root = createRoot(document.createElement("div"));
     roots.push(root);
     function Probe({ onAccepted }: { onAccepted: () => void }) {
-      useExternalFileChangeCoordinator({ ...options, onAcceptedPersistedFileChange: onAccepted });
+      useExternalFileChangeCoordinator(acceptingFileViews({ ...options, onAcceptedPersistedFileChange: onAccepted }));
       return null;
     }
     const latest = vi.fn();
