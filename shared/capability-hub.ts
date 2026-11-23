@@ -81,6 +81,10 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
     title: 'Media Models & Generation',
     description: 'Discover configured providers and models to generate or edit images, videos, music, SFX, and speech.',
     tools: [
+      'openmotion_capability_discover',
+      'openmotion_capability_run',
+      'openmotion_job_manage',
+      'openmotion_asset_manage',
       'openmotion_media_use',
       'openmotion_assets_use',
     ],
@@ -92,6 +96,7 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
     title: 'Brand Kits',
     description: 'Extract and reuse brand styles, palettes, typography, logos, and visual rules across every workflow.',
     tools: [
+      'openmotion_asset_manage',
       'openmotion_assets_use',
       'openmotion_design_catalog',
     ],

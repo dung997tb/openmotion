@@ -55,7 +55,7 @@ export class AssetLibrary {
         }
         if (input.source && current?.source !== input.source) return false;
         if (query) {
-          const haystack = `${asset.name} ${asset.versions.map(v => `${v.prompt ?? ''} ${v.model ?? ''} ${typeof v.parameters?.voice === 'string' ? v.parameters.voice : ''} ${knownSpeechVoiceName(v.parameters?.voice) ?? ''}`).join(' ')}`.toLocaleLowerCase();
+          const haystack = `${asset.name} ${asset.versions.map(v => `${v.prompt ?? ''} ${v.model ?? ''} ${v.capabilityId ?? ''} ${typeof v.parameters?.voice === 'string' ? v.parameters.voice : ''} ${knownSpeechVoiceName(v.parameters?.voice) ?? ''}`).join(' ')}`.toLocaleLowerCase();
           if (!haystack.includes(query)) return false;
         }
         return true;
@@ -71,8 +71,10 @@ export class AssetLibrary {
     return { asset, version, filename };
   }
   async validateGeneration(input: LibraryGeneration) {
-    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['assetId', 'title', 'parentVersionId', 'references', 'conversationId'].includes(key))) throw new Error('Invalid asset generation destination');
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['assetId', 'title', 'parentVersionId', 'capabilityId', 'capabilityOptions', 'references', 'conversationId'].includes(key))) throw new Error('Invalid asset generation destination');
     if (input.title !== undefined) assetName(input.title);
+    if (input.capabilityId !== undefined && (typeof input.capabilityId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,80}$/.test(input.capabilityId))) throw new Error('Invalid capability identity');
+    if (input.capabilityOptions !== undefined && (!input.capabilityOptions || typeof input.capabilityOptions !== 'object' || Array.isArray(input.capabilityOptions))) throw new Error('Invalid capability options');
     if (input.conversationId !== undefined && !libraryId(input.conversationId)) throw new Error('Invalid asset conversation');
     if (input.parentVersionId && !input.assetId) throw new Error('Choose an asset before editing a version');
     if (input.assetId) {

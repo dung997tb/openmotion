@@ -20,9 +20,16 @@ import {
   resolveTaskProjectDir,
 } from '../gateway/super-agent-workspace.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
+import {
+  registerCapabilityScriptExecutor,
+  saveCapabilityOverrides,
+  unregisterCapabilityScriptExecutor,
+} from '../gateway/capability-center.ts';
+import { classifySuperAgentTool, describeSuperAgentApproval, formatSuperAgentToolLabel } from '../shared/super-agent.ts';
+import { execute } from '../hyperframes.ts';
+import { verificationBinaries } from '../scripts/verify-export.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
 import { buildSuperAgentHandoff } from '../shared/capability-hub.ts';
-import { classifySuperAgentTool, describeSuperAgentApproval } from '../shared/super-agent.ts';
 import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
 
@@ -1480,6 +1487,221 @@ test('hiddenInstructions stay hidden from stored user messages while reaching th
   assert.equal(doneSnap.permissionMode, 'auto');
   assert.deepEqual(decisions, ['accept', 'accept']);
   await service.close();
+}));
+
+test('SuperAgentConversations gates openmotion_capability_run approvals, skips approval on dryRun, wraps asset_manage read media, and isolates artifact extraction', () => fixture(async store => {
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_discover', { action: 'list' }), 'Browsed capability catalog');
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_run', { dryRun: true }), 'Previewed capability execution');
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_run', { capabilityId: 'remove-background' }), 'Ran media capability');
+  assert.equal(formatSuperAgentToolLabel('openmotion_job_manage', { action: 'status' }), 'Checked generation job status');
+  assert.equal(formatSuperAgentToolLabel('openmotion_asset_manage', { action: 'read' }), 'Inspected media asset');
+  assert.equal(
+    classifySuperAgentTool('openmotion_capability_run', { capabilityId: 'remove-background' }).summary,
+    'remove-background',
+  );
+
+  const phase1 = new Phase1Service(store, pluginRoot, {
+    origin: () => 'http://127.0.0.1:4173',
+    nativeUrl: () => undefined,
+    openProject: async () => {},
+    mutation: async fn => fn(),
+    cancel: async () => ({ id: 'x', state: 'cancelled' } as any),
+  });
+
+  const makePng = async (filename: string, color: string) => {
+    const file = path.join(store.directory, filename);
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', `color=c=${color}:s=32x24`, '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  };
+
+  const rawPng = await makePng('sa-source.png', 'blue');
+  const imported = await phase1.call('openmotion_asset_manage', {
+    action: 'import',
+    requestId: 'sa-import-1',
+    sourcePath: rawPng,
+    name: 'Source Subject',
+  });
+  const sourceRef = { assetId: imported.asset.id, versionId: imported.asset.currentVersionId };
+
+  const scriptId = 'sa-test-cutout';
+  let scriptRuns = 0;
+  registerCapabilityScriptExecutor(scriptId, async () => {
+    scriptRuns += 1;
+    return { sourcePath: await makePng('sa-cutout.png', 'white'), name: 'Cutout Subject' };
+  });
+
+  await saveCapabilityOverrides(store, [
+    { id: 'remove-background', executor: { kind: 'script', scriptId } },
+  ]);
+
+  let producedAssetId = '';
+  let producedVersionId = '';
+  const responses = new Map<number, any>();
+
+  class CapabilityRpc {
+    onNotification: (msg: any) => void;
+    closed = false;
+
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, _onError: (err: Error) => void) {
+      this.onNotification = onNotification;
+    }
+
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-cap-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          // 1. dryRun: true must NOT require approval or run script
+          this.onNotification({
+            id: 201,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-dry',
+              tool: 'openmotion_capability_run',
+              arguments: { capabilityId: 'remove-background', references: [sourceRef], dryRun: true },
+            },
+          });
+        });
+        return { turn: { id: 'turn-cap-1' } };
+      }
+      return {};
+    }
+
+    send(payload: any) {
+      responses.set(payload.id, payload);
+      if (payload.id === 201) {
+        queueMicrotask(() => {
+          // 2. Real capability_run (no requestId passed) must trigger generation approval & inject requestId
+          this.onNotification({
+            id: 202,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-real',
+              tool: 'openmotion_capability_run',
+              arguments: { capabilityId: 'remove-background', references: [sourceRef] },
+            },
+          });
+        });
+      }
+      if (payload.id === 202) {
+        const textItem = payload.result?.contentItems?.find((i: any) => i.type === 'inputText')?.text;
+        const parsed = textItem ? JSON.parse(textItem) : {};
+        producedAssetId = parsed.asset?.id ?? '';
+        producedVersionId = parsed.version?.id ?? '';
+        queueMicrotask(() => {
+          // 3. asset_manage action=get must NOT add an extra artifact
+          this.onNotification({
+            id: 203,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-get',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'get', assetId: imported.asset.id, versionId: imported.asset.currentVersionId },
+            },
+          });
+        });
+      }
+      if (payload.id === 203) {
+        queueMicrotask(() => {
+          // 4. asset_manage action=update (trash) must NOT add an extra artifact
+          this.onNotification({
+            id: 204,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-update',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'update', assetId: imported.asset.id, changes: { trashed: true } },
+            },
+          });
+        });
+      }
+      if (payload.id === 204) {
+        queueMicrotask(() => {
+          // 5. asset_manage action=read must return wrapped image media content
+          this.onNotification({
+            id: 205,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-read',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'read', assetId: producedAssetId, versionId: producedVersionId },
+            },
+          });
+        });
+      }
+      if (payload.id === 205) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-cap-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: CapabilityRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  try {
+    const chat = await service.create({ engine: 'codex', permissionMode: 'on-request' });
+    await service.start(chat.id, { requestId: 'req-cap-turn-1', text: 'Remove background from subject' }, {
+      origin: 'http://127.0.0.1:4173',
+      phase1: () => phase1,
+    });
+
+    // Wait for the approval triggered ONLY by call 202 (NOT call 201 dryRun)
+    let waiting = await service.get(chat.id);
+    for (let i = 0; i < 80 && waiting.approvals.length === 0; i++) {
+      await new Promise(r => setTimeout(r, 15));
+      waiting = await service.get(chat.id);
+    }
+    assert.equal(responses.has(201), true, 'dryRun should finish without waiting for approval');
+    assert.equal(scriptRuns, 0, 'script must not execute before generation approval');
+    assert.equal(waiting.approvals.length, 1);
+    assert.equal(waiting.approvals[0].kind, 'generation');
+    assert.match(waiting.approvals[0].title, /remove-background/);
+
+    await service.answer(chat.id, waiting.approvals[0].id, true);
+
+    let done = await service.get(chat.id);
+    for (let i = 0; i < 100 && done.state !== 'idle'; i++) {
+      await new Promise(r => setTimeout(r, 15));
+      done = await service.get(chat.id);
+    }
+
+    assert.equal(done.state, 'idle');
+    assert.equal(scriptRuns, 1);
+    assert.ok(producedAssetId && producedVersionId);
+
+    // Only the generated cutout asset should be extracted into chat artifacts (NOT get/update/trash on source)
+    assert.equal(done.artifacts.length, 1);
+    assert.equal(done.artifacts[0].assetId, producedAssetId);
+    assert.equal(done.artifacts[0].versionId, producedVersionId);
+
+    // asset_manage(action="read") must wrap image preview into Codex inputImage content item
+    const readResp = responses.get(205);
+    assert.equal(readResp?.result?.success, true);
+    assert.ok(
+      readResp?.result?.contentItems?.some((item: any) => item.type === 'inputImage' && typeof item.imageUrl === 'string'),
+      'expected wrapped imageUrl content item from openmotion_asset_manage(action="read")',
+    );
+  } finally {
+    unregisterCapabilityScriptExecutor(scriptId);
+    await service.close();
+  }
 }));
 
 test('classifySuperAgentTool extracts every file in multi-file Game, Design, and Motion batches plus capture_cover', () => {

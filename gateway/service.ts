@@ -121,7 +121,7 @@ export class ModelGateway {
     this.cloudReads.set(context.identity, read);
     try { return await read; } finally { this.cloudReads.delete(context.identity); }
   }
-  private async models(): Promise<Model[]> {
+  async models(): Promise<Model[]> {
     const cached = await readJson<Model[]>(path.join(this.root, 'catalog.json'), []);
     const overrides = await this.connections.modelOverrides();
     const custom = (await this.config()).customModels, compatible = await this.connections.mediaModels(), account = await this.account.mediaModels();
@@ -312,7 +312,10 @@ export class ModelGateway {
         ...(model.provider === 'account' ? { providerOrigin: await this.account.identity() } : model.provider === 'opendesign' ? { providerOrigin: await this.cloudOrigin() }
           : !isGatewayProvider(model.provider) ? { providerOrigin: await this.connections.baseUrl(model.provider) } : {}),
         ...(!isGatewayProvider(model.provider) && model.provider !== 'account' ? { providerRevision: await this.connections.identity(model.provider) } : {}),
-        parameters: storedParameters, usage: input.usage, idempotencyKey: input.idempotencyKey, requestHash,
+        parameters: storedParameters,
+        ...(input.capabilityId ?? input.library?.capabilityId ? { capabilityId: input.capabilityId ?? input.library?.capabilityId } : {}),
+        ...(input.capabilityOptions ?? input.library?.capabilityOptions ? { capabilityOptions: input.capabilityOptions ?? input.library?.capabilityOptions } : {}),
+        usage: input.usage, idempotencyKey: input.idempotencyKey, requestHash,
         createdAt: Date.now(), updatedAt: Date.now(), phase: 'queued', assets: [] };
       const work = path.join(this.root, 'work', job.id);
       try {
@@ -546,7 +549,10 @@ export class ModelGateway {
             const existing = await library.get(targetId).catch(error => { if (error.message !== 'ASSET_NOT_FOUND') throw error; return undefined; });
             const asset = await library.addLocked(prepared[index], { assetId: existing?.id, createId: targetId,
               name: job.library?.title || (job.modality === 'audio' ? audioAssetTitle(job.prompt) : job.prompt.replace(/\s+/g, ' ').trim().slice(0, 80)), expectedModality: job.modality,
-              version: { source: 'generated', prompt: job.prompt, model: job.model.id, parameters: job.parameters, references: job.library?.references ?? [],
+              version: { source: 'generated', prompt: job.prompt, model: job.model.id, parameters: job.parameters,
+                ...(job.capabilityId ?? job.library?.capabilityId ? { capabilityId: job.capabilityId ?? job.library?.capabilityId } : {}),
+                ...(job.capabilityOptions ?? job.library?.capabilityOptions ? { capabilityOptions: job.capabilityOptions ?? job.library?.capabilityOptions } : {}),
+                references: job.library?.references ?? [],
                 ...(job.modality === 'audio' ? { audioKind: classifyAudioKind(job.model.id, job.model.mode, 'generated', `${job.model.modelId} ${job.model.label}`) } : {}),
                 parentVersionId: job.library?.parentVersionId, jobId: job.id, requestId: `${job.id}-${index}`, requestHash: file.sha256, conversationId: job.library?.conversationId, result: current.result } });
             const version = asset.versions.find(v => v.requestId === `${job.id}-${index}`)!;

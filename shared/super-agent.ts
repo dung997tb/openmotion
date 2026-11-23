@@ -442,6 +442,28 @@ export function formatSuperAgentToolLabel(tool: string, args?: Record<string, un
     case 'openmotion_list_skills':
     case 'openmotion_get_skill':
       return 'Read creative Skills';
+    case 'openmotion_capability_discover':
+      if (action === 'describe') return 'Inspected capability schema';
+      if (action === 'quote') return 'Estimated capability cost';
+      if (action === 'providers') return 'Checked media providers';
+      if (action === 'models') return 'Listed media models';
+      return 'Browsed capability catalog';
+    case 'openmotion_capability_run':
+      return args?.dryRun === true ? 'Previewed capability execution' : 'Ran media capability';
+    case 'openmotion_job_manage':
+      if (action === 'status') return 'Checked generation job status';
+      if (action === 'cancel') return 'Cancelled generation job';
+      if (action === 'retry_save') return 'Retried saving generation output';
+      if (action === 'resume') return 'Resumed generation job';
+      return 'Listed generation jobs';
+    case 'openmotion_asset_manage':
+      if (action === 'read') return 'Inspected media asset';
+      if (action === 'import') return 'Imported workspace asset';
+      if (action === 'import_to_project') return 'Adopted asset into Motion project';
+      if (action === 'brand_kit') return 'Worked with Brand Kit';
+      if (action === 'get') return 'Read asset metadata';
+      if (action === 'update') return 'Updated workspace asset';
+      return 'Listed workspace assets';
     case 'openmotion_assets_use':
     case 'openmotion_assets':
       if (action === 'generate') return 'Generated workspace media asset';
@@ -803,7 +825,7 @@ export function classifySuperAgentTool(
     return {
       category: 'mcp',
       label: humanLabel,
-      summary: firstString(args.title, args.projectId, args.url, action),
+      summary: firstString(args.capabilityId, args.model, args.title, args.projectId, args.url, action),
     };
   }
 

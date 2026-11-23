@@ -136,7 +136,7 @@ export function CreativeWorkspace({ destination, soundTab, skill, visit, onNavig
         {t(item.label)}
       </Button>)}</nav> : isSoundStudio && activeSoundTab && selectSoundTab ? (
         <nav className="om-asset-tabs om-sound-studio-tabs" aria-label={t('Scenes')}>
-          <SoundSceneTabs activeTab={activeSoundTab} onSelectTab={tabId => selectSoundTab(tabId)} />
+          <SoundSceneTabs activeTab={activeSoundTab} capabilities={catalog.catalog?.capabilities} onSelectTab={tabId => selectSoundTab(tabId)} />
         </nav>
       ) : <nav className="om-asset-tabs" aria-label={t('Scenes')}>{scenesForStudio(studio).map(item => <Button variant="plain" className="om-nav-item" key={item.id}
         aria-current={item.id === scene.id ? 'page' : undefined} onClick={() => {

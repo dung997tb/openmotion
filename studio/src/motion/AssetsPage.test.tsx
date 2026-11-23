@@ -1265,3 +1265,107 @@ it('rejects oversized generated assets when attaching from the Generations light
   expect(document.body.textContent).toContain('The reference image is larger than the 2 MiB OpenDesign upload limit.');
   expect(rememberGen.mock.lastCall?.[0].references).toEqual([]);
 });
+
+it('validates Sound Studio picker references as audio or video and enforces capability reference limits', async () => {
+  const { resolveCapabilityCatalog } = await import('../../../shared/capability-registry');
+  const { sceneDestination } = await import('./creativeStudios');
+  const { studioScenes } = await import('../../../shared/studio-catalog');
+  const { WorkspaceChromeContext } = await import('./WorkspaceChromeContext');
+  const chromeValue = {
+    openModelSettings: vi.fn(),
+    openProviderSettings: vi.fn(),
+    openAccountSettings: vi.fn(),
+    openSubscriptionSettings: vi.fn(),
+  } as never;
+
+  const liveCapabilities = resolveCapabilityCatalog([
+    { id: 'dubbing', status: 'live', channels: { gui: true, mcp: true } },
+  ]);
+  const speechModel = {
+    id: 'opendesign:minimax-speech-2.8-hd',
+    provider: 'opendesign',
+    modelId: 'minimax-speech-2.8-hd',
+    label: 'MiniMax Speech 2.8 HD',
+    modality: 'audio' as const,
+    mode: 'text-to-speech',
+    source: 'live' as const,
+  };
+  const audioAsset: LibraryAsset = {
+    id: 'AUD1',
+    name: 'Voiceover clip',
+    modality: 'audio',
+    createdAt: 1,
+    updatedAt: 1,
+    currentVersionId: 'AUD1-v1',
+    versions: [{ id: 'AUD1-v1', createdAt: 1, source: 'upload', filename: 'voice.mp3', mimeType: 'audio/mpeg', bytes: 4096, sha256: 'aud1', references: [] }],
+  };
+  const videoAsset: LibraryAsset = {
+    id: 'VID1',
+    name: 'Demo clip',
+    modality: 'video',
+    createdAt: 1,
+    updatedAt: 1,
+    currentVersionId: 'VID1-v1',
+    versions: [{ id: 'VID1-v1', createdAt: 1, source: 'upload', filename: 'demo.mp4', mimeType: 'video/mp4', bytes: 8192, sha256: 'vid1', references: [] }],
+  };
+  records.set('AUD1', audioAsset);
+  records.set('VID1', videoAsset);
+
+  const rememberSound = vi.fn();
+  const soundStudio = {
+    destination: sceneDestination(studioScenes.find(scene => scene.id === 'speech')!),
+    soundTab: 'dubbing' as const,
+    draftKey: 'sound:dubbing',
+    catalog: {
+      catalog: {
+        models: [speechModel],
+        capabilities: liveCapabilities,
+        status: { routes: {}, providers: [{ id: 'opendesign', label: 'OpenDesign Cloud', available: true }] },
+      },
+      failed: false,
+      retry: vi.fn(),
+    },
+    remember: rememberSound,
+    chooseModel: vi.fn(),
+  };
+
+  await act(async () => root.render(
+    <WorkspaceChromeContext.Provider value={chromeValue}>
+      <AssetsPage active studio={soundStudio} />
+    </WorkspaceChromeContext.Provider>,
+  )); await flush();
+
+  // Picking an image asset in Sound Studio is rejected with an audio/video message.
+  await click('Choose an asset'); await flush();
+  let dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Picture A"]')!.click()); await flush();
+  await click('Use selected version');
+  expect(document.body.textContent).toContain('Choose an audio or video asset.');
+  expect(rememberSound.mock.lastCall?.[0].references).toEqual([]);
+
+  // Picking an existing audio asset attaches cleanly without an image-format error.
+  await click('Choose an asset'); await flush();
+  dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Voiceover clip"]')!.click()); await flush();
+  await click('Use selected version');
+  expect(document.body.textContent).not.toContain('OpenDesign does not accept this reference image format.');
+  expect(rememberSound.mock.lastCall?.[0].references).toEqual([
+    { reference: { assetId: 'AUD1', versionId: 'AUD1-v1' }, name: 'Voiceover clip' },
+  ]);
+
+  // Video assets are also accepted when attaching a fresh dubbing source.
+  await act(async () => root.unmount()); root = createRoot(container);
+  const rememberVideo = vi.fn();
+  await act(async () => root.render(
+    <WorkspaceChromeContext.Provider value={chromeValue}>
+      <AssetsPage active studio={{ ...soundStudio, draftKey: 'sound:dubbing-video', remember: rememberVideo }} />
+    </WorkspaceChromeContext.Provider>,
+  )); await flush();
+  await click('Choose an asset'); await flush();
+  dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Demo clip"]')!.click()); await flush();
+  await click('Use selected version');
+  expect(rememberVideo.mock.lastCall?.[0].references).toEqual([
+    { reference: { assetId: 'VID1', versionId: 'VID1-v1' }, name: 'Demo clip' },
+  ]);
+});

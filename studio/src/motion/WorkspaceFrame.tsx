@@ -37,7 +37,9 @@ import { dismissBannerToday, shouldShowBlackFridayBanner, useMinuteCondition } f
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
 import { Skeleton } from '../components/ui/Skeleton';
-import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type SettingsSection, type SuperAgentRouteMode, type WorkspacePage } from './workspacePageRouting';
+import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, unresolvedCreateSceneId, workspacePageHref, type SettingsSection, type SuperAgentRouteMode, type WorkspacePage } from './workspacePageRouting';
+import { peekCachedGateway } from './gatewayClient';
+import { useMediaCatalog } from './useMediaCatalog';
 import type { SoundTabId } from './soundTabs';
 import { WORKSPACE_LOCATION_CHANGED, initializeWorkspaceHistory, navigateWorkspaceHistory, readLocationWorkspaceSource, restoreWorkspaceSource, workspaceHistoryIndex, workspaceHistorySource, workspaceSettingsSource, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { useToast } from '../hooks/useToast';
@@ -85,12 +87,17 @@ export function WorkspaceFrame(props: WorkspaceFrameProps) {
 function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: WorkspaceFrameProps) {
   const { t, locale } = useI18n();
   const routerLocation = useLocation();
-  const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname));
+  const pendingCreateScene = unresolvedCreateSceneId(routerLocation.search, routerLocation.hash, routerLocation.pathname);
+  const dynamicRouteCatalog = useMediaCatalog(Boolean(pendingCreateScene));
+  const routeCapabilities = dynamicRouteCatalog.catalog?.capabilities ?? peekCachedGateway()?.capabilities;
+  const routeCapabilitiesRef = useRef(routeCapabilities);
+  routeCapabilitiesRef.current = routeCapabilities;
+  const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname, routeCapabilities));
   const [navPage, setNavPage] = useState(page);
   const [source, setSource] = useState(() => readLocationWorkspaceSource(routerLocation.state));
   const [isRoutePending, startRouteTransition] = useTransition();
   const sourceUrl = source ? new URL(source.href) : null;
-  const sourcePage = sourceUrl && readWorkspacePage(sourceUrl.search, sourceUrl.hash, sourceUrl.pathname);
+  const sourcePage = sourceUrl && readWorkspacePage(sourceUrl.search, sourceUrl.hash, sourceUrl.pathname, routeCapabilities);
   const fromExplore = sourcePage?.explore && !sourcePage.templates && !sourcePage.template;
   const { settings, assets: assetsOpen, skills: skillsOpen, templates: libraryRequested } = page;
   const standaloneMcp = settings === 'mcp' && !page.mcpInSettings;
@@ -116,7 +123,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const libraryClosed = useRef(onLibraryClose); libraryClosed.current = onLibraryClose;
   useEffect(() => {
     const sync = (search: string, hash: string, pathname: string, locationState?: unknown) => {
-      const next = readWorkspacePage(search, hash, pathname);
+      const next = readWorkspacePage(search, hash, pathname, routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities);
       if (libraryOpen.current && !next.templates) libraryClosed.current?.();
       libraryOpen.current = next.templates;
       const nextSource = locationState !== undefined ? readLocationWorkspaceSource(locationState) : workspaceHistorySource();
@@ -132,14 +139,16 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     return () => {
       window.removeEventListener(WORKSPACE_LOCATION_CHANGED, onLocationChanged);
     };
-  }, [routerLocation]);
+  }, [routerLocation, routeCapabilities]);
   useEffect(() => scheduleIdleRouteWarmup(), []);
   useEffect(() => {
-    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }), true);
+    const capabilities = routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities;
+    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }, capabilities), true);
   }, [page]);
   const navigatePage = useCallback((patch: Partial<WorkspacePage>, replace = false, mode?: 'from-page' | 'keep') => {
     const current = new URL(location.href);
-    const target = new URL(workspacePageHref(current.href, patch), current);
+    const capabilities = routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities;
+    const target = new URL(workspacePageHref(current.href, patch, capabilities), current);
     initializeWorkspaceHistory();
     const index = workspaceHistoryIndex();
     const origin = !replace && index !== null && target.href !== current.href ? { href: current.href, index } : null;
@@ -215,7 +224,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const closeStandalonePreview = () => {
     // A card pushes one preview entry. Copied links start a new history session at index zero.
     if (onNavigate && (workspaceHistoryIndex() ?? 0) > 0) history.back();
-    else writeWorkspaceHistory(workspacePageHref(location.href, { template: null }), true);
+    else writeWorkspaceHistory(workspacePageHref(location.href, { template: null }, routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities), true);
   };
   const collectionSkillTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
