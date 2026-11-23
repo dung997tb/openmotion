@@ -119,14 +119,23 @@ export function useTimelineDeleteOps({
             const groups = new Map<string, typeof selection>();
             for (const clip of removing) {
               const path = clip.sourceFile || activeCompPath || "index.html";
-              const ids = groups.get(path) ?? [];
-              ids.push(clip);
-              groups.set(path, ids);
+              const group = groups.get(path) ?? [];
+              group.push(clip);
+              groups.set(path, group);
             }
             await saveCloudTimeline(pid, [...groups].map(([path, clips]) => {
               const peers = timelineElements.filter(el => (el.sourceFile || activeCompPath || "index.html") === path);
               const main = mainVisualTrack(peers);
-              return {path, command: resolve => ({kind:"deleteClips", hfIds:clips.map(resolve), ...(usePlayerStore.getState().rippleEditEnabled && main != null && {rippleTrack:main})})};
+              const anchor = usePlayerStore.getState().rippleEditEnabled && clips.find(el => el.track === main);
+              const rippleTrack = anchor ? anchor.authoredTrack ?? anchor.track : undefined;
+              // Legacy files can share an authored track across audio/visual zones or overlap into spill rows.
+              const splitLane = rippleTrack !== undefined && peers.some(el =>
+                el.track !== main && (el.authoredTrack ?? el.track) === rippleTrack,
+              );
+              return { path, command: resolve => ({
+                kind: "deleteClips", hfIds: clips.map(resolve), rippleTrack,
+                ...(splitLane && { rippleMembers: peers.filter(el => el.track === main).map(resolve) }),
+              }) };
             }), writeProjectFile, recordEdit, deleteHistoryLabel);
           } else await saveServerRewriteWithHistory({
             projectId: pid,

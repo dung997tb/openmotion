@@ -117,3 +117,18 @@ test('a headless lane move updates paint order and time atomically, refusing a l
   const locked = html.replace('id="b" data-hf-id', 'id="b" data-timeline-locked data-hf-id');
   assert.throws(() => apply(locked, { ...move, stacking: { ranks: [{ hfId: 'b', zIndex: 1 }] } }), /Unlock/);
 });
+
+test('locked track controls toggle mute and visibility without releasing the edit lock', () => {
+  const clip = (source: string) => root(source).querySelector('#b')!;
+  let html = apply(source, { kind: 'setClipState', state: 'locked', enabled: true, hfIds: ['b'] });
+  for (const [state, attr] of [['muted', 'muted'], ['hidden', 'data-hidden']] as const) {
+    for (const enabled of [true, false]) {
+      html = apply(html, { kind: 'setClipState', state, enabled, hfIds: ['b'] });
+      assert.equal(clip(html).hasAttribute(attr), enabled);
+      assert.ok(clip(html).hasAttribute('data-timeline-locked'));
+    }
+  }
+  assert.throws(() => apply(html, { kind:'deleteClips', hfIds:['b'] }), /Unlock/);
+  const unlocked = apply(html, { kind: 'setClipState', state: 'locked', enabled: false, hfIds: ['b'] });
+  assert.equal(clip(unlocked).hasAttribute('data-timeline-locked'), false);
+});

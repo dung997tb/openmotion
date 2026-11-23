@@ -113,8 +113,9 @@ function openTimelineSource(source: string, command: TimelineCommand) {
   function target(id: string) {
     const el = byId.get(id);
     if (!el) throw new Error('Missing clip: ' + id);
-    if (!(command.kind === 'setClipState' && command.state === 'locked' && !command.enabled))
-      requireUnlocked(el);
+    // The track header stays usable while locked: mute, visibility and the lock toggle
+    // do not change the protected clip's content, position or duration.
+    if (command.kind !== 'setClipState') requireUnlocked(el);
     return el;
   }
   const original = wrappedFragment ? document.body.innerHTML : document.toString();
@@ -303,8 +304,14 @@ function applySelectionCommand(
     const targets = command.hfIds.map((hfId) => ({ hfId }));
     assertSafeElementDeletion(source, targets);
     let after = removeElementsFromHtml(serialize(), targets);
+    if (command.rippleMembers && command.rippleTrack === undefined) {
+      throw new Error('Choose an authored track for ripple deletion.');
+    }
     if (command.rippleTrack !== undefined) {
-      const onTrack = (el: Element) => ctx.trackByElement.get(el) === command.rippleTrack;
+      const members = command.rippleMembers ? new Set(command.rippleMembers) : undefined;
+      const onTrack = (el: Element) =>
+        ctx.trackByElement.get(el) === command.rippleTrack &&
+        (!members || members.has(el.getAttribute('data-hf-id')!));
       const removed = selected.filter(onTrack).map(timing);
       const shifts = clips
         .filter((el) => onTrack(el) && !selected.includes(el))

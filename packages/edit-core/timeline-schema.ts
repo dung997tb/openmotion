@@ -12,7 +12,7 @@ export type TimelineCommand =
       at: number;
       measured?: Array<{ hfId: string; start: number; duration: number; track?: number; at?: number }>;
     }
-  | { kind: 'deleteClips'; hfIds: string[]; rippleTrack?: number }
+  | { kind: 'deleteClips'; hfIds: string[]; rippleTrack?: number; rippleMembers?: string[] }
   | { kind: 'linkClips' | 'unlinkClips'; hfIds: string[] }
   | { kind: 'setClipState'; hfIds: string[]; state: 'locked' | 'hidden' | 'muted'; enabled: boolean }
   | { kind: 'detachAudio' | 'moveIntoSync' | 'slipIntoSync'; hfId: string }
@@ -115,7 +115,20 @@ export const timelineCommandSchemas = [
       ),
     },
   ),
-  schema('deleteClips', { hfIds }, { rippleTrack: track }),
+  schema(
+    'deleteClips',
+    { hfIds },
+    {
+      rippleTrack: track,
+      rippleMembers: {
+        type: 'array',
+        items: id,
+        minItems: 1,
+        uniqueItems: true,
+        description: 'The clips on the displayed lane when one authored track spans multiple lanes.',
+      },
+    },
+  ),
   schema('linkClips', { hfIds }),
   schema('unlinkClips', { hfIds }),
   schema('setClipState', {
