@@ -22,7 +22,7 @@ export function createStudioHistoryRoutes(deps: DisklessStudioDeps): Hono<{ Vari
   app.get('/api/projects/:id/history', async (c) => {
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id');
-    const result = await deps.history.listHistory(auth, projectId);
+    const result = await deps.history.listHistory(auth, projectId, c.req.query('view') === 'navigation' ? {} : undefined);
     return c.json(result);
   });
 

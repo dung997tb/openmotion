@@ -474,7 +474,11 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     setRightPanelTab,
     initialState: initialUrlStateRef.current,
   });
-  const historyFlags = useHistoryFlags(editHistory);
+  const historyFlags = useHistoryFlags({
+    ...editHistory,
+    canUndo: editHistory.canUndo || appHotkeys.historyPending,
+    canRedo: editHistory.canRedo || appHotkeys.historyPending,
+  });
   const toolbarSession = useToolbarSession(domEditSession);
   const studioCtxValue = buildStudioContextValue({
     projectId: projectId!,

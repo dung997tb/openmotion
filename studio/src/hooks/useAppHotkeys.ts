@@ -289,6 +289,7 @@ export function useAppHotkeys({
     {
       handleUndo,
       handleRedo,
+      historyPending: fileHistory.pending,
       syncPreviewHotkeys,
     },
     projectId,

@@ -86,7 +86,7 @@ interface ExternalFileChangeCoordinatorOptions {
    */
   refreshFileTree?: () => void | Promise<void>;
   /** Refresh the server-backed history view when another actor changes history without a file event. */
-  onHistoryChanged?: () => void | Promise<void>;
+  onHistoryChanged?: (writeToken?: string) => void | Promise<void>;
 }
 
 export interface ExternalFileChangeCoordinatorHandle {
@@ -532,7 +532,7 @@ export function useExternalFileChangeCoordinator({
       if (!payload || !projectId) return;
       const deliveredProjectId = readFileChangeField(payload, "projectId");
       if (deliveredProjectId && deliveredProjectId !== projectId) return;
-      void Promise.resolve(onHistoryChanged?.()).catch((error) => {
+      void Promise.resolve(onHistoryChanged?.(readFileChangeField(payload, "writeToken") ?? undefined)).catch((error) => {
         console.warn("Studio could not refresh project history after an external change.", error);
       });
     },
