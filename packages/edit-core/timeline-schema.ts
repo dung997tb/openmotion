@@ -1,6 +1,8 @@
 type ClipMove = { hfId: string; start: number; track?: number; clearAudioGroup?: boolean };
 type ClipTrim = { hfId: string; start: number; duration: number; playbackStart?: number };
-export type ClipStacking = { hfId: string; direction: "up" | "down" } | { ranks: { hfId: string; zIndex: number }[] };
+export type ClipStacking =
+  | { hfId: string; direction: 'up' | 'down' }
+  | { ranks: { hfId: string; zIndex: number; makeRelative?: boolean }[] };
 export type TimelineCommand =
   | { kind: 'moveClips'; changes: ClipMove[]; includeLinked?: boolean; stacking?: ClipStacking }
   | { kind: 'trimClips'; changes: ClipTrim[]; includeLinked?: boolean }
@@ -8,7 +10,7 @@ export type TimelineCommand =
       kind: 'splitClips';
       hfIds: string[];
       at: number;
-      measured?: Array<{ hfId: string; start: number; duration: number; track?: number }>;
+      measured?: Array<{ hfId: string; start: number; duration: number; track?: number; at?: number }>;
     }
   | { kind: 'deleteClips'; hfIds: string[]; rippleTrack?: number }
   | { kind: 'linkClips' | 'unlinkClips'; hfIds: string[] }
@@ -54,14 +56,35 @@ export const timelineCommandSchemas = [
   schema(
     'moveClips',
     {
-      changes: { ...array(
-        object({ hfId: id, start: seconds, track, clearAudioGroup: { type: 'boolean' } }, ['hfId', 'start']),
-      ), minItems: 0 },
+      changes: {
+        ...array(
+          object({ hfId: id, start: seconds, track, clearAudioGroup: { type: 'boolean' } }, [
+            'hfId',
+            'start',
+          ]),
+        ),
+        minItems: 0,
+      },
     },
-    { includeLinked: { type: 'boolean' }, stacking: { oneOf: [
-        object({ hfId:id, direction:{enum:['up','down']} }, ['hfId','direction']),
-        object({ ranks: array(object({hfId:id,zIndex:{type:'integer'}},['hfId','zIndex'])) }, ['ranks']),
-      ] } },
+    {
+      includeLinked: { type: 'boolean' },
+      stacking: {
+        oneOf: [
+          object({ hfId: id, direction: { enum: ['up', 'down'] } }, ['hfId', 'direction']),
+          object(
+            {
+              ranks: array(
+                object({ hfId: id, zIndex: { type: 'integer' }, makeRelative: { type: 'boolean' } }, [
+                  'hfId',
+                  'zIndex',
+                ]),
+              ),
+            },
+            ['ranks'],
+          ),
+        ],
+      },
+    },
   ),
   schema(
     'trimClips',
@@ -85,11 +108,10 @@ export const timelineCommandSchemas = [
     { hfIds, at: seconds },
     {
       measured: array(
-        object({ hfId: id, start: seconds, duration: { type: 'number', exclusiveMinimum: 0 }, track }, [
-          'hfId',
-          'start',
-          'duration',
-        ]),
+        object(
+          { hfId: id, start: seconds, duration: { type: 'number', exclusiveMinimum: 0 }, track, at: seconds },
+          ['hfId', 'start', 'duration'],
+        ),
       ),
     },
   ),

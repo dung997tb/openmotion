@@ -1,5 +1,5 @@
-import type { TimelineCommand } from "../../../packages/edit-core/timeline-schema";
-import { canSubmitTimelineCommand, saveCloudTimeline } from "../utils/cloudTimelineEdit";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { type TimelineFileEdit, saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { useCallback, type MutableRefObject } from "react";
 import { usePlayerStore, type TimelineElement } from "../player";
 import type { TimelineLinkEdit } from "../player/components/timelineCallbacks";
@@ -81,15 +81,14 @@ export function useTimelineLinkEditing({
       const path = plan.anchor.sourceFile || activeCompPath || "index.html";
       pendingTimelineEditPathRef.current.add(path);
       const targets = linkEditTargets(edit);
-      let command: TimelineCommand | undefined;
-      if (canSubmitTimelineCommand(targets)) {
+      const command: TimelineFileEdit["command"] | undefined = getCachedCloudDisklessMode() ? resolve => {
         switch (edit.kind) {
-          case "link": case "unlink": command = { kind: edit.kind === "link" ? "linkClips" : "unlinkClips", hfIds: targets.map(el => el.hfId!) }; break;
-          case "detach": command = {kind:"detachAudio",hfId:edit.element.hfId!}; break;
-          case "merge": command = {kind:"mergeAudio",audioId:edit.audio.hfId!,videoId:edit.video.hfId!}; break;
-          case "move-into-sync": case "slip-into-sync": command = {kind:edit.kind === "move-into-sync" ? "moveIntoSync" : "slipIntoSync",hfId:edit.element.hfId!}; break;
+          case "link": case "unlink": return { kind: edit.kind === "link" ? "linkClips" : "unlinkClips", hfIds: targets.map(resolve) };
+          case "detach": return {kind:"detachAudio",hfId:resolve(edit.element)};
+          case "merge": return {kind:"mergeAudio",audioId:resolve(edit.audio),videoId:resolve(edit.video)};
+          case "move-into-sync": case "slip-into-sync": return {kind:edit.kind === "move-into-sync" ? "moveIntoSync" : "slipIntoSync",hfId:resolve(edit.element)};
         }
-      }
+      } : undefined;
       const queued = editQueueRef.current.then(() =>
         command ? saveCloudTimeline(pid, [{ path, command }], writeProjectFile, recordEdit, plan.label)
           : saveProjectFilesWithHistory({

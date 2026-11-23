@@ -1,5 +1,5 @@
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
-import { canSubmitTimelineCommand, saveCloudTimeline, timelineAttributeCommand } from "../utils/cloudTimelineEdit";
+import { saveCloudTimeline, timelineAttributeCommand } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
 import { useCaptionWorkspace } from "../motion/captionWorkspace";
 import type { TimelineEditCallbacks } from "../player/components/timelineCallbacks";
@@ -86,12 +86,12 @@ export function useSetElementsAttribute({
         const uniform = edits.every(edit => edit.value === edits[0]?.value);
         const state = attr === "muted" ? "muted" : attr === "data-timeline-locked" ? "locked" : null;
         let changedPaths: string[];
-        if (state && uniform && canSubmitTimelineCommand(edits.map(edit => edit.element))) {
+        if (state && uniform && getCachedCloudDisklessMode()) {
           changedPaths = await saveCloudTimeline(
             projectId,
-            [...byFile].map(([path, patches]) => ({ path, command: {
-              kind: "setClipState", hfIds: patches.map(p => p.target.hfId!), state, enabled: edits[0]!.value !== null,
-            } })),
+            [...byFile].map(([path, patches]) => ({ path, command: resolve => ({
+              kind: "setClipState", hfIds: patches.map(p => resolve({...p.target, domId:p.target.id ?? undefined})), state, enabled: edits[0]!.value !== null,
+            }) })),
             writeProjectFile, recordEdit, label,
           );
         } else {

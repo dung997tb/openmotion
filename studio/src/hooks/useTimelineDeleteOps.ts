@@ -1,4 +1,5 @@
-import { canSubmitTimelineCommand, saveCloudTimeline } from "../utils/cloudTimelineEdit";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { mainVisualTrack } from "../player/components/timelineLinkage";
 import { buildProjectApiPath } from "../utils/projectRouting";
 // Timeline clip deletion: the marquee/multi path and the single-clip wrapper
@@ -110,22 +111,22 @@ export function useTimelineDeleteOps({
         // Shared with the ripple move below so a folded ripple is one undo step with the delete.
         const step = timingGestureStep("main-track-ripple-delete");
         const deleteHistoryLabel = "Delete timeline clip";
-        const cloudDelete = canSubmitTimelineCommand(selection);
+        const cloudDelete = getCachedCloudDisklessMode();
         const removing = cloudDelete ? selection : sameFile;
         let rollbackDuration = () => {};
         try {
           if (cloudDelete) {
-            const groups = new Map<string, string[]>();
+            const groups = new Map<string, typeof selection>();
             for (const clip of removing) {
               const path = clip.sourceFile || activeCompPath || "index.html";
               const ids = groups.get(path) ?? [];
-              ids.push(clip.hfId!);
+              ids.push(clip);
               groups.set(path, ids);
             }
-            await saveCloudTimeline(pid, [...groups].map(([path,hfIds]) => {
+            await saveCloudTimeline(pid, [...groups].map(([path, clips]) => {
               const peers = timelineElements.filter(el => (el.sourceFile || activeCompPath || "index.html") === path);
               const main = mainVisualTrack(peers);
-              return {path, command:{kind:"deleteClips", hfIds, ...(usePlayerStore.getState().rippleEditEnabled && main != null && {rippleTrack:main})}};
+              return {path, command: resolve => ({kind:"deleteClips", hfIds:clips.map(resolve), ...(usePlayerStore.getState().rippleEditEnabled && main != null && {rippleTrack:main})})};
             }), writeProjectFile, recordEdit, deleteHistoryLabel);
           } else await saveServerRewriteWithHistory({
             projectId: pid,

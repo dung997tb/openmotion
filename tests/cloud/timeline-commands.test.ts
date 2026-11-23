@@ -102,3 +102,18 @@ test('moving unclocked root text materializes its original composition window', 
   assert.equal(moved.querySelector('#title')?.getAttribute('data-duration'), '4');
   assert.equal(moved.querySelector('[data-composition-id]')?.getAttribute('data-duration'), '6');
 });
+
+test('a headless lane move updates paint order and time atomically, refusing a locked paint target', () => {
+  const html =
+    '<div data-composition-id="s" data-duration="6"><div id="a" data-hf-id="a" data-start="0" data-duration="4" data-track-index="2" style="z-index:1"></div><div id="b" data-hf-id="b" data-start="0" data-duration="4" data-track-index="1" style="z-index:5"></div></div>';
+  const move = {
+    kind: 'moveClips' as const,
+    changes: [{ hfId: 'a', start: 1, track: 0 }],
+    stacking: { hfId: 'a', direction: 'up' as const },
+  };
+  const moved = root(apply(html, move)).querySelector('#a') as HTMLElement;
+  assert.equal(moved.getAttribute('data-start'), '1');
+  assert.ok(Number(moved.style.getPropertyValue('z-index')) > 5);
+  const locked = html.replace('id="b" data-hf-id', 'id="b" data-timeline-locked data-hf-id');
+  assert.throws(() => apply(locked, { ...move, stacking: { ranks: [{ hfId: 'b', zIndex: 1 }] } }), /Unlock/);
+});

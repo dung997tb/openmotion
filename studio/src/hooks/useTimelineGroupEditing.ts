@@ -1,4 +1,5 @@
-import { canSubmitTimelineCommand, saveCloudTimeline, timelineTimingEdits, type TimelinePaintPlan } from "../utils/cloudTimelineEdit";
+import { previewTimelinePaint } from "./timelinePaintPreview";
+import { saveCloudTimeline, timelineTimingEdits, type TimelinePaintPlan } from "../utils/cloudTimelineEdit";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { usePlayerStore } from "../player/store/playerStore";
 import { compactMainTrack } from "../player/components/timelineMainMagnet";
@@ -251,6 +252,7 @@ export function useTimelineGroupEditing({
   const handleTimelineGroupMove = useCallback(
     (changes: TimelineGroupMoveChange[], options?: TimelineGroupCommitOptions) => {
       if (changes.length === 0) return Promise.resolve();
+      const preview = previewTimelinePaint(options?.paint, previewIframeRef.current, activeCompPath);
       for (const change of changes) {
         // Lane-only changes keep the live start too (see applyTimelineMoveAttributes).
         const attrs: Array<[string, string]> = change.start === change.element.start ? [] : [
@@ -298,12 +300,12 @@ export function useTimelineGroupEditing({
       const label = options?.label ?? "Move timeline clips";
       return enqueueGroupOperation(label, async (projectId) => {
         await options?.beforeTiming;
-        if (options?.gapEdit && canSubmitTimelineCommand(changes.map(change => change.element))) {
+        if (options?.gapEdit && getCachedCloudDisklessMode()) {
           await saveCloudTimeline(projectId, [{path:targetPathFor(changes[0]!.element, activeCompPath), command:options.gapEdit}], writeProjectFile, recordEdit, label, refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectId, reloadPreview));
           forceReloadSdkSession?.();
           return;
         }
-        if (getCachedCloudDisklessMode()) return persistCloudGroup(projectId, changes, label, options?.paint);
+        if (getCachedCloudDisklessMode()) return persistCloudGroup(projectId, changes, label, preview.paint);
         const sdk = await trySdkBatchPersist({
           changes,
           sdkChanges: toSdkTimingChanges(changes, (change) => ({
@@ -361,6 +363,7 @@ export function useTimelineGroupEditing({
       }).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root
         // alongside the gesture owner's store rollback.
+        preview.rollback();
         rollbackDuration();
         if (options?.suppressFailureToast) {
           console.error("[Timeline] group move failed to persist", error);

@@ -1,7 +1,7 @@
-import { computeStackingPatches } from "./timeline-stacking.ts";
-import { resolveCssStackingContextId } from "@hyperframes/core/runtime/stacking-context";
-import type { ClipStacking } from "./timeline-schema.ts";
-import { unlinkSelectedMembers } from "./element-deletion.ts";
+import { computeStackingPatches } from './timeline-stacking.ts';
+import { resolveCssStackingContextId } from '@hyperframes/core/runtime/stacking-context';
+import type { ClipStacking } from './timeline-schema.ts';
+import { unlinkSelectedMembers } from './element-deletion.ts';
 import { furthestClipEndFromDocument, isTimelineIgnoredElement, syncContentEnd } from './content-duration.ts';
 import { resolveReferencedStart, resolveReferencedDuration } from '@hyperframes/parsers/reference-resolver';
 import { isUntimedRootText } from './text-tag.ts';
@@ -246,11 +246,12 @@ function applySelectionCommand(
               duration: number(measured.duration, 'clip duration', Number.MIN_VALUE),
             }
           : timing(timed);
-      if (!Number.isFinite(command.at) || command.at <= start || command.at >= start + duration)
+      const at = measured?.at ?? command.at;
+      if (!Number.isFinite(at) || at <= start || at >= start + duration)
         throw new Error('Cut inside each selected clip.');
       return {
         target: { hfId: id },
-        splitTime: command.at,
+        splitTime: at,
         elementStart: start,
         elementDuration: duration,
         track: timed.hasAttribute('data-track-index')
@@ -278,7 +279,7 @@ function applySelectionCommand(
     return serialize();
   }
   if (command.kind === 'linkClips') {
-    const isLinked = selected.some(el => el.hasAttribute('data-link'));
+    const isLinked = selected.some((el) => el.hasAttribute('data-link'));
     const tags = new Set(selected.map((el) => el.localName));
     if (selected.length !== 2 || !tags.has('audio') || !tags.has('video') || isLinked)
       throw new Error('Select one unlinked video and one unlinked audio clip.');
@@ -338,33 +339,59 @@ function closeTrackGaps(ctx: TimelineSource, command: Extract<TimelineCommand, {
 
 /** Timing and its associated paint order are serialized from the same document. */
 function applyClipStacking(ctx: TimelineSource, stacking: ClipStacking) {
-  let ranks;
-  if ("ranks" in stacking) {
+  let ranks: { hfId: string; zIndex: number; makeRelative?: boolean }[];
+  if ('ranks' in stacking) {
     ranks = stacking.ranks;
   } else {
     ctx.target(stacking.hfId);
     const rows = ctx.clips.flatMap((el, domIndex) => {
-      if (!el.hasAttribute("data-start") && !el.hasAttribute("data-end")) return [];
+      if (!el.hasAttribute('data-start') && !el.hasAttribute('data-end')) return [];
       const duration = resolveReferencedDuration(el.ownerDocument, el, new Map(), new Set());
       if (!duration) return [];
-      return [{ key: el.getAttribute("data-hf-id")!, start: timing(el).start, duration,
-        track: Number(el.getAttribute("data-track-index") ?? ctx.trackByElement.get(el) ?? 0),
-        zIndex: Number.parseInt((el as HTMLElement).style?.getPropertyValue("z-index") ?? "", 10) || 0,
-        domIndex, isAudio: el.localName === "audio", stackingContextId: resolveCssStackingContextId(el) }];
+      return [
+        {
+          key: el.getAttribute('data-hf-id')!,
+          start: timing(el).start,
+          duration,
+          track: Number(el.getAttribute('data-track-index') ?? ctx.trackByElement.get(el) ?? 0),
+          zIndex: Number.parseInt((el as HTMLElement).style?.getPropertyValue('z-index') ?? '', 10) || 0,
+          domIndex,
+          isAudio: el.localName === 'audio',
+          // A source-only parser has no CSS cascade. Siblings share a paint scope;
+          // crossing wrappers must use the computed ranks supplied by a mounted preview.
+          stackingContextId: typeof el.ownerDocument.defaultView?.getComputedStyle === 'function'
+            ? resolveCssStackingContextId(el)
+            : el.parentElement?.getAttribute('data-hf-id'),
+        },
+      ];
     });
-    ranks = computeStackingPatches(rows, [stacking.hfId], stacking.direction).map(p => ({ hfId: p.key, zIndex: p.zIndex }));
+    ranks = computeStackingPatches(rows, [stacking.hfId], stacking.direction).map((p) => ({
+      hfId: p.key,
+      zIndex: p.zIndex,
+    }));
   }
-  for (const { hfId, zIndex } of ranks) {
-    if (!Number.isSafeInteger(zIndex)) throw new Error("Invalid layer order.");
+  for (const { hfId, zIndex, makeRelative } of ranks) {
+    if (!Number.isSafeInteger(zIndex)) throw new Error('Invalid layer order.');
     const el = ctx.target(hfId) as HTMLElement;
-    if (el.localName === "audio") throw new Error("Audio clips have no paint order.");
-    el.style.setProperty("z-index", String(zIndex));
+    if (el.localName === 'audio') throw new Error('Audio clips have no paint order.');
+    el.style.setProperty('z-index', String(zIndex));
+    if (
+      makeRelative ||
+      el.style.position === 'static' ||
+      (makeRelative === undefined &&
+        !el.style.position &&
+        !el.ownerDocument.querySelector('style, link[rel~="stylesheet"]'))
+    )
+      el.style.setProperty('position', 'relative');
   }
 }
 
 function applyTimingCommand(ctx: TimelineSource, command: Extract<TimelineCommand, { changes: unknown }>) {
   const { source, clips, target, root, serialize } = ctx;
-  if ((!command.changes.length && !(command.kind === 'moveClips' && command.stacking)) || new Set(command.changes.map((c) => c.hfId)).size !== command.changes.length)
+  if (
+    (!command.changes.length && !(command.kind === 'moveClips' && command.stacking)) ||
+    new Set(command.changes.map((c) => c.hfId)).size !== command.changes.length
+  )
     throw new Error('Choose distinct clips.');
   if (command.includeLinked) {
     const changes = [...command.changes];
