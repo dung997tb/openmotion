@@ -1,3 +1,4 @@
+import type { RemoteFileRead } from "./remoteFileReads";
 import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { openComposition } from "@hyperframes/sdk";
@@ -6,6 +7,7 @@ import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import type { PublishSdkSession } from "../utils/sdkCutover";
 import { addExternalFileReloadListener } from "./externalFileReloadBus";
+import { beginTimelineSourceRead } from "../player/lib/peerTimeline";
 import { rememberCompositionPosterSource } from "../player/lib/compositionPosterSource";
 import { usePlayerStore, whenPreviewBooted } from "../player/store/playerStore";
 import { studioApiFetch } from "../utils/studioApiFetch";
@@ -157,6 +159,7 @@ async function httpReadFailureWhy(res: Response): Promise<string | undefined> {
 
 interface ProjectFileBody {
   content?: string;
+  version?: string;
   /** Present only from a server that separates its shim from a real 0-byte file. */
   missing?: boolean;
 }
@@ -171,7 +174,7 @@ interface ProjectFileBody {
  * two empties it was. Without that field (older server) the combined label
  * stands rather than guessing one and corrupting the series.
  */
-function classifyProjectFileBody(data: ProjectFileBody): ProjectFileReadResult {
+function classifyProjectFileBody(data: Pick<ProjectFileBody, "content" | "missing">): ProjectFileReadResult {
   if (typeof data.content !== "string") return { ok: false, reason: "missing_content" };
   if (data.content !== "") return { ok: true, content: data.content };
   if (data.missing === true) return { ok: false, reason: "absent" };
@@ -188,6 +191,7 @@ function classifyProjectFileBody(data: ProjectFileBody): ProjectFileReadResult {
 async function readProjectFileOptional(
   projectId: string,
   path: string,
+  sharedRead?: RemoteFileRead,
 ): Promise<ProjectFileReadResult> {
   // Reject traversal / NUL before building the request URL — `path` is a
   // user-influenced composition path (mirrors the guard in timelineEditingHelpers,
@@ -195,6 +199,18 @@ async function readProjectFileOptional(
   // already confines both values to single segments of this same-origin URL.
   if (path.includes("\0") || path.includes("..")) return { ok: false, reason: "unsafe_path" };
   const previewState = usePlayerStore.getState();
+  const rememberSource = beginTimelineSourceRead(projectId, path);
+  const shared = sharedRead?.(projectId, path);
+  if (shared) {
+    try {
+      const file = await shared;
+      const result = classifyProjectFileBody(file);
+      if (result.ok) rememberCompositionPosterSource(previewState, projectId, path, result.content, file.version);
+      return result;
+    } catch {
+      // Retry through the diagnostic reader so a missing project or a network fault stays visible.
+    }
+  }
   let res: Response;
   const fetchStarted = performance.now();
   try {
@@ -221,7 +237,10 @@ async function readProjectFileOptional(
     };
   }
   const read = classifyProjectFileBody(data);
-  if (read.ok) rememberCompositionPosterSource(previewState, projectId, path, read.content);
+  if (read.ok) {
+    rememberSource(read.content);
+    rememberCompositionPosterSource(previewState, projectId, path, read.content, data.version ?? res.headers?.get("etag"));
+  }
   return read;
 }
 
@@ -375,6 +394,7 @@ export function useSdkSession(
   projectIdRef.current = projectId;
   const activeCompPathRef = useRef(activeCompPath);
   activeCompPathRef.current = activeCompPath;
+  const externalRead = useRef<RemoteFileRead | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
   const reloadTokenRef = useRef(reloadToken);
   reloadTokenRef.current = reloadToken;
@@ -411,9 +431,10 @@ export function useSdkSession(
 
   useEffect(
     () =>
-      addExternalFileReloadListener((changedPath) => {
+      addExternalFileReloadListener((changedPath, read) => {
         // "." is a project-wide change (a reconnect or a replaced folder): every session reloads.
         if (changedPath === "." || changedPath === activeCompPathRef.current) {
+          externalRead.current = read;
           setReloadToken((token) => token + 1);
         }
       }),
@@ -422,6 +443,8 @@ export function useSdkSession(
 
   // ── Open / re-open the session ──
   useEffect(() => {
+    const sharedRead = externalRead.current;
+    externalRead.current = undefined;
     const generation = ++generationRef.current;
     let cancelled = false;
 
@@ -451,7 +474,7 @@ export function useSdkSession(
     // the first frame and play do not need it, so it waits for the live preview to boot.
     whenPreviewBooted(projectId)
       .then((booted) =>
-        cancelled || !booted ? null : readProjectFileOptional(projectId, activeCompPath),
+        cancelled || !booted ? null : readProjectFileOptional(projectId, activeCompPath, sharedRead),
       )
       .then(async (read) => {
         if (!read || cancelled) return;

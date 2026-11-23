@@ -23,8 +23,8 @@ export async function readProjectFileContentWithVersion(projectId: string | null
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(path)}${query}`,
   );
   if (!response.ok) throw new Error(`Failed to read ${path}`);
-  const data = (await response.json()) as { content?: string; version?: string };
-  return { content: data.content, version: data.version ?? response.headers.get("etag") };
+  const data = (await response.json()) as { content?: string; version?: string; missing?: boolean };
+  return { content: data.content, version: data.version ?? response.headers.get("etag"), missing: data.missing };
 }
 
 // The etag-guarded project-file read/write pair every Studio save path

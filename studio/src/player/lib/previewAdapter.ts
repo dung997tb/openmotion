@@ -24,6 +24,7 @@ export type PreviewBridgeMessageType =
   | "edit-element"
   | "timeline-state"
   | "playback-control"
+  | "peer-timing"
   | "layer-tree"
   | "layer-select"
   | "inline-text"

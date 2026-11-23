@@ -1109,7 +1109,8 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(cssJson.writeToken, 'studio-write-77');
     assert.equal(cssJson.version, fileContentVersion('.box { opacity: 1; }'));
 
-    // DELETE emits DELETED_VERSION = '"deleted"'.
+    // A delete emits a single file-change carrying the legacy deletion hint.
+    const beforeDelete = env.published.length;
     const delRes = await env.studioApp.request(`/api/projects/${created.projectId}/files/extra.css`, {
       method: 'DELETE',
     });
@@ -1117,6 +1118,11 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     const delJson = (await delRes.json()) as { version: string };
     assert.equal(delJson.version, DELETED_VERSION);
     assert.equal(DELETED_VERSION, '"deleted"');
+    const deletions = env.published.slice(beforeDelete)
+      .map(e => e.payload as { type?: string; version?: string })
+      .filter(e => e.type === 'file-change');
+    assert.equal(deletions.length, 1);
+    assert.equal(deletions[0].version, DELETED_VERSION);
   });
 
   it('answers HEAD /preview/* and HEAD /render/:jobId/view DIRECTLY (never 302) while GET binary returns 302 with Cache-Control & Vary', async () => {

@@ -12,6 +12,7 @@ export function createTimelineResetState() {
     ...resetPlaybackReadinessState(),
     beatDragging: false,
     elements: [],
+    timelineSourceProjected: false,
     pendingAssetDrops: [] as PendingAssetDrop[],
     selectedElementId: null,
     zEditVersion: 0,

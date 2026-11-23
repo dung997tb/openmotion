@@ -1,4 +1,7 @@
-import { useCallback, type MutableRefObject } from "react";
+import { useCallback, useMemo, type MutableRefObject } from "react";
+import { changedFilePaths, readFileChangeAffectsPreview } from "../components/editor/manualEditsParsing";
+import { syncPeerComposition } from "./syncPeerComposition";
+import { createRemoteFileReader } from "./remoteFileReads";
 import { usePlayerStore } from "../player/store/playerStore";
 import { clearStudioSaveFailures } from "../utils/studioSaveState";
 import {
@@ -34,6 +37,7 @@ interface UseStudioExternalFileChangesOptions {
   projectId: string | null;
   activeCompPath: string | null;
   masterCompPath: string | null;
+  previewIframeRef: MutableRefObject<HTMLIFrameElement | null>;
   fileManager: FileManager;
   previewPersistence: PreviewPersistence;
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
@@ -47,6 +51,7 @@ export function useStudioExternalFileChanges({
   projectId,
   activeCompPath,
   masterCompPath,
+  previewIframeRef,
   fileManager,
   previewPersistence,
   pendingTimelineEditPathRef,
@@ -64,6 +69,21 @@ export function useStudioExternalFileChanges({
     },
     [bumpThumbnailRevisions, onOutsideChange],
   );
+  const filesForChange = useMemo(() => createRemoteFileReader(), []);
+  const refreshFileViews = useCallback((payload: unknown) => {
+    if (!projectId) return;
+    const paths = changedFilePaths(payload);
+    const read = filesForChange(projectId, payload);
+    const preview = readFileChangeAffectsPreview(payload)
+      ? syncPeerComposition(projectId, activeCompPath ?? masterCompPath, paths, read, previewIframeRef)
+      : undefined;
+    for (const path of paths ?? ["."]) {
+      notifyExternalFileReload(path, read);
+      fileManager.refreshOpenSource(path, read);
+    }
+    return preview;
+  }, [projectId, activeCompPath, masterCompPath, previewIframeRef, filesForChange, fileManager.refreshOpenSource]);
+
   const drainPendingChanges = useCallback(async () => {
     const source = await flushPendingSourceSave();
     if (source.status !== "clean") return source;
@@ -85,8 +105,7 @@ export function useStudioExternalFileChanges({
     getPendingCandidate: fileManager.getPendingSourceCandidate,
     discardPendingChanges,
     reloadPreview,
-    reloadSdkSession: notifyExternalFileReload,
-    refreshOpenSource: fileManager.refreshOpenSource,
+    refreshFileViews,
     persistConflictSnapshot: persistExternalConflictSnapshot,
     persistFailureSnapshot: persistExternalFailureSnapshot,
     loadConflictSnapshot: loadExternalConflictSnapshot,
