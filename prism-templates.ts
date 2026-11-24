@@ -164,9 +164,14 @@ export class TemplateCatalog {
       ...(snapshot.publication.content.en?.brands ?? []),
       ...(snapshot.publication.content[locale]?.brands ?? []),
     ].map(brand => [brand.name, brand.logoUrl]));
+    // Keep searchAliases compact: include cross-language names/categories/tags from
+    // English + Simplified Chinese (plus active locale) without serializing verbose prose
+    // from all 11 locales on every template response.
+    const aliasLocales = Array.from(new Set(['en', 'zh-CN', locale]))
+      .filter(loc => Boolean(snapshot.publication.content?.[loc]?.templates));
     const aliasesById = new Map<string, string[]>();
     const seenById = new Map<string, Set<string>>();
-    for (const loc of Object.keys(snapshot.publication.content ?? {})) {
+    for (const loc of aliasLocales) {
       for (const entry of snapshot.publication.content[loc]?.templates ?? []) {
         let list = aliasesById.get(entry.templateId);
         let seen = seenById.get(entry.templateId);
@@ -179,10 +184,8 @@ export class TemplateCatalog {
         const candidates = [
           entry.original.templateName,
           entry.original.category,
-          entry.original.summary,
           entry.original.author,
           entry.original.attributionNickname,
-          entry.original.styleDescription,
           ...splitTags(entry.original.promotionalUseCases),
           ...splitTags(entry.original.visualPresentation),
           ...splitTags(entry.original.motionTags),

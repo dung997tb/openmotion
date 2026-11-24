@@ -674,56 +674,67 @@ export class Phase1Service {
         ...(stamped ? { versionNormalized: true, previousRevision: before.revision, previousVersionId: before.currentVersionId } : {}),
         preflight: checked.result, openedByHost: false, selectionSource: args.projectId ? 'explicit_project' : 'bound_session' };
     }
-    if (name === 'motion_edit_project') return this.writeRequest(name, args, () => this.context.mutation(() => this.store.lock(async () => {
-      const versions = this.versions(args.projectId), scoped = versions.store;
-      const names = new Set<string>(); let bytes = 0;
-      for (const file of args.files ?? []) {
-        projectPath(file.path);
-        if (!textExtensions.has(path.extname(file.path)) || [metadataPath, assetIndexPath].includes(file.path)) throw new Error('INVALID_FILE_TYPE_OR_RESERVED_PATH');
-        if (names.has(file.path)) throw new Error('DUPLICATE_FILE_PATH'); names.add(file.path); bytes += Buffer.byteLength(file.content);
-      }
-      if (bytes > 8388608) throw new Error('SOURCE_BATCH_TOO_LARGE: 8 MiB limit');
-      const changes = [...(args.files ?? [])];
-      let canvas;
-      if (args.canvas) {
-        const name = projectPath(args.canvas.compositionPath);
-        if (!name.endsWith('.html') || names.has(name)) throw new Error('Supply one canvas edit per HTML composition without a competing file edit');
-        const parsers = await loadCanvasSourceOperations(this.runtimeRoot);
-        const result = compositionCanvasSource(await readFile(await scoped.safePath(name), 'utf8'), parsers, args.canvas);
-        canvas = result.canvas; changes.push({ path: name, content: result.content });
-      }
-      if (args.files === undefined && !args.canvas && args.requirements === undefined && args.namingLanguage === undefined && !args.assetNames?.length) throw new Error('Supply files or canvas settings');
-      if (args.requirements !== undefined || args.namingLanguage !== undefined) {
-        if (args.requirements !== undefined) validateInstruction(args.requirements);
-        const meta = await jsonFile<any>(path.join(scoped.projectDirectory, metadataPath), { schemaVersion: 1, projectType: 'legacy' });
-        changes.push({ path: metadataPath, content: JSON.stringify({ ...meta, ...(args.requirements !== undefined ? { requirements: args.requirements } : {}), ...(args.namingLanguage !== undefined ? { namingLanguage: namingLanguage(args.namingLanguage) } : {}) }) });
-      }
-      if (args.assetNames?.length) {
-        const records = await jsonFile<any[]>(path.join(scoped.projectDirectory, assetIndexPath), []);
-        const renamed = new Set<string>();
-        for (const item of args.assetNames) {
-          const assetPath = projectPath(item.path);
-          if (renamed.has(assetPath)) throw new Error('DUPLICATE_ASSET_PATH');
-          renamed.add(assetPath);
-          const displayName = validateAssetDisplayName(item.name);
-          const file = await stat(await scoped.safePath(assetPath));
-          if (!file.isFile() || projectAssetKind(assetPath) < 0) throw new Error('INVALID_ASSET_PATH');
-          const record = records.find(asset => asset.path === assetPath);
-          if (record) Object.assign(record, { originalName: record.originalName ?? record.name ?? path.basename(assetPath), name: displayName, nameSource: 'user' });
-          else records.push({ path: assetPath, originalName: path.basename(assetPath), name: displayName, nameSource: 'user' });
+    if (name === 'motion_edit_project') return this.writeRequest(name, args, async () => {
+      const { result, projectDirectory, shouldLint } = await this.context.mutation(() => this.store.lock(async () => {
+        const versions = this.versions(args.projectId), scoped = versions.store;
+        const names = new Set<string>(); let bytes = 0;
+        for (const file of args.files ?? []) {
+          projectPath(file.path);
+          if (!textExtensions.has(path.extname(file.path)) || [metadataPath, assetIndexPath].includes(file.path)) throw new Error('INVALID_FILE_TYPE_OR_RESERVED_PATH');
+          if (names.has(file.path)) throw new Error('DUPLICATE_FILE_PATH'); names.add(file.path); bytes += Buffer.byteLength(file.content);
         }
-        changes.push({ path: assetIndexPath, content: JSON.stringify(records) });
-      }
-      const committed = await versions.withHistory(async history =>
-        versions.transaction(history, args.expectedRevision, args.expectedVersionId, args.requestId, changes, { label: args.summary ?? 'Agent source edit' }));
-      const checked = changes.some(file => !file.remove && /\.(html|css|js|mjs)$/i.test(file.path))
-        ? await inspectProject(this.runtimeRoot, scoped.projectDirectory, 'lint').catch(() => null)
+        if (bytes > 8388608) throw new Error('SOURCE_BATCH_TOO_LARGE: 8 MiB limit');
+        const changes = [...(args.files ?? [])];
+        let canvas;
+        if (args.canvas) {
+          const name = projectPath(args.canvas.compositionPath);
+          if (!name.endsWith('.html') || names.has(name)) throw new Error('Supply one canvas edit per HTML composition without a competing file edit');
+          const parsers = await loadCanvasSourceOperations(this.runtimeRoot);
+          const result = compositionCanvasSource(await readFile(await scoped.safePath(name), 'utf8'), parsers, args.canvas);
+          canvas = result.canvas; changes.push({ path: name, content: result.content });
+        }
+        if (args.files === undefined && !args.canvas && args.requirements === undefined && args.namingLanguage === undefined && !args.assetNames?.length) throw new Error('Supply files or canvas settings');
+        if (args.requirements !== undefined || args.namingLanguage !== undefined) {
+          if (args.requirements !== undefined) validateInstruction(args.requirements);
+          const meta = await jsonFile<any>(path.join(scoped.projectDirectory, metadataPath), { schemaVersion: 1, projectType: 'legacy' });
+          changes.push({ path: metadataPath, content: JSON.stringify({ ...meta, ...(args.requirements !== undefined ? { requirements: args.requirements } : {}), ...(args.namingLanguage !== undefined ? { namingLanguage: namingLanguage(args.namingLanguage) } : {}) }) });
+        }
+        if (args.assetNames?.length) {
+          const records = await jsonFile<any[]>(path.join(scoped.projectDirectory, assetIndexPath), []);
+          const renamed = new Set<string>();
+          for (const item of args.assetNames) {
+            const assetPath = projectPath(item.path);
+            if (renamed.has(assetPath)) throw new Error('DUPLICATE_ASSET_PATH');
+            renamed.add(assetPath);
+            const displayName = validateAssetDisplayName(item.name);
+            const file = await stat(await scoped.safePath(assetPath));
+            if (!file.isFile() || projectAssetKind(assetPath) < 0) throw new Error('INVALID_ASSET_PATH');
+            const record = records.find(asset => asset.path === assetPath);
+            if (record) Object.assign(record, { originalName: record.originalName ?? record.name ?? path.basename(assetPath), name: displayName, nameSource: 'user' });
+            else records.push({ path: assetPath, originalName: path.basename(assetPath), name: displayName, nameSource: 'user' });
+          }
+          changes.push({ path: assetIndexPath, content: JSON.stringify(records) });
+        }
+        const committed = await versions.withHistory(async history =>
+          versions.transaction(history, args.expectedRevision, args.expectedVersionId, args.requestId, changes, { label: args.summary ?? 'Agent source edit' }));
+        return {
+          projectDirectory: scoped.projectDirectory,
+          shouldLint: changes.some(file => !file.remove && /\.(html|css|js|mjs)$/i.test(file.path)),
+          result: {
+            projectId: args.projectId, ...committed,
+            ...(canvas ? { canvas } : {}), ...await readProjectAssetNames(scoped, undefined, undefined, this.runtimeRoot),
+            changedFiles: changes.map(file => file.path), previewSync: this.context.nativeUrl(args.projectId) ? 'file_watcher_notified' : 'not_open',
+          },
+        };
+      }));
+      const checked = shouldLint
+        ? await inspectProject(this.runtimeRoot, projectDirectory, 'lint').catch(() => null)
         : null;
-      return { projectId: args.projectId, ...committed,
-        ...(canvas ? { canvas } : {}), ...await readProjectAssetNames(scoped, undefined, undefined, this.runtimeRoot),
-        changedFiles: changes.map(file => file.path), previewSync: this.context.nativeUrl(args.projectId) ? 'file_watcher_notified' : 'not_open',
-        ...(checked ? { lint: { ok: checked.exitCode === 0, result: checked.result } } : {}) };
-    })));
+      return {
+        ...result,
+        ...(checked ? { lint: { ok: checked.exitCode === 0, result: checked.result } } : {}),
+      };
+    });
     if (name === 'motion_restore_version') return this.writeRequest(name, args, () => this.context.mutation(() => this.store.lock(async () => {
       const versions = this.versions(args.projectId);
       return versions.withHistory(async history => {
