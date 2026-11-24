@@ -521,6 +521,90 @@ test('desktop/scripts/notarize.cjs skips non-darwin or OM_SKIP_NOTARIZE and reso
   assert.equal(notarizeHook.resolveNotaryCredentials({}), null);
 });
 
+test('desktop/scripts/sign-mac.cjs detects Mach-O binaries, layers bottom-up, and caps concurrency at 6', async () => {
+  const { createRequire } = await import('node:module');
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const req = createRequire(import.meta.url);
+  const signMac = req(path.join(desktopRoot, 'scripts', 'sign-mac.cjs'));
+
+  const builderYml = readFileSync(path.join(desktopRoot, 'electron-builder.yml'), 'utf8');
+  assert.match(builderYml, /^\s+sign:\s*scripts\/sign-mac\.cjs$/m);
+  assert.equal(signMac.resolveConcurrency({}), 6);
+  assert.equal(signMac.resolveConcurrency({ OM_CODESIGN_CONCURRENCY: '4' }), 4);
+
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'om-sign-mac-test-'));
+  try {
+    const macho64 = path.join(tmpDir, 'bin64');
+    writeFileSync(macho64, Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]));
+    const fatMacho = path.join(tmpDir, 'fat');
+    writeFileSync(fatMacho, Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x02]));
+    const javaClass = path.join(tmpDir, 'Fake.class');
+    writeFileSync(javaClass, Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x37]));
+    const pakFile = path.join(tmpDir, 'locale.pak');
+    writeFileSync(pakFile, Buffer.from([0x05, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04]));
+
+    assert.equal(signMac.isMachOFile(macho64), true);
+    assert.equal(signMac.isMachOFile(fatMacho), true);
+    assert.equal(signMac.isMachOFile(javaClass), false);
+    assert.equal(signMac.isMachOFile(pakFile), false);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  const waves = signMac.groupSigningLayers([
+    '/App.app/Contents/Frameworks/Electron Framework.framework',
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib',
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler',
+    '/App.app/Contents/Frameworks/Squirrel.framework',
+    '/App.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt',
+    '/App.app/Contents/Frameworks/Helper.app',
+  ]);
+  assert.equal(waves.length, 2);
+  assert.deepEqual(waves[0], [
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler',
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib',
+    '/App.app/Contents/Frameworks/Helper.app',
+    '/App.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt',
+  ]);
+  assert.deepEqual(waves[1], [
+    '/App.app/Contents/Frameworks/Electron Framework.framework',
+    '/App.app/Contents/Frameworks/Squirrel.framework',
+  ]);
+
+  let active = 0;
+  let peak = 0;
+  const items = Array.from({ length: 18 }, (_, i) => i);
+  const out = await signMac.runWithConcurrency(items, 6, async (item) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active--;
+    return item * 2;
+  });
+  assert.equal(peak <= 6 && peak >= 2, true, `expected bounded concurrency <=6, got peak=${peak}`);
+  assert.deepEqual(out, items.map((i) => i * 2));
+
+  const args = signMac.buildCodesignArgs(
+    '/App.app',
+    { identity: 'ABC123', keychain: '/tmp/build.keychain' },
+    { hardenedRuntime: true, entitlements: '/tmp/entitlements.mac.plist' },
+  );
+  assert.deepEqual(args, [
+    '--sign',
+    'ABC123',
+    '--force',
+    '--keychain',
+    '/tmp/build.keychain',
+    '--timestamp',
+    '--options',
+    'runtime',
+    '--entitlements',
+    '/tmp/entitlements.mac.plist',
+    '/App.app',
+  ]);
+});
+
 test('resolvePackagedReleaseChannel preserves test channel from bundle metadata even for clean semver versions', () => {
   assert.equal(
     resolvePackagedReleaseChannel({

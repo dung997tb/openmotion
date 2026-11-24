@@ -26,6 +26,7 @@ protocols:
 mac:
   category: public.app-category.video
   icon: build/icon.icns
+  sign: scripts/sign-mac.cjs
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
