@@ -566,7 +566,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
               <div><strong>{t('This game only runs on the creator’s site.')}</strong>
                 <Button variant="ghost" className="om-button h-auto" data-primary onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open original')}</Button></div>
             </div>
-          : url ? <iframe key={reload} ref={frame} src={url} title={game.title} onLoad={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'success', game); } }} onError={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'failure', game); } }} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-pointer-lock'} allow="fullscreen; gamepad; autoplay; clipboard-write" />
+          : url ? <iframe key={reload} ref={frame} src={url} title={game.title} onLoad={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'success', game); } }} onError={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'failure', game); } }} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-forms allow-pointer-lock'} allow="fullscreen; gamepad; autoplay; clipboard-write" />
           : <span className="om-muted">{t('Loading game…')}</span>}
       </div>
     </section>

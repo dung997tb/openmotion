@@ -26,7 +26,12 @@ import { rankSearchResults } from '../shared/fuzzy-search.ts';
 /** Queued input-image snapshot; the first keeps its historical name for older jobs. */
 const referenceFile = (index: number, mimeType: string) => (index ? `reference-${index}.` : 'reference.') + (mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]);
 
-type Options = { tracking?: OmTracking; fetcher?: Fetcher; detect?: () => Promise<Agent[]>; codex?: typeof generateCodexImage; download?: typeof downloadMedia; pollMs?: number };
+type Options = { tracking?: OmTracking; fetcher?: Fetcher; detect?: () => Promise<Agent[]>; codex?: typeof generateCodexImage; download?: typeof downloadMedia; pollMs?: number; maxConcurrentJobs?: number };
+// 4 keeps OpenDesign Cloud/account batches 2x faster than the previous cap of 2 while staying below Cloud's 5-concurrent per-tier limit.
+// Other providers (local Codex CLI and BYOK APIs without verified higher concurrency limits) remain capped at 2.
+const DEFAULT_MAX_CONCURRENT_JOBS = 4;
+const DEFAULT_MAX_CONCURRENT_OTHER_JOBS = 2;
+const isOpenDesignConcurrencyProvider = (provider: string) => provider === 'opendesign' || provider === 'account';
 type SavedOutput = { path: string; mimeType: string; bytes: number; sha256: string };
 const saveUnavailable = 'SAVE_NOT_AVAILABLE: retained outputs are missing, changed or unreadable; no model request was made';
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -473,8 +478,20 @@ export class ModelGateway {
           job.state = 'failed'; job.phase = job.savePending ? 'save_failed' : 'interrupted'; job.error = job.savePending ? 'Saving was interrupted. Local outputs are retained; retry_save saves them without another model request.' : 'Worker stopped; request was not automatically resubmitted. Check provider history before retrying.'; if (resumableJob(job) && job.model.provider === 'opendesign') job.error += ' Check the original Cloud task with action=resume without paying again.'; job.updatedAt = Date.now(); await this.saveResult(job);
           if (!job.savePending && !(job.model.provider === 'account' && resumableJob(job))) await rm(path.join(this.root, 'work', job.id), { recursive: true, force: true });
         }
-        const capacity = Math.max(0, 2 - jobs.filter(j => j.state === 'running').length);
-        const next = jobs.filter(j => j.state === 'queued' && !this.active.has(j.id)).reverse().slice(0, capacity);
+        const running = jobs.filter(j => j.state === 'running');
+        const maxTotal = Math.max(1, Math.min(20, this.options.maxConcurrentJobs ?? DEFAULT_MAX_CONCURRENT_JOBS));
+        const maxOther = Math.min(maxTotal, DEFAULT_MAX_CONCURRENT_OTHER_JOBS);
+        let totalSlots = Math.max(0, maxTotal - running.length);
+        let otherSlots = Math.max(0, maxOther - running.filter(j => !isOpenDesignConcurrencyProvider(j.model.provider)).length);
+        const next: GenerationJob[] = [];
+        for (const job of jobs.filter(j => j.state === 'queued' && !this.active.has(j.id)).reverse()) {
+          if (totalSlots <= 0) break;
+          const isOpenDesign = isOpenDesignConcurrencyProvider(job.model.provider);
+          if (!isOpenDesign && otherSlots <= 0) continue;
+          next.push(job);
+          totalSlots--;
+          if (!isOpenDesign) otherSlots--;
+        }
         for (const job of next) { job.state = 'running'; job.phase = 'starting'; job.startedAt = Date.now(); job.updatedAt = Date.now(); job.workerPid = process.pid; await this.saveJob(job); }
         return next;
       });

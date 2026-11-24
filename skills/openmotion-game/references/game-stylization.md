@@ -156,14 +156,14 @@ Discover with `openmotion_media_use action=models modality=image refresh=true` a
 
 | What | Preferred model when listed | Composition target & live params | Volume per game |
 |---|---|---|---|
-| Key art, cover art, title screen, character portraits, visual-novel scenes | `gpt-image-2.6-sunburst` (quality) or `seedream-5.5` (painterly/photoreal) | Target `16:9` scenes or `3:4`/`1:1` portraits; send only live-listed params (`quality`/`background` on GPT Image 2.6, `size` on Seedream 5.5 — never bare `aspect_ratio` unless listed) and crop/pad cleanly in code | 1–6 hero images |
-| Sprites, props, UI icons (need alpha) | `gpt-image-2.6-flare` / `gpt-image-2.6-sunburst` with `background:"transparent"` when listed | Square centered framing (`quality` + `background:"transparent"`) | ≤10 assets, all submitted together |
-| Backgrounds, tiles, textures | `seedream-5.0-flash` (fast) or `seedream-5.5` | Target `16:9` (background) or `1:1` (tile/texture) using the model's live `size` / profile params | ≤6 |
+| Key art, cover art, title screen, character portraits, visual-novel scenes | `gpt-image-2.6-sunburst` (quality) or `seedream-5.5` (painterly/photoreal) | Target `16:9` scenes or `3:4`/`1:1` portraits; send only live-listed params (`quality`/`background` on GPT Image 2.6, `size` on Seedream 5.5 — never bare `aspect_ratio` or `output` unless listed) and crop/pad cleanly in code | 1–4 hero images |
+| Sprites, props, tiles, card art, UI icons | `gpt-image-2.6-flare` (fast + native `background:"transparent"` when listed) or `seedream-5.0-flash` (fast opaque tiles/cards, `size:"1K"`) | Square centered framing using only live-listed params; reserve slower `sunburst` for hero focal art so full batches finish fast | ≤8 assets, submitted upfront together |
+| Backgrounds, seamless textures | `seedream-5.0-flash` (fast) or `seedream-5.5` / `gpt-image-2.6-sunburst` | Target `16:9` (background) or `1:1` (tile/texture) using the model's live `size` / `quality` params | ≤4 |
 | Variants and edits of an approved asset (pose, expression, recolor) | a model returned with `supportsImageReference:true`, passing `references:[{assetId,versionId}]` | within `maxInputImages` and live-listed params | as needed |
 | 3D concept/reference images | any listed image model above | Square centered framing using live-listed params | one per prop |
 
-- One primary generator across asset kinds is itself a cohesion win; don't
-  spread kinds across models without a reason.
+- **Tier models & overlap work for speed:** submit the entire approved asset batch concurrently right after planning so the gateway runs jobs in parallel while you author `logic.js`, `index.html`, and `client.js`; pair 1–4 hero visuals on a quality model with faster models (`gpt-image-2.6-flare` for transparent cutouts, `seedream-5.0-flash` for opaque tiles/cards) to avoid multi-minute tail queues.
+- Keep style cohesion via the verbatim STYLE FORMULA across tiers (never mix wildly different art directions).
 - Pick resolution at generation time from the catalogue profile; never upscale afterwards.
 - **Regeneration budget: 2 attempts per asset** within the approved spend (style drift / keying /
   tiling failures), then take the best attempt and compensate in code
@@ -180,11 +180,7 @@ Discover with `openmotion_media_use action=models modality=image refresh=true` a
   hero-units (hero = `1.0`, spike trap ≈ `0.6`, doorway ≈ `2.0`). It drives
   in-game sizing and the contact sheet; it is NOT inserted into generation
   prompts.
-- **Contact sheet before asset approval:** paste all sprites side by side at
-  their relative scales on a strip of the generated tile. Check with eyes
-  (the agent reads the image): proportions read right? hero pops against the
-  tile or blends? A problem caught here costs one regen; caught after coding
-  it costs a debugging session.
+- **Contact sheet before asset approval:** inspect all generated image assets together in **one** batch call — `openmotion_assets_use(action="read", items=[{assetId, versionId}, ...])` (composites up to 12 images onto one labeled grid over neutral gray so style cohesion, palette separation, framing, and transparent alpha cutouts are visible side-by-side without injecting 8–10 full-resolution images into later turns). Use single-asset `read` with `maxEdge: 512` only when zooming in on one doubtful asset. A problem caught here costs one regen; caught after coding it costs a debugging session.
 - Per-set style checklist: same rendering style on every asset (block 1)?
   outlines consistent (block 2)? palette roles respected — hero contrasts
   environment, signal hue only on hazards/pickups (block 3)? one perspective

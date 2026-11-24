@@ -5755,6 +5755,10 @@
   display: block;
 }
 
+.om-sa-showcase-thumb[data-modality="video"] img {
+  object-fit: contain;
+}
+
 .om-sa-showcase-iframe-wrap > .om-design-card-thumb {
   width: 100%;
   height: 100%;
