@@ -5,6 +5,7 @@ import { useI18n } from "../../i18n/I18n";
 import { applyPreviewVariablesToUrl } from "../../hooks/previewVariablesStore";
 import { buildProjectApiPath } from "../../utils/projectRouting";
 import { createPreviewAdapter } from "../lib/previewAdapter";
+import { rememberBridgeTimelineState } from "../lib/playbackAdapter";
 import { bindPreviewLease } from "../lib/previewLease";
 import { rememberPreviewPosition } from "../lib/previewReconnect";
 import { announcePreviewDocumentLoaded } from "../sceneSwap";
@@ -149,6 +150,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
           return;
         }
         if (event.data.type !== "timeline-state") return;
+        rememberBridgeTimelineState(iframe!, bridge.token, event.data);
         if (Number.isFinite(event.data.currentTime)) runtimeTime = event.data.currentTime;
         const assetSnapshot = parseBridgeAssetProgress(event.data.assets);
         if (assetSnapshot && tracksAssets && !passive) {
@@ -219,6 +221,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         receivedHtmlSources = false;
         forgetPreviewHtmlSources(iframe);
         rememberPeerTimingDocument(iframe, null, null);
+        rememberBridgeTimelineState(iframe, null, {});
         iframe.src = next.href;
         bridge = createPreviewAdapter({ iframe, expectedOrigin: props.origin });
         if (tracksAssets && !passive) {

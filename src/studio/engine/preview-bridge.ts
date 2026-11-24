@@ -101,6 +101,62 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   ${PREVIEW_INSPECTOR_STYLES}
   ${PREVIEW_LAYERS}
   ${PREVIEW_THUMBNAIL_CAPTURE}
+  function waitPaintFrames(count){
+    return new Promise(function(resolve){
+      var done=false, remaining=count||2;
+      var timer=null;
+      var finish=function(){
+        if(done) return;
+        done=true;
+        if(timer!==null && typeof clearTimeout==='function') clearTimeout(timer);
+        resolve();
+      };
+      if(typeof setTimeout==='function') timer=setTimeout(finish,250);
+      function step(){
+        if(done) return;
+        if(--remaining<=0) finish();
+        else if(typeof requestAnimationFrame==='function') requestAnimationFrame(step);
+        else finish();
+      }
+      if(typeof requestAnimationFrame==='function') requestAnimationFrame(step);
+      else finish();
+    });
+  }
+  function waitVisibleImagesAt(time){
+    if(typeof document==='undefined' || typeof document.querySelectorAll!=='function') return Promise.resolve();
+    var pending=[];
+    Array.from(document.querySelectorAll('img[src],img[srcset]')).forEach(function(node){
+      if(node.complete) return;
+      if(node.checkVisibility && !node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return;
+      var rect=node.getBoundingClientRect&&node.getBoundingClientRect();
+      if(rect && (!rect.width || !rect.height || rect.right<=0 || rect.bottom<=0 || rect.top>=innerHeight || rect.left>=innerWidth)) return;
+      var start=0, end=Infinity, chain=[], owner=node;
+      while(owner){ if(owner.hasAttribute&&owner.hasAttribute('data-start')) chain.push(owner); owner=owner.parentElement; }
+      for(var i=chain.length-1;i>=0;i--){
+        start+=Number(chain[i].getAttribute('data-start'))||0;
+        var dur=Number(chain[i].getAttribute('data-duration'));
+        if(dur>0) end=Math.min(end,start+dur);
+      }
+      if(time<start || time>=end) return;
+      if(node.loading==='lazy') node.loading='eager';
+      if(typeof node.decode==='function') pending.push(node.decode().catch(function(){}));
+    });
+    if(!pending.length) return Promise.resolve();
+    var all=Promise.all(pending);
+    if(typeof setTimeout!=='function') return all;
+    return Promise.race([all,new Promise(function(resolve){ setTimeout(resolve,500); })]);
+  }
+  function waitSeekPainted(time){
+    var seekDone=typeof window.__hfWaitForSeekCompletion==='function'
+      ? (function(){
+          var pending=Promise.resolve().then(function(){ return window.__hfWaitForSeekCompletion(); }).catch(function(){});
+          return typeof setTimeout==='function'
+            ? Promise.race([pending,new Promise(function(resolve){ setTimeout(resolve,3000); })])
+            : pending;
+        })()
+      : Promise.resolve();
+    return seekDone.then(function(){ return waitVisibleImagesAt(time); }).then(function(){ return waitPaintFrames(2); });
+  }
   function respond(requestId,result,error,transfer){
     var message=Object.assign({source:SOURCE,version:VERSION,type:'response',projectId:projectId,token:token},error?{ok:false,error:String(error)}:{ok:true,result:result});
     if(requestId) message.requestId=requestId;
@@ -164,7 +220,23 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         if(!p) throw new Error('Preview player is not ready');
         if(action==='play' && typeof p.play==='function') p.play();
         else if(action==='pause' && typeof p.pause==='function') p.pause();
-        else if(action==='seek' && typeof p.seek==='function') p.seek(Math.max(0,Number(message.time)||0));
+        else if(action==='seek' && typeof p.seek==='function'){
+          var target=Math.max(0,Number(message.time)||0);
+          if(message.reseek===true) p.seek(target>0.001?Math.max(0,target-0.001):0.001);
+          p.seek(target);
+          if(message.waitForPaint===true){
+            waitSeekPainted(target).then(function(){
+              var state=timeline();
+              post('timeline-state',state);
+              respond(requestId,state);
+            },function(){
+              var state=timeline();
+              post('timeline-state',state);
+              respond(requestId,state);
+            });
+            return;
+          }
+        }
         else throw new Error('Unsupported playback action');
         post('timeline-state',timeline()); respond(requestId,timeline()); return;
       }
