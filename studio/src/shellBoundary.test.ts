@@ -131,12 +131,19 @@ describe("Studio entry shell dependency boundary", () => {
       "acorn",
       "cssomnom",
       "linkedom",
+      "@mcp-b/global",
     ];
     for (const pkg of forbiddenExternals) {
       expect(graph.externals.has(pkg), `main.tsx must not statically import ${pkg}`).toBe(false);
     }
+    const hyperframesImports = [...graph.externals].filter((pkg) => pkg.startsWith("@hyperframes/"));
+    expect(hyperframesImports, `main.tsx must not statically import @hyperframes/* runtime packages`).toEqual([]);
 
     const forbiddenEditorModules = [
+      "motion/MotionStudioHost.tsx",
+      "player/store/playerStore.ts",
+      "player/lib/thumbnailPageLifecycle.ts",
+      "webmcp/polyfill.ts",
       "utils/sourcePatcher.ts",
       "utils/studioHelpers.ts",
       "i18n/sourceCatalog.ts",

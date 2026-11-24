@@ -73,6 +73,7 @@ const UUID_TABLES = new Set([
 
 class StudioTestPgClient {
   readonly tables = new Map<string, Row[]>();
+  selectCount = 0;
   private snap: Map<string, Row[]> | null = null;
 
   constructor() {
@@ -133,6 +134,7 @@ class StudioTestPgClient {
   }
 
   private select(sqlText: string, params: unknown[], rowMode?: string): { rows: unknown[] } {
+    this.selectCount++;
     const cleaned = sqlText.replace(/\s+for\s+update\s*$/i, '').trim();
     const m = /^select\s+([\s\S]+?)\s+from\s+"([^"]+)"([\s\S]*)$/i.exec(cleaned)!;
     const selectList = m[1].trim();
@@ -152,8 +154,57 @@ class StudioTestPgClient {
       order = ordM[1].trim();
       rem = rem.slice(0, ordM.index).trim();
     }
-    const whM = /^where\s+([\s\S]+)$/i.exec(rem);
-    if (whM) where = whM[1].trim();
+    const whereIdx = findKw(rem, 'where');
+    const joinsClause = whereIdx >= 0 ? rem.slice(0, whereIdx).trim() : /^left\s+/i.test(rem) ? rem : '';
+    if (whereIdx >= 0) where = rem.slice(whereIdx + 5).trim();
+
+    if (joinsClause) {
+      const joins: { table: string; on: string }[] = [];
+      let jc = joinsClause;
+      while (jc) {
+        const jm = /^left\s+(?:outer\s+)?join\s+"([^"]+)"\s+on\s+/i.exec(jc);
+        if (!jm) throw new Error(`Unsupported JOIN: ${sqlText}`);
+        const joinTable = jm[1];
+        const afterOn = jc.slice(jm[0].length);
+        const nextJoinIdx = findKw(afterOn, 'left');
+        const onExpr = nextJoinIdx >= 0 ? afterOn.slice(0, nextJoinIdx).trim() : afterOn.trim();
+        joins.push({ table: joinTable, on: onExpr });
+        jc = nextJoinIdx >= 0 ? afterOn.slice(nextJoinIdx).trim() : '';
+      }
+      let combined: Map<string, Row | null>[] = this.rows(table).map((r) => new Map([[table, r]]));
+      for (const j of joins) {
+        const next: Map<string, Row | null>[] = [];
+        for (const rowMap of combined) {
+          let found = false;
+          for (const candidate of this.rows(j.table)) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, candidate);
+            if (evalJoinedW(merged, j.on, params)) {
+              next.push(merged);
+              found = true;
+            }
+          }
+          if (!found) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, null);
+            next.push(merged);
+          }
+        }
+        combined = next;
+      }
+      if (where) combined = combined.filter((rowMap) => evalJoinedW(rowMap, where, params));
+      if (limit !== null) combined = combined.slice(0, limit);
+      const specs = splitTop(selectList, ',').map(qualifiedCol);
+      return {
+        rows: combined.map((rowMap) =>
+          rowMode === 'array'
+            ? specs.map((s) => (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null)
+            : Object.fromEntries(
+                specs.map((s) => [s.col, (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null]),
+              ),
+        ),
+      };
+    }
 
     let matched = this.rows(table).filter((r) => (where ? evalW(r, where, params) : true));
     if (/^COALESCE\s*\(\s*MAX\s*\(/i.test(selectList)) {
@@ -268,6 +319,36 @@ class StudioTestPgClient {
 function colName(expr: string): string {
   const m = [...expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').matchAll(/"([^"]+)"/g)];
   return m.length > 0 ? m[m.length - 1][1] : expr.trim();
+}
+function qualifiedCol(expr: string): { table?: string; col: string } {
+  const trimmed = expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').trim();
+  const m = [...trimmed.matchAll(/"([^"]+)"/g)];
+  if (m.length >= 2) return { table: m[m.length - 2][1], col: m[m.length - 1][1] };
+  return { col: m.length === 1 ? m[0][1] : trimmed };
+}
+function evalJoinedOperand(rowMap: Map<string, Row | null>, expr: string, params: unknown[]): unknown {
+  const t = expr.trim();
+  const qm = /^"([^"]+)"\."([^"]+)"$/.exec(t);
+  if (qm) return rowMap.get(qm[1])?.[qm[2]] ?? null;
+  return evalSc(t, params);
+}
+function evalJoinedW(rowMap: Map<string, Row | null>, raw: string, params: unknown[]): boolean {
+  const terms = splitAnd(stripP(raw));
+  if (terms.length > 1) return terms.every((t) => evalJoinedW(rowMap, t, params));
+  const term = stripP(terms[0]);
+  let m: RegExpExecArray | null;
+  if ((m = /^([\s\S]+?)\s+is\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) == null;
+  if ((m = /^([\s\S]+?)\s+is\s+not\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) != null;
+  if ((m = /^([\s\S]+?)\s+in\s*\(([\s\S]+)\)$/i.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    return lv != null && splitTop(m[2], ',').map((v) => evalJoinedOperand(rowMap, v, params)).includes(lv);
+  }
+  if ((m = /^([\s\S]+?)\s*=\s*([\s\S]+)$/.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    const rv = evalJoinedOperand(rowMap, m[2], params);
+    return lv !== null && rv !== null && lv === rv;
+  }
+  throw new Error(`Unsupported joined WHERE: ${term}`);
 }
 function splitTop(input: string, sep: string): string[] {
   const out: string[] = [];
@@ -1259,8 +1340,9 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
       ops: [{ op: 'upsert_binary', path: 'assets/intro.mp4', data: videoBytes, mimeType: 'video/mp4' }],
     });
 
-    // HEAD /api/projects/:id/preview/assets/intro.mp4 -> 200 DIRECT from PG metadata, ZERO presignGet calls!
+    // HEAD /api/projects/:id/preview/assets/intro.mp4 -> 200 DIRECT from PG metadata (1 SELECT), ZERO presignGet calls!
     const presignBefore = env.storage.presignGetCalls;
+    const headSelectsBefore = env.pgClient.selectCount;
     const headPreview = await env.studioApp.request(
       `/api/projects/${created.projectId}/preview/assets/intro.mp4`,
       { method: 'HEAD' },
@@ -1272,8 +1354,10 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(headPreview.headers.get('etag'), fileContentVersion(videoBytes));
     assert.equal(headPreview.headers.get('x-openmotion-media-track'), 'original');
     assert.equal(env.storage.presignGetCalls, presignBefore, 'HEAD must NEVER call presignGet');
+    assert.equal(env.pgClient.selectCount - headSelectsBefore, 1, 'HEAD preview asset should use 1 joined PG query');
 
-    // GET /api/projects/:id/preview/assets/intro.mp4 -> 302 Found with Cache-Control, Vary & X-OpenMotion-Media-Track: original!
+    // GET /api/projects/:id/preview/assets/intro.mp4 -> 302 Found reusing loaded file (1 SELECT, never re-calling getFile)!
+    const getSelectsBefore = env.pgClient.selectCount;
     const getPreview = await env.studioApp.request(
       `/api/projects/${created.projectId}/preview/assets/intro.mp4`,
       { method: 'GET' },
@@ -1283,6 +1367,7 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(getPreview.headers.get('cache-control'), 'private, max-age=60');
     assert.equal(getPreview.headers.get('vary'), 'Origin, Cookie');
     assert.equal(getPreview.headers.get('x-openmotion-media-track'), 'original');
+    assert.equal(env.pgClient.selectCount - getSelectsBefore, 1, 'GET preview asset must reuse file without a second getFile lookup');
 
     // Seed a completed export job in PG and test HEAD vs GET on /api/render/:jobId/view & /download.
     const jobId = randomUUID();
@@ -1691,9 +1776,14 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     const loads = t.mock.method(env.files, 'loadVirtualProject');
     const results = await Promise.all(Array.from({ length: 8 }, () => env.studioApp.request(url)));
     assert.ok(results.every(response => response.status === 200));
+    assert.equal(results[0]!.headers.get('cache-control'), 'private, no-cache');
+    assert.equal(results[0]!.headers.get('vary'), 'Cookie, Authorization');
     assert.equal(loads.mock.callCount(), 1);
     const etag = results[0]!.headers.get('etag')!;
-    assert.equal((await env.studioApp.request(url, { headers: { 'If-None-Match': etag } })).status, 304);
+    const revalidated = await env.studioApp.request(url, { headers: { 'If-None-Match': etag } });
+    assert.equal(revalidated.status, 304);
+    assert.equal(revalidated.headers.get('cache-control'), 'private, no-cache');
+    assert.equal(revalidated.headers.get('vary'), 'Cookie, Authorization');
     assert.equal(loads.mock.callCount(), 1);
 
     const warm = await env.studioApp.request(url + '?capture=1', { method: 'HEAD' });

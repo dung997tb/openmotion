@@ -1,0 +1,249 @@
+/* Shared shell overlays, loader, and toast primitives used across both the
+ * workspace shell and the lazy Motion Editor. */
+
+/*
+ * OpenDesign brand loader. Shared by preview overlays that need a calm,
+ * branded loading state instead of a generic spinner.
+ */
+.hf-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  width: min(34rem, 100%);
+  padding: 1.5rem;
+  box-sizing: border-box;
+  text-align: center;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+.hf-frame {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 12rem;
+  border: 1px solid color-mix(in srgb, var(--motion-strong) 8%, transparent);
+  background: color-mix(in srgb, var(--motion-panel) 52%, transparent);
+}
+
+.hf-loader-mark-frame {
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  transform-origin: 50% 50%;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+.hf-loader-mark {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--motion-accent) 20%, transparent));
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+.hf-loader-title {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: var(--motion-weight-semibold);
+  letter-spacing: 0;
+  color: var(--color-text-0);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hf-loader-detail {
+  max-width: 32rem;
+  min-height: 2.5rem;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.hf-loader-mono {
+  width: min(36rem, 100%);
+  min-height: 1.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hf-loader-progress {
+  width: min(18rem, 72vw);
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: var(--motion-radius-full);
+  background: color-mix(in srgb, var(--motion-strong) 10%, transparent);
+}
+
+.hf-loader-progress__fill {
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  border-radius: inherit;
+  background: var(--motion-brand);
+  transition: transform 160ms ease;
+}
+
+/* Toast enter/exit (StudioToast) */
+/* Fixed-width dots make reconnect activity visible without moving the toast. */
+.hf-toast-progress-dots { display: inline-flex; }
+.hf-toast-progress-dots > span { animation: hf-toast-progress-dot 1.2s steps(1, end) infinite; }
+.hf-toast-progress-dots > span:nth-child(2) { animation-delay: 0.2s; }
+.hf-toast-progress-dots > span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes hf-toast-progress-dot {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hf-toast-progress-dots > span { animation: none; opacity: 1; }
+}
+
+@keyframes hf-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hf-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+}
+
+.hf-toast-enter {
+  animation: hf-toast-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, opacity;
+}
+
+.hf-toast-exit {
+  animation: hf-toast-out 160ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hf-toast-enter,
+  .hf-toast-exit {
+    animation: none;
+  }
+  .hf-toast-exit {
+    opacity: 0;
+  }
+}
+
+/* Host for feedback portalled above native dialogs: full viewport, invisible and
+ * transparent to pointer input, so each notice keeps its own positioning. */
+.motion-feedback-layer {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  background: transparent;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+/* Shared overlay motion. Dock panel resizing/expansion has its own timing. */
+.hf-floating-motion {
+  --overlay-x: 0px;
+  --overlay-y: 3px;
+  opacity: 1;
+  scale: 1;
+  transform: translate(0, 0);
+  transform-origin: var(--transform-origin, center);
+  transition: opacity var(--duration-open, 160ms) cubic-bezier(.22, 1, .36, 1),
+    transform var(--duration-open, 160ms) cubic-bezier(.22, 1, .36, 1),
+    scale var(--duration-open, 160ms) cubic-bezier(.22, 1, .36, 1);
+}
+.hf-floating-motion[data-side="top"] { --overlay-y: -3px; }
+.hf-floating-motion[data-side="left"] { --overlay-x: -3px; --overlay-y: 0px; }
+.hf-floating-motion[data-side="right"] { --overlay-x: 3px; --overlay-y: 0px; }
+.hf-floating-motion[data-starting-style] {
+  opacity: 0;
+  scale: .98;
+  transform: translate(var(--overlay-x), var(--overlay-y));
+}
+.hf-floating-motion[data-ending-style] {
+  opacity: 0;
+  transition-duration: 100ms;
+}
+.hf-tooltip-motion { transition-duration: 100ms; }
+.hf-tooltip-motion[data-instant] { transition-duration: 0ms; }
+.hf-floating-motion[data-preview-state="open"] { opacity: 1; scale: 1; transform: none; }
+
+/* Native and custom dialogs share the same entrance without changing placement.
+ * Scale is separate from translate so centered dialogs keep their centering. */
+:root[data-motion-ui] :is(dialog, [role="dialog"], [role="alertdialog"]):not(.hf-floating-motion):not(.motion-sidebar-drawer) {
+  opacity: 1;
+  scale: 1;
+  transition: opacity 180ms cubic-bezier(.22, 1, .36, 1), scale 180ms cubic-bezier(.22, 1, .36, 1),
+    display 180ms allow-discrete, overlay 180ms allow-discrete;
+}
+:root[data-motion-ui] :is(dialog:not([open]), [role="dialog"][data-starting-style], [role="dialog"][data-ending-style]):not(.hf-floating-motion):not(.motion-sidebar-drawer) {
+  opacity: 0;
+  scale: .985;
+}
+:root[data-motion-ui] [role="dialog"][data-ending-style]:not(.hf-floating-motion) { transition-duration: 100ms; }
+.hf-overlay-backdrop, :root[data-motion-ui] dialog::backdrop {
+  opacity: 1;
+  transition: opacity 180ms cubic-bezier(.22, 1, .36, 1), display 180ms allow-discrete, overlay 180ms allow-discrete;
+}
+.hf-overlay-backdrop:is([data-starting-style], [data-ending-style]),
+:root[data-motion-ui] dialog:not([open])::backdrop { opacity: 0; }
+.motion-sidebar-drawer {
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 180ms cubic-bezier(.22, 1, .36, 1), transform 180ms cubic-bezier(.22, 1, .36, 1);
+}
+.motion-sidebar-drawer:is([data-starting-style], [data-ending-style]) { opacity: 0; transform: translateX(-8px); }
+.motion-sidebar-drawer[data-ending-style], .hf-overlay-backdrop[data-ending-style] { transition-duration: 100ms; }
+
+/* Also covers popups that mount directly instead of using Base UI presence. */
+@starting-style {
+  .hf-floating-motion:not([data-preview-state="open"]) {
+    opacity: 0;
+    scale: .98;
+    transform: translate(var(--overlay-x), var(--overlay-y));
+  }
+  :root[data-motion-ui] :is(dialog[open], [role="dialog"], [role="alertdialog"]):not(.hf-floating-motion):not(.motion-sidebar-drawer) { opacity: 0; scale: .985; }
+  .hf-overlay-backdrop, :root[data-motion-ui] dialog[open]::backdrop { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hf-floating-motion, .hf-overlay-backdrop, .motion-sidebar-drawer,
+  :root[data-motion-ui] :is(dialog, [role="dialog"], [role="alertdialog"]),
+  :root[data-motion-ui] dialog::backdrop { transition: none !important; }
+}

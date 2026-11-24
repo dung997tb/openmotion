@@ -193,7 +193,8 @@ it('reads the same saved patch in preview, history, render, download, ZIP and an
     assert.equal(fresh.baseline.fileVersion, before.version);
     assert.deepEqual(fresh.patches, delta.patches);
 
-    const signed = (await files.presignFileGet(auth, source.projectId, 'index.html'))!;
+    const indexFile = (await files.getFile(auth, source.projectId, 'index.html'))!;
+    const signed = await files.presignResolvedFileGet(auth.workspaceId, indexFile);
     const cas = workspaceBlobKey(workspaceId, sha256Hex(expected));
     assert.ok(new URL(signed.url).pathname.endsWith('/' + cas));
     assert.equal(signed.etag, token);

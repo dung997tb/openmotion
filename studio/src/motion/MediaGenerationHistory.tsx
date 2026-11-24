@@ -1,3 +1,4 @@
+import './assets.css';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';

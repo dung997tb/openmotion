@@ -1,3 +1,4 @@
+import './assets.css';
 import { Button } from 'open-design-ui/button';
 import { CreationEmblem, creationKinds } from './AssetCreationVisuals';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
