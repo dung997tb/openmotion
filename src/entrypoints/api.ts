@@ -70,7 +70,7 @@ import {
   signPreviewToken,
   verifyPreviewToken,
 } from '../auth/preview-token.ts';
-import { PREVIEW_BRIDGE_PATH } from '../studio/engine/preview-bridge.ts';
+import { PREVIEW_BRIDGE_ASSET_RE, PREVIEW_BRIDGE_PATH } from '../studio/engine/preview-bridge.ts';
 import { isAssetLease, renewAssetLease, resolveAssetWorkspace } from '../auth/preview-asset-lease.ts';
 import { hasMinRole, hasScope, type AuthContext } from '../contracts/auth.ts';
 import { CloudError, featureDeferredP2, isCloudError } from '../contracts/errors.ts';
@@ -2123,7 +2123,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     const isPublicPreviewAsset =
       pathname === '/api/health/live' ||
       pathname === '/api/runtime.js' ||
-      pathname === PREVIEW_BRIDGE_PATH ||
+      pathname === PREVIEW_BRIDGE_PATH || PREVIEW_BRIDGE_ASSET_RE.test(pathname) ||
       pathname === '/api/vendor/snapdom.js' ||
       pathname.startsWith('/api/vendor/gsap/');
     const isReadOnlyFontAsset = pathname === '/api/fonts' || pathname.startsWith('/api/fonts/');
