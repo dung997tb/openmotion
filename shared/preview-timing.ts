@@ -19,11 +19,11 @@ export interface PreviewChange {
   attributes: [typeof TIMING_ATTRIBUTES[number], string | null, string | null][];
 }
 
-export type LivePreviewEdits = { position?: true; mediaTiming?: true };
-
 /** Used by Studio and the isolated bridge to validate the complete set of changes. */
 export function isLivePositionEdit(changes: PreviewChange[]): boolean {
-  return changes.length > 0 && changes.every(change => change?.styles?.length &&
-    !change.text && Array.isArray(change.attributes) && change.attributes.length === 0 &&
-    change.styles.every(([name]) => name === "left" || name === "top"));
+  return Array.isArray(changes) && changes.length > 0 && changes.every(change =>
+    !change?.text && Array.isArray(change?.attributes) && change.attributes.length === 0 &&
+    Array.isArray(change.styles) && change.styles.length > 0 && change.styles.every(style =>
+      Array.isArray(style) && style.length === 3 && (style[0] === "left" || style[0] === "top") &&
+      style.slice(1).every(value => typeof value === "string" && (value === "" || /^-?(?:\d+\.?\d*|\.\d+)px$/.test(value)))));
 }

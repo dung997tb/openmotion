@@ -26,15 +26,26 @@ export function syncPeerComposition(
       const revision = previewSourceRevision();
       const isCurrent = () => frame === frameRef.current && revision === previewSourceRevision() &&
         usePlayerStore.getState().timelineProjectId === projectId && !isStudioEditSaving();
-      // The old document stays visible while the normal script rebuild starts independently.
+      // Nested files can use the same verified placement update as the writer.
       const changedFile = read(projectId, changedPath);
       if (changedFile && changedPath !== path) {
         shareCompositionPosterRead(usePlayerStore.getState(), projectId, changedPath, changedFile);
       }
-      void changedFile?.then(({ content, version }) => {
-        if (typeof content === "string" && version && isCurrent())
-          return tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "temporary");
-      }).catch(() => {});
+      if (changedFile && changedPath !== path && hasPeerLiveEdit(frame, "position") && !isPreviewChanging()) {
+        return changedFile.then(async ({ content, version }) => {
+          if (typeof content !== "string" || !version || !isCurrent() || isPreviewChanging()) return false;
+          const applied = await tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent);
+          if (applied && isCurrent()) announcePreviewScenesSwapped(frame);
+          return applied;
+        });
+      }
+      // Unverified scripts can display a provisional style while their document rebuilds.
+      if (!(changedPath === path && hasPeerLiveEdit(frame, "mediaTiming"))) {
+        void changedFile?.then(({ content, version }) => {
+          if (typeof content === "string" && version && isCurrent())
+            return tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "temporary");
+        }).catch(() => {});
+      }
     }
   }
   if (!path || !apply) return;
