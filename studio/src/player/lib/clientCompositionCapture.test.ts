@@ -6,6 +6,7 @@ import {
   clearClientCompositionCaptureCacheForTest,
   computeCompositionSampleTimes,
   createClientCompositionCaptureRequest,
+  getCompositionCacheRevision,
   getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
   quantizeCompositionFrameCount,
@@ -14,6 +15,7 @@ import {
   selectInitialGateCompositionPaths,
   setCachedProjectRevision,
   setClientCompositionCaptureCapabilityForTest,
+  subscribeCompositionCacheRevision,
   subscribeProgressiveCompositionCapture,
   withPreviewRedirectSafeFetch,
 } from "./clientCompositionCapture";
@@ -598,10 +600,22 @@ describe("clientCompositionCapture", () => {
     const req2Before = createClientCompositionCaptureRequest({ ...scene2Input, sessionEpoch: 1 });
 
     // Only scene-2 changed; whole-project revision bumped from rev-1 -> rev-2.
+    const listener = vi.fn();
+    const unsubRev = subscribeCompositionCacheRevision("proj-percomp", listener);
     setCachedProjectRevision("proj-percomp", "rev-2", {
       "compositions/scene-1.html": "sha1:head:shared",
       "compositions/scene-2.html": "sha2-edited:head:shared",
     });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(getCompositionCacheRevision("proj-percomp", scene1Input.previewUrl)).toBe("sha1:head:shared");
+    expect(getCompositionCacheRevision("proj-percomp", scene2Input.previewUrl)).toBe("sha2-edited:head:shared");
+    // Re-setting identical revisions does not trigger spurious re-renders.
+    setCachedProjectRevision("proj-percomp", "rev-2", {
+      "compositions/scene-1.html": "sha1:head:shared",
+      "compositions/scene-2.html": "sha2-edited:head:shared",
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubRev();
 
     expect(peekCachedCompositionCapture(scene1Input)).not.toBeNull();
     expect(peekCachedCompositionCapture(scene2Input)).toBeNull();

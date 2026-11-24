@@ -24,12 +24,14 @@ import {
   acquireCachedCompositionCaptureFromIdb,
   canCaptureCompositionInBrowser,
   createClientCompositionCaptureRequest,
+  getCompositionCacheRevision,
   getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
   quantizeCompositionFrameCount,
   retainCachedCompositionCapture,
   selectInitialGateCompositionPaths,
   selectorCaptureWindowKey,
+  subscribeCompositionCacheRevision,
   subscribeProgressiveCompositionCapture,
 } from "../lib/clientCompositionCapture";
 import { studioApiFetch } from "../../utils/studioApiFetch";
@@ -224,6 +226,16 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
 
   const effectiveClipDuration = clipDuration ?? duration;
   const captureEnabled = cloud && canCaptureCompositionInBrowser();
+  const subscribeCacheRev = useCallback(
+    (listener: () => void) =>
+      captureEnabled ? subscribeCompositionCacheRevision(projectId, listener) : () => {},
+    [captureEnabled, projectId],
+  );
+  const getCacheRev = useCallback(
+    () => (captureEnabled ? getCompositionCacheRevision(projectId, previewUrl) : ""),
+    [captureEnabled, previewUrl, projectId],
+  );
+  const compCacheRev = useSyncExternalStore(subscribeCacheRev, getCacheRev, () => "");
   const desiredCaptureFrames = useValueAtRest(
     quantizeCompositionFrameCount(
       computeThumbnailStrip(container.width, 16 / 9, container.height, 48).frameCount,
@@ -236,7 +248,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
   const selectorStart = selector ? captureStart : undefined;
   const selectorDuration = selector ? captureDuration : undefined;
   const captureCacheKey = captureEnabled && captureMeasured
-    ? `${projectId}|${previewUrl}|${contentRevision}|${desiredCaptureFrames}|${selector ?? ""}|${selectorIndex ?? 0}|${selectorCaptureWindowKey({ selector, seekTime: selectorStart, duration: selectorDuration }) ?? ""}`
+    ? `${projectId}|${previewUrl}|${compCacheRev}|${contentRevision}|${desiredCaptureFrames}|${selector ?? ""}|${selectorIndex ?? 0}|${selectorCaptureWindowKey({ selector, seekTime: selectorStart, duration: selectorDuration }) ?? ""}`
     : null;
 
   // Tier 0: synchronous in-memory hit (0ms across project/composition switches).
@@ -257,6 +269,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     [
       captureEnabled,
       captureMeasured,
+      compCacheRev,
       contentRevision,
       desiredCaptureFrames,
       previewUrl,
@@ -363,6 +376,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
       cachedValue,
       captureEnabled,
       captureMeasured,
+      compCacheRev,
       contentRevision,
       desiredCaptureFrames,
       captureDuration,
@@ -397,6 +411,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
       captureEnabled,
       captureMeasured,
       captureSnapshot.status,
+      compCacheRev,
       contentRevision,
       desiredCaptureFrames,
       idbPending,

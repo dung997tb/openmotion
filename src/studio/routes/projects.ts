@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { parseHTMLContent, stripEmbeddedRuntimeScripts } from '@hyperframes/core/compiler';
+import { isFullHtmlDocument } from '@hyperframes/core/compiler/html-document';
 import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
 import { decodedUrlPath } from '@hyperframes/parsers/asset-paths';
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
@@ -13,6 +15,7 @@ import {
   type StudioVariables,
 } from '../context.ts';
 import { infoInMemory } from '../engine/inspect.ts';
+import { hasUnknownStaticHtmlInputs } from '../engine/preview-html-sources.ts';
 import { formatFileVersion } from '../etag.ts';
 import {
   listVirtualCompositions,
@@ -37,24 +40,49 @@ function resolveNestedCompositionPath(
   return null;
 }
 
-function collectNestedCompositionDeps(
+function isStaticHtmlMarkup(rawHtml: string): boolean {
+  const stripped = stripEmbeddedRuntimeScripts(rawHtml);
+  const wrapped = isFullHtmlDocument(stripped)
+    ? stripped
+    : `<!DOCTYPE html><html><head></head><body>${stripped}</body></html>`;
+  return !hasUnknownStaticHtmlInputs(parseHTMLContent(wrapped));
+}
+
+function isStaticIndexHead(indexHead: string): boolean {
+  if (!indexHead.trim()) return true;
+  const stripped = stripEmbeddedRuntimeScripts(indexHead);
+  const doc = parseHTMLContent(`<!DOCTYPE html><html><head>${stripped}</head><body></body></html>`);
+  return !hasUnknownStaticHtmlInputs(doc, { allowSafeHeadLinks: true });
+}
+
+/**
+ * Collect the statically closed transitive `data-composition-src` dependency set for `rootComp`.
+ * Returns `null` whenever `rootComp` or any nested dependency has scripts, event handlers,
+ * dynamic resource loads, missing sources, or unresolved `data-composition-src` references so
+ * callers conservatively fall back to the full `projectRevision`.
+ */
+function collectStaticCompositionClosure(
   rootComp: string,
   byPath: ReadonlyMap<string, string>,
   readText?: (filePath: string) => string | null,
-): string[] {
-  if (!readText) return [];
+): string[] | null {
+  if (!readText) return null;
   const visited = new Set<string>([rootComp]);
   const queue: string[] = [rootComp];
   const deps: string[] = [];
   while (queue.length > 0) {
     const current = queue.shift()!;
     const html = readText(current);
-    if (!html || !/data-composition-src/i.test(html)) continue;
+    if (html === null) return null;
+    if (!isStaticHtmlMarkup(html)) return null;
+    if (!/data-composition-src/i.test(html)) continue;
     for (const tag of scanHtmlOpeningTags(html)) {
       const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
-      if (attr?.kind !== 'value') continue;
+      if (!attr) continue;
+      if (attr.kind !== 'value') return null;
       const target = resolveNestedCompositionPath(current, decodeAuthoredAttribute(attr.value), byPath);
-      if (!target || visited.has(target)) continue;
+      if (!target) return null;
+      if (visited.has(target)) continue;
       visited.add(target);
       deps.push(target);
       queue.push(target);
@@ -65,9 +93,9 @@ function collectNestedCompositionDeps(
 
 /**
  * Compute per-composition cache revisions so editing one sub-composition does not
- * invalidate thumbnail caches for untouched sibling scenes, while edits to shared
- * assets, `index.html`'s `<head>`, or transitively embedded `data-composition-src`
- * compositions still invalidate all dependent compositions.
+ * invalidate thumbnail caches for provably static untouched sibling scenes, while
+ * any composition with scripts, dynamic inputs, unresolved references, or a dynamic
+ * `index.html` `<head>` conservatively falls back to `projectRevision`.
  */
 export function computeCompositionRevisions(
   fileList: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly blobScope?: string }>,
@@ -77,6 +105,7 @@ export function computeCompositionRevisions(
   readText?: (filePath: string) => string | null,
 ): Record<string, string> {
   const indexHead = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml ?? '')?.[1] ?? '';
+  const headIsStatic = isStaticIndexHead(indexHead);
   const indexHeadHash = createHash('sha256').update(indexHead).digest('hex').slice(0, 12);
   const compSet = new Set(compositions);
   const byPath = new Map<string, string>();
@@ -95,7 +124,7 @@ export function computeCompositionRevisions(
   const sharedTag = sharedHash.digest('hex').slice(0, 12);
   const revisions: Record<string, string> = {};
   for (const comp of compositions) {
-    if (comp === 'index.html') {
+    if (comp === 'index.html' || !headIsStatic) {
       revisions[comp] = projectRevision;
       continue;
     }
@@ -104,7 +133,11 @@ export function computeCompositionRevisions(
       revisions[comp] = projectRevision;
       continue;
     }
-    const deps = collectNestedCompositionDeps(comp, byPath, readText);
+    const deps = collectStaticCompositionClosure(comp, byPath, readText);
+    if (deps === null) {
+      revisions[comp] = projectRevision;
+      continue;
+    }
     const ownTag =
       deps.length === 0
         ? createHash('sha256').update(selfVersion).digest('hex').slice(0, 16)

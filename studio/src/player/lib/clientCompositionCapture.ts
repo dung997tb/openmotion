@@ -96,6 +96,13 @@ let testCapabilityOverride: boolean | null = null;
 let snapdomLoader: Promise<SnapdomModuleFn | null> | null = null;
 const projectRevisionByProjectId = new Map<string, string>();
 const compositionRevisionsByProjectId = new Map<string, Map<string, string>>();
+const revisionListenersByProjectId = new Map<string, Set<() => void>>();
+
+function notifyRevisionListeners(projectId: string): void {
+  const listeners = revisionListenersByProjectId.get(projectId);
+  if (!listeners) return;
+  for (const listener of new Set(listeners)) listener();
+}
 // In-memory cover cache keyed by composition identity (ignoring frameCount) so sidebar 1-frame
 // cards immediately reuse frames already captured for a timeline strip without booting a 2nd run.
 const sharedCoverCache = new Map<string, { blob: Blob; aspect: number; width: number; height: number }>();
@@ -204,6 +211,7 @@ export function clearClientCompositionCaptureCacheForTest(): void {
   sharedCoverCache.clear();
   projectRevisionByProjectId.clear();
   compositionRevisionsByProjectId.clear();
+  revisionListenersByProjectId.clear();
   inFlightIdbReads.clear();
   progressiveStrips.clear();
   progressiveListeners.clear();
@@ -280,8 +288,13 @@ export function setCachedProjectRevision(
   compositionRevisions?: Readonly<Record<string, string>> | null,
 ): void {
   if (!projectId) return;
+  let changed = false;
   if (typeof revision === "string" && revision.trim()) {
-    projectRevisionByProjectId.set(projectId, revision.trim());
+    const trimmed = revision.trim();
+    if (projectRevisionByProjectId.get(projectId) !== trimmed) {
+      projectRevisionByProjectId.set(projectId, trimmed);
+      changed = true;
+    }
   }
   if (compositionRevisions && typeof compositionRevisions === "object") {
     const normalized = new Map<string, string>();
@@ -290,12 +303,44 @@ export function setCachedProjectRevision(
       const key = normalizeCompositionPathForGate(rawPath);
       if (key) normalized.set(key, compRev.trim());
     }
+    const prev = compositionRevisionsByProjectId.get(projectId);
     if (normalized.size > 0) {
-      compositionRevisionsByProjectId.set(projectId, normalized);
+      const same =
+        prev !== undefined &&
+        prev.size === normalized.size &&
+        Array.from(normalized.entries()).every(([k, v]) => prev.get(k) === v);
+      if (!same) {
+        compositionRevisionsByProjectId.set(projectId, normalized);
+        changed = true;
+      }
+      if (changed) notifyRevisionListeners(projectId);
       return;
     }
   }
-  compositionRevisionsByProjectId.delete(projectId);
+  if (compositionRevisionsByProjectId.delete(projectId)) {
+    changed = true;
+  }
+  if (changed) notifyRevisionListeners(projectId);
+}
+
+export function subscribeCompositionCacheRevision(projectId: string, listener: () => void): () => void {
+  if (!projectId) return () => {};
+  let listeners = revisionListenersByProjectId.get(projectId);
+  if (!listeners) {
+    listeners = new Set();
+    revisionListenersByProjectId.set(projectId, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = revisionListenersByProjectId.get(projectId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) revisionListenersByProjectId.delete(projectId);
+  };
+}
+
+export function getCompositionCacheRevision(projectId: string, compPathOrUrl: string): string {
+  return resolveCompositionRevision(projectId, compPathOrUrl);
 }
 
 function resolveCompositionRevision(projectId: string, compPathOrUrl: string): string {
