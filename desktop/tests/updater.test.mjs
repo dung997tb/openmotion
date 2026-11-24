@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_UPDATE_BASE_URL } from '../../shared/desktop-builtin-rules.ts';
 import {
   buildDesktopReleaseCardPayload,
+  formatStructuredReleaseChangelog,
   sendFeishuReleaseNotification,
   signFeishuWebhook,
   validateFeishuWebhookUrl,
@@ -486,6 +487,8 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /npm --prefix desktop ci/);
   assert.match(workflowYml, /npm --prefix desktop test/);
   assert.match(workflowYml, /FEISHU_DESKTOP_NOTIFY_WEBHOOK/);
+  assert.match(workflowYml, /FEISHU_DESKTOP_NOTIFY_ENABLED/);
+  assert.match(workflowYml, /latest-meta\.json/);
   assert.match(workflowYml, /notify-feishu-release\.mjs/);
 });
 
@@ -749,4 +752,29 @@ test('notify-feishu-release builds signed Card 2.0 payload, respects includeMacX
     fetchImpl: async () => new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 }),
   });
   assert.equal(result.ok, true);
+});
+
+test('formatStructuredReleaseChangelog groups conventional commits and honors manual release notes', () => {
+  const grouped = formatStructuredReleaseChangelog({
+    commits: [
+      'Merge branch main into desktop-test',
+      'fix(desktop-auth): repair IPC sign-in serialization',
+      'feat(desktop): structured changelog block',
+      'perf(desktop): parallel macOS signing',
+      'test(desktop): noise test',
+    ],
+  });
+  assert.equal(grouped.source, 'commits');
+  assert.match(grouped.markdown, /\*\*新增\*\*/);
+  assert.match(grouped.markdown, /\*\*修复\*\*/);
+  assert.match(grouped.markdown, /\*\*优化\*\*/);
+  assert.equal(grouped.markdown.includes('Merge branch'), false);
+  assert.equal(grouped.markdown.includes('noise test'), false);
+
+  const manual = formatStructuredReleaseChangelog({
+    commits: ['fix(desktop): internal'],
+    manualNotes: '- 修复客户端登录\n- 优化启动体验',
+  });
+  assert.equal(manual.source, 'manual');
+  assert.match(manual.markdown, /修复客户端登录/);
 });

@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 
 const ALLOWED_FEISHU_HOSTS = new Set(['open.feishu.cn', 'open.larksuite.com']);
+const MAX_CHANGELOG_ITEMS = 5;
 
 export function validateFeishuWebhookUrl(rawUrl) {
   const trimmed = String(rawUrl ?? '').trim();
@@ -37,6 +39,150 @@ function escapeLarkMarkdown(raw) {
     .replace(/`/g, '&#96;');
 }
 
+const CONVENTIONAL_COMMIT_RE = /^([a-zA-Z]+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/;
+const MERGE_COMMIT_RE = /^Merge\s+(?:branch|pull request|remote-tracking branch)\b/i;
+
+function classifyCommit(subject) {
+  const trimmed = String(subject ?? '').trim();
+  if (!trimmed || MERGE_COMMIT_RE.test(trimmed)) return null;
+
+  const match = CONVENTIONAL_COMMIT_RE.exec(trimmed);
+  if (!match) {
+    return { bucket: 'other', text: trimmed };
+  }
+
+  const rawType = match[1].toLowerCase();
+  const description = match[4].trim();
+  if (!description) return null;
+
+  if (rawType === 'feat') return { bucket: 'feat', text: description };
+  if (rawType === 'fix') return { bucket: 'fix', text: description };
+  if (rawType === 'perf' || rawType === 'refactor' || rawType === 'style') {
+    return { bucket: 'improve', text: description };
+  }
+  if (rawType === 'test') {
+    return { bucket: 'noise', text: description };
+  }
+  return { bucket: 'other', text: description };
+}
+
+/**
+ * Scheme 1: Builds a concise, grouped release changelog from commit history
+ * (between last published SHA and HEAD) or an explicit manual `releaseNotes` override.
+ */
+export function formatStructuredReleaseChangelog({
+  commits = [],
+  manualNotes = '',
+  commitSubject = '',
+  maxItems = MAX_CHANGELOG_ITEMS,
+} = {}) {
+  const trimmedNotes = String(manualNotes ?? '').trim();
+  if (trimmedNotes) {
+    const lines = trimmedNotes
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .slice(0, maxItems)
+      .map(line => {
+        const cleaned = line.replace(/^[-*•]\s+/, '');
+        return `• ${escapeLarkMarkdown(cleaned)}`;
+      });
+    return {
+      markdown: lines.join('\n'),
+      plainMarkdown: lines.join('\n'),
+      totalCount: lines.length,
+      truncatedCount: 0,
+      source: 'manual',
+    };
+  }
+
+  const rawEntries = Array.isArray(commits) && commits.length > 0
+    ? commits
+    : commitSubject
+      ? [{ subject: commitSubject }]
+      : [];
+
+  const buckets = {
+    feat: [],
+    fix: [],
+    improve: [],
+    other: [],
+    noise: [],
+  };
+
+  const seenTexts = new Set();
+  for (const entry of rawEntries) {
+    const subject = typeof entry === 'string' ? entry : entry?.subject;
+    const classified = classifyCommit(subject);
+    if (!classified) continue;
+    const dedupKey = classified.text.toLowerCase();
+    if (seenTexts.has(dedupKey)) continue;
+    seenTexts.add(dedupKey);
+    buckets[classified.bucket].push(classified.text);
+  }
+
+  const primaryCount = buckets.feat.length + buckets.fix.length + buckets.improve.length;
+  const orderedGroups = [
+    { key: 'feat', label: '新增', items: buckets.feat },
+    { key: 'fix', label: '修复', items: buckets.fix },
+    { key: 'improve', label: '优化', items: buckets.improve },
+    ...(primaryCount < maxItems ? [{ key: 'other', label: '其他', items: buckets.other }] : []),
+    ...(primaryCount === 0 && buckets.other.length === 0
+      ? [{ key: 'noise', label: '维护', items: buckets.noise }]
+      : []),
+  ].filter(group => group.items.length > 0);
+
+  const totalCount =
+    buckets.feat.length +
+    buckets.fix.length +
+    buckets.improve.length +
+    buckets.other.length +
+    (primaryCount === 0 && buckets.other.length === 0 ? buckets.noise.length : 0);
+
+  if (orderedGroups.length === 0) {
+    return {
+      markdown: "<font color='grey'>例行构建更新</font>",
+      plainMarkdown: '- 例行构建更新',
+      totalCount: 0,
+      truncatedCount: 0,
+      source: 'empty',
+    };
+  }
+
+  const cardLines = [];
+  const plainLines = [];
+  let emitted = 0;
+
+  for (const group of orderedGroups) {
+    if (emitted >= maxItems) break;
+    const remaining = maxItems - emitted;
+    const slice = group.items.slice(0, remaining);
+    if (slice.length === 0) continue;
+
+    cardLines.push(`**${group.label}**`);
+    plainLines.push(`**${group.label}**`);
+    for (const item of slice) {
+      cardLines.push(`• ${escapeLarkMarkdown(item)}`);
+      plainLines.push(`- ${item}`);
+      emitted += 1;
+    }
+  }
+
+  const truncatedCount = Math.max(0, totalCount - emitted);
+  if (truncatedCount > 0) {
+    cardLines.push(`<font color='grey'>其余 ${truncatedCount} 项变更见下方完整对比</font>`);
+    plainLines.push(`_…and ${truncatedCount} more change(s)_`);
+  }
+
+  return {
+    markdown: cardLines.join('\n'),
+    plainMarkdown: plainLines.join('\n'),
+    totalCount,
+    truncatedCount,
+    source: 'commits',
+  };
+}
+
 function makeDownloadButton({ label, url, primary = false }) {
   return {
     tag: 'button',
@@ -61,10 +207,14 @@ export function buildDesktopReleaseCardPayload({
   channel,
   version,
   buildVersion,
+  previousVersion = '',
   publicOrigin = 'https://releases.open-design.ai',
   branch = '',
   commitSha = '',
   commitSubject = '',
+  commits = [],
+  manualNotes = '',
+  compareUrl = '',
   actor = '',
   runUrl = '',
   includeMacX64 = true,
@@ -88,6 +238,12 @@ export function buildDesktopReleaseCardPayload({
   const subtitleParts = [`v${version}`];
   if (buildVersion) subtitleParts.push(`Build ${buildVersion}`);
   if (branch) subtitleParts.push(branch);
+
+  const changelog = formatStructuredReleaseChangelog({
+    commits,
+    manualNotes,
+    commitSubject,
+  });
 
   const infoColumns = [
     {
@@ -124,7 +280,7 @@ export function buildDesktopReleaseCardPayload({
         { tag: 'markdown', content: "<font color='grey'>提交</font>", text_size: 'notation', margin: '0px' },
         {
           tag: 'markdown',
-          content: `**${escapeLarkMarkdown(shortSha || 'manual')}**`,
+          content: `**${escapeLarkMarkdown(shortSha || 'manual')}**${actor ? ` <font color='grey'>${escapeLarkMarkdown(actor)}</font>` : ''}`,
           text_size: 'normal',
           margin: '0px',
         },
@@ -132,30 +288,9 @@ export function buildDesktopReleaseCardPayload({
     },
   ];
 
-  const summaryInnerElements = [
-    {
-      tag: 'column_set',
-      flex_mode: 'none',
-      horizontal_spacing: '12px',
-      columns: infoColumns,
-      margin: '0px',
-    },
-  ];
-
-  if (commitSubject || actor) {
-    const summaryText = [
-      commitSubject ? escapeLarkMarkdown(String(commitSubject).trim()) : '',
-      actor ? `<font color='grey'>· ${escapeLarkMarkdown(actor)}</font>` : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    summaryInnerElements.push({
-      tag: 'markdown',
-      content: `<font color='grey'>变更内容：</font>${summaryText}`,
-      text_size: 'notation',
-      margin: '4px 0px 0px 0px',
-    });
-  }
+  const changelogHeading = previousVersion
+    ? `**本次更新** <font color='grey'>对比 v${escapeLarkMarkdown(previousVersion)}</font>`
+    : '**本次更新**';
 
   const footerParts = [
     `<font color='grey'>${
@@ -164,8 +299,11 @@ export function buildDesktopReleaseCardPayload({
         : '已安装 Test 频道客户端会自动检测更新，无需重复安装'
     }</font>`,
   ];
+  if (compareUrl) {
+    footerParts.push(`[完整变更](${compareUrl})`);
+  }
   if (runUrl) {
-    footerParts.push(`[查看 CI 构建详情](${runUrl})`);
+    footerParts.push(`[CI 构建详情](${runUrl})`);
   }
 
   const elements = [
@@ -180,8 +318,22 @@ export function buildDesktopReleaseCardPayload({
           width: 'weighted',
           weight: 1,
           padding: '10px 12px',
-          vertical_spacing: '4px',
-          elements: summaryInnerElements,
+          vertical_spacing: '8px',
+          elements: [
+            {
+              tag: 'column_set',
+              flex_mode: 'none',
+              horizontal_spacing: '12px',
+              columns: infoColumns,
+              margin: '0px',
+            },
+            {
+              tag: 'markdown',
+              content: `${changelogHeading}\n${changelog.markdown}`,
+              text_size: 'notation',
+              margin: '0px',
+            },
+          ],
         },
       ],
     },
@@ -348,7 +500,48 @@ export async function sendFeishuReleaseNotification({
   return { ok: true, response: body };
 }
 
+function parseCommitsJson(raw) {
+  if (!raw || !String(raw).trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
+  const commits = parseCommitsJson(process.env.RELEASE_COMMITS_JSON);
+  const manualNotes = process.env.RELEASE_NOTES?.trim() || '';
+  const commitSubject = process.env.COMMIT_SUBJECT?.trim() || '';
+  const previousVersion = process.env.PREVIOUS_VERSION?.trim() || '';
+  const compareUrl = process.env.COMPARE_URL?.trim() || '';
+  const version = process.env.EXPECTED_VERSION || process.env.RELEASE_VERSION || '';
+  const channel = process.env.CHANNEL || process.env.OPENMOTION_RELEASE_CHANNEL || 'test';
+
+  const changelog = formatStructuredReleaseChangelog({
+    commits,
+    manualNotes,
+    commitSubject,
+  });
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const heading = previousVersion
+      ? `#### What's changed in v${version} (since v${previousVersion})`
+      : `#### What's changed in v${version}`;
+    const summaryLines = [heading, changelog.plainMarkdown];
+    if (compareUrl) {
+      summaryLines.push(`\nCompare: ${compareUrl}`);
+    }
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summaryLines.join('\n')}\n\n`, 'utf8');
+  }
+
+  const notifyEnabled = process.env.FEISHU_NOTIFY_ENABLED === 'true';
+  if (!notifyEnabled) {
+    console.log('FEISHU_NOTIFY_ENABLED is not true; generated structured changelog only (Feishu send paused).');
+    process.exit(0);
+  }
+
   const webhookUrl = process.env.FEISHU_WEBHOOK_URL?.trim();
   if (!webhookUrl) {
     console.log('FEISHU_WEBHOOK_URL not configured; skipping Feishu desktop release notification.');
@@ -363,13 +556,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename
   await sendFeishuReleaseNotification({
     webhookUrl,
     secret: process.env.FEISHU_WEBHOOK_SECRET?.trim() || '',
-    channel: process.env.CHANNEL || process.env.OPENMOTION_RELEASE_CHANNEL || 'test',
-    version: process.env.EXPECTED_VERSION || process.env.RELEASE_VERSION || '',
+    channel,
+    version,
     buildVersion: process.env.RELEASE_BUILD_VERSION || '',
+    previousVersion,
     publicOrigin: process.env.RELEASE_PUBLIC_ORIGIN || 'https://releases.open-design.ai',
     branch: process.env.GITHUB_REF_NAME || '',
     commitSha: process.env.GITHUB_SHA || '',
-    commitSubject: process.env.COMMIT_SUBJECT || '',
+    commitSubject,
+    commits,
+    manualNotes,
+    compareUrl,
     actor: process.env.GITHUB_ACTOR || '',
     runUrl,
     includeMacX64: process.env.INCLUDE_MAC_X64 !== 'false',

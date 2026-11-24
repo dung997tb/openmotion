@@ -47,6 +47,12 @@ on:
         type: boolean
         default: false
 
+      release_notes:
+        description: Optional custom release notes bullets (overrides automatic commit grouping)
+        required: false
+        type: string
+        default: ''
+
 permissions:
   contents: read
 
@@ -522,6 +528,7 @@ jobs:
       - name: Checkout Feishu release notifier
         uses: actions/checkout@v6.0.2
         with:
+          fetch-depth: 30
           sparse-checkout: |
             desktop/scripts/notify-feishu-release.mjs
           sparse-checkout-cone-mode: false
@@ -653,10 +660,20 @@ jobs:
             echo "- Windows feed: [${CHANNEL}.yml](${WIN_MANIFEST_URL})"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Notify Feishu desktop release group
+      - name: Generate structured changelog and optionally notify Feishu group
         continue-on-error: true
         shell: bash
         env:
+          RELEASE_BUCKET: ${{ vars.CLOUDFLARE_R2_RELEASES_BUCKET || secrets.RELEASE_S3_BUCKET }}
+          RELEASE_S3_ENDPOINT: ${{ vars.CLOUDFLARE_R2_RELEASES_URL || secrets.RELEASE_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK || secrets.RELEASE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK || secrets.RELEASE_S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_PAGER: ''
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          FEISHU_NOTIFY_ENABLED: ${{ vars.FEISHU_DESKTOP_NOTIFY_ENABLED || 'false' }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_DESKTOP_NOTIFY_WEBHOOK }}
           FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_DESKTOP_NOTIFY_SECRET }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
@@ -664,8 +681,48 @@ jobs:
           RELEASE_BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
           INCLUDE_MAC_X64: ${{ needs.prepare.outputs.include_mac_x64 }}
           RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN || 'https://releases.open-design.ai' }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
           set -euo pipefail
+          DEST_PREFIX="s3://${RELEASE_BUCKET}/open-motion/desktop/${CHANNEL}"
+          AWS_ARGS=(--region auto)
+          if [ -n "${RELEASE_S3_ENDPOINT:-}" ]; then
+            AWS_ARGS+=(--endpoint-url "${RELEASE_S3_ENDPOINT}")
+          fi
+
+          PREVIOUS_VERSION=""
+          PREVIOUS_SHA=""
+          if aws "${AWS_ARGS[@]}" s3 cp "${DEST_PREFIX}/latest-meta.json" /tmp/latest-meta.json --only-show-errors 2>/dev/null; then
+            PREVIOUS_VERSION="$(node -e 'const d = JSON.parse(require("node:fs").readFileSync("/tmp/latest-meta.json", "utf8")); console.log(d.version || "");' 2>/dev/null || true)"
+            PREVIOUS_SHA="$(node -e 'const d = JSON.parse(require("node:fs").readFileSync("/tmp/latest-meta.json", "utf8")); console.log(d.commitSha || "");' 2>/dev/null || true)"
+          fi
+
           COMMIT_SUBJECT="$(git log -1 --pretty=%s 2>/dev/null || true)"
-          export COMMIT_SUBJECT
+          COMPARE_URL=""
+          if [ -n "${PREVIOUS_SHA}" ] && git cat-file -e "${PREVIOUS_SHA}^{commit}" 2>/dev/null && [ "${PREVIOUS_SHA}" != "${GITHUB_SHA}" ]; then
+            LOG_RANGE="${PREVIOUS_SHA}..HEAD"
+            COMPARE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${PREVIOUS_SHA:0:12}...${GITHUB_SHA:0:12}"
+          else
+            LOG_RANGE="-n 5"
+          fi
+
+          RELEASE_COMMITS_JSON="$(git log ${LOG_RANGE} --no-merges --pretty=format:'%s' -- desktop/ shared/desktop-*.ts shared/platform-host.ts shared/signed-config.ts packages/design-system/brand/ .github/workflows/desktop-release.yml 2>/dev/null | node -e 'const lines = require("node:fs").readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean); console.log(JSON.stringify(lines));')"
+          export COMMIT_SUBJECT PREVIOUS_VERSION COMPARE_URL RELEASE_COMMITS_JSON
+
           node desktop/scripts/notify-feishu-release.mjs
+
+          node -e '
+            const fs = require("node:fs");
+            fs.writeFileSync("/tmp/next-latest-meta.json", JSON.stringify({
+              channel: process.env.CHANNEL,
+              version: process.env.EXPECTED_VERSION,
+              buildVersion: process.env.RELEASE_BUILD_VERSION,
+              commitSha: process.env.GITHUB_SHA,
+              branch: process.env.GITHUB_REF_NAME,
+              updatedAt: new Date().toISOString(),
+            }, null, 2) + "\n", "utf8");
+          '
+          aws "${AWS_ARGS[@]}" s3 cp /tmp/next-latest-meta.json "${DEST_PREFIX}/latest-meta.json" \
+            --cache-control "no-cache, max-age=0" \
+            --content-type "application/json" \
+            --only-show-errors
