@@ -262,7 +262,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         methods: ['scan'],
       },
       async invoke(method, params) {
-        if (method === 'scan' || method === 'detect' || method === 'detectAll') {
+        if (method === 'scan' || method === 'detect') {
           const checked = validateHostMethodParams<AtomDetectParams>(HOST_CAPABILITIES.ATOM_DETECT, method, params);
           if (!checked.ok) return checked;
           return detectAtom.scan(checked.data);
@@ -328,7 +328,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         methods: ['start', 'poll', 'status', 'inject', 'revoke', 'retryPendingRevokes'],
       },
       async invoke(method, params) {
-        if (method === 'start' || method === 'startDeviceAuth') {
+        if (method === 'start') {
           const checked = validateHostMethodParams<AtomCredentialStartParams>(
             HOST_CAPABILITIES.ATOM_CREDENTIAL,
             method,
@@ -337,7 +337,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
           if (!checked.ok) return checked;
           return credentialAtom.start(checked.data);
         }
-        if (method === 'poll' || method === 'pollDeviceAuth') {
+        if (method === 'poll') {
           const checked = validateHostMethodParams<AtomCredentialPollParams>(
             HOST_CAPABILITIES.ATOM_CREDENTIAL,
             method,

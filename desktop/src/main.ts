@@ -69,7 +69,6 @@ import {
   extractDeepLinkFromArgv,
   registerDesktopProtocolClient,
 } from './protocol.ts';
-import type { SplashController } from './splash.ts';
 import { DesktopUpdaterController, resolvePackagedReleaseChannel } from './updater.ts';
 import {
   attachWindowNavigationPolicies,
@@ -343,7 +342,6 @@ const progressCoordinator = new TaskProgressCoordinator(value => {
   }
 });
 let mainWindow: BrowserWindow | null = null;
-const splash: SplashController | null = null;
 let domFullscreen = false;
 let themePreference: 'system' | 'light' | 'dark' = 'system';
 let currentTheme: 'light' | 'dark' = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
@@ -1049,7 +1047,6 @@ function dispatchMenuAction(action: DesktopMenuAction): void {
   focusOrRestoreMainWindow();
   if (rendererReady) {
     registry.emit(HOST_CAPABILITIES.WINDOW, 'menuAction', action);
-    registry.emit(HOST_CAPABILITIES.WINDOW, 'menu-action', action);
   } else {
     queuePendingMenuAction(action);
   }
@@ -1067,12 +1064,7 @@ async function exportLogsWithDialog(): Promise<DesktopDiagnosticExportResult> {
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const defaultName = `openmotion-diagnostics-${stamp}.zip`;
-    const parent =
-      mainWindow && !mainWindow.isDestroyed()
-        ? mainWindow
-        : splash?.window && !splash.window.isDestroyed()
-          ? splash.window
-          : undefined;
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
     const saveOptions = {
       title: 'Export OpenDesign Diagnostic Logs',
       defaultPath: path.join(app.getPath('downloads'), defaultName),
@@ -1132,7 +1124,6 @@ function revealMainWindow(): void {
   if (!win.isVisible()) {
     win.show();
   }
-  void splash?.playExitAndClose().catch(() => splash?.close());
   broadcastChromeState();
 }
 
@@ -1377,7 +1368,6 @@ function registerIpc(): void {
     authHandoff,
     envController,
     getMainWindow: () => mainWindow,
-    getSplash: () => splash,
     getPrivilegedGuardOptions,
     buildRuntimeInfo,
     resolveStudioUrl,

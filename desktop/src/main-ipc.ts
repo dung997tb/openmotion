@@ -19,7 +19,6 @@ import {
   type SplashAllowedAction,
 } from './ipc-guard.ts';
 import type { DesktopEnvironmentController } from './main-env-runtime.ts';
-import type { SplashController } from './splash.ts';
 import type { DesktopUpdaterController } from './updater.ts';
 
 export type RegisterDesktopIpcDeps = {
@@ -31,7 +30,6 @@ export type RegisterDesktopIpcDeps = {
   authHandoff: DesktopAuthHandoffManager;
   envController: DesktopEnvironmentController;
   getMainWindow: () => BrowserWindow | null;
-  getSplash: () => SplashController | null;
   getPrivilegedGuardOptions: () => PrivilegedIpcGuardOptions;
   buildRuntimeInfo: () => HostRuntimeInfo;
   resolveStudioUrl: () => string;
@@ -73,11 +71,6 @@ export function registerDesktopIpc(deps: RegisterDesktopIpcDeps): void {
     event: Electron.IpcMainInvokeEvent,
     action: SplashAllowedAction,
   ) {
-    const splashResult = authorizeSplashSender(event, action, {
-      splashWindow: deps.getSplash()?.window,
-      allowedFilePaths: allowedSplashFiles,
-    });
-    if (splashResult.ok) return { ok: true as const };
     return authorizeSplashSender(event, action, {
       splashWindow: deps.getMainWindow(),
       allowedFilePaths: allowedSplashFiles,
@@ -260,6 +253,5 @@ export function registerDesktopIpc(deps: RegisterDesktopIpcDeps): void {
 
   deps.authHandoff.subscribe(state => {
     deps.registry.emit(HOST_CAPABILITIES.ACCOUNT, 'state', state);
-    deps.registry.emit(HOST_CAPABILITIES.ACCOUNT, 'login-state', state);
   });
 }

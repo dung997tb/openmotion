@@ -521,12 +521,6 @@ export function createWindowCapabilityModule(deps: WindowCapabilityDeps): Capabi
         validate: validateExternalUrlParams,
         handler: async ({ url }: { url: string }) => hostOk(await deps.openExternal(url)),
       },
-      notifyRendererReady: {
-        handler: async () => {
-          await deps.notifyRendererReady();
-          return hostOk({ ok: true });
-        },
-      },
       rendererReady: {
         handler: async () => {
           await deps.notifyRendererReady();
@@ -617,14 +611,8 @@ export function createUpdaterCapabilityModule(deps: UpdaterCapabilityDeps): Capa
       getState: {
         handler: async () => hostOk(await deps.getUpdateState()),
       },
-      check: {
-        handler: async () => hostOk(await deps.checkForUpdates()),
-      },
       checkForUpdates: {
         handler: async () => hostOk(await deps.checkForUpdates()),
-      },
-      download: {
-        handler: async () => hostOk(await deps.downloadUpdate()),
       },
       downloadUpdate: {
         handler: async () => hostOk(await deps.downloadUpdate()),
@@ -659,9 +647,6 @@ export function createDiagnosticsCapabilityModule(
       getAppInfo: {
         handler: async () => hostOk(await deps.getAppInfo()),
       },
-      exportLogs: {
-        handler: async () => hostOk(await deps.exportLogs()),
-      },
       exportBundle: {
         handler: async () => hostOk(await deps.exportLogs()),
       },
@@ -693,18 +678,8 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
     version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ACCOUNT],
     status: deps.status ?? 'available',
     ...(deps.reason !== undefined ? { reason: deps.reason } : {}),
-    events: ['state', 'login-state'],
+    events: ['state'],
     methods: {
-      startSignIn: {
-        validate: params => {
-          const base = validateStartSignInParams(params);
-          if (!base.ok) return base;
-          const switchAccount = params.switchAccount === true;
-          return { ok: true, value: { ...base.value, switchAccount } };
-        },
-        handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>
-          hostOk(await deps.startSignIn(params)),
-      },
       startBrowserLogin: {
         validate: params => {
           const candidate = params.returnPath !== undefined ? params.returnPath : params.returnTo;
@@ -727,9 +702,6 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
         },
         handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>
           hostOk(await deps.startSignIn(params)),
-      },
-      cancelSignIn: {
-        handler: async () => hostOk(await deps.cancelSignIn()),
       },
       cancelLogin: {
         handler: async () => hostOk(await deps.cancelSignIn()),

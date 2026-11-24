@@ -8,6 +8,7 @@ import {
   CapabilityRegistry,
   createAccountCapabilityModule,
   createDiagnosticsCapabilityModule,
+  createPreferencesCapabilityModule,
   createUpdaterCapabilityModule,
   createWebContentsEventSink,
   createWindowCapabilityModule,
@@ -295,19 +296,19 @@ test('All four shell capability modules (window, updater, diagnostics, account) 
     (await registry.invoke('window', 'openExternal', { url: 'file:///etc/passwd' })).error.code,
     'INVALID_PARAMS',
   );
-  assert.equal((await registry.invoke('window', 'notifyRendererReady')).ok, true);
+  assert.equal((await registry.invoke('window', 'rendererReady')).ok, true);
   assert.equal((await registry.invoke('window', 'retryStartup')).ok, true);
   assert.equal((await registry.invoke('window', 'continueToStudio')).ok, true);
 
   // Updater capability
   assert.deepEqual(await registry.invoke('updater', 'getState'), { ok: true, data: updateState });
-  assert.equal((await registry.invoke('updater', 'check')).data.status, 'checking');
-  assert.equal((await registry.invoke('updater', 'download')).data.progress, 50);
+  assert.equal((await registry.invoke('updater', 'checkForUpdates')).data.status, 'checking');
+  assert.equal((await registry.invoke('updater', 'downloadUpdate')).data.progress, 50);
   assert.deepEqual(await registry.invoke('updater', 'installNow'), { ok: true, data: { ok: true } });
 
   // Diagnostics capability
   assert.equal((await registry.invoke('diagnostics', 'getAppInfo')).data.hostKind, 'desktop');
-  assert.deepEqual(await registry.invoke('diagnostics', 'exportLogs'), {
+  assert.deepEqual(await registry.invoke('diagnostics', 'exportBundle'), {
     ok: true,
     data: { ok: true, path: '/tmp/diag.zip', entryCount: 4 },
   });
@@ -317,15 +318,15 @@ test('All four shell capability modules (window, updater, diagnostics, account) 
   });
 
   // Account capability
-  assert.deepEqual(await registry.invoke('account', 'startSignIn', { returnPath: '/projects/1' }), {
+  assert.deepEqual(await registry.invoke('account', 'startBrowserLogin', { returnPath: '/projects/1' }), {
     ok: true,
     data: { state: 'authorizing', returnPath: '/projects/1' },
   });
   assert.equal(
-    (await registry.invoke('account', 'startSignIn', { returnPath: '//evil.com' })).error.code,
+    (await registry.invoke('account', 'startBrowserLogin', { returnPath: '//evil.com' })).error.code,
     'INVALID_PARAMS',
   );
-  assert.deepEqual(await registry.invoke('account', 'cancelSignIn'), {
+  assert.deepEqual(await registry.invoke('account', 'cancelLogin'), {
     ok: true,
     data: { state: 'signed-out' },
   });
@@ -594,4 +595,65 @@ test('desktop/src/preload.ts exposes only the 4-method __OPENMOTION_HOST__ bridg
   assert.match(source, /HOST_IPC_CHANNELS\.INVOKE/);
   assert.match(source, /HOST_IPC_CHANNELS\.EVENT/);
   assert.match(source, /HOST_IPC_CHANNELS\.DOM_FULLSCREEN/);
+});
+
+test('shell capabilities expose one canonical name per method and event', () => {
+  // The host contract is additive-only: a name listed here is permanent once a
+  // stable shell ships it. Add to these lists deliberately, never as an alias.
+  const expected = {
+    window: {
+      methods: [
+        'getChromeState',
+        'setTheme',
+        'minimize',
+        'toggleMaximize',
+        'close',
+        'openExternal',
+        'rendererReady',
+        'retryStartup',
+        'continueToStudio',
+        'setTaskProgress',
+        'acquireWakeLock',
+        'releaseWakeLock',
+        'notify',
+      ],
+      events: ['chromeState', 'menuAction', 'themeChanged'],
+    },
+    updater: {
+      methods: ['getState', 'checkForUpdates', 'downloadUpdate', 'installNow'],
+      events: ['state'],
+    },
+    diagnostics: {
+      methods: ['getAppInfo', 'exportBundle', 'openLogsFolder'],
+      events: [],
+    },
+    account: {
+      methods: [
+        'startBrowserLogin',
+        'cancelLogin',
+        'getLoginState',
+        'openBillingPortal',
+        'openInWindowLogin',
+        'refresh',
+        'signOut',
+      ],
+      events: ['state'],
+    },
+    preferences: {
+      methods: ['getAll', 'set', 'reset', 'pickDownloadDir', 'relaunch'],
+      events: ['changed'],
+    },
+  };
+
+  const modules = [
+    createWindowCapabilityModule({}),
+    createUpdaterCapabilityModule({}),
+    createDiagnosticsCapabilityModule({}),
+    createAccountCapabilityModule({}),
+    createPreferencesCapabilityModule({}),
+  ];
+  const actual = Object.fromEntries(
+    modules.map(mod => [mod.name, { methods: Object.keys(mod.methods), events: [...(mod.events ?? [])] }]),
+  );
+  assert.deepEqual(actual, expected);
 });

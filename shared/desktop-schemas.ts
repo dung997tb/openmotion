@@ -253,7 +253,6 @@ const HOST_METHOD_SCHEMA_REGISTRY: Record<string, Record<string, z.ZodType>> = {
   [HOST_CAPABILITIES.ATOM_DETECT]: {
     scan: AtomDetectParamsSchema,
     detect: AtomDetectParamsSchema,
-    detectAll: AtomDetectParamsSchema,
   },
   [HOST_CAPABILITIES.ATOM_EXEC]: {
     run: AtomExecParamsSchema,
@@ -273,9 +272,7 @@ const HOST_METHOD_SCHEMA_REGISTRY: Record<string, Record<string, z.ZodType>> = {
   },
   [HOST_CAPABILITIES.ATOM_CREDENTIAL]: {
     start: AtomCredentialStartParamsSchema,
-    startDeviceAuth: AtomCredentialStartParamsSchema,
     poll: AtomCredentialPollParamsSchema,
-    pollDeviceAuth: AtomCredentialPollParamsSchema,
     status: AtomCredentialStatusParamsSchema,
     inject: AtomCredentialInjectParamsSchema,
     revoke: AtomCredentialRevokeParamsSchema,

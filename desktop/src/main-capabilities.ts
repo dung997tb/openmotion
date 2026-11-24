@@ -440,11 +440,6 @@ export function registerDesktopCapabilities(deps: RegisterDesktopCapabilitiesDep
     }
     if (capName === HOST_CAPABILITIES.ATOM_DETECT) {
       methods.detect = { handler: async params => atomHandler.invoke('scan', params) };
-      methods.detectAll = { handler: async params => atomHandler.invoke('scan', params) };
-    }
-    if (capName === HOST_CAPABILITIES.ATOM_CREDENTIAL) {
-      methods.startDeviceAuth = { handler: async params => atomHandler.invoke('start', params) };
-      methods.pollDeviceAuth = { handler: async params => atomHandler.invoke('poll', params) };
     }
     registry.register({
       name: atomHandler.descriptor.name,
