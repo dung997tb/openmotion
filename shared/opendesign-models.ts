@@ -142,18 +142,19 @@ function sanitizeBestFor(value: unknown): string[] | undefined {
     tags.push(normalized);
     if (tags.length >= 12) break;
   }
-  return tags.length ? tags : undefined;
+  return tags;
 }
 
 function sanitizeDescription(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const cleaned = value.replace(/\s+/g, ' ').trim().slice(0, 400);
-  return cleaned || undefined;
+  return value.replace(/\s+/g, ' ').trim().slice(0, 400);
 }
 
 /**
  * Extract optional server-published routing metadata (`tier`, `bestFor`, `description`) from a live
  * OpenDesign Cloud or account catalogue row (either top-level or nested under `capabilities`).
+ * Explicit empty values (`best_for: []`, `description: ""`) are preserved as authoritative so
+ * server-side clearing is never overwritten by local fallback profiles.
  */
 export function parseServerModelRoutingMetadata(row: unknown): {
   description?: string;
@@ -162,13 +163,17 @@ export function parseServerModelRoutingMetadata(row: unknown): {
 } {
   if (!isRecord(row)) return {};
   const caps = isRecord(row.capabilities) ? row.capabilities : undefined;
-  const tier = sanitizeTier(row.tier ?? caps?.tier);
-  const bestFor = sanitizeBestFor(row.bestFor ?? row.best_for ?? caps?.bestFor ?? caps?.best_for);
-  const description = sanitizeDescription(row.description ?? caps?.description);
+  const tier = sanitizeTier(row.tier) ?? sanitizeTier(caps?.tier);
+  const bestFor =
+    sanitizeBestFor(row.bestFor)
+    ?? sanitizeBestFor(row.best_for)
+    ?? sanitizeBestFor(caps?.bestFor)
+    ?? sanitizeBestFor(caps?.best_for);
+  const description = sanitizeDescription(row.description) ?? sanitizeDescription(caps?.description);
   return {
-    ...(description ? { description } : {}),
-    ...(tier ? { tier } : {}),
-    ...(bestFor ? { bestFor } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(tier !== undefined ? { tier } : {}),
+    ...(bestFor !== undefined ? { bestFor } : {}),
   };
 }
 

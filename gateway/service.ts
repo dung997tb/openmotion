@@ -160,9 +160,9 @@ export class ModelGateway {
           supportsImageReference: live.supportsImageReference,
           maxInputImages: live.maxInputImages,
           nativeOptions: live.nativeOptions,
-          ...(live.description ? { description: live.description } : {}),
-          ...(live.tier ? { tier: live.tier } : {}),
-          ...(live.bestFor?.length ? { bestFor: live.bestFor } : {}),
+          ...(live.description !== undefined ? { description: live.description } : {}),
+          ...(live.tier !== undefined ? { tier: live.tier } : {}),
+          ...(live.bestFor !== undefined ? { bestFor: live.bestFor } : {}),
         } : {}),
       };
       const normalized = ['opendesign', 'account'].includes(merged.provider) && merged.modality === 'image' && merged.supportsImageReference

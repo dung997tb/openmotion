@@ -34,21 +34,37 @@ Never use a model name that discovery did not return. No dedicated SFX model is 
 
 ## Requests
 
-Submit via `openmotion_capability_run` (`capabilityId: "music" | "speech"`) or `openmotion_assets_use` (`action:"generate"`), only after the user approved the planned list. Each new intended job needs a unique `requestId`.
+Submit only after the user approved the planned list. Each new intended job needs a unique `requestId`.
 
-Music:
+When Unified Capability Center meta-tools are exposed (and discovery reports `music` / `speech` with `status:"live"` and `available:true`), submit via **`openmotion_capability_run`**:
+
+Music (`openmotion_capability_run`):
+
+```json
+{"action":"run","requestId":"game-bgm-01","capabilityId":"music","model":"<provider>:<discovered-music-model>","prompt":"Instrumental synthwave racing loop, 128 BPM, driving bass, bright arpeggios, no vocals, seamless loop ending","parameters":{}}
+```
+
+Speech (`openmotion_capability_run`):
+
+```json
+{"action":"run","requestId":"game-vo-hero-01","capabilityId":"speech","model":"<provider>:<discovered-speech-model>","prompt":"The gate is open. Move!","parameters":{"voice":"<voice id listed by models>"}}
+```
+
+When using **`openmotion_assets_use`** directly (fallback or legacy hosts), use its `action:"generate"` schema:
+
+Music (`openmotion_assets_use`):
 
 ```json
 {"action":"generate","requestId":"game-bgm-01","model":"<provider>:<discovered-music-model>","modality":"audio","mode":"text-to-audio","prompt":"Instrumental synthwave racing loop, 128 BPM, driving bass, bright arpeggios, no vocals, seamless loop ending","parameters":{}}
 ```
 
-Speech:
+Speech (`openmotion_assets_use`):
 
 ```json
 {"action":"generate","requestId":"game-vo-hero-01","model":"<provider>:<discovered-speech-model>","modality":"audio","mode":"text-to-speech","prompt":"The gate is open. Move!","parameters":{"voice":"<voice id listed by models>"}}
 ```
 
-Poll the returned `job.id` with `{"action":"status","jobId":"<job.id>"}` until `state:"completed"`, read the saved `{assetId, versionId}` from `job.libraryAssets[]`, and call `{"action":"read","assetId":"...","versionId":"..."}` (or `action:"get"`) to inspect `version` metadata (duration, format, mimeType). Speech results may include timing metadata (ElevenLabs `alignment`, BytePlus `sentences`) in `job.result`; use it to sync subtitles or mouth flaps. Never auto-retry a failed paid job; follow the media job procedure.
+Poll the returned `job.id` with `openmotion_job_manage` or `openmotion_assets_use` (`{"action":"status","jobId":"<job.id>"}`) until `state:"completed"`, read the saved `{assetId, versionId}` from `job.libraryAssets[]`, and call `openmotion_asset_manage` / `openmotion_assets_use` (`{"action":"read","assetId":"...","versionId":"..."}` or `action:"get"`) to inspect `version` metadata (duration, format, mimeType). Speech results may include timing metadata (ElevenLabs `alignment`, BytePlus `sentences`) in `job.result`; use it to sync subtitles or mouth flaps. Never auto-retry a failed paid job; follow the media job procedure.
 
 ## Wiring generated audio
 

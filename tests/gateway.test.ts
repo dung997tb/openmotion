@@ -672,13 +672,22 @@ test('OpenDesign model discovery hydrates fallback routing traits, prefers serve
           models: [
             // Existing model without server routing metadata -> hydrated from fallback profile.
             { model: 'gpt-image-2.6-flare', kind: 'image', capabilities: { edits: true, background: ['auto', 'transparent', 'opaque'] } },
-            // Existing model WITH server-published routing metadata -> server fields take precedence.
+            // Existing model WITH server-published routing metadata -> server fields take precedence,
+            // and an invalid top-level tier falls through to a valid nested capabilities.tier.
             {
               model: 'seedream-5.5',
               kind: 'image',
-              tier: 'balanced',
+              tier: 'ultra-invalid',
               best_for: ['Server Tag', 'editorial-key-art'],
               description: 'Server-published Seedream description.',
+              capabilities: { edits: true, tier: 'balanced' },
+            },
+            // Existing model WITH explicit empty server metadata -> stays cleared (never overwritten by fallback).
+            {
+              model: 'gpt-image-2.6-sunburst',
+              kind: 'image',
+              best_for: [],
+              description: '',
               capabilities: { edits: true },
             },
             // Brand-new unseen model WITH server-published metadata under capabilities -> flows through untouched.
@@ -716,6 +725,11 @@ test('OpenDesign model discovery hydrates fallback routing traits, prefers serve
     assert.deepEqual(seedream.bestFor, ['server-tag', 'editorial-key-art']);
     assert.equal(seedream.description, 'Server-published Seedream description.');
 
+    const sunburst = byId.get('gpt-image-2.6-sunburst')!;
+    assert.equal(sunburst.tier, 'flagship');
+    assert.deepEqual(sunburst.bestFor, []);
+    assert.equal(sunburst.description, '');
+
     const nextGen = byId.get('gpt-image-3-pro')!;
     assert.equal(nextGen.tier, 'flagship');
     assert.deepEqual(nextGen.bestFor, ['3d-concept', 'sprite-sheets']);
@@ -726,13 +740,14 @@ test('OpenDesign model discovery hydrates fallback routing traits, prefers serve
     assert.equal(unseen.bestFor, undefined);
     assert.equal(unseen.description, undefined);
 
-    // Search indexes tier and bestFor tags (both fallback and server-published).
+    // Search indexes tier and bestFor tags (both fallback and server-published), and respects server-cleared tags.
     const zhSpeech = await gateway.listModels({ provider: 'opendesign', query: 'zh-speech' });
     assert.equal(zhSpeech.models[0]?.modelId, 'byteplus-tts-2');
     const spriteSheets = await gateway.listModels({ provider: 'opendesign', query: 'sprite-sheets' });
     assert.equal(spriteSheets.models[0]?.modelId, 'gpt-image-3-pro');
     const transparentCutout = await gateway.listModels({ provider: 'opendesign', modality: 'image', query: 'transparent-cutout' });
     assert(transparentCutout.models.some(m => m.modelId === 'gpt-image-2.6-flare'));
+    assert(!transparentCutout.models.some(m => m.modelId === 'gpt-image-2.6-sunburst'));
 
     // Non-OpenDesign models do not receive OpenDesign fallback traits.
     const falModels = await gateway.listModels({ provider: 'fal' });
