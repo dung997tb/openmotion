@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { candidateFixture } from './release-fixture.mjs';
-import { waitForRegistry, releaseInputs, resolveCandidate, sealCandidate, validateSource, validateRun, verifyDownloaded, verifyCurrentCandidate, downloadCandidate, publishNpm, promoteTest, archiveRelease, repository, candidateWorkflow, recoveryWorkflow, publicationWorkflow, candidateJobName, findCandidate, authorizationReceipt, recordAuthorization } from '../.github/scripts/motion-release.mjs';
+import { waitForRegistry, releaseInputs, resolveCandidate, sealCandidate, validateSource, validateRun, verifyDownloaded, verifyCurrentCandidate, downloadCandidate, publishNpm, promoteTest, archiveRelease, repository, candidateWorkflow, recoveryWorkflow, publicationWorkflow, candidateJobName, candidateSourceRef, findCandidate, authorizationReceipt, recordAuthorization } from '../.github/scripts/motion-release.mjs';
 import { compareReleaseVersions, comparePublicationVersions } from '../scripts/release-version.mjs';
 import { consumerEnvironment } from '../.github/scripts/motion-registry-smoke.mjs';
 import { runFile } from '../scripts/runtime-assets.mjs';
@@ -277,6 +277,18 @@ test('next integration branch supports same-run sealing, verification and operat
   const run = { ...origin, head_branch: 'next', id: 800, path: publicationWorkflow, actor: { login: 'operator' } };
   await recordAuthorization(f.directory, f.inputs, async () => Response.json(run), f.env);
   await assert.rejects(recordAuthorization(f.directory, f.inputs, async () => Response.json({ ...run, head_branch: 'main' }), f.env));
+});
+
+test('retained candidate source ancestry always falls back to main for non-release candidate refs', async () => {
+  assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/main' } }), 'refs/heads/main');
+  assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/next' } }), 'refs/heads/next');
+  assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/feature/motion' } }), 'refs/heads/main');
+  assert.equal(candidateSourceRef({ workflow: {} }), 'refs/heads/main');
+  assert.equal(candidateSourceRef(null), 'refs/heads/main');
+  const script = await readFile(new URL('../.github/scripts/motion-release.mjs', import.meta.url), 'utf8');
+  const installCheck = await readFile(new URL('../.github/workflows/motion-install-check.yml', import.meta.url), 'utf8');
+  assert(script.includes('validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, candidateSourceRef(c))'));
+  assert(installCheck.includes('validateSource(process.cwd(), c.sourceCommit, c.version, undefined, undefined, candidateSourceRef(c))'));
 });
 
 test('old main receipts remain readable but unregistered candidate branches cannot seal artifacts', async t => {

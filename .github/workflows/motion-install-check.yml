@@ -55,10 +55,9 @@ jobs:
           git fetch origin next:refs/remotes/origin/next || true
           node --input-type=module <<'JS'
           import { appendFile } from 'node:fs/promises';
-          import { downloadCandidate, releaseRefs, validateSource } from './.github/scripts/motion-release.mjs';
+          import { candidateSourceRef, downloadCandidate, validateSource } from './.github/scripts/motion-release.mjs';
           const c = await downloadCandidate(process.env.MOTION_VERSION, process.env.RUNNER_TEMP + '/candidate', undefined, fetch, process.env.MOTION_CANDIDATE_RUN_ID);
-          const sourceRef = releaseRefs.includes(c.workflow?.ref) ? c.workflow.ref : 'refs/heads/main';
-          await validateSource(process.cwd(), c.sourceCommit, c.version, undefined, undefined, sourceRef);
+          await validateSource(process.cwd(), c.sourceCommit, c.version, undefined, undefined, candidateSourceRef(c));
           await appendFile(process.env.GITHUB_OUTPUT, `tgz_sha256=${c.tgzSHA256}\n`);
           JS
       - uses: actions/upload-artifact@v7.0.2

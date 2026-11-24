@@ -32,6 +32,10 @@ function releaseBranch(ref) {
   return ref.slice('refs/heads/'.length);
 }
 
+export function candidateSourceRef(candidate) {
+  return releaseRefs.includes(candidate?.workflow?.ref) ? candidate.workflow.ref : 'refs/heads/main';
+}
+
 function manualEntry(env, workflows) {
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Wrong repository');
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'Manual invocation required');
@@ -519,8 +523,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else if (command === 'authorize') await recordAuthorization(directory, inputs);
     else if (command === 'rescan') {
       const c = await verifyDownloaded(directory, inputs.expectedSHA256);
-      const sourceRef = releaseRefs.includes(c.workflow?.ref) ? c.workflow.ref : process.env.GITHUB_REF;
-      await validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, sourceRef);
+      await validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, candidateSourceRef(c));
       const work = await mkdtemp(path.join(os.tmpdir(), 'motion-source-verify-'));
       try {
         await runFile('git', ['worktree', 'add', '--detach', work, c.sourceCommit], { cwd: extra });
