@@ -65,3 +65,18 @@ it('keeps authored filenames in inert per-document attributes, including markup-
     projectId: 'own-project', compositionPath: path, sourceVersions: { [path]: 'its-version' },
   });
 });
+
+it('asks the scoped parent to retry a failed bridge even when document.URL shadows the URL constructor', () => {
+  const { script } = bridgeDocumentTags('https://preview.example', 'project', 'index.html', {});
+  const document = parseHTMLContent('<html><body>' + script + '</body></html>');
+  const handler = document.querySelector('script')!.getAttribute('onerror')!;
+  const messages: unknown[] = [];
+  runInNewContext(handler, {
+    URL: 'https://preview.example/document', globalThis: { URL },
+    location: { href: 'https://preview.example/doc?pt=grant' }, document: { referrer: 'https://studio.example/editor' },
+    window: { parent: { postMessage(message: Record<string, unknown>, origin: string) { messages.push([{ ...message }, origin]); } } },
+  });
+  assert.deepEqual(messages, [[{
+    source: 'openmotion-preview-bridge', version: 1, type: 'preview-build-busy', projectId: 'project', token: 'grant', retryAfterMs: 1000,
+  }, 'https://studio.example']]);
+});

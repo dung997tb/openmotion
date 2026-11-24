@@ -14,6 +14,11 @@ const SHA_PATTERN = /^[a-f0-9]{40}$/;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const DEFAULT_MAX_ATTEMPTS = 4;
 const DEFAULT_RETRY_DELAY_MS = 15_000;
+const PUBLICATION_TIMEOUT_MS = 30_000;
+const TRANSIENT_NETWORK_CODES = new Set([
+	"ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT", "EPIPE",
+	"UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET",
+]);
 
 export function parseOrbitApiUrl(value) {
 	const raw = requireNonEmpty(value, "ORBIT_API_URL");
@@ -234,13 +239,29 @@ export async function publishCloudTestToOrbit({
 			return { skipped: true, reason: "superseded", remoteSha };
 		}
 
-		const response = await fetchImpl(endpoint, {
-			method: "POST",
-			redirect: "error",
-			headers,
-			body,
-		});
-		const rawBody = await response.text();
+		let response;
+		let rawBody;
+		const signal = AbortSignal.timeout(PUBLICATION_TIMEOUT_MS);
+		try {
+			response = await fetchImpl(endpoint, {
+				method: "POST",
+				redirect: "error",
+				headers,
+				body,
+				signal,
+			});
+			rawBody = await response.text();
+		} catch (error) {
+			const code = error.cause?.code ?? error.code;
+			if (!signal.aborted && !TRANSIENT_NETWORK_CODES.has(code)) throw error;
+			const reason = signal.aborted ? "request timeout" : code;
+			if (attempt === maxAttempts) {
+				throw new Error(`Orbit publication failed after ${attempt} attempts (${reason})`, { cause: error });
+			}
+			log(`Orbit publication interrupted (${reason}); retrying in ${retryDelayMs}ms`);
+			await sleep(retryDelayMs);
+			continue;
+		}
 		let parsedBody = {};
 		if (rawBody.trim()) {
 			try {

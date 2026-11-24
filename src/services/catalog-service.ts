@@ -62,9 +62,9 @@ export {
 export { mimeTypeForPath, normalizeCatalogAssetPath } from './catalog-template-source.ts';
 
 const TEMPLATE_ID_REGEX = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
-const DEFAULT_PRESIGN_GET_TTL_SEC = 300;
-const REDIRECT_CACHE_CONTROL = 'private, max-age=60';
-const REDIRECT_VARY = 'Origin, Cookie';
+const DEFAULT_PRESIGN_GET_TTL_SEC = 900;
+const REDIRECT_CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
+const REDIRECT_VARY = 'Origin';
 
 export function validateTemplateId(value: string): string {
   if (typeof value !== 'string' || !TEMPLATE_ID_REGEX.test(value)) {

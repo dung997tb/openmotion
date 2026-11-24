@@ -87,3 +87,20 @@ it('keeps the page usable when no WebMCP context is available', async () => {
   await act(async () => root.render(<><OpenMotionAgentTools /><p>Editor ready</p></>));
   expect(container.textContent).toBe('Editor ready');
 });
+
+it('skips native document.modelContext when polyfillOnly is set while still falling back to polyfill when absent', async () => {
+  const native = context();
+  Object.defineProperty(document, 'modelContext', { value: native, configurable: true });
+  await act(async () => root.render(<OpenMotionAgentTools polyfillOnly />));
+  expect(native.registerTool).not.toHaveBeenCalled();
+  expect(loadPolyfill).not.toHaveBeenCalled();
+
+  await act(async () => root.unmount());
+  Reflect.deleteProperty(document, 'modelContext');
+  root = createRoot(container);
+  const fallback = context();
+  loadPolyfill.mockResolvedValue(fallback);
+  await act(async () => root.render(<OpenMotionAgentTools polyfillOnly />));
+  expect(loadPolyfill).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(fallback.registered.size).toBe(22));
+});

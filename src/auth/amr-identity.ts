@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   type AmrWorkspaceRole,
   type AuthContext,
@@ -7,6 +8,7 @@ import {
 } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { AppConfig } from '../infra/config.ts';
+import { createLogger, type Logger } from '../infra/logger.ts';
 import {
   intersectScopesWithRole,
   roleAllowedScopes,
@@ -16,6 +18,8 @@ import {
 } from './store.ts';
 
 export const MAX_AMR_IDENTITY_CACHE_TTL_SEC = 60;
+
+type LookupFailureReason = 'timeout' | 'transport' | 'upstream_http' | 'invalid_response' | 'missing_workspace';
 
 export interface AmrWorkspaceSnapshot {
   readonly workspaceId: string;
@@ -77,6 +81,7 @@ export interface AmrIdentityClientOptions {
   cacheTtlSec?: number;
   timeoutMs?: number;
   fetcher?: typeof fetch;
+  logger?: Pick<Logger, 'warn'>;
 }
 
 export function amrIdentityClientFromAppConfig(
@@ -85,6 +90,7 @@ export function amrIdentityClientFromAppConfig(
     'OPENDESIGN_API_URL' | 'OPENDESIGN_INTERNAL_API_TOKEN' | 'OPENDESIGN_S2S_API_KEY' | 'AMR_IDENTITY_CACHE_TTL_SEC'
   >,
   cache?: AuthKeyValueCache,
+  logger?: Pick<Logger, 'warn'>,
 ): AmrIdentityClient | undefined {
   const token = config.OPENDESIGN_INTERNAL_API_TOKEN ?? config.OPENDESIGN_S2S_API_KEY;
   if (!token) return undefined;
@@ -92,6 +98,7 @@ export function amrIdentityClientFromAppConfig(
     apiUrl: config.OPENDESIGN_API_URL,
     internalToken: token,
     cache,
+    logger,
     cacheTtlSec: config.AMR_IDENTITY_CACHE_TTL_SEC,
   });
 }
@@ -111,6 +118,7 @@ export class AmrIdentityClient {
   private readonly cacheTtlSec: number;
   private readonly timeoutMs: number;
   private readonly fetcher: typeof fetch;
+  private readonly logger: Pick<Logger, 'warn'>;
 
   constructor(options: AmrIdentityClientOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, '');
@@ -122,6 +130,21 @@ export class AmrIdentityClient {
     );
     this.timeoutMs = options.timeoutMs ?? 5_000;
     this.fetcher = options.fetcher ?? fetch;
+    this.logger = options.logger ?? createLogger();
+  }
+
+  private unavailable(
+    reason: LookupFailureReason,
+    message: string,
+    context: { upstreamStatus?: number; cause?: unknown },
+  ): CloudError {
+    const diagnosticId = randomUUID();
+    this.logger.warn('AMR identity lookup unavailable', {
+      diagnosticId,
+      reason,
+      upstreamStatus: context.upstreamStatus,
+    });
+    return new CloudError('AUTH_UNAVAILABLE', message, { status: 503, details: { diagnosticId }, cause: context.cause });
   }
 
   async lookupIdentity(
@@ -149,6 +172,7 @@ export class AmrIdentityClient {
       url.searchParams.set('workspaceId', options.externalWorkspaceId);
     }
 
+    const signal = AbortSignal.timeout(this.timeoutMs);
     let response: Response;
     try {
       response = await this.fetcher(url.toString(), {
@@ -157,21 +181,21 @@ export class AmrIdentityClient {
           'x-internal-token': this.internalToken,
           Accept: 'application/json',
         },
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
-    } catch (error) {
-      throw new CloudError(
-        'AUTH_UNAVAILABLE',
+    } catch (cause) {
+      throw this.unavailable(
+        signal.aborted ? 'timeout' : 'transport',
         'Temporarily unable to verify login state with OpenDesign account service.',
-        { status: 503, cause: error },
+        { cause },
       );
     }
 
     if (response.status >= 500 || response.status === 429) {
-      throw new CloudError(
-        'AUTH_UNAVAILABLE',
+      throw this.unavailable(
+        'upstream_http',
         `OpenDesign account identity lookup failed with HTTP ${response.status}.`,
-        { status: 503 },
+        { upstreamStatus: response.status },
       );
     }
 
@@ -189,10 +213,10 @@ export class AmrIdentityClient {
     }
 
     if (!response.ok || !rawBody) {
-      throw new CloudError(
-        'AUTH_UNAVAILABLE',
+      throw this.unavailable(
+        !response.ok ? 'upstream_http' : signal.aborted ? 'timeout' : 'invalid_response',
         `Unexpected identity service response HTTP ${response.status}.`,
-        { status: 503 },
+        { upstreamStatus: response.status },
       );
     }
 
@@ -205,8 +229,8 @@ export class AmrIdentityClient {
 
     const ws = rawBody.workspace as AmrWorkspaceSnapshot | null | undefined;
     if (!ws || typeof ws.workspaceId !== 'string' || typeof ws.workspaceMemberId !== 'string') {
-      throw new CloudError('AUTH_UNAVAILABLE', 'AMR identity response missing workspace context.', {
-        status: 503,
+      throw this.unavailable('missing_workspace', 'AMR identity response missing workspace context.', {
+        upstreamStatus: response.status,
       });
     }
 

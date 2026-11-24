@@ -20,7 +20,9 @@ export const PREVIEW_INSPECTOR = `
     if (!el) return null;
     const detail = describe(el);
     const sha256 = sourceVersions[detail.sourceFile];
-    if (!sha256) return null;
+    // The node still exists while a saved drag is waiting for the replacement
+    // preview. Only a missing target should clear Studio's current selection.
+    if (!sha256) return undefined;
     const inline = {}, computed = {}, data = {};
     const style = getComputedStyle(el);
     for (const name of (Array.isArray(message.properties) ? message.properties : []).slice(0,64)) {

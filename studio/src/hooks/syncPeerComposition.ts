@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { shareCompositionPosterRead, type KnownCompositionSource, MAX_POSTER_SOURCE_LENGTH } from "../player/lib/compositionPosterSource";
 import { beginPeerTimelineUpdate } from "../player/lib/peerTimeline";
-import { hasPeerTimingDocument, hasScriptedStylePreview, tryApplyPeerChanges } from "../player/peerTimingPreview";
+import { hasPeerLiveEdit, hasPeerTimingDocument, hasScriptedStylePreview, tryApplyPeerChanges } from "../player/peerTimingPreview";
 import { isPreviewChanging } from "../player/previewReloading";
 import { announcePreviewScenesSwapped, notePeerPreviewChange, previewSourceRevision } from "../player/sceneSwap";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -20,21 +20,33 @@ export function syncPeerComposition(
   const apply = path && (!paths || paths.includes(path)) && beginPeerTimelineUpdate(projectId, path, frame);
   if (!apply) notePeerPreviewChange();
   const changedPath = paths?.length === 1 ? paths[0] : undefined;
+  const liveRoot = frame && (hasPeerTimingDocument(frame) || hasPeerLiveEdit(frame, "position") || hasPeerLiveEdit(frame, "mediaTiming"));
   if (frame && hasScriptedStylePreview(frame) && changedPath?.endsWith(".html")) {
     const base = confirmedSource(projectId, changedPath) ?? (changedPath === path ? previous : null);
     if (base && base.content.length <= MAX_PEER_PREVIEW_SOURCE_LENGTH) {
       const revision = previewSourceRevision();
       const isCurrent = () => frame === frameRef.current && revision === previewSourceRevision() &&
         usePlayerStore.getState().timelineProjectId === projectId && !isStudioEditSaving();
-      // The old document stays visible while the normal script rebuild starts independently.
+      // Nested files can use the same verified placement update as the writer.
       const changedFile = read(projectId, changedPath);
       if (changedFile && changedPath !== path) {
         shareCompositionPosterRead(usePlayerStore.getState(), projectId, changedPath, changedFile);
       }
-      void changedFile?.then(({ content, version }) => {
-        if (typeof content === "string" && version && isCurrent())
-          return tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "temporary");
-      }).catch(() => {});
+      if (changedFile && changedPath !== path && hasPeerLiveEdit(frame, "position") && !isPreviewChanging()) {
+        return changedFile.then(async ({ content, version }) => {
+          if (typeof content !== "string" || !version || !isCurrent() || isPreviewChanging()) return false;
+          const applied = await tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "keep-visible");
+          if (applied && isCurrent()) announcePreviewScenesSwapped(frame);
+          return applied;
+        });
+      }
+      // Unverified scripts can display a provisional style while their document rebuilds.
+      if (!(changedPath === path && liveRoot)) {
+        void changedFile?.then(({ content, version }) => {
+          if (typeof content === "string" && version && isCurrent())
+            return tryApplyPeerChanges(frame, { path: changedPath, previous: base, current: { content, version } }, isCurrent, "temporary");
+        }).catch(() => {});
+      }
     }
   }
   if (!path || !apply) return;
@@ -45,7 +57,7 @@ export function syncPeerComposition(
     if (!result.missing && typeof result.content === "string") apply(result.content, frameRef.current);
     return result;
   });
-  if (!frame || !hasPeerTimingDocument(frame) || paths?.length !== 1 || !previous || isPreviewChanging()) {
+  if (!frame || !liveRoot || paths?.length !== 1 || !previous || isPreviewChanging()) {
     void timeline.catch(() => {});
     return;
   }
@@ -54,7 +66,7 @@ export function syncPeerComposition(
     usePlayerStore.getState().timelineProjectId === projectId && !isPreviewChanging() && !isStudioEditSaving();
   return timeline.then(async ({ content, version, missing }) => {
     if (missing || !version || typeof content !== "string" || content.length > MAX_POSTER_SOURCE_LENGTH || !isCurrent()) return false;
-    const applied = await tryApplyPeerChanges(frame, { path, previous, current: { content, version } }, isCurrent);
+    const applied = await tryApplyPeerChanges(frame, { path, previous, current: { content, version } }, isCurrent, "keep-visible");
     if (applied && isCurrent()) {
       announcePreviewScenesSwapped(frame);
       return true;

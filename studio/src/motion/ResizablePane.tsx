@@ -1,3 +1,4 @@
+import './assets.css';
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 export function readPaneWidth(key: string, fallback: number, min: number, max: number) {

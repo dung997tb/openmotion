@@ -21,6 +21,10 @@ export interface StudioHost {
   desktopLink?: boolean;
   feedback?: boolean;
   themeToggle?: boolean;
+  /** Optional lazy host wrapper mounted around the lazy editor inside ArtifactViewer. */
+  EditorHost?: ComponentType<{ children: ReactNode }>;
+  /** Optional prefetcher paired with EditorHost to load it in parallel with the editor chunk. */
+  preloadEditorHost?: () => void;
 }
 
 export const StudioHostContext = createContext<StudioHost | null>(null);

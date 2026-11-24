@@ -19,8 +19,9 @@ import {
   PRESIGNED_REDIRECT_HEADERS,
   formatFileVersion,
 } from '../etag.ts';
-import { PREVIEW_BRIDGE_PATH, PREVIEW_BRIDGE_SCRIPT, PREVIEW_BRIDGE_VERSION } from '../engine/preview-bridge.ts';
+import { PREVIEW_BRIDGE_ASSET_RE, PREVIEW_BRIDGE_PATH, PREVIEW_BRIDGE_SCRIPT, PREVIEW_BRIDGE_VERSION } from '../engine/preview-bridge.ts';
 import { PreviewBuildBusy, PreviewDocumentCache } from '../engine/preview-document-cache.ts';
+import { createLogger } from '../../infra/logger.ts';
 import { assertTenantScopedKey } from '../../infra/storage.ts';
 import { normalizeSafeProjectPath } from '../../services/project-files-service.ts';
 
@@ -140,14 +141,53 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
 
   const cache = new PreviewDocumentCache();
   const gsapBaseUrl = '/api/vendor/gsap/';
+  const bridgeKey = (version: string) => 'system/preview-bridge/' + version + '.js';
+  const javascript = 'application/javascript; charset=utf-8';
+  const bridgeBytes = new TextEncoder().encode(PREVIEW_BRIDGE_SCRIPT);
+  const logger = createLogger();
+  let publication: Promise<unknown> | undefined;
+  let retryPublicationAt = 0;
+
+  function publishBridge() {
+    if (publication || Date.now() < retryPublicationAt) return;
+    // This pod always serves its own bytes directly. Keep a copy for other builds.
+    publication = deps.storage.putBlobIfAbsent(bridgeKey(PREVIEW_BRIDGE_VERSION), Buffer.from(PREVIEW_BRIDGE_SCRIPT), javascript)
+      .catch(() => {
+        publication = undefined;
+        retryPublicationAt = Date.now() + 30_000;
+        logger.warn('Could not archive the preview bridge for other API versions', { version: PREVIEW_BRIDGE_VERSION });
+      });
+  }
 
   app.get(PREVIEW_BRIDGE_PATH, c => {
-    // A neighboring release may serve the request during rollout. Its script
-    // is protocol-compatible, but must never populate another build's cache key.
-    const exactBuild = c.req.query('v') === PREVIEW_BRIDGE_VERSION;
-    c.header('Cache-Control', exactBuild ? 'public, max-age=31536000, immutable' : 'no-store');
-    c.header('Content-Type', 'application/javascript; charset=utf-8');
+    // Older documents used a query-based URL that some CDNs cache by pathname.
+    c.header('Cache-Control', 'no-store');
+    c.header('CDN-Cache-Control', 'no-store');
+    c.header('Content-Type', javascript);
     return c.body(PREVIEW_BRIDGE_SCRIPT);
+  });
+
+  app.get('/api/preview-bridge/:file', async c => {
+    c.header('Cache-Control', 'no-store');
+    c.header('CDN-Cache-Control', 'no-store');
+    const version = PREVIEW_BRIDGE_ASSET_RE.exec(c.req.path)?.[1];
+    if (!version) return c.notFound();
+    let body = bridgeBytes;
+    if (version !== PREVIEW_BRIDGE_VERSION) {
+      const key = bridgeKey(version);
+      try {
+        if (!await deps.storage.headObject(key)) return c.notFound();
+        const bytes = await deps.storage.getObjectBuffer(key, 1024 * 1024);
+        if (createHash('sha256').update(bytes).digest('hex') !== version) return c.text('Bridge version unavailable', 503);
+        body = new Uint8Array(bytes);
+      } catch {
+        return c.text('Bridge version unavailable', 503);
+      }
+    }
+    c.header('Content-Type', javascript);
+    c.header('CDN-Cache-Control', undefined);
+    c.header('Cache-Control', 'public, max-age=31536000, immutable');
+    return c.body(body);
   });
 
   app.get(SNAPDOM_VENDOR_PATH, async c => {
@@ -167,6 +207,7 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     const variables = parseVariablesQuery(c.req.query('variables'));
     const assetBase = c.get('previewAssetBase');
     const origin = assetBase && new URL(assetBase).origin;
+    if (origin) publishBridge();
     const localBase = `/api/projects/${encodeURIComponent(projectId)}/preview/`;
     const variant = createHash('sha256').update(JSON.stringify([
       auth.workspaceId, projectId, compPath, origin, capture, variables, origin ? PREVIEW_BRIDGE_VERSION : null,
@@ -176,8 +217,9 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     });
     const validator = c.req.header('if-none-match');
     const expectedTag = tag(project.revision);
-    c.header('Cache-Control', 'no-store');
-    if (validator === expectedTag && await deps.files.getFile(auth, projectId, compPath ?? 'index.html')) {
+    if (validator === expectedTag && await deps.files.hasFile(auth, projectId, compPath ?? 'index.html')) {
+      c.header('Cache-Control', 'private, no-cache');
+      c.header('Vary', 'Cookie, Authorization');
       c.header('ETag', expectedTag);
       return c.body(null, 304);
     }
@@ -207,21 +249,26 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
         return html === null ? null : { html, templateBase, revision: virtual.revision };
       });
       if (!doc) {
+        c.header('Cache-Control', 'no-store');
         return c.json(compPath === undefined
           ? { error: 'Entry composition index.html not found' }
           : { error: 'Sub-composition not found', path: compPath }, 404);
       }
+      c.header('Cache-Control', 'private, no-cache');
+      c.header('Vary', 'Cookie, Authorization');
       c.header('ETag', tag(doc.revision));
       c.header('Content-Type', 'text/html; charset=utf-8');
       return c.body(assetBase ? doc.html.replaceAll(doc.templateBase, () => assetBase) : doc.html, 200);
     } catch (error) {
       if (error instanceof PreviewBuildBusy) {
         const retryAfterSeconds = 1;
+        c.header('Cache-Control', 'no-store');
         c.header('Retry-After', String(retryAfterSeconds));
         if (assetBase) return c.html(createPreviewBuildBusyHtml(projectId, retryAfterSeconds), 503);
         return c.json({ error: 'Preview builders are busy.' }, 503);
       }
       if (compPath !== undefined) throw error;
+      c.header('Cache-Control', 'no-store');
       c.header('Content-Type', 'text/html; charset=utf-8');
       return c.body(previewErrorHtml(error instanceof Error ? error.message : 'Preview bundling failed'), 500);
     }
@@ -338,13 +385,10 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
       });
     }
 
-    const presigned = await deps.files.presignFileGet(auth, projectId, safePath, {
+    const presigned = await deps.files.presignResolvedFileGet(auth.workspaceId, file, {
       expiresInSec: 300,
       responseContentType: file.mimeType,
     });
-    if (!presigned) {
-      return c.json({ error: 'Preview asset not found', path: safePath }, 404);
-    }
 
     return new Response(null, {
       status: 302,

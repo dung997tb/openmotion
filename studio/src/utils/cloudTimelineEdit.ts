@@ -7,7 +7,7 @@ import type { TimelineCommand } from '../../../packages/edit-core/timeline-schem
 import type { ProjectFileWriter, RecordEditInput } from './studioFileHistory';
 import { readProjectFileContent } from './studioFileHistory';
 import { serializeStudioFileMutations } from './studioFileMutationCoordinator';
-import { confirmedSource } from './confirmedTextSources';
+import { confirmedSource, type ConfirmedSource } from './confirmedTextSources';
 import { commitStudioEditBatch } from './projectEditBatch';
 
 type ClipLocator = { hfId?: string; domId?: string; selector?: string; selectorIndex?: number };
@@ -85,7 +85,7 @@ export async function saveCloudTimeline(
   write: ProjectFileWriter,
   recordEdit: (entry: RecordEditInput) => Promise<void>,
   label: string,
-  onSaved?: (files: RecordEditInput['files']) => Promise<void>,
+  onSaved?: (files: RecordEditInput['files'], previous?: ConfirmedSource) => Promise<void>,
   options: {
     onSkippedSelectors?: (selectors: string[]) => void;
     projectPending?: (files: RecordEditInput['files']) => (() => void) | undefined;
@@ -147,6 +147,7 @@ export async function saveCloudTimeline(
       const files = Object.fromEntries(changes.map(({ path, before, after }) => [path, { before, after }]));
       const rollback = options.projectPending?.(files);
       const [only] = changes;
+      const previous = onSaved && only && changes.length === 1 ? confirmedSource(projectId, only.path) : undefined;
       let needsRefresh: boolean;
       try {
         needsRefresh = changes.length === 1 && only
@@ -158,7 +159,7 @@ export async function saveCloudTimeline(
       }
       if (needsRefresh) rollback?.();
       await recordEdit({ label, files });
-      if (onSaved && !needsRefresh) await onSaved(files);
+      if (onSaved && !needsRefresh) await onSaved(files, previous);
       return Object.keys(files);
     },
   );

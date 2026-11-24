@@ -1,5 +1,5 @@
 import { isolatedPreviewOrigin, preparePreviewLease, type PreparedPreviewLease } from "../player/lib/previewLease";
-import { InitialPreviewLeaseContext } from "./StudioHost";
+import { InitialPreviewLeaseContext, useStudioHost } from "./StudioHost";
 import { Button } from 'open-design-ui/button';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInRouterContext, useLocation } from 'react-router';
@@ -34,6 +34,7 @@ export function MotionApp() {
 
 function MotionAppContent() {
   const { t } = useI18n();
+  const host = useStudioHost();
   const routerLocation = useLocation();
   const [route, setRoute] = useState(() => ({
     projectId: editorProjectIdFromPath(routerLocation.pathname) ?? requestedProject(routerLocation.search, routerLocation.hash),
@@ -87,6 +88,7 @@ function MotionAppContent() {
     if (projectId && validWorkspaceProject(projectId) && (sessionId === null || validWorkspaceProject(sessionId))
       && new URLSearchParams(location.search).get('templates') !== '1') {
       preloadMotionProjectEditor();
+      host?.preloadEditorHost?.();
       const origin = isolatedPreviewOrigin();
       if (origin) previewLease = preparePreviewLease(projectId, origin, controller.signal);
     }
@@ -112,7 +114,7 @@ function MotionAppContent() {
       setError((err as Error).message);
     });
     return () => controller.abort();
-  }, [route, attempt, libraryOnly, settingsPage]);
+  }, [route, attempt, libraryOnly, settingsPage, host]);
   const closeLibrary = () => {
     setLibraryOnly(false);
   };

@@ -151,6 +151,9 @@ function extractWildcardAssetPath(
   return normalizeCatalogAssetPath(decodedSegments.join('/'));
 }
 
+const CATALOG_PUBLIC_CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
+const CATALOG_PUBLIC_VARY = 'Origin';
+
 function buildHeadResponse(head: CatalogHead): Response {
   if ('kind' in head) return buildAssetResponse(head);
   const headers = new Headers({
@@ -158,13 +161,13 @@ function buildHeadResponse(head: CatalogHead): Response {
     'Content-Length': String(head.sizeBytes),
     ETag: head.etag,
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'private, max-age=60',
-    Vary: 'Origin, Cookie',
+    'Cache-Control': CATALOG_PUBLIC_CACHE_CONTROL,
+    Vary: CATALOG_PUBLIC_VARY,
   });
   return new Response(null, { status: 200, headers });
 }
 
-function buildAssetResponse(resolved: ResolvedCatalogAsset): Response {
+function buildAssetResponse(resolved: ResolvedCatalogAsset, ifNoneMatch?: string): Response {
   if (resolved.kind === 'redirect') {
     const headers = new Headers({
       Location: resolved.location,
@@ -175,6 +178,17 @@ function buildAssetResponse(resolved: ResolvedCatalogAsset): Response {
       headers.set('ETag', resolved.etag);
     }
     return new Response(null, { status: 302, headers });
+  }
+
+  if (ifNoneMatch && ifNoneMatch.trim() === resolved.etag) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        ETag: resolved.etag,
+        'Cache-Control': resolved.cacheControl,
+        Vary: resolved.vary,
+      },
+    });
   }
 
   const headers = new Headers({
@@ -209,7 +223,7 @@ function resolveRequiredAuth(
  * - Listing & search (`GET /api/templates`, `GET /api/template-catalog`)
  * - Template detail (`GET /api/templates/:id`)
  * - `HEAD` directly from PostgreSQL metadata (never redirects `HEAD` to GET-signed S3 URLs)
- * - `GET` `302` presigned poster/preview/source endpoints (with `Cache-Control: private, max-age=60`, `Vary: Origin, Cookie`)
+ * - `GET` `302` presigned poster/preview/source endpoints (with `Cache-Control: public, max-age=300, s-maxage=300`, `Vary: Origin`)
  * - Zero-copy clone into tenant workspace (`POST /api/templates/:id/clone` and `/open`)
  */
 export function createCatalogRoutes(deps: CatalogRoutesDeps): Hono<CatalogRouteEnv> {
@@ -282,7 +296,7 @@ export function createCatalogRoutes(deps: CatalogRoutesDeps): Hono<CatalogRouteE
       return buildHeadResponse(await catalog.headPosterAsset(id));
     }
     const resolved = await catalog.resolvePosterAsset(id);
-    return buildAssetResponse(resolved);
+    return buildAssetResponse(resolved, c.req.header('if-none-match'));
   });
 
   // 4. Preview GET & HEAD (302 presigned on GET; PG metadata on HEAD)
@@ -292,7 +306,7 @@ export function createCatalogRoutes(deps: CatalogRoutesDeps): Hono<CatalogRouteE
       return buildHeadResponse(await catalog.headPreviewAsset(id));
     }
     const resolved = await catalog.resolvePreviewAsset(id);
-    return buildAssetResponse(resolved);
+    return buildAssetResponse(resolved, c.req.header('if-none-match'));
   });
 
   // 5. Source asset GET & HEAD under both `/templates/:id/source/*` and legacy `/template-source/:id/*`
@@ -312,7 +326,7 @@ export function createCatalogRoutes(deps: CatalogRoutesDeps): Hono<CatalogRouteE
       forceRedirect: c.req.query('redirect') === '1',
       locale: c.req.query('locale') || undefined,
     });
-    return buildAssetResponse(resolved);
+    return buildAssetResponse(resolved, c.req.header('if-none-match'));
   };
 
   app.get(`${base}/templates/:id/source/*`, (c) => handleSourceAsset(c, 'templates-source'));

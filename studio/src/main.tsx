@@ -15,18 +15,15 @@ import {
   isExtensionOnlyStack,
 } from "./utils/rejectionTelemetry";
 import { prefetchPreviewForHash } from "./utils/previewPrefetch";
-import { bindThumbnailPageLifecycle } from "./player/lib/thumbnailPageLifecycle";
 // Shared workspace host and discovery surface styles (imported before studio.css
 // and application.css to preserve exact cascade order across all lazy routes).
-import "./motion/skills.css";
 import "./motion/sceneDiscovery.css";
-import "./motion/assets.css";
 import "./styles/studio.css";
 import "./motion/theme.css";
 import "./motion/workspace.css";
-import "../../packages/design-system/studio.css";
+import "../../packages/design-system/studio-shell.css";
 import "./motion/application.css";
-import { MotionStudioHost } from "./motion/MotionStudioHost";
+import { MotionAppShell } from "./motion/MotionAppShell";
 import { StudioRouterProvider } from "./router/createAppRouter";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
@@ -50,9 +47,6 @@ import.meta.hot?.dispose(unbindHostTheme);
 
 const stopDiagnostics = initializeDiagnostics();
 import.meta.hot?.dispose(stopDiagnostics);
-
-const unbindThumbnailPageLifecycle = bindThumbnailPageLifecycle(window, document);
-import.meta.hot?.dispose(unbindThumbnailPageLifecycle);
 
 prefetchPreviewForHash(window.location.hash);
 window.addEventListener("hashchange", () => prefetchPreviewForHash(window.location.hash));
@@ -155,12 +149,12 @@ function mountStudio() {
           Icons that pass their own size or weight still win. */}
       <IconContext.Provider value={readIconTokens()}>
         <ShowThemeToggle.Provider value>
-          <MotionStudioHost>
+          <MotionAppShell>
             <StudioRouterProvider>
               <MotionApp />
             </StudioRouterProvider>
             {ComponentInspector && <Suspense fallback={null}><ComponentInspector /></Suspense>}
-          </MotionStudioHost>
+          </MotionAppShell>
         </ShowThemeToggle.Provider>
       </IconContext.Provider>
     </StrictMode>,

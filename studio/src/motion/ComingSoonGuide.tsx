@@ -1,3 +1,4 @@
+import './skills.css';
 import { Button } from 'open-design-ui/button';
 import { GitHubMark } from '../../../packages/design-system/react/GitHubMark';
 import { useI18n } from '../i18n/I18n';

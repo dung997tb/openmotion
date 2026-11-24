@@ -24,6 +24,7 @@ import {
   parsePreviewFacts,
 } from "../store/previewQualitySlice";
 import { parseTimelineFromDOM } from "../lib/timelineDOM";
+import { acceptsTimingManifest } from "../peerTimingPreview";
 import { hasPendingHistoryTimeline } from "../timelineRestorePending";
 import {
   createPreviewAdapter,
@@ -87,6 +88,8 @@ function acceptedPreviewMessage(
   if (isPreviewBridgeMessageValue(data) && data.source === PREVIEW_BRIDGE_SOURCE) {
     const adapter = iframe ? createPreviewAdapter({ iframe }) : null;
     if (!adapter?.accepts(e)) return null;
+    if (iframe && data.type === "timeline-state" && Array.isArray(data.clips) &&
+        !acceptsTimingManifest(iframe, data.timelinePath, data.timelineVersion)) return null;
     if (data.type === "layer-tree" || data.type === "response") return null;
     return projectTimelineUrls(normalizeBridgeMessage(data), adapter);
   }

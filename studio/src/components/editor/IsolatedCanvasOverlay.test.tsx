@@ -8,6 +8,7 @@ import { PREVIEW_BRIDGE_SOURCE, type PreviewBridgeMessage } from "../../player/l
 
 const state = vi.hoisted(() => ({
   previewIframeRef: { current: null as HTMLIFrameElement | null },
+  compositionRect: { left: 10, top: 10, width: 200, height: 100 },
   commitDomEditPatchBatches: vi.fn(),
   showToast: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("../../contexts/DomEditContext", () => ({ useDomEditActionsContext: () =
 vi.mock("../../contexts/StudioContext", () => ({
   useStudioShellContext: () => ({ ...state, projectId: "project-1", writeBlockedReason: null }),
 }));
+vi.mock("./PreviewOverlayProvider", () => ({ usePreviewOverlayContext: () => ({ state }) }));
 vi.mock("../../i18n/I18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 
 let host: HTMLElement, frame: HTMLIFrameElement, root: Root, canvas: HTMLElement;
@@ -38,6 +40,7 @@ beforeEach(() => {
   vi.spyOn(frame, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 200, 100));
   state.previewIframeRef.current = frame;
   messages = [];
+  state.compositionRect = { left: 10, top: 10, width: 200, height: 100 };
   state.commitDomEditPatchBatches.mockReset().mockResolvedValue({ durable: true, changed: true });
   vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(message => { messages.push(message); });
   root = createRoot(host);
@@ -170,6 +173,10 @@ it("outlines only the verified frame's layer selection at its scaled coordinates
   deliver("one");
   const style = (canvas.firstElementChild as HTMLElement).style;
   expect([style.left, style.top, style.width, style.height]).toEqual(["34px", "40px", "64px", "40px"]);
+  state.compositionRect = { left: 30, top: 20, width: 300, height: 150 };
+  act(() => root.render(<IsolatedCanvasOverlay />));
+  expect([style.left, style.top, style.width, style.height]).toEqual(["66px", "65px", "96px", "60px"]);
+  expect(messages).toHaveLength(0);
   act(() => frame.dispatchEvent(new Event("load")));
   expect(canvas.firstElementChild).toBeNull();
 });
