@@ -111,6 +111,50 @@ it('commits missing dependencies and the host patch as one collaborative catalog
   } finally { await cleanup(); }
 });
 
+it('accepts large localized patches from an upgraded editor during a rolling deployment', { skip: !connectionString }, async () => {
+  const { auth, workspace, files, cleanup } = await fixture();
+  try {
+    const path = 'large.html';
+    const original = 'a'.repeat(1024 * 1024);
+    const inserted = '中\n\\'.repeat(60 * 1024);
+    assert.equal(Buffer.byteLength(inserted), 300 * 1024);
+    const escapedPath = 'escaped.txt';
+    const prefix = 'a'.repeat(300 * 1024);
+    const retained = '\u0001'.repeat(8);
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [
+      { path, content: original }, { path: escapedPath, content: prefix + retained },
+    ] });
+    const base = (await files.readTextFile(auth, projectId, path))!;
+    const saved = await files.commitTextEdits(auth, projectId, { files: [
+      { path, baseVersion: base.version, patch: [[0, Buffer.byteLength(inserted), inserted]] },
+    ] }, { source: 'studio', requestId: randomUUID() });
+    const current = (await files.readTextFile(auth, projectId, path))!;
+    assert.equal(current.version, saved.versionsByPath[path]);
+    assert.equal(current.content, inserted + original.slice(Buffer.byteLength(inserted)));
+
+    const requestId = randomUUID();
+    const size = Buffer.byteLength(current.content);
+    await assert.rejects(files.commitTextEdits(auth, projectId, { files: [
+      { path, baseVersion: current.version, patch: [[0, size / 2, inserted], [size / 2, size / 2, inserted]] },
+    ] }, { source: 'studio', requestId }), /Send content/);
+    assert.equal((await files.readTextFile(auth, projectId, path))!.version, current.version);
+    const full = await files.commitTextEdits(auth, projectId, { files: [
+      { path, baseVersion: current.version, content: inserted + inserted },
+    ] }, { source: 'studio', requestId });
+    assert.match(full.versionsByPath[path], /^"sha256:/);
+    assert.equal((await files.readTextFile(auth, projectId, path))!.content, inserted + inserted);
+
+    // The patch is bigger than the raw result but smaller than its escaped wire representation.
+    const escapedBase = (await files.readTextFile(auth, projectId, escapedPath))!;
+    const patch = [[0, prefix.length, inserted]] as const;
+    assert.ok(Buffer.byteLength(JSON.stringify({ patch })) > Buffer.byteLength(inserted + retained));
+    assert.ok(Buffer.byteLength(JSON.stringify({ patch })) < Buffer.byteLength(JSON.stringify({ content: inserted + retained })));
+    await files.commitTextEdits(auth, projectId, { files: [{ path: escapedPath, baseVersion: escapedBase.version, patch }] },
+      { source: 'studio', requestId: randomUUID() });
+    assert.equal((await files.readTextFile(auth, projectId, escapedPath))!.content, inserted + retained);
+  } finally { await cleanup(); }
+});
+
 it('publishes one exact file version and one history change for a patch, undo, redo and deletion', { skip: !connectionString }, async () => {
   const { events, auth, workspace, files, history, cleanup } = await fixture();
   try {
@@ -712,10 +756,11 @@ it('records a 300 KiB splice once, retries checkpoint failures and keeps saving 
   const releaseUpload = Promise.withResolvers<void>();
   try {
     const path = 'index.html';
-    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content: 'x' }] });
-    let version = formatFileVersion('workspace', sha256Hex('x'));
+    const baseline = 'x'.repeat(1024 * 1024);
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content: baseline }] });
+    let version = formatFileVersion('workspace', sha256Hex(baseline));
     async function append(text: string) {
-      const result = await files.commitTextEdits(auth, projectId, { files: [{ path, baseVersion: version, patch: [[1, 0, text]] }] },
+      const result = await files.commitTextEdits(auth, projectId, { files: [{ path, baseVersion: version, patch: [[baseline.length, 0, text]] }] },
         { requestId: randomUUID(), source: 'studio' });
       version = result.versionsByPath[path];
       return version.slice(7, -1);
@@ -753,22 +798,22 @@ it('records a 300 KiB splice once, retries checkpoint failures and keeps saving 
       await pool.query("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE NOWAIT", [auth.workspaceId]);
       // The reservation survives a crash, but the upload holds no database transaction or object locks.
       const { rows: [reservation] } = await pool.query('SELECT checkpoint_pending_sha, checkpoint_sha FROM project_text_revisions WHERE id=$1 FOR UPDATE NOWAIT', [candidate]);
-      assert.deepEqual(reservation, { checkpoint_pending_sha: sha256Hex('x' + large), checkpoint_sha: null });
+      assert.deepEqual(reservation, { checkpoint_pending_sha: sha256Hex(baseline + large), checkpoint_sha: null });
       await pool.query('SELECT sha256 FROM workspace_blobs WHERE workspace_id=$1 AND sha256=$2 FOR UPDATE NOWAIT', [auth.workspaceId, reservation.checkpoint_pending_sha]);
       assert.ok(!(await markZeroRefForDeletion(db, { graceSeconds: 0, batchSize: 128 })).some(row => row.sha256 === reservation.checkpoint_pending_sha));
       await requestTextCheckpoint(db, auth.workspaceId, candidate);
       await append(small);
       const { rows } = await pool.query(`SELECT depth, chain_patch_bytes, checkpoint_due_at IS NOT NULL AS due FROM project_text_revisions
         WHERE project_id=$1 ORDER BY chain_patch_bytes DESC`, [projectId]);
-      const smallBytes = Buffer.byteLength(JSON.stringify([[1, 0, small]]));
+      const smallBytes = Buffer.byteLength(JSON.stringify([[baseline.length, 0, small]]));
       assert.deepEqual(rows, [
-        { depth: 1, chain_patch_bytes: Buffer.byteLength(JSON.stringify([[1, 0, large]])), due: true },
+        { depth: 1, chain_patch_bytes: Buffer.byteLength(JSON.stringify([[baseline.length, 0, large]])), due: true },
         { depth: 2, chain_patch_bytes: smallBytes * 2, due: false }, { depth: 1, chain_patch_bytes: smallBytes, due: false },
       ]);
     } finally { releaseUpload.resolve(); await work; }
     assert.deepEqual(await work, { completed: 1, failed: 0 });
-    assert.equal(await ensure(auth.workspaceId, candidate), sha256Hex('x' + large));
-    assert.equal((await files.readTextFile(auth, projectId, path))?.content, 'x' + small + small + large);
+    assert.equal(await ensure(auth.workspaceId, candidate), sha256Hex(baseline + large));
+    assert.equal((await files.readTextFile(auth, projectId, path))?.content, baseline + small + small + large);
   } finally { releaseUpload.resolve(); await cleanup(); }
 });
 

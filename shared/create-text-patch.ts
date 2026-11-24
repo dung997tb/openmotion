@@ -38,10 +38,6 @@ export function createTextPatch(before: string, after: string): TextPatch | null
   const oldWindow = before.slice(start, before.length - suffix);
   const newWindow = after.slice(start, after.length - suffix);
   const changes = oldWindow && newWindow ? diffWindow(oldWindow, newWindow) : undefined;
-  // An exhausted differ gives no useful detail for rewrites of most of the file.
-  // A localized replacement, however, can still preserve the untouched majority.
-  if (!changes && oldWindow && newWindow && newWindow.length > start + suffix) return null;
-
   const patch: [number, number, string][] = [];
   let offset = encoder.encode(before.slice(0, start)).length;
   let replacement: [number, number, string] | undefined;

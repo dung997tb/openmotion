@@ -18,6 +18,8 @@ import { primaryFile } from './motion-component-source.ts';
 import { getMotionComponent, prepareMotionComponent } from './motion-component-registry.ts';
 import { validateTextPatch } from './text-patch-boundaries.ts';
 
+// Existing callers may use the patch form even for very short files.
+const SMALL_TEXT_PATCH_BYTES = 64 * 1024;
 const version = z.string().regex(/^"(?:sha256|patch):[a-f0-9]{64}"$/);
 const splice = z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative(), z.string()])
   .transform(([offset, removed, insert]) => [offset, removed, insert] as const);
@@ -57,6 +59,15 @@ export async function appendTextRevisions(tx: DbTransaction, workspaceId: string
     op: 'upsert' as const, path, blobScope: 'patch' as const, sha256: record.id,
     sizeBytes: record.sizeBytes, mimeType: record.mimeType, isText: true,
   }));
+}
+
+// The inserted strings have exactly the same JSON escaping in both wire forms. Each
+// retained UTF-8 byte can cost at most six JSON bytes (e.g. a control character).
+// This upper bound rules out wasteful patches without reading the unchanged source.
+function canPatchBeSmaller(patch: TextPatch, baseBytes: number): boolean {
+  const retained = patch.reduce((bytes, [, removed]) => bytes - removed, baseBytes);
+  const envelope = patch.map(([offset, removed]) => [offset, removed, '']);
+  return JSON.stringify({ patch: envelope }).length < '{"content":""}'.length + 6 * retained;
 }
 
 export async function commitTextEdits(files: ProjectFilesService, db: Database, storage: StoragePort,
@@ -116,6 +127,9 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
     if (!parent) throw invalid('Invalid patch base');
     if (!item.patch.length) continue;
     const sizeBytes = await validateTextPatch(db, {workspaceId: ctx.workspaceId, projectId, base: parent, patch: item.patch, storage});
+    if (patchBytes > SMALL_TEXT_PATCH_BYTES && !canPatchBeSmaller(item.patch, parent.sizeBytes)) {
+      throw invalid('Send content for a large replacement whose patch cannot be smaller than the complete file.');
+    }
     let depth = 1;
     let chainPatchBytes = patchBytes;
     if (parent.blobScope === 'patch') {
