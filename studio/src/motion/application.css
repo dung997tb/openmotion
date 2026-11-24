@@ -269,11 +269,6 @@
 .om-agent-connection details[open] { display: grid; gap: var(--motion-space-12); }
 .om-agent-connection details[open] > :not(summary) { margin-top: var(--motion-space-12); }
 
-.om-contribution-guide { display: grid; gap: var(--motion-space-16); min-width: 0; }
-.om-contribution-steps { margin: 0; padding-inline-start: 20px; list-style: decimal; display: grid; gap: var(--motion-space-6); font-size: var(--motion-text-sm); line-height: var(--motion-leading-prose); color: var(--motion-text); }
-.om-contribution-prompt { margin: 0; padding: var(--motion-space-16); background: var(--motion-inset); border: 0; border-radius: var(--motion-radius-lg); font-family: var(--motion-font-mono); font-size: var(--motion-text-sm); line-height: var(--motion-leading-prose); color: var(--motion-text); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; user-select: all; }
-.om-contribution-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--motion-space-12); }
-
 .om-agent-list-note { padding: var(--motion-space-8); }
 .om-agent-model-list { display: grid; gap: var(--motion-space-4); max-height: 280px; overflow: auto; }
 .om-agent-model-list .om-nav-item { justify-content: space-between; min-height: 36px; }

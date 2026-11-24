@@ -3,7 +3,7 @@ import { HorizontalRail } from './HorizontalRail';
 import { collectionFacet, industryCollection } from './templateCollections';
 import { TemplateIndustryMenu } from './TemplateIndustryMenu';
 import { SkillSubmissionLink } from './SkillSubmissionLink';
-import { ContributionSubmitButton } from './ContributionGuideDialog';
+import { templateContributionUrl } from './templateContribution';
 import { MotionIcon } from './icons';
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { exploreCommunities, findMediaStudio, findTechniqueStudio, type CreativeStudio, type ExploreCommunity, type MediaStudio } from '../../../shared/studio-catalog';
@@ -562,8 +562,8 @@ function ExploreCollection({ community, root, firstPages, ...props }: ExplorePro
           send('ui_click', { page_name: 'explore', area: 'explore_feed', element: 'view_all_templates', ...templateShelfTarget(shelf.collection) });
           openLibrary(trigger, undefined, shelf.collection ?? undefined);
         }}
-        extraAction={<ContributionSubmitButton kind="template" label={t('Submit template')} className="om-button" primary borderless
-          onTrack={() => track('explore_feed', 'submit_video')} />}>
+        extraAction={<a className="om-button" data-primary data-borderless href={templateContributionUrl} target="_blank" rel="noopener noreferrer"
+          onClick={() => track('explore_feed', 'submit_video')}>{t('Submit template')}<MotionIcon name="arrow-up-right" size={15} /></a>}>
         {shelf.error ? <div className="om-discovery-empty" role="alert"><span>{t('Templates could not be loaded.')}</span><Button type="button" variant="secondary" className="om-button" onClick={shelf.retry}>{t('Retry')}</Button></div>
           : !shelf.loading && !shelfItems.length ? <p className="om-muted">{t('No templates available. Open the library or try again later.')}</p>
           : <div className="om-studio-template-grid om-explore-preview-grid" aria-busy={shelf.loading} aria-label={shelf.loading ? t('Loading templates…') : undefined}>

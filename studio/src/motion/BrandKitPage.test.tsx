@@ -439,10 +439,7 @@ it('limits surprise to matching official kits and retains discovery state after 
   await click('Close Brand Kit preview');
   expect(page().querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('Azure');
   expect(galleryCards()).toEqual(['azure']);
-  const submitBrandKit = page().querySelector<HTMLButtonElement>('button[data-contribution-trigger="brand-kit"]');
-  expect(submitBrandKit?.textContent).toContain('Submit Brand Kit');
-  await act(async () => submitBrandKit?.click());
-  expect(document.querySelector('.om-contribution-guide a[href="https://github.com/nexu-io/openmotion/blob/main/CONTRIBUTING.md#submit-a-brand-kit"]')).toBeTruthy();
+  expect(page().querySelector('a[href="https://github.com/nexu-io/openmotion/blob/main/CONTRIBUTING.md#submit-a-brand-kit"]')?.textContent).toContain('Submit Brand Kit');
 });
 
 it('opens extraction in the detail layout and returns to its source collection', async () => {
