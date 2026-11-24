@@ -378,7 +378,20 @@
     "Follow-up behavior": "跟随提问方式",
     "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "在智能体运行期间将新消息加入队列，或立即打断并引导当前任务。按 ⌘ / Ctrl + Enter 可临时以相反方式发送当前消息。",
     "Steer": "Steer（即时打断引导）",
-    "Queue": "Queue（加入队列）"
+    "Queue": "Queue（加入队列）",
+    "Console": "控制台",
+    "Upgrade": "升级",
+    "Current period ends {date}": "本期结束于 {date}",
+    "Coding Plan quota": "Coding Plan 额度",
+    "7-day quota remaining": "7 天额度剩余",
+    "Resets in {days}d {hours}h {minutes}m": "{days} 天 {hours} 小时 {minutes} 分后重置",
+    "Quota windows temporarily unavailable": "额度窗口暂不可用",
+    "Pay-as-you-go credits": "按量额度",
+    "After your plan quota runs out, keep working with pay-as-you-go credits.": "套餐额度用完后，可用按量额度继续工作。",
+    "Top up": "充值",
+    "Auto top-up on": "自动充值已开启",
+    "Auto top-up off": "自动充值未开启",
+    "Both quotas are shared by your team. Each task uses the quota of the model chosen when it starts.": "两种额度由团队共享，按任务发起时所选的模型扣除对应的额度。"
   },
   "ja": {
     "Go back": "戻る",

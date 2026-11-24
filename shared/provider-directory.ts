@@ -51,6 +51,16 @@ export type AccountAttempt = {
   /** Confirms credentials an interrupted attempt had already saved; the connector shows no activation link for it. */
   resumed?: boolean;
 };
+export type AccountUsage = {
+  /** ISO time the current subscription period ends. */
+  periodEnd?: string | null;
+  /** The 7-day Coding Plan window: remaining share 0–100 and when it resets (ISO), or null when unavailable. */
+  weekly?: { remainingPercent: number; resetsAt: string | null } | null;
+  /** Pay-as-you-go credits in USD, used after the plan quota runs out. */
+  payAsYouGoUsd?: string | null;
+  autoRecharge?: boolean;
+};
+
 export type AccountSummary = {
   state: 'signed-out' | 'authorizing' | 'signed-in' | 'reauth-required' | 'unavailable';
   user?: { name?: string; email?: string }; authorizationUrl?: string; userCode?: string;
@@ -59,6 +69,12 @@ export type AccountSummary = {
   /** While authorizing: the browser approved the sign-in and the account is being set up locally. */
   syncing?: boolean;
   plan?: string; balance?: string | null; billingUnavailable?: boolean;
+  /**
+   * Plan usage as the OpenDesign console dashboard shows it. Optional until the gateway passes it through: `periodEnd` and
+   * `payAsYouGoUsd` come from billing/summary (`subscriptionCurrentPeriodEnd`, `rechargeCreditsUsd`); `weekly` from the
+   * workspace billing snapshot's 7-day design plan window. Studio keeps the plan/balance cards while it is absent.
+   */
+  usage?: AccountUsage;
   /** Service rejection behind `billingUnavailable`, when the connector reported one. */
   billingError?: { status: number; code?: string };
   error?: string; errorCode?: AccountErrorCode; attempt?: AccountAttempt;
