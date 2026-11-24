@@ -30,6 +30,14 @@ it("projects only the requested authored layer, with caret text and presentation
   expect(await inspect('<p id="t">word</p>', {elementId:"t",sourceFile:"missing.html"})).toBeNull();
 });
 
+it("distinguishes a mounted target awaiting its saved version from a removed target", async () => {
+  const html = '<h1 id="title">Title</h1>';
+  const target = { elementId: "title" };
+  expect(await inspect(html, target, "")).toBeUndefined();
+  expect((await inspect(html, target))?.id).toBe("title");
+  expect(await inspect('<p id="other">Other</p>', target)).toBeNull();
+});
+
 it("accepts a preview produced from a patch revision without a content digest", async () => {
   const version = '"patch:' + 'c'.repeat(64) + '"';
   const selection = await inspect('<h1 id="p">Title</h1>', {elementId:"p"}, version);

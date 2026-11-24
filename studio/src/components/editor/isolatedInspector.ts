@@ -28,7 +28,7 @@ function plainMap(input: unknown, allowed: (key: string) => boolean, limit: numb
 
 export async function inspectIsolatedElement(adapter: PreviewAdapter, identity: Identity, isMasterView: boolean) {
   if (!identity.elementId && !identity.hfId) return null;
-  const snapshot = await adapter.request<InspectorSnapshot | null>("inspect-element", {
+  const snapshot = await adapter.request<InspectorSnapshot | null | undefined>("inspect-element", {
     elementId: identity.elementId, hfId: identity.hfId, sourceFile: identity.sourceFile, properties: CURATED_STYLE_PROPERTIES,
   }).catch(() => undefined);
   if (snapshot === undefined) return undefined;
