@@ -150,9 +150,42 @@ function InlineVideo({ item }: { item: PoolItem }) {
   );
 }
 
+/** An image from this run to dress an audio output: the first generated still, else any image. */
+function runCoverImage(run: ScenarioRun | null, poolById: Map<string, PoolItem>): string | null {
+  const images = (run?.pool ?? []).map(item => poolById.get(item.id) ?? item)
+    .filter(item => item.kind === 'image' && item.ref.type === 'asset');
+  const pick = images.find(item => item.stepId !== null) ?? images[0];
+  return pick && pick.ref.type === 'asset' ? assetMediaUrl(pick.ref.assetId, pick.ref.versionId) : null;
+}
+
+/** A cover for an audio output: the run's key image under a waveform, so the card reads as sound. */
+function AudioCover({ item, image, large = false }: { item: PoolItem; image: string | null; large?: boolean }) {
+  // A fixed waveform per item, so the cover never changes between renders.
+  const bars = useMemo(() => {
+    let seed = 0;
+    for (const char of item.id) seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
+    return Array.from({ length: large ? 48 : 28 }, (_, index) => {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      const envelope = Math.sin(Math.PI * (index + 0.5) / (large ? 48 : 28));
+      return 0.25 + 0.75 * envelope * (0.45 + (seed % 1000) / 1800);
+    });
+  }, [item.id, large]);
+  return (
+    <span className="om-studio-audio-cover" data-size={large ? 'lg' : 'md'} aria-hidden="true">
+      {image && <img src={image} alt="" loading="lazy" />}
+      <span className="om-studio-audio-cover-icon"><RemixIcon name={item.label.includes('配音') || /voice/i.test(item.label) ? 'mic-line' : 'music-2-line'} size={large ? 22 : 16} /></span>
+      <span className="om-studio-audio-cover-wave">
+        {bars.map((height, index) => <i key={index} style={{ height: `${Math.round(height * 100)}%` }} />)}
+      </span>
+      {large && <span className="om-studio-audio-cover-title">{item.label}</span>}
+    </span>
+  );
+}
+
 /** A deliverable tab: the top row switches which output is shown below. */
-function DeliverableTab({ step, state, cover, example, selected, onSelect }: {
+function DeliverableTab({ step, state, cover, audioImage, example, selected, onSelect }: {
   step: ScenarioStepDefinition;
+  audioImage: string | null;
   state: ScenarioStepState | undefined;
   cover: { item: PoolItem; run: ScenarioRun | null } | null;
   example: string | undefined;
@@ -165,7 +198,8 @@ function DeliverableTab({ step, state, cover, example, selected, onSelect }: {
     <Button variant="plain" role="tab" aria-selected={selected} className="om-studio-output" data-studio-output={step.id}
       data-output-state={status} onClick={onSelect}>
       <span className="om-studio-output-art" aria-hidden="true">
-        {cover ? <PoolThumb item={cover.item} run={cover.run} size="lg" />
+        {cover?.item.kind === 'audio' ? <AudioCover item={cover.item} image={audioImage} />
+          : cover ? <PoolThumb item={cover.item} run={cover.run} size="lg" />
           : example ? <img src={example} alt="" loading="lazy" />
           : <RemixIcon name={step.icon} size={24} />}
         {!cover && example && <span className="om-studio-output-example">{t('Example output')}</span>}
@@ -190,6 +224,7 @@ export function ScenarioStudioView({
   // Studios show one example per scenario for now; the keyboard example is not offered here.
   const presets = useMemo(() => briefPresetsFor(scenario.id, locale).filter(preset => !hiddenStudioPresets.has(preset.id)), [scenario.id, locale]);
   const poolById = useMemo(() => new Map(poolItems.map(item => [item.id, item])), [poolItems]);
+  const audioImage = useMemo(() => runCoverImage(run, poolById), [run, poolById]);
   const references = useMemo(() => poolItems.filter(item => item.stepId === null && !item.tags.includes('product') && (item.source === 'upload' || item.source === 'workspace')), [poolItems]);
   const briefFieldIds = useMemo(() => new Set(scenario.briefFields.map(field => field.id)), [scenario]);
   const usesProduct = studioUsesProduct(briefFieldIds);
@@ -552,7 +587,7 @@ export function ScenarioStudioView({
             const first = made.items[0] ?? made.posts.flatMap(post => post.mediaPoolItemIds).map(id => poolById.get(id)).find((item): item is PoolItem => Boolean(item));
             return (
               <DeliverableTab key={step.id} step={step} state={run?.steps[step.id]} example={examples.get(step.id)}
-                cover={first ? { item: first, run } : null} selected={step.id === shownStep?.id} onSelect={() => setShownStepId(step.id)} />
+                cover={first ? { item: first, run } : null} audioImage={audioImage} selected={step.id === shownStep?.id} onSelect={() => setShownStepId(step.id)} />
             );
           })}
         </div>
@@ -603,7 +638,7 @@ export function ScenarioStudioView({
                   ))}
                   {items.filter(item => item.kind === 'audio' && item.ref.type === 'asset').map(item => (
                     <figure key={item.id} className="om-studio-output-audio" data-studio-inline="audio">
-                      <figcaption>{item.label}</figcaption>
+                      <AudioCover item={item} image={audioImage} large />
                       {item.ref.type === 'asset' && <audio controls preload="metadata" src={assetMediaUrl(item.ref.assetId, item.ref.versionId)} />}
                     </figure>
                   ))}
