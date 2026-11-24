@@ -469,4 +469,288 @@ describe("runIsolatedBrowserExport bridge orchestration", () => {
     expect(seenStages.some((s) => s.length === 200)).toBe(true);
     expect(seenStages.every((s) => s.length <= 200)).toBe(true);
   });
+
+  it("sizes the hidden export frame from liveIframe and timeline-state authored dimensions", async () => {
+    setupPreviewTokenFetch("pt-isolated-vertical");
+    const origAppendChild = document.body.appendChild.bind(document.body);
+    let mountedFrame: HTMLIFrameElement | null = null;
+    let initialMountedWidth = "";
+    let initialMountedHeight = "";
+    let startFrameWidth = "";
+    let startFrameHeight = "";
+    let startPayload: Record<string, unknown> | null = null;
+
+    const liveIframe = document.createElement("iframe");
+    liveIframe.setAttribute("width", "1080");
+    liveIframe.setAttribute("height", "1920");
+
+    const fakeContentWindow = {
+      postMessage: (data: Record<string, unknown>) => {
+        if (data.type === "browser-export-start") {
+          startFrameWidth = mountedFrame?.style.width ?? "";
+          startFrameHeight = mountedFrame?.style.height ?? "";
+          startPayload = (data.payload as Record<string, unknown>) ?? null;
+          const outBuf = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]).buffer;
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "response",
+                projectId: "demo",
+                token: "pt-isolated-vertical",
+                requestId: String(data.requestId),
+                ok: true,
+                result: { buffer: outBuf, mimeType: "video/mp4", width: 720, height: 1280, frameCount: 60 },
+              },
+            }),
+          );
+        }
+      },
+    };
+
+    vi.spyOn(document.body, "appendChild").mockImplementation(<T extends Node>(node: T): T => {
+      const appended = origAppendChild(node);
+      if (node instanceof HTMLIFrameElement && node.hasAttribute("data-openmotion-isolated-export-frame")) {
+        mountedFrame = node;
+        initialMountedWidth = node.style.width;
+        initialMountedHeight = node.style.height;
+        let storedSrc = "";
+        Object.defineProperty(node, "src", { configurable: true, get: () => storedSrc, set: (v: string) => { storedSrc = v; } });
+        Object.defineProperty(node, "contentWindow", { configurable: true, get: () => fakeContentWindow });
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "preview-ready",
+                projectId: "demo",
+                token: "pt-isolated-vertical",
+                capabilities: ["browser-export"],
+              },
+            }),
+          );
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "timeline-state",
+                projectId: "demo",
+                token: "pt-isolated-vertical",
+                duration: 2,
+                width: 720,
+                height: 1280,
+                firstFrame: "ready",
+              },
+            }),
+          );
+        });
+      }
+      return appended;
+    });
+
+    const result = await runIsolatedBrowserExport({
+      projectId: "demo",
+      previewOrigin: "https://openmotion-preview.example.test",
+      format: "mp4",
+      quality: "standard",
+      fps: 30,
+      duration: 2,
+      elements: [makeElement({ tag: "p", text: { value: "Portrait" } })],
+      keyframeCache: new Map(),
+      iframe: liveIframe,
+    });
+
+    expect(initialMountedWidth).toBe("1080px");
+    expect(initialMountedHeight).toBe("1920px");
+    expect(startFrameWidth).toBe("720px");
+    expect(startFrameHeight).toBe("1280px");
+    expect(startPayload?.compositionDimensions).toEqual({ width: 720, height: 1280 });
+    expect(result.width).toBe(720);
+    expect(result.height).toBe(1280);
+  });
+
+  it("rejects stalled exports via watchdog and resets the timer while progress arrives", async () => {
+    setupPreviewTokenFetch("pt-isolated-stall");
+    const origAppendChild = document.body.appendChild.bind(document.body);
+    const sentTypes: string[] = [];
+    let mountedFrame: HTMLIFrameElement | null = null;
+
+    const fakeContentWindow = {
+      postMessage: (data: Record<string, unknown>) => {
+        sentTypes.push(String(data.type));
+      },
+    };
+
+    vi.spyOn(document.body, "appendChild").mockImplementation(<T extends Node>(node: T): T => {
+      const appended = origAppendChild(node);
+      if (node instanceof HTMLIFrameElement && node.hasAttribute("data-openmotion-isolated-export-frame")) {
+        mountedFrame = node;
+        let storedSrc = "";
+        Object.defineProperty(node, "src", { configurable: true, get: () => storedSrc, set: (v: string) => { storedSrc = v; } });
+        Object.defineProperty(node, "contentWindow", { configurable: true, get: () => fakeContentWindow });
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "preview-ready",
+                projectId: "demo",
+                token: "pt-isolated-stall",
+                capabilities: ["browser-export"],
+              },
+            }),
+          );
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "timeline-state",
+                projectId: "demo",
+                token: "pt-isolated-stall",
+                duration: 2,
+                firstFrame: "ready",
+              },
+            }),
+          );
+        });
+      }
+      return appended;
+    });
+
+    await expect(
+      runIsolatedBrowserExport({
+        projectId: "demo",
+        previewOrigin: "https://openmotion-preview.example.test",
+        format: "mp4",
+        quality: "standard",
+        fps: 30,
+        duration: 2,
+        elements: [makeElement({ tag: "p", text: { value: "Stalled" } })],
+        keyframeCache: new Map(),
+        stallTimeoutMs: 40,
+      }),
+    ).rejects.toThrow("Timed out waiting for isolated browser export progress.");
+
+    expect(sentTypes).toEqual(["browser-export-start", "browser-export-cancel"]);
+    expect(mountedFrame?.isConnected).toBe(false);
+
+    // Active progress heartbeats keep the export alive past a single stall window.
+    vi.restoreAllMocks();
+    clearSharedPreviewGrantsForTest();
+    setupPreviewTokenFetch("pt-isolated-heartbeat");
+    const fakeActiveWindow = {
+      postMessage: (data: Record<string, unknown>) => {
+        if (data.type === "browser-export-start") {
+          const requestId = String(data.requestId);
+          const exportId = String(data.exportId);
+          setTimeout(() => {
+            window.dispatchEvent(
+              new MessageEvent("message", {
+                origin: "https://openmotion-preview.example.test",
+                source: fakeActiveWindow as unknown as Window,
+                data: {
+                  source: "openmotion-preview-bridge",
+                  version: 1,
+                  type: "browser-export-progress",
+                  projectId: "demo",
+                  token: "pt-isolated-heartbeat",
+                  requestId,
+                  exportId,
+                  progress: 50,
+                  stage: "Encoding frame 15/30",
+                },
+              }),
+            );
+          }, 40);
+          setTimeout(() => {
+            const outBuf = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]).buffer;
+            window.dispatchEvent(
+              new MessageEvent("message", {
+                origin: "https://openmotion-preview.example.test",
+                source: fakeActiveWindow as unknown as Window,
+                data: {
+                  source: "openmotion-preview-bridge",
+                  version: 1,
+                  type: "response",
+                  projectId: "demo",
+                  token: "pt-isolated-heartbeat",
+                  requestId,
+                  ok: true,
+                  result: { buffer: outBuf, mimeType: "video/mp4", width: 1920, height: 1080, frameCount: 30 },
+                },
+              }),
+            );
+          }, 95);
+        }
+      },
+    };
+    vi.spyOn(document.body, "appendChild").mockImplementation(<T extends Node>(node: T): T => {
+      const appended = origAppendChild(node);
+      if (node instanceof HTMLIFrameElement && node.hasAttribute("data-openmotion-isolated-export-frame")) {
+        let storedSrc = "";
+        Object.defineProperty(node, "src", { configurable: true, get: () => storedSrc, set: (v: string) => { storedSrc = v; } });
+        Object.defineProperty(node, "contentWindow", { configurable: true, get: () => fakeActiveWindow });
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeActiveWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "preview-ready",
+                projectId: "demo",
+                token: "pt-isolated-heartbeat",
+                capabilities: ["browser-export"],
+              },
+            }),
+          );
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeActiveWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "timeline-state",
+                projectId: "demo",
+                token: "pt-isolated-heartbeat",
+                duration: 1,
+                firstFrame: "ready",
+              },
+            }),
+          );
+        });
+      }
+      return appended;
+    });
+
+    const completed = await runIsolatedBrowserExport({
+      projectId: "demo",
+      previewOrigin: "https://openmotion-preview.example.test",
+      format: "mp4",
+      quality: "standard",
+      fps: 30,
+      duration: 1,
+      elements: [makeElement({ tag: "p", text: { value: "Alive" } })],
+      keyframeCache: new Map(),
+      stallTimeoutMs: 80,
+    });
+    expect(completed.bytes).toBe(12);
+  });
 });

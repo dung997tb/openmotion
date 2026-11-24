@@ -13,12 +13,44 @@ import {
 } from "./browserExport";
 
 const ISOLATED_EXPORT_BOOT_TIMEOUT_MS = 20_000;
+const ISOLATED_EXPORT_STALL_TIMEOUT_MS = 60_000;
 const MAX_STAGE_LENGTH = 200;
 const MAX_ERROR_LENGTH = 500;
+const MAX_FRAME_DIMENSION = 16_384;
 
 export interface IsolatedBrowserExportOptions extends Omit<BrowserExportOptions, "isolateIframe" | "previewTarget"> {
   previewOrigin: string;
   activeCompPath?: string | null;
+  /** Maximum inactivity window without progress/response during export before failing. */
+  stallTimeoutMs?: number;
+}
+
+function normalizeAuthoredDimensions(
+  width: unknown,
+  height: unknown,
+): { width: number; height: number } | null {
+  const w = typeof width === "number" ? width : typeof width === "string" && width.trim() ? Number(width) : NaN;
+  const h = typeof height === "number" ? height : typeof height === "string" && height.trim() ? Number(height) : NaN;
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
+  if (w <= 0 || h <= 0 || w > MAX_FRAME_DIMENSION || h > MAX_FRAME_DIMENSION) return null;
+  return { width: Math.max(2, Math.round(w)), height: Math.max(2, Math.round(h)) };
+}
+
+function readIframeAuthoredDimensions(iframe?: HTMLIFrameElement | null): { width: number; height: number } | null {
+  if (!iframe) return null;
+  return normalizeAuthoredDimensions(
+    iframe.getAttribute("width") || iframe.width,
+    iframe.getAttribute("height") || iframe.height,
+  );
+}
+
+function applyFrameDimensions(frame: HTMLIFrameElement, dims: { width: number; height: number }): void {
+  const width = Math.max(2, Math.round(dims.width));
+  const height = Math.max(2, Math.round(dims.height));
+  frame.width = String(width);
+  frame.height = String(height);
+  frame.style.width = `${width}px`;
+  frame.style.height = `${height}px`;
 }
 
 export function sanitizeIsolatedExportMimeType(
@@ -147,6 +179,7 @@ export async function runIsolatedBrowserExport(
     iframe: liveIframe,
     htmlCaptureMode,
     snapdomEngine,
+    stallTimeoutMs,
     signal,
     onProgress,
   } = options;
@@ -180,16 +213,13 @@ export async function runIsolatedBrowserExport(
     activeCompPath,
   });
 
-  const resolvedSize = resolveBrowserExportDimensions(
+  let authoredDimensions =
+    normalizeAuthoredDimensions(compositionDimensions?.width, compositionDimensions?.height) ??
+    readIframeAuthoredDimensions(liveIframe);
+  const initialSize = authoredDimensions ?? resolveBrowserExportDimensions(
     resolution as CanvasResolution | "auto" | undefined,
     compositionDimensions,
   );
-  const frameWidth = compositionDimensions?.width && compositionDimensions.width > 0
-    ? compositionDimensions.width
-    : resolvedSize.width;
-  const frameHeight = compositionDimensions?.height && compositionDimensions.height > 0
-    ? compositionDimensions.height
-    : resolvedSize.height;
 
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
@@ -201,13 +231,12 @@ export async function runIsolatedBrowserExport(
     "position: fixed",
     "left: 0",
     "top: 0",
-    `width: ${Math.max(2, Math.round(frameWidth))}px`,
-    `height: ${Math.max(2, Math.round(frameHeight))}px`,
     "border: 0",
     "opacity: 0.001",
     "pointer-events: none",
     "z-index: -1",
   ].join("; ");
+  applyFrameDimensions(frame, initialSize);
 
   const exportId =
     globalThis.crypto?.randomUUID?.() ?? `isolated-export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -266,6 +295,11 @@ export async function runIsolatedBrowserExport(
           return;
         }
         if (data.type === "timeline-state") {
+          const reportedDims = normalizeAuthoredDimensions(data.width, data.height);
+          if (reportedDims) {
+            authoredDimensions = reportedDims;
+            applyFrameDimensions(frame, reportedDims);
+          }
           if (Number(data.duration) > 0) {
             sawTimeline = true;
             if (sawReady) finish();
@@ -280,6 +314,17 @@ export async function runIsolatedBrowserExport(
     throwIfAborted(signal);
     onProgress?.({ progress: 4, stage: "Preparing browser export" });
 
+    const effectiveCompositionDimensions =
+      normalizeAuthoredDimensions(compositionDimensions?.width, compositionDimensions?.height) ?? authoredDimensions;
+    const resolvedSize = resolveBrowserExportDimensions(
+      resolution as CanvasResolution | "auto" | undefined,
+      effectiveCompositionDimensions,
+    );
+    const effectiveStallTimeoutMs =
+      typeof stallTimeoutMs === "number" && Number.isFinite(stallTimeoutMs) && stallTimeoutMs > 0
+        ? stallTimeoutMs
+        : ISOLATED_EXPORT_STALL_TIMEOUT_MS;
+
     const serializedKeyframes: Array<[string, KeyframeCacheEntry]> = Array.from(keyframeCache.entries());
     const result = await new Promise<{
       buffer: ArrayBuffer;
@@ -292,8 +337,16 @@ export async function runIsolatedBrowserExport(
       stats?: BrowserExportStats;
     }>((resolve, reject) => {
       let settled = false;
+      let stallTimer: ReturnType<typeof setTimeout> | null = null;
       const requestId =
         globalThis.crypto?.randomUUID?.() ?? `browser-export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      const clearStallTimer = () => {
+        if (stallTimer !== null) {
+          clearTimeout(stallTimer);
+          stallTimer = null;
+        }
+      };
 
       const finish = (err?: unknown, value?: {
         buffer: ArrayBuffer;
@@ -307,11 +360,25 @@ export async function runIsolatedBrowserExport(
       }) => {
         if (settled) return;
         settled = true;
+        clearStallTimer();
         window.removeEventListener("message", onExportMessage);
         signal?.removeEventListener("abort", onAbort);
         cleanupRef.current = null;
         if (err) reject(err);
         else resolve(value!);
+      };
+
+      const resetStallTimer = () => {
+        clearStallTimer();
+        if (settled) return;
+        stallTimer = setTimeout(() => {
+          try {
+            adapter?.send("browser-export-cancel", { exportId });
+          } catch {
+            /* ignore */
+          }
+          finish(new Error("Timed out waiting for isolated browser export progress."));
+        }, effectiveStallTimeoutMs);
       };
 
       const onAbort = () => {
@@ -329,6 +396,7 @@ export async function runIsolatedBrowserExport(
         if (data.type === "browser-export-progress") {
           if (data.requestId && data.requestId !== requestId) return;
           if (data.exportId && data.exportId !== exportId) return;
+          resetStallTimer();
           const rawPct = typeof data.progress === "number" && Number.isFinite(data.progress) ? data.progress : 0;
           const pct = Math.max(0, Math.min(100, Math.round(rawPct)));
           const stage =
@@ -386,6 +454,7 @@ export async function runIsolatedBrowserExport(
       window.addEventListener("message", onExportMessage);
       signal?.addEventListener("abort", onAbort, { once: true });
       cleanupRef.current = () => {
+        clearStallTimer();
         window.removeEventListener("message", onExportMessage);
         signal?.removeEventListener("abort", onAbort);
       };
@@ -400,7 +469,7 @@ export async function runIsolatedBrowserExport(
             quality,
             fps,
             resolution,
-            compositionDimensions: compositionDimensions ?? null,
+            compositionDimensions: effectiveCompositionDimensions ?? null,
             duration,
             elements: elements as readonly TimelineElement[],
             keyframeEntries: serializedKeyframes,
@@ -412,7 +481,9 @@ export async function runIsolatedBrowserExport(
       );
       if (!sentId) {
         finish(new Error("Preview bridge is not ready for browser export."));
+        return;
       }
+      resetStallTimer();
     });
 
     throwIfAborted(signal);
