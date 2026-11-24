@@ -912,10 +912,12 @@ it('browses both Explore shelves, opens exact details and restores the selected 
     await act(async () => trigger.click());
   };
   const templates = shelf('Templates'), skills = shelf('Skills');
-  const templateSubmission = templates.querySelector('header a');
-  expect(templateSubmission?.getAttribute('href')).toBe(templateContributionUrl);
+  const templateSubmission = templates.querySelector<HTMLButtonElement>('header button[data-contribution-trigger="template"]');
   expect(templateSubmission?.textContent).toBe('Submit template');
-  expect(skills.querySelector('header a')?.getAttribute('href')).toBe(skillSubmissionUrl);
+  expect(templateSubmission?.getAttribute('aria-haspopup')).toBe('dialog');
+  expect(skills.querySelector<HTMLButtonElement>('header button[data-contribution-trigger="skill"]')?.textContent).toBe('Submit a skill');
+  expect(templateContributionUrl).toContain('CONTRIBUTING.md');
+  expect(skillSubmissionUrl).toContain('#submit-a-skill-with-your-agent');
   expect(skills.querySelector('.om-feed-skill-badge, .om-feed-card-detail')).toBeNull();
   expect([...skills.querySelectorAll('[aria-label="Skill category"] button')].map(button => button.textContent)).toEqual(['All', ...skillCategories]);
   await choose(templates, 'Product promos');

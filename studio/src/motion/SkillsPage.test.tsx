@@ -263,11 +263,15 @@ it('ignores a late copy failure after the brief has changed', async () => {
   expect(instruction.dataset.manual).toBe('false');
 });
 
-it('opens the contribution guide section for submitting a skill, like the template library', async () => {
+it('opens the contribution guide dialog for submitting a skill, with a direct section link', async () => {
   act(() => root.render(<Host />));
-  const link = [...container.querySelectorAll<HTMLAnchorElement>('.om-skills-intro a')].find(node => node.textContent?.includes('Submit a skill'))!;
+  const trigger = [...container.querySelectorAll<HTMLButtonElement>('.om-skills-intro button')].find(node => node.textContent?.includes('Submit a skill'))!;
+  expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+  await act(async () => trigger.click());
+  const link = document.querySelector<HTMLAnchorElement>('.om-contribution-guide a[href*="CONTRIBUTING.md"]')!;
   expect(link.href).toBe(skillSubmissionUrl);
   expect(link.target).toBe('_blank');
+  expect(document.querySelector('.om-contribution-prompt')?.textContent).toContain('library/skills/<name>/SKILL.md');
   const { default: guide } = await import('../../../CONTRIBUTING.md?raw');
   const section = guide.slice(guide.indexOf('### Submit a skill with your Agent'));
   expect(skillSubmissionUrl.endsWith('#submit-a-skill-with-your-agent')).toBe(true);

@@ -459,7 +459,7 @@ test('Explore fills every gallery row and plays the featured artwork in place', 
         }));
         assert.ok(studios.length === 8 && studios.every(item => item.full), 'Every Studio collection renders complete rows at ' + width + ': ' + JSON.stringify(studios));
         const toolbarGeometry = await page.$eval('.om-explore-shelf[aria-label="Templates"]', section => {
-          const submit = section.querySelector<HTMLAnchorElement>('header a[href*="CONTRIBUTING.md"]');
+          const submit = section.querySelector<HTMLButtonElement>('header button[data-contribution-trigger="template"]');
           const dropdown = section.querySelector<HTMLButtonElement>('.om-shelf-toolbar .om-gallery-dropdown');
           const strip = section.querySelector<HTMLElement>('.om-shelf-toolbar .om-category-strip');
           const dr = dropdown?.getBoundingClientRect();

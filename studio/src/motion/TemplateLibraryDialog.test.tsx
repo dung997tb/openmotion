@@ -167,8 +167,8 @@ it('opens the reference-link form from each category without changing browsing o
   const intro = host.querySelector('.om-gallery-intro')!;
   const trigger = button(actionLabel, intro);
   const actions = intro.querySelector('.om-gallery-intro-actions')!;
-  expect(actions.querySelector('a')?.textContent).toBe('Submit template');
-  expect(actions.querySelector('a')?.classList.contains('om-gallery-submit')).toBe(true);
+  expect(actions.querySelector('button[data-contribution-trigger="template"]')?.textContent).toBe('Submit template');
+  expect(actions.querySelector('button[data-contribution-trigger="template"]')?.classList.contains('om-gallery-submit')).toBe(true);
   expect(button('Surprise me', actions).classList.contains('om-gallery-surprise')).toBe(true);
   expect(actions.nextElementSibling?.contains(trigger)).toBe(true);
   expect(trigger.hasAttribute('data-primary')).toBe(false);
@@ -724,7 +724,7 @@ it('does not duplicate a brand when the catalog has no author identity', async (
 
 it('copies contribution instructions with the selected template without opening another dialog', async () => {
   await mount();
-  expect(host.querySelector('a[href="https://github.com/nexu-io/openmotion/blob/main/CONTRIBUTING.md"]')?.textContent).toContain('Submit template');
+  expect(host.querySelector('button[data-contribution-trigger="template"]')?.textContent).toContain('Submit template');
   await act(async () => preview('First'));
   await act(async () => button('Recreate and submit').click());
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('First (one)'));
@@ -1409,7 +1409,7 @@ it('preserves the TOP100 detail and return path alongside the regular template h
     await mount();
     await act(async () => button('TOP 100 brands').click());
     expect(button('Surprise me')).toBeDefined();
-    expect(host.querySelector('a[href]')?.getAttribute('href')).toBeTruthy();
+    expect(host.querySelector('button[data-contribution-trigger="template"]')?.getAttribute('aria-haspopup')).toBe('dialog');
     await act(async () => button('View Figma brand series').click());
     const brand = host.querySelector('dialog[aria-label="Figma brand story"]')!;
     expect(brand.querySelector('[aria-label="Release history"]')).not.toBeNull();

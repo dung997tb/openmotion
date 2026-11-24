@@ -34,7 +34,7 @@ import { useToast } from '../hooks/useToast';
 import { copyTextToClipboard, copyTextWithMethod } from '../utils/clipboard';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import { orderedPurposes } from './templateDiscoveryTaxonomy';
-import { templateContributionUrl, templateSubmissionPrompt } from './templateContribution';
+import { templateSubmissionPrompt } from './templateContribution';
 import styles from './TemplateLibraryDialog.module.css';
 import { TemplateMotionGuide } from './TemplateMotionGuide';
 import { RelatedTemplatePreviews } from './RelatedTemplatePreviews';
@@ -777,7 +777,7 @@ export function TemplateLibraryDialog(props: Props) {
     <main className={styles.results} aria-busy={loading}>
       {missingTemplate && <div className={styles.empty} role="alert"><p>{t('This template is no longer available.')}</p><Button variant="plain" onClick={closeDetail}>{t('View all templates')}</Button></div>}
       <div className={storiesPreview && brandsOnly ? storyStyles.brandGrid : styles.grid}>
-        {!showEmptyRecovery && <GalleryIntro eyebrow={storiesPreview && brandsOnly ? t('TOP 100 / Brand series') : t('Made to move.')} title={storiesPreview && brandsOnly ? t('Find ideas for your next launch.') : t('Find your next motion.')} description={storiesPreview && brandsOnly ? t('Browse by brand and follow their launches over time. Pick a video and make it your own.') : t('Explore the details. Find a direction. Make it your own.')} count={loading && !catalog.length ? t('Loading templates…') : storiesPreview && brandsOnly ? t('{brands} brands · {works} works', { brands: visibleBrandGroups.length, works: visible.length }) : t('{count} templates', { count: visible.length })} disabled={!visible.length || loading} onSurprise={surprise} submitLabel={t('Submit template')} submitUrl={templateContributionUrl} onSubmit={() => tracking.reportDiscoveryClick('submit_video', listContext())}
+        {!showEmptyRecovery && <GalleryIntro eyebrow={storiesPreview && brandsOnly ? t('TOP 100 / Brand series') : t('Made to move.')} title={storiesPreview && brandsOnly ? t('Find ideas for your next launch.') : t('Find your next motion.')} description={storiesPreview && brandsOnly ? t('Browse by brand and follow their launches over time. Pick a video and make it your own.') : t('Explore the details. Find a direction. Make it your own.')} count={loading && !catalog.length ? t('Loading templates…') : storiesPreview && brandsOnly ? t('{brands} brands · {works} works', { brands: visibleBrandGroups.length, works: visible.length }) : t('{count} templates', { count: visible.length })} disabled={!visible.length || loading} onSurprise={surprise} submitLabel={t('Submit template')} submitKind="template" onSubmit={() => tracking.reportDiscoveryClick('submit_video', listContext())}
           afterActions={!query.trim() && <div className={`om-media-detail-actions ${styles.referenceEntry}`}>
             <span className={styles.referenceEntryLabel}>{t('Nothing suitable?')}</span>
             <Button variant="ghost" type="button" className="om-button h-auto" data-reference-entry="library_home" aria-haspopup="dialog" aria-label={t('Paste a video link to make your own')} onClick={event => {
