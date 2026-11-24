@@ -51,7 +51,7 @@ export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit
     visit={visit}
     title={t(title)}
     details={t(details)}
-    buttonLabel={t('Upgrade', undefined, `${destination.scene.modality} offer`)}
+    buttonLabel={t('Upgrade', undefined, 'generation offer')}
   />;
 }
 

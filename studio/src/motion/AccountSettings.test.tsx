@@ -219,7 +219,7 @@ it('starts login from the signed-out subscription offer and switches to upgrade 
   await act(async () => window.dispatchEvent(new Event('motion:account-changed')));
   const upgrade = page.querySelector<HTMLElement>('[data-guide="upgrade"]')!;
   expect(upgrade.className).toBe(guide.className);
-  expect(upgrade.querySelector('ul')?.textContent).toBe(guide.querySelector('ul')?.textContent);
+  expect(upgrade.querySelector('ul')?.getAttribute('aria-label')).toBe('Subscription offers');
   expect(actions(upgrade)).toEqual(['Upgrade to Plus']);
 });
 
@@ -227,13 +227,13 @@ it('offers Free and Go accounts an upgrade through the registered entry source, 
   for (const plan of ['free', 'go']) {
     const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan, balance: '0.00' }, 'en', 'subscription');
     const guide = page.querySelector<HTMLElement>('[data-guide="upgrade"]')!;
-    expect(guide.querySelector('h2')?.textContent).toBe('Unlock more popular AI models');
-    expect(guide.querySelector('p')?.textContent).toBe('Black Friday’s lowest prices of the year! 7 days of unlimited use');
+    expect(guide.querySelector('h2')?.textContent).toBe('7 days of unlimited use on select models');
+    expect(guide.querySelector('p')?.textContent).toBe('GPT image 2.0｜Nano banana 2｜Seedream5.0｜Seedream5.5');
     expect(guide.textContent).not.toContain('Current plan');
     expect(page.querySelector('.om-account-metrics h3')?.textContent).toBe(plan === 'free' ? 'Free plan' : 'go');
     expect(actions(guide)).toEqual(['Upgrade to Plus']);
     expect([...guide.querySelectorAll('li')].map(item => item.textContent)).toEqual([
-      'GPT Image 2.6 Sunburst', 'Seedance 2.5', 'ElevenLabs V3', '...',
+      'Featured models 7-day unlimited', 'Go Max annual from $100/mo', 'Claude / GPT up to 20% off',
     ]);
     expect(page.querySelector('.om-settings-section .om-button')).toBeNull();
     expect(page.querySelector('.om-account-summary')).toBeNull();

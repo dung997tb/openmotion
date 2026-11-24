@@ -57,22 +57,36 @@ const featuredModels = [
   { id: 'elevenlabs-v3', name: 'ElevenLabs V3' },
 ] as const;
 
+function SubscriptionUpgradeBenefits() {
+  const { t } = useI18n();
+  return <>
+    <p className={offerStyles.modelSummary}>GPT image 2.0｜Nano banana 2｜Seedream5.0｜Seedream5.5</p>
+    <ul className={offerStyles.dealTags} aria-label={t('Subscription offers')}>
+      <li>{t('Featured models')} {t('7-day unlimited')}</li>
+      <li>{t('Go Max annual from')} <strong>{t('$100/mo')}</strong></li>
+      <li>Claude / GPT <strong>{t('up to 20% off')}</strong></li>
+    </ul>
+  </>;
+}
+
 function SubscriptionGuide({ kind, children }: { kind: 'sign-in' | 'upgrade'; children: ReactNode }) {
   const { t } = useI18n();
   return <section className={offerStyles.subscriptionCard} data-guide={kind}>
     <div className={offerStyles.subscriptionHeading}>
-      <h2>{t(kind === 'sign-in' ? 'Sign in to unlock popular AI models' : 'Unlock more popular AI models')}</h2>
+      <h2>{t(kind === 'sign-in' ? 'Sign in to unlock popular AI models' : '7 days of unlimited use on select models')}</h2>
       {kind === 'sign-in' && <span className="om-badge">{t('Plus and above')}</span>}
     </div>
     <div className={offerStyles.benefits}>
-      <div className={offerStyles.offerLine}>
-        <p>{t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}</p>
-        <GuideOffer />
-      </div>
-      <ul className={offerStyles.models} aria-label={t('Models')}>
-        {featuredModels.map(({ id, name }) => <li key={id}><ModelAvatar modelId={id} name={name} />{name}</li>)}
-        <li className={offerStyles.moreModels} aria-label={t('More')}>...</li>
-      </ul>
+      {kind === 'upgrade' ? <SubscriptionUpgradeBenefits /> : <>
+        <div className={offerStyles.offerLine}>
+          <p>{t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}</p>
+          <GuideOffer />
+        </div>
+        <ul className={offerStyles.models} aria-label={t('Models')}>
+          {featuredModels.map(({ id, name }) => <li key={id}><ModelAvatar modelId={id} name={name} />{name}</li>)}
+          <li className={offerStyles.moreModels} aria-label={t('More')}>...</li>
+        </ul>
+      </>}
     </div>
     <div className={`om-settings-actions ${offerStyles.upgradeAction}`}>
       {children}
