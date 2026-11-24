@@ -105,12 +105,8 @@ function changeParam(label: string, next: string) {
 
 async function flushCommit() {
   await act(async () => {
-    vi.advanceTimersByTime(350);
-    // Drain the read → guard → write promise chain.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await import('../../../../packages/edit-core/composition-variable');
+    await vi.advanceTimersByTimeAsync(350);
   });
 }
 
@@ -136,6 +132,17 @@ describe("BlockParamsPanel commit safety", () => {
     expect(select.options[0].textContent).toBe("Glide (smooth)");
     expect(select.value).toBe("glide");
     expect(fm.writeProjectFile).not.toHaveBeenCalled();
+  });
+  it("hydrates an existing block's saved declaration and edits only its target", async () => {
+    const content = { value: `<div data-composition-id="demo" data-composition-variables='[{"id":"bg-color","type":"color","default":"#445566"},{"id":"sibling","type":"color","default":"#445566"}]'></div>` };
+    const fm = makeFileManager(content);
+    renderPanel(fm.value);
+    await flushCommit();
+    expect(document.body.textContent).toContain("445566");
+    changeParam("Background", "abcdef");
+    await flushCommit();
+    expect(content.value).toContain('"id":"bg-color","type":"color","default":"#abcdef"');
+    expect(content.value).toContain('"id":"sibling","type":"color","default":"#445566"');
   });
   it("refuses a multi-occurrence value and never mutates the unrelated sibling", async () => {
     // The param's default (#0c0c0c) also appears on an UNRELATED element. The

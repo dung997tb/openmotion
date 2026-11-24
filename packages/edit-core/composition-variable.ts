@@ -1,4 +1,4 @@
-import postcss from 'postcss';
+import postcss, { type Declaration, type Root } from 'postcss';
 import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers/html-attribute-spans';
 
 type Variable = { id: string; type: string; default: unknown; options?: { value: string }[] };
@@ -15,9 +15,14 @@ function readDeclarations(html: string) {
   return { attr, variables: declarations as Variable[] };
 }
 
-export function compositionVariableValues(html: string): Map<string, string> | null {
+export function compositionVariableValues(html: string, parameterKeys: readonly string[] = []): Map<string, string> | null {
   const declarations = readDeclarations(html);
-  return declarations && new Map(declarations.variables.map(variable => [variable.id, String(variable.default ?? '')]));
+  if (declarations) return new Map(declarations.variables.map(variable => [variable.id, String(variable.default ?? '')]));
+  const values = new Map<string, string>();
+  for (const [key, bindings] of cssBindings(html, parameterKeys)) {
+    if (bindings.length === 1) values.set(key, bindings[0]!.declaration.value);
+  }
+  return values.size ? values : null;
 }
 
 /** Registry cards may spell a declared ID such as cellSize as the CSS key --cellsize. */
@@ -67,32 +72,45 @@ function updateDeclaredVariable(source: string, key: string, value: string): str
 }
 
 
+type CssBinding = { start: number; end: number; sheet: Root; declaration: Declaration };
+
 /** Older blocks may declare a real CSS custom property in a style element. */
-function updateCssParameter(source: string, key: string, value: string) {
-  if (!key.startsWith('--') || !source.includes(key)) return null;
-  let result: string | null = null;
+function cssBindings(source: string, keys: readonly string[]) {
+  const found = new Map<string, CssBinding[]>();
+  const wanted = new Set(keys.filter(key => key.startsWith('--') && source.includes(key)));
+  if (!wanted.size) return found;
   for (const tag of scanHtmlOpeningTags(source)) {
     if (tag.name !== 'style' || tag.rawTextEnd === null) continue;
-    const sheet = postcss.parse(source.slice(tag.end, tag.rawTextEnd));
-    sheet.walkDecls(key, declaration => {
-      if (result !== null) throw new Error('Ambiguous CSS parameter: ' + key);
-      declaration.value = value;
-      result = source.slice(0, tag.end) + sheet.toString() + source.slice(tag.rawTextEnd!);
+    const start = tag.end, end = tag.rawTextEnd;
+    const sheet = postcss.parse(source.slice(start, end));
+    sheet.walkDecls(declaration => {
+      if (!wanted.has(declaration.prop)) return;
+      const matches = found.get(declaration.prop) ?? [];
+      matches.push({ start, end, sheet, declaration });
+      found.set(declaration.prop, matches);
     });
   }
-  return result;
+  return found;
 }
 
 export function setBlockParameter(source: string, key: string, value: string, path: string, previous?: string): string {
-  const declared = updateDeclaredVariable(source, key, value) ?? updateCssParameter(source, key, value);
+  const declared = updateDeclaredVariable(source, key, value);
   if (declared !== null) return declared;
+  const matches = cssBindings(source, [key]).get(key);
+  if (matches) {
+    if (matches.length !== 1) throw new Error('Ambiguous CSS parameter: ' + key);
+    const binding = matches[0]!;
+    binding.declaration.value = value;
+    return source.slice(0, binding.start) + binding.sheet.toString() + source.slice(binding.end);
+  }
   if (previous === undefined) throw new Error('This legacy parameter needs its previous value: ' + key);
   return replaceLegacyLiteral(source, previous, value, path);
 }
 
 /** Old registry blocks without declarations can only bind an unambiguous literal. */
 function replaceLegacyLiteral(content: string, previous: string, nextValue: string, path: string): string {
-  if (previous === nextValue || !previous || !nextValue.trim()) return content;
+  if (previous === nextValue) return content;
+  if (!previous || !nextValue.trim()) throw new Error(`Couldn't find the current value in ${path}. It may have been edited by hand.`);
   const matcher = new RegExp(`(?<![-\\w#])${previous.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![-\\w])`, "g");
   const matches = content.match(matcher)?.length ?? 0;
   if (!matches) throw new Error(`Couldn't find the current value in ${path}. It may have been edited by hand.`);
