@@ -32,8 +32,9 @@ import { BrowserExportToggle } from "./BrowserExportToggle";
 import {
   ISOLATED_PREVIEW_EXPORT_REASON,
   isBrowserWebCodecsSupported,
-  isIsolatedPreviewIframe,
+  isPreviewExportBlockedByIsolation,
 } from "../../render/browserExportPreflight";
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
 import { useLivePreviewIframe } from "../../player/store/previewIframeStore";
 import { GifLoopInput, isInvalidGifLoop } from "./GifLoopInput";
 import { trackStudioEvent } from "../../utils/studioTelemetry";
@@ -235,11 +236,11 @@ function FormatExportButton({
   const [gpu, setGpu] = useState(persisted.gpu);
   const [browserExport, setBrowserExport] = useState(getBrowserExportEnabled);
   const webCodecsSupported = isBrowserWebCodecsSupported();
-  const previewIsolated = isIsolatedPreviewIframe(previewIframe);
-  const browserExportSupported = webCodecsSupported && !previewIsolated && canBrowserExport;
+  const previewIsolationBlocked = isPreviewExportBlockedByIsolation(previewIframe, isolatedPreviewOrigin());
+  const browserExportSupported = webCodecsSupported && !previewIsolationBlocked && canBrowserExport;
   const browserExportUnsupportedReason = !webCodecsSupported
     ? "WebCodecs VideoEncoder is unavailable in this browser."
-    : previewIsolated
+    : previewIsolationBlocked
       ? ISOLATED_PREVIEW_EXPORT_REASON
       : !canBrowserExport
         ? "Browser export only applies to the currently open composition."

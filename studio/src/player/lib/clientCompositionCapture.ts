@@ -28,14 +28,14 @@ export const MAX_INITIAL_TIMELINE_PREVIEW_GATE = 4;
 /** Maximum extra wait after primary assets settle before releasing to background capture. */
 export const TIMELINE_PREVIEW_GATE_TIMEOUT_MS = 4_500;
 
-const CAPTURE_TARGET_WIDTH = 240;
+const CAPTURE_TARGET_WIDTH = 160;
 const CAPTURE_MAX_HEIGHT = 480;
 const CAPTURE_MAX_SCALE = 2;
 const CAPTURE_JPEG_QUALITY = 0.78;
 const CAPTURE_BOOT_TIMEOUT_MS = 12_000;
 const CAPTURE_MEDIA_TIMEOUT_MS = 2_000;
 const CAPTURE_RAF_FALLBACK_MS = 250;
-const CAPTURE_FRAME_YIELD_MS = 24;
+const CAPTURE_FRAME_YIELD_MS = 8;
 const CAPTURE_IDLE_TEARDOWN_MS = 1_500;
 const MAX_CONCURRENT_ISOLATED_CAPTURES = 3;
 const MAX_CONCURRENT_SAME_ORIGIN_CAPTURES = 2;
@@ -618,16 +618,15 @@ function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function nextTwoAnimationFrames(win: Window, signal: AbortSignal): Promise<void> {
+function nextAnimationFrames(win: Window, count: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
-    let raf1 = 0;
-    let raf2 = 0;
+    let rafId = 0;
+    let remaining = Math.max(1, count);
     let settled = false;
     const cleanup = () => {
       clearTimeout(fallbackTimer);
-      win.cancelAnimationFrame?.(raf1);
-      win.cancelAnimationFrame?.(raf2);
+      win.cancelAnimationFrame?.(rafId);
       signal.removeEventListener("abort", onAbort);
     };
     const finish = () => {
@@ -644,10 +643,15 @@ function nextTwoAnimationFrames(win: Window, signal: AbortSignal): Promise<void>
     };
     const fallbackTimer = setTimeout(finish, CAPTURE_RAF_FALLBACK_MS);
     signal.addEventListener("abort", onAbort, { once: true });
-    raf1 = win.requestAnimationFrame(() => {
+    const step = () => {
       if (settled) return;
-      raf2 = win.requestAnimationFrame(finish);
-    });
+      if (--remaining <= 0) {
+        finish();
+        return;
+      }
+      rafId = win.requestAnimationFrame(step);
+    };
+    rafId = win.requestAnimationFrame(step);
   });
 }
 
@@ -1098,15 +1102,47 @@ async function loadLocalSnapdom(): Promise<SnapdomModuleFn | null> {
   return snapdomLoader;
 }
 
+function hasVisibleText(node: Node): boolean {
+  if (node.nodeType === 3) return Boolean((node.nodeValue ?? "").replace(/\s+/g, "").trim());
+  if (node.nodeType !== 1) return false;
+  const tag = (node as Element).tagName.toUpperCase();
+  if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT" || tag === "TEMPLATE" || tag === "CANVAS") {
+    return false;
+  }
+  if (!node.childNodes || node.childNodes.length === 0) {
+    return Boolean((node.textContent ?? "").replace(/\s+/g, "").trim());
+  }
+  for (const child of Array.from(node.childNodes)) {
+    if (hasVisibleText(child)) return true;
+  }
+  return false;
+}
+
 function findPureCanvasTarget(root: Element, stageW: number, stageH: number): HTMLCanvasElement | null {
   if (root instanceof HTMLCanvasElement) return root;
   const canvases = root.querySelectorAll("canvas");
   if (canvases.length !== 1) return null;
-  if ((root.textContent ?? "").replace(/\s+/g, "").trim().length > 0) return null;
+  if (hasVisibleText(root)) return null;
   if (root.querySelector("img,svg,video")) return null;
   const canvas = canvases[0]!;
   const rect = canvas.getBoundingClientRect();
   return rect.width >= stageW * 0.9 && rect.height >= stageH * 0.9 ? canvas : null;
+}
+
+function isOrContainsDynamicVisual(el: Element): boolean {
+  const tag = el.tagName.toUpperCase();
+  if (tag === "CANVAS" || tag === "VIDEO") return true;
+  return Boolean(el.querySelector("canvas,video"));
+}
+
+function canSkipUnchangedFrame(doc: Document, target: Element): boolean {
+  if (typeof MutationObserver !== "function" || typeof doc.getAnimations !== "function") return false;
+  if (isOrContainsDynamicVisual(target)) return false;
+  try {
+    return doc.getAnimations().length === 0;
+  } catch {
+    return false;
+  }
 }
 
 function releaseCanvasBacking(canvas: HTMLCanvasElement | null | undefined): void {
@@ -1119,20 +1155,26 @@ function releaseCanvasBacking(canvas: HTMLCanvasElement | null | undefined): voi
   }
 }
 
-function drawToJpegBlob(source: CanvasImageSource, outW: number, outH: number): Promise<Blob> {
-  const out = document.createElement("canvas");
-  out.width = outW;
-  out.height = outH;
+function drawToJpegBlob(
+  source: CanvasImageSource,
+  outW: number,
+  outH: number,
+  reusable?: HTMLCanvasElement,
+): Promise<Blob> {
+  const out = reusable ?? document.createElement("canvas");
+  if (out.width !== outW) out.width = outW;
+  if (out.height !== outH) out.height = outH;
   const ctx = out.getContext("2d");
   if (!ctx) {
-    releaseCanvasBacking(out);
+    if (!reusable) releaseCanvasBacking(out);
     return Promise.reject(new Error("2D context unavailable"));
   }
+  ctx.clearRect(0, 0, outW, outH);
   ctx.drawImage(source, 0, 0, outW, outH);
   return new Promise((resolve, reject) => {
     out.toBlob(
       (blob) => {
-        releaseCanvasBacking(out);
+        if (!reusable) releaseCanvasBacking(out);
         if (blob && blob.size > 0) resolve(blob);
         else reject(new Error("Failed to encode composition thumbnail frame"));
       },
@@ -1333,36 +1375,80 @@ async function captureSameOrigin(
       for (let i = 0; i < times.length; i++) order.push(i);
     }
 
-    const blobs: Array<Blob | undefined> = new Array(times.length);
-    for (const frameIdx of order) {
-      const t = times[frameIdx]!;
-      await waitUntilInteractiveIdle(signal);
-      win.__player!.seek!(t);
-      await nextTwoAnimationFrames(win, signal);
-
-      const pureCanvas = findPureCanvasTarget(target, targetW, targetH);
-      let blob: Blob;
-      if (pureCanvas) {
-        blob = await drawToJpegBlob(pureCanvas, outW, outH);
-      } else {
-        const rendered = await withPreviewRedirectSafeFetch(async () => {
-          const snap = await snapdom(target, {
-            scale,
-            fast: true,
-            embedFonts: false,
-            exclude: "video",
-          });
-          return snap.toCanvas();
+    const hasAsyncVisual = isOrContainsDynamicVisual(target);
+    const settleFrames = hasAsyncVisual ? 2 : 1;
+    const outCanvas = document.createElement("canvas");
+    let observer: MutationObserver | null = null;
+    let observedMutated = false;
+    const observeRoot = doc.documentElement ?? (target === root ? root : null);
+    if (times.length > 1 && observeRoot && canSkipUnchangedFrame(doc, target)) {
+      try {
+        observer = new MutationObserver(() => {
+          observedMutated = true;
         });
-        try {
-          blob = await drawToJpegBlob(rendered, outW, outH);
-        } finally {
-          releaseCanvasBacking(rendered);
-        }
+        observer.observe(observeRoot, {
+          subtree: true,
+          attributes: true,
+          childList: true,
+          characterData: true,
+        });
+      } catch {
+        observer = null;
       }
-      blobs[frameIdx] = blob;
-      onFrame?.(frameIdx, times.length, blob, { aspect, width: outW, height: outH });
-      if (times.length > 1) await sleepAbortable(CAPTURE_FRAME_YIELD_MS, signal);
+    }
+
+    const blobs: Array<Blob | undefined> = new Array(times.length);
+    let lastBlob: Blob | null = null;
+    try {
+      for (const frameIdx of order) {
+        const t = times[frameIdx]!;
+        await waitUntilInteractiveIdle(signal);
+        if (observer) {
+          observer.takeRecords();
+          observedMutated = false;
+        }
+        win.__player!.seek!(t);
+        await nextAnimationFrames(win, settleFrames, signal);
+
+        let blob: Blob;
+        if (
+          observer &&
+          lastBlob &&
+          !observedMutated &&
+          observer.takeRecords().length === 0 &&
+          canSkipUnchangedFrame(doc, target)
+        ) {
+          blob = lastBlob;
+        } else {
+          const pureCanvas = findPureCanvasTarget(target, targetW, targetH);
+          if (pureCanvas) {
+            blob = await drawToJpegBlob(pureCanvas, outW, outH, outCanvas);
+          } else {
+            const rendered = await withPreviewRedirectSafeFetch(async () => {
+              const snap = await snapdom(target, {
+                scale,
+                dpr: 1,
+                fast: true,
+                embedFonts: false,
+                exclude: "video",
+              });
+              return snap.toCanvas();
+            });
+            try {
+              blob = await drawToJpegBlob(rendered, outW, outH, outCanvas);
+            } finally {
+              releaseCanvasBacking(rendered);
+            }
+          }
+        }
+        lastBlob = blob;
+        blobs[frameIdx] = blob;
+        onFrame?.(frameIdx, times.length, blob, { aspect, width: outW, height: outH });
+        if (times.length > 1) await sleepAbortable(CAPTURE_FRAME_YIELD_MS, signal);
+      }
+    } finally {
+      observer?.disconnect();
+      releaseCanvasBacking(outCanvas);
     }
 
     return {
@@ -1500,7 +1586,7 @@ async function captureIsolatedOrigin(
             onFrame?.(idx, Number(data.total) || times.length, blob, {
               aspect: typeof data.aspect === "number" && data.aspect > 0 ? data.aspect : 16 / 9,
               width: typeof data.width === "number" && data.width > 0 ? data.width : CAPTURE_TARGET_WIDTH,
-              height: typeof data.height === "number" && data.height > 0 ? data.height : 135,
+              height: typeof data.height === "number" && data.height > 0 ? data.height : 90,
             });
           }
           return;
@@ -1552,7 +1638,7 @@ async function captureIsolatedOrigin(
       blobs,
       aspect: payload.aspect && payload.aspect > 0 ? payload.aspect : 16 / 9,
       width: payload.width || CAPTURE_TARGET_WIDTH,
-      height: payload.height || 135,
+      height: payload.height || 90,
     };
   } catch (error) {
     resetSlot = true;

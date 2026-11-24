@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const inputs = ['package.json', 'package-lock.json', 'studio', 'shared', 'tracking', 'packages/design-system', 'packages/edit-core', 'packages/open-design-ui', 'packages/observability', 'mcp-ui', 'web',
   'scripts/diagnostic-redaction.mjs',
-  'scripts/build-inline-ui.mjs', 'scripts/build-template-cards.mjs', 'scripts/source-build-state.mjs'];
+  'scripts/build-inline-ui.mjs', 'scripts/build-template-cards.mjs', 'scripts/build-browser-export.mjs', 'scripts/source-build-state.mjs'];
 const outputs = ['studio/build', 'mcp-ui/template-recommendations/build', 'web/inline-video.html'];
 const receipt = '.artifacts/install/source-build.json';
 const dependenciesReceipt = '.artifacts/install/source-dependencies.sha256';

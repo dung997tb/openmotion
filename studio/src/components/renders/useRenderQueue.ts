@@ -20,8 +20,11 @@ import {
   evaluateBrowserExportEligibility,
   isBrowserWebCodecsSupported,
   isIsolatedPreviewIframe,
+  isPreviewExportBlockedByIsolation,
 } from "../../render/browserExportPreflight";
 import { runBrowserExport } from "../../render/browserExport";
+import { runIsolatedBrowserExport } from "../../render/isolatedBrowserExport";
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
 import { getBrowserExportEnabled } from "./renderSettings";
 import { durationBucket, exportRejection, exportSettings, openTemplateFields, projectScaleFields, projectFields,
   reportExportRequest, reportExportResult, type ExportOrigin } from "../../motion/editorTracking";
@@ -278,6 +281,7 @@ export function useRenderQueue(
       };
       const requestedFormat = opts.format ?? "mp4";
       const previewIframe = usePreviewIframeStore.getState().iframe;
+      const previewOrigin = isolatedPreviewOrigin();
       // Browser export captures the mounted preview iframe and player store, so it
       // can only render the currently open composition; other compositions always
       // fall back to the server render pipeline.
@@ -287,7 +291,7 @@ export function useRenderQueue(
           (opts.engine === undefined &&
             getBrowserExportEnabled() &&
             isBrowserWebCodecsSupported() &&
-            !isIsolatedPreviewIframe(previewIframe) &&
+            !isPreviewExportBlockedByIsolation(previewIframe, previewOrigin) &&
             (requestedFormat === "mp4" || requestedFormat === "webm")));
 
       // The server would answer this with a 503 anyway. Refusing here keeps
@@ -377,6 +381,7 @@ export function useRenderQueue(
           elements: player.elements,
           duration: player.duration,
           iframe,
+          previewOrigin,
         });
         if (!eligibility.eligible) {
           requestResult("rejected", "REQUEST_REJECTED");
@@ -417,7 +422,7 @@ export function useRenderQueue(
         );
         void (async () => {
           try {
-            const result = await runBrowserExport({
+            const commonOptions = {
               projectId,
               format: format as "mp4" | "webm",
               quality,
@@ -428,13 +433,21 @@ export function useRenderQueue(
               keyframeCache: player.keyframeCache,
               iframe,
               signal: controller.signal,
-              onProgress: ({ progress, stage }) => {
+              onProgress: ({ progress, stage }: { progress: number; stage: string }) => {
                 if (currentProject.current !== projectId) return;
                 setJobs((prev) =>
                   prev.map((j) => (j.id === jobId && j.status === "rendering" ? { ...j, progress, stage } : j)),
                 );
               },
-            });
+            };
+            const useIsolatedBridge = Boolean(previewOrigin && (!iframe || isIsolatedPreviewIframe(iframe)));
+            const result = useIsolatedBridge
+              ? await runIsolatedBrowserExport({
+                  ...commonOptions,
+                  previewOrigin: previewOrigin!,
+                  activeCompPath: activeCompPathRef.current,
+                })
+              : await runBrowserExport(commonOptions);
             blobUrlsRef.current.add(result.blobUrl);
             if (currentProject.current !== projectId) return;
             const fpsInfo = result.stats

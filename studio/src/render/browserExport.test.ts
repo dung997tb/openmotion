@@ -6,7 +6,9 @@ import type { TimelineElement } from "../player/store/timelineElement";
 import {
   ISOLATED_PREVIEW_EXPORT_REASON,
   evaluateBrowserExportEligibility,
+  isIsolatedPreviewExportSupported,
   isIsolatedPreviewIframe,
+  isPreviewExportBlockedByIsolation,
   resolveOriginalPreviewMediaUrl,
 } from "./browserExportPreflight";
 import { capturePreviewLayoutSnapshot, interpolateElementTransform } from "./layoutSnapshot";
@@ -1233,5 +1235,73 @@ describe("cloud preview adaptation", () => {
     });
     expect(result.stats?.htmlMode).toBe("snapdom-live");
     iframe.remove();
+  });
+
+  it("preserves preview asset lease or preview token when resolving original media URLs inside isolated previews", () => {
+    const leasedBase = "https://openmotion-preview.example.test/api/projects/proj-1/preview/~assets/lease-abc/";
+    expect(
+      resolveOriginalPreviewMediaUrl(
+        "assets/clip.mp4",
+        "proj-1",
+        "https://openmotion-preview.example.test",
+        leasedBase,
+        "?pt=tok-1",
+      ),
+    ).toBe("https://openmotion-preview.example.test/api/projects/proj-1/preview/~assets/lease-abc/assets/clip.mp4?original=1");
+
+    expect(
+      resolveOriginalPreviewMediaUrl(
+        "https://openmotion.example.test/api/projects/proj-1/preview/assets/poster.png",
+        "proj-1",
+        "https://openmotion-preview.example.test",
+        leasedBase,
+        "?pt=tok-1",
+      ),
+    ).toBe("https://openmotion-preview.example.test/api/projects/proj-1/preview/~assets/lease-abc/assets/poster.png?original=1");
+
+    expect(
+      resolveOriginalPreviewMediaUrl(
+        "assets/music.mp3",
+        "proj-1",
+        "https://openmotion-preview.example.test",
+        "https://openmotion-preview.example.test/api/projects/proj-1/preview",
+        "?pt=tok-2",
+      ),
+    ).toBe("/api/projects/proj-1/preview/assets/music.mp3?pt=tok-2&original=1");
+  });
+
+  it("allows configured previewOrigin isolation while still rejecting opaque sandboxes and mismatched origins", () => {
+    const isolatedIframe = document.createElement("iframe");
+    isolatedIframe.setAttribute("src", "https://preview.example.test/api/projects/proj-1/preview?pt=tok");
+    isolatedIframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    Object.defineProperty(isolatedIframe, "contentDocument", { get: () => null });
+
+    expect(
+      isIsolatedPreviewExportSupported(isolatedIframe, "https://preview.example.test", "https://studio.example.test"),
+    ).toBe(true);
+    expect(
+      isPreviewExportBlockedByIsolation(isolatedIframe, "https://preview.example.test", "https://studio.example.test"),
+    ).toBe(false);
+    expect(
+      isPreviewExportBlockedByIsolation(isolatedIframe, "https://other-preview.example.test", "https://studio.example.test"),
+    ).toBe(true);
+
+    const eligible = evaluateBrowserExportEligibility({
+      format: "mp4",
+      elements: [makeElement({ tag: "p", text: { value: "Hello" } })],
+      duration: 2,
+      webCodecsSupported: true,
+      iframe: isolatedIframe,
+      origin: "https://studio.example.test",
+      previewOrigin: "https://preview.example.test",
+    });
+    expect(eligible.eligible).toBe(true);
+
+    const opaqueIframe = document.createElement("iframe");
+    opaqueIframe.setAttribute("src", "https://preview.example.test/api/projects/proj-1/preview?pt=tok");
+    opaqueIframe.setAttribute("sandbox", "allow-scripts");
+    expect(
+      isPreviewExportBlockedByIsolation(opaqueIframe, "https://preview.example.test", "https://studio.example.test"),
+    ).toBe(true);
   });
 });

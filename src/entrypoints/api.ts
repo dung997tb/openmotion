@@ -71,6 +71,7 @@ import {
   verifyPreviewToken,
 } from '../auth/preview-token.ts';
 import { PREVIEW_BRIDGE_ASSET_RE, PREVIEW_BRIDGE_PATH } from '../studio/engine/preview-bridge.ts';
+import { BROWSER_EXPORT_VENDOR_PATH } from '../studio/routes/preview.ts';
 import { isAssetLease, renewAssetLease, resolveAssetWorkspace } from '../auth/preview-asset-lease.ts';
 import { hasMinRole, hasScope, type AuthContext } from '../contracts/auth.ts';
 import { CloudError, featureDeferredP2, isCloudError } from '../contracts/errors.ts';
@@ -2126,6 +2127,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
       pathname === '/api/runtime.js' ||
       pathname === PREVIEW_BRIDGE_PATH || PREVIEW_BRIDGE_ASSET_RE.test(pathname) ||
       pathname === '/api/vendor/snapdom.js' ||
+      pathname === BROWSER_EXPORT_VENDOR_PATH ||
       pathname.startsWith('/api/vendor/gsap/');
     const isReadOnlyFontAsset = pathname === '/api/fonts' || pathname.startsWith('/api/fonts/');
     const projectPreviewMatch = PREVIEW_PROJECT_PATH_RE.exec(pathname);
