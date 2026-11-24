@@ -25,6 +25,7 @@ import { PricingEntry } from './PricingEntry';
 import { WorkspaceResourceActions } from './WorkspaceResourceActions';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { preloadWorkspacePage } from '../router/lazyPages';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 const avatarSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const themeLabels = { light: 'Light', dark: 'Dark', system: 'System' } as const;
@@ -38,6 +39,7 @@ export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset,
   onCommunity: (community: ExploreCommunity) => void;
 }) {
   const { t } = useI18n();
+  const brandKitEnabled = useCloudFeatureEnabled('brandKit');
   const { openAssets, openHome } = useWorkspaceChrome();
   const homeHint = atExploreHome ? undefined : t('Back to Explore');
   const header = useRef<HTMLElement>(null);
@@ -53,7 +55,7 @@ export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset,
   function workspaceActions(closeMenu?: () => void) {
     return <>
       <WorkspaceSearch onChoose={closeMenu} onSkill={onSkill} destination={navigation.destination} onLibrary={openAssets} onAccount={() => openSettings('account')} onAsset={openAsset} onScene={navigation.onNavigate} onStudio={navigation.onChooseStudio} onCommunity={onCommunity} />
-      <WorkspaceResourceActions onBrandKit={() => openSettings('brand-kit')} brandKitOpen={settings === 'brand-kit'} closeMenu={closeMenu} />
+      <WorkspaceResourceActions onBrandKit={brandKitEnabled ? () => openSettings('brand-kit') : undefined} brandKitOpen={brandKitEnabled && settings === 'brand-kit'} closeMenu={closeMenu} />
     </>;
   }
 

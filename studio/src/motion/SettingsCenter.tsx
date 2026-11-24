@@ -24,7 +24,8 @@ import { getDesktopHostBridge, isDesktopApp, useDesktopUpdateState } from '../ut
 
 import type { SettingsSection } from './workspacePageRouting';
 export type { SettingsSection } from './workspacePageRouting';
-import { settingsCenterSections as sections, settingsSectionLabel } from './settingsMeta';
+import { settingsSectionLabel, visibleSettingsCenterSections } from './settingsMeta';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 const cloudModelKinds: ModelKind[] = ['image', 'video', 'audio'];
 
@@ -48,6 +49,8 @@ export function SettingsCenter({
   mcp?: ReactNode;
 }) {
   const { t } = useI18n();
+  const localAgentsEnabled = useCloudFeatureEnabled('localAgents');
+  const sections = visibleSettingsCenterSections(localAgentsEnabled);
   const [search, setSearch] = useState('');
   const filtered = sections.filter(item => t(item.label).toLowerCase().includes(search.toLowerCase()));
   // One view per section shown; the section is remounted for each route.
@@ -107,9 +110,9 @@ export function SettingsCenter({
           </aside>
         </div>
       </div>
-      <main key={section} className="om-settings-main" aria-label={t(settingsSectionLabel(section))}>
+      <main key={section} className="om-settings-main" aria-label={t(settingsSectionLabel(section, localAgentsEnabled))}>
         <SettingsSurfaceBoundary>
-          {section === 'mcp' ? mcp : section === 'local' ? <AgentSettings /> : section === 'providers' ? (
+          {section === 'mcp' ? mcp : section === 'local' && localAgentsEnabled ? <AgentSettings /> : section === 'providers' || section === 'local' ? (
             <ModelSettings key={section} openAccount={() => onSection('account')} providerId={providerId} onProviderChange={onProviderChange} />
           ) : section === 'account' || section === 'subscription' ? (
             <AccountSettings key={section} subscription={section === 'subscription'} openProviders={() => onSection('providers')} />

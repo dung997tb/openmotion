@@ -278,8 +278,8 @@ export function useTimelineClipTimingEditing({
     ) => {
       const authoredStart = toAuthoredStart(element, updates.start);
       const liveAttrs: Array<[string, string]> = [
-        ["data-start", formatTimelineAttributeNumber(authoredStart)],
-        ["data-duration", formatTimelineAttributeNumber(updates.duration)],
+        ["data-start", String(authoredStart)],
+        ["data-duration", String(updates.duration)],
       ];
       if (updates.playbackStart != null) {
         const liveAttr = playbackStartAttributeForElement(element);

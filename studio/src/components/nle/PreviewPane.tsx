@@ -26,6 +26,7 @@ import { togglePreviewFullscreen } from '../../player/lib/previewFullscreen';
 import { useToast } from '../../hooks/useToast';
 import { StudioToastViewport } from '../StudioToastViewport';
 import { useI18n } from '../../i18n/I18n';
+import { useCloudFeatureEnabled } from '../../utils/cloudFeatures';
 
 // Clear the timeline selection when a pointer lands outside the composition
 // frame (clicks *inside* the frame are handled by the DOM-edit overlay).
@@ -73,6 +74,7 @@ export function PreviewPane({
   onCompositionDrop,
 }: PreviewPaneProps) {
   const mvp = useMvpEditor();
+  const reviewCommentsEnabled = useCloudFeatureEnabled('reviewComments');
   const { t } = useI18n(), toast = useToast();
   const previewHeader = useDockHeaderSlot("preview");
   const {
@@ -186,7 +188,7 @@ export function PreviewPane({
         {!empty && !isFullscreen && <PreviewOverlayProvider>
           <PreviewGuides />
           {previewOverlay}
-          {mvp && <><ReviewAnnotationOverlay /><ReviewComposerOverlay /></>}
+          {mvp && reviewCommentsEnabled && <><ReviewAnnotationOverlay /><ReviewComposerOverlay /></>}
         </PreviewOverlayProvider>}
         {empty && <PreviewEmptyState />}
         {!empty && !isFullscreen && <TimelineHoverPreview />}
@@ -199,7 +201,7 @@ export function PreviewPane({
           <CompositionBreadcrumb stack={compositionStack} onNavigate={handleNavigateComposition} />
         )}
         <PlayerControls
-          reviewControls={mvp && !isFullscreen ? <ReviewPlayerControls projectId={projectId} disabled={timelineDisabled || compositionLoading} /> : undefined}
+          reviewControls={mvp && reviewCommentsEnabled && !isFullscreen ? <ReviewPlayerControls projectId={projectId} disabled={timelineDisabled || compositionLoading} /> : undefined}
           onTogglePlay={togglePlay}
           onSeek={seek}
           disabled={timelineDisabled}

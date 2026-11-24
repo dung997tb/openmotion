@@ -5,8 +5,156 @@ export function isolatedPreviewOrigin(): string | undefined {
     document.querySelector<HTMLMetaElement>('meta[name="openmotion-preview-origin"]')?.content;
 }
 
-type Grant = { previewOrigin: string; token: string; expiresAt: string; assetLease: string };
+type Grant = { previewOrigin?: string; token: string; expiresAt?: string; assetLease?: string };
 type GrantResponse = { status: number; grant: Grant | null };
+
+export interface SharedPreviewGrant {
+  readonly origin: string;
+  readonly token: string;
+  readonly assetLease?: string;
+  readonly expiresAt: number;
+}
+
+interface InFlightSharedGrant {
+  promise: Promise<SharedPreviewGrant>;
+  controller: AbortController;
+  waiters: number;
+}
+
+const SHARED_GRANT_MIN_TTL_MS = 30_000;
+const FALLBACK_SHARED_GRANT_TTL_MS = 5 * 60_000;
+const sharedGrantsByProject = new Map<string, SharedPreviewGrant>();
+const inFlightSharedGrants = new Map<string, InFlightSharedGrant>();
+
+function normalizeOrigin(origin: string): string {
+  return new URL(origin).origin;
+}
+
+function recordSharedGrant(project: string, origin: string, grant: Grant): SharedPreviewGrant {
+  const normalizedOrigin = normalizeOrigin(origin);
+  const parsedExpiry = typeof grant.expiresAt === "string" ? Date.parse(grant.expiresAt) : NaN;
+  const expiresAt =
+    Number.isFinite(parsedExpiry) && parsedExpiry > Date.now()
+      ? parsedExpiry
+      : Date.now() + FALLBACK_SHARED_GRANT_TTL_MS;
+  const entry: SharedPreviewGrant = {
+    origin: normalizedOrigin,
+    token: grant.token,
+    ...(typeof grant.assetLease === "string" && grant.assetLease ? { assetLease: grant.assetLease } : {}),
+    expiresAt,
+  };
+  sharedGrantsByProject.set(project, entry);
+  return entry;
+}
+
+function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () => void): Promise<T> {
+  if (signal.aborted) {
+    onAbort();
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = () => {
+      onAbort();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", handleAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * Reuse the active project's preview token and asset lease across background captures so
+ * every capture iframe skips extra `preview-token` round-trips and shares the live preview's
+ * `/~assets/<lease>/` browser HTTP cache.
+ */
+export function acquireSharedPreviewGrant(
+  projectId: string,
+  previewOrigin: string,
+  signal: AbortSignal,
+): Promise<SharedPreviewGrant> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  const expectedOrigin = normalizeOrigin(previewOrigin);
+  const project = encodeURIComponent(projectId);
+  const cached = sharedGrantsByProject.get(project);
+  if (cached && cached.origin === expectedOrigin && cached.expiresAt - Date.now() > SHARED_GRANT_MIN_TTL_MS) {
+    return Promise.resolve(cached);
+  }
+
+  const flightKey = `${project}::${expectedOrigin}`;
+  let flight = inFlightSharedGrants.get(flightKey);
+  if (!flight) {
+    const controller = new AbortController();
+    const requestPromise = requestPreviewLease(project, cached?.assetLease, controller.signal)
+      .then((response) => {
+        if (!response.grant || !response.grant.token) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            sharedGrantsByProject.delete(project);
+          }
+          throw new Error(
+            response.grant
+              ? "Missing preview capture token"
+              : `Preview token failed (${response.status})`,
+          );
+        }
+        if (response.grant.previewOrigin && normalizeOrigin(response.grant.previewOrigin) !== expectedOrigin) {
+          throw new Error("Invalid preview authorization");
+        }
+        return recordSharedGrant(project, expectedOrigin, response.grant);
+      })
+      .finally(() => {
+        if (inFlightSharedGrants.get(flightKey)?.promise === requestPromise) {
+          inFlightSharedGrants.delete(flightKey);
+        }
+      });
+    flight = { promise: requestPromise, controller, waiters: 0 };
+    inFlightSharedGrants.set(flightKey, flight);
+  }
+
+  const activeFlight = flight;
+  activeFlight.waiters += 1;
+  let released = false;
+  const releaseWaiter = (abortIfEmpty: boolean) => {
+    if (released) return;
+    released = true;
+    activeFlight.waiters = Math.max(0, activeFlight.waiters - 1);
+    if (abortIfEmpty && activeFlight.waiters === 0) {
+      activeFlight.controller.abort();
+      if (inFlightSharedGrants.get(flightKey) === activeFlight) {
+        inFlightSharedGrants.delete(flightKey);
+      }
+    }
+  };
+
+  return awaitWithAbort(activeFlight.promise, signal, () => releaseWaiter(true)).finally(() => {
+    releaseWaiter(false);
+  });
+}
+
+export function invalidateSharedPreviewGrant(projectId: string, token?: string): void {
+  const project = encodeURIComponent(projectId);
+  const existing = sharedGrantsByProject.get(project);
+  if (!existing) return;
+  if (!token || existing.token === token) {
+    sharedGrantsByProject.delete(project);
+  }
+}
+
+export function clearSharedPreviewGrantsForTest(): void {
+  sharedGrantsByProject.clear();
+  for (const flight of inFlightSharedGrants.values()) {
+    flight.controller.abort();
+  }
+  inFlightSharedGrants.clear();
+}
 
 async function requestPreviewLease(project: string, assetLease: string | undefined, signal: AbortSignal): Promise<GrantResponse> {
   const response = await studioApiFetch(`/api/projects/${project}/preview-token`, {
@@ -23,7 +171,15 @@ async function requestPreviewLease(project: string, assetLease: string | undefin
 export function preparePreviewLease(projectId: string, origin: string, route?: AbortSignal) {
   const project = encodeURIComponent(projectId);
   const signal = route && AbortSignal.any([route, AbortSignal.timeout(10_000)]);
-  let pending: Promise<GrantResponse | undefined> | undefined = signal && requestPreviewLease(project, undefined, signal).catch(() => undefined);
+  let pending: Promise<GrantResponse | undefined> | undefined = signal && requestPreviewLease(project, undefined, signal)
+    .then((result) => {
+      if (!signal.aborted && result.grant?.token && result.grant.previewOrigin === origin &&
+          typeof result.grant.expiresAt === "string" && Date.parse(result.grant.expiresAt) > Date.now()) {
+        recordSharedGrant(project, origin, result.grant);
+      }
+      return result;
+    })
+    .catch(() => undefined);
   signal?.addEventListener("abort", () => { pending = undefined; }, { once: true });
   return {
     project, origin,
@@ -32,7 +188,7 @@ export function preparePreviewLease(projectId: string, origin: string, route?: A
       const response = pending;
       pending = undefined;
       return response?.then(result => {
-        if (signal?.aborted || !result?.grant || !(Date.parse(result.grant.expiresAt) > Date.now())) return;
+        if (signal?.aborted || !result?.grant || !(Date.parse(result.grant.expiresAt ?? "") > Date.now())) return;
         return result;
       });
     },
@@ -88,6 +244,7 @@ export function bindPreviewLease(
         if (response.status === 401 || response.status === 403 || response.status === 404) {
           assetLease = undefined;
           if (scope) scope.assetLease = undefined;
+          sharedGrantsByProject.delete(project);
           renewAt = Infinity;
           failed(`Preview access denied (HTTP ${response.status})`);
           return;
@@ -95,13 +252,14 @@ export function bindPreviewLease(
         throw new Error(`Preview authorization failed (HTTP ${response.status})`);
       }
       const grant = response.grant;
-      const deadline = Date.parse(grant.expiresAt);
+      const deadline = Date.parse(grant.expiresAt ?? "");
       const ttl = deadline - Date.now();
       if (grant.previewOrigin !== origin || typeof grant.token !== "string" || !grant.token ||
           typeof grant.assetLease !== "string" || !grant.assetLease || !(ttl > 0)) {
         throw new Error("Invalid preview authorization");
       }
       if (controller.signal.aborted) return;
+      recordSharedGrant(project, origin, grant);
       if (navigateOnGrant || assetLease !== grant.assetLease) {
         const url = new URL(source.pathname, origin);
         url.search = source.search;

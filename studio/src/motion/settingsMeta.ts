@@ -21,6 +21,14 @@ export const settingsCenterSections: readonly SettingsSectionMeta[] = [
   { id: 'about', label: 'About OpenMotion', icon: 'information-line', group: 'Resources' },
 ];
 
-export function settingsSectionLabel(section: SettingsSection): string {
-  return settingsCenterSections.find(item => item.id === section)?.label ?? 'Settings';
+export function visibleSettingsCenterSections(localAgentsEnabled: boolean): SettingsSectionMeta[] {
+  return settingsCenterSections
+    .filter(item => localAgentsEnabled || item.id !== 'local')
+    .map(item => (!localAgentsEnabled && item.id === 'models' ? { ...item, label: 'Default models' } : item));
+}
+
+export function settingsSectionLabel(section: SettingsSection, localAgentsEnabled = true): string {
+  return visibleSettingsCenterSections(localAgentsEnabled).find(item => item.id === section)?.label
+    ?? settingsCenterSections.find(item => item.id === section)?.label
+    ?? 'Settings';
 }

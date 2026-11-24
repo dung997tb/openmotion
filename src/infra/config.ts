@@ -93,6 +93,8 @@ const rawConfigSchema = z.object({
   MODEL_GATEWAY_MODE: z.enum(['opendesign', 'mock']).default('opendesign'),
   OPENDESIGN_API_URL: z.string().url().default('https://amr-api.open-design.ai'),
   OPENDESIGN_LINK_URL: z.string().url().default('https://amr-link.open-design.ai'),
+  // OpenDesign web console that account/plan links open; non-production environments point at their own console.
+  OPENDESIGN_CONSOLE_URL: z.string().url().default('https://open-design.ai/cloud'),
   OPENDESIGN_INTERNAL_API_TOKEN: optionalNonEmptyString,
   OPENDESIGN_S2S_API_KEY: optionalNonEmptyString,
   AMR_IDENTITY_CACHE_TTL_SEC: z.coerce.number().int().min(1).max(60).default(60),

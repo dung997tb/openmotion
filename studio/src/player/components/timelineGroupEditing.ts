@@ -71,13 +71,16 @@ export function applyClipStartTrimDelta(
   clip: TimelineStartTrimClip,
   delta: number,
 ): { start: number; duration: number; playbackStart?: number } {
+  if (delta === 0) return { start: clip.start, duration: clip.duration, playbackStart: clip.playbackStart };
   const playbackRate = resolveTimelinePlaybackRate(clip.playbackRate);
   const mediaZero =
     clip.playbackStart != null ? clip.start - clip.playbackStart / playbackRate : -Infinity;
   const start = Math.max(roundTimelineTime(clip.start + delta), ceilTimelineTime(mediaZero));
   return {
     start,
-    duration: roundTimelineTime(clip.start + clip.duration - start),
+    // Only the dragged edge snaps to the centisecond grid. Keep the untouched
+    // end at its authored frame, including 30/60 fps boundaries.
+    duration: Number((clip.start + clip.duration - start).toFixed(12)),
     playbackStart:
       clip.playbackStart != null
         ? Math.max(0, clip.playbackStart + (start - clip.start) * playbackRate)

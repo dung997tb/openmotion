@@ -85,7 +85,8 @@ COPY packages/design-system/ ./packages/design-system/
 COPY packages/edit-core/ ./packages/edit-core/
 COPY packages/motion-package/ ./packages/motion-package/
 COPY packages/observability/ ./packages/observability/
-COPY templates/ ./templates/
+COPY templates/compositions/ ./templates/compositions/
+COPY templates/index.html ./templates/index.html
 COPY web/ ./web/
 COPY mcp-ui/template-recommendations/manifest.json \
      mcp-ui/template-recommendations/inline.fragment.html \

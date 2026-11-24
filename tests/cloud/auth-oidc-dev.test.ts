@@ -14,14 +14,18 @@ import {
   InMemoryAuthStore,
   OidcService,
   SESSION_COOKIE_NAME,
+  buildOAuth21Config,
   createAuthMiddleware,
   createAuthRoutes,
   createBrowserSession,
   createMcpBearerAuthMiddleware,
   createPat,
+  exchangeOAuthToken,
   generatePkcePair,
   getAuthContext,
+  registerOAuthClient,
   requireScope,
+  revokeOAuthToken,
   sha256Hex,
   verifyPat,
   type AuthEnv,
@@ -675,6 +679,63 @@ describe('OAuth 2.1 Proxy & Delegated Modes (RFC 9728, RFC 8414, DCR, PKCE S256,
       headers: { Authorization: `Bearer ${rotated.access_token}` },
     });
     assert.equal(mcpAfterRevoke.status, 401);
+  });
+
+  it('revokes every live token of the connection when a rotated refresh token is replayed after the grace window', async () => {
+    const config = makeConfig();
+    const oauthCfg = buildOAuth21Config(config);
+    const store = new InMemoryAuthStore();
+    const seeded = store.seedWorkspace({
+      email: 'reuse@example.test',
+      displayName: 'Reuse',
+    });
+    const client = await registerOAuthClient(
+      store,
+      { client_name: 'Reuse probe', redirect_uris: ['http://127.0.0.1:53682/callback'] },
+      { allowedHttpsHosts: [] },
+    );
+    const seedRefresh = async (fill: string) => {
+      const refreshToken = `om_ort_${fill.repeat(48)}`;
+      await store.createOAuthToken({
+        clientId: client.client_id,
+        userId: seeded.user.id,
+        workspaceId: seeded.workspace.id,
+        accessTokenHash: sha256Hex(`om_oat_${fill.repeat(48)}`),
+        refreshTokenHash: sha256Hex(refreshToken),
+        scope: 'projects:read mcp:tools',
+        resource: null,
+        accessExpiresAt: new Date(Date.now() + 3600_000),
+        refreshExpiresAt: new Date(Date.now() + 86_400_000),
+      });
+      return refreshToken;
+    };
+    const refresh = (refreshToken: string) =>
+      exchangeOAuthToken(store, oauthCfg, { grantType: 'refresh_token', refreshToken, clientId: client.client_id });
+    const isLive = async (accessToken: string) =>
+      (await store.findActiveOAuthTokenByAccessHash(sha256Hex(accessToken))) !== null;
+
+    // Explicit revocation (RFC 7009 / disconnect) is not rotation: replaying that token revokes nothing else.
+    const explicitlyRevoked = await seedRefresh('e');
+    const other = await refresh(await seedRefresh('o'));
+    await revokeOAuthToken(store, explicitlyRevoked);
+    const explicitRow = [...store.oauthTokens.values()].find(t => t.accessTokenHash === sha256Hex(`om_oat_${'e'.repeat(48)}`));
+    explicitRow!.revokedAt = new Date(Date.now() - 31_000);
+    await assert.rejects(refresh(explicitlyRevoked), /invalid_grant/);
+    assert.equal(await isLive(other.access_token), true);
+
+    const original = await seedRefresh('r');
+    const rotated = await refresh(original);
+    // A replay inside the grace window (e.g. a concurrent refresh) only fails; the winner stays valid.
+    await assert.rejects(refresh(original), /invalid_grant/);
+    assert.equal(await isLive(rotated.access_token), true);
+
+    // Outside the window the replay is treated as theft and the connection's live tokens are revoked.
+    const originalRow = await store.findOAuthTokenByRefreshHash(sha256Hex(original));
+    originalRow!.revokedAt = new Date(Date.now() - 31_000);
+    await assert.rejects(refresh(original), /invalid_grant/);
+    assert.equal(await isLive(rotated.access_token), false);
+    assert.equal(await isLive(other.access_token), false);
+    await assert.rejects(refresh(rotated.refresh_token), /invalid_grant/);
   });
 
   it('advertises external issuer in MCP_OAUTH_MODE=delegated and disables proxy DCR endpoints', async () => {

@@ -392,16 +392,15 @@ describe("computeDragPreview — a clip landing on an empty main track keeps its
 describe("guideIfSaved — a guide only where the clip saves", () => {
   const grid = { time: 3.25, type: "grid" as const };
 
-  it("drops the guide when start and duration round apart from the target", () => {
-    // 1440 px/s: 1.125s + 2.125s saves as 1.13s + 2.13s, 14px past the 3.25s guide.
+  it("keeps a resize guide when both authored values are between centiseconds", () => {
     const el = clip("a", 0, 1.125, 2, 0, "div");
-    expect(guideIfSaved(el, { start: 1.125, duration: 2.125 }, grid, 1440)).toBeNull();
+    expect(guideIfSaved(el, { start: 1.125, duration: 2.125 }, grid, 1440)).toBe(grid);
   });
 
-  it("drops the guide when a nested clip's local start rounds off it", () => {
+  it("keeps a nested resize guide on the same master-clock edge", () => {
     const el = { ...clip("a", 0, 2, 1, 0, "div"), parentCompositionStart: 1 / 30 };
     const target = { time: 2.1, type: "playhead" as const };
-    expect(guideIfSaved(el, { start: 2.1, duration: 1 }, target, 1440)).toBeNull();
+    expect(guideIfSaved(el, { start: 2.1, duration: 1 }, target, 1440)).toBe(target);
   });
 
   it("keeps the guide when the saved edge is on it", () => {

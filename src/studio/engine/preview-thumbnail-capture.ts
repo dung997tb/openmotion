@@ -40,22 +40,54 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
       });
     });
   }
-  function withPreviewRedirectSafeFetch(run){
+  function withPreviewRedirectSafeFetch(run,fetchCache){
     var origFetch=window.fetch;
     if(typeof origFetch!=='function') return run();
     window.fetch=function(input,init){
-      if(init&&init.credentials==='include'){
-        try {
-          var rawUrl=typeof input==='string'?input:(input&&typeof input.url==='string'?input.url:'');
-          if(rawUrl){
-            var parsed=new URL(rawUrl,location.href);
-            if(parsed.origin===location.origin&&/^\\/api\\/projects\\/[^/]+\\/preview\\//.test(parsed.pathname)){
+      var method=(init&&init.method?String(init.method):'GET').toUpperCase();
+      var cacheKey=null;
+      try {
+        var rawUrl=typeof input==='string'?input:(input&&typeof input.url==='string'?input.url:'');
+        if(rawUrl){
+          var parsed=new URL(rawUrl,location.href);
+          if(parsed.origin===location.origin&&/^\\/api\\/projects\\/[^/]+\\/preview\\//.test(parsed.pathname)){
+            if(init&&init.credentials==='include'){
               init=Object.assign({},init,{credentials:'same-origin'});
             }
+            if(fetchCache&&method==='GET') cacheKey=parsed.href;
           }
-        } catch(_){}
+        }
+      } catch(_){}
+      if(cacheKey&&fetchCache[cacheKey]){
+        return fetchCache[cacheKey].then(function(entry){
+          return new Response(entry.buffer.slice(0),{status:entry.status,statusText:entry.statusText,headers:entry.headers});
+        });
       }
-      return origFetch.call(this,input,init);
+      var resPromise=origFetch.call(this,input,init);
+      if(cacheKey&&typeof Response==='function'){
+        var cached=resPromise.then(function(resp){
+          if(!resp||!resp.ok||typeof resp.clone!=='function'||typeof resp.arrayBuffer!=='function'){
+            delete fetchCache[cacheKey];
+            return null;
+          }
+          var headers=[];
+          if(resp.headers&&typeof resp.headers.forEach==='function'){
+            resp.headers.forEach(function(v,k){ headers.push([k,v]); });
+          }
+          return resp.clone().arrayBuffer().then(function(buf){
+            return {status:resp.status,statusText:resp.statusText,headers:headers,buffer:buf};
+          });
+        },function(err){
+          delete fetchCache[cacheKey];
+          throw err;
+        });
+        fetchCache[cacheKey]=cached;
+        return resPromise.then(function(resp){
+          if(!resp||!resp.ok||typeof resp.clone!=='function') delete fetchCache[cacheKey];
+          return resp;
+        });
+      }
+      return resPromise;
     };
     function restore(){ if(window.fetch!==origFetch) window.fetch=origFetch; }
     var pending;
@@ -66,6 +98,47 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
       function(err){ restore(); throw err; }
     );
   }
+  function inlineDecodedCaptureImages(root){
+    if(!root||typeof root.querySelectorAll!=='function') return;
+    var imgs=root.querySelectorAll('img');
+    if(!imgs||!imgs.length) return;
+    var cache={};
+    for(var i=0;i<imgs.length;i++){
+      var img=imgs[i];
+      if(!img||!img.complete||!(img.naturalWidth>0)||!(img.naturalHeight>0)) continue;
+      var rawSrc=img.getAttribute&&img.getAttribute('src')||'';
+      if(rawSrc.indexOf('data:')===0) continue;
+      var key=img.currentSrc||img.src||rawSrc;
+      if(!key) continue;
+      var dataUrl=cache[key];
+      if(dataUrl===undefined){
+        try {
+          var natW=img.naturalWidth, natH=img.naturalHeight;
+          var scale=Math.min(1,480/Math.max(natW,natH));
+          var cw=Math.max(1,Math.round(natW*scale));
+          var ch=Math.max(1,Math.round(natH*scale));
+          var cv=document.createElement('canvas');
+          cv.width=cw; cv.height=ch;
+          var ctx=cv.getContext('2d');
+          if(!ctx){ cache[key]=null; continue; }
+          ctx.drawImage(img,0,0,cw,ch);
+          dataUrl=cv.toDataURL('image/png');
+          cache[key]=dataUrl;
+        } catch(_){
+          cache[key]=null;
+          continue;
+        }
+      }
+      if(!dataUrl) continue;
+      if(!img.hasAttribute('width')&&!img.hasAttribute('height')){
+        img.setAttribute('width',String(img.naturalWidth));
+        img.setAttribute('height',String(img.naturalHeight));
+      }
+      img.removeAttribute('srcset');
+      img.removeAttribute('sizes');
+      img.setAttribute('src',dataUrl);
+    }
+  }
   function waitForCaptureMedia(timeoutMs){
     var done=false;
     var tasks=[];
@@ -74,6 +147,8 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     for(var i=0;i<imgs.length;i++){
       var img=imgs[i];
       if(img.complete) continue;
+      if(!img.getAttribute('src')&&!img.getAttribute('srcset')) continue;
+      if(img.loading==='lazy') img.loading='eager';
       tasks.push(new Promise(function(resolve){
         var el=img;
         function finish(){ el.removeEventListener('load',finish); el.removeEventListener('error',finish); resolve(); }
@@ -81,9 +156,10 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
         el.addEventListener('error',finish,{once:true});
       }));
     }
+    if(!tasks.length) return Promise.resolve(false);
     return Promise.race([
       Promise.all(tasks),
-      new Promise(function(resolve){ setTimeout(function(){ done=true; resolve(); },timeoutMs||4000); })
+      new Promise(function(resolve){ setTimeout(function(){ done=true; resolve(); },timeoutMs||2000); })
     ]).then(function(){ return done; });
   }
   function findPureCanvasTarget(root,stageW,stageH){
@@ -112,7 +188,7 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
       },'image/jpeg',0.78);
     });
   }
-  function capturePreviewFrames(message){
+  function capturePreviewFrames(message,onFrame){
     var times=Array.isArray(message.times)?message.times:[];
     if(!times.length) return Promise.resolve({frames:[],mimeType:'image/jpeg',width:240,height:135,aspect:16/9});
     var p=player();
@@ -137,31 +213,54 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     var outW=maxW;
     var outH=Math.max(27,Math.round(outW*stageH/Math.max(1,stageW)));
     var scale=outW/Math.max(1,stageW);
-    return waitForCaptureMedia(4000).then(function(){
+    var aspect=stageW/Math.max(1,stageH);
+    var progressive=typeof onFrame==='function';
+    var order=[];
+    if(progressive&&times.length>=3){
+      var coverIdx=Math.floor(times.length/2);
+      order.push(coverIdx);
+      for(var k=0;k<times.length;k++){ if(k!==coverIdx) order.push(k); }
+    } else {
+      for(var m=0;m<times.length;m++) order.push(m);
+    }
+    // Kick off SnapDOM load concurrently with media/font readiness when DOM capture is needed.
+    var snapdomReady=findPureCanvasTarget(target,stageW,stageH)?Promise.resolve(null):loadSnapdom();
+    return waitForCaptureMedia(2000).then(function(){
+      inlineDecodedCaptureImages(target);
+      var fetchCache={};
       var frames=[];
       var chain=Promise.resolve();
-      for(var i=0;i<times.length;i++){
-        (function(t){
+      for(var i=0;i<order.length;i++){
+        (function(frameIdx,t){
           chain=chain.then(function(){
             p.seek(Math.max(0,Number(t)||0));
             return waitTwoFrames();
           }).then(function(){
             var pureCanvas=findPureCanvasTarget(target,stageW,stageH);
             if(pureCanvas) return canvasToJpegBuffer(pureCanvas,outW,outH);
-            return loadSnapdom().then(function(fn){
+            return snapdomReady.then(function(fn){
+              return fn||loadSnapdom();
+            }).then(function(fn){
               return withPreviewRedirectSafeFetch(function(){
                 return fn(target,{scale:scale,fast:true,embedFonts:false,exclude:'video'})
                   .then(function(res){ return res.toCanvas(); });
-              });
+              },fetchCache);
             }).then(function(cv){ return canvasToJpegBuffer(cv,outW,outH); });
           }).then(function(buf){
-            frames.push(buf);
+            if(progressive){
+              onFrame({index:frameIdx,total:times.length,frame:buf,mimeType:'image/jpeg',width:outW,height:outH,aspect:aspect},buf);
+            } else {
+              frames.push(buf);
+            }
             return new Promise(function(r){ setTimeout(r,0); });
           });
-        })(times[i]);
+        })(order[i],times[order[i]]);
       }
       return chain.then(function(){
-        return {frames:frames,mimeType:'image/jpeg',width:outW,height:outH,aspect:stageW/Math.max(1,stageH)};
+        if(progressive){
+          return {frames:[],streamed:true,frameCount:times.length,mimeType:'image/jpeg',width:outW,height:outH,aspect:aspect};
+        }
+        return {frames:frames,mimeType:'image/jpeg',width:outW,height:outH,aspect:aspect};
       });
     });
   }

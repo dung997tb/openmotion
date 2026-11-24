@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bindPreviewLease, preparePreviewLease } from "./previewLease";
+import {
+  acquireSharedPreviewGrant,
+  bindPreviewLease,
+  clearSharedPreviewGrantsForTest,
+  preparePreviewLease,
+} from "./previewLease";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 
 vi.mock("../../utils/studioApiFetch", () => ({ studioApiFetch: vi.fn() }));
@@ -21,7 +26,7 @@ describe("preview lease", () => {
     vi.clearAllMocks();
     vi.spyOn(Math, "random").mockReturnValue(0);
   });
-  afterEach(() => { lease.dispose(); vi.restoreAllMocks(); vi.useRealTimers(); });
+  afterEach(() => { lease?.dispose(); clearSharedPreviewGrantsForTest(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
   it("renews the same read lease in place and reconnects only if the server issues a replacement", async () => {
     fetch.mockImplementationOnce(async () => grant("A", "first"))
@@ -181,5 +186,47 @@ describe("preview lease", () => {
     resolve(grant("A", "late"));
     await vi.advanceTimersByTimeAsync(0);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("coalesces concurrent shared grant requests and preserves assetLease across renewal", async () => {
+    fetch
+      .mockResolvedValueOnce(
+        Response.json({
+          assetLease: "lease-shared-A",
+          token: "tok-1",
+          previewOrigin: origin,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          assetLease: "lease-shared-A",
+          token: "tok-2",
+          previewOrigin: origin,
+          expiresAt: new Date(Date.now() + 120_000).toISOString(),
+        }),
+      );
+
+    const [a, b, c] = await Promise.all([
+      acquireSharedPreviewGrant("proj-x", origin, new AbortController().signal),
+      acquireSharedPreviewGrant("proj-x", origin, new AbortController().signal),
+      acquireSharedPreviewGrant("proj-x", origin, new AbortController().signal),
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(a.token).toBe("tok-1");
+    expect(b.token).toBe("tok-1");
+    expect(c.assetLease).toBe("lease-shared-A");
+
+    // Within remaining TTL (>30s), subsequent callers reuse cached grant with 0 requests.
+    const warm = await acquireSharedPreviewGrant("proj-x", origin, new AbortController().signal);
+    expect(warm.token).toBe("tok-1");
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    // Near expiry (<=30s left), renewal sends the existing assetLease to preserve browser HTTP cache.
+    vi.setSystemTime(Date.now() + 35_000);
+    const renewed = await acquireSharedPreviewGrant("proj-x", origin, new AbortController().signal);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ assetLease: "lease-shared-A" });
+    expect(renewed.token).toBe("tok-2");
   });
 });

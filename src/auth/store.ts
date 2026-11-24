@@ -333,10 +333,18 @@ export interface AuthStore {
   }): Promise<OAuthTokenRecord>;
   findActiveOAuthTokenByAccessHash(accessTokenHash: string): Promise<OAuthTokenRecord | null>;
   findActiveOAuthTokenByRefreshHash(refreshTokenHash: string): Promise<OAuthTokenRecord | null>;
+  /** Any row (including revoked/expired) for refresh-token reuse detection. */
+  findOAuthTokenByRefreshHash(refreshTokenHash: string): Promise<OAuthTokenRecord | null>;
   touchOAuthToken(tokenId: string): Promise<void>;
+  /** Rotation only: keeps the refresh hash so a later replay is detected as reuse. */
   revokeOAuthTokenById(tokenId: string): Promise<boolean>;
+  /**
+   * Explicit revocations (RFC 7009, disconnect) also clear the refresh hash, so only tokens retired
+   * by rotation can trigger reuse detection.
+   */
   revokeOAuthTokenByHash(hash: string): Promise<boolean>;
   listConnectedApps(userId: string): Promise<ConnectedAppSummary[]>;
+  /** Explicit revocation of every live token of a connection; clears refresh hashes the same way. */
   revokeOAuthClientForUser(userId: string, clientId: string): Promise<number>;
   cleanupUnusedOAuthClients(olderThan: Date): Promise<number>;
 
@@ -848,6 +856,13 @@ export class InMemoryAuthStore implements AuthStore {
     return null;
   }
 
+  async findOAuthTokenByRefreshHash(refreshTokenHash: string): Promise<OAuthTokenRecord | null> {
+    for (const t of this.oauthTokens.values()) {
+      if (t.refreshTokenHash === refreshTokenHash) return t;
+    }
+    return null;
+  }
+
   async revokeOAuthTokenById(tokenId: string): Promise<boolean> {
     const t = this.oauthTokens.get(tokenId);
     if (!t || t.revokedAt) return false;
@@ -859,6 +874,7 @@ export class InMemoryAuthStore implements AuthStore {
     for (const t of this.oauthTokens.values()) {
       if ((t.accessTokenHash === hash || t.refreshTokenHash === hash) && !t.revokedAt) {
         t.revokedAt = new Date();
+        t.refreshTokenHash = null;
         return true;
       }
     }
@@ -930,6 +946,7 @@ export class InMemoryAuthStore implements AuthStore {
     for (const t of this.oauthTokens.values()) {
       if (t.userId === userId && t.clientId === clientId && !t.revokedAt) {
         t.revokedAt = now;
+        t.refreshTokenHash = null;
         count += 1;
       }
     }
@@ -1605,6 +1622,15 @@ export function createPgAuthStore(db: Database): AuthStore {
       return row ?? null;
     },
 
+    async findOAuthTokenByRefreshHash(refreshTokenHash) {
+      const [row] = await db
+        .select()
+        .from(oauthTokens)
+        .where(eq(oauthTokens.refreshTokenHash, refreshTokenHash))
+        .limit(1);
+      return row ?? null;
+    },
+
     async revokeOAuthTokenById(tokenId) {
       const rows = await db
         .update(oauthTokens)
@@ -1617,7 +1643,7 @@ export function createPgAuthStore(db: Database): AuthStore {
     async revokeOAuthTokenByHash(hash) {
       const rows = await db
         .update(oauthTokens)
-        .set(asUpdate(oauthTokens, { revokedAt: sql`now()` }))
+        .set(asUpdate(oauthTokens, { revokedAt: sql`now()`, refreshTokenHash: null }))
         .where(
           and(
             or(eq(oauthTokens.accessTokenHash, hash), eq(oauthTokens.refreshTokenHash, hash)),
@@ -1705,7 +1731,7 @@ export function createPgAuthStore(db: Database): AuthStore {
     async revokeOAuthClientForUser(userId, clientId) {
       const rows = await db
         .update(oauthTokens)
-        .set(asUpdate(oauthTokens, { revokedAt: sql`now()` }))
+        .set(asUpdate(oauthTokens, { revokedAt: sql`now()`, refreshTokenHash: null }))
         .where(
           and(
             eq(oauthTokens.userId, userId),

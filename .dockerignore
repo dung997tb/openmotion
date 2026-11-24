@@ -36,6 +36,10 @@ scratch
 outputs
 research
 
+# Phase 2 Game Studio static templates/kits (not shipped in Cloud Phase 1 images)
+templates/games
+templates/game-kits
+
 # Secrets and local environment overrides (keep .env.example files for reference)
 .env
 .env.*

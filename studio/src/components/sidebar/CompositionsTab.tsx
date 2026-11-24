@@ -4,7 +4,7 @@ import { IconButton } from "open-design-ui/icon-button";
 import { RemixIcon } from "../../icons/RemixIcons";
 import { useI18n } from "../../i18n/I18n";
 import { buildProjectApiPath } from "../../utils/projectRouting";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useThumbnailLease } from "../../hooks/useThumbnailLease";
 import {
   thumbnailScheduler,
@@ -21,8 +21,10 @@ import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import {
   canCaptureCompositionInBrowser,
   createClientCompositionCaptureRequest,
+  getCompositionCacheRevision,
   peekCachedCompositionCapture,
   retainCachedCompositionCapture,
+  subscribeCompositionCacheRevision,
 } from "../../player/lib/clientCompositionCapture";
 import { setPreviewMediaMuted } from "../../player/lib/timelineIframeHelpers";
 import { postFrameDisplayScale } from "../../player/lib/runtimeProtocol";
@@ -253,9 +255,20 @@ function CompCard({
   const thumbnailUrl = compositionCardThumbnailUrl(projectId, comp, contentRevision);
   const [thumbnailBox, nearViewport] = useNearViewport<HTMLDivElement>();
   const timelineSessionEpoch = usePlayerStore((state) => state.timelineSessionEpoch);
+  const captureEnabled = nearViewport && getCachedCloudDisklessMode() && canCaptureCompositionInBrowser();
+  const subscribeCacheRev = useCallback(
+    (listener: () => void) =>
+      captureEnabled ? subscribeCompositionCacheRevision(projectId, listener) : () => {},
+    [captureEnabled, projectId],
+  );
+  const getCacheRev = useCallback(
+    () => (captureEnabled ? getCompositionCacheRevision(projectId, previewUrl) : ""),
+    [captureEnabled, previewUrl, projectId],
+  );
+  const compCacheRev = useSyncExternalStore(subscribeCacheRev, getCacheRev, () => "");
   const syncCachedCover = useMemo(
     () =>
-      nearViewport && getCachedCloudDisklessMode() && canCaptureCompositionInBrowser()
+      captureEnabled
         ? peekCachedCompositionCapture({
             previewUrl,
             projectId,
@@ -263,7 +276,7 @@ function CompCard({
             frameCount: 1,
           })
         : null,
-    [contentRevision, nearViewport, previewUrl, projectId],
+    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId],
   );
   // Keep cached cover object URLs alive while this card renders them, even after LRU eviction.
   useLayoutEffect(() => retainCachedCompositionCapture(syncCachedCover), [syncCachedCover]);
@@ -279,7 +292,7 @@ function CompCard({
   );
   const captureRequest = useMemo(
     () =>
-      nearViewport && !syncCachedCover && getCachedCloudDisklessMode() && canCaptureCompositionInBrowser()
+      captureEnabled && !syncCachedCover
         ? createClientCompositionCaptureRequest({
             previewUrl,
             projectId,
@@ -291,7 +304,7 @@ function CompCard({
             rich: true,
           })
         : null,
-    [contentRevision, nearViewport, previewUrl, projectId, syncCachedCover, timelineSessionEpoch],
+    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId, syncCachedCover, timelineSessionEpoch],
   );
   const posterThumbnail = useThumbnailLease(thumbnailRequest);
   const captureThumbnail = useThumbnailLease(captureRequest);

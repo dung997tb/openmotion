@@ -45,7 +45,9 @@ import {
 import { getMimeType, sha256Hex } from '../studio/etag.ts';
 import { prepareFullBaseline } from './text-patch-boundaries.ts';
 import {
+  agentProjectFilter,
   assertAgentProjectAccess,
+  assertAgentSessionAccess,
   assertValidUuid,
   canonicalInputHash,
   loadProjectOrThrow,
@@ -56,6 +58,13 @@ import {
 } from './project-files-service.ts';
 
 export const DEFAULT_SESSION_TITLE = 'New Session';
+
+function sessionNotFound(sessionId: string): CloudError {
+  return new CloudError('SESSION_NOT_FOUND', `Session ${sessionId} was not found.`, {
+    status: 404,
+    applied: false,
+  });
+}
 
 const MAX_SESSION_MESSAGES = 200;
 
@@ -277,11 +286,13 @@ export class WorkspaceService {
       .from(workspaces)
       .where(eq(workspaces.id, ctx.workspaceId));
 
-    const projectRows = await this.db
+    const agentFilter = await agentProjectFilter(this.db, ctx);
+    const workspaceProjectRows = await this.db
       .select()
       .from(projects)
       .where(eq(projects.workspaceId, ctx.workspaceId))
       .orderBy(desc(projects.openedAt), desc(projects.createdAt));
+    const projectRows = agentFilter ? workspaceProjectRows.filter(agentFilter) : workspaceProjectRows;
 
     const sessionRows = await this.db
       .select()
@@ -306,12 +317,15 @@ export class WorkspaceService {
     const creativeSessions: CreativeSession[] = [];
     for (const sess of sessionRows) {
       const artifacts = (projectsBySession.get(sess.id) ?? []).map(projectArtifact);
+      if (agentFilter && artifacts.length === 0) continue;
+      const activeArtifactId =
+        agentFilter && !artifacts.some((a) => a.id === sess.activeArtifactId) ? artifacts[0].id : sess.activeArtifactId;
       const fullSession: CreativeSession = {
         id: sess.id,
         title: sess.title,
         mode: 'motion',
         artifacts,
-        ...(sess.activeArtifactId ? { activeArtifactId: sess.activeArtifactId } : {}),
+        ...(activeArtifactId ? { activeArtifactId } : {}),
         createdAt: sess.createdAt.getTime(),
         openedAt: sess.openedAt.getTime(),
         ...(sess.templateId ? { templateId: sess.templateId } : {}),
@@ -484,6 +498,8 @@ export class WorkspaceService {
             applied: false,
           });
         }
+        // The new project is auto-granted, so it must not open someone else's conversation to the agent.
+        await assertAgentSessionAccess(tx, ctx, input.sessionId);
         sessionId = sessRows[0].id;
       } else {
         const [createdSession] = await tx
@@ -1414,11 +1430,15 @@ export class WorkspaceService {
       });
     }
 
-    const projRows = await this.db
+    const sessionProjectRows = await this.db
       .select()
       .from(projects)
       .where(and(eq(projects.workspaceId, ctx.workspaceId), eq(projects.sessionId, sess.id)))
       .orderBy(asc(projects.createdAt));
+    const agentFilter = await agentProjectFilter(this.db, ctx);
+    const projRows = agentFilter ? sessionProjectRows.filter(agentFilter) : sessionProjectRows;
+    // The conversation belongs to its projects: agents need a grant on at least one of them.
+    if (agentFilter && sessionProjectRows.length > 0 && projRows.length === 0) throw sessionNotFound(sessionId);
 
     const msgRows = await this.db
       .select()
@@ -1429,13 +1449,17 @@ export class WorkspaceService {
     const activeArtifacts = projRows
       .filter((p) => !p.trashed)
       .map(projectArtifact);
+    const activeArtifactId =
+      agentFilter && !activeArtifacts.some((a) => a.id === sess.activeArtifactId)
+        ? activeArtifacts[0]?.id
+        : sess.activeArtifactId;
 
     return {
       id: sess.id,
       title: sess.title,
       mode: 'motion',
       artifacts: activeArtifacts,
-      ...(sess.activeArtifactId ? { activeArtifactId: sess.activeArtifactId } : {}),
+      ...(activeArtifactId ? { activeArtifactId } : {}),
       createdAt: sess.createdAt.getTime(),
       openedAt: sess.openedAt.getTime(),
       ...(sess.templateId ? { templateId: sess.templateId } : {}),
@@ -1518,6 +1542,7 @@ export class WorkspaceService {
   async renameSession(ctx: AuthContext, sessionId: string, title: string): Promise<SessionDetail> {
     assertValidUuid(ctx.workspaceId, 'workspaceId');
     assertValidUuid(sessionId, 'sessionId');
+    await assertAgentSessionAccess(this.db, ctx, sessionId);
     const clean = safeTitle(title);
 
     const rows = await this.db
@@ -1577,11 +1602,16 @@ export class WorkspaceService {
         )
         .orderBy(desc(projects.openedAt));
 
+      // Agents never get an ungranted project chosen for them; one they name still fails its grant check.
+      const agentFilter = await agentProjectFilter(tx, ctx);
+      if (agentFilter && projectId === undefined) await assertAgentSessionAccess(tx, ctx, sess.id);
+      const candidates = agentFilter ? projRows.filter(agentFilter) : projRows;
       const activeProj =
         (projectId ? projRows.find((p) => p.id === projectId) : undefined) ??
-        projRows.find((p) => p.artifactId === sess.activeArtifactId) ??
-        projRows[0] ??
+        candidates.find((p) => p.artifactId === sess.activeArtifactId) ??
+        candidates[0] ??
         null;
+      if (!editor && agentFilter && activeProj) await assertAgentProjectAccess(tx, ctx, activeProj);
       if (editor) {
         if (projectId !== undefined && activeProj?.id !== projectId) {
           throw new CloudError('PROJECT_NOT_FOUND', 'Project is unavailable in this session.', { status: 404, applied: false });
@@ -1641,6 +1671,7 @@ export class WorkspaceService {
   ): Promise<{ message: SessionMessage; messages: SessionMessage[]; replayed: boolean }> {
     assertValidUuid(ctx.workspaceId, 'workspaceId');
     assertValidUuid(sessionId, 'sessionId');
+    await assertAgentSessionAccess(this.db, ctx, sessionId);
 
     const role: SessionMessageRole = input.role === 'assistant' ? 'assistant' : 'user';
     let cleanContent: string;
