@@ -160,6 +160,7 @@ export class CapabilityRegistry {
         status: mod.status,
         ...(mod.reason !== undefined ? { reason: mod.reason } : {}),
         methods: Object.keys(mod.methods),
+        events: [...(mod.events ?? [])],
       });
     }
     return list;

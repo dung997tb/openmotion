@@ -447,6 +447,7 @@ export function registerDesktopCapabilities(deps: RegisterDesktopCapabilitiesDep
       status: atomHandler.descriptor.status,
       ...(atomHandler.descriptor.reason ? { reason: atomHandler.descriptor.reason } : {}),
       methods,
+      ...(atomHandler.descriptor.events ? { events: atomHandler.descriptor.events } : {}),
     });
   }
 }

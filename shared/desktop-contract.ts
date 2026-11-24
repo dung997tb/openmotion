@@ -46,6 +46,7 @@ export type HostCapabilityDescriptor = {
   status: HostCapabilityStatus;
   reason?: string;
   methods?: readonly string[];
+  events?: readonly string[];
 };
 
 export type HostErrorCode =

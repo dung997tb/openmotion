@@ -272,7 +272,21 @@ test('All four shell capability modules (window, updater, diagnostics, account) 
     assert.equal(descriptor.version, '1.0.0');
     assert.equal(descriptor.status, 'available');
     assert.ok(Array.isArray(descriptor.methods) && descriptor.methods.length > 0);
+    assert.ok(Array.isArray(descriptor.events));
   }
+  const byName = new Map(descriptors.map(d => [d.name, d]));
+  assert.deepEqual(byName.get(HOST_CAPABILITIES.WINDOW)?.events, [
+    'chromeState',
+    'menuAction',
+    'themeChanged',
+    'focus',
+    'visibility',
+    'resizing',
+    'deepLink',
+  ]);
+  assert.deepEqual(byName.get(HOST_CAPABILITIES.UPDATER)?.events, ['state']);
+  assert.deepEqual(byName.get(HOST_CAPABILITIES.DIAGNOSTICS)?.events, []);
+  assert.deepEqual(byName.get(HOST_CAPABILITIES.ACCOUNT)?.events, ['state']);
 
   // Window capability
   assert.deepEqual(await registry.invoke('window', 'getChromeState'), { ok: true, data: chromeState });

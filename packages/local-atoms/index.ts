@@ -260,6 +260,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ATOM_DETECT],
         status: 'available',
         methods: ['scan'],
+        events: [],
       },
       async invoke(method, params) {
         if (method === 'scan' || method === 'detect') {
@@ -277,6 +278,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ATOM_EXEC],
         status: 'available',
         methods: ['run', 'preview'],
+        events: [],
       },
       async invoke(method, params) {
         if (method === 'run' || method === 'preview') {
@@ -294,6 +296,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ATOM_INSTALL_COMPONENT],
         status: 'available',
         methods: ['install', 'preview', 'status', 'uninstall'],
+        events: [],
       },
       async invoke(method, params) {
         if (method === 'install' || method === 'preview' || method === 'uninstall') {
@@ -326,6 +329,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ATOM_CREDENTIAL],
         status: 'available',
         methods: ['start', 'poll', 'status', 'inject', 'revoke', 'retryPendingRevokes'],
+        events: [],
       },
       async invoke(method, params) {
         if (method === 'start') {
@@ -392,6 +396,7 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.ATOM_CONFIG],
         status: 'available',
         methods: ['read', 'write', 'previewWrite', 'restoreBackup'],
+        events: [],
       },
       async invoke(method, params) {
         if (method === 'read') {

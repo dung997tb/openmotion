@@ -31,7 +31,12 @@ import {
   compareSemver,
   exportDesktopDiagnosticBundle,
   getActiveHostBridge,
+  hasCapabilityEventInList,
+  hasCapabilityInList,
+  hasCapabilityMethodInList,
   hasHostCapability,
+  hasHostCapabilityEvent,
+  hasHostCapabilityMethod,
   invokeHostAtom,
   isDesktopApp,
   notifyDesktopRendererReady,
@@ -176,6 +181,57 @@ describe('platformHost universal bridge', () => {
     expect(await hasHostCapability(HOST_CAPABILITIES.UPDATER, '1.0.0')).toBe(false);
     expect(await hasHostCapability(HOST_CAPABILITIES.DIAGNOSTICS)).toBe(false);
     expect(mock.capabilitiesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires matching major version and probes advertised capability methods and events', async () => {
+    const caps: HostCapabilityDescriptor[] = [
+      {
+        name: HOST_CAPABILITIES.WINDOW,
+        version: '2.1.0',
+        status: 'available',
+        methods: ['getChromeState', 'notify'],
+        events: ['chromeState', 'deepLink'],
+      },
+      {
+        name: HOST_CAPABILITIES.UPDATER,
+        version: '1.0.0',
+        status: 'unavailable',
+        methods: ['getState'],
+        events: ['state'],
+      },
+      {
+        name: HOST_CAPABILITIES.DIAGNOSTICS,
+        version: 'invalid',
+        status: 'available',
+        methods: ['getAppInfo'],
+      },
+    ];
+
+    // Major version mismatch must fail closed so breaking v2 capabilities are not treated as v1-compatible.
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.WINDOW, '1.0.0')).toBe(false);
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.WINDOW, '2.0.0')).toBe(true);
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.WINDOW, '2.1.0')).toBe(true);
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.WINDOW, '2.2.0')).toBe(false);
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.WINDOW)).toBe(true);
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.DIAGNOSTICS, '1.0.0')).toBe(false);
+    expect(hasCapabilityInList(caps, HOST_CAPABILITIES.WINDOW, 'not-a-semver')).toBe(false);
+
+    // Method and event probing checks advertised lists and respects availability/major rules.
+    expect(hasCapabilityMethodInList(caps, HOST_CAPABILITIES.WINDOW, 'notify', '2.0.0')).toBe(true);
+    expect(hasCapabilityMethodInList(caps, HOST_CAPABILITIES.WINDOW, 'notify', '1.0.0')).toBe(false);
+    expect(hasCapabilityMethodInList(caps, HOST_CAPABILITIES.WINDOW, 'removedMethod', '2.0.0')).toBe(false);
+    expect(hasCapabilityEventInList(caps, HOST_CAPABILITIES.WINDOW, 'deepLink', '2.0.0')).toBe(true);
+    expect(hasCapabilityEventInList(caps, HOST_CAPABILITIES.WINDOW, 'deepLink', '1.0.0')).toBe(false);
+    expect(hasCapabilityEventInList(caps, HOST_CAPABILITIES.WINDOW, 'removedEvent', '2.0.0')).toBe(false);
+    expect(hasCapabilityEventInList(caps, HOST_CAPABILITIES.UPDATER, 'state', '1.0.0')).toBe(false);
+    expect(hasCapabilityEventInList(caps, HOST_CAPABILITIES.DIAGNOSTICS, 'anything')).toBe(false);
+
+    const mock = createMockBridge({ capabilities: caps });
+    window.__OPENMOTION_HOST__ = mock.bridge;
+    expect(await hasHostCapabilityMethod(HOST_CAPABILITIES.WINDOW, 'getChromeState', '2.0.0')).toBe(true);
+    expect(await hasHostCapabilityEvent(HOST_CAPABILITIES.WINDOW, 'chromeState', '2.0.0')).toBe(true);
+    expect(await hasHostCapabilityEvent(HOST_CAPABILITIES.WINDOW, 'chromeState', '1.0.0')).toBe(false);
+    expect(await hasHostCapabilityEvent(HOST_CAPABILITIES.WINDOW, 'unknownEvent', '2.0.0')).toBe(false);
   });
 
   it('binds desktop chrome, applies document attributes, syncs theme, and notifies renderer ready once', async () => {

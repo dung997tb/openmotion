@@ -259,8 +259,40 @@ export function hasCapabilityInList(
   if (!descriptor || descriptor.status === 'unavailable') {
     return false;
   }
-  if (!minVersion) return true;
+  if (!minVersion || !minVersion.trim()) return true;
+  const actual = parseSemver(descriptor.version);
+  const required = parseSemver(minVersion);
+  if (!actual || !required) return false;
+  // Require the same major version so future breaking capability bumps (e.g. 2.0.0)
+  // are never treated as drop-in compatible with callers expecting 1.x.
+  if (actual.major !== required.major) return false;
   return compareSemver(descriptor.version, minVersion) >= 0;
+}
+
+export function hasCapabilityMethodInList(
+  capabilities: readonly HostCapabilityDescriptor[],
+  capabilityName: string,
+  method: string,
+  minVersion?: string,
+): boolean {
+  if (!hasCapabilityInList(capabilities, capabilityName, minVersion)) {
+    return false;
+  }
+  const descriptor = capabilities.find(item => item.name === capabilityName);
+  return Array.isArray(descriptor?.methods) && descriptor.methods.includes(method);
+}
+
+export function hasCapabilityEventInList(
+  capabilities: readonly HostCapabilityDescriptor[],
+  capabilityName: string,
+  event: string,
+  minVersion?: string,
+): boolean {
+  if (!hasCapabilityInList(capabilities, capabilityName, minVersion)) {
+    return false;
+  }
+  const descriptor = capabilities.find(item => item.name === capabilityName);
+  return Array.isArray(descriptor?.events) && descriptor.events.includes(event);
 }
 
 export function resolveCapabilityMethod(
@@ -282,7 +314,7 @@ export function resolveCapabilityMethod(
 /**
  * Capability-based feature detection against the active host bridge (or an explicit bridge).
  * Never throws; returns false when no bridge is active, the capability is unavailable,
- * or its version is lower than `minVersion`.
+ * its major version differs from `minVersion`, or its version is lower than `minVersion`.
  */
 export async function hasHostCapability(
   name: string,
@@ -293,6 +325,30 @@ export async function hasHostCapability(
   if (!target) return false;
   const capabilities = await loadHostCapabilities(target);
   return hasCapabilityInList(capabilities, name, minVersion);
+}
+
+export async function hasHostCapabilityMethod(
+  capabilityName: string,
+  method: string,
+  minVersion?: string,
+  bridge?: UniversalHostBridge,
+): Promise<boolean> {
+  const target = bridge ?? getActiveHostBridge();
+  if (!target) return false;
+  const capabilities = await loadHostCapabilities(target);
+  return hasCapabilityMethodInList(capabilities, capabilityName, method, minVersion);
+}
+
+export async function hasHostCapabilityEvent(
+  capabilityName: string,
+  event: string,
+  minVersion?: string,
+  bridge?: UniversalHostBridge,
+): Promise<boolean> {
+  const target = bridge ?? getActiveHostBridge();
+  if (!target) return false;
+  const capabilities = await loadHostCapabilities(target);
+  return hasCapabilityEventInList(capabilities, capabilityName, event, minVersion);
 }
 
 /**
