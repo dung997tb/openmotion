@@ -1,0 +1,219 @@
+/**
+ * One shared publish state per game. The right-hand publish panel and the cards in the
+ * conversation both read and change this store, so acting in either place updates both.
+ * State lives in memory for the session (front-end prototype); persisting it is a backend task.
+ */
+import { useSyncExternalStore } from 'react';
+import { completeUserStep, prepareForPlatform, publishGameLink } from './gamePublishAdapter';
+import { LINK_PUBLISH_STEPS, gamePublishPlatform, type GamePublishPlatformId } from './platforms';
+
+export type GamePublishView = 'home' | 'list' | 'step' | 'working' | 'result' | 'link-result';
+
+export interface GamePublishStatus {
+  tone: 'idle' | 'running' | 'done';
+  /** English source key; `line` is an English source key substituted as {line}. */
+  key: string;
+  line?: string;
+}
+
+export interface GamePublishSession {
+  artifactId: string;
+  chatId: string | null;
+  gameId: string;
+  gameTitle: string;
+  open: boolean;
+  view: GamePublishView;
+  platformId?: GamePublishPlatformId;
+  stepIndex: number;
+  picked?: string;
+  inputs: Record<string, string>;
+  preparing: boolean;
+  status: GamePublishStatus;
+  linkUrl?: string;
+  linkPublishing: boolean;
+  published: GamePublishPlatformId[];
+}
+
+export type GamePublishThreadEntry =
+  | { id: string; artifactId: string; kind: 'user'; key: string; name?: string }
+  | { id: string; artifactId: string; kind: 'agent'; title: string; name?: string; lines: Array<{ text: string; done: boolean }> }
+  | { id: string; artifactId: string; kind: 'need'; platformId: GamePublishPlatformId; stepIndex: number; closed: boolean }
+  | { id: string; artifactId: string; kind: 'result'; title: string; detail: string; action: string; link?: boolean };
+
+const sessions = new Map<string, GamePublishSession>();
+const threads = new Map<string, GamePublishThreadEntry[]>();
+const listeners = new Set<() => void>();
+let entrySeq = 0;
+
+function emit() { for (const listener of listeners) listener(); }
+function subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
+
+function update(artifactId: string, patch: Partial<GamePublishSession>) {
+  const current = sessions.get(artifactId);
+  if (!current) return;
+  sessions.set(artifactId, { ...current, ...patch });
+  emit();
+}
+
+function threadKey(session: GamePublishSession) { return session.chatId ?? `artifact:${session.artifactId}`; }
+
+type NewThreadEntry = GamePublishThreadEntry extends infer E ? E extends GamePublishThreadEntry ? Omit<E, 'id' | 'artifactId'> : never : never;
+
+function pushEntry(session: GamePublishSession, entry: NewThreadEntry): string {
+  const key = threadKey(session);
+  const id = `publish-${++entrySeq}`;
+  threads.set(key, [...(threads.get(key) ?? []), { ...entry, id, artifactId: session.artifactId } as GamePublishThreadEntry]);
+  emit();
+  return id;
+}
+
+function patchEntry(session: GamePublishSession, id: string, patch: (entry: GamePublishThreadEntry) => GamePublishThreadEntry) {
+  const key = threadKey(session);
+  threads.set(key, (threads.get(key) ?? []).map(entry => (entry.id === id ? patch(entry) : entry)));
+  emit();
+}
+
+/** Plays Agent work: one conversation block with ticking lines, and the panel's single status line. */
+async function runAgent(artifactId: string, title: string, name: string | undefined, run: (onLine: (line: string) => void) => Promise<unknown>) {
+  const session = sessions.get(artifactId);
+  if (!session) return;
+  const entryId = pushEntry(session, { kind: 'agent', title, name, lines: [] });
+  await run(line => {
+    const latest = sessions.get(artifactId);
+    if (!latest) return;
+    patchEntry(latest, entryId, entry => entry.kind === 'agent'
+      ? { ...entry, lines: [...entry.lines.map(item => ({ ...item, done: true })), { text: line, done: false }] }
+      : entry);
+    update(artifactId, { status: { tone: 'running', key: 'Agent: {line}', line } });
+  });
+  const latest = sessions.get(artifactId);
+  if (!latest) return;
+  patchEntry(latest, entryId, entry => entry.kind === 'agent' ? { ...entry, lines: entry.lines.map(item => ({ ...item, done: true })) } : entry);
+}
+
+function closeOpenNeedCards(session: GamePublishSession) {
+  const key = threadKey(session);
+  threads.set(key, (threads.get(key) ?? []).map(entry => (entry.kind === 'need' && entry.artifactId === session.artifactId ? { ...entry, closed: true } : entry)));
+}
+
+export const gamePublishActions = {
+  open(input: { artifactId: string; chatId: string | null; gameId: string; gameTitle: string }) {
+    const existing = sessions.get(input.artifactId);
+    if (existing) {
+      // Reopening returns to the step in progress; a finished platform returns to the link result.
+      const view: GamePublishView = existing.view === 'result' || existing.view === 'list'
+        ? (existing.linkUrl ? 'link-result' : 'home')
+        : existing.view;
+      update(input.artifactId, { open: true, view, chatId: input.chatId ?? existing.chatId });
+      return;
+    }
+    sessions.set(input.artifactId, {
+      ...input,
+      open: true,
+      view: 'home',
+      stepIndex: 0,
+      inputs: {},
+      preparing: false,
+      status: { tone: 'idle', key: 'Agent is ready' },
+      linkPublishing: false,
+      published: [],
+    });
+    emit();
+  },
+  close(artifactId: string) { update(artifactId, { open: false }); },
+  /** Show the panel again for a game that already has publish state (e.g. from a conversation card). */
+  reopen(artifactId: string) { gamePublishActions.open({ ...sessions.get(artifactId)!, artifactId }); },
+  toggle(input: { artifactId: string; chatId: string | null; gameId: string; gameTitle: string }) {
+    if (sessions.get(input.artifactId)?.open) gamePublishActions.close(input.artifactId);
+    else gamePublishActions.open(input);
+  },
+  showList(artifactId: string) { update(artifactId, { view: 'list' }); },
+  showHome(artifactId: string) {
+    const session = sessions.get(artifactId);
+    update(artifactId, { view: session?.linkUrl ? 'link-result' : 'home' });
+  },
+  async publishLink(artifactId: string) {
+    const session = sessions.get(artifactId);
+    if (!session || session.linkPublishing) return;
+    update(artifactId, { linkPublishing: true });
+    pushEntry(session, { kind: 'user', key: 'Publish the game link' });
+    let url = '';
+    await runAgent(artifactId, 'Publishing the game link', undefined, async onLine => {
+      ({ url } = await publishGameLink(session.gameId, LINK_PUBLISH_STEPS, { onLine }));
+    });
+    const latest = sessions.get(artifactId);
+    if (!latest) return;
+    update(artifactId, { linkUrl: url, linkPublishing: false, view: 'link-result', status: { tone: 'done', key: 'Agent: all done' } });
+    pushEntry(latest, { kind: 'result', title: 'Live', detail: url, action: 'Copy link', link: true });
+  },
+  choose(artifactId: string, platformId: GamePublishPlatformId) {
+    const session = sessions.get(artifactId);
+    const platform = gamePublishPlatform(platformId);
+    if (!session || !platform) return;
+    closeOpenNeedCards(session);
+    update(artifactId, { platformId, stepIndex: 0, picked: undefined, inputs: {}, view: 'step', status: { tone: 'done', key: 'Agent: ready for your step' } });
+    const latest = sessions.get(artifactId)!;
+    pushEntry(latest, { kind: 'user', key: 'Publish to {name}', name: platform.name });
+    pushEntry(latest, { kind: 'need', platformId, stepIndex: 0, closed: false });
+    if (platform.prepare.length) {
+      update(artifactId, { preparing: true });
+      void runAgent(artifactId, 'Preparing for {name}', platform.name, onLine =>
+        prepareForPlatform(session.gameId, platformId, platform.prepare, { onLine }),
+      ).then(() => {
+        const after = sessions.get(artifactId);
+        if (!after || after.platformId !== platformId) return;
+        update(artifactId, { preparing: false, status: { tone: 'done', key: 'Agent: ready for your step' } });
+      });
+    }
+  },
+  pick(artifactId: string, option: string) { update(artifactId, { picked: option }); },
+  setInput(artifactId: string, label: string, value: string) {
+    const session = sessions.get(artifactId);
+    if (session) update(artifactId, { inputs: { ...session.inputs, [label]: value } });
+  },
+  /** The user finished the current step (from the panel or the conversation card). */
+  async completeStep(artifactId: string) {
+    const session = sessions.get(artifactId);
+    const platform = gamePublishPlatform(session?.platformId);
+    if (!session || !platform || session.view !== 'step') return;
+    const step = platform.steps[session.stepIndex];
+    if (step.pick && !session.picked) { update(artifactId, { open: true }); return; }
+    closeOpenNeedCards(session);
+    pushEntry(session, { kind: 'user', key: step.cta });
+    update(artifactId, { view: 'working' });
+    // Wait for preparation that is still running, then run the Agent work for this step.
+    while (sessions.get(artifactId)?.preparing) await new Promise(resolve => setTimeout(resolve, 200));
+    await runAgent(artifactId, step.working, undefined, onLine =>
+      completeUserStep(session.gameId, platform.id, session.stepIndex, sessions.get(artifactId)?.inputs ?? {}, step.after, { onLine }),
+    );
+    const latest = sessions.get(artifactId);
+    if (!latest || latest.platformId !== platform.id) return;
+    const next = latest.stepIndex + 1;
+    if (next < platform.steps.length) {
+      update(artifactId, { stepIndex: next, view: 'step', status: { tone: 'done', key: 'Agent: ready for your step' } });
+      pushEntry(sessions.get(artifactId)!, { kind: 'need', platformId: platform.id, stepIndex: next, closed: false });
+      return;
+    }
+    update(artifactId, {
+      stepIndex: platform.steps.length,
+      view: 'result',
+      published: latest.published.includes(platform.id) ? latest.published : [...latest.published, platform.id],
+      status: { tone: 'done', key: 'Agent: all done' },
+    });
+    pushEntry(sessions.get(artifactId)!, { kind: 'result', title: platform.resultTitle, detail: platform.resultDetail, action: platform.resultAction });
+  },
+};
+
+export function useGamePublishSession(artifactId: string | null | undefined): GamePublishSession | undefined {
+  return useSyncExternalStore(subscribe, () => (artifactId ? sessions.get(artifactId) : undefined));
+}
+
+const EMPTY: GamePublishThreadEntry[] = [];
+export function useGamePublishThread(chatId: string | null | undefined): GamePublishThreadEntry[] {
+  return useSyncExternalStore(subscribe, () => (chatId ? threads.get(chatId) ?? EMPTY : EMPTY));
+}
+
+export function gamePublishSessionFor(artifactId: string): GamePublishSession | undefined { return sessions.get(artifactId); }
+
+/** Test helper. */
+export function resetGamePublishStore() { sessions.clear(); threads.clear(); entrySeq = 0; emit(); }

@@ -94,6 +94,8 @@ import {
   type MediaPromptExtra,
   type ModeComposerOptions,
 } from './ModeComposerControls';
+import { GamePublishThread } from './gamePublish/GamePublishThread';
+import { gamePublishActions } from './gamePublish/gamePublishStore';
 
 export function resolveCreationModeEntry(
   mode: SuperAgentCreationModeId | null,
@@ -1762,6 +1764,7 @@ export function ConversationStream({
           </div>
           )
         ) : (
+          <>
           <ExecutionTimeline
             chat={displayChat}
             busy={busy || Boolean(pendingSubmission)}
@@ -1784,6 +1787,15 @@ export function ConversationStream({
             onApprove={onApprove}
             onContinue={() => void onSend(t('Continue from where you stopped and finish the task.'))}
           />
+          <GamePublishThread
+            chatId={chat.id}
+            onOpenPanel={artifactId => {
+              onOpenArtifactId(artifactId);
+              gamePublishActions.reopen(artifactId);
+            }}
+            onNotify={onNotify}
+          />
+          </>
             )}
           </div>
           );
