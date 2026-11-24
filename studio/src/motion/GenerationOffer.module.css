@@ -91,6 +91,10 @@
   background-image: linear-gradient(90deg, var(--motion-black-friday-night) 4%, transparent 90%), var(--offer-art);
 }
 
+.subscriptionCard[data-guide='sign-in'] {
+  row-gap: var(--motion-space-20);
+}
+
 .subscriptionHeading {
   display: flex;
   flex-wrap: wrap;
@@ -167,6 +171,9 @@
 
 .subscriptionHeading .dealTag {
   padding: var(--motion-space-4) var(--motion-space-8);
+  border-color: color-mix(in srgb, var(--motion-neutral-n10) 70%, transparent);
+  background-color: color-mix(in srgb, var(--motion-neutral-n11) 76%, transparent);
+  background-clip: padding-box;
   font-size: var(--motion-text-xs);
 }
 
