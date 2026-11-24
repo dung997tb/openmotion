@@ -431,6 +431,12 @@ export function refreshCommittedTimeline(iframe: HTMLIFrameElement | null, path:
   };
 }
 
+/** Only the isolated cloud player consumes versioned file receipts for structural edits. */
+export function isolatedStructureRefresh(frame: HTMLIFrameElement | null | undefined, path: string, projectId: string, reload: () => void) {
+  return frame && !createPreviewAdapter({ iframe: frame }).sameOrigin
+    ? refreshCommittedTimeline(frame, path, projectId, reload) : undefined;
+}
+
 /** The GSAP sync a committed SDK timing write made, or null when its timeline script is unchanged. */
 export function sdkTimingGsapSync(
   result: Extract<CutoverResult, { status: "committed" }>,

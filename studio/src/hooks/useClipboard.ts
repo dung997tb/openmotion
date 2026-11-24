@@ -1,3 +1,4 @@
+import { isolatedStructureRefresh } from "./timelineTimingSync";
 import { applyPasteCommand, type PasteCommand } from "../../../packages/edit-core/content-commands";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 export { pasteElementHtml, pasteTimelineClips, resolveFreeTrack, type PlacedClip } from "../../../packages/edit-core/clipboard";
@@ -278,6 +279,8 @@ export function useClipboard({
         };
 
         const { label, toast } = pasteWords(payload);
+        const onSaved = getCachedCloudDisklessMode()
+          ? isolatedStructureRefresh(previewIframeRef.current, targetPath, pid, reloadPreview) : undefined;
 
         await saveProjectFilesWithHistory({
           projectId: pid,
@@ -287,6 +290,7 @@ export function useClipboard({
           writeFile: writeProjectFile,
           commandForWrite: () => getCachedCloudDisklessMode() ? command : undefined,
           recordEdit,
+          onSaved,
         });
 
         // CapCut: the pasted clip(s) become the selection; the playhead does not
@@ -297,14 +301,14 @@ export function useClipboard({
           usePlayerStore.getState().setSelection(pastedIds.map((id) => elementKey(id, targetPath)));
         }
         pastedDomElementRef.current = pastedHfId ? { projectId: pid, path: targetPath, hfId: pastedHfId } : null;
-        reloadPreview();
+        if (!onSaved) reloadPreview();
         showToast(toast, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to paste";
         showToast(message);
       }
     },
-    [activeCompPath, recordEdit, reloadPreview, showToast, writeProjectFile],
+    [activeCompPath, previewIframeRef, recordEdit, reloadPreview, showToast, writeProjectFile],
   );
 
   // Duplicates the selection right after it, or with `inPlace` at its own time on a track of its own,
@@ -337,6 +341,8 @@ export function useClipboard({
           ids = result.ids;
           return result.content;
         };
+        const onSaved = getCachedCloudDisklessMode()
+          ? isolatedStructureRefresh(previewIframeRef.current, activeCompPath ?? "index.html", pid, reloadPreview) : undefined;
 
         await saveProjectFilesWithHistory({
           projectId: pid,
@@ -346,6 +352,7 @@ export function useClipboard({
           writeFile: writeProjectFile,
           commandForWrite: () => getCachedCloudDisklessMode() ? command : undefined,
           recordEdit,
+          onSaved,
         });
 
         // The duplicate becomes the selection, mirroring CapCut's own paste
@@ -355,7 +362,7 @@ export function useClipboard({
         if (ids.length > 0) {
           usePlayerStore.getState().setSelection(ids.map((id) => elementKey(id, targetPath)));
         }
-        reloadPreview();
+        if (!onSaved) reloadPreview();
         showToast(clipToast("Duplicated", clips.length), "info");
         return true;
       } catch (error) {
@@ -367,6 +374,7 @@ export function useClipboard({
     [
       activeCompPath,
       readClips,
+      previewIframeRef,
       recordEdit,
       reloadPreview,
       showToast,

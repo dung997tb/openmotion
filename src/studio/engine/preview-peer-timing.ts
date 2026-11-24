@@ -1,4 +1,5 @@
 import { isLiveMediaMove } from '../../../shared/preview-live-media.ts';
+import { stageVisualClipInsert } from '../../../shared/preview-visual-insert.ts';
 import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from '../../../packages/edit-core/canvas-position.ts';
 import { PREVIEW_ATTRIBUTES, canPatchPreviewAttribute, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit, canPatchPresentationValue } from '../../../shared/preview-timing.ts';
 
@@ -64,6 +65,7 @@ export const PREVIEW_PEER_TIMING = `
   }
   const isPositionEdit = ${isLivePositionEdit.toString()};
   const isMediaMove = ${isLiveMediaMove.toString()};
+  const stageClipInsert = ${stageVisualClipInsert.toString()};
   function applyPeerTiming(m) {
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
     const temporary = m.type === 'peer-presentation' && m.temporary === true;
@@ -84,10 +86,18 @@ export const PREVIEW_PEER_TIMING = `
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
         !Array.isArray(m.changes) || !m.changes.length || m.changes.length > 32) return false;
     const edits = [], effects = [];
-    let removing = false;
+    let structureChanged = false;
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
-          (!change.attributes.length && !change.styles && !change.text && !change.removeFromComposition) || change.attributes.length > previewAttributes.size) return false;
+          (!change.attributes.length && !change.styles && !change.text && !change.removeFromComposition && !change.insert) || change.attributes.length > previewAttributes.size) return false;
+      if (change.insert) {
+        if (structureChanged || !timingDocumentId || m.type !== 'peer-timing') return false;
+        const insert = stageClipInsert(document, change, presentationTags);
+        if (!insert) return false;
+        structureChanged = true;
+        effects.push(insert);
+        continue;
+      }
       if ((temporary || ownDrag) && (!change.styles || change.text || change.attributes.length)) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
@@ -97,10 +107,10 @@ export const PREVIEW_PEER_TIMING = `
       const node = matches[0];
       if (change.removeFromComposition) {
         const parent = node.parentElement, next = node.nextSibling;
-        if (removing || !timingDocumentId || m.type !== 'peer-timing' || !change.hfId || !presentationTags.has(node.localName) ||
+        if (structureChanged || !timingDocumentId || m.type !== 'peer-timing' || !change.hfId || !presentationTags.has(node.localName) ||
             node.id !== change.id || node.childElementCount || !node.classList.contains('clip') ||
             parent?.getAttribute('data-composition-id') !== change.removeFromComposition) return false;
-        removing = true;
+        structureChanged = true;
         effects.push(forward => forward ? node.remove() : parent.insertBefore(node, next));
       }
       if (media && change.tag !== 'audio' && node !== document.querySelector('[data-composition-id]')) return false;
@@ -123,7 +133,7 @@ export const PREVIEW_PEER_TIMING = `
       }
       for (const effect of effects) effect(key === 'to');
       // Lock is an editor flag. Studio reapplies the local monitor preference on mute.
-      if (!removing && !edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
+      if (!structureChanged && !edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
       p.seek(time);
       window.__hfForceTimelineRebind();
       window.__hfStudioManualEditsApply?.();

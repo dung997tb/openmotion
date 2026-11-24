@@ -79,6 +79,39 @@ it('removes only the identified direct visual leaf and restores it if the player
   assert.equal(rolledBack.target.parentElement?.getAttribute('data-hf-authored-duration'), '15');
 });
 
+it('adds a direct visual leaf at its verified sibling and rolls it back if playing cannot resume', () => {
+  const change = { id: 'copy', hfId: 'copy-hf', tag: 'div', attributes: [], insert: {
+    owner: 'root', next: 'title-hf', whitespace: ['', '\n', ''], text: 'Copy',
+    attrs: [['class', 'clip'], ['data-start', '4'], ['data-duration', '2'], ['style', 'background:#ddd;z-index:2']],
+  } };
+  const frame = preview();
+  const title = frame.document.getElementById('title')!;
+  title.setAttribute('data-hf-id', 'title-hf');
+  const audio = frame.document.getElementById('clip');
+  for (const invalid of [
+    { ...change, insert: { ...change.insert, next: 'unknown' } },
+    { ...change, insert: { ...change.insert, attrs: [...change.insert.attrs, ['src', 'asset']] } },
+    { ...change, insert: { ...change.insert, whitespace: ['old', '', ''] } },
+    { ...change, tag: 'video' },
+  ]) assert.equal(frame.send({ changes: [invalid] }), false);
+  assert.equal(frame.send({ before: etag(3), changes: [change] }), false);
+  assert.equal(preview(false).send({ changes: [change] }), false);
+
+  const rebind = frame.window.__hfForceTimelineRebind;
+  frame.window.__hfForceTimelineRebind = () => { throw new Error('failed'); };
+  assert.equal(frame.send({ changes: [change, root] }), false);
+  assert.equal(frame.document.getElementById('copy'), null);
+  assert.equal(title.previousSibling, audio);
+  frame.window.__hfForceTimelineRebind = rebind;
+  assert.equal(frame.send({ changes: [change, root] }), true);
+  const added = frame.document.getElementById('copy')!;
+  assert.equal(added.nextElementSibling, title);
+  assert.equal(added.textContent, 'Copy');
+  assert.equal(added.getAttribute('data-hf-id'), 'copy-hf');
+  assert.equal(frame.document.getElementById('clip'), audio);
+  assert.deepEqual(frame.hooks.slice(-3), ['seek:4', 'rebind', 'play']);
+});
+
 it('updates text and placement on the same live nodes without seeking or replacing media', () => {
   const { send, document, hooks } = preview();
   const node = document.getElementById('title')!;

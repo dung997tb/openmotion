@@ -12,6 +12,7 @@ import type { RecordEditInput } from "./timelineEditingHelpers";
 import { projectLocalTimelineEdit } from "../player/lib/peerTimeline";
 import { useFreezeFrame } from "./useFreezeFrame";
 import { useMvpEditor } from "../motion/StudioHost";
+import { isolatedStructureRefresh } from "./timelineTimingSync";
 
 interface UseRazorSplitOptions {
   previewIframeRef?: React.RefObject<HTMLIFrameElement | null>;
@@ -43,7 +44,7 @@ export function useRazorSplit({
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
-  const synchronize = useCallback((path?: string) => {
+  const synchronize = useCallback((path?: string, previewScheduled?: boolean) => {
     let failure: unknown;
     try {
       forceReloadSdkSession?.();
@@ -51,7 +52,7 @@ export function useRazorSplit({
       failure = error;
     }
     try {
-      reloadPreview(path);
+      if (!previewScheduled) reloadPreview(path);
     } catch (error) {
       failure ??= error;
     }
@@ -81,7 +82,8 @@ export function useRazorSplit({
           const file = files[path];
           if (file && pid === projectIdRef.current) return projectLocalTimelineEdit(pid, path, file, previewIframeRef?.current ?? null);
         },
-        synchronize: () => synchronize(intents.length === 1 ? intents[0].path : undefined),
+        onSaved: isolatedStructureRefresh(previewIframeRef?.current, activeCompPath ?? "index.html", pid, reloadPreview),
+        synchronize: scheduled => synchronize(intents.length === 1 ? intents[0].path : undefined, scheduled),
       });
       trackStudioRazorSplit({ mode, count: result.splitCount });
       if (result.syncFailed) {

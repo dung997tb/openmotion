@@ -1,4 +1,5 @@
 import { isLiveMediaMove } from "../../../shared/preview-live-media";
+import { takeInsertedClip, takeRemovedClip } from "./visualClipStructure";
 import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from "../../../packages/edit-core/canvas-position";
 import { createPreviewAdapter } from "./lib/previewAdapter";
 import { capturePresentedTimelineChanges } from "./lib/isolatedTimelineEdits";
@@ -51,27 +52,6 @@ function elements(doc: Document | DocumentFragment): Element[] {
 
 const presentationTags = new Set<string>(PRESENTATION_TAGS);
 
-/** The compiler keeps identified, direct visual leaves. Relative timings may depend on a deleted sibling. */
-function takeRemovedClip(before: Document, after: Document, nodes: Element[]): PreviewChange | null {
-  const roots = before.querySelectorAll("[data-composition-id]");
-  if (roots.length !== 1 || before.querySelector("script,template,[data-composition-src]")) return null;
-  const ids = new Set([...after.querySelectorAll("[data-hf-id]")].map(node => node.getAttribute("data-hf-id")));
-  const missing = nodes.filter(node => node.hasAttribute("data-hf-id") && !ids.has(node.getAttribute("data-hf-id")));
-  const clip = missing[0];
-  if (missing.length !== 1 || !clip || !presentationTags.has(clip.localName) || clip.childElementCount ||
-      !clip.classList.contains("clip") || clip.parentElement !== roots[0]) return null;
-  for (const timed of before.querySelectorAll("[data-start],[data-end],[data-duration]")) {
-    if (["data-start", "data-end", "data-duration"].some(attr =>
-      timed.hasAttribute(attr) && !/^\d+(?:\.\d+)?$/.test(timed.getAttribute(attr)!))) return null;
-  }
-  const owner = roots[0]!.getAttribute("data-composition-id");
-  if (!owner) return null;
-  clip.remove();
-  nodes.splice(nodes.indexOf(clip), 1);
-  return { hfId: clip.getAttribute("data-hf-id"), id: clip.id, compositionId: null,
-    tag: clip.localName, attributes: [], removeFromComposition: owner };
-}
-
 function simpleText(element: Element): Text | null {
   const node = element.firstChild;
   return node?.nodeType === Node.TEXT_NODE && !node.nextSibling ? node as Text : null;
@@ -107,9 +87,10 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
   const b = elements(after);
   const changes: PreviewChange[] = [];
   if (a.length !== b.length) {
-    const removal = a.length === b.length + 1 && takeRemovedClip(before, after, a);
-    if (!removal) return null;
-    changes.push(removal);
+    const structural = a.length === b.length + 1 ? takeRemovedClip(before, after, a, presentationTags)
+      : b.length === a.length + 1 && takeInsertedClip(before, after, b, presentationTags);
+    if (!structural) return null;
+    changes.push(structural);
   }
   for (let i = 0; i < a.length; i++) {
     const left = a[i]!;
@@ -219,7 +200,7 @@ export async function tryApplyPeerChanges(
     if (changes.some(change => change.attributes.some(([name]) => name === "muted"))) {
       setPreviewMediaMuted(frame, usePlayerStore.getState().audioMuted);
     }
-    if (!temporary && changes.some(change => change.attributes.length || change.removeFromComposition)) releasePresented?.();
+    if (!temporary && changes.some(change => change.attributes.length || change.removeFromComposition || change.insert)) releasePresented?.();
     if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
       document.timingFile = { path: update.path, version: current.version };
     }
