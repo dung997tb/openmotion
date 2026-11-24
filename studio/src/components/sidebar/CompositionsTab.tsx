@@ -21,7 +21,7 @@ import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import {
   canCaptureCompositionInBrowser,
   createClientCompositionCaptureRequest,
-  getCompositionCacheRevision,
+  getCompositionCacheKeyRevision,
   peekCachedCompositionCapture,
   retainCachedCompositionCapture,
   subscribeCompositionCacheRevision,
@@ -262,21 +262,22 @@ function CompCard({
     [captureEnabled, projectId],
   );
   const getCacheRev = useCallback(
-    () => (captureEnabled ? getCompositionCacheRevision(projectId, previewUrl) : ""),
-    [captureEnabled, previewUrl, projectId],
+    () => (captureEnabled ? getCompositionCacheKeyRevision(projectId, previewUrl, contentRevision) : ""),
+    [captureEnabled, contentRevision, previewUrl, projectId],
   );
   const compCacheRev = useSyncExternalStore(subscribeCacheRev, getCacheRev, () => "");
+  const captureContentRevision = compCacheRev.startsWith("file:") ? 0 : contentRevision;
   const syncCachedCover = useMemo(
     () =>
       captureEnabled
         ? peekCachedCompositionCapture({
             previewUrl,
             projectId,
-            contentRevision,
+            contentRevision: captureContentRevision,
             frameCount: 1,
           })
         : null,
-    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId],
+    [captureContentRevision, captureEnabled, compCacheRev, previewUrl, projectId],
   );
   // Keep cached cover object URLs alive while this card renders them, even after LRU eviction.
   useLayoutEffect(() => retainCachedCompositionCapture(syncCachedCover), [syncCachedCover]);
@@ -297,14 +298,14 @@ function CompCard({
             previewUrl,
             projectId,
             sessionEpoch: timelineSessionEpoch,
-            contentRevision,
+            contentRevision: captureContentRevision,
             frameCount: 1,
             seekTime: THUMBNAIL_SEEK_TIME_SECONDS,
             priority: "overscan",
             rich: true,
           })
         : null,
-    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId, syncCachedCover, timelineSessionEpoch],
+    [captureContentRevision, captureEnabled, compCacheRev, previewUrl, projectId, syncCachedCover, timelineSessionEpoch],
   );
   const posterThumbnail = useThumbnailLease(thumbnailRequest);
   const captureThumbnail = useThumbnailLease(captureRequest);

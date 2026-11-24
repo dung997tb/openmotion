@@ -10,6 +10,7 @@ import {
   seedClientCompositionCaptureForTest,
   setCachedProjectRevision,
   setClientCompositionCaptureCapabilityForTest,
+  updateCachedCompositionRevisions,
 } from "../lib/clientCompositionCapture";
 import { thumbnailScheduler } from "../lib/thumbnailScheduler";
 import { usePlayerStore } from "../store/playerStore";
@@ -545,9 +546,9 @@ describe("CompositionThumbnail retained filmstrip during refresh", () => {
           projectId: "demo",
           previewUrl,
           contentRevision: 0,
-          frameCount: 4,
+          frameCount: 8,
         },
-        [new Blob(["a"]), new Blob(["b"]), new Blob(["c"]), new Blob(["d"])],
+        Array.from({ length: 8 }, (_, idx) => new Blob([`init-${idx}`])),
       );
       expect(initial.kind).toBe("filmstrip");
       const initialUrls = initial.kind === "filmstrip" ? [...initial.urls] : [];
@@ -627,7 +628,7 @@ describe("CompositionThumbnail retained filmstrip during refresh", () => {
 
       // Once the recalculated filmstrip finishes, swap atomically and release the evicted old URLs.
       await act(async () => {
-        env.resolveCapture(requestId, 4);
+        env.resolveCapture(requestId, 8);
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
 
@@ -652,9 +653,9 @@ describe("CompositionThumbnail retained filmstrip during refresh", () => {
           projectId: "demo",
           previewUrl,
           contentRevision: 0,
-          frameCount: 4,
+          frameCount: 8,
         },
-        [new Blob(["a"]), new Blob(["b"]), new Blob(["c"]), new Blob(["d"])],
+        Array.from({ length: 8 }, (_, idx) => new Blob([`init-${idx}`])),
       );
       const initialUrls = initial.kind === "filmstrip" ? [...initial.urls] : [];
 
@@ -681,7 +682,7 @@ describe("CompositionThumbnail retained filmstrip during refresh", () => {
 
       const requestId = await env.waitForCaptureRequest();
       await act(async () => {
-        env.resolveCapture(requestId, 4);
+        env.resolveCapture(requestId, 8);
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
       const shownAfter = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
@@ -701,9 +702,9 @@ describe("CompositionThumbnail retained filmstrip during refresh", () => {
           projectId: "demo",
           previewUrl: introUrl,
           contentRevision: 0,
-          frameCount: 4,
+          frameCount: 8,
         },
-        [new Blob(["a"]), new Blob(["b"]), new Blob(["c"]), new Blob(["d"])],
+        Array.from({ length: 8 }, (_, idx) => new Blob([`iso-${idx}`])),
       );
       const initialUrls = initial.kind === "filmstrip" ? [...initial.urls] : [];
 
@@ -763,6 +764,108 @@ describe("CompositionThumbnail retained filmstrip during refresh", () => {
 
       expect(host.querySelectorAll("img")).toHaveLength(0);
       expect(host.querySelector('[data-composition-strip="text"]')).not.toBeNull();
+    } finally {
+      env.cleanup();
+    }
+  });
+
+  it("never re-captures when trimming, stretching, zooming, or bumping session revision while file version is unchanged, and re-captures only on real file-version change", async () => {
+    const env = setupIsolatedCaptureEnv();
+    try {
+      const previewUrl = "/api/projects/demo/preview/comp/compositions/intro.html";
+      setCachedProjectRevision("demo", "proj-rev-1", {
+        "compositions/intro.html": '"sha256:intro-v1"',
+      });
+      const v1 = seedClientCompositionCaptureForTest(
+        {
+          projectId: "demo",
+          previewUrl,
+          contentRevision: 0,
+          frameCount: 8,
+        },
+        Array.from({ length: 8 }, (_, idx) => new Blob([`v1-${idx}`])),
+      );
+      expect(v1.kind).toBe("filmstrip");
+      const v1Urls = v1.kind === "filmstrip" ? [...v1.urls] : [];
+
+      root = createRoot(host);
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 0,
+            clipDuration: 6,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const initialCount = host.querySelectorAll("img").length;
+      expect(initialCount).toBeGreaterThan(1);
+
+      // Shrink clip to a single tile & ultra-short duration -> shows fewer tiles from the same cached strip, 0 captures.
+      await act(async () => {
+        reportResize(60, 40);
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 1,
+            clipDuration: 0.3,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const shrunkImgs = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(shrunkImgs).toHaveLength(1);
+      expect(shrunkImgs[0]).toBe(v1Urls[4]);
+      expect(document.querySelector('iframe[data-openmotion-thumb-capture="true"]')).toBeNull();
+
+      // Stretch clip wide -> shows more tiles from the same cached strip, still 0 captures.
+      await act(async () => {
+        reportResize(640, 40);
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 2,
+            clipDuration: 15,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const stretchedImgs = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(stretchedImgs.length).toBeGreaterThan(initialCount);
+      expect(stretchedImgs.every((src) => v1Urls.includes(src!))).toBe(true);
+      expect(document.querySelector('iframe[data-openmotion-thumb-capture="true"]')).toBeNull();
+
+      // Now update the composition's real persisted file version -> retains v1 while capturing v2 once.
+      await act(async () => {
+        updateCachedCompositionRevisions("demo", { "compositions/intro.html": '"patch:intro-v2"' });
+      });
+      expect([...host.querySelectorAll("img")].every((img) => v1Urls.includes(img.getAttribute("src")!))).toBe(true);
+      const requestId = await env.waitForCaptureRequest();
+      await act(async () => {
+        env.resolveCapture(requestId, 8);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const v2Imgs = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(v2Imgs.length).toBeGreaterThan(0);
+      expect(v2Imgs.some((src) => v1Urls.includes(src!))).toBe(false);
+
+      // Undo back to v1 -> restores cached v1 immediately with 0 additional captures.
+      await act(async () => {
+        updateCachedCompositionRevisions("demo", { "compositions/intro.html": '"sha256:intro-v1"' });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const undoneImgs = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(undoneImgs.every((src) => v1Urls.includes(src!))).toBe(true);
     } finally {
       env.cleanup();
     }

@@ -1,5 +1,5 @@
-// Multi-file imports already carry their changed paths. Keep the extra ETag hints small.
-const MAX_HTML_VERSION_HINTS = 32;
+// Multi-file imports already carry their changed paths. Keep the extra ETag hints bounded.
+const MAX_HTML_VERSION_HINTS = 256;
 
 export function htmlFileVersions(
   changedPaths: readonly string[],

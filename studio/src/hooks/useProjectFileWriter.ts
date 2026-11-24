@@ -14,6 +14,7 @@ import {
 import { studioExpectedFileVersion, studioWriteHeaders } from "../utils/studioFileVersion";
 import { studioApiFetch } from "../utils/studioApiFetch";
 import { trackStudioProjectSave } from "../utils/studioSaveState";
+import { updateCachedCompositionRevisions } from "../player/lib/clientCompositionCapture";
 
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
@@ -82,6 +83,7 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
           : await tryStudioTextEdit(projectId, [{ path, before: source.content, after: content }], history);
         if (saved) {
           fileVersions.set(path, saved.versions[path]);
+          updateCachedCompositionRevisions(projectId, saved.versions);
           if (saved.divergent.length) return saved.divergent[0];
           const accepted = confirmedSource(projectId, path)?.content ?? content;
           if (accepted === content) onSavedContent?.(projectId, path, content);
@@ -143,6 +145,7 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
             const currentVersion = conflict?.currentVersion ?? null;
             if (currentVersion && conflict?.currentContent === content) {
               fileVersions.set(path, currentVersion);
+              updateCachedCompositionRevisions(writeProjectId, { [path]: currentVersion });
               return;
             }
             throw new StudioFileConflictError({
@@ -163,6 +166,7 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
             return rebased;
           }
           fileVersions.set(path, version);
+          updateCachedCompositionRevisions(writeProjectId, { [path]: version });
         });
         if (divergent) return divergent;
         onSavedContent?.(writeProjectId, path, content);

@@ -299,141 +299,53 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
     }
   });
 
-  it('computes per-composition cache revisions so single-scene edits preserve untouched static siblings while shared edits invalidate all', () => {
+  it('computes per-composition cache revisions directly from each file content version so unchanged HTML files never invalidate', () => {
     const baseFiles = [
-      { path: 'index.html', sha256: 'idx-1' },
-      { path: 'compositions/s1.html', sha256: 's1-aaaaaaaaaaaaaaaa' },
-      { path: 'compositions/s2.html', sha256: 's2-bbbbbbbbbbbbbbbb' },
-      { path: 'assets/hero.png', sha256: 'img-1' },
-      { path: 'styles/theme.css', sha256: 'css-1' },
+      { path: 'index.html', sha256: 'idx-1', blobScope: 'workspace' },
+      { path: 'compositions/s1.html', sha256: 's1-aaaaaaaaaaaaaaaa', blobScope: 'workspace' },
+      { path: 'compositions/s2.html', sha256: 's2-bbbbbbbbbbbbbbbb', blobScope: 'catalog' },
+      { path: 'assets/hero.png', sha256: 'img-1', blobScope: 'workspace' },
+      { path: 'styles/theme.css', sha256: 'css-1', blobScope: 'workspace' },
     ];
     const comps = ['index.html', 'compositions/s1.html', 'compositions/s2.html'];
-    const indexV1 = '<html><head><link rel="stylesheet" href="styles/theme.css"></head><body><div>v1</div></body></html>';
-    const textByPath: Record<string, string> = {
-      'index.html': indexV1,
-      'compositions/s1.html': '<template><div data-composition-id="s1"><h1>Scene 1</h1></div></template>',
-      'compositions/s2.html': '<template><div data-composition-id="s2"><h1>Scene 2</h1></div></template>',
-    };
-    const readText = (p: string) => textByPath[p] ?? null;
 
-    const rev1 = computeCompositionRevisions(baseFiles, comps, indexV1, 'proj-rev-1', readText);
+    const rev1 = computeCompositionRevisions(baseFiles, comps, 'proj-rev-1');
+    assert.equal(rev1['index.html'], '"sha256:idx-1"');
+    assert.equal(rev1['compositions/s1.html'], '"sha256:s1-aaaaaaaaaaaaaaaa"');
+    assert.equal(rev1['compositions/s2.html'], '"sha256:s2-bbbbbbbbbbbbbbbb"');
 
-    // Editing only s2.html leaves static s1.html unchanged while changing s2.html and root index.html.
+    // Editing only s2.html (via patch revision) updates only s2.html; s1.html and index.html stay cached.
     const filesS2Edited = baseFiles.map((f) =>
-      f.path === 'compositions/s2.html' ? { ...f, sha256: 's2-cccccccccccccccc' } : f,
+      f.path === 'compositions/s2.html' ? { ...f, sha256: 'patch-id-2', blobScope: 'patch' } : f,
     );
-    const rev2 = computeCompositionRevisions(filesS2Edited, comps, indexV1, 'proj-rev-2', readText);
+    const rev2 = computeCompositionRevisions(filesS2Edited, comps, 'proj-rev-2');
     assert.equal(rev2['compositions/s1.html'], rev1['compositions/s1.html']);
+    assert.equal(rev2['index.html'], rev1['index.html']);
+    assert.equal(rev2['compositions/s2.html'], '"patch:patch-id-2"');
     assert.notEqual(rev2['compositions/s2.html'], rev1['compositions/s2.html']);
-    assert.notEqual(rev2['index.html'], rev1['index.html']);
 
-    // Editing only index.html body preserves static sub-composition revisions.
-    const indexBodyEdited = '<html><head><link rel="stylesheet" href="styles/theme.css"></head><body><div>v2</div></body></html>';
-    const rev3 = computeCompositionRevisions(baseFiles, comps, indexBodyEdited, 'proj-rev-3', readText);
+    // Editing index.html (e.g. moving/trimming timeline clips, even with scripted <head>) updates only index.html.
+    const filesIndexEdited = baseFiles.map((f) =>
+      f.path === 'index.html' ? { ...f, sha256: 'idx-2', blobScope: 'patch' } : f,
+    );
+    const rev3 = computeCompositionRevisions(filesIndexEdited, comps, 'proj-rev-3');
     assert.equal(rev3['compositions/s1.html'], rev1['compositions/s1.html']);
     assert.equal(rev3['compositions/s2.html'], rev1['compositions/s2.html']);
-    assert.notEqual(rev3['index.html'], rev1['index.html']);
+    assert.equal(rev3['index.html'], '"patch:idx-2"');
 
-    // Editing index.html <head> invalidates all sub-compositions.
-    const indexHeadEdited = '<html><head><style>body{color:rgb(255, 0, 0)}</style></head><body><div>v1</div></body></html>';
-    const rev4 = computeCompositionRevisions(baseFiles, comps, indexHeadEdited, 'proj-rev-4', readText);
-    assert.notEqual(rev4['compositions/s1.html'], rev1['compositions/s1.html']);
-    assert.notEqual(rev4['compositions/s2.html'], rev1['compositions/s2.html']);
-
-    // Editing a shared asset invalidates all sub-compositions.
-    const filesAssetEdited = baseFiles.map((f) =>
-      f.path === 'assets/hero.png' ? { ...f, sha256: 'img-2' } : f,
-    );
-    const rev5 = computeCompositionRevisions(filesAssetEdited, comps, indexV1, 'proj-rev-5', readText);
-    assert.notEqual(rev5['compositions/s1.html'], rev1['compositions/s1.html']);
-    assert.notEqual(rev5['compositions/s2.html'], rev1['compositions/s2.html']);
-  });
-
-  it('falls back to projectRevision for scripted/dynamic compositions so runtime reads of another HTML file never serve stale caches', () => {
-    const files = [
-      { path: 'index.html', sha256: 'idx-1' },
-      { path: 'compositions/parent-scripted.html', sha256: 'parent-1' },
-      { path: 'compositions/child-color.html', sha256: 'child-red' },
-      { path: 'compositions/static-sibling.html', sha256: 'static-1' },
-      { path: 'compositions/nested-dynamic.html', sha256: 'nested-dyn-1' },
+    // Editing or uploading unrelated assets leaves unchanged HTML compositions untouched.
+    const filesAssetEdited = [
+      ...baseFiles.map((f) => (f.path === 'assets/hero.png' ? { ...f, sha256: 'img-2' } : f)),
+      { path: 'assets/new-clip.mp4', sha256: 'vid-1', blobScope: 'workspace' },
     ];
-    const comps = files.map((f) => f.path);
-    const textByPath: Record<string, string> = {
-      'index.html': '<html><head><title>App</title></head><body></body></html>',
-      'compositions/parent-scripted.html':
-        '<div data-composition-id="parent"><script>fetch("compositions/child-color.html").then(r=>r.text()).then(t=>{document.body.style.background=t;});</script></div>',
-      'compositions/child-color.html': '<div data-composition-id="color">red</div>',
-      'compositions/static-sibling.html': '<div data-composition-id="static"><h1>Static</h1></div>',
-      'compositions/nested-dynamic.html':
-        '<div data-composition-id="nested"><div data-composition-src="parent-scripted.html"></div></div>',
-    };
-    const readText = (p: string) => textByPath[p] ?? null;
+    const rev4 = computeCompositionRevisions(filesAssetEdited, comps, 'proj-rev-4');
+    assert.equal(rev4['compositions/s1.html'], rev1['compositions/s1.html']);
+    assert.equal(rev4['compositions/s2.html'], rev1['compositions/s2.html']);
+    assert.equal(rev4['index.html'], rev1['index.html']);
 
-    const revRed = computeCompositionRevisions(files, comps, textByPath['index.html'], 'proj-red', readText);
-    assert.equal(revRed['compositions/parent-scripted.html'], 'proj-red');
-    assert.equal(revRed['compositions/nested-dynamic.html'], 'proj-red');
-    assert.notEqual(revRed['compositions/static-sibling.html'], 'proj-red');
-
-    // Child HTML changes from red to blue: scripted parent AND compositions embedding it MUST invalidate on reopen,
-    // while unrelated purely static siblings remain cached.
-    const blueFiles = files.map((f) =>
-      f.path === 'compositions/child-color.html' ? { ...f, sha256: 'child-blue' } : f,
-    );
-    const revBlue = computeCompositionRevisions(blueFiles, comps, textByPath['index.html'], 'proj-blue', readText);
-    assert.equal(revBlue['compositions/parent-scripted.html'], 'proj-blue');
-    assert.notEqual(revBlue['compositions/parent-scripted.html'], revRed['compositions/parent-scripted.html']);
-    assert.equal(revBlue['compositions/nested-dynamic.html'], 'proj-blue');
-    assert.equal(revBlue['compositions/static-sibling.html'], revRed['compositions/static-sibling.html']);
-
-    // A <script> in index.html <head> affects every sub-composition, so all compositions fall back to projectRevision.
-    const scriptedHeadIndex = '<html><head><script>window.__color="blue";</script></head><body></body></html>';
-    const revScriptedHead = computeCompositionRevisions(files, comps, scriptedHeadIndex, 'proj-head-script', readText);
-    for (const comp of comps) {
-      assert.equal(revScriptedHead[comp], 'proj-head-script');
-    }
-
-    // Without readText, fail closed to projectRevision for all compositions.
-    const revNoReader = computeCompositionRevisions(files, comps, textByPath['index.html'], 'proj-no-reader');
-    for (const comp of comps) {
-      assert.equal(revNoReader[comp], 'proj-no-reader');
-    }
-  });
-
-  it('folds transitive data-composition-src dependencies into per-composition revisions with cycle safety', () => {
-    const files = [
-      { path: 'index.html', sha256: 'idx-1' },
-      { path: 'compositions/nested-shell.html', sha256: 'shell-1' },
-      { path: 'compositions/title-card.html', sha256: 'card-1' },
-      { path: 'compositions/other.html', sha256: 'other-1' },
-      { path: 'compositions/cycle-a.html', sha256: 'ca-1' },
-      { path: 'compositions/cycle-b.html', sha256: 'cb-1' },
-    ];
-    const comps = files.map((f) => f.path);
-    const textByPath: Record<string, string> = {
-      'index.html': '<html><head></head><body></body></html>',
-      'compositions/nested-shell.html':
-        '<div data-composition-id="shell"><div data-composition-src="title-card.html"></div></div>',
-      'compositions/title-card.html': '<div data-composition-id="card"><h1>Title</h1></div>',
-      'compositions/other.html': '<div data-composition-id="other">Unrelated</div>',
-      'compositions/cycle-a.html': '<div data-composition-src="compositions/cycle-b.html"></div>',
-      'compositions/cycle-b.html': '<div data-composition-src="cycle-a.html"></div>',
-    };
-    const readText = (p: string) => textByPath[p] ?? null;
-
-    const revBefore = computeCompositionRevisions(files, comps, textByPath['index.html'], 'proj-1', readText);
-
-    // Editing title-card.html invalidates nested-shell.html, title-card.html, and index.html,
-    // while leaving unrelated other.html untouched.
-    const editedFiles = files.map((f) =>
-      f.path === 'compositions/title-card.html' ? { ...f, sha256: 'card-2' } : f,
-    );
-    const revAfter = computeCompositionRevisions(editedFiles, comps, textByPath['index.html'], 'proj-2', readText);
-
-    assert.notEqual(revAfter['compositions/title-card.html'], revBefore['compositions/title-card.html']);
-    assert.notEqual(revAfter['compositions/nested-shell.html'], revBefore['compositions/nested-shell.html']);
-    assert.equal(revAfter['compositions/other.html'], revBefore['compositions/other.html']);
-    assert.equal(revAfter['compositions/cycle-a.html'], revBefore['compositions/cycle-a.html']);
-    assert.equal(revAfter['compositions/cycle-b.html'], revBefore['compositions/cycle-b.html']);
+    // Missing composition paths fall back cleanly to projectRevision.
+    const revMissing = computeCompositionRevisions(baseFiles, [...comps, 'compositions/missing.html'], 'proj-rev-5');
+    assert.equal(revMissing['compositions/missing.html'], 'proj-rev-5');
   });
 
   it('inlines decoded images to data URLs once and memoizes preview-asset fetches across multi-frame captures', async () => {

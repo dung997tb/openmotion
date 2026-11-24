@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
   changedFileVersion,
+  changedFileVersions,
   mergeFileChangePayloads,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
@@ -8,6 +9,7 @@ import {
   readFileChangeField,
   readStudioFileChangePath,
 } from "../components/editor/manualEditsParsing";
+import { updateCachedCompositionRevisions } from "../player/lib/clientCompositionCapture";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import type { ExternalConflictSnapshot } from "../utils/externalConflictStorage";
 import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
@@ -326,6 +328,8 @@ export function useExternalFileChangeCoordinator({
   const deliverOwed = useCallback(
     (owed: unknown, accept = true) => {
       const path = readStudioFileChangePath(owed) ?? ".";
+      const versions = changedFileVersions(owed);
+      if (projectId && versions) updateCachedCompositionRevisions(projectId, versions);
       const inPlace = refreshFileViews(owed, unaffectedPreview => {
         const compositions = readFileChangeAffectedCompositions(owed);
         if (accept) onAcceptedPersistedFileChange(path, unaffectedPreview && compositions
@@ -351,7 +355,7 @@ export function useExternalFileChangeCoordinator({
       // a watcher event the SSE never delivered).
       if (readFileTreeChanged(owed)) void refreshFileTree?.();
     },
-    [onAcceptedPersistedFileChange, reloadPreview, refreshFileViews, refreshFileTree],
+    [projectId, onAcceptedPersistedFileChange, reloadPreview, refreshFileViews, refreshFileTree],
   );
 
   const persistSnapshotInOrder = useCallback(async (write: () => Promise<void>) => {
@@ -534,6 +538,8 @@ export function useExternalFileChangeCoordinator({
       const ownContentEcho = content != null && isSelfWriteEcho(path, content);
       if (!ownWriteToken) invalidateLatestSourceWrite();
       if (ownWriteToken || ownContentEcho) {
+        const versions = changedFileVersions(payload);
+        if (versions) updateCachedCompositionRevisions(projectId, versions);
         const version = changedFileVersion(payload, path);
         const ownWrite = ownWriteToken && token && version && isLatestSourceWrite(token) ? { token, version } : undefined;
         onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(payload), ownWrite);

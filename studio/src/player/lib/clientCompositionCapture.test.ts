@@ -6,6 +6,7 @@ import {
   clearClientCompositionCaptureCacheForTest,
   computeCompositionSampleTimes,
   createClientCompositionCaptureRequest,
+  getCompositionCacheKeyRevision,
   getCompositionCacheRevision,
   getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
@@ -18,6 +19,7 @@ import {
   setClientCompositionCaptureCapabilityForTest,
   subscribeCompositionCacheRevision,
   subscribeProgressiveCompositionCapture,
+  updateCachedCompositionRevisions,
   withPreviewRedirectSafeFetch,
 } from "./clientCompositionCapture";
 import { bindPreviewLease } from "./previewLease";
@@ -1021,5 +1023,74 @@ describe("clientCompositionCapture", () => {
       Array.from({ length: 8 }, (_, idx) => new Blob([String(idx)])),
     );
     expect(peekFallbackCompositionCapture({ projectId: "proj-fb", previewUrl })).toBe(strip8);
+  });
+
+  it("keys per-file captures strictly by persisted file version, ignores session contentRevision, and reuses canonical strips for narrower frame counts", () => {
+    const introUrl = "/api/projects/proj-fv/preview/comp/compositions/intro.html";
+    const outroUrl = "/api/projects/proj-fv/preview/comp/compositions/outro.html";
+    let seq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:test/fv-${++seq}`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    setCachedProjectRevision("proj-fv", "proj-rev-1", {
+      "compositions/intro.html": '"sha256:intro-v1"',
+      "compositions/outro.html": '"sha256:outro-v1"',
+    });
+
+    const introV1 = seedClientCompositionCaptureForTest(
+      { projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 },
+      Array.from({ length: 8 }, (_, idx) => new Blob([`v1-${idx}`])),
+    );
+    const urlsAfterSeed = seq;
+
+    // Session-local contentRevision bumps do not bust a persisted file version.
+    expect(getCompositionCacheKeyRevision("proj-fv", introUrl, 0)).toBe('file:"sha256:intro-v1"');
+    expect(getCompositionCacheKeyRevision("proj-fv", introUrl, 5)).toBe('file:"sha256:intro-v1"');
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 5, frameCount: 8 }),
+    ).toBe(introV1);
+
+    // Narrower frame counts (4, 2, 1) reuse the canonical 8-frame strip with zero duplicate URLs.
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 4 }),
+    ).toBe(introV1);
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 2 }),
+    ).toBe(introV1);
+    const cover = peekCachedCompositionCapture({
+      projectId: "proj-fv",
+      previewUrl: introUrl,
+      contentRevision: 0,
+      frameCount: 1,
+    });
+    expect(cover?.kind).toBe("image");
+    expect(seq).toBe(urlsAfterSeed);
+
+    // Real file-version update (from save or SSE fileVersions) invalidates only intro.html.
+    const listener = vi.fn();
+    const unsub = subscribeCompositionCacheRevision("proj-fv", listener);
+    updateCachedCompositionRevisions("proj-fv", {
+      "index.html": '"patch:idx-2"',
+      "assets/music.mp3": '"sha256:ignored"',
+    });
+    // Non-HTML asset ignored; index.html added -> 1 notification, intro.html still cached.
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
+    ).toBe(introV1);
+
+    updateCachedCompositionRevisions("proj-fv", { "compositions/intro.html": '"patch:intro-v2"' });
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
+    ).toBeNull();
+    expect(getCompositionCacheRevision("proj-fv", outroUrl)).toBe('"sha256:outro-v1"');
+
+    // Undo back to v1 immediately hits the cached v1 strip with zero re-capture.
+    updateCachedCompositionRevisions("proj-fv", { "compositions/intro.html": '"sha256:intro-v1"' });
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
+    ).toBe(introV1);
+    unsub();
   });
 });
