@@ -13,7 +13,8 @@ import {
 } from "./browserExport";
 
 const ISOLATED_EXPORT_BOOT_TIMEOUT_MS = 20_000;
-const SAFE_VIDEO_MIME_RE = /^video\/(mp4|webm)(?:\s*;\s*codecs="[a-zA-Z0-9.,_\s-]+")?$/i;
+const MAX_STAGE_LENGTH = 200;
+const MAX_ERROR_LENGTH = 500;
 
 export interface IsolatedBrowserExportOptions extends Omit<BrowserExportOptions, "isolateIframe" | "previewTarget"> {
   previewOrigin: string;
@@ -21,18 +22,28 @@ export interface IsolatedBrowserExportOptions extends Omit<BrowserExportOptions,
 }
 
 export function sanitizeIsolatedExportMimeType(
-  rawMimeType: unknown,
+  _rawMimeType: unknown,
   format: "mp4" | "webm",
 ): string {
-  const expectedSubtype = format === "webm" ? "webm" : "mp4";
-  if (typeof rawMimeType === "string") {
-    const trimmed = rawMimeType.trim();
-    const match = SAFE_VIDEO_MIME_RE.exec(trimmed);
-    if (match && match[1]?.toLowerCase() === expectedSubtype) {
-      return trimmed;
-    }
+  return format === "webm" ? "video/webm" : "video/mp4";
+}
+
+export function hasValidVideoContainerMagic(
+  buffer: ArrayBuffer,
+  format: "mp4" | "webm",
+): boolean {
+  const bytes = new Uint8Array(buffer);
+  if (format === "webm") {
+    return bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
   }
-  return `video/${expectedSubtype}`;
+  // ISO BMFF / MP4 starts with a box whose 4-byte type at offset 4 is 'ftyp'.
+  return (
+    bytes.length >= 12 &&
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70
+  );
 }
 
 export function buildIsolatedExportPreviewUrl(options: {
@@ -320,19 +331,30 @@ export async function runIsolatedBrowserExport(
           if (data.exportId && data.exportId !== exportId) return;
           const rawPct = typeof data.progress === "number" && Number.isFinite(data.progress) ? data.progress : 0;
           const pct = Math.max(0, Math.min(100, Math.round(rawPct)));
-          const stage = typeof data.stage === "string" && data.stage.trim() ? data.stage : "Exporting";
+          const stage =
+            typeof data.stage === "string" && data.stage.trim()
+              ? data.stage.trim().slice(0, MAX_STAGE_LENGTH)
+              : "Exporting";
           onProgress?.({ progress: pct, stage });
           return;
         }
         if (data.type === "response" && data.requestId === requestId) {
           if (data.ok === false) {
-            finish(new Error(typeof data.error === "string" && data.error ? data.error : "Browser export failed"));
+            const msg =
+              typeof data.error === "string" && data.error.trim()
+                ? data.error.trim().slice(0, MAX_ERROR_LENGTH)
+                : "Browser export failed";
+            finish(new Error(msg));
             return;
           }
           const rawResult = data.result as Record<string, unknown> | null | undefined;
           const buffer = rawResult?.buffer;
           if (!isArrayBufferValue(buffer) || buffer.byteLength <= 0) {
             finish(new Error("Browser export produced an empty output buffer."));
+            return;
+          }
+          if (!hasValidVideoContainerMagic(buffer, format)) {
+            finish(new Error("Browser export returned an invalid video container."));
             return;
           }
           const safeMimeType = sanitizeIsolatedExportMimeType(rawResult?.mimeType, format);

@@ -148,7 +148,8 @@ describe('preview-browser-export embedded bridge helper', () => {
       document: {
         readyState: 'complete',
         visibilityState: 'visible',
-        referrer: 'https://studio.example.test/',
+        // Simulate referrerPolicy="no-referrer" so targetOrigin must come explicitly from settings.studioOrigin.
+        referrer: '',
         currentScript: {
           getAttribute: () =>
             JSON.stringify({
@@ -205,8 +206,61 @@ describe('preview-browser-export embedded bridge helper', () => {
     const response = posted.find((entry) => entry.message.type === 'response' && entry.message.requestId === 'req-ok');
     assert.ok(response, 'expected response message for matching studioOrigin');
     assert.equal(response!.message.ok, true);
+    assert.equal(response!.targetOrigin, 'https://studio.example.test');
     assert.equal(response!.transfer?.length, 1);
     assert.equal(response!.transfer?.[0], outBuf);
+  });
+
+  it('fails closed when studioOrigin is missing on browser-export-start and browser-export-cancel', async () => {
+    const posted: Array<{ message: Record<string, unknown> }> = [];
+    const messageHandlerRef: { current: ((event: Record<string, unknown>) => void) | null } = { current: null };
+    const parentWindow = {
+      postMessage: (message: Record<string, unknown>) => {
+        posted.push({ message });
+      },
+    };
+    const sandbox: Record<string, unknown> = {
+      URL, Object, Array, Number, Math, String, Error, Promise, JSON, AbortController, DOMException,
+      setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => {},
+      location: { href: 'https://preview.example.test/api/projects/p1/preview?pt=tok-1', origin: 'https://preview.example.test' },
+      window: {
+        parent: parentWindow,
+        innerWidth: 1280,
+        innerHeight: 720,
+        addEventListener: (type: string, fn: (event: Record<string, unknown>) => void) => {
+          if (type === 'message') messageHandlerRef.current = fn;
+        },
+        __openmotionBrowserExport: { run: async () => ({ buffer: new Uint8Array(12).buffer, mimeType: 'video/mp4' }) },
+      },
+      document: {
+        readyState: 'complete',
+        visibilityState: 'visible',
+        referrer: '',
+        currentScript: {
+          getAttribute: () => JSON.stringify({ projectId: 'p1', compositionPath: 'index.html', sourceVersions: {} }),
+        },
+        addEventListener: () => {},
+        querySelector: () => null,
+        querySelectorAll: () => [],
+      },
+    };
+    vm.runInNewContext(PREVIEW_BRIDGE_SCRIPT, sandbox);
+    messageHandlerRef.current!({
+      source: parentWindow,
+      origin: 'https://studio.example.test',
+      data: {
+        source: 'openmotion-studio',
+        version: 1,
+        type: 'browser-export-start',
+        projectId: 'p1',
+        token: 'tok-1',
+        requestId: 'req-no-origin',
+        exportId: 'exp-no-origin',
+        payload: {},
+      },
+    });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(posted.some((entry) => entry.message.requestId === 'req-no-origin'), false);
   });
 
   it('serves /api/vendor/browser-export.js with ETag, no-cache, and 304 revalidation', async () => {

@@ -21,10 +21,10 @@ function scopedScript(configuration: string, body: string): string {
   var parentWindow=window.parent;
   var parentOrigin='*';
   try { if(document.referrer) parentOrigin=new globalThis.URL(document.referrer).origin; } catch (_) {}
-  function post(type,payload,requestId,transfer){
+  function post(type,payload,requestId,transfer,explicitOrigin){
     var message=Object.assign({source:SOURCE,version:VERSION,type:type,projectId:projectId,token:token},payload||{});
     if(requestId) message.requestId=requestId;
-    var targetOrigin=parentOrigin==='null'?'*':parentOrigin;
+    var targetOrigin=explicitOrigin||(parentOrigin==='null'?'*':parentOrigin);
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
@@ -103,10 +103,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   ${PREVIEW_LAYERS}
   ${PREVIEW_THUMBNAIL_CAPTURE}
   ${PREVIEW_BROWSER_EXPORT}
-  function respond(requestId,result,error,transfer){
+  function respond(requestId,result,error,transfer,explicitOrigin){
     var message=Object.assign({source:SOURCE,version:VERSION,type:'response',projectId:projectId,token:token},error?{ok:false,error:String(error)}:{ok:true,result:result});
     if(requestId) message.requestId=requestId;
-    var targetOrigin=parentOrigin==='null'?'*':parentOrigin;
+    var targetOrigin=explicitOrigin||(parentOrigin==='null'?'*':parentOrigin);
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
@@ -162,19 +162,20 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         return;
       }
       if(message.type==='browser-export-start'){
-        if(settings.studioOrigin && settings.studioOrigin !== event.origin) return;
+        if(!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
+        var exportTargetOrigin=settings.studioOrigin;
         startBridgeBrowserExport(message,function(update){
-          post('browser-export-progress',update,requestId);
+          post('browser-export-progress',update,requestId,undefined,exportTargetOrigin);
         }).then(function(result){
-          respond(requestId,result,null,result&&result.buffer?[result.buffer]:undefined);
+          respond(requestId,result,null,result&&result.buffer?[result.buffer]:undefined,exportTargetOrigin);
         },function(error){
-          respond(requestId,null,error);
+          respond(requestId,null,error,undefined,exportTargetOrigin);
         });
         return;
       }
       if(message.type==='browser-export-cancel'){
-        if(settings.studioOrigin && settings.studioOrigin !== event.origin) return;
-        respond(requestId,{cancelled:cancelBridgeBrowserExport(message)});
+        if(!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
+        respond(requestId,{cancelled:cancelBridgeBrowserExport(message)},null,undefined,settings.studioOrigin);
         return;
       }
       if(message.type==='playback-control'){

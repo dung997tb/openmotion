@@ -6,6 +6,7 @@ import type { TimelineElement } from "../player/store/timelineElement";
 import { clearSharedPreviewGrantsForTest } from "../player/lib/previewLease";
 import {
   buildIsolatedExportPreviewUrl,
+  hasValidVideoContainerMagic,
   runIsolatedBrowserExport,
   sanitizeIsolatedExportMimeType,
 } from "./isolatedBrowserExport";
@@ -29,16 +30,25 @@ afterEach(() => {
 });
 
 describe("isolatedBrowserExport helpers", () => {
-  it("sanitizes MIME types strictly to MP4/WebM and rejects unsafe HTML/SVG types", () => {
+  it("sanitizes MIME types strictly to bare video/mp4 or video/webm and validates container magic bytes", () => {
     expect(sanitizeIsolatedExportMimeType("video/mp4", "mp4")).toBe("video/mp4");
-    expect(sanitizeIsolatedExportMimeType('video/mp4; codecs="avc1.640028, mp4a.40.2"', "mp4")).toBe(
-      'video/mp4; codecs="avc1.640028, mp4a.40.2"',
-    );
+    expect(sanitizeIsolatedExportMimeType('video/mp4; codecs="avc1.640028, mp4a.40.2"', "mp4")).toBe("video/mp4");
     expect(sanitizeIsolatedExportMimeType("video/webm", "webm")).toBe("video/webm");
     expect(sanitizeIsolatedExportMimeType("video/webm", "mp4")).toBe("video/mp4");
     expect(sanitizeIsolatedExportMimeType("text/html", "mp4")).toBe("video/mp4");
     expect(sanitizeIsolatedExportMimeType("image/svg+xml", "webm")).toBe("video/webm");
     expect(sanitizeIsolatedExportMimeType(undefined, "mp4")).toBe("video/mp4");
+
+    const validMp4 = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]).buffer;
+    const validWebm = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81]).buffer;
+    const spoofedHtml = new TextEncoder().encode("<!doctype html><script>alert(1)</script>").buffer;
+
+    expect(hasValidVideoContainerMagic(validMp4, "mp4")).toBe(true);
+    expect(hasValidVideoContainerMagic(validMp4, "webm")).toBe(false);
+    expect(hasValidVideoContainerMagic(validWebm, "webm")).toBe(true);
+    expect(hasValidVideoContainerMagic(validWebm, "mp4")).toBe(false);
+    expect(hasValidVideoContainerMagic(spoofedHtml, "mp4")).toBe(false);
+    expect(hasValidVideoContainerMagic(spoofedHtml, "webm")).toBe(false);
   });
 
   it("preserves composition path and variables while enforcing capture=1 and fresh preview token", () => {
@@ -146,7 +156,9 @@ describe("runIsolatedBrowserExport bridge orchestration", () => {
               },
             }),
           );
-          const mp4Bytes = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]).buffer;
+          const mp4Bytes = new Uint8Array([
+            0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+          ]).buffer;
           window.dispatchEvent(
             new MessageEvent("message", {
               origin: "https://openmotion-preview.example.test",
@@ -256,7 +268,7 @@ describe("runIsolatedBrowserExport bridge orchestration", () => {
     expect(mountedFrame!.isConnected).toBe(false);
     expect(result.blobUrl).toBe("blob:isolated-mp4");
     expect(result.mimeType).toBe("video/mp4");
-    expect(result.bytes).toBe(8);
+    expect(result.bytes).toBe(12);
     expect(createdUrls[0]?.type).toBe("video/mp4");
     expect(progressUpdates.some((u) => u.stage === "Spoofed")).toBe(false);
     expect(progressUpdates.some((u) => u.progress === 65 && u.stage === "Capturing frame 2/3")).toBe(true);
@@ -349,5 +361,112 @@ describe("runIsolatedBrowserExport bridge orchestration", () => {
 
     expect(sentTypes).toEqual(["browser-export-start", "browser-export-cancel"]);
     expect(mountedFrame?.isConnected).toBe(false);
+  });
+
+  it("rejects non-video payloads and bounds untrusted stage/error string lengths", async () => {
+    setupPreviewTokenFetch("pt-isolated-spoof");
+    const origAppendChild = document.body.appendChild.bind(document.body);
+    const seenStages: string[] = [];
+
+    const fakeContentWindow = {
+      postMessage: (data: Record<string, unknown>) => {
+        if (data.type === "browser-export-start") {
+          const requestId = String(data.requestId);
+          const exportId = String(data.exportId);
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "browser-export-progress",
+                projectId: "demo",
+                token: "pt-isolated-spoof",
+                requestId,
+                exportId,
+                progress: 12,
+                stage: "X".repeat(500),
+              },
+            }),
+          );
+          const htmlBytes = new TextEncoder().encode("<html><script>alert(1)</script></html>").buffer;
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "response",
+                projectId: "demo",
+                token: "pt-isolated-spoof",
+                requestId,
+                ok: true,
+                result: { buffer: htmlBytes, mimeType: "video/mp4" },
+              },
+            }),
+          );
+        }
+      },
+    };
+
+    vi.spyOn(document.body, "appendChild").mockImplementation(<T extends Node>(node: T): T => {
+      const appended = origAppendChild(node);
+      if (node instanceof HTMLIFrameElement && node.hasAttribute("data-openmotion-isolated-export-frame")) {
+        let storedSrc = "";
+        Object.defineProperty(node, "src", { configurable: true, get: () => storedSrc, set: (v: string) => { storedSrc = v; } });
+        Object.defineProperty(node, "contentWindow", { configurable: true, get: () => fakeContentWindow });
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "preview-ready",
+                projectId: "demo",
+                token: "pt-isolated-spoof",
+                capabilities: ["browser-export"],
+              },
+            }),
+          );
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              origin: "https://openmotion-preview.example.test",
+              source: fakeContentWindow as unknown as Window,
+              data: {
+                source: "openmotion-preview-bridge",
+                version: 1,
+                type: "timeline-state",
+                projectId: "demo",
+                token: "pt-isolated-spoof",
+                duration: 2,
+                firstFrame: "ready",
+              },
+            }),
+          );
+        });
+      }
+      return appended;
+    });
+
+    await expect(
+      runIsolatedBrowserExport({
+        projectId: "demo",
+        previewOrigin: "https://openmotion-preview.example.test",
+        format: "mp4",
+        quality: "standard",
+        fps: 30,
+        duration: 2,
+        elements: [makeElement({ tag: "p", text: { value: "Test" } })],
+        keyframeCache: new Map(),
+        onProgress: (u) => seenStages.push(u.stage),
+      }),
+    ).rejects.toThrow("invalid video container");
+
+    expect(seenStages.some((s) => s.length === 200)).toBe(true);
+    expect(seenStages.every((s) => s.length <= 200)).toBe(true);
   });
 });
