@@ -35,6 +35,9 @@ describe("peer timing classification", () => {
     expect(await diffScriptedPreviewStyles(before, next)).toMatchObject([{ id: "title", styles: [["font-size", "", "54px"]] }]);
     expect(diffPreviewChanges(before, next)).toBeNull();
     expect(await diffScriptedPreviewStyles(before, next.replace(/data-hf-id="[^"]+"/, 'data-hf-id="unrelated"'))).toBeNull();
+    const partial = '<main data-composition-id="scene"><p id="title" data-hf-id="existing">Hi</p></main>';
+    const stamped = ensureHfIds(partial).replace('id="title"', 'id="title" style="font-size: 52px"');
+    expect(await diffScriptedPreviewStyles(partial, stamped)).toMatchObject([{ hfId: "existing", id: "title" }]);
   });
 
   it("includes the containing-block change on the first drag of a static layer", () => {
@@ -52,6 +55,21 @@ describe("peer timing classification", () => {
       ["background-color", "red", "blue"], ["background-image", "", "none"],
     ]);
     expect(diffPreviewChanges(filled, filled.replace("none", "url(asset.png)"))).toBeNull();
+  });
+
+  it("recognizes text, color, and an edit-core translation together and preserves font declarations", () => {
+    const before = '<style>@font-face { font-family: Sample; src:url(sample.woff2) }</style><h1 id="title">Old</h1>';
+    const after = before.replace('id="title"', 'id="title" style="font-family:Sample;color:red;translate:30px 12px"').replace('Old', 'New');
+    expect(diffPreviewChanges(before, after)).toMatchObject([{
+      id: "title", text: ["Old", "New"],
+      styles: [["font-family", "", "Sample"], ["color", "", "red"], ["translate", "", "30px 12px"]],
+    }]);
+    expect(diffPreviewChanges(before, after.replace("sample.woff2", "other.woff2"))).toBeNull();
+    expect(diffPreviewChanges(before, after.replace("30px 12px", "50% 12px"))).toBeNull();
+    const marked = after.replace('id="title"', 'data-hf-studio-original-inline-translate="" id="title"');
+    expect(diffPreviewChanges(before, marked)?.[0]?.captureOriginalTranslate).toBe(true);
+    expect(diffPreviewChanges(marked, before)?.[0]?.captureOriginalTranslate).toBe(false);
+    expect(diffPreviewChanges(before, marked.replace('translate=""', 'translate="90px"'))).toBeNull();
   });
 
   it("falls back for a changed tween, markup, source, label, style or expression in the same edit", () => {

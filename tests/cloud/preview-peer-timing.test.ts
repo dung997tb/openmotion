@@ -88,6 +88,22 @@ it('applies a solid fill without installing a new image URL through the live bri
   assert.equal(tile.style.getPropertyValue('background-image'), 'none');
 });
 
+it('updates a font and a pixel translation with text only on a declarative document', () => {
+  const message = (offset: string) => ({ type: 'peer-presentation', changes: [{ id: 'title', tag: 'div', attributes: [],
+    text: ['Hello', 'Changed'], styles: [['font-family', '', 'Sample'], ['translate', '', offset]], captureOriginalTranslate: true }] });
+  const { document, send, hooks } = preview();
+  assert.equal(send(message('50% 12px')), false);
+  assert.equal(send(message('30px 12px')), true);
+  assert.equal(document.getElementById('title')!.style.getPropertyValue('font-family'), 'Sample');
+  assert.equal(document.getElementById('title')!.style.getPropertyValue('translate'), '30px 12px');
+  assert.equal(document.getElementById('title')!.getAttribute('data-hf-studio-original-inline-translate'), '');
+  assert.equal(send({ type: 'peer-presentation', before: etag(2), after: etag(3), changes: [{ id: 'title', tag: 'div',
+    attributes: [], styles: [['translate', '30px 12px', '']], captureOriginalTranslate: false }] }), true);
+  assert.equal(document.getElementById('title')!.getAttribute('data-hf-studio-original-inline-translate'), null);
+  assert.deepEqual(hooks, []);
+  assert.equal(preview(false, { position: true }).send(message('30px 12px')), false);
+});
+
 it('shows a confirmed nested style on the old scripted document while keeping its loaded revision for rebuild', () => {
   const { send, document, hooks } = preview(false);
   const path = 'scenes/intro.html';

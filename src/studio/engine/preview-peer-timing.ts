@@ -1,4 +1,5 @@
 import { isLiveMediaMove } from '../../../shared/preview-live-media.ts';
+import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from '../../../packages/edit-core/canvas-position.ts';
 import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit, canPatchPresentationValue } from '../../../shared/preview-timing.ts';
 
 // Runs inside the token-scoped iframe. Each change targets a verified live node and file revision.
@@ -6,6 +7,7 @@ export const PREVIEW_PEER_TIMING = `
   const timingAttributes = new Set(${JSON.stringify(TIMING_ATTRIBUTES)});
   const presentationTags = new Set(${JSON.stringify(PRESENTATION_TAGS)});
   const presentationStyles = new Set(${JSON.stringify(PRESENTATION_STYLES)});
+  const originalTranslateAttribute = ${JSON.stringify(STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR)};
   const canPatchPresentationValue = ${canPatchPresentationValue.toString()};
   const styleDocumentId = globalThis.crypto?.randomUUID?.();
   const timingDocumentId = settings.canRebindTiming === true ? styleDocumentId : undefined;
@@ -15,6 +17,19 @@ export const PREVIEW_PEER_TIMING = `
     return match ? (match[1] === 'patch' ? tag : match[2]) : null;
   }
   function stagePresentation(node, change, effects, local, pending) {
+    if (change.captureOriginalTranslate !== undefined) {
+      const move = Array.isArray(change.styles) && change.styles.find(style => Array.isArray(style) && style[0] === 'translate');
+      if (typeof change.captureOriginalTranslate !== 'boolean' || !timingDocumentId || !move) return false;
+      const from = change.captureOriginalTranslate ? null : move[2];
+      const to = change.captureOriginalTranslate ? move[1] : null;
+      const actual = node.getAttribute(originalTranslateAttribute);
+      if (actual !== from && !(local && actual === to)) return false;
+      effects.push(forward => {
+        const value = forward ? to : actual;
+        if (value === null) node.removeAttribute(originalTranslateAttribute);
+        else node.setAttribute(originalTranslateAttribute, value);
+      });
+    }
     if (!change.styles && !change.text) return true;
     if (!presentationTags.has(node.localName)) return false;
     if (change.styles) {

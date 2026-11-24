@@ -5,10 +5,12 @@ export const TIMING_ATTRIBUTES = [
 ] as const;
 
 // Properties set directly by the inspector or by the positioning gesture.
-export const PRESENTATION_STYLES = ["position", "left", "top", "width", "height", "font-size", "font-weight", "text-align", "color", "background-color", "background-image", "opacity"] as const;
-/** A solid fill clears the image layer. Other image changes need the normal asset pipeline. */
+export const PRESENTATION_STYLES = ["position", "left", "top", "width", "height", "font-size", "font-weight", "font-family", "text-align", "color", "background-color", "background-image", "opacity", "translate"] as const;
+/** Solid fills clear the image layer; canvas moves produce a one- or two-axis pixel offset. */
 export function canPatchPresentationValue(name: string, value: string): boolean {
-  return name !== "background-image" || value === "none" || value === "";
+  if (name === "background-image") return value === "none" || value === "";
+  if (name === "translate") return value === "" || value === "none" || /^-?(?:\d+\.?\d*|\.\d+)px(?: -?(?:\d+\.?\d*|\.\d+)px)?$/.test(value);
+  return true;
 }
 export const PRESENTATION_TAGS = ["div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6"] as const;
 export const MAX_PREVIEW_TEXT_LENGTH = 4096;
@@ -19,6 +21,8 @@ export interface PreviewChange {
   compositionId: string | null;
   tag: string;
   styles?: [typeof PRESENTATION_STYLES[number], string, string][];
+  /** A first canvas move captures the author's translate for Reset; undo removes the marker. */
+  captureOriginalTranslate?: boolean;
   text?: [string, string];
   attributes: [typeof TIMING_ATTRIBUTES[number], string | null, string | null][];
 }
