@@ -7,9 +7,9 @@ import { motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
 import type { ScenarioId } from '../../../shared/scenarios';
-import seedanceHeroPoster from './corridor-covers/cover-26.webp';
+import seedanceHeroPoster from './corridor-covers/cover-26.webp?no-inline';
 import gptImageHeroPoster from './scene-art/studio-glass-sculpture.jpg';
-import blackFridayHeroPoster from './scene-art/black-friday-spotlight.jpg';
+import blackFridayHeroPoster from './scene-art/black-friday-spotlight.webp?no-inline';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
 

@@ -271,7 +271,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
 
   if (isShowcaseHub) {
     return (
-      <main className="om-explore om-model-hub-page om-model-hub-minimal">
+      <main className="om-explore om-model-hub-page">
         <div className="om-discovery-page om-model-hub om-model-hub-showcase" data-hub={hub.id}>
           <header className="om-hub-editorial-header">
             <div className="om-hub-editorial-main">
@@ -475,7 +475,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                   <Button
                     type="button"
                     variant="plain"
-                    className="om-hub-lightbox-nav om-hub-lightbox-prev"
+                    className="om-hub-lightbox-nav"
                     aria-label={t('Previous showcase')}
                     onClick={() => stepCase(-1)}
                   >
@@ -598,7 +598,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                   <Button
                     type="button"
                     variant="plain"
-                    className="om-hub-lightbox-nav om-hub-lightbox-next"
+                    className="om-hub-lightbox-nav"
                     aria-label={t('Next showcase')}
                     onClick={() => stepCase(1)}
                   >

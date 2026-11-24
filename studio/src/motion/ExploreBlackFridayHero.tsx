@@ -1,41 +1,41 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react';
 import { useI18n } from '../i18n/I18n';
-import cover01 from './corridor-covers/cover-01.webp';
-import cover02 from './corridor-covers/cover-02.webp';
-import cover03 from './corridor-covers/cover-03.webp';
-import cover04 from './corridor-covers/cover-04.jpg';
-import cover05 from './corridor-covers/cover-05.webp';
-import cover06 from './corridor-covers/cover-06.webp';
-import cover07 from './corridor-covers/cover-07.webp';
-import cover08 from './corridor-covers/cover-08.jpg';
-import cover09 from './corridor-covers/cover-09.webp';
-import cover10 from './corridor-covers/cover-10.jpg';
-import cover11 from './corridor-covers/cover-11.webp';
-import cover12 from './corridor-covers/cover-12.jpg';
-import cover13 from './corridor-covers/cover-13.webp';
-import cover14 from './corridor-covers/cover-14.jpg';
-import cover15 from './corridor-covers/cover-15.webp';
-import cover16 from './corridor-covers/cover-16.webp';
-import cover17 from './corridor-covers/cover-17.jpg';
-import cover18 from './corridor-covers/cover-18.jpg';
-import cover19 from './corridor-covers/cover-19.webp';
-import cover20 from './corridor-covers/cover-20.jpg';
-import cover21 from './corridor-covers/cover-21.webp';
-import cover22 from './corridor-covers/cover-22.webp';
-import cover23 from './corridor-covers/cover-23.webp';
-import cover24 from './corridor-covers/cover-24.webp';
-import cover25 from './corridor-covers/cover-25.webp';
-import cover26 from './corridor-covers/cover-26.webp';
-import cover27 from './corridor-covers/cover-27.webp';
-import cover28 from './corridor-covers/cover-28.webp';
-import cover29 from './corridor-covers/cover-29.webp';
-import cover30 from './corridor-covers/cover-30.webp';
-import cover31 from './corridor-covers/cover-31.webp';
-import cover32 from './corridor-covers/cover-32.webp';
-import cover34 from './corridor-covers/cover-34.webp';
-import cover35 from './corridor-covers/cover-35.webp';
-import cover36 from './corridor-covers/cover-36.webp';
+import cover01 from './corridor-covers/cover-01.webp?no-inline';
+import cover02 from './corridor-covers/cover-02.webp?no-inline';
+import cover03 from './corridor-covers/cover-03.webp?no-inline';
+import cover04 from './corridor-covers/cover-04.webp?no-inline';
+import cover05 from './corridor-covers/cover-05.webp?no-inline';
+import cover06 from './corridor-covers/cover-06.webp?no-inline';
+import cover07 from './corridor-covers/cover-07.webp?no-inline';
+import cover08 from './corridor-covers/cover-08.webp?no-inline';
+import cover09 from './corridor-covers/cover-09.webp?no-inline';
+import cover10 from './corridor-covers/cover-10.webp?no-inline';
+import cover11 from './corridor-covers/cover-11.webp?no-inline';
+import cover12 from './corridor-covers/cover-12.webp?no-inline';
+import cover13 from './corridor-covers/cover-13.webp?no-inline';
+import cover14 from './corridor-covers/cover-14.webp?no-inline';
+import cover15 from './corridor-covers/cover-15.webp?no-inline';
+import cover16 from './corridor-covers/cover-16.webp?no-inline';
+import cover17 from './corridor-covers/cover-17.webp?no-inline';
+import cover18 from './corridor-covers/cover-18.webp?no-inline';
+import cover19 from './corridor-covers/cover-19.webp?no-inline';
+import cover20 from './corridor-covers/cover-20.webp?no-inline';
+import cover21 from './corridor-covers/cover-21.webp?no-inline';
+import cover22 from './corridor-covers/cover-22.webp?no-inline';
+import cover23 from './corridor-covers/cover-23.webp?no-inline';
+import cover24 from './corridor-covers/cover-24.webp?no-inline';
+import cover25 from './corridor-covers/cover-25.webp?no-inline';
+import cover26 from './corridor-covers/cover-26.webp?no-inline';
+import cover27 from './corridor-covers/cover-27.webp?no-inline';
+import cover28 from './corridor-covers/cover-28.webp?no-inline';
+import cover29 from './corridor-covers/cover-29.webp?no-inline';
+import cover30 from './corridor-covers/cover-30.webp?no-inline';
+import cover31 from './corridor-covers/cover-31.webp?no-inline';
+import cover32 from './corridor-covers/cover-32.webp?no-inline';
+import cover34 from './corridor-covers/cover-34.webp?no-inline';
+import cover35 from './corridor-covers/cover-35.webp?no-inline';
+import cover36 from './corridor-covers/cover-36.webp?no-inline';
 import styles from './ExploreBlackFridayHero.module.css';
 import { MODEL_LOGO_ASSETS, type ModelLogoAsset } from './exploreModelLogos';
 import {
@@ -641,10 +641,12 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
     ? Math.min(0.96, Math.max(0.78, (collapsedHeight - 36) / 480))
     : 0.94;
 
+  const heroClassName = collapsed ? `${styles.hero} ${styles.heroCollapsed}` : styles.hero;
+
   return (
     <section
       ref={heroRef}
-      className={collapsed ? `${styles.hero} ${styles.heroCollapsed}` : styles.hero}
+      className={heroClassName}
       data-bf-hero="true"
       data-script={script}
       data-collapsed={collapsed ? 'true' : 'false'}
