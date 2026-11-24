@@ -1,3 +1,4 @@
+import { NON_PREVIEW_FILES } from "../../../../shared/preview-impact";
 import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { usePlayerStore } from "../store/playerStore";
 import { thumbnailRevisionOf } from "../store/thumbnailSlice";
@@ -85,6 +86,8 @@ interface MemoryStripEntry {
   inCache: boolean;
   refCount: number;
   revoked: boolean;
+  /** Retained solely for `peekFallbackCompositionCapture` after being superseded by a newer revision. */
+  fallbackOnly: boolean;
 }
 
 interface CapturePreviewWindow extends Window {
@@ -124,7 +127,30 @@ let testCapabilityOverride: boolean | null = null;
 let snapdomLoader: Promise<SnapdomModuleFn | null> | null = null;
 const projectRevisionByProjectId = new Map<string, string>();
 const compositionRevisionsByProjectId = new Map<string, Map<string, string>>();
+const projectSharedTagByProjectId = new Map<string, string>();
 const revisionListenersByProjectId = new Map<string, Set<() => void>>();
+let liveSharedDepSeq = 0;
+
+const SHARED_REV_MARKER = "|shared:";
+const DEPS_REV_MARKER = "|deps:";
+
+function splitSharedRev(rev: string): { base: string; shared: string } {
+  const idx = rev.indexOf(SHARED_REV_MARKER);
+  return idx >= 0
+    ? { base: rev.slice(0, idx), shared: rev.slice(idx + SHARED_REV_MARKER.length) }
+    : { base: rev, shared: "" };
+}
+
+function splitSharedTagParts(tag: string): { head: string; assets: string } {
+  const idx = tag.indexOf(":");
+  return idx >= 0
+    ? { head: tag.slice(0, idx), assets: tag.slice(idx + 1) }
+    : { head: tag, assets: "" };
+}
+
+function joinSharedRev(base: string, shared: string): string {
+  return shared ? `${base}${SHARED_REV_MARKER}${shared}` : base;
+}
 
 function notifyRevisionListeners(projectId: string): void {
   const listeners = revisionListenersByProjectId.get(projectId);
@@ -244,8 +270,21 @@ export function clearClientCompositionCaptureCacheForTest(): void {
   sharedCoverCache.clear();
   projectRevisionByProjectId.clear();
   compositionRevisionsByProjectId.clear();
+  projectSharedTagByProjectId.clear();
   revisionListenersByProjectId.clear();
+  liveSharedDepSeq = 0;
   inFlightIdbReads.clear();
+  const prevDbPromise = idbOpenPromise;
+  idbOpenPromise = null;
+  if (prevDbPromise) {
+    void prevDbPromise.then((db) => {
+      try {
+        db?.close();
+      } catch {
+        // ignore
+      }
+    });
+  }
   progressiveStrips.clear();
   progressiveListeners.clear();
   clearRemoteCompositionFilmstripStateForTest();
@@ -328,10 +367,13 @@ function evictStaleMemoryStripEntries(isStale: (entry: MemoryStripEntry) => bool
     if (entry.revoked) continue;
     if (isStale(entry)) {
       staleEntries.push(pair);
-    } else if (entry.value.kind === "filmstrip" && entry.value.urls.length > 0) {
-      hasFreshFilmstrip.add(entry.clipIdentityKey);
-    } else if (entry.value.kind === "image" && entry.value.representative === "render") {
-      hasFreshRender.add(entry.clipIdentityKey);
+    } else {
+      entry.fallbackOnly = false;
+      if (entry.value.kind === "filmstrip" && entry.value.urls.length > 0) {
+        hasFreshFilmstrip.add(entry.clipIdentityKey);
+      } else if (entry.value.kind === "image" && entry.value.representative === "render") {
+        hasFreshRender.add(entry.clipIdentityKey);
+      }
     }
   }
   const preservedFallbackKeys = new Map<string, string>();
@@ -358,7 +400,10 @@ function evictStaleMemoryStripEntries(isStale: (entry: MemoryStripEntry) => bool
     }
   }
   for (const [key, entry] of staleEntries) {
-    if (preservedFallbackKeys.get(entry.clipIdentityKey) === key) continue;
+    if (preservedFallbackKeys.get(entry.clipIdentityKey) === key) {
+      entry.fallbackOnly = true;
+      continue;
+    }
     memoryStripCache.delete(key);
     entry.inCache = false;
     maybeRevokeEntry(entry);
@@ -372,23 +417,23 @@ function evictStaleProjectRevisions(
   evictStaleMemoryStripEntries(
     (entry) =>
       entry.projectId === projectId &&
-      entry.compRev !== resolveCompositionRevision(projectId, entry.compPath),
+      entry.compRev !== resolveCompositionRevision(projectId, entry.compPath).rev,
   );
   thumbnailScheduler.invalidateMatching(projectId, (req) => {
     if (req.kind !== "composition" || !req.compositionPath) return false;
     if (req.compositionRevision !== undefined) {
-      return req.compositionRevision !== resolveCompositionRevision(projectId, req.compositionPath);
+      return req.compositionRevision !== resolveCompositionRevision(projectId, req.compositionPath).rev;
     }
     return isPathChanged(req.compositionPath);
   });
   for (const [key, entry] of sharedCoverCache) {
     if (entry.projectId !== projectId) continue;
-    if (entry.compRev === resolveCompositionRevision(projectId, entry.compPath)) continue;
+    if (entry.compRev === resolveCompositionRevision(projectId, entry.compPath).rev) continue;
     sharedCoverCache.delete(key);
   }
   for (const slot of captureIframePool) {
     if (slot.busy || !slot.loaded || slot.loaded.projectId !== projectId) continue;
-    if (slot.loaded.compRev === resolveCompositionRevision(projectId, slot.loaded.compPath)) continue;
+    if (slot.loaded.compRev === resolveCompositionRevision(projectId, slot.loaded.compPath).rev) continue;
     slot.loaded = null;
     resetCaptureIframe(slot.iframe);
   }
@@ -412,6 +457,9 @@ export function evictStaleCompositionCaptures(
       : new Set(compositions.map((path) => normalizeCompositionPathForGate(path)).filter(Boolean));
   const isStale = (compPath: string, contentRevision: number): boolean => {
     if (affected !== null && !affected.has(compPath)) return false;
+    // Compositions pinned to a persisted file version are invalidated only by real file-version
+    // updates (`setCachedProjectRevision` / `updateCachedCompositionRevisions`), not session counters.
+    if (resolveCompositionRevision(projectId, compPath).hasFileVersion) return false;
     if (!currentRevisions) return true;
     return contentRevision < thumbnailRevisionOf(currentRevisions, compPath);
   };
@@ -452,10 +500,23 @@ export function setCachedProjectRevision(
   }
   if (compositionRevisions && typeof compositionRevisions === "object") {
     const normalized = new Map<string, string>();
+    let detectedSharedTag = "";
     for (const [rawPath, compRev] of Object.entries(compositionRevisions)) {
       if (typeof compRev !== "string" || !compRev.trim()) continue;
       const key = normalizeCompositionPathForGate(rawPath);
-      if (key) normalized.set(key, compRev.trim());
+      if (key) {
+        const trimmedRev = compRev.trim();
+        normalized.set(key, trimmedRev);
+        if (!detectedSharedTag) {
+          const { shared } = splitSharedRev(trimmedRev);
+          if (shared) detectedSharedTag = shared;
+        }
+      }
+    }
+    if (detectedSharedTag) {
+      projectSharedTagByProjectId.set(projectId, detectedSharedTag);
+    } else {
+      projectSharedTagByProjectId.delete(projectId);
     }
     const prev = compositionRevisionsByProjectId.get(projectId);
     if (normalized.size > 0) {
@@ -490,8 +551,156 @@ export function setCachedProjectRevision(
   if (compositionRevisionsByProjectId.delete(projectId)) {
     changed = true;
   }
+  projectSharedTagByProjectId.delete(projectId);
   if (changed) {
     evictStaleProjectRevisions(projectId);
+    notifyRevisionListeners(projectId);
+  }
+}
+
+const HTML_FILE_RE = /\.html?$/i;
+
+/**
+ * Update individual HTML composition file versions (and shared CSS/asset/`<head>` render
+ * dependencies) in real time from Studio file saves or SSE `file-change` events so:
+ * - edited scenes refresh immediately using the exact persisted version returned on reload,
+ * - moving/trimming/splitting clips in `index.html <body>` leaves untouched scenes warm,
+ * - shared asset/CSS/`<head>` edits invalidate affected scenes immediately without reload.
+ */
+export function updateCachedCompositionRevisions(
+  projectId: string,
+  fileVersions: Readonly<Record<string, string | null>> | null | undefined,
+  options?: {
+    readonly changedPaths?: readonly string[];
+    readonly indexHeadHash?: string;
+    readonly indexHeadChanged?: boolean;
+  },
+): void {
+  if (!projectId) return;
+  let perComp = compositionRevisionsByProjectId.get(projectId);
+  const changedPaths = new Set<string>();
+  let changed = false;
+
+  const isPreviewSharedNonHtml = (rawPath: string): boolean => {
+    const key = normalizeCompositionPathForGate(rawPath);
+    if (!key || key === "." || HTML_FILE_RE.test(key)) return false;
+    return !NON_PREVIEW_FILES.has(key);
+  };
+
+  const projectRev = projectRevisionByProjectId.get(projectId) ?? "";
+  const isFailClosedRev = (rev: string | undefined): boolean =>
+    Boolean(rev && projectRev && rev === projectRev);
+
+  let nonHtmlSharedChanged = false;
+  if (fileVersions) {
+    for (const rawPath of Object.keys(fileVersions)) {
+      if (isPreviewSharedNonHtml(rawPath)) {
+        nonHtmlSharedChanged = true;
+        break;
+      }
+    }
+  }
+  if (!nonHtmlSharedChanged && options?.changedPaths) {
+    for (const rawPath of options.changedPaths) {
+      if (isPreviewSharedNonHtml(rawPath)) {
+        nonHtmlSharedChanged = true;
+        break;
+      }
+    }
+  }
+
+  const prevSharedTag = projectSharedTagByProjectId.get(projectId) ?? "";
+  const { head: prevHead, assets: prevAssets } = splitSharedTagParts(prevSharedTag);
+  let nextHead = prevHead;
+  let nextAssets = prevAssets;
+  let sharedTagChanged = false;
+
+  if (options?.indexHeadHash && options.indexHeadHash !== prevHead) {
+    nextHead = options.indexHeadHash;
+    sharedTagChanged = true;
+  } else if (options?.indexHeadChanged) {
+    nextHead = `h${++liveSharedDepSeq}`;
+    sharedTagChanged = true;
+  }
+
+  if (nonHtmlSharedChanged) {
+    nextAssets = `a${++liveSharedDepSeq}`;
+    sharedTagChanged = true;
+  }
+
+  const activeSharedTag = sharedTagChanged ? `${nextHead}:${nextAssets}` : prevSharedTag;
+  if (sharedTagChanged) {
+    projectSharedTagByProjectId.set(projectId, activeSharedTag);
+    if (perComp) {
+      for (const [compKey, existingRev] of perComp) {
+        if (isFailClosedRev(existingRev)) continue;
+        const { base } = splitSharedRev(existingRev);
+        const rewritten = joinSharedRev(base, activeSharedTag);
+        if (rewritten !== existingRev) {
+          perComp.set(compKey, rewritten);
+          changedPaths.add(compKey);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (fileVersions) {
+    const editedSubComps = new Set<string>();
+    for (const [rawPath, rawVersion] of Object.entries(fileVersions)) {
+      const key = normalizeCompositionPathForGate(rawPath);
+      if (!key) continue;
+      const tracked = perComp?.has(key) === true;
+      if (!tracked && !HTML_FILE_RE.test(key)) continue;
+      if (typeof rawVersion === "string" && rawVersion.trim()) {
+        const trimmed = rawVersion.trim();
+        if (!perComp) {
+          perComp = new Map();
+          compositionRevisionsByProjectId.set(projectId, perComp);
+        }
+        const existingRev = perComp.get(key);
+        if (isFailClosedRev(existingRev)) {
+          if (key !== "index.html") editedSubComps.add(key);
+          continue;
+        }
+        const existingDepsIdx = existingRev ? splitSharedRev(existingRev).base.indexOf(DEPS_REV_MARKER) : -1;
+        const existingDepsSuffix =
+          existingRev && existingDepsIdx >= 0 ? splitSharedRev(existingRev).base.slice(existingDepsIdx) : "";
+        const nextRev = trimmed.includes(SHARED_REV_MARKER)
+          ? trimmed
+          : joinSharedRev(`${trimmed}${existingDepsSuffix}`, activeSharedTag);
+        if (existingRev !== nextRev) {
+          perComp.set(key, nextRev);
+          changedPaths.add(key);
+          changed = true;
+          if (key !== "index.html") editedSubComps.add(key);
+        }
+      } else if (rawVersion === null && perComp?.delete(key)) {
+        changedPaths.add(key);
+        changed = true;
+        if (key !== "index.html") editedSubComps.add(key);
+      }
+    }
+    // If a sub-composition changed, invalidate any parent composition that embeds nested scenes (`|deps:`).
+    if (editedSubComps.size > 0 && perComp) {
+      const nestedTag = `d${++liveSharedDepSeq}`;
+      for (const [compKey, existingRev] of perComp) {
+        if (editedSubComps.has(compKey)) continue;
+        const { base, shared } = splitSharedRev(existingRev);
+        const depsIdx = base.indexOf(DEPS_REV_MARKER);
+        if (depsIdx < 0) continue;
+        const rewritten = joinSharedRev(`${base.slice(0, depsIdx)}${DEPS_REV_MARKER}${nestedTag}`, shared);
+        if (rewritten !== existingRev) {
+          perComp.set(compKey, rewritten);
+          changedPaths.add(compKey);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    evictStaleProjectRevisions(projectId, (compPath) => changedPaths.has(compPath));
     notifyRevisionListeners(projectId);
   }
 }
@@ -513,17 +722,39 @@ export function subscribeCompositionCacheRevision(projectId: string, listener: (
 }
 
 export function getCompositionCacheRevision(projectId: string, compPathOrUrl: string): string {
-  return resolveCompositionRevision(projectId, compPathOrUrl);
+  return resolveCompositionRevision(projectId, compPathOrUrl).rev;
 }
 
-function resolveCompositionRevision(projectId: string, compPathOrUrl: string): string {
+/**
+ * Stable cache-revision token for a composition strip. Uses the persisted per-file
+ * version alone when known so session-local `contentRevision` counters neither bust
+ * untouched strips nor mismatch IndexedDB entries after a page refresh.
+ */
+export function getCompositionCacheKeyRevision(
+  projectId: string,
+  compPathOrUrl: string,
+  contentRevision = 0,
+): string {
+  const { rev, hasFileVersion } = resolveCompositionRevision(projectId, compPathOrUrl);
+  return hasFileVersion ? `file:${rev}` : `rev:${rev}|${contentRevision}`;
+}
+
+function resolveCompositionRevision(
+  projectId: string,
+  compPathOrUrl: string,
+): { rev: string; hasFileVersion: boolean } {
+  const projectRev = projectRevisionByProjectId.get(projectId) ?? "";
   const perComp = compositionRevisionsByProjectId.get(projectId);
   if (perComp) {
     const normalized = normalizeCompositionPathForGate(compPathOrUrl);
     const exact = perComp.get(normalized);
-    if (exact) return exact;
+    if (exact) {
+      // Fail-closed compositions equal to `projectRevision` must keep tracking live
+      // session `contentRevision` bumps so edits invalidate them before reload.
+      return { rev: exact, hasFileVersion: !projectRev || exact !== projectRev };
+    }
   }
-  return projectRevisionByProjectId.get(projectId) ?? "";
+  return { rev: projectRev, hasFileVersion: false };
 }
 
 export function canCaptureCompositionInBrowser(): boolean {
@@ -1210,10 +1441,11 @@ async function waitForDocumentMedia(doc: Document, signal: AbortSignal): Promise
   ]);
 }
 
-function buildCaptureUrl(previewUrl: string, contentRevision: number): URL {
+function buildCaptureUrl(previewUrl: string, contentRevision: number, fileVersion?: string): URL {
   const url = new URL(previewUrl, window.location.origin);
   url.searchParams.set("capture", "1");
-  if (contentRevision > 0) url.searchParams.set("revision", String(contentRevision));
+  const revisionToken = fileVersion || (contentRevision > 0 ? String(contentRevision) : "");
+  if (revisionToken) url.searchParams.set("revision", revisionToken);
   return url;
 }
 
@@ -1221,13 +1453,14 @@ function buildCaptureDocumentKey(
   input: Pick<ClientCaptureInput, "projectId" | "previewUrl" | "contentRevision">,
   previewOrigin: string | undefined,
 ): string {
-  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const revTag = hasFileVersion ? 0 : input.contentRevision;
   if (previewOrigin) {
     const expectedOrigin = new URL(previewOrigin).origin;
     const source = new URL(input.previewUrl, window.location.origin);
-    return `iso|${expectedOrigin}|${source.pathname}|${source.search}|rev=${input.contentRevision}|compRev=${compRev}`;
+    return `iso|${expectedOrigin}|${source.pathname}|${source.search}|rev=${revTag}|compRev=${compRev}`;
   }
-  const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision);
+  const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision, compRev);
   return `same|${captureUrl.href}|compRev=${compRev}`;
 }
 
@@ -1257,10 +1490,10 @@ async function captureSameOrigin(
   if (signal.aborted) throw abortError();
 
   const compPath = normalizeCompositionPathForGate(input.previewUrl);
-  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const { rev: compRev } = resolveCompositionRevision(input.projectId, input.previewUrl);
   const slot = acquireCaptureSlot(1280, 720, docKey);
   const iframe = slot.iframe;
-  const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision);
+  const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision, compRev);
   let resetSlot = false;
 
   try {
@@ -1363,7 +1596,9 @@ async function captureSameOrigin(
 
     const { outW, outH, scale, aspect } = computeBoundedCaptureDimensions(targetW, targetH);
     const actualDuration = win.__player?.getDuration?.() || 0;
-    const times = captureSampleTimes(actualDuration, input);
+    const effectiveFrameCount =
+      !input.selector && actualDuration > 0 && actualDuration <= 0.5 ? 1 : input.frameCount;
+    const times = captureSampleTimes(actualDuration, { ...input, frameCount: effectiveFrameCount });
     const order: number[] = [];
     if (onFrame && times.length >= 3) {
       const coverIdx = Math.floor(times.length / 2);
@@ -1477,12 +1712,13 @@ async function captureIsolatedOrigin(
   const token = grant.token;
 
   const compPath = normalizeCompositionPathForGate(input.previewUrl);
-  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const { rev: compRev } = resolveCompositionRevision(input.projectId, input.previewUrl);
   const source = new URL(input.previewUrl, window.location.origin);
   const isolatedUrl = new URL(source.pathname, expectedOrigin);
   isolatedUrl.search = source.search;
   isolatedUrl.searchParams.set("capture", "1");
-  if (input.contentRevision > 0) isolatedUrl.searchParams.set("revision", String(input.contentRevision));
+  const revisionToken = compRev || (input.contentRevision > 0 ? String(input.contentRevision) : "");
+  if (revisionToken) isolatedUrl.searchParams.set("revision", revisionToken);
   isolatedUrl.searchParams.set("pt", token);
 
   const slot = acquireCaptureSlot(1920, 1080, docKey);
@@ -1554,7 +1790,9 @@ async function captureIsolatedOrigin(
       };
     }
 
-    const times = captureSampleTimes(duration, input);
+    const effectiveFrameCount =
+      !input.selector && duration > 0 && duration <= 0.5 ? 1 : input.frameCount;
+    const times = captureSampleTimes(duration, { ...input, frameCount: effectiveFrameCount });
     const requestId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const streamedBlobs: Array<Blob | undefined> = new Array(times.length);
     let streamedCount = 0;
@@ -1659,12 +1897,13 @@ export function selectorCaptureWindowKey({ selector, seekTime, duration }: Pick<
 function coverCacheKey(
   input: StripCacheInput,
   projectRev: string,
+  hasFileVersion: boolean,
 ): string {
   return createThumbnailKey({
     project: input.projectId,
     url: input.previewUrl,
     projectRev,
-    rev: input.contentRevision,
+    rev: hasFileVersion ? undefined : input.contentRevision,
     sel: input.selector,
     idx: input.selectorIndex,
     samples: selectorCaptureWindowKey(input),
@@ -1703,18 +1942,24 @@ function stripMemoryCacheKey(
   meta: StripCacheMeta;
 } {
   const compPath = normalizeCompositionPathForGate(input.previewUrl);
-  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
-  const baseCoverKey = coverCacheKey(input, compRev);
+  const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const effectiveContentRevision = hasFileVersion ? 0 : input.contentRevision;
+  const baseCoverKey = coverCacheKey(input, compRev, hasFileVersion);
   return {
     idbKey: `${baseCoverKey}&frames=${input.frameCount}`,
     baseCoverKey,
-    compPathKey: compPathCacheTag(input.projectId, input.previewUrl, compRev, input.contentRevision),
+    compPathKey: compPathCacheTag(
+      input.projectId,
+      input.previewUrl,
+      compRev,
+      effectiveContentRevision,
+    ),
     meta: {
       clipIdentityKey: clipIdentityCacheKey(input),
       projectId: input.projectId,
       compPath,
       compRev,
-      contentRevision: input.contentRevision,
+      contentRevision: effectiveContentRevision,
     },
   };
 }
@@ -1742,6 +1987,7 @@ function putMemoryStripCache(
         }
       }
     }
+    existing.fallbackOnly = false;
     memoryStripCache.delete(idbKey);
     memoryStripCache.set(idbKey, existing);
     return existing;
@@ -1776,12 +2022,13 @@ function putMemoryStripCache(
     inCache: true,
     refCount: 0,
     revoked: false,
+    fallbackOnly: false,
   };
   entryByValue.set(value, entry);
   if (coverValue !== value) entryByValue.set(coverValue, entry);
   // Drop superseded revisions for the same clip once a fresh capture lands so repeated drags
   // do not accumulate stale strips in RAM until the 64-entry LRU ceiling is hit.
-  const currentCompRev = resolveCompositionRevision(meta.projectId, meta.compPath);
+  const currentCompRev = resolveCompositionRevision(meta.projectId, meta.compPath).rev;
   const isCurrentRev = meta.compRev === currentCompRev;
   for (const [oldKey, oldEntry] of memoryStripCache) {
     if (oldEntry.clipIdentityKey !== meta.clipIdentityKey) continue;
@@ -1860,7 +2107,7 @@ function peekMemoryEntry(
 ): { entry: MemoryStripEntry; value: ThumbnailValue } | null {
   const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
   const exact = memoryStripCache.get(idbKey);
-  if (exact) {
+  if (exact && !exact.fallbackOnly) {
     memoryStripCache.delete(idbKey);
     memoryStripCache.set(idbKey, exact);
     return { entry: exact, value: exact.value };
@@ -1868,7 +2115,7 @@ function peekMemoryEntry(
   if (!input.selector && input.frameCount > 1 && input.frameCount < MAX_CLIENT_COMPOSITION_FRAMES) {
     const canonicalKey = `${baseCoverKey}&frames=${MAX_CLIENT_COMPOSITION_FRAMES}`;
     const canonical = memoryStripCache.get(canonicalKey);
-    if (canonical && canonical.value.kind === "filmstrip" && canonical.urls.length >= input.frameCount) {
+    if (canonical && !canonical.fallbackOnly && canonical.value.kind === "filmstrip" && canonical.urls.length >= input.frameCount) {
       memoryStripCache.delete(canonicalKey);
       memoryStripCache.set(canonicalKey, canonical);
       return { entry: canonical, value: canonical.value };
@@ -1878,7 +2125,7 @@ function peekMemoryEntry(
     // Reuse an already-resident multi-frame strip's middle frame without creating duplicate
     // object URLs or triggering LRU eviction during React render.
     for (const [key, entry] of memoryStripCache) {
-      if (entry.baseCoverKey === baseCoverKey) {
+      if (!entry.fallbackOnly && entry.baseCoverKey === baseCoverKey) {
         memoryStripCache.delete(key);
         memoryStripCache.set(key, entry);
         return { entry, value: entry.coverValue };
@@ -1898,6 +2145,23 @@ function peekMemoryEntry(
       );
       return { entry, value: entry.value };
     }
+    return null;
+  }
+  // Any already-cached strip with at least as many frames for the exact same content version
+  // satisfies narrower frame counts without re-running SnapDOM (ThumbnailTiles samples evenly).
+  let bestKey: string | null = null;
+  let bestEntry: MemoryStripEntry | null = null;
+  for (const [key, entry] of memoryStripCache) {
+    if (entry.fallbackOnly || entry.baseCoverKey !== baseCoverKey || entry.urls.length < input.frameCount) continue;
+    if (!bestEntry || entry.urls.length > bestEntry.urls.length) {
+      bestKey = key;
+      bestEntry = entry;
+    }
+  }
+  if (bestKey && bestEntry) {
+    memoryStripCache.delete(bestKey);
+    memoryStripCache.set(bestKey, bestEntry);
+    return { entry: bestEntry, value: bestEntry.value };
   }
   return null;
 }
@@ -1968,10 +2232,10 @@ export function hasAnyCachedCompositionCapture(
   compPath: string,
   contentRevision = 0,
 ): boolean {
-  const compRev = resolveCompositionRevision(projectId, compPath);
-  const target = compPathCacheTag(projectId, compPath, compRev, contentRevision);
+  const { rev: compRev, hasFileVersion } = resolveCompositionRevision(projectId, compPath);
+  const target = compPathCacheTag(projectId, compPath, compRev, hasFileVersion ? 0 : contentRevision);
   for (const entry of memoryStripCache.values()) {
-    if (entry.compPathKey === target) return true;
+    if (!entry.fallbackOnly && entry.compPathKey === target) return true;
   }
   return false;
 }
@@ -2004,6 +2268,23 @@ export function getProgressiveCompositionCapture(
   return progressiveStrips.get(idbKey) ?? null;
 }
 
+async function readCachedStripWithCanonicalFallback(
+  idbKey: string,
+  baseCoverKey: string,
+  frameCount: number,
+): Promise<{ storageKey: string; record: CachedStripRecord } | null> {
+  const exact = await readCachedStrip(idbKey);
+  if (exact) return { storageKey: idbKey, record: exact };
+  if (frameCount < MAX_CLIENT_COMPOSITION_FRAMES) {
+    const canonicalKey = `${baseCoverKey}&frames=${MAX_CLIENT_COMPOSITION_FRAMES}`;
+    const canonical = await readCachedStrip(canonicalKey);
+    if (canonical && (frameCount === 1 || canonical.blobs.length >= frameCount)) {
+      return { storageKey: canonicalKey, record: canonical };
+    }
+  }
+  return null;
+}
+
 /**
  * Fast-path IndexedDB + remote shared filmstrip lookup that bypasses `thumbnailScheduler`'s
  * 2-slot composition bucket so warm reloads (~5–15ms) and cold pre-baked/S3 template opens
@@ -2020,7 +2301,8 @@ export function acquireCachedCompositionCaptureFromIdb(
       release: retainMemoryEntry(syncHit.entry),
     });
   }
-  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const remoteContentRevision = hasFileVersion ? 0 : input.contentRevision;
   const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
   const canonicalIdbKey =
     !input.selector && input.frameCount < MAX_CLIENT_COMPOSITION_FRAMES
@@ -2060,42 +2342,16 @@ export function acquireCachedCompositionCaptureFromIdb(
   let entryPromise = inFlightIdbReads.get(idbKey);
   if (!entryPromise) {
     entryPromise = (async (): Promise<MemoryStripEntry | null> => {
-      const exactCached = await readCachedStrip(idbKey);
-      if (exactCached) {
+      const found = await readCachedStripWithCanonicalFallback(idbKey, baseCoverKey, input.frameCount);
+      if (found) {
+        const { storageKey, record: cached } = found;
         return hydrateRecord(
-          idbKey,
-          exactCached.blobs,
-          exactCached.aspect,
-          exactCached.width,
-          exactCached.height,
+          storageKey,
+          cached.blobs,
+          cached.aspect,
+          cached.width,
+          cached.height,
         );
-      }
-
-      if (canonicalIdbKey) {
-        const canonicalCached = await readCachedStrip(canonicalIdbKey);
-        if (canonicalCached && canonicalCached.blobs.length >= input.frameCount) {
-          const canonicalEntry = hydrateRecord(
-            canonicalIdbKey,
-            canonicalCached.blobs,
-            canonicalCached.aspect,
-            canonicalCached.width,
-            canonicalCached.height,
-          );
-          if (input.frameCount === 1) {
-            const coverBlob =
-              canonicalCached.blobs[
-                Math.min(canonicalCached.blobs.length - 1, Math.floor(canonicalCached.blobs.length / 2))
-              ]!;
-            return hydrateRecord(
-              idbKey,
-              [coverBlob],
-              canonicalCached.aspect,
-              canonicalCached.width,
-              canonicalCached.height,
-            );
-          }
-          return canonicalEntry;
-        }
       }
 
       // Tier 1.5: shared pre-baked / S3 composition filmstrip sprite cache (whole compositions only).
@@ -2104,7 +2360,7 @@ export function acquireCachedCompositionCaptureFromIdb(
           projectId: input.projectId,
           previewUrl: input.previewUrl,
           compRev,
-          contentRevision: input.contentRevision,
+          contentRevision: remoteContentRevision,
         });
         if (remote.status === "hit") {
           const remoteKey = `${baseCoverKey}&frames=${remote.frameCount}`;
@@ -2124,15 +2380,12 @@ export function acquireCachedCompositionCaptureFromIdb(
             updatedAt: Date.now(),
           });
           if (remote.frameCount >= input.frameCount) {
-            if (remote.frameCount === input.frameCount) {
+            if (remote.frameCount === input.frameCount || remote.frameCount === MAX_CLIENT_COMPOSITION_FRAMES) {
               return remoteEntry;
             }
             if (input.frameCount === 1) {
               const coverBlob = subsampleFilmstripFrames(remote.blobs, 1)[0]!;
               return hydrateRecord(idbKey, [coverBlob], remote.aspect, remote.width, remote.height);
-            }
-            if (remote.frameCount === MAX_CLIENT_COMPOSITION_FRAMES) {
-              return remoteEntry;
             }
             const sliced = subsampleFilmstripFrames(remote.blobs, input.frameCount);
             return hydrateRecord(idbKey, sliced, remote.aspect, remote.width, remote.height);
@@ -2147,11 +2400,11 @@ export function acquireCachedCompositionCaptureFromIdb(
   }
   return entryPromise.then((entry) => {
     if (!entry) return null;
-    const rematerializeKey =
-      canonicalIdbKey && entry.blobs.length === MAX_CLIENT_COMPOSITION_FRAMES
+    const storageKey =
+      canonicalIdbKey && entry.blobs.length >= MAX_CLIENT_COMPOSITION_FRAMES
         ? canonicalIdbKey
         : idbKey;
-    const live = retainOrRematerialize(rematerializeKey, entry);
+    const live = retainOrRematerialize(storageKey, entry);
     return {
       value: input.frameCount === 1 ? live.coverValue : live.value,
       release: retainMemoryEntry(live),
@@ -2165,48 +2418,23 @@ async function runClientCompositionCapture(
 ): Promise<ThumbnailLoadedResult> {
   const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
 
-  // 0. Fast path: synchronous in-memory strip/cover cache hit (0ms across switches).
-  const memHit = memoryStripCache.get(idbKey);
+  // 0 & 1. Fast path: synchronous in-memory strip/cover hit (including downsampling from canonical strips).
+  const memHit = peekMemoryEntry(input);
   if (memHit) {
-    memoryStripCache.delete(idbKey);
-    memoryStripCache.set(idbKey, memHit);
-    return memoryEntryToThumbnailResult(memHit);
+    const release = retainMemoryEntry(memHit.entry);
+    const isCover = memHit.value === memHit.entry.coverValue && memHit.value !== memHit.entry.value;
+    return {
+      value: memHit.value,
+      weight: isCover ? memHit.entry.width * memHit.entry.height * 4 : memHit.entry.weight,
+      dispose: release,
+    };
   }
 
-  // 1. Fast path: 1-frame sidebar covers reuse any already-captured strip frame immediately.
-  if (input.frameCount === 1) {
-    for (const [key, entry] of memoryStripCache) {
-      if (entry.baseCoverKey === baseCoverKey) {
-        memoryStripCache.delete(key);
-        memoryStripCache.set(key, entry);
-        const release = retainMemoryEntry(entry);
-        return {
-          value: entry.coverValue,
-          weight: entry.width * entry.height * 4,
-          dispose: release,
-        };
-      }
-    }
-    const shared = sharedCoverCache.get(baseCoverKey);
-    if (shared) {
-      const entry = putMemoryStripCache(
-        idbKey,
-        baseCoverKey,
-        compPathKey,
-        meta,
-        [shared.blob],
-        shared.aspect,
-        shared.width,
-        shared.height,
-      );
-      return memoryEntryToThumbnailResult(entry);
-    }
-  }
-
-  // 2. Fast path: persistent IndexedDB hit across page refreshes.
-  const cached = await readCachedStrip(idbKey);
+  // 2. Fast path: persistent IndexedDB hit across page refreshes (reusing canonical strip when present).
+  const found = await readCachedStripWithCanonicalFallback(idbKey, baseCoverKey, input.frameCount);
   if (signal.aborted) throw abortError();
-  if (cached) {
+  if (found) {
+    const { storageKey, record: cached } = found;
     const coverBlob = cached.blobs[Math.min(cached.blobs.length - 1, Math.floor(cached.blobs.length / 2))]!;
     putSharedCoverCache(baseCoverKey, {
       blob: coverBlob,
@@ -2219,7 +2447,7 @@ async function runClientCompositionCapture(
       contentRevision: meta.contentRevision,
     });
     const entry = putMemoryStripCache(
-      idbKey,
+      storageKey,
       baseCoverKey,
       compPathKey,
       meta,
@@ -2228,6 +2456,14 @@ async function runClientCompositionCapture(
       cached.width,
       cached.height,
     );
+    if (input.frameCount === 1) {
+      const release = retainMemoryEntry(entry);
+      return {
+        value: entry.coverValue,
+        weight: entry.width * entry.height * 4,
+        dispose: release,
+      };
+    }
     return memoryEntryToThumbnailResult(entry);
   }
 
@@ -2338,12 +2574,12 @@ async function runClientCompositionCapture(
     });
 
     if (!input.selector) {
-      const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+      const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
       void uploadRemoteCompositionFilmstripIfEligible({
         projectId: input.projectId,
         previewUrl: input.previewUrl,
         compRev,
-        contentRevision: input.contentRevision,
+        contentRevision: hasFileVersion ? 0 : input.contentRevision,
         blobs: result.blobs,
         width: result.width,
         height: result.height,
@@ -2383,13 +2619,13 @@ async function runClientCompositionCapture(
 
 /** Build a scheduler-managed request that captures real composition frames in the browser. */
 export function createClientCompositionCaptureRequest(input: ClientCaptureInput): ThumbnailRequest {
-  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
   return {
     key: createThumbnailKey({
       kind: "client-comp-capture",
       previewUrl: input.previewUrl,
       projectRev: compRev,
-      revision: input.contentRevision,
+      revision: hasFileVersion ? undefined : input.contentRevision,
       frames: input.frameCount,
       selector: input.selector,
       selectorIndex: input.selectorIndex,
@@ -2402,7 +2638,7 @@ export function createClientCompositionCaptureRequest(input: ClientCaptureInput)
     priority: input.priority ?? "visible",
     rich: input.rich ?? true,
     compositionPath: normalizeCompositionPathForGate(input.previewUrl),
-    contentRevision: input.contentRevision,
+    contentRevision: hasFileVersion ? 0 : input.contentRevision,
     compositionRevision: compRev,
     load: (signal) => runClientCompositionCapture(input, signal),
   };

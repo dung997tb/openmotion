@@ -32,6 +32,7 @@ import {
 import { RULER_GUTTER_PX, usePreviewGuidesStore } from "../editor/previewGuidesStore";
 import { PreviewZoomOverlay, usePreviewNavigator } from "./PreviewZoomOverlay";
 import {
+  LIVE_IFRAME_STYLE,
   PREVIEW_STAGE_INSET_PX,
   resolvePreviewStageSize,
   SHADOW_IFRAME_STYLE,
@@ -529,11 +530,7 @@ export const NLEPreview = memo(function NLEPreview({
                   portrait={portrait}
                   suppressLoadingOverlay={suppressLoadingOverlay}
                   loadingUi={loadingUi}
-                  style={
-                    directUrl?.includes("/components/")
-                      ? { position: "absolute", inset: 0, zIndex: 1 }
-                      : undefined
-                  }
+                  style={LIVE_IFRAME_STYLE}
                 />
               ) : (
                 // Loads hidden behind the live slot until promoted.
@@ -548,6 +545,7 @@ export const NLEPreview = memo(function NLEPreview({
                   portrait={portrait}
                   suppressLoadingOverlay
                   noLoadTimeout
+                  inert
                   style={SHADOW_IFRAME_STYLE}
                 />
               ),

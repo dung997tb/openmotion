@@ -39,6 +39,7 @@ import {
   DELETED_VERSION,
   formatFileVersion,
   getMimeType,
+  hashIndexHeadMarkup,
   sha256Hex,
 } from '../studio/etag.ts';
 import {
@@ -884,6 +885,22 @@ export class ProjectFilesService {
       }
       const eventPaths = [...new Set([...result.changedPaths, ...result.deletedPaths])];
       if (this.eventBus && eventPaths.length > 0) {
+        let indexHeadHash: string | undefined;
+        if (eventPaths.includes('index.html')) {
+          const indexOp = preparedOps.find(
+            (op): op is Extract<(typeof preparedOps)[number], { op: 'upsert' }> =>
+              op.op === 'upsert' && op.path === 'index.html',
+          );
+          const uploadedText = indexOp ? uploads.get(indexOp.sha256)?.textContent : undefined;
+          if (uploadedText !== undefined) {
+            indexHeadHash = hashIndexHeadMarkup(uploadedText);
+          } else if (result.deletedPaths.includes('index.html')) {
+            indexHeadHash = hashIndexHeadMarkup('');
+          } else {
+            const read = await this.readTextFile(ctx, input.projectId, 'index.html').catch(() => null);
+            if (read) indexHeadHash = hashIndexHeadMarkup(read.content);
+          }
+        }
         const event: ProjectEvent = {
           type: 'file-change',
           workspaceId: ctx.workspaceId,
@@ -892,6 +909,7 @@ export class ProjectFilesService {
           versionId: result.versionId ?? undefined,
           paths: eventPaths,
           fileVersions: htmlFileVersions(eventPaths, path => result.versionsByPath[path] ?? null),
+          ...(indexHeadHash ? { indexHeadHash } : {}),
           ...(result.changedPaths.length === 0 && { version: DELETED_VERSION }),
           writeToken: result.writeToken,
           affectsPreview: result.affectsPreview,

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
@@ -25,7 +26,8 @@ import { PREVIEW_BRIDGE_ASSET_RE, PREVIEW_BRIDGE_PATH, PREVIEW_BRIDGE_SCRIPT, PR
 import { PreviewBuildBusy, PreviewDocumentCache } from '../engine/preview-document-cache.ts';
 import { createLogger } from '../../infra/logger.ts';
 import { assertTenantScopedKey } from '../../infra/storage.ts';
-import { normalizeSafeProjectPath } from '../../services/project-files-service.ts';
+import { singleByteRange } from '../../infra/byte-range.ts';
+import { normalizeSafeProjectPath, resolveBlobStorageKey } from '../../services/project-files-service.ts';
 
 /**
  * Frozen metadata contract written by `worker-media` (`generate_preview_proxy`) onto `workspace_blobs.metadata`.
@@ -432,12 +434,26 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     }
 
     if (file.isText) {
-      const content = await deps.files.readTextBlob(auth.workspaceId, file.blobScope, file.sha256);
       c.header('Content-Type', file.mimeType);
-      c.header('Content-Length', String(Buffer.byteLength(content, 'utf8')));
       c.header('ETag', etag);
       c.header('Cache-Control', versionedScript ? 'private, max-age=300, immutable' : 'no-cache');
       c.header('Vary', 'Cookie, Authorization');
+      c.header('Accept-Ranges', 'bytes');
+      const range = c.req.header('range'), ifRange = c.req.header('if-range');
+      const slice = range && (!ifRange || ifRange === etag) ? singleByteRange(range, file.sizeBytes) : undefined;
+      if (slice === null) {
+        c.header('Content-Range', `bytes */${file.sizeBytes}`);
+        return c.body(null, 416);
+      }
+      if (slice) {
+        const key = resolveBlobStorageKey(auth.workspaceId, file.blobScope, file.sha256);
+        const { stream } = await deps.storage.getObjectStream(key, `bytes=${slice.start}-${slice.end - 1}`);
+        c.header('Content-Range', slice.contentRange);
+        c.header('Content-Length', String(slice.end - slice.start));
+        return c.body(Readable.toWeb(stream) as ReadableStream<Uint8Array>, 206);
+      }
+      const content = await deps.files.readTextBlob(auth.workspaceId, file.blobScope, file.sha256);
+      c.header('Content-Length', String(Buffer.byteLength(content, 'utf8')));
       return c.body(content, 200);
     }
 

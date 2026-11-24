@@ -7,6 +7,7 @@ import type { BlockParam } from "@hyperframes/core/registry";
 import { FileManagerProvider } from "../../contexts/FileManagerContext";
 import type { useFileManager } from "../../hooks/useFileManager";
 import { StudioPlaybackProvider, type StudioPlaybackValue } from "../../contexts/StudioContext";
+import { StudioFileConflictError } from "../../utils/studioSaveDiagnostics";
 import { BlockParamsPanel } from "./BlockParamsPanel";
 import { I18nProvider, useI18n, type Locale } from "../../i18n/I18n";
 
@@ -222,6 +223,21 @@ describe("BlockParamsPanel commit safety", () => {
     expect(fm.writeProjectFile).toHaveBeenCalledTimes(1); // no second write
     expect(content.value).toBe(".a { background: #fafafa; } .b { color: #fafafa; }");
     expect(document.body.textContent).toContain("appears 2×");
+  });
+
+  it("restores the other editor's confirmed color after a real version conflict", async () => {
+    const content = { value: "<style>.title { --bg-color: #0c0c0c; }</style>" };
+    const fm = makeFileManager(content);
+    fm.writeProjectFile.mockRejectedValueOnce(new StudioFileConflictError({
+      filePath: "compositions/vfx-demo.html", currentVersion: "new",
+      currentContent: content.value.replace("#0c0c0c", "#778899"), attemptedContent: "", syncLatest: true,
+    }));
+    renderPanel(fm.value);
+    await flushCommit();
+    changeParam("Background", "#123456");
+    await flushCommit();
+    expect(document.querySelector('[aria-label="Pick background color"]')?.textContent).toContain("778899");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("changed elsewhere");
   });
 
   it("keeps a pending commit for one param when another param is edited", async () => {

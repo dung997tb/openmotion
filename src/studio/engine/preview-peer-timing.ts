@@ -1,4 +1,5 @@
 import { isLiveMediaMove } from '../../../shared/preview-live-media.ts';
+import { stageVisualClipInsert } from '../../../shared/preview-visual-insert.ts';
 import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from '../../../packages/edit-core/canvas-position.ts';
 import { PREVIEW_ATTRIBUTES, canPatchPreviewAttribute, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit, canPatchPresentationValue } from '../../../shared/preview-timing.ts';
 
@@ -64,7 +65,18 @@ export const PREVIEW_PEER_TIMING = `
   }
   const isPositionEdit = ${isLivePositionEdit.toString()};
   const isMediaMove = ${isLiveMediaMove.toString()};
+  const stageClipInsert = ${stageVisualClipInsert.toString()};
+  // A draft owns only its provisional DOM. Its source version stays unchanged until storage confirms it.
+  let structureDraft;
   function applyPeerTiming(m) {
+    if (m.discardDraftId) {
+      if (!structureDraft || m.discardDraftId !== structureDraft.id || m.path !== structureDraft.path ||
+          m.documentId !== timingDocumentId) return false;
+      const draft = structureDraft;
+      structureDraft = undefined;
+      draft.restore();
+      return true;
+    }
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
     const temporary = m.type === 'peer-presentation' && m.temporary === true;
     const local = !temporary && m.type === 'peer-presentation' && m.localSave === true;
@@ -82,11 +94,40 @@ export const PREVIEW_PEER_TIMING = `
         (!ownDrag && (drag || pendingDrags.size)) ||
         (inlineText && !(local && inlineText.id === m.gestureId && inlineText.after !== undefined)) || !p || typeof p.seek !== 'function' ||
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
-        !Array.isArray(m.changes) || !m.changes.length || m.changes.length > 32) return false;
+        !Array.isArray(m.changes) || m.changes.length > 32) return false;
+    const sameContent = !m.changes.length && m.sameContent === true && m.type === 'peer-timing' && !!timingDocumentId;
+    if (!m.changes.length && !sameContent) return false;
+    const drafting = typeof m.structureDraftId === 'string';
+    if (drafting && (!timingDocumentId || m.type !== 'peer-timing' || before !== after ||
+        !m.structureDraftId.length || m.structureDraftId.length > 64 || !m.changes.some(c => c?.removeFromComposition || c?.insert))) return false;
+    if (structureDraft) {
+      if (drafting) return false;
+      const draft = structureDraft;
+      structureDraft = undefined;
+      if (m.type === 'peer-timing' && draft.path === m.path && draft.before === before &&
+          draft.changes === JSON.stringify(m.changes)) {
+        confirmCanvasVersion(m.path, after);
+        return true;
+      }
+      draft.restore();
+    }
+    if (sameContent) {
+      confirmCanvasVersion(m.path, after);
+      return true;
+    }
     const edits = [], effects = [];
+    let structureChanged = false;
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
-          (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > previewAttributes.size) return false;
+          (!change.attributes.length && !change.styles && !change.text && !change.removeFromComposition && !change.insert) || change.attributes.length > previewAttributes.size) return false;
+      if (change.insert) {
+        if (structureChanged || !timingDocumentId || m.type !== 'peer-timing') return false;
+        const insert = stageClipInsert(document, change, presentationTags);
+        if (!insert) return false;
+        structureChanged = true;
+        effects.push(insert);
+        continue;
+      }
       if ((temporary || ownDrag) && (!change.styles || change.text || change.attributes.length)) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
@@ -94,35 +135,48 @@ export const PREVIEW_PEER_TIMING = `
         node.localName === change.tag && sourceFileForElement(node) === m.path);
       if (matches.length !== 1 || matches[0].closest('[data-hf-parked-scene]')) return false;
       const node = matches[0];
+      if (change.removeFromComposition) {
+        const parent = node.parentElement, next = node.nextSibling;
+        if (structureChanged || !timingDocumentId || m.type !== 'peer-timing' || !change.hfId || !presentationTags.has(node.localName) ||
+            node.id !== change.id || node.childElementCount || !node.classList.contains('clip') ||
+            parent?.getAttribute('data-composition-id') !== change.removeFromComposition) return false;
+        structureChanged = true;
+        effects.push(forward => forward ? node.remove() : parent.insertBefore(node, next));
+      }
       if (media && change.tag !== 'audio' && node !== document.querySelector('[data-composition-id]')) return false;
       if (!stagePresentation(node, change, effects, local, pending)) return false;
       for (const [name, from, to] of change.attributes) {
         if (!previewAttributes.has(name) || [from, to].some(value => !canPatchPreviewAttribute(name, value, node.localName))) return false;
         const preserved = name === 'data-duration' || name === 'data-end' ? name.replace('data-','data-hf-authored-') : null;
         const names = preserved && node.hasAttribute(preserved) ? [preserved,name] : [name];
-        const actual = node.getAttribute(names[0]);
+        const control = previewControls.get(node)?.get(names[0]);
+        const actual = control ? control.base : node.getAttribute(names[0]);
         if (actual !== from && !(actual && from && Number(actual) === Number(from))) return false;
-        for (const attr of names) edits.push({node,attr,old:node.getAttribute(attr),to});
+        for (const attr of names) edits.push({node,attr,old:attr === names[0] ? actual : node.getAttribute(attr),to});
       }
     }
     const time = p.getTime(), playing = p.isPlaying?.() === true;
     if (!Number.isFinite(time) || Date.now() >= m.expiresAt) return false;
-    function update(key) {
+    function update(key, at = time, resume = playing) {
       for (const e of edits) {
-        if (e[key] === null) e.node.removeAttribute(e.attr);
-        else e.node.setAttribute(e.attr,e[key]);
+        applyTimelineReceipt(e.node, e.attr, e[key]);
       }
       for (const effect of effects) effect(key === 'to');
       // Lock is an editor flag. Studio reapplies the local monitor preference on mute.
-      if (!edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
-      p.seek(time);
+      if (!structureChanged && !edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
+      p.seek(at);
       window.__hfForceTimelineRebind();
       window.__hfStudioManualEditsApply?.();
-      if (playing) p.play?.();
+      if (resume) p.play?.();
     }
     const run = cb => window.__hfSuppressSceneMutations ? window.__hfSuppressSceneMutations(cb) : cb();
     try { run(() => update('to')); }
     catch (_) { try { run(() => update('old')); } catch (_) {} return false; }
+    if (drafting) {
+      structureDraft = { id: m.structureDraftId, path: m.path, before, changes: JSON.stringify(m.changes),
+        restore: () => run(() => update('old', p.getTime(), p.isPlaying?.() === true)) };
+      return true;
+    }
     // Only a complete rebind advances the revision used for future edits and selections.
     if (!temporary) {
       if (ownDrag) pending.verifiedVersion = after;

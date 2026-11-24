@@ -13,7 +13,9 @@ import {
 } from "../utils/studioSaveDiagnostics";
 import { studioExpectedFileVersion, studioWriteHeaders } from "../utils/studioFileVersion";
 import { studioApiFetch } from "../utils/studioApiFetch";
+import { extractIndexHeadMarkup } from "../../../shared/preview-impact";
 import { trackStudioProjectSave } from "../utils/studioSaveState";
+import { updateCachedCompositionRevisions } from "../player/lib/clientCompositionCapture";
 
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
@@ -82,6 +84,13 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
           : await tryStudioTextEdit(projectId, [{ path, before: source.content, after: content }], history);
         if (saved) {
           fileVersions.set(path, saved.versions[path]);
+          const indexHeadChanged =
+            path === "index.html" && extractIndexHeadMarkup(source.content) !== extractIndexHeadMarkup(content);
+          updateCachedCompositionRevisions(
+            projectId,
+            saved.versions,
+            indexHeadChanged ? { indexHeadChanged: true } : undefined,
+          );
           if (saved.divergent.length) return saved.divergent[0];
           const accepted = confirmedSource(projectId, path)?.content ?? content;
           if (accepted === content) onSavedContent?.(projectId, path, content);
@@ -143,6 +152,15 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
             const currentVersion = conflict?.currentVersion ?? null;
             if (currentVersion && conflict?.currentContent === content) {
               fileVersions.set(path, currentVersion);
+              const indexHeadChanged =
+                path === "index.html" &&
+                source != null &&
+                extractIndexHeadMarkup(source.content) !== extractIndexHeadMarkup(content);
+              updateCachedCompositionRevisions(
+                writeProjectId,
+                { [path]: currentVersion },
+                indexHeadChanged ? { indexHeadChanged: true } : undefined,
+              );
               return;
             }
             throw new StudioFileConflictError({
@@ -163,6 +181,15 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
             return rebased;
           }
           fileVersions.set(path, version);
+          const indexHeadChanged =
+            path === "index.html" &&
+            source != null &&
+            extractIndexHeadMarkup(source.content) !== extractIndexHeadMarkup(content);
+          updateCachedCompositionRevisions(
+            writeProjectId,
+            { [path]: version },
+            indexHeadChanged ? { indexHeadChanged: true } : undefined,
+          );
         });
         if (divergent) return divergent;
         onSavedContent?.(writeProjectId, path, content);

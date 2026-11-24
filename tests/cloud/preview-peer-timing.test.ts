@@ -17,7 +17,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
     projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1), 'scenes/intro.html': sha(3) }, studioOrigin: 'https://studio.test', canRebindTiming, liveEdits,
   }));
   Object.defineProperty(document, 'currentScript', { value: script });
-  const replies: { result?: unknown }[] = [];
+  const replies: { result?: unknown; type?: string; timelineVersion?: string }[] = [];
   const parent = { postMessage: (reply: typeof replies[number]) => replies.push(reply) };
   const hooks: string[] = [];
   const player = { getTime: () => 4, isPlaying: () => true, seek: (time: number) => hooks.push('seek:' + time), play: () => hooks.push('play') };
@@ -26,7 +26,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
     __hfForceTimelineRebind: () => { hooks.push('rebind'); },
     addEventListener: (event: string, handler: typeof handle) => { if (event === 'message') handle = handler; },
   };
-  runInNewContext(PREVIEW_BRIDGE_SCRIPT, { window, document, URL, CSS: { escape: (s: string) => s }, crypto: { randomUUID: () => 'document-1' },
+  runInNewContext(PREVIEW_BRIDGE_SCRIPT, { window, document, URL, HTMLElement: document.defaultView?.HTMLElement, CSS: { escape: (s: string) => s }, crypto: { randomUUID: () => 'document-1' },
     setInterval() {}, location: { href: 'https://preview.test/api/projects/p/preview?pt=grant' } });
   function send(overrides: Record<string, unknown> = {}, origin = 'https://studio.test', source = parent) {
     replies.length = 0;
@@ -35,7 +35,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
       expiresAt: Date.now() + 350, changes: [root, clip], ...overrides } });
     return replies[0]?.result;
   }
-  return { send, document, hooks, window };
+  return { send, document, hooks, window, replies };
 }
 
 it('applies a complete version once, preserves the media node and rebinds at the playhead', () => {
@@ -52,6 +52,109 @@ it('applies a complete version once, preserves the media node and rebinds at the
   assert.equal(send(reverse), true);
   assert.equal(audio.hasAttribute('data-media-start'), false);
   assert.equal(send({ ...reverse, before: reverse.after, after: etag(4), changes: [clip] }), false);
+});
+
+it('removes only the identified direct visual leaf and restores it if the player cannot rebind', () => {
+  function setup(canRebind = true) {
+    const frame = preview(canRebind);
+    const target = frame.document.getElementById('title')!;
+    target.setAttribute('data-hf-id', 'title-hf');
+    target.classList.add('clip');
+    const change = { hfId: 'title-hf', id: 'title', tag: 'div', attributes: [], removeFromComposition: 'root' };
+    return { ...frame, target, change };
+  }
+  const { send, document, change, hooks } = setup();
+  assert.equal(send({ changes: [{ ...change, removeFromComposition: 'other' }] }), false);
+  assert.equal(send({ changes: [{ ...change, id: 'other' }] }), false);
+  assert.equal(send({ changes: [change, root] }), true);
+  assert.equal(document.getElementById('title'), null);
+  assert.deepEqual(hooks, ['seek:4', 'rebind', 'play']);
+  assert.equal(setup(false).send({ changes: [change] }), false);
+  const rolledBack = setup();
+  const next = rolledBack.target.nextSibling;
+  rolledBack.window.__hfForceTimelineRebind = () => { throw new Error('rebind failed'); };
+  assert.equal(rolledBack.send({ changes: [rolledBack.change, root] }), false);
+  assert.equal(rolledBack.document.getElementById('title'), rolledBack.target);
+  assert.equal(rolledBack.target.nextSibling, next);
+  assert.equal(rolledBack.target.parentElement?.getAttribute('data-hf-authored-duration'), '15');
+});
+
+it('adds a direct visual leaf at its verified sibling and rolls it back if playing cannot resume', () => {
+  const change = { id: 'copy', hfId: 'copy-hf', tag: 'div', attributes: [], insert: {
+    owner: 'root', next: 'title-hf', whitespace: ['', '\n', ''], text: 'Copy',
+    attrs: [['class', 'clip'], ['data-start', '4'], ['data-duration', '2'], ['style', 'background:#ddd;z-index:2']],
+  } };
+  const frame = preview();
+  const title = frame.document.getElementById('title')!;
+  title.setAttribute('data-hf-id', 'title-hf');
+  const audio = frame.document.getElementById('clip');
+  for (const invalid of [
+    { ...change, insert: { ...change.insert, next: 'unknown' } },
+    { ...change, insert: { ...change.insert, attrs: [...change.insert.attrs, ['src', 'asset']] } },
+    { ...change, insert: { ...change.insert, whitespace: ['old', '', ''] } },
+    { ...change, tag: 'video' },
+  ]) assert.equal(frame.send({ changes: [invalid] }), false);
+  assert.equal(frame.send({ before: etag(3), changes: [change] }), false);
+  assert.equal(preview(false).send({ changes: [change] }), false);
+
+  const rebind = frame.window.__hfForceTimelineRebind;
+  frame.window.__hfForceTimelineRebind = () => { throw new Error('failed'); };
+  assert.equal(frame.send({ changes: [change, root] }), false);
+  assert.equal(frame.document.getElementById('copy'), null);
+  assert.equal(title.previousSibling, audio);
+  frame.window.__hfForceTimelineRebind = rebind;
+  assert.equal(frame.send({ changes: [change, root] }), true);
+  const added = frame.document.getElementById('copy')!;
+  assert.equal(added.nextElementSibling, title);
+  assert.equal(added.textContent, 'Copy');
+  assert.equal(added.getAttribute('data-hf-id'), 'copy-hf');
+  assert.equal(frame.document.getElementById('clip'), audio);
+  assert.deepEqual(frame.hooks.slice(-3), ['seek:4', 'rebind', 'play']);
+  frame.send({ type: 'handshake', timelineOnly: true });
+  assert.equal(frame.replies.find(message => message.type === 'timeline-state')?.timelineVersion, etag(2));
+
+});
+
+it('projects a local structural draft, confirms without rebinding, and discards a rejected draft at the current playhead', () => {
+  const message = { changes: [{ id: 'copy', hfId: 'copy-hf', tag: 'div', attributes: [], insert: {
+    owner: 'root', next: null, whitespace: ['', '', ''], text: 'Copy',
+    attrs: [['class', 'clip'], ['data-start', '4'], ['data-duration', '2']],
+  } }] };
+  const write = { ...message, structureDraftId: 'first', after: etag(1) };
+  const frame = preview();
+  assert.equal(frame.send(write), true);
+  const painted = frame.document.getElementById('copy');
+  assert.ok(painted);
+  assert.deepEqual(frame.hooks, ['seek:4', 'rebind', 'play']);
+  assert.equal(frame.send({ ...message, before: etag(2), after: etag(3) }), false);
+  assert.equal(frame.send({ discardDraftId: 'other' }), false);
+  assert.equal(frame.send(message), true);
+  assert.equal(frame.document.getElementById('copy'), painted);
+  assert.deepEqual(frame.hooks, ['seek:4', 'rebind', 'play']);
+  assert.equal(frame.send({ discardDraftId: 'first' }), false);
+  assert.equal(frame.send({ changes: [root], before: etag(2), after: etag(3) }), true);
+
+  const rejected = preview();
+  assert.equal(rejected.send(write), true);
+  rejected.window.__player.getTime = () => 7;
+  assert.equal(rejected.send({ discardDraftId: 'first' }), true);
+  assert.equal(rejected.document.getElementById('copy'), null);
+  assert.deepEqual(rejected.hooks.slice(-3), ['seek:7', 'rebind', 'play']);
+  assert.equal(rejected.send(message), true);
+
+  const raced = preview();
+  assert.equal(raced.send(write), true);
+  assert.equal(raced.send({ changes: [root] }), true);
+  assert.equal(raced.document.getElementById('copy'), null);
+  assert.equal(raced.send({ discardDraftId: 'first' }), false);
+
+  const netZero = preview();
+  assert.equal(netZero.send(write), true);
+  assert.equal(netZero.send({ changes: [] }), false);
+  assert.ok(netZero.document.getElementById('copy'));
+  assert.equal(netZero.send({ changes: [], sameContent: true }), true);
+  assert.equal(netZero.document.getElementById('copy'), null);
+  assert.equal(netZero.send({ ...message, before: etag(2), after: etag(3) }), true);
 });
 
 it('updates text and placement on the same live nodes without seeking or replacing media', () => {
@@ -246,4 +349,36 @@ it('enables the fast path only for declarative documents with no user startup co
   assert.equal((await build(2, '<img onload="paint()" src="p.png">')).allowed, false);
   assert.equal((await build(2, '<div data-composition-src="scene.html"></div>')).allowed, false);
   assert.equal((await build(2, '', { '.hyperframes/studio-manual-edits.json': '{}' })).allowed, false);
+});
+
+it('advances a net-zero batch without touching playback and rejects its stale receipts', () => {
+  const { send, hooks } = preview();
+  assert.equal(send({ changes: [] }), false);
+  assert.equal(send({ changes: [], sameContent: true }), true);
+  assert.deepEqual(hooks, []);
+  assert.equal(send(), false);
+  assert.equal(send({ before: etag(2), after: etag(3) }), true);
+});
+
+it('displays the latest control while earlier file versions settle, preserving playback', () => {
+  const { send, document, hooks } = preview();
+  const title = document.getElementById('title')!;
+  const project = (enabled: boolean, settled: boolean) => send({
+    type: 'timeline-controls', attr: 'data-hidden',
+    changes: [{ sourceFile: 'index.html', elementId: 'title', value: enabled ? '' : null, settled }],
+  });
+  project(true, false);
+  assert.equal(title.hasAttribute('data-hidden'), true);
+  assert.deepEqual(hooks, ['seek:4', 'play']);
+  project(false, false);
+  const confirm = (before: number, after: number, from: string | null, to: string | null) => send({
+    before: etag(before), after: etag(after),
+    changes: [{ id: 'title', tag: 'div', attributes: [['data-hidden', from, to]] }],
+  });
+  assert.equal(confirm(1, 2, null, ''), true);
+  assert.equal(title.hasAttribute('data-hidden'), false);
+  project(false, true);
+  assert.equal(confirm(2, 3, '', null), true);
+  project(true, true); // A receipt alone cannot start a gesture in a replacement document.
+  assert.equal(title.hasAttribute('data-hidden'), false);
 });

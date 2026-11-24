@@ -69,6 +69,7 @@ interface SaveProjectFilesWithHistoryInput {
   writeFile: ProjectFileWriter;
   /** Observe successful file writes, including a compensating write after a history failure. */
   onFileWritten?: (path: string, submitted: string) => void;
+  projectPending?: (files: RecordEditInput["files"]) => (() => void) | undefined;
   onSaved?: (files: RecordEditInput["files"], previous?: ConfirmedSource) => Promise<void>;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
   /**
@@ -152,6 +153,7 @@ export async function writeProjectFilesWithHistoryInQueue({
   readFile,
   writeFile,
   onFileWritten,
+  projectPending,
   onSaved,
   recordEdit,
   diskContent,
@@ -196,20 +198,27 @@ export async function writeProjectFilesWithHistoryInQueue({
     }
   }
 
+  let rollbackProjection = projectPending?.(snapshots);
   const writtenPaths: string[] = [];
   try {
     for (const path of changedPaths) {
       const expected = diskContent?.[path] ?? snapshots[path].before;
       const command = commandForWrite?.(path);
-      if (history) await writeFile(path, snapshots[path].after, expected, command, history);
-      else if (command) await writeFile(path, snapshots[path].after, expected, command);
-      else await writeFile(path, snapshots[path].after, expected);
+      let divergent: void | RebasedFileEdit;
+      if (history) divergent = await writeFile(path, snapshots[path].after, expected, command, history);
+      else if (command) divergent = await writeFile(path, snapshots[path].after, expected, command);
+      else divergent = await writeFile(path, snapshots[path].after, expected);
+      if (divergent) {
+        rollbackProjection?.();
+        rollbackProjection = undefined;
+      }
       writtenPaths.push(path);
       onFileWritten?.(path, snapshots[path].after);
     }
 
     await recordHistory();
   } catch (error) {
+    rollbackProjection?.();
     try {
       for (const path of writtenPaths.reverse()) {
         await writeFile(path, snapshots[path].before, snapshots[path].after);

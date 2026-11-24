@@ -1,5 +1,6 @@
 import type { Database } from '../db/client.ts';
 import { TextRevisionStorage } from './text-revisions.ts';
+import { singleByteRange } from './byte-range.ts';
 import { Readable } from 'node:stream';
 import {
   AbortMultipartUploadCommand,
@@ -463,8 +464,11 @@ export class StorageService implements StoragePort {
   async getObjectStream(key: string, range?: string): Promise<ObjectStreamResult> {
     const address = revisionAddress(key);
     if (address) {
-      if (range) return this.getObjectStream(workspaceBlobKey(address[0], await this.ensureTextCheckpoint(...address)), range);
       const bytes = await this.revisionStore().read(...address);
+      const slice = range ? singleByteRange(range, bytes.length) : undefined;
+      if (slice === null) throw new CloudError('INVALID_ARGUMENT', 'Requested byte range is not satisfiable.', { status: 416 });
+      if (slice) return { stream: Readable.from([bytes.subarray(slice.start, slice.end)]),
+        contentLength: slice.end - slice.start, contentRange: slice.contentRange };
       return { stream: Readable.from([bytes]), contentLength: bytes.length };
     }
     const response = await this.internalClient.send(

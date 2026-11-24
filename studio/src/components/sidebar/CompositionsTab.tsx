@@ -22,7 +22,7 @@ import {
   acquireCachedCompositionCaptureFromIdb,
   canCaptureCompositionInBrowser,
   createClientCompositionCaptureRequest,
-  getCompositionCacheRevision,
+  getCompositionCacheKeyRevision,
   peekCachedCompositionCapture,
   retainCachedCompositionCapture,
   subscribeCompositionCacheRevision,
@@ -263,25 +263,26 @@ function CompCard({
     [captureEnabled, projectId],
   );
   const getCacheRev = useCallback(
-    () => (captureEnabled ? getCompositionCacheRevision(projectId, previewUrl) : ""),
-    [captureEnabled, previewUrl, projectId],
+    () => (captureEnabled ? getCompositionCacheKeyRevision(projectId, previewUrl, contentRevision) : ""),
+    [captureEnabled, contentRevision, previewUrl, projectId],
   );
   const compCacheRev = useSyncExternalStore(subscribeCacheRev, getCacheRev, () => "");
+  const captureContentRevision = compCacheRev.startsWith("file:") ? 0 : contentRevision;
   const syncCachedCover = useMemo(
     () =>
       captureEnabled
         ? peekCachedCompositionCapture({
             previewUrl,
             projectId,
-            contentRevision,
+            contentRevision: captureContentRevision,
             frameCount: 1,
           })
         : null,
-    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId],
+    [captureContentRevision, captureEnabled, compCacheRev, previewUrl, projectId],
   );
   // Keep cached cover object URLs alive while this card renders them, even after LRU eviction.
   useLayoutEffect(() => retainCachedCompositionCapture(syncCachedCover), [syncCachedCover]);
-  const coverProbeKey = captureEnabled ? `${projectId}|${previewUrl}|${compCacheRev}|${contentRevision}` : null;
+  const coverProbeKey = captureEnabled ? `${projectId}|${previewUrl}|${compCacheRev}|${captureContentRevision}` : null;
   const [idbCoverProbe, setIdbCoverProbe] = useState<{
     key: string;
     value: ReturnType<typeof peekCachedCompositionCapture>;
@@ -293,7 +294,7 @@ function CompCard({
     void acquireCachedCompositionCaptureFromIdb({
       previewUrl,
       projectId,
-      contentRevision,
+      contentRevision: captureContentRevision,
       frameCount: 1,
     })
       .then((lease) => {
@@ -312,7 +313,7 @@ function CompCard({
       releaseLease?.();
       releaseLease = null;
     };
-  }, [contentRevision, coverProbeKey, previewUrl, projectId, syncCachedCover]);
+  }, [captureContentRevision, coverProbeKey, previewUrl, projectId, syncCachedCover]);
   const idbCachedCover =
     coverProbeKey && idbCoverProbe?.key === coverProbeKey ? idbCoverProbe.value : null;
   const cachedCover = syncCachedCover ?? idbCachedCover;
@@ -336,14 +337,14 @@ function CompCard({
             previewUrl,
             projectId,
             sessionEpoch: timelineSessionEpoch,
-            contentRevision,
+            contentRevision: captureContentRevision,
             frameCount: 1,
             seekTime: THUMBNAIL_SEEK_TIME_SECONDS,
             priority: "overscan",
             rich: true,
           })
         : null,
-    [cachedCover, captureEnabled, compCacheRev, contentRevision, idbCoverPending, previewUrl, projectId, timelineSessionEpoch],
+    [cachedCover, captureContentRevision, captureEnabled, compCacheRev, idbCoverPending, previewUrl, projectId, timelineSessionEpoch],
   );
   const posterThumbnail = useThumbnailLease(thumbnailRequest);
   const captureThumbnail = useThumbnailLease(captureRequest);

@@ -27,6 +27,15 @@ export function canPatchPresentationValue(name: string, value: string): boolean 
 export const PRESENTATION_TAGS = ["div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6"] as const;
 export const MAX_PREVIEW_TEXT_LENGTH = 4096;
 
+/** The bundler preserves identified, numeric, direct visual leaves. No executable markup crosses the bridge. */
+export type VisualClipInsert = {
+  owner: string;
+  next: string | null;
+  whitespace: [before: string, left: string, right: string];
+  attrs: [name: string, value: string][];
+  text: string;
+};
+
 export interface PreviewChange {
   hfId: string | null;
   id: string;
@@ -36,6 +45,9 @@ export interface PreviewChange {
   /** A first canvas move captures the author's translate for Reset; undo removes the marker. */
   captureOriginalTranslate?: boolean;
   text?: [string, string];
+  /** Remove the verified visual leaf directly owned by this composition. */
+  removeFromComposition?: string;
+  insert?: VisualClipInsert;
   attributes: [typeof PREVIEW_ATTRIBUTES[number], string | null, string | null][];
 }
 

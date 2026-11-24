@@ -23,6 +23,7 @@ export type PreviewBridgeMessageType =
   | "inspect-element"
   | "inspector-styles"
   | "edit-element"
+  | "timeline-controls"
   | "timeline-state"
   | "playback-control"
   | "peer-timing"

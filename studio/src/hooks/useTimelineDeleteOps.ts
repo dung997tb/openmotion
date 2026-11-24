@@ -1,5 +1,7 @@
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
+import { projectPendingStructure } from "../player/lib/peerTimeline";
+import { scheduleCommittedTimelinePreview } from "../player/committedTimelinePreview";
 import { mainVisualTrack } from "../player/components/timelineLinkage";
 import { buildProjectApiPath } from "../utils/projectRouting";
 // Timeline clip deletion: the marquee/multi path and the single-clip wrapper
@@ -114,6 +116,7 @@ export function useTimelineDeleteOps({
         const cloudDelete = getCachedCloudDisklessMode();
         const removing = cloudDelete ? selection : sameFile;
         let rollbackDuration = () => {};
+        let previewScheduled = false;
         try {
           if (cloudDelete) {
             const groups = new Map<string, typeof selection>();
@@ -136,7 +139,12 @@ export function useTimelineDeleteOps({
                 kind: "deleteClips", hfIds: clips.map(resolve), rippleTrack,
                 ...(splitLane && { rippleMembers: peers.filter(el => el.track === main).map(resolve) }),
               }) };
-            }), writeProjectFile, recordEdit, deleteHistoryLabel);
+            }), writeProjectFile, recordEdit, deleteHistoryLabel, async (files, previous) => {
+              const frame = previewIframeRef.current;
+              if (!frame || targetPath !== (activeCompPath ?? "index.html")) return;
+              scheduleCommittedTimelinePreview(frame, pid, targetPath, files, previous, reloadPreview);
+              previewScheduled = true;
+            }, { projectPending: files => projectPendingStructure(pid, activeCompPath ?? "index.html", previewIframeRef.current, files) });
           } else await saveServerRewriteWithHistory({
             projectId: pid,
             path: targetPath,
@@ -233,7 +241,7 @@ export function useTimelineDeleteOps({
         usePlayerStore.getState().setSelectedElementId(null);
         usePlayerStore.getState().setSelectedElementIds(new Set());
         forceReloadSdkSession?.();
-        reloadPreview();
+        if (!previewScheduled) reloadPreview();
         // A failed ripple already showed its own toast above; the user did one
         // thing (delete), so they get one message, not this generic follow-up too.
         if (!rippleFailed) {

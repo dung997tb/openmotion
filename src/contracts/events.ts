@@ -8,6 +8,8 @@ export type ProjectEvent =
       paths: string[];
       /** Exact ETags of changed HTML files. A null value means the path was deleted. */
       fileVersions?: Record<string, string | null>;
+      /** 12-char sha256 prefix of `index.html`'s `<head>` when `index.html` changed. */
+      indexHeadHash?: string;
       /** Legacy deletion sentinel for commits containing only removals. */
       version?: string;
       writeToken?: string;

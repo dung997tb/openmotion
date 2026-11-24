@@ -272,6 +272,7 @@ export const sweepExpiredReceiptsPayloadSchema = z.object({
 });
 
 export const blobGcJobSchemas = {
+  create_text_checkpoints: z.object({ batchSize: z.number().int().min(1).max(32).default(8) }),
   sweep_unreferenced_blobs: sweepUnreferencedBlobsPayloadSchema,
   sweep_expired_uploads: sweepExpiredUploadsPayloadSchema,
   sweep_expired_receipts: sweepExpiredReceiptsPayloadSchema,

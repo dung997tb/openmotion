@@ -1,3 +1,5 @@
+import { projectPendingStructure } from "../player/lib/peerTimeline";
+import { isolatedStructureRefresh } from "./timelineTimingSync";
 import { applyPasteCommand, type PasteCommand } from "../../../packages/edit-core/content-commands";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 export { pasteElementHtml, pasteTimelineClips, resolveFreeTrack, type PlacedClip } from "../../../packages/edit-core/clipboard";
@@ -112,6 +114,22 @@ function clipboardMarkup(saved: Document, sourceFile: string, target: AuthoredId
   if (authored) return authoredMarkup(authored, live, sourceFile, files);
   if (live) return liveMarkupWithoutPreviewMarks(live);
   throw new Error("Cannot copy an element that is missing from its source file.");
+}
+
+function clipboardProjection(pid: string, path: string, frame: HTMLIFrameElement | null, getIds: () => string[]) {
+  let selected = false;
+  return {
+    projectPending(files: Record<string, { before: string; after: string }>) {
+      const keys = getIds().map(id => elementKey(id, path));
+      const rollback = projectPendingStructure(pid, path, frame, files, keys);
+      selected = keys.length > 0 && keys.every(key => usePlayerStore.getState().selectedElementIds.has(key));
+      return rollback;
+    },
+    selectAfterSave() {
+      const ids = getIds();
+      if (!selected && ids.length) usePlayerStore.getState().setSelection(ids.map(id => elementKey(id, path)));
+    },
+  };
 }
 
 export function useClipboard({
@@ -278,7 +296,10 @@ export function useClipboard({
         };
 
         const { label, toast } = pasteWords(payload);
+        const onSaved = getCachedCloudDisklessMode()
+          ? isolatedStructureRefresh(previewIframeRef.current, targetPath, pid, reloadPreview) : undefined;
 
+        const projection = clipboardProjection(pid, targetPath, previewIframeRef.current, () => pastedIds);
         await saveProjectFilesWithHistory({
           projectId: pid,
           label,
@@ -287,24 +308,24 @@ export function useClipboard({
           writeFile: writeProjectFile,
           commandForWrite: () => getCachedCloudDisklessMode() ? command : undefined,
           recordEdit,
+          projectPending: onSaved && projection.projectPending,
+          onSaved,
         });
 
         // CapCut: the pasted clip(s) become the selection; the playhead does not
         // move. reloadPreview is a bare refresh-key bump with no selection
         // snapshot of its own; calling setSelection before it is what makes the
         // post-reload store state land on the pasted ids instead of stale ones.
-        if (pastedIds.length > 0) {
-          usePlayerStore.getState().setSelection(pastedIds.map((id) => elementKey(id, targetPath)));
-        }
+        projection.selectAfterSave();
         pastedDomElementRef.current = pastedHfId ? { projectId: pid, path: targetPath, hfId: pastedHfId } : null;
-        reloadPreview();
+        if (!onSaved) reloadPreview();
         showToast(toast, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to paste";
         showToast(message);
       }
     },
-    [activeCompPath, recordEdit, reloadPreview, showToast, writeProjectFile],
+    [activeCompPath, previewIframeRef, recordEdit, reloadPreview, showToast, writeProjectFile],
   );
 
   // Duplicates the selection right after it, or with `inPlace` at its own time on a track of its own,
@@ -337,7 +358,10 @@ export function useClipboard({
           ids = result.ids;
           return result.content;
         };
+        const onSaved = getCachedCloudDisklessMode()
+          ? isolatedStructureRefresh(previewIframeRef.current, activeCompPath ?? "index.html", pid, reloadPreview) : undefined;
 
+        const projection = clipboardProjection(pid, targetPath, previewIframeRef.current, () => ids);
         await saveProjectFilesWithHistory({
           projectId: pid,
           label: clipLabel("Duplicate", clips.length),
@@ -346,16 +370,16 @@ export function useClipboard({
           writeFile: writeProjectFile,
           commandForWrite: () => getCachedCloudDisklessMode() ? command : undefined,
           recordEdit,
+          projectPending: onSaved && projection.projectPending,
+          onSaved,
         });
 
         // The duplicate becomes the selection, mirroring CapCut's own paste
         // convention — there is no CapCut Duplicate to match directly (Cmd+D is
         // a no-op there); this is our own choice for consistency with paste.
         // Select before reloading, same reason as handlePaste above.
-        if (ids.length > 0) {
-          usePlayerStore.getState().setSelection(ids.map((id) => elementKey(id, targetPath)));
-        }
-        reloadPreview();
+        projection.selectAfterSave();
+        if (!onSaved) reloadPreview();
         showToast(clipToast("Duplicated", clips.length), "info");
         return true;
       } catch (error) {
@@ -367,6 +391,7 @@ export function useClipboard({
     [
       activeCompPath,
       readClips,
+      previewIframeRef,
       recordEdit,
       reloadPreview,
       showToast,

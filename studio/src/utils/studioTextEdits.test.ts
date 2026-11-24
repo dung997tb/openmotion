@@ -45,6 +45,25 @@ it('submits a block parameter as one named patch against its known source versio
   expect(applyTextPatch(before, body.files[0].patch)).toBe(after);
 });
 
+it('patches a self-contained clipboard edit and leaves project media validation on the command endpoint', async () => {
+  const project = 'clipboard-patch', path = 'index.html';
+  const before = '<main data-hf-id="root" data-composition-id="main" data-duration="8">' + ' '.repeat(1000) + '</main>';
+  const fetch = vi.fn().mockResolvedValueOnce(sourceResponse(before, 1)).mockResolvedValueOnce(receipt([path], 2));
+  vi.stubGlobal('fetch', fetch);
+  await readProjectFileContent(project, path);
+  const paste = (html: string) => ({ kind: 'pasteClips' as const, compositionPath: path, start: 1,
+    clips: [{ html, start: 0, duration: 2, track: 0 }] });
+  const versions = { [path]: version(1) };
+  expect(await tryStudioCommandPatches(project, [paste('<video id="v" src="assets/shot.mp4"></video>')], versions)).toBeUndefined();
+  expect(await tryStudioCommandPatches(project, [paste('<div id="n" data-composition-src="scene.html"></div>')], versions)).toBeUndefined();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await tryStudioCommandPatches(project, [paste('<div id="title">Title</div>')], versions);
+  const [url, request] = fetch.mock.calls[1];
+  expect(url).toBe('/api/projects/clipboard-patch/text-edits');
+  const body = JSON.parse(request.body);
+  expect(applyTextPatch(before, body.files[0].patch)).toContain('>Title</div>');
+});
+
 it('marks ongoing typing on the wire and keeps an independently confirmed edit separate', async () => {
   const project = 'continuous-input', path = 'titles.css';
   const fetch = vi.fn().mockResolvedValueOnce(sourceResponse('0', 1))

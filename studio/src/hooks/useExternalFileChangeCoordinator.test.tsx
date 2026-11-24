@@ -12,6 +12,11 @@ import { markSelfWrite, resetSelfWriteRegistry } from "./sdkSelfWriteRegistry";
 import { subscribeProjectActivity } from "../motion/workspaceRefresh";
 import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import {
+  clearClientCompositionCaptureCacheForTest,
+  getCompositionCacheRevision,
+  setCachedProjectRevision,
+} from "../player/lib/clientCompositionCapture";
+import {
   useExternalFileChangeCoordinator,
   type ExternalFileChangeCoordinatorHandle,
 } from "./useExternalFileChangeCoordinator";
@@ -82,6 +87,7 @@ describe("external file change coordinator", () => {
   afterEach(async () => {
     while (roots.length > 0) await act(async () => roots.pop()?.unmount());
     setCachedCloudDisklessMode(null);
+    clearClientCompositionCaptureCacheForTest();
     vi.unstubAllGlobals();
   });
 
@@ -1350,6 +1356,73 @@ describe("external file change coordinator", () => {
       );
 
       expect(reloadPreview).toHaveBeenCalledOnce();
+    });
+
+    it("propagates persisted HTML fileVersions, indexHeadHash, and shared CSS/asset invalidation from SSE into clientCompositionCapture", async () => {
+      setCachedProjectRevision("project-a", "proj-rev-1", {
+        "index.html": '"sha256:idx-1"|deps:dddddddddddd|shared:111111111111:222222222222',
+        "compositions/intro.html": '"sha256:intro-1"|shared:111111111111:222222222222',
+        "compositions/outro.html": '"sha256:outro-1"|shared:111111111111:222222222222',
+      });
+      await mountCoordinator();
+
+      // Own write echo for index.html <body> (same indexHeadHash) updates only index.html while preserving |deps: and |shared:.
+      markStudioWriteToken("tok-timeline-move");
+      await act(async () =>
+        handler?.({
+          projectId: "project-a",
+          paths: ["index.html"],
+          fileVersions: { "index.html": '"patch:idx-2"' },
+          indexHeadHash: "111111111111",
+          affectedCompositions: ["index.html"],
+          writeToken: "tok-timeline-move",
+          fileTreeChanged: false,
+        }),
+      );
+      expect(getCompositionCacheRevision("project-a", "index.html")).toBe('"patch:idx-2"|deps:dddddddddddd|shared:111111111111:222222222222');
+      expect(getCompositionCacheRevision("project-a", "compositions/intro.html")).toBe('"sha256:intro-1"|shared:111111111111:222222222222');
+      expect(getCompositionCacheRevision("project-a", "compositions/outro.html")).toBe('"sha256:outro-1"|shared:111111111111:222222222222');
+
+      // External edit / undo for compositions/intro.html updates intro.html and rotates index.html's |deps: while keeping outro.html warm.
+      await act(async () =>
+        handler?.({
+          projectId: "project-a",
+          paths: ["compositions/intro.html"],
+          fileVersions: { "compositions/intro.html": '"patch:intro-2"' },
+          affectedCompositions: ["compositions/intro.html", "index.html"],
+          fileTreeChanged: false,
+        }),
+      );
+      expect(getCompositionCacheRevision("project-a", "compositions/intro.html")).toBe('"patch:intro-2"|shared:111111111111:222222222222');
+      expect(getCompositionCacheRevision("project-a", "compositions/outro.html")).toBe('"sha256:outro-1"|shared:111111111111:222222222222');
+      expect(getCompositionCacheRevision("project-a", "index.html")).not.toBe('"patch:idx-2"|deps:dddddddddddd|shared:111111111111:222222222222');
+
+      // Editing index.html <head> rotates indexHeadHash across every composition immediately.
+      await act(async () =>
+        handler?.({
+          projectId: "project-a",
+          paths: ["index.html"],
+          fileVersions: { "index.html": '"patch:idx-3"' },
+          indexHeadHash: "aaaaaaaaaaaa",
+          affectedCompositions: ["index.html"],
+          fileTreeChanged: false,
+        }),
+      );
+      expect(getCompositionCacheRevision("project-a", "compositions/intro.html")).toBe('"patch:intro-2"|shared:aaaaaaaaaaaa:222222222222');
+      expect(getCompositionCacheRevision("project-a", "compositions/outro.html")).toBe('"sha256:outro-1"|shared:aaaaaaaaaaaa:222222222222');
+
+      // Editing a shared stylesheet (non-HTML path, no HTML fileVersions) invalidates every composition live.
+      const beforeCss = getCompositionCacheRevision("project-a", "compositions/outro.html");
+      await act(async () =>
+        handler?.({
+          projectId: "project-a",
+          paths: ["styles/theme.css"],
+          affectsPreview: true,
+          fileTreeChanged: false,
+        }),
+      );
+      expect(getCompositionCacheRevision("project-a", "compositions/outro.html")).not.toBe(beforeCss);
+      expect(getCompositionCacheRevision("project-a", "compositions/intro.html")).not.toBe('"patch:intro-2"|shared:aaaaaaaaaaaa:222222222222');
     });
   });
 });

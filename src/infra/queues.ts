@@ -266,6 +266,10 @@ export class QueueService {
 
   async scheduleBlobGcRepeatable(graceSeconds: number = DEFAULT_BLOB_GC_GRACE_SECONDS): Promise<void> {
     await this.blobGc.upsertJobScheduler(
+      'text-revision-checkpoints', { every: 5_000 },
+      { name: 'create_text_checkpoints', data: validateBlobGcPayload('create_text_checkpoints', {}) },
+    );
+    await this.blobGc.upsertJobScheduler(
       'blob-gc-sweep-unreferenced',
       { every: 15 * 60_000 },
       {

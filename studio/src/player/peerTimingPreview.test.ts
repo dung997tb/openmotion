@@ -6,6 +6,42 @@ import { diffPreviewChanges, diffScriptedPreviewStyles, rememberPeerTimingDocume
 const source = '<!doctype html><main data-composition-id="root" data-duration="15"><audio id="a" data-start="2" data-duration="3"></audio><script>window.run(1)</script></main>';
 
 describe("peer timing classification", () => {
+  it("identifies a single visual clip deletion and the new composition end together", () => {
+    const clip = '<div class="clip" data-hf-id="first" data-start="0" data-duration="3">First</div>';
+    const remaining = '<div class="clip" data-hf-id="last" data-start="5" data-duration="2">Last</div>';
+    const previous = '<main data-composition-id="root" data-duration="12">' + clip + remaining + '</main>';
+    const current = previous.replace(clip, '').replace('"12"', '"7"');
+    expect(diffPreviewChanges(previous, current)).toMatchObject([
+      { hfId: "first", removeFromComposition: "root", attributes: [] },
+      { compositionId: "root", attributes: [["data-duration", "12", "7"]] },
+    ]);
+    for (const [from, to] of [
+      ['<main ', '<script>setup()</script><main '], ['data-start="5"', 'data-start="first + 1"'],
+      [clip, clip.replace('>First', '><span>First</span>')], [clip, clip.replaceAll('div', 'video')],
+    ] as const) {
+      expect(diffPreviewChanges(previous.replace(from, to), current.replace(from, to))).toBeNull();
+    }
+    expect(diffPreviewChanges(previous, current.replace(remaining, ''))).toBeNull();
+    expect(diffPreviewChanges(previous, current.replace('class="clip"', 'class="changed"'))).toBeNull();
+  });
+
+  it("inserts one plain visual leaf and changes its sibling timing in the same revision", () => {
+    const leaf = '<div id="intro" class="clip" data-hf-id="first" data-start="0" data-duration="3">Hi</div>';
+    const previous = '<main data-composition-id="root">\n' + leaf + '</main>';
+    const clone = leaf.replace('id="intro"', 'id="copy"').replace('"first"', '"copy-hf"').replace('>Hi', ' style="background:#ffeedd;z-index:2">Hi');
+    const current = previous.replace(leaf, clone + '\n  ' + leaf.replace('"3"', '"2"'));
+    expect(diffPreviewChanges(previous, current)).toMatchObject([
+      { id: "copy", insert: { owner: "root", next: "first", text: "Hi", whitespace: ["\n", "\n", "\n  "] } },
+      { id: "intro", attributes: [["data-duration", "3", "2"]] },
+    ]);
+    for (const unsupported of [current.replace('>Hi', '><b>Hi</b>'),
+      current.replace('id="copy"', 'id="intro"'), current.replace('background:#ffeedd', 'background:url(asset.png)'),
+      current.replace('id="copy"', 'id="copy" onclick="setup()"'), current.replace('id="copy"', 'id="copy" data-composition-src="other.html"'),
+      current.replace('id="intro"', 'id="changed"'), current + '<script>setup()</script>']) {
+      expect(diffPreviewChanges(previous, unsupported)).toBeNull();
+    }
+  });
+
   it("includes root and media in a single verified set and requires stable identities", () => {
     const next = source.replace('"15"', '"14"').replace('data-start="2"', 'data-start="3" data-media-start="1"');
     expect(diffPreviewChanges(source, next)?.map(change => [change.id || change.compositionId, change.attributes])).toEqual([

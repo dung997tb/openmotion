@@ -1,4 +1,5 @@
 import { isLiveMediaMove } from "../../../shared/preview-live-media";
+import { takeInsertedClip, takeRemovedClip } from "./visualClipStructure";
 import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from "../../../packages/edit-core/canvas-position";
 import { createPreviewAdapter } from "./lib/previewAdapter";
 import { capturePresentedTimelineChanges } from "./lib/isolatedTimelineEdits";
@@ -84,8 +85,13 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
       before.doctype?.systemId !== after.doctype?.systemId || before.doctype?.name !== after.doctype?.name) return null;
   const a = elements(before);
   const b = elements(after);
-  if (a.length !== b.length) return null;
   const changes: PreviewChange[] = [];
+  if (a.length !== b.length) {
+    const structural = a.length === b.length + 1 ? takeRemovedClip(before, after, a, presentationTags)
+      : b.length === a.length + 1 && takeInsertedClip(before, after, b, presentationTags);
+    if (!structural) return null;
+    changes.push(structural);
+  }
   for (let i = 0; i < a.length; i++) {
     const left = a[i]!;
     const right = b[i]!;
@@ -158,7 +164,7 @@ export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
   isCurrent: () => boolean,
-  options?: "temporary" | "keep-visible" | { gestureId?: string },
+  options?: "temporary" | "keep-visible" | { gestureId?: string } | { structureDraftId: string },
 ): Promise<boolean> {
   if (!frame || !isCurrent()) return false;
   const adapter = createPreviewAdapter({ iframe: frame });
@@ -166,7 +172,9 @@ export async function tryApplyPeerChanges(
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
   const { previous, current } = update;
   const releasePresented = capturePresentedTimelineChanges(frame, update.path);
-  const changes = options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
+  // Several accepted toggles can bring the file back to the exact source already on screen.
+  const sameContent = !options && document.canRebind && previous.content === current.content;
+  const changes = sameContent ? [] : options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
     await diffMountedPreview(previous.content, current.content);
   if (!changes || !isCurrent()) return false;
   const canAdvance = document.canRebind || (document.liveEdits.position && isLivePositionEdit(changes)) ||
@@ -174,14 +182,17 @@ export async function tryApplyPeerChanges(
   const temporary = options === "temporary" || (!canAdvance && options === "keep-visible");
   if (temporary && (document.canRebind || !onlyStyles(changes))) return false;
   if (!temporary && !canAdvance) return false;
-  const localSave = typeof options === "object" ? options : undefined;
+  const draftId = typeof options === "object" && "structureDraftId" in options ? options.structureDraftId : undefined;
+  if (draftId && (!document.canRebind || !changes.some(change => change.removeFromComposition || change.insert))) return false;
+  const localSave = typeof options === "object" && !("structureDraftId" in options) ? options : undefined;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;
   try {
     const paint = adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
-      changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
+      changes, ...(sameContent && { sameContent: true }), ...(draftId && { structureDraftId: draftId }),
+      ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
     // A provisional style can paint in parallel with the authoritative script rebuild.
     if (temporary && options === "keep-visible") {
@@ -189,15 +200,34 @@ export async function tryApplyPeerChanges(
       return false;
     }
     if (await paint !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    if (draftId) return true;
     // The HTML attribute changes defaultMuted. The runtime combines per-clip mute
     // with this window's independent monitor preference on a set-muted message.
     if (changes.some(change => change.attributes.some(([name]) => name === "muted"))) {
       setPreviewMediaMuted(frame, usePlayerStore.getState().audioMuted);
     }
-    if (!temporary && changes.some(change => change.attributes.length)) releasePresented?.();
+    if (!temporary && changes.some(change => change.attributes.length || change.removeFromComposition || change.insert)) releasePresented?.();
     if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
       document.timingFile = { path: update.path, version: current.version };
     }
     return true;
   } catch { return false; }
+}
+
+/** Paint the same structural delta that its receipt will confirm. The draft never advances the file version. */
+export function stageStructurePreview(frame: HTMLIFrameElement, path: string, previous: FileSnapshot, content: string) {
+  const doc = documents.get(frame);
+  if (!doc?.canRebind) return;
+  const adapter = createPreviewAdapter({ iframe: frame });
+  const id = crypto.randomUUID();
+  let active = true;
+  const current = () => active && frame.isConnected && documents.get(frame) === doc;
+  void tryApplyPeerChanges(frame, { path, previous, current: { content, version: previous.version } }, current,
+    { structureDraftId: id }).catch(() => {});
+  return () => {
+    active = false;
+    if (frame.isConnected && documents.get(frame) === doc) {
+      adapter.send("peer-timing", { documentId: doc.id, path, discardDraftId: id });
+    }
+  };
 }

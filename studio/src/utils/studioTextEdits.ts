@@ -1,5 +1,5 @@
 import type { CompositionEdit } from '../../../packages/edit-core/commands';
-import { isContentCommand } from '../../../packages/edit-core/content-schema';
+import { contentDependencies, isContentCommand } from '../../../packages/edit-core/content-schema';
 import { confirmedSource, forgetSource, observeSourceRead, pendingSourceRead, rememberSource, supportsProjectTextEdits, type ConfirmedSource } from './confirmedTextSources';
 import { acknowledgeFileEdit, isolatedEditVersion } from './isolatedEditVersions';
 import { reconcileFileEdit } from './rebasedFileEdit';
@@ -15,7 +15,7 @@ type Prepared = TextEditSource & { version: string };
 // Commands which read external assets, nested compositions or beat sidecars still require the
 // semantic endpoint until the browser can attest all of the corresponding input revisions.
 const localCommand = (command: CompositionEdit) => isContentCommand(command)
-  ? command.kind === 'setBlockParameter'
+  ? contentDependencies(command).length === 0
   : command.kind !== 'setBeatGrid' && command.kind !== 'gradeMedia';
 
 /** Resolve the exact bytes used to prepare an edit. A changed base is never substituted. */
