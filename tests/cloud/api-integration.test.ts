@@ -2867,6 +2867,17 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.match(snapdomAsset.headers.get('content-type') ?? '', /javascript/);
     assert.equal(snapdomAsset.headers.get('set-cookie'), null);
     assert.match(await snapdomAsset.text(), /window\.snapdom/);
+    const browserExportAsset = await app.request('/api/vendor/browser-export.js', { headers: previewHeaders });
+    assert.equal(browserExportAsset.status, 200);
+    assert.match(browserExportAsset.headers.get('content-type') ?? '', /javascript/);
+    assert.equal(browserExportAsset.headers.get('cache-control'), 'no-cache');
+    assert.equal(browserExportAsset.headers.get('set-cookie'), null);
+    assert.match(await browserExportAsset.text(), /__openmotionBrowserExport/);
+    const browserExportPost = await app.request('/api/vendor/browser-export.js', {
+      method: 'POST',
+      headers: previewHeaders,
+    });
+    assert.equal(browserExportPost.status, 403);
     const script = await bridgeAsset.text();
     assert.equal(createHash('sha256').update(script).digest('hex'), expectedSha);
     assert.ok(previewHtml.includes('integrity="sha256-' + Buffer.from(expectedSha, 'hex').toString('base64') + '"'));
