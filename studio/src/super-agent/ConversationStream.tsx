@@ -1788,7 +1788,7 @@ export function ConversationStream({
             onContinue={() => void onSend(t('Continue from where you stopped and finish the task.'))}
           />
           <GamePublishThread
-            chatId={chat.id}
+            chatId={chat?.id}
             onOpenPanel={artifactId => {
               onOpenArtifactId(artifactId);
               gamePublishActions.reopen(artifactId);
