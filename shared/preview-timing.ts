@@ -36,6 +36,8 @@ export interface PreviewChange {
   /** A first canvas move captures the author's translate for Reset; undo removes the marker. */
   captureOriginalTranslate?: boolean;
   text?: [string, string];
+  /** Remove the verified visual leaf directly owned by this composition. */
+  removeFromComposition?: string;
   attributes: [typeof PREVIEW_ATTRIBUTES[number], string | null, string | null][];
 }
 

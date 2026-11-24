@@ -54,6 +54,31 @@ it('applies a complete version once, preserves the media node and rebinds at the
   assert.equal(send({ ...reverse, before: reverse.after, after: etag(4), changes: [clip] }), false);
 });
 
+it('removes only the identified direct visual leaf and restores it if the player cannot rebind', () => {
+  function setup(canRebind = true) {
+    const frame = preview(canRebind);
+    const target = frame.document.getElementById('title')!;
+    target.setAttribute('data-hf-id', 'title-hf');
+    target.classList.add('clip');
+    const change = { hfId: 'title-hf', id: 'title', tag: 'div', attributes: [], removeFromComposition: 'root' };
+    return { ...frame, target, change };
+  }
+  const { send, document, change, hooks } = setup();
+  assert.equal(send({ changes: [{ ...change, removeFromComposition: 'other' }] }), false);
+  assert.equal(send({ changes: [{ ...change, id: 'other' }] }), false);
+  assert.equal(send({ changes: [change, root] }), true);
+  assert.equal(document.getElementById('title'), null);
+  assert.deepEqual(hooks, ['seek:4', 'rebind', 'play']);
+  assert.equal(setup(false).send({ changes: [change] }), false);
+  const rolledBack = setup();
+  const next = rolledBack.target.nextSibling;
+  rolledBack.window.__hfForceTimelineRebind = () => { throw new Error('rebind failed'); };
+  assert.equal(rolledBack.send({ changes: [rolledBack.change, root] }), false);
+  assert.equal(rolledBack.document.getElementById('title'), rolledBack.target);
+  assert.equal(rolledBack.target.nextSibling, next);
+  assert.equal(rolledBack.target.parentElement?.getAttribute('data-hf-authored-duration'), '15');
+});
+
 it('updates text and placement on the same live nodes without seeking or replacing media', () => {
   const { send, document, hooks } = preview();
   const node = document.getElementById('title')!;
