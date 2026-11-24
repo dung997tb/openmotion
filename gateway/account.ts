@@ -50,6 +50,7 @@ const stagePrefix = 'OPEN_DESIGN_AMR_AUTH_STAGE\t', completionPrefix = 'OPEN_DES
 const stageNames: readonly string[] = accountStages;
 const failureMessages: Record<AccountErrorCode, string> = {
   connector_unavailable: "Couldn't download the OpenDesign sign-in component. Check your network or proxy, then select Retry. If it keeps failing, run this command in a terminal, then select Retry:",
+  interrupted: 'Sign-in was interrupted. Sign in again.',
   setup_failed: "Can't connect to OpenDesign right now. Check your network and try again.",
   authorization_expired: 'Browser authorization expired or was cancelled. Sign in again.',
   credentials_rejected: 'Account credentials could not be verified. Sign in again, and contact us if this keeps happening.',
@@ -57,6 +58,7 @@ const failureMessages: Record<AccountErrorCode, string> = {
 // A connector that cannot be prepared explains why; each message ends with the manual installation command.
 const connectorMessages: Record<ConnectorProblem, string> = {
   npm_missing: "OpenMotion couldn't find npm to set up the OpenDesign sign-in component. Run this command in a terminal, then select Retry:",
+  install_timeout: 'The sign-in component installation timed out. Check your connection and select Retry.',
   install_failed: failureMessages.connector_unavailable,
   start_failed: "The OpenDesign sign-in component couldn't start on this device. Run this command in a terminal to reinstall it, then select Retry:",
 };
@@ -134,7 +136,7 @@ function failureCode(attempt: AccountAttempt, cancelled: boolean): AccountErrorC
   if (cancelled || (stage === 'device_authorization_result' && errorKind !== 'network_error')) return 'authorization_expired';
   // Approved in the browser, then stopped before reporting a later stage (for example incomplete issued credentials).
   if (!stage && attempt.stages.includes('device_authorization_result:success')) return 'credentials_rejected';
-  return 'setup_failed';
+  return attempt.exitCode === 130 ? 'interrupted' : 'setup_failed';
 }
 
 const productionApi = 'https://amr-api.open-design.ai';
@@ -314,7 +316,7 @@ export class OpenDesignAccount {
     // Whether the browser opened is its own field; the error kind belongs to the stage that stopped the attempt.
     const errorKind = attempt.stages.findLast(entry => entry.split(':')[1] === 'failed' && !entry.startsWith('browser_open_result'))?.split(':')[2];
     const browser = attempt.stages.find(entry => entry.startsWith('browser_open_result:'))?.split(':')[1];
-    const record = { attempt_id: attempt.id, outcome, error_code: errorCode, connector_problem: connector?.problem, connector_version: connectorVersion, resumed: Boolean(attempt.resumed),
+    const record = { attempt_id: attempt.id, outcome, error_code: errorCode, connector_problem: connector?.problem, connector_cause: connector?.causeCode, http_status: attempt.httpStatus, connector_version: connectorVersion, resumed: Boolean(attempt.resumed),
       source_product: 'openmotion', source_detail: 'openmotion_editor_login', entry_id: this.clock.entryId, entry_occurred_at: this.clock.occurredAt,
       ...(outcome === 'success' && validField('code', amrUserId) ? { amr_user_id: amrUserId } : {}),
       last_stage: lastStage, last_result: lastResult, browser_opened: browser === undefined ? undefined : browser === 'success', receipt: attempt.receipt,
@@ -539,7 +541,10 @@ export class OpenDesignAccount {
     // A receipt written while the connector exits fails with EPIPE; the exit itself decides the attempt.
     child.stdin?.on('error', () => {});
     // CLI stderr is private: it can include account details and request bodies.
-    child.stderr?.on('data', () => {});
+    let stderrTail = '';
+    child.stderr?.on('data', chunk => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-4096);
+    });
     attempt.exitCode = await new Promise<number | null>((resolve, reject) => {
       // The connector waits until the service's own authorization expiry (15 minutes) and exits; this is only a backstop.
       // A shorter limit here would cancel authorizations the user is still completing in the browser.
@@ -547,6 +552,10 @@ export class OpenDesignAccount {
       child.once('error', error => { clearTimeout(timer); reject(child.pid === undefined ? new SignInFailure('connector_unavailable', new ConnectorUnavailable('start_failed', error)) : new SignInFailure(failureCode(attempt, cancelled))); });
       child.once('close', code => { clearTimeout(timer); resolve(code); });
     });
+    if (attempt.exitCode && stderrTail) {
+      const status = /API request failed with status ([45]\d{2})\b/.exec(stderrTail);
+      if (status) attempt.httpStatus = Number(status[1]);
+    }
     if (generation === this.generation) {
       if (partial) record(partial);
       this.child = undefined; this.authorizationUrl = undefined; this.userCode = undefined;

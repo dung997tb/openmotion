@@ -115,6 +115,13 @@ most once per minute and `worker_heartbeat` with bounded counts. Confirmed
 correctness incidents and recovery evidence use `incident_confirmed` and
 `recovery_recorded`; ordinary task failures are not incidents.
 
+A failed desktop export keeps its stage and error code. The result event adds the
+first failing lint or verification rule when available. For a renderer exit,
+`render_reason` identifies recognized browser, loopback permission or encoder
+errors, process termination by signal, or an unclassified exit. Only an actual
+numeric exit is reported in `renderer_exit_code`. A terminal persistence
+incident can also identify a lost job claim or a local filesystem error.
+
 ## Identity, properties and privacy
 
 `account_sign_in_result` reports each finished OpenDesign connector attempt with
@@ -126,6 +133,10 @@ is reported only after the connector completes credential acceptance and the
 local account setup finishes; browser opening or approval alone is not success.
 Successful completion also reports the confirmed account ID as `amr_user_id`,
 so account counts can deduplicate across installations and join AMR account facts.
+Connector failures can include an allowlisted system or npm error code.
+An interrupted login and an installation timeout have distinct codes.
+A failed authorization request can include its numeric HTTP status when the
+connector reports one. Raw connector output stays out of telemetry.
 Failures and cancellations omit that ID. The existing collection controls apply;
 `distinct_id` remains the installation ID, without identify/alias or person merging.
 Email, names, activation URLs, authorization codes and credentials are omitted.

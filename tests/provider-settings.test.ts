@@ -440,8 +440,9 @@ test('the manual connector command quotes the private directory for the shell, a
   t.after(() => account.close());
   await account.login(); await until(async () => (await account.summary()).state !== 'authorizing');
   assert.equal(records.length, 1); assert.equal(records[0].error_code, 'connector_unavailable'); assert.equal(records[0].connector_problem, 'start_failed');
+  assert.equal(records[0].connector_cause, 'ENOENT');
   assert(validProperties(omEvents, 'account_sign_in_result', records[0]), JSON.stringify(records[0]));
-  assert.doesNotMatch(JSON.stringify(records[0]), /missing-connector|ENOENT/);
+  assert.doesNotMatch(JSON.stringify(records[0]), /missing-connector/);
 }));
 
 test('the connector installation reports why it failed and reuses a working installation', { skip: process.platform === 'win32' }, async t => {
@@ -505,6 +506,8 @@ test('sign-in failures are classified by the stage reached and logged without ac
   const created = await attempt('login-create-failure', { authorize: false });
   assert.equal(created.errorCode, 'setup_failed'); assert.equal(created.error, "Can't connect to OpenDesign right now. Check your network and try again.");
   assert.deepEqual(created.attempt?.stages, ['attempt_started:started', 'device_auth_create_result:failed:network_error']); assert.equal(created.attempt?.exitCode, 1);
+  assert.equal(created.attempt?.httpStatus, 503);
+  assert.equal((await attempt('login-interrupted', { authorize: false })).errorCode, 'interrupted');
   const missing = await attempt('', { binary: path.join(store.directory, 'missing-connector'), authorize: false });
   assert.equal(missing.errorCode, 'connector_unavailable');
   assert.equal(missing.error, "The OpenDesign sign-in component set by OPENMOTION_ACCOUNT_CLI couldn't start. Check or clear that path, then select Retry.");
@@ -527,7 +530,7 @@ test('sign-in failures are classified by the stage reached and logged without ac
   const persisted = await attempt('login-persist-failure');
   assert.equal(persisted.errorCode, 'setup_failed'); assert.equal(persisted.attempt?.stages.at(-1), 'credential_persist_result:failed:credential_persist_error');
   assert.equal(persisted.attempt?.persisted, false);
-  assert.equal(logs.length, 9);
+  assert.equal(logs.length, 10);
   // The local log keeps why the connector was unavailable for support.
   assert.match(logs.join('\n'), /"connectorProblem":"start_failed","connectorDetail":"spawn [^"]*missing-connector ENOENT"/);
   assert.doesNotMatch(logs.join('\n'), /synthetic-private|TEST-123|open-design\.ai|fixture@example|Fixture user|fixture-user-id|private upstream/);
