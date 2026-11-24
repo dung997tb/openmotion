@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import {
   describeSuperAgentApproval,
+  gameValidationPassed,
   type SuperAgentApproval,
   type SuperAgentArtifact,
   type SuperAgentChat,
@@ -15,9 +16,10 @@ import {
   type SuperAgentToolEvent,
 } from '../../../shared/super-agent';
 import { Tooltip } from '../components/ui/Tooltip';
-import { useI18n } from '../i18n/I18n';
+import { useI18n, type Translate } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
+import { readDirectGameBrief } from '../motion/game/gameSuperAgent';
 import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
 import { FilesChangedCard, UnifiedDiffView } from './ChangedFilesTree';
 import { InlineMentionChip } from './MentionNode';
@@ -38,12 +40,12 @@ type TurnGroup = {
 
 export function formatElapsedDuration(ms?: number): string {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return '';
-  if (ms < 1000) return `${Math.max(10, Math.round(ms))}ms`;
-  const secs = ms / 1000;
-  if (secs < 60) return `${secs.toFixed(secs < 10 ? 1 : 0)}s`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = Math.round(secs % 60);
-  return `${mins}m ${remSecs}s`;
+  if (ms < 1) return '<1ms';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function formatWorkingDuration(ms: number): string {
@@ -70,6 +72,15 @@ function useLiveElapsedMs(startedAt: number | undefined, active: boolean, interv
     return () => window.clearInterval(timer);
   }, [active, startedAt, intervalMs]);
   return elapsedMs;
+}
+
+function isWorkItem(message: SuperAgentMessage): boolean {
+  return message.role === 'tool' || (message.role === 'reasoning' && Boolean(message.text.trim()));
+}
+
+function isFailedGameValidation(event?: SuperAgentToolEvent): boolean {
+  return Boolean(event && event.status !== 'running'
+    && (event.validationPassed ?? gameValidationPassed(event.tool, event.outputPreview)) === false);
 }
 
 function countCompletedWorkItems(workItems: SuperAgentMessage[]): number {
@@ -172,7 +183,7 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
 
   const claimedArtifactIds = new Set<string>();
   return rawTurns.map((group, idx) => {
-    const workItems = group.rest.filter(m => m.role === 'reasoning' || m.role === 'tool');
+    const workItems = group.rest.filter(isWorkItem);
     const assistantItems = group.rest.filter(m => m.role === 'assistant');
     const artifactIds = new Set<string>();
     for (const m of group.rest) {
@@ -206,7 +217,7 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
     const hasRunning = workItems.some(
       m => m.status === 'streaming' || m.toolEvent?.status === 'running',
     );
-    const hasFailure = workItems.some(m => m.toolEvent?.status === 'failed');
+    const hasFailure = workItems.some(m => m.toolEvent?.status === 'failed' || isFailedGameValidation(m.toolEvent));
 
     let durationMs: number | undefined;
     if (idx === rawTurns.length - 1 && chat.lastTurnDurationMs !== undefined) {
@@ -233,6 +244,38 @@ function groupMessagesIntoTurns(chat: SuperAgentChat): TurnGroup[] {
   });
 }
 
+const gameGuideSections: Readonly<Record<string, string>> = {
+  start: 'Game workflow overview',
+  flow: 'Game development flow',
+  genres: 'Game genre recipes',
+  design: 'Design system',
+  style: 'Game visual style',
+  review: 'Game review rubric',
+  playable: 'Playable ad',
+  audio: 'Audio',
+};
+
+function workflowGuideDetail(event: SuperAgentToolEvent, t: Translate): string | undefined {
+  const tool = event.tool.replace(/^mcp_+openmotion_+/, '');
+  if (tool !== 'openmotion_read_workflow' || !event.inputPreview || event.status === 'failed') {
+    return event.summary;
+  }
+
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(event.inputPreview);
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return event.summary;
+  } catch {
+    return event.summary;
+  }
+
+  const workflow = args.workflow ?? 'production';
+  const section = args.section ?? 'start';
+  if (typeof workflow !== 'string' || typeof section !== 'string') return event.summary;
+  if (workflow === 'game' && Object.hasOwn(gameGuideSections, section)) return t(gameGuideSections[section]);
+  return `${workflow}/${section}`;
+}
+
 function ToolStepRow({
   message,
   onOpenArtifactId,
@@ -246,7 +289,8 @@ function ToolStepRow({
   const isRunning = ev?.status === 'running';
   const liveElapsedMs = useLiveElapsedMs(ev?.startedAt, isRunning);
   if (!ev) return null;
-  const status = ev.status ?? 'completed';
+  const failedValidation = isFailedGameValidation(ev);
+  const status = failedValidation ? 'failed' : ev.status ?? 'completed';
   const fileOp = ev.fileOp ?? ev.files?.[0];
   const diffFiles = (ev.files ?? (fileOp ? [fileOp] : [])).filter(f => f.diffPreview);
   const hasBody = Boolean(ev.command || diffFiles.length > 0 || ev.inputPreview || ev.outputPreview);
@@ -254,6 +298,7 @@ function ToolStepRow({
   const displayDurationMs = status === 'running'
     ? (liveElapsedMs >= 1000 ? liveElapsedMs : undefined)
     : ev.durationMs;
+  const detail = workflowGuideDetail(ev, t);
 
   const headerContent = (
     <>
@@ -264,9 +309,9 @@ function ToolStepRow({
       >
         <RemixIcon name={categoryIcon(ev.category, status)} size={15} />
       </span>
-      <span className="om-sa-tool-label">{t(ev.label || message.text)}</span>
-      {ev.summary && ev.summary !== ev.label && (
-        <span className="om-sa-tool-summary" title={ev.summary}>{ev.summary}</span>
+      <span className="om-sa-tool-label">{t(failedValidation ? 'Game validation failed' : ev.label || message.text)}</span>
+      {detail && detail !== ev.label && (
+        <span className="om-sa-tool-summary" title={detail}>{detail}</span>
       )}
       <span className="om-sa-step-trail">
         {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
@@ -370,17 +415,19 @@ function ToolStepRow({
 
 function ReasoningStepRow({
   message,
+  isStreaming: isStreamingProp,
   onCopyText,
   onOpenWebUrl,
   onOpenFilePath,
 }: {
   message: SuperAgentMessage;
+  isStreaming?: boolean;
   onCopyText?: (text: string) => void;
   onOpenWebUrl?: (url: string) => void;
   onOpenFilePath?: (filePath: string, label?: string) => void;
 }) {
   const { t } = useI18n();
-  const isStreaming = message.status === 'streaming';
+  const isStreaming = isStreamingProp ?? message.status === 'streaming';
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   const liveElapsedMs = useLiveElapsedMs(message.createdAt, isStreaming);
   const hasBody = Boolean(message.text?.trim());
@@ -452,6 +499,7 @@ function WorkLogSection({
   hideInlineStatus = false,
   hasPendingApproval = false,
   engineLabel,
+  activity,
   onOpenArtifactId,
   onCopyText,
   onOpenWebUrl,
@@ -464,6 +512,7 @@ function WorkLogSection({
   hideInlineStatus?: boolean;
   hasPendingApproval?: boolean;
   engineLabel?: string;
+  activity?: SuperAgentChat['turnActivity'];
   onOpenArtifactId: (artifactId: string) => void;
   onCopyText?: (text: string) => void;
   onOpenWebUrl?: (url: string) => void;
@@ -474,9 +523,13 @@ function WorkLogSection({
   const shouldAutoExpand = !isTurnFinished;
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const [mountStartedAt] = useState(() => Date.now());
+  const effectiveActivity = activity ?? chat.turnActivity;
   const isRunning = (isActiveTurn && !hasPendingApproval) || turn.hasRunning;
-  const liveStart = chat.turnActivity?.startedAt ?? turn.workItems[0]?.createdAt ?? turn.user?.createdAt ?? mountStartedAt;
+  const liveStart = effectiveActivity?.startedAt ?? turn.workItems[0]?.createdAt ?? turn.user?.createdAt ?? mountStartedAt;
   const liveRunningMs = useLiveElapsedMs(liveStart, isRunning, 250);
+  const activeReasoningId = isActiveTurn && (!effectiveActivity || effectiveActivity.phase === 'thinking')
+    ? turn.workItems.at(-1)?.id
+    : undefined;
 
   useEffect(() => {
     if (isTurnFinished) {
@@ -562,6 +615,7 @@ function WorkLogSection({
               <ReasoningStepRow
                 key={item.id}
                 message={item}
+                isStreaming={item.id === activeReasoningId && item.status === 'streaming'}
                 onCopyText={onCopyText}
                 onOpenWebUrl={onOpenWebUrl}
                 onOpenFilePath={onOpenFilePath}
@@ -697,7 +751,7 @@ export function SuperAgentLiveProgressDock({
     for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
       const m = chat.messages[i];
       if (m.role === 'user') break;
-      if (m.role === 'reasoning' || m.role === 'tool') workItems.push(m);
+      if (isWorkItem(m)) workItems.push(m);
     }
     return { total: workItems.length, done: countCompletedWorkItems(workItems) };
   }, [chat]);
@@ -745,6 +799,67 @@ function isLongUserQuery(text: string): boolean {
 }
 
 function UserMessageBubble({
+  text,
+  segments,
+  attachments,
+  onPreviewAttachment,
+}: {
+  text: string;
+  segments?: SuperAgentPromptSegment[];
+  attachments?: SuperAgentResourceAttachment[];
+  onPreviewAttachment?: (attachment: SuperAgentResourceAttachment) => void;
+}) {
+  const hasInlineMentions = Boolean(segments?.some(seg => seg.type === 'mention'));
+  const game = !hasInlineMentions ? attachments?.find(attachment => attachment.kind === 'game-project') : undefined;
+  const brief = game ? readDirectGameBrief(text, game.id) : undefined;
+
+  return brief ? (
+    <GameBriefBubble brief={brief} instruction={text} />
+  ) : (
+    <FullUserMessageBubble
+      text={text}
+      segments={segments}
+      attachments={attachments}
+      onPreviewAttachment={onPreviewAttachment}
+    />
+  );
+}
+
+function GameBriefBubble({ brief, instruction }: { brief: string; instruction: string }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
+
+  return (
+    <div className="om-sa-user-bubble om-sa-user-bubble-collapsible" data-game-brief>
+      <div className="om-sa-user-bubble-text" data-preview={isLongUserQuery(brief) || undefined}>
+        {brief}
+      </div>
+      <Button
+        variant="plain"
+        type="button"
+        className="om-sa-user-bubble-toggle"
+        aria-expanded={expanded}
+        aria-controls={expanded ? detailsId : undefined}
+        onClick={() => setExpanded(value => !value)}
+      >
+        <span className="om-sa-user-toggle-cta">
+          <span>{t('Agent instructions')}</span>
+          <span className="om-sa-user-toggle-chevron" data-open={expanded || undefined} aria-hidden="true">
+            <RemixIcon name="arrow-down-s-line" size={14} />
+          </span>
+        </span>
+      </Button>
+      {expanded && (
+        <div id={detailsId} className="om-sa-user-bubble-text" data-details tabIndex={0}>
+          {instruction}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FullUserMessageBubble({
   text,
   segments,
   attachments,
@@ -1092,6 +1207,7 @@ export function ExecutionTimeline({
               hideInlineStatus={hideInlineStatus}
               hasPendingApproval={chat.approvals.length > 0}
               engineLabel={engineLabel}
+              activity={isActiveTurn ? chat.turnActivity : undefined}
               onOpenArtifactId={onOpenArtifactId}
               onCopyText={onCopyText}
               onOpenWebUrl={onOpenWebUrl}

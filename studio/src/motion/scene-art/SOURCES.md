@@ -11,3 +11,5 @@ The Audio navigation menu's Voice changer preview uses two original studio portr
 The AI Influencer cover (`ai-influencer-marketing.webp`) is an original creator-marketing studio photograph generated specifically for OpenMotion.
 
 The background-removal and relighting guides use two original comparison renders (`sofa-cutout.webp` and `sofa-relight.webp`) generated specifically for OpenMotion.
+
+OpenMotion contributor `fengcao` created the armchair comparison for the image-editing guide using GPT Astra. The contributor confirmed redistribution rights for the reference material and contributed the resulting image under the repository's [Apache-2.0 license](../../../../LICENSE), including distribution with the OpenMotion npm package. The bundled `sofa-edit.webp` is a WebP conversion of the submitted PNG.

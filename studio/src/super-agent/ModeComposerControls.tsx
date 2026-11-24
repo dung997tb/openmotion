@@ -31,6 +31,7 @@ import {
 import { providerRank, providerReady } from '../motion/imageMenuModels';
 import { ModelAvatar } from '../motion/settingsPrimitives';
 import { useMediaCatalog } from '../motion/useMediaCatalog';
+import { Toggle } from '../ui';
 import {
   buildMediaHiddenDirective,
   migrateModelParameters,
@@ -48,7 +49,7 @@ import type { ResourceCategoryTab } from './ResourcePickerDialog';
 
 export type DesignModeFormat = 'html' | 'image';
 export type DesignViewportTarget = 'responsive' | 'desktop' | 'tablet' | 'mobile';
-export type ImageDesignScene = 'text-to-image' | 'image-edit' | 'remove-background' | 'relight' | 'character';
+export type ImageDesignScene = 'text-to-image' | 'image-edit' | 'remove-background' | 'relight' | 'image-blend';
 export type ImageDesignStyle = 'auto' | 'photorealistic' | 'editorial' | '3d-render' | 'illustration' | 'poster' | 'minimalist';
 export type ImageDesignLighting = 'auto' | 'studio' | 'natural' | 'dramatic' | 'neon' | 'warm';
 export type ImageDesignBackground = 'auto' | 'transparent' | 'solid';
@@ -141,8 +142,7 @@ export type ModeComposerOptions = {
   gameStyle: GameStyle | null;
   gameSetting: GameSetting | null;
   gameOrientation: 'landscape' | 'portrait';
-  gameMultiplayer: boolean;
-  /** Portrait only: build a playable ad. On by default, matching Game Studio; ignored for landscape or multiplayer. */
+  /** Portrait only: build a playable ad. On by default, matching Game Studio. */
   gamePlayableAd: boolean;
   gameTemplate: GameCard | null;
 
@@ -152,13 +152,13 @@ export type ModeComposerOptions = {
 };
 
 /** A local template is copied as it is (remix takes only its id), so the ad option cannot apply to it. */
-export function canChoosePlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gameTemplate'>): boolean {
-  return options.gameOrientation === 'portrait' && !(options.gameTemplate && !options.gameTemplate.external);
+export function canChoosePlayableAd(options: Partial<Pick<ModeComposerOptions, 'gameTemplate'>>): boolean {
+  return !options.gameTemplate || Boolean(options.gameTemplate.external);
 }
 
 /** A portrait, single-player game brief with the ad option on is built as a playable ad. */
-export function isPlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gameMultiplayer' | 'gamePlayableAd'> & Partial<Pick<ModeComposerOptions, 'gameTemplate'>>): boolean {
-  return canChoosePlayableAd({ gameOrientation: options.gameOrientation, gameTemplate: options.gameTemplate ?? null }) && options.gamePlayableAd && !options.gameMultiplayer;
+export function isPlayableAd(options: Pick<ModeComposerOptions, 'gameOrientation' | 'gamePlayableAd'> & Partial<Pick<ModeComposerOptions, 'gameTemplate'>>): boolean {
+  return options.gameOrientation === 'portrait' && options.gamePlayableAd && canChoosePlayableAd(options);
 }
 
 export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
@@ -224,7 +224,6 @@ export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
   gameStyle: null,
   gameSetting: null,
   gameOrientation: 'landscape',
-  gameMultiplayer: false,
   gamePlayableAd: true,
   gameTemplate: null,
 
@@ -288,7 +287,7 @@ export const IMAGE_SCENE_CHOICES: readonly {
   { id: 'image-edit', label: 'Image edit', icon: 'edit-line', description: 'Modify, restyle, or refine an attached reference image' },
   { id: 'remove-background', label: 'Remove background', icon: 'scissors-line', description: 'Isolate a crisp subject with transparent or clean backdrop' },
   { id: 'relight', label: 'Relight', icon: 'flashlight-line', description: 'Change lighting mood, direction & atmosphere cleanly' },
-  { id: 'character', label: 'Character', icon: 'group-line', description: 'Keep character identity consistent across poses & scenes' },
+  { id: 'image-blend', label: 'Image blend', icon: 'group-line', description: 'Blend subjects, props, and references into one cohesive scene' },
 ];
 
 const IMAGE_STYLE_LABELS: Record<ImageDesignStyle, string> = {
@@ -710,8 +709,8 @@ export function getModeComposerPlaceholder(
           return t('Attach an image and describe the subject to isolate or new backdrop to use…');
         case 'relight':
           return t('Attach a photo and describe the target lighting mood, direction, and color tone…');
-        case 'character':
-          return t('Describe the character pose, outfit, and scene while keeping identity consistent…');
+        case 'image-blend':
+          return t('Attach reference images and describe how to blend subjects, style, and scene together…');
         default:
           return t('Describe the poster, illustration, product visual, or image edit you want to generate…');
       }
@@ -948,7 +947,7 @@ export function formatModePromptPrefix(
     if (options.gameStyle) parts.push(`Style: ${styleLabels[options.gameStyle]}`);
     if (options.gameSetting) parts.push(`Setting: ${settingLabels[options.gameSetting]}`);
     parts.push(`Layout: ${options.gameOrientation === 'portrait' ? 'Portrait (9:16)' : 'Landscape (16:9)'}`);
-    parts.push(`Players: ${isPlayableAd(options) ? 'Playable ad' : options.gameMultiplayer ? 'Multiplayer' : 'Single player'}`);
+    parts.push(`Players: ${isPlayableAd(options) ? 'Playable ad' : 'Single player'}`);
     if (options.gameTemplate) parts.push(`Template: ${options.gameTemplate.title}`);
   } else {
     parts.push(`Mode: ${mode.label}`);
@@ -1025,9 +1024,10 @@ export function buildModeContextTags(
     if (options.gameStyle) tags.push({ kind: 'param', label: t(styleLabels[options.gameStyle]) });
     if (options.gameSetting) tags.push({ kind: 'param', label: t(settingLabels[options.gameSetting]) });
     tags.push({ kind: 'param', label: options.gameOrientation === 'portrait' ? '9:16' : '16:9' });
+    const playableAd = canChoosePlayableAd(options) ? isPlayableAd(options) : options.gameTemplate?.playableAd;
     tags.push({
       kind: 'param',
-      label: t(isPlayableAd(options) ? 'Playable ad' : options.gameMultiplayer ? 'Multiplayer' : 'Single player'),
+      label: t(playableAd ? 'Playable ad' : 'Single player'),
     });
     if (options.gameTemplate) {
       const tplTitle = options.gameTemplate.i18n?.[locale]?.title || options.gameTemplate.title;
@@ -1231,7 +1231,6 @@ export function ModeComposerTopBar({
     | 'game-style'
     | 'game-setting'
     | 'game-orientation'
-    | 'game-players'
     | ModelParamMenuKey
     | null
   >(null);
@@ -3447,8 +3446,25 @@ export function ModeComposerTopBar({
       );
     };
 
+    const playableAd = isPlayableAd(options);
     return (
       <div className="om-sa-composer-top-bar" role="group" aria-label={t('Game studio options')}>
+        {canChoosePlayableAd(options) && (
+          <label
+            className="om-sa-composer-top-pill cursor-pointer"
+            data-active={playableAd || undefined}
+          >
+            <span>{t('Playable ad')}</span>
+            <Toggle
+              label={t('Playable ad')}
+              checked={playableAd}
+              disabled={disabled}
+              onCommit={enabled => onChange(enabled
+                ? { gameOrientation: 'portrait', gamePlayableAd: true }
+                : { gamePlayableAd: false })}
+            />
+          </label>
+        )}
         {renderGameArtPicker({
           menuKey: 'game-genre',
           fallbackIcon: 'gamepad-line',
@@ -3542,7 +3558,7 @@ export function ModeComposerTopBar({
                     onClick={() => {
                       // Choosing portrait selects Playable ad by default, every time (like Game Studio).
                       onChange(item.id === 'portrait' && options.gameOrientation !== 'portrait'
-                        ? { gameOrientation: item.id, gamePlayableAd: true, gameMultiplayer: false }
+                        ? { gameOrientation: item.id, gamePlayableAd: true }
                         : { gameOrientation: item.id });
                       setOpenMenu(null);
                     }}
@@ -3554,95 +3570,6 @@ export function ModeComposerTopBar({
                       <span className="om-sa-game-choice-title">
                         <strong>{t(item.label)}</strong>
                         <small>{item.ratio}</small>
-                      </span>
-                      <span>{t(item.description)}</span>
-                    </span>
-                    <span className="om-sa-game-choice-check" aria-hidden="true">
-                      {selected && <RemixIcon name="check-line" size={15} />}
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        </Popover>
-
-        <Popover
-          open={openMenu === 'game-players'}
-          onOpenChange={next => setOpenMenu(next ? 'game-players' : null)}
-          side="top"
-          align="end"
-          aria-label={t('Players')}
-          className="om-sa-mode-popover om-sa-game-choice-popover"
-          trigger={
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-composer-top-pill"
-              data-active={options.gameMultiplayer || isPlayableAd(options) || openMenu === 'game-players' || undefined}
-              data-open={openMenu === 'game-players' || undefined}
-              aria-haspopup="listbox"
-              aria-expanded={openMenu === 'game-players'}
-              disabled={disabled}
-            >
-              <span key={isPlayableAd(options) ? 'ad' : options.gameMultiplayer ? 'multi' : 'solo'} className="om-sa-pill-swap">
-                <RemixIcon name={isPlayableAd(options) ? 'cursor-line' : options.gameMultiplayer ? 'group-line' : 'user-3-line'} size={13} />
-                <span className="om-sa-composer-top-pill-label">
-                  {t(isPlayableAd(options) ? 'Playable ad' : options.gameMultiplayer ? 'Multiplayer' : 'Single player')}
-                </span>
-              </span>
-              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
-            </Button>
-          }
-        >
-          <div className="om-sa-mode-menu">
-            <div className="om-sa-mode-menu-head">
-              <span className="om-sa-popover-label">{t('Players')}</span>
-            </div>
-            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Players')}>
-              {([
-                {
-                  multiplayer: false,
-                  icon: 'user-3-line',
-                  label: 'Single player',
-                  description: 'Solo arcade, story, or puzzle session',
-                },
-                {
-                  multiplayer: true,
-                  icon: 'group-line',
-                  label: 'Multiplayer',
-                  description: 'Shared room link so friends can join live',
-                },
-                // A playable ad is a portrait single-player build, offered only for portrait briefs that are not a local template copy.
-                ...(canChoosePlayableAd(options) ? [{
-                  multiplayer: false,
-                  playableAd: true,
-                  icon: 'cursor-line',
-                  label: 'Playable ad',
-                  description: 'Ad-ready: instant play, hand tutorial, short levels and a store button',
-                }] : []),
-              ] as { multiplayer: boolean; playableAd?: boolean; icon: string; label: string; description: string }[]).map(item => {
-                const selected = item.playableAd ? isPlayableAd(options) : !isPlayableAd(options) && options.gameMultiplayer === item.multiplayer;
-                return (
-                  <Button
-                    key={item.label}
-                    variant="plain"
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    data-active={selected || undefined}
-                    className="om-sa-game-choice-row"
-                    onClick={() => {
-                      onChange({ gameMultiplayer: item.multiplayer, gamePlayableAd: Boolean(item.playableAd) });
-                      setOpenMenu(null);
-                    }}
-                  >
-                    <span className="om-sa-game-choice-visual" aria-hidden="true">
-                      <RemixIcon name={item.icon} size={15} />
-                    </span>
-                    <span className="om-sa-game-choice-copy">
-                      <span className="om-sa-game-choice-title">
-                        <strong>{t(item.label)}</strong>
                       </span>
                       <span>{t(item.description)}</span>
                     </span>

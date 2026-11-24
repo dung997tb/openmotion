@@ -525,6 +525,7 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
     setting: 'space',
     multiplayer: false,
     orientation: 'portrait',
+    playableAd: true,
   });
   const gameId = createdGame.game.id;
 
@@ -621,6 +622,7 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
       id: `game:${gameId}`,
       kind: 'game-project',
       title: createdGame.game.title,
+      subtitle: 'shooter · Game Studio',
       projectId: gameId,
       scenario: 'portrait',
       url: `/motion-api/games/${gameId}/play/index.html`,
@@ -628,6 +630,7 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   });
   assert.equal(chat.intent, 'game');
   assert.equal(chat.activeArtifactId, `game:${gameId}`);
+  assert.equal((await service.get(chat.id)).artifacts[0].playableAd, true);
 
   await service.start(chat.id, {
     requestId: 'req-game-turn-1',
@@ -652,6 +655,8 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   assert.ok(gameArtifact);
   assert.equal(gameArtifact.title, 'Star Drifter 99');
   assert.equal(gameArtifact.scenario, 'portrait');
+  assert.equal(gameArtifact.playableAd, true);
+  assert.equal(gameArtifact.subtitle, 'shooter · Playable ad');
   assert.equal(gameArtifact.url, `/motion-api/games/${gameId}/play/index.html`);
   assert.equal(done.activeArtifactId, gameArtifact.id);
 
@@ -673,6 +678,17 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   const filesRes = JSON.parse(bodyText) as { files: Array<{ path: string; bytes: number }> };
   assert.ok(filesRes.files.some(f => f.path === 'index.html'));
   assert.ok(filesRes.files.some(f => f.path === 'logic.js'));
+
+  const renamed = await service.update(chat.id, { title: '新游戏名' });
+  assert.equal(renamed.title, '新游戏名');
+  assert.equal(renamed.activeArtifactId, gameArtifact.id);
+  const renamedGame = renamed.artifacts.find(item => item.id === gameArtifact.id);
+  assert.equal(renamedGame?.title, renamed.title);
+  assert.equal(renamedGame?.url, gameArtifact.url);
+  assert.equal(renamedGame?.playableAd, true);
+  assert.equal((await gameProjectsFor(store.directory).get(gameId)).title, renamed.title);
+  assert.match((await gameProjectsFor(store.directory).read(gameId, 'index.html')).content, /<title>新游戏名<\/title>/);
+  assert.equal((await service.get(chat.id)).artifacts.find(item => item.id === gameArtifact.id)?.title, renamed.title);
 
   await service.close();
 }));

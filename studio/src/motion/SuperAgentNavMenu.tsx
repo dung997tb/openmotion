@@ -21,7 +21,7 @@ const moreModes = [
   { mode: 'website', label: 'Build a website', icon: 'layout-line' },
 ] as const;
 
-export function SuperAgentNavMenu({ onSelect }: { onSelect: (mode: SuperAgentRouteMode | null) => void }) {
+export function SuperAgentNavMenu({ onSelect }: { onSelect: (mode: SuperAgentRouteMode) => void }) {
   const { t } = useI18n();
   return <div className="om-agent-nav-menu">
     <h2>{t('Super Agent')}</h2>
@@ -47,7 +47,7 @@ export function SuperAgentNavMenu({ onSelect }: { onSelect: (mode: SuperAgentRou
         ))}
       </div>
     </section>
-    <Button type="button" variant="plain" className="om-audio-menu-spotlight" onClick={() => onSelect(null)}>
+    <Button type="button" variant="plain" className="om-audio-menu-spotlight" onClick={() => onSelect('game')}>
       <span className="om-audio-menu-spotlight-copy">
         <span className="om-badge" data-nav-badge="New" lang="en">New</span>
         <strong className="om-audio-menu-spotlight-title">{t('Build a minigame in minutes')}</strong>

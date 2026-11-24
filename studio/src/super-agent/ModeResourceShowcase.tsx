@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { blackFridayTemplates } from '../../../shared/black-friday-collection';
 import type { GalleryTemplate } from '../../../shared/catalog';
 import { designScenarios, isDesignScenario } from '../../../shared/design-project';
@@ -70,7 +70,7 @@ export type SuperAgentModeSpec = {
   icon: string;
   label: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   placeholder: string;
   defaultPrompt: string;
   pickerCategory: ResourceCategoryTab;
@@ -230,17 +230,11 @@ export const SUPER_AGENT_MODES: readonly SuperAgentModeSpec[] = [
     tone: 'agent',
     icon: 'gamepad-line',
     label: 'Game Studio',
-    title: 'Create your own game in minutes',
-    subtitle: 'Pick a genre, style and setting, describe your game in one line and your Agent builds a playable web game.',
+    title: 'Create a playable game in minutes',
     placeholder: 'Describe the game you want to make',
     defaultPrompt: 'Build a playable retro neon arcade space-shooter game in HTML5 Canvas with keyboard and mouse controls, score & wave HUD, particle explosions, and a restart button. Preview it in the Artifact Viewer.',
     pickerCategory: 'projects',
-    quickIdeas: [
-      { title: 'Co-op 3D crystal defense', prompt: 'Defend a glowing arena crystal through 5 waves with 1–4 co-op players, dash/nova skills, and an instant invite link.' },
-      { title: 'Retro pixel platformer', prompt: 'Build a crisp pixel-art platformer with tight jump physics, hidden coins, hazards, and a dramatic boss arena.' },
-      { title: 'Portrait one-tap arcade', prompt: 'Create an addictive 9:16 portrait one-tap arcade game playable with one thumb, instant restarts, and combo multipliers.' },
-      { title: 'Cyberpunk drift racer', prompt: 'Build a neon night-time 3D street racing game with smooth drifting, nitro boost pads, and lap time records.' },
-    ],
+    quickIdeas: GAME_STUDIO_QUICK_IDEAS,
   },
   {
     id: 'image',
@@ -502,14 +496,14 @@ function buildImageCardsByCategory(category: string, isZh: boolean): CuratedShow
       title: 'Speaker room reference',
     },
   }));
-  const char: CuratedShowcaseCard[] = sceneExamples.character.map((ex, idx) => ({
-    id: `char-${idx}`,
+  const blend: CuratedShowcaseCard[] = sceneExamples['image-blend'].map((ex, idx) => ({
+    id: `image-blend-${idx}`,
     title: ex.title,
-    subtitle: ['Character reference'],
+    subtitle: ['Image blend'],
     poster: ex.poster,
     posterPosition: ex.posterPosition,
     prompt: ex.prompt,
-    optionsPatch: { imageScene: 'character' },
+    optionsPatch: { imageScene: 'image-blend' },
     referenceImage: {
       url: lunarRef,
       filename: 'apollo-11.jpg',
@@ -548,14 +542,14 @@ function buildImageCardsByCategory(category: string, isZh: boolean): CuratedShow
   if (category === 'text-to-image') return t2i;
   if (category === 'image-edit') return edit;
   if (category === 'remove-background') return bg;
+  if (category === 'image-blend') return blend;
   if (category === 'relight') return relight;
-  if (category === 'character') return char;
 
   const seenTitles = new Set<string>();
   const seenPosters = new Set<string>();
   const primary: CuratedShowcaseCard[] = [];
   const secondary: CuratedShowcaseCard[] = [];
-  for (const item of [...gpt, ...t2i, ...edit, ...bg, ...relight, ...char, ...cinemaStills]) {
+  for (const item of [...gpt, ...t2i, ...edit, ...bg, ...blend, ...relight, ...cinemaStills]) {
     if (seenTitles.has(item.title)) continue;
     seenTitles.add(item.title);
     if (item.poster && !seenPosters.has(item.poster)) {
@@ -781,7 +775,7 @@ export function ModeResourceShowcase({
   modeOptions?: ModeComposerOptions;
   playingGameId?: string | null;
   onChangeModeOptions?: (patch: Partial<ModeComposerOptions>) => void;
-  onToggleAttachment: (item: SuperAgentResourceAttachment) => void;
+  onToggleAttachment: (item: SuperAgentResourceAttachment) => boolean | void;
   onPlayGame?: (game: GameCard) => void;
   onDeployGame?: (game: GameCard) => void;
   onFocusComposer?: () => void;
@@ -792,6 +786,7 @@ export function ModeResourceShowcase({
 }) {
   const { t, locale } = useI18n();
   const isZh = locale === 'zh-CN';
+  const templateHeadingId = useId();
 
   // Motion & Cinema modes share Explore's full covered Motion template catalog.
   const coveredMotion = useCoveredTemplates(locale, mode.id === 'motion' || mode.id === 'media', { showFirstPage: true });
@@ -818,9 +813,10 @@ export function ModeResourceShowcase({
   const [designQuery, setDesignQuery] = useState('');
   const [gameQuery, setGameQuery] = useState('');
   const [gameSort, setGameSort] = useState<GameSort>('relevance');
+  const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
   const [fanIndex, setFanIndex] = useState(0);
   const [fanPaused, setFanPaused] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
+  const showcaseRef = useRef<HTMLElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const publishedGameTemplates = useMemo(
@@ -877,7 +873,6 @@ export function ModeResourceShowcase({
     : isMotionGraphicsView
       ? (findSuperAgentMode('motion') ?? mode)
       : mode;
-
   // Build real categories & live counts per mode.
   const filters = useMemo<FilterOption[]>(() => {
     const motionGraphicsFilters = (): FilterOption[] => {
@@ -913,7 +908,7 @@ export function ModeResourceShowcase({
             { id: 'image-edit', label: 'Image edit', count: sceneExamples['image-edit'].length },
             { id: 'remove-background', label: 'Remove background', count: sceneExamples['remove-background'].length },
             { id: 'relight', label: 'Relight', count: sceneExamples.relight.length },
-            { id: 'character', label: 'Character', count: sceneExamples.character.length },
+            { id: 'image-blend', label: 'Image blend', count: sceneExamples['image-blend'].length },
             { id: 'asset', label: 'Workspace Assets', count: assets ? assets.filter(a => a.modality === 'image').length : undefined },
             { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
           ];
@@ -1023,8 +1018,8 @@ export function ModeResourceShowcase({
           { id: 'text-to-image', label: 'Text to image', count: sceneExamples['text-to-image'].length },
           { id: 'image-edit', label: 'Image editing', count: sceneExamples['image-edit'].length },
           { id: 'remove-background', label: 'Remove background', count: sceneExamples['remove-background'].length },
+          { id: 'image-blend', label: 'Image blend', count: sceneExamples['image-blend'].length },
           { id: 'relight', label: 'Relight', count: sceneExamples.relight.length },
-          { id: 'character', label: 'Character reference', count: sceneExamples.character.length },
           { id: 'design-template', label: 'Design templates', count: designTemplates?.length },
           { id: 'asset', label: 'Workspace Assets', count: assets ? assets.filter(a => a.modality === 'image').length : undefined },
           { id: 'brand-kit', label: 'Brand Kits', count: brandKits?.length },
@@ -1384,6 +1379,7 @@ export function ModeResourceShowcase({
 
   const selectedKeys = useMemo(() => new Set(attachments.map(resourceKey)), [attachments]);
   const selectGameForAgent = (game: GameCard) => {
+    if (game.multiplayer) return;
     const title = localizedGameTitle(game, locale);
     if (game.source === 'mine') {
       const att = toGameResourceAttachment(game, title);
@@ -1401,12 +1397,13 @@ export function ModeResourceShowcase({
             gameStyle: game.style,
             gameSetting: game.setting,
             gameOrientation: game.orientation ?? 'landscape',
-            gameMultiplayer: game.multiplayer,
             gamePlayableAd: Boolean(game.playableAd),
           }
         : {}),
     });
-    if (!isSelected) onFocusComposer?.();
+    if (!isSelected) {
+      onFocusComposer?.();
+    }
   };
   const visibleGames = showGameCards ? filteredGames.slice(0, visibleCount) : null;
   const visibleCurated = !showGameCards && curatedCards ? curatedCards.slice(0, visibleCount) : null;
@@ -1482,18 +1479,25 @@ export function ModeResourceShowcase({
                     variant="plain"
                     type="button"
                     className="om-sa-game-fan-card"
-                    aria-pressed={isCenter ? isSelected : undefined}
-                    aria-label={isCenter ? `${t('Remix')}: ${title}` : title}
+                    aria-pressed={isCenter && !game.multiplayer ? isSelected : undefined}
+                    aria-label={isCenter
+                      ? game.multiplayer ? t('Play {title}', { title }) : `${t('Remix')}: ${title}`
+                      : title}
+                    disabled={isCenter && game.multiplayer && !onPlayGame}
                     onClick={() => {
                       if (!isCenter) {
                         setFanIndex(index);
+                        return;
+                      }
+                      if (game.multiplayer) {
+                        onPlayGame?.(game);
                         return;
                       }
                       selectGameForAgent(game);
                     }}
                   >
                     {cover && <img src={cover} alt="" />}
-                    {isCenter && (
+                    {isCenter && !game.multiplayer && (
                       <span
                         className="om-sa-game-select-cue"
                         data-selected={isSelected || undefined}
@@ -1556,7 +1560,7 @@ export function ModeResourceShowcase({
         )}
         <div className="om-sa-mode-hero-copy">
           <h2>{t(effectiveHeroMode.title)}</h2>
-          <p className="om-muted">{t(effectiveHeroMode.subtitle)}</p>
+          {effectiveHeroMode.subtitle && <p className="om-muted">{t(effectiveHeroMode.subtitle)}</p>}
         </div>
 
         {mode.id === 'game' && (
@@ -1725,7 +1729,6 @@ export function ModeResourceShowcase({
                     gameStyle: idea.style,
                     gameSetting: idea.setting,
                     gameOrientation: idea.orientation,
-                    gameMultiplayer: idea.multiplayer,
                     gamePlayableAd: Boolean(idea.playableAd),
                     gameTemplate: null,
                   });
@@ -1733,7 +1736,7 @@ export function ModeResourceShowcase({
                 }}
               >
                 <span className="om-sa-tone-icon" data-tone={mode.tone} aria-hidden="true">
-                  <RemixIcon name={idea.multiplayer ? 'group-line' : 'sparkling-line'} size={12} />
+                  <RemixIcon name="sparkling-line" size={12} />
                 </span>
                 <span>{t(idea.title)}</span>
               </Button>
@@ -1761,7 +1764,8 @@ export function ModeResourceShowcase({
       </div>
 
       {mode.id !== 'coding' && (
-      <section className="om-sa-showcase-panel">
+      <section ref={showcaseRef} className="om-sa-showcase-panel" aria-labelledby={templateHeadingId}>
+        <h3 id={templateHeadingId} className="om-sa-showcase-heading">{t('Discover templates')}</h3>
         <div className="om-sa-showcase-bar" data-game-bar={showGameCards || undefined}>
           <div className="om-sa-showcase-tabs" role="tablist" aria-label={t('Template filters')}>
             {filters.map(f => (
@@ -1782,7 +1786,7 @@ export function ModeResourceShowcase({
                         || f.id === 'image-edit'
                         || f.id === 'remove-background'
                         || f.id === 'relight'
-                        || f.id === 'character'
+                        || f.id === 'image-blend'
                       ) {
                         onChangeModeOptions?.({ imageScene: f.id });
                       }
@@ -1795,7 +1799,7 @@ export function ModeResourceShowcase({
                       || f.id === 'image-edit'
                       || f.id === 'remove-background'
                       || f.id === 'relight'
-                      || f.id === 'character'
+                      || f.id === 'image-blend'
                     ) {
                       onChangeModeOptions?.({ imageScene: f.id });
                     }
@@ -1813,42 +1817,7 @@ export function ModeResourceShowcase({
               </Button>
             ))}
           </div>
-          {showGameCards ? (
-            <div className="om-sa-game-bar-controls">
-              <span className="om-field om-sa-game-search">
-                <RemixIcon name="search-line" size={14} />
-                <input
-                  value={gameQuery}
-                  placeholder={t('Search')}
-                  aria-label={t('Search games')}
-                  onChange={event => setGameQuery(event.target.value)}
-                />
-                {gameQuery && (
-                  <IconButton
-                    variant="plain"
-                    className="om-sa-game-search-clear"
-                    aria-label={t('Clear')}
-                    onClick={() => setGameQuery('')}
-                    icon={<RemixIcon name="close-line" size={12} />}
-                  />
-                )}
-              </span>
-              {activeFilter !== 'mine' && (
-                <div className="om-sa-game-sort">
-                  <Select
-                    label={t('Sort')}
-                    value={gameSort}
-                    onCommit={next => setGameSort(next as GameSort)}
-                    options={[
-                      { value: 'relevance', label: t('Default sort') },
-                      { value: 'plays', label: t('Most played') },
-                      { value: 'newest', label: t('Newest') },
-                    ]}
-                  />
-                </div>
-              )}
-            </div>
-          ) : (mode.id === 'design' || mode.id === 'research' || mode.id === 'visualization') ? (
+          {(mode.id === 'design' || mode.id === 'research' || mode.id === 'visualization') ? (
             <div className="om-sa-design-bar-controls">
               <span className="om-field om-sa-game-search om-sa-design-search">
                 <RemixIcon name="search-line" size={14} />
@@ -1890,20 +1859,63 @@ export function ModeResourceShowcase({
               variant="plain"
               type="button"
               className="om-sa-showcase-more"
-              onClick={() => onOpenAllResources(
-                activeFilter === 'brand-kit' ? 'brand-kit'
-                  : activeFilter === 'asset' ? 'asset'
-                  : activeFilter === 'skills' || activeFilter === 'design-skill' ? 'skills'
-                  : isPureVideoView ? 'asset'
-                  : isMotionGraphicsView ? 'motion-template'
-                  : mode.pickerCategory,
-              )}
+              onClick={() => {
+                if (showGameCards) {
+                  setVisibleCount(totalCount);
+                  showcaseRef.current?.scrollIntoView?.({ block: 'start', inline: 'nearest' });
+                  return;
+                }
+                onOpenAllResources(
+                  activeFilter === 'brand-kit' ? 'brand-kit'
+                    : activeFilter === 'asset' ? 'asset'
+                    : activeFilter === 'skills' || activeFilter === 'design-skill' ? 'skills'
+                    : isPureVideoView ? 'asset'
+                    : isMotionGraphicsView ? 'motion-template'
+                    : mode.pickerCategory,
+                );
+              }}
             >
               <span>{t('View all')}</span>
-              <RemixIcon name="arrow-right-up-line" size={13} />
+              <RemixIcon name={showGameCards ? 'arrow-down-s-line' : 'arrow-right-up-line'} size={13} />
             </Button>
           )}
         </div>
+        {showGameCards && (
+          <div className="om-sa-game-bar-controls">
+            <span className="om-field om-sa-game-search">
+              <RemixIcon name="search-line" size={14} />
+              <input
+                value={gameQuery}
+                placeholder={t('Search')}
+                aria-label={t('Search games')}
+                onChange={event => setGameQuery(event.target.value)}
+              />
+              {gameQuery && (
+                <IconButton
+                  variant="plain"
+                  className="om-sa-game-search-clear"
+                  aria-label={t('Clear')}
+                  onClick={() => setGameQuery('')}
+                  icon={<RemixIcon name="close-line" size={12} />}
+                />
+              )}
+            </span>
+            {activeFilter !== 'mine' && (
+              <div className="om-sa-game-sort">
+                <Select
+                  label={t('Sort')}
+                  value={gameSort}
+                  onCommit={next => setGameSort(next as GameSort)}
+                  options={[
+                    { value: 'relevance', label: t('Default sort') },
+                    { value: 'plays', label: t('Most played') },
+                    { value: 'newest', label: t('Newest') },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {isMotionGraphicsView && activeFilter === 'skills' && (
           <div className="om-sa-showcase-subtabs" role="tablist" aria-label={t('Skill categories')}>
@@ -1975,9 +1987,13 @@ export function ModeResourceShowcase({
                       variant="plain"
                       type="button"
                       className="om-sa-game-tile-cover"
-                      aria-pressed={isSelected}
-                      aria-label={isMine ? `${t('Attach')}: ${title}` : `${t('Remix')}: ${title}`}
-                      onClick={() => selectGameForAgent(game)}
+                      data-composer-source={!game.multiplayer || undefined}
+                      aria-pressed={game.multiplayer ? undefined : isSelected}
+                      aria-label={game.multiplayer
+                        ? t('Play {title}', { title })
+                        : `${t(isMine ? 'Attach' : 'Remix')}: ${title}`}
+                      disabled={game.multiplayer && !onPlayGame}
+                      onClick={() => game.multiplayer ? onPlayGame?.(game) : selectGameForAgent(game)}
                     >
                       {cover ? (
                         <img src={cover} alt="" loading="lazy" decoding="async" />
@@ -1987,14 +2003,16 @@ export function ModeResourceShowcase({
                           <span>{title}</span>
                         </div>
                       )}
-                      <span
-                        className="om-sa-game-select-cue"
-                        data-selected={isSelected || undefined}
-                        aria-hidden="true"
-                      >
-                        <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
-                        <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Remix')}</span>
-                      </span>
+                      {!game.multiplayer && (
+                        <span
+                          className="om-sa-game-select-cue"
+                          data-selected={isSelected || undefined}
+                          aria-hidden="true"
+                        >
+                          <RemixIcon name={isSelected ? 'check-line' : 'sparkling-line'} size={13} />
+                          <span>{isSelected ? t('Selected') : isMine ? t('Attach') : t('Remix')}</span>
+                        </span>
+                      )}
                       {status && (
                         <span className="om-sa-game-status" data-tone={game.status}>
                           {game.status === 'building' && <RemixIcon name="loader-4-line" size={12} />}
@@ -2145,9 +2163,12 @@ export function ModeResourceShowcase({
                   variant="plain"
                   type="button"
                   className="om-sa-showcase-card"
+                  data-composer-source
                   aria-pressed={isSelected}
                   data-selected={isSelected || undefined}
-                  onClick={() => onToggleAttachment(item)}
+                  onClick={() => {
+                    onToggleAttachment(item);
+                  }}
                 >
                   <ResourceShowcaseThumb item={item} active={active} />
                   <span className="om-sa-showcase-check" aria-hidden="true">

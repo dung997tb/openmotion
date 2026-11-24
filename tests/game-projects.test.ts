@@ -34,6 +34,33 @@ async function fixture(run: (service: GameProjects, workspace: string) => Promis
   finally { await rm(dir,{recursive:true,force:true}); }
 }
 
+test('renaming a game updates the entry title and preserves it across Agent edits', () => fixture(async service => {
+  const { game } = await service.create(brief);
+  const source = '<!doctype html><html><head><!-- <title>Comment</title> --><script>const other = "<title>Script</title>";</script><title>Old title</title></head><body><svg><title>Icon</title></svg></body></html>';
+  await service.write(game.id, [{ path: 'index.html', content: source }]);
+  await service.updateMeta(game.id, { title: 'Old title', i18n: { 'zh-CN': { title: '旧名称', description: '说明' } } });
+  await service.status(game.id, 'ready');
+
+  const renamed = await service.rename(game.id, 'Nova & <Stars>');
+  assert.equal(renamed.title, 'Nova & <Stars>');
+  assert.deepEqual(renamed.i18n?.['zh-CN'], { title: renamed.title, description: '说明' });
+  assert.equal(renamed.status, 'ready');
+  assert.equal(renamed.playUrl, game.playUrl);
+  const index = (await service.read(game.id, 'index.html')).content;
+  const managedTitleScript = /<script data-openmotion-game-title>[\s\S]*?<\/script>/g;
+  assert.equal([...index.matchAll(managedTitleScript)].length, 1);
+  assert.equal(index.replace(managedTitleScript, ''), source.replace('Old title', 'Nova &amp; &lt;Stars&gt;'));
+  await service.rename(game.id, renamed.title);
+  assert.equal((await service.read(game.id, 'index.html')).content, index);
+
+  const edited = await service.updateMeta(game.id, { title: 'Agent title', i18n: { 'zh-CN': { title: '另一名称', controls: '点击' } } });
+  assert.equal(edited.title, renamed.title);
+  assert.deepEqual(edited.i18n?.['zh-CN'], { title: renamed.title, description: '说明', controls: '点击' });
+  await service.write(game.id, [{ path: 'index.html', content: '<!doctype html><svg><title>Icon</title></svg>' }]);
+  const regeneratedIndex = (await service.read(game.id, 'index.html')).content;
+  assert.equal(regeneratedIndex.replace(managedTitleScript, ''), '<!doctype html><title>Nova &amp; &lt;Stars&gt;</title><svg><title>Icon</title></svg>');
+}));
+
 test('draft lifecycle, remix, persisted local viewer and concurrent counters',()=>fixture(async(service,workspace)=>{
   assert.deepEqual(await service.catalog(),{games:[]});
   const { game, agentInstruction }=await service.create(brief);
@@ -126,11 +153,27 @@ test('multiplayer validation, determinism, contract errors, CDN rules and public
   assert.throws(()=>new GameRuntime(starterLogic+'\nFunction("return process")();','escape'),/Code generation/);
 }));
 
-test('MCP game schemas and shared dispatcher use the requested workspace without video initialization',()=>fixture(async(_,workspace)=>{
+test('MCP game tools author single-player games and preserve access to existing multiplayer games',()=>fixture(async(service,workspace)=>{
   assert.equal(gameTools.length,12);
   for(const tool of gameTools) assert.match(tool.title,/^OpenMotion · /);
   validateInput(gameTools[0].inputSchema,brief);
+  validateInput(gameTools[0].inputSchema,{prompt:brief.prompt});
   assert.throws(()=>validateInput(gameTools[0].inputSchema,{...brief,genre:'invalid'}));
+  assert.throws(()=>validateInput(gameTools[0].inputSchema,{...brief,multiplayer:true}));
+  for (const [name, args] of [
+    ['openmotion_game_create',{...brief,multiplayer:true}],
+    ['motion_game_create',{brief:{...brief,multiplayer:true}}],
+  ] as const) {
+    await assert.rejects(dispatchGameTool(name,args,workspace),/single-player games only/);
+  }
+  const solo=await dispatchGameTool('openmotion_game_create',{prompt:brief.prompt},workspace);
+  assert.equal(solo.game.multiplayer,false);
+  const existing=(await service.create({...brief,multiplayer:true})).game;
+  await assert.rejects(dispatchGameTool('openmotion_game_write_files',{id:existing.id,files:[{path:'index.html',content:'unwritten'}]},workspace),/single-player games only/);
+  await assert.rejects(dispatchGameTool('openmotion_game_set_status',{id:existing.id,status:'building'},workspace),/single-player games only/);
+  const existingCard=await dispatchGameTool('openmotion_game_get',{id:existing.id},workspace);
+  assert.equal(existingCard.multiplayer,true);
+  assert.equal(existingCard.status,'draft');
   const created:any=await dispatchGameTool('motion_game_create',brief,workspace);
   const detail:any=await dispatchGameTool('openmotion_game_get',{id:created.game.id},workspace);
   assert.equal(detail.id,created.game.id); assert.equal(detail.files[0].path,'index.html');
@@ -199,7 +242,7 @@ import { EventEmitter } from 'node:events';
 import { handler } from '../server.ts';
 import { WorkspaceStore } from '../workspace.ts';
 
-test('mounted /api/games and /motion-api/games HTTP adapters work without a listening socket',()=>fixture(async(_,workspace)=>{
+test('mounted game HTTP adapters block multiplayer authoring while preserving local play',()=>fixture(async(service,workspace)=>{
   const store=new WorkspaceStore(workspace);
   async function call(method:string,url:string,body?:unknown) {
     const req=Readable.from(body===undefined?[]:[Buffer.from(JSON.stringify(body))]) as any;
@@ -208,8 +251,21 @@ test('mounted /api/games and /motion-api/games HTTP adapters work without a list
     const res={setHeader(key:string,value:unknown){headers[key.toLowerCase()]=value;},writeHead(code:number,values:Record<string,unknown>){status=code;for(const [key,value] of Object.entries(values??{}))headers[key.toLowerCase()]=value;},end(value?:any){data=Buffer.from(value??'');}} as any;
     await handler(req,res,store,{} as any);return {status,data,headers};
   }
-  const created=await call('POST','/api/games',brief);assert.equal(created.status,201);
+  for (const prefix of ['/api/games','/motion-api/games']) {
+    const rejected=await call('POST',prefix,{...brief,multiplayer:true});
+    assert.equal(rejected.status,400);
+    assert.match(rejected.data.toString(),/single-player games only/);
+  }
+  const legacy=(await service.create({...brief,multiplayer:true})).game;
+  for (const [method,action] of [['POST','remix'],['GET','handoff']]) {
+    const rejected=await call(method,`/motion-api/games/${legacy.id}/${action}`);
+    assert.equal(rejected.status,400);
+    assert.match(rejected.data.toString(),/single-player games only/);
+  }
+  assert.equal((await call('GET',legacy.playUrl)).status,302);
+  const created=await call('POST','/api/games',{prompt:brief.prompt});assert.equal(created.status,201);
   const game=JSON.parse(created.data.toString()).game;
+  assert.equal(game.multiplayer,false);
   const metadata=await call('POST',`/motion-api/games/${game.id}/update-meta`,{title:'HTTP metadata',controls:'Keyboard and touch'});assert.equal(metadata.status,200);assert.equal(JSON.parse(metadata.data.toString()).title,'HTTP metadata');
   const catalog=await call('GET','/motion-api/games');assert.equal(catalog.status,200,catalog.data.toString());
   const played=await call('GET',game.playUrl);assert.equal(played.status,200);assert.match(String(played.headers['content-type']),/text\/html/);
@@ -241,6 +297,7 @@ function memoryInbox(socket:MemorySocket) {
     while(true){const index=messages.findIndex(predicate);if(index>=0)return messages.splice(index,1)[0];await new Promise<void>((resolve,reject)=>{const timeout=setTimeout(()=>{events.off('message',onMessage);reject(Error('Memory socket timeout'));},Math.max(1,deadline-Date.now()));const onMessage=()=>{clearTimeout(timeout);resolve();};events.once('message',onMessage);});}
   };
 }
+
 test('in-memory WebSocket upgrades and masked frames drive a two-player authoritative round',()=>fixture(async(_,workspace)=>{
   const service=gameProjectsFor(workspace),{game}=await service.create({...brief,multiplayer:true});
   await service.write(game.id,[{path:'logic.js',content:starterLogic.replace('minPlayers: 1','minPlayers: 2').replace('return { over: false };','return { over: Object.values(state.scores).some(n => n >= 2), winners: Object.keys(state.scores).filter(id => state.scores[id] >= 2) };')}]);
@@ -637,6 +694,60 @@ test('validation checks external client.js URLs with the same CDN allowlist and 
   }
   const coop=await service.create({...brief,genre:'shooter',multiplayer:true});const runtime=new GameRuntime((await service.read(coop.game.id,'logic.js')).content,'solo');assert.equal(runtime.meta.minPlayers,1);
   const basic=await service.create({...brief,multiplayer:true});assert.equal(new GameRuntime((await service.read(basic.game.id,'logic.js')).content,'solo-basic').meta.minPlayers,1);
+}));
+
+test('validation and publication require entry scripts and stylesheets to resolve to playable files', () => fixture(async service => {
+  const { game } = await service.create(brief);
+  await service.write(game.id, [{
+    path: 'index.html',
+    content: '<link href=./assets/theme.css rel=stylesheet><script type=module src="./assets/runtime.mjs?v=1"></script>',
+  }]);
+  await service.status(game.id, 'ready');
+  const validation = await service.validate(game.id);
+  assert.equal(validation.passed, false);
+  assert.deepEqual(validation.diagnostics.map(item => item.message), [
+    'Referenced stylesheet not found: ./assets/theme.css',
+    'Referenced script not found: ./assets/runtime.mjs?v=1',
+  ]);
+  await assert.rejects(service.publish(game.id), /Game validation failed/);
+  assert.equal((await service.get(game.id)).status, 'ready');
+
+  await service.write(game.id, [
+    { path: 'assets/theme.css', content: 'canvas { display: block }' },
+    { path: 'assets/runtime.mjs', content: 'document.body.dataset.loaded = "true";' },
+  ]);
+  assert.equal((await service.validate(game.id)).passed, true);
+  assert.equal((await service.publish(game.id)).game.status, 'published');
+}));
+
+test('playable ads reject CDN dependencies and allow inline assets and store CTA destinations', () => fixture(async service => {
+  const { game } = await service.create({ ...brief, orientation: 'portrait', playableAd: true });
+  await service.write(game.id, [{
+    path: 'index.html',
+    content: '<link rel="alternate stylesheet" href="https://cdn.jsdelivr.net/npm/normalize.css"><script src=//unpkg.com/gsap></script>',
+  }]);
+  const validation = await service.validate(game.id);
+  assert.equal(validation.passed, false);
+  assert(validation.diagnostics.some(item => /External stylesheet.*normalize\.css/.test(item.message)));
+  assert(validation.diagnostics.some(item => /External script.*unpkg\.com/.test(item.message)));
+  await assert.rejects(service.publish(game.id), /Game validation failed/);
+
+  await service.write(game.id, [{
+    path: 'index.html',
+    content: '<style>@import "https://cdn.jsdelivr.net/npm/normalize.css";</style>',
+  }]);
+  await assert.rejects(service.publish(game.id), /External network host is not allowed: cdn\.jsdelivr\.net/);
+
+  await service.write(game.id, [{
+    path: 'index.html',
+    content: [
+      '<!-- <script src="absent.js"></script> -->',
+      '<style>canvas { display: block }</style>',
+      '<script>const store = "https://apps.apple.com/app/id1";</script>',
+    ].join('\n'),
+  }]);
+  assert.equal((await service.validate(game.id)).passed, true);
+  assert.equal((await service.publish(game.id)).game.status, 'published');
 }));
 
 test('co-op lobby joins a room on load without typing and survives an opaque iframe denying history replacement',async()=>{
@@ -1171,12 +1282,12 @@ test('default arcade input uses its horizontal keyboard controls for both press 
   const client=(await service.read(game.id,'client.js')).content;assert.match(client,/KeyD/);
 }));
 
-test('any workspace draft returns a complete Agent handoff; templates do not',()=>fixture(async(service,workspace)=>{
-  const created=await service.create({...brief,prompt:'Co-op zombie night shift',multiplayer:true,orientation:'portrait'});
+test('single-player workspace drafts return a complete Agent handoff; templates do not',()=>fixture(async(service,workspace)=>{
+  const created=await service.create({...brief,prompt:'Zombie night shift',orientation:'portrait'});
   const handoff=await service.handoff(created.game.id);
   assert.equal(handoff.gameId,created.game.id); assert.equal(handoff.status,'draft');
   assert.equal(handoff.agentInstruction,created.agentInstruction);
-  for(const part of [created.game.id,'openmotion_game_get','openmotion_game_set_status','Co-op zombie night shift','portrait 9:16']) assert(handoff.agentInstruction.includes(part),part);
+  for(const part of [created.game.id,'openmotion_game_get','openmotion_game_set_status','Zombie night shift','portrait 9:16','Build a single-player game']) assert(handoff.agentInstruction.includes(part),part);
   await service.status(created.game.id,'building'); assert.equal((await service.handoff(created.game.id)).status,'building');
   const template=path.join(service.templates,'racer'); await mkdir(template,{recursive:true});
   await writeFile(path.join(template,'game.json'),JSON.stringify({...created.game,id:'racer',status:'published',source:'template'}));

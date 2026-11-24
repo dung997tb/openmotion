@@ -34,7 +34,7 @@ import { RouteSurfaceFallback } from '../motion/RouteSurfaceFallback';
 import { consumeSuperAgentHandoff, queueSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { readSuperAgentPromptLink, withoutSuperAgentPromptLink } from './superAgentPromptLink';
 import { bundledGames, communityGames, gameApi } from '../motion/game/gameCatalog';
-import { localizedGameTitle, toGameArtifact, toGameResourceAttachment } from '../motion/game/gameSuperAgent';
+import { isMultiplayerGameArtifact, localizedGameTitle, toGameArtifact, toGameResourceAttachment } from '../motion/game/gameSuperAgent';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged, useLocalAgents } from '../motion/useLocalAgents';
@@ -177,6 +177,7 @@ function resourceToArtifactPatch(
       kind: 'game-project',
       title: item.title,
       subtitle: item.subtitle || 'Game Studio',
+      playableAd: item.playableAd,
       projectId: item.id,
       url: `/motion-api/games/${encodeURIComponent(item.id)}/play/index.html`,
     };
@@ -258,6 +259,7 @@ function artifactToResourceAttachment(artifact: SuperAgentArtifact): SuperAgentR
       kind: 'game-project',
       title: artifact.title,
       subtitle: artifact.subtitle,
+      playableAd: artifact.playableAd,
     };
   }
   return null;
@@ -376,7 +378,7 @@ export function SuperAgentWorkspace({
       : false,
   );
   const [containerWidth, setContainerWidth] = useState(0);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerExpanded, setViewerExpanded] = useState(false);
   const [viewerWidth, setViewerWidth] = useState<number | null>(null);
@@ -1380,6 +1382,7 @@ export function SuperAgentWorkspace({
       kind: 'game-project',
       title: patch.title || displayTitle,
       subtitle: patch.subtitle,
+      playableAd: patch.playableAd,
       ...(patch.projectId ? { projectId: patch.projectId } : {}),
       scenario: patch.scenario,
       revision: patch.revision,
@@ -1420,6 +1423,7 @@ export function SuperAgentWorkspace({
   }, [handlePlayGame]);
 
   const handleUseGameInAgent = useCallback(async (artifact: SuperAgentArtifact) => {
+    if (isMultiplayerGameArtifact(artifact)) return;
     const gameId = artifact.projectId || (artifact.id.startsWith('game:') ? artifact.id.slice('game:'.length) : '');
     let game: GameCard | null =
       (gameId ? playedGamesRef.current.get(gameId) ?? null : null)
@@ -1435,6 +1439,7 @@ export function SuperAgentWorkspace({
       }
     }
 
+    if (game?.multiplayer) return;
     if (game && game.source !== 'mine') {
       const displayTitle = localizedGameTitle(game, locale);
       setGameTemplateSeed({ id: ++handoffSeqRef.current, game });
@@ -1890,8 +1895,9 @@ export function SuperAgentWorkspace({
         </div>
       )}
 
-      {sidebarAsDrawer && (
-        <Dialog.Root open={sidebarOpen} onOpenChange={setSidebarOpen}>
+      {/* Release the modal focus and pointer handling as soon as the drawer closes. */}
+      {sidebarAsDrawer && sidebarOpen && (
+        <Dialog.Root open onOpenChange={setSidebarOpen}>
           <Dialog.Portal>
             <Dialog.Backdrop className="om-sa-dialog-backdrop" />
             <Dialog.Popup className="om-sa-sidebar-drawer" aria-label={t('Conversations')} onKeyDown={e => e.stopPropagation()}>

@@ -109,6 +109,7 @@ export type SuperAgentResourceAttachment = {
   kind: SuperAgentResourceKind;
   title: string;
   subtitle?: string;
+  playableAd?: boolean;
   modality?: 'image' | 'video' | 'audio';
   versionId?: string;
   scenario?: string;
@@ -179,6 +180,7 @@ export type SuperAgentArtifact = {
   kind: SuperAgentArtifactKind;
   title: string;
   subtitle?: string;
+  playableAd?: boolean;
   projectId?: string;
   sessionId?: string;
   scenario?: string;
@@ -199,6 +201,11 @@ export type SuperAgentArtifact = {
   /** Monotonic timestamp bumped when an artifact is explicitly presented/opened in the Artifact Viewer. */
   presentedAt?: number;
 };
+
+export function isPlayableAdArtifact(item: Pick<SuperAgentArtifact | SuperAgentResourceAttachment, 'kind' | 'playableAd' | 'subtitle'>): boolean {
+  return item.kind === 'game-project'
+    && (item.playableAd ?? /(?:^|·)\s*(?:Playable ad|广告游戏)\s*$/i.test(item.subtitle ?? ''));
+}
 
 export type SuperAgentToolCategory =
   | 'file_read'
@@ -264,6 +271,7 @@ export type SuperAgentToolEvent = {
   summary?: string;
   inputPreview?: string;
   outputPreview?: string;
+  validationPassed?: boolean;
   artifactId?: string;
   startedAt: number;
   finishedAt?: number;
@@ -499,6 +507,43 @@ export function artifactCanonicalAddress(artifact: SuperAgentArtifact): string {
     case 'web':
       return artifact.url || 'about:blank';
   }
+}
+
+function parseValidationOutput(output: unknown): unknown {
+  if (typeof output !== 'string') return output;
+  try {
+    return JSON.parse(output);
+  } catch {
+    // Older previews may be cut off after the validator's top-level decision.
+    if (!output.endsWith('\n…')) return undefined;
+    const verdict = /^\s*\{\s*(?:"id"\s*:\s*"[^"]*"\s*,\s*)?"passed"\s*:\s*(true|false)\s*[,}]/.exec(output);
+    return verdict ? { passed: verdict[1] === 'true' } : undefined;
+  }
+}
+
+function validationDecision(output: unknown): boolean | undefined {
+  const value = parseValidationOutput(output);
+  if (!value || typeof value !== 'object' || !('passed' in value)) return undefined;
+  return typeof value.passed === 'boolean' ? value.passed : undefined;
+}
+
+export function gameValidationPassed(tool: string, output: unknown): boolean | undefined {
+  const name = tool.replace(/^mcp_+openmotion_+/, '');
+  if (name !== 'openmotion_game_validate' && name !== 'motion_game_validate') return undefined;
+  const value = parseValidationOutput(output);
+  const decision = validationDecision(value);
+  if (decision !== undefined || !value || typeof value !== 'object') return decision;
+  if ('structuredContent' in value) {
+    const structured = validationDecision(value.structuredContent);
+    if (structured !== undefined) return structured;
+  }
+  if (!('content' in value) || !Array.isArray(value.content)) return undefined;
+  for (const item of value.content) {
+    if (item?.type !== 'text') continue;
+    const text = validationDecision(item.text);
+    if (text !== undefined) return text;
+  }
+  return undefined;
 }
 
 export function formatSuperAgentToolLabel(tool: string, args?: Record<string, unknown>): string {

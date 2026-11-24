@@ -96,7 +96,7 @@ export function preferredImageModelFilters(scene: string, hasInputImage = false)
       model => model.modality === 'image' && Boolean(model.supportsImageReference),
     ];
   }
-  if (hasInputImage || scene === 'image-edit' || scene === 'relight' || scene === 'character') {
+  if (hasInputImage || scene === 'image-edit' || scene === 'relight' || scene === 'image-blend' || scene === 'character') {
     return [model => model.modality === 'image' && Boolean(model.supportsImageReference)];
   }
   return [];

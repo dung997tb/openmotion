@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
 import { designRoutes, findDesignScenario, isDesignScenario } from '../../../shared/design-project';
 import { designClient } from '../design/designClient';
@@ -459,13 +459,33 @@ export function ConversationStream({
   );
   const modeOptionsRef = useRef<ModeComposerOptions>(modeOptions);
   modeOptionsRef.current = modeOptions;
+  const templatePromptRef = useRef<string | null>(null);
   const updateModeOptions = useCallback((patch: Partial<ModeComposerOptions>) => {
+    if (patch.gameTemplate) {
+      const prompt = buildGameUserPrompt(patch.gameTemplate, locale);
+      templatePromptRef.current = prompt;
+      setText(prompt);
+      composerRef.current?.setPlainText(prompt);
+    } else if (patch.gameTemplate === null) {
+      const previousPrompt = templatePromptRef.current;
+      templatePromptRef.current = null;
+      // Removing a template clears its suggestion but keeps the user's edits.
+      if (previousPrompt !== null) {
+        setText(current => {
+          if (current === previousPrompt) {
+            composerRef.current?.clear();
+            return '';
+          }
+          return current;
+        });
+      }
+    }
     setModeOptions(prev => {
       const next = { ...prev, ...patch };
       modeOptionsRef.current = next;
       return next;
     });
-  }, []);
+  }, [locale]);
   const enterMode = useCallback((
     mode: SuperAgentCreationModeId | null,
     designModule?: SuperAgentDesignModuleId | null,
@@ -501,6 +521,7 @@ export function ConversationStream({
   useEffect(() => {
     if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
     appliedDraftSeedRef.current = draftSeed.id;
+    templatePromptRef.current = null;
     setText(draftSeed.text);
     setSegments([]);
     setInlineMentions([]);
@@ -522,28 +543,26 @@ export function ConversationStream({
     if (!gameTemplateSeed || appliedGameTemplateSeedRef.current === gameTemplateSeed.id) return;
     appliedGameTemplateSeedRef.current = gameTemplateSeed.id;
     const picked = gameTemplateSeed.game;
+    if (picked.multiplayer) return;
     if (!chat?.messages.length) {
       setActiveModeId('game');
-      setModeOptions(prev => ({
-        ...prev,
+      updateModeOptions({
         gameTemplate: picked,
         gameGenre: picked.genre,
         gameStyle: picked.style,
         gameSetting: picked.setting,
         gameOrientation: picked.orientation ?? 'landscape',
-        gameMultiplayer: picked.multiplayer,
         gamePlayableAd: Boolean(picked.playableAd),
-      }));
+      });
     } else {
-      const displayTitle = localizedGameTitle(picked, locale);
       if (!text.trim()) {
-        const remixPrompt = t('Remix · {title}', { title: displayTitle });
+        const remixPrompt = buildGameUserPrompt(picked, locale);
         setText(remixPrompt);
         composerRef.current?.setPlainText(remixPrompt);
       }
     }
     requestAnimationFrame(() => composerRef.current?.focus());
-  }, [gameTemplateSeed, chat?.messages.length, locale, t]);
+  }, [gameTemplateSeed, chat?.messages.length, locale, updateModeOptions]);
 
   useEffect(() => {
     if (!active) {
@@ -617,7 +636,7 @@ export function ConversationStream({
         genre: modeOptions.gameGenre,
         style: modeOptions.gameStyle,
         setting: modeOptions.gameSetting,
-        multiplayer: modeOptions.gameMultiplayer,
+        multiplayer: false,
       })
     : '';
   const hasGameStudioBrief = activeMode?.id === 'game' && !hasAttachedGameProject && Boolean(modeOptions.gameTemplate || gameBrief);
@@ -741,6 +760,7 @@ export function ConversationStream({
       setActiveModeId(null);
       pendingHiddenInstructionsRef.current = undefined;
       pendingContextTagsRef.current = undefined;
+      templatePromptRef.current = null;
       setModeOptions(prev => (prev.gameTemplate ? { ...prev, gameTemplate: null } : prev));
     }
     followRef.current = true;
@@ -820,13 +840,15 @@ export function ConversationStream({
     const exists = attachments.some(existing => resourceKey(existing) === key);
     if (exists) {
       onAttachmentsChange(attachments.filter(existing => resourceKey(existing) !== key));
-    } else {
-      onAttachmentsChange([...attachments, item].slice(0, 30));
-      if (attachments.length < 30 && item.kind === 'motion-template') {
-        if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
-        else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
-      }
+      return false;
     }
+    if (attachments.length >= 30) return false;
+    onAttachmentsChange([...attachments, item]);
+    if (item.kind === 'motion-template') {
+      if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
+      else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
+    }
+    return true;
   };
 
   useEffect(() => {
@@ -853,6 +875,10 @@ export function ConversationStream({
     }
   }, [activeModeId, chat?.id, chat?.messages.length]);
 
+  const focusComposerAfterModeChange = useCallback(() => {
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, []);
+
   const exitActiveMode = useCallback(() => {
     sampleAttachSeqRef.current += 1;
     autoSampleKeyRef.current = null;
@@ -860,7 +886,8 @@ export function ConversationStream({
     setActiveModeId(null);
     updateModeOptions({ gameTemplate: null });
     if (requestedMode) onChangeRequestedMode?.(null);
-  }, [requestedMode, onChangeRequestedMode, updateModeOptions]);
+    focusComposerAfterModeChange();
+  }, [requestedMode, onChangeRequestedMode, updateModeOptions, focusComposerAfterModeChange]);
 
   const applyPickedPromptMeta = useCallback((meta?: PickPromptMeta) => {
     const seq = ++sampleAttachSeqRef.current;
@@ -947,6 +974,7 @@ export function ConversationStream({
     if (!mode) return;
     setActiveModeId(mode.id);
     onChangeRequestedMode?.(mode.id);
+    focusComposerAfterModeChange();
   };
 
   const handleStartEditQueued = (item: SuperAgentQueuedMessage) => {
@@ -1074,7 +1102,7 @@ export function ConversationStream({
       };
 
       if (!editingQueuedId && activeMode?.id === 'game' && !chat?.messages.length && !cappedAttachments.some(att => att.kind === 'game-project')) {
-        const selectedTemplate = activeModeOptions.gameTemplate;
+        const selectedTemplate = activeModeOptions.gameTemplate?.multiplayer ? null : activeModeOptions.gameTemplate;
         setScaffoldingGame(true);
         let gameScaffoldSent = false;
         try {
@@ -1087,7 +1115,7 @@ export function ConversationStream({
                       genre: activeModeOptions.gameGenre ?? selectedTemplate.genre,
                       style: activeModeOptions.gameStyle ?? selectedTemplate.style,
                       setting: activeModeOptions.gameSetting ?? selectedTemplate.setting,
-                      multiplayer: activeModeOptions.gameMultiplayer,
+                      multiplayer: false,
                       orientation: activeModeOptions.gameOrientation,
                       playableAd: isPlayableAd(activeModeOptions),
                     }
@@ -1096,7 +1124,7 @@ export function ConversationStream({
                       genre: activeModeOptions.gameGenre,
                       style: activeModeOptions.gameStyle,
                       setting: activeModeOptions.gameSetting,
-                      multiplayer: activeModeOptions.gameMultiplayer,
+                      multiplayer: false,
                       orientation: activeModeOptions.gameOrientation,
                       playableAd: isPlayableAd(activeModeOptions),
                     },

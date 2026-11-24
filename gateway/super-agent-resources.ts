@@ -268,7 +268,8 @@ export async function collectWorkspaceResources(
           id: game.id,
           kind: 'game-project',
           title: game.title,
-          subtitle: `${game.genre} · ${game.multiplayer ? 'Multiplayer' : 'Single player'}`,
+          subtitle: `${game.genre} · ${game.playableAd ? 'Playable ad' : game.multiplayer ? 'Multiplayer' : 'Single player'}`,
+          playableAd: game.playableAd === true,
           previewUrl: game.cover ?? undefined,
           tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : [])],
         }))
