@@ -57,6 +57,12 @@ const featuredModels = [
   { id: 'elevenlabs-v3', name: 'ElevenLabs V3' },
 ] as const;
 
+function SubscriptionUpgradeTitle() {
+  const { t } = useI18n();
+  const [before, after] = t('{offer} on select models').split('{offer}');
+  return <>{before}<span className={offerStyles.unlimitedText}>{t('7 days of unlimited use')}</span>{after}</>;
+}
+
 function SubscriptionUpgradeBenefits() {
   const { t } = useI18n();
   return <>
@@ -73,7 +79,7 @@ function SubscriptionGuide({ kind, children }: { kind: 'sign-in' | 'upgrade'; ch
   const { t } = useI18n();
   return <section className={offerStyles.subscriptionCard} data-guide={kind}>
     <div className={offerStyles.subscriptionHeading}>
-      <h2>{t(kind === 'sign-in' ? 'Sign in to unlock popular AI models' : '7 days of unlimited use on select models')}</h2>
+      <h2>{kind === 'sign-in' ? t('Sign in to unlock popular AI models') : <SubscriptionUpgradeTitle />}</h2>
       {kind === 'sign-in' && <span className="om-badge">{t('Plus and above')}</span>}
     </div>
     <div className={offerStyles.benefits}>
@@ -233,7 +239,9 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
           </Button>
         </SubscriptionGuide>} />}
       {subscription ? <>
-        {plan && <SubscriptionGuide kind="upgrade"><MultimodalUpgradeButton subscription={subscriptionOpener} /></SubscriptionGuide>}
+        {plan && <SubscriptionGuide kind="upgrade">
+          <MultimodalUpgradeButton subscription={subscriptionOpener} label={t('Upgrade to Plus', undefined, 'subscription offer')} />
+        </SubscriptionGuide>}
         <section className="om-settings-section"><div className="om-settings-row"><h2 className="om-subtitle">{t('Subscription & usage')}</h2>{signedIn && <Tooltip label={t('Refresh account')} wrap><IconButton variant="ghost" className="motion-icon-button" aria-label={t('Refresh account')} disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()} icon={<RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={17} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />} /></Tooltip>}</div>
           {!(signedIn && account.billingUnavailable) && <div className="om-account-metrics"><div className="om-card"><span className="om-muted">{t('Current plan')}</span><h3 className="om-title">{signedIn && account.plan ? account.plan === 'free' ? t('Free plan') : account.plan : '—'}</h3><p className="om-muted">{t(signedIn ? 'Managed by OpenDesign' : 'Sign in to view your plan')}</p></div><div className="om-card"><span className="om-muted">{t('Available balance')}</span><h3 className="om-title">{signedIn && account.balance != null ? `$${account.balance}` : '—'}</h3><p className="om-muted">{t(signedIn ? 'Account credits in USD' : 'Sign in to view usage')}</p></div></div>}
           {signedIn && account.billingUnavailable && <div className="om-settings-row"><p className="om-muted">{t(account.billingError?.status === 403 ? "The billing service declined this request. Open Manage subscription to check your plan in OpenDesign." : "Couldn't load your plan and balance. Account models are unaffected and can be used as usual.")}</p><Button variant="ghost" className="om-button h-auto" disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()}><RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={15} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />{t('Refresh')}</Button></div>}

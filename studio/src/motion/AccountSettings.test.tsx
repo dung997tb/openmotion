@@ -223,6 +223,14 @@ it('starts login from the signed-out subscription offer and switches to upgrade 
   expect(actions(upgrade)).toEqual(['Upgrade to Plus']);
 });
 
+it('highlights the seven-day offer and labels the upgrade action in Chinese', async () => {
+  const page = await open({ state: 'signed-in', plan: 'free' }, 'zh-CN', 'subscription');
+  const guide = page.querySelector<HTMLElement>('[data-guide="upgrade"]')!;
+  expect(guide.querySelector('h2')?.textContent).toBe('精选模型7天无限用');
+  expect(guide.querySelector('h2 span')?.textContent).toBe('7天无限用');
+  expect(actions(guide)).toEqual(['立即升级']);
+});
+
 it('offers Free and Go accounts an upgrade through the registered entry source, and nothing to paid plans', async () => {
   for (const plan of ['free', 'go']) {
     const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan, balance: '0.00' }, 'en', 'subscription');

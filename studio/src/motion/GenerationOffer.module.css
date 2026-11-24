@@ -108,6 +108,14 @@
   overflow-wrap: anywhere;
 }
 
+@media (forced-colors: none) {
+  .unlimitedText {
+    background-image: var(--motion-black-friday-headline-gradient);
+    background-clip: text;
+    color: transparent;
+  }
+}
+
 .benefits {
   grid-area: 2 / 1;
   display: grid;
@@ -208,6 +216,13 @@
   font-size: var(--motion-text-md);
 }
 
+.subscriptionCard[data-guide='upgrade'] .upgradeAction > :is(button, a) {
+  min-block-size: var(--motion-space-44);
+  min-inline-size: calc(2 * var(--motion-space-64));
+  padding-inline: var(--motion-space-20);
+  font-size: var(--motion-text-body);
+}
+
 @container subscription-offer (max-width: 32rem) {
   .benefits { grid-column: 1 / -1; }
   .upgradeAction { grid-row: 1; }
@@ -215,5 +230,9 @@
     gap: var(--motion-space-6);
     padding-inline: var(--motion-space-10);
     font-size: var(--motion-text-sm);
+  }
+  .subscriptionCard[data-guide='upgrade'] .upgradeAction > :is(button, a) {
+    min-inline-size: calc(var(--motion-space-64) + var(--motion-space-40));
+    padding-inline: var(--motion-space-12);
   }
 }
