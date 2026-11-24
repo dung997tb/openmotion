@@ -2001,6 +2001,10 @@ export function ModeResourceShowcase({
                       disabled={game.multiplayer && !onPlayGame}
                       onClick={() => game.multiplayer ? onPlayGame?.(game) : selectGameForAgent(game)}
                     >
+                      {/* Portrait games share the 16:9 card: the cover sits whole in the middle over a blurred copy of itself. */}
+                      {cover && game.orientation === 'portrait' && (
+                        <img className="om-sa-game-tile-backdrop" src={cover} alt="" loading="lazy" decoding="async" />
+                      )}
                       {cover ? (
                         <img src={cover} alt="" loading="lazy" decoding="async" />
                       ) : (
