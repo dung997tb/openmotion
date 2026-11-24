@@ -12,6 +12,7 @@ import { getDesktopHostBridge, isDesktopApp, startDesktopBrowserLogin, useDeskto
 import { HOST_CAPABILITIES } from '../../../shared/desktop-contract';
 import { useWorkspaceChrome } from './WorkspaceFrame';
 import { buildLoginUrl, useAccountSummary } from './AccountSettings';
+import { clearPrivateSwrCache } from './swrCache';
 import { CommunityLink } from './CommunityLink';
 import { clickMethod, clickOption, trackStudioClick } from './editorTracking';
 import { GitHubLink } from './GitHubLink';
@@ -46,11 +47,13 @@ export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset,
   const desktopChrome = useDesktopChrome();
   const desktopBridge = getDesktopHostBridge();
   const [compactActions, setCompactActions] = useState(false);
+  const desktopInsetTotal = desktopChrome ? desktopChrome.insetLeft + desktopChrome.insetRight : 0;
+  const compactActionThreshold = desktopInsetTotal > 0 ? 640 : 560;
   useLayoutEffect(() => {
-    const observer = new ResizeObserver(([entry]) => setCompactActions(entry.contentRect.width <= 560));
+    const observer = new ResizeObserver(([entry]) => setCompactActions(entry.contentRect.width <= compactActionThreshold));
     observer.observe(header.current!);
     return () => observer.disconnect();
-  }, []);
+  }, [compactActionThreshold]);
 
   function workspaceActions(closeMenu?: () => void) {
     return <>
@@ -135,6 +138,7 @@ export function ApplicationAccountMenu({ settings, openSettings }: { settings: S
     try {
       const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
       const data = await response.json().catch(() => ({})) as { endSessionUrl?: string };
+      clearPrivateSwrCache();
       window.dispatchEvent(new Event('motion:account-changed'));
       if (data.endSessionUrl) window.location.assign(data.endSessionUrl);
     } catch {

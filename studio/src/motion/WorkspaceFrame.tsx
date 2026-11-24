@@ -316,6 +316,24 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     query.addEventListener('change', update); return () => query.removeEventListener('change', update);
   }, []);
   useEffect(() => {
+    const appEl = applicationRef.current;
+    if (!appEl) return;
+    const syncWorkspaceTop = () => {
+      const workspaceEl = appEl.querySelector<HTMLElement>(':scope > .motion-workspace');
+      if (!workspaceEl) return;
+      const top = Math.max(0, Math.round(workspaceEl.getBoundingClientRect().top));
+      document.documentElement.style.setProperty('--om-workspace-top', `${top}px`);
+    };
+    syncWorkspaceTop();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(syncWorkspaceTop);
+    observer.observe(appEl);
+    for (const child of appEl.children) {
+      if (child instanceof HTMLElement) observer.observe(child);
+    }
+    return () => observer.disconnect();
+  }, [bfBannerVisible, hostChrome]);
+  useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === ',') { event.preventDefault(); openSettings('general'); }
       if (editorActive && event.altKey && event.key.toLowerCase() === 'b') { event.preventDefault(); toggleSidebar(); }
