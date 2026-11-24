@@ -17,7 +17,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
     projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1), 'scenes/intro.html': sha(3) }, studioOrigin: 'https://studio.test', canRebindTiming, liveEdits,
   }));
   Object.defineProperty(document, 'currentScript', { value: script });
-  const replies: { result?: unknown }[] = [];
+  const replies: { result?: unknown; type?: string; timelineVersion?: string }[] = [];
   const parent = { postMessage: (reply: typeof replies[number]) => replies.push(reply) };
   const hooks: string[] = [];
   const player = { getTime: () => 4, isPlaying: () => true, seek: (time: number) => hooks.push('seek:' + time), play: () => hooks.push('play') };
@@ -35,7 +35,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
       expiresAt: Date.now() + 350, changes: [root, clip], ...overrides } });
     return replies[0]?.result;
   }
-  return { send, document, hooks, window };
+  return { send, document, hooks, window, replies };
 }
 
 it('applies a complete version once, preserves the media node and rebinds at the playhead', () => {
@@ -110,6 +110,9 @@ it('adds a direct visual leaf at its verified sibling and rolls it back if playi
   assert.equal(added.getAttribute('data-hf-id'), 'copy-hf');
   assert.equal(frame.document.getElementById('clip'), audio);
   assert.deepEqual(frame.hooks.slice(-3), ['seek:4', 'rebind', 'play']);
+  frame.send({ type: 'handshake', timelineOnly: true });
+  assert.equal(frame.replies.find(message => message.type === 'timeline-state')?.timelineVersion, etag(2));
+
 });
 
 it('updates text and placement on the same live nodes without seeking or replacing media', () => {
