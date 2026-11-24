@@ -945,3 +945,45 @@ test('SSOT metadata attaches standardKey and tier to generationOptions and gatew
     gateway.close();
   }
 }));
+
+test('OpenDesign image models fail fast locally on unsupported geometry/output parameters before queueing', () => fixture(async store => {
+  const sunburst: Model = {
+    id: 'opendesign:gpt-image-2.6-sunburst', provider: 'opendesign', modelId: 'gpt-image-2.6-sunburst',
+    label: 'GPT Image 2.6 Sunburst', modality: 'image', mode: 'text-to-image', source: 'live',
+  };
+  const flare: Model = { ...sunburst, id: 'account:gpt-image-2.6-flare', provider: 'account', modelId: 'gpt-image-2.6-flare' };
+  const seedream: Model = {
+    id: 'opendesign:seedream-5.0-flash', provider: 'opendesign', modelId: 'seedream-5.0-flash',
+    label: 'Seedream 5.0 Flash', modality: 'image', mode: 'text-to-image', source: 'live',
+  };
+  const profiled: Model = {
+    id: 'opendesign:nano-banana-2', provider: 'opendesign', modelId: 'nano-banana-2',
+    label: 'Nano Banana 2', modality: 'image', mode: 'text-to-image', source: 'live',
+    nativeOptions: { profiles: { generations: { profiles: [{ aspect_ratio: '1:1', resolution: '1K' }], default: { aspect_ratio: '1:1', resolution: '1K' } } } },
+  };
+  assert.throws(() => resolveGenerationParameters(sunburst, { quality: 'medium', background: 'transparent', output: { aspect_ratio: '1:1', resolution: '1k' } }), /does not support output/i);
+  assert.throws(() => validateGenerationOptions(sunburst, { output: { aspect_ratio: '1:1', resolution: '1K' } }), /does not support output/i);
+  assert.throws(() => resolveGenerationParameters(flare, { size: '1K' }), /does not support size/i);
+  assert.throws(() => resolveGenerationParameters(sunburst, { aspect_ratio: '1:1', resolution: '1K' }), /does not support aspect_ratio, resolution/i);
+  assert.doesNotThrow(() => resolveGenerationParameters(sunburst, { quality: 'medium', background: 'transparent' }));
+  assert.throws(() => resolveGenerationParameters(seedream, { output: { aspect_ratio: '1:1', resolution: '1K' } }), /does not support output/i);
+  assert.throws(() => resolveGenerationParameters(seedream, { background: 'transparent' }), /does not support background/i);
+  assert.doesNotThrow(() => resolveGenerationParameters(seedream, { size: '1K' }));
+  assert.throws(() => resolveGenerationParameters(profiled, { output: { aspect_ratio: '1:1', resolution: '1k' } }), /Output profile 1:1 \/ 1k is not available/);
+  assert.throws(() => resolveGenerationParameters(profiled, { output: '1:1' }), /parameters\.output must be an object/);
+  assert.doesNotThrow(() => resolveGenerationParameters(profiled, { output: { aspect_ratio: '1:1', resolution: '1K' } }));
+
+  let posts = 0;
+  const gateway = gatewayFor(store);
+  gateway.options.fetcher = (async () => { posts++; return Response.json({ models: [{ model: 'gpt-image-2.6-sunburst', kind: 'image', capabilities: { edits: true } }] }); }) as typeof fetch;
+  try {
+    await gateway.configureProvider('opendesign', { apiKey: 'test-key', baseUrl: 'https://cloud.example' });
+    posts = 0;
+    await assert.rejects(
+      gateway.submit({ modality: 'image', model: 'opendesign:gpt-image-2.6-sunburst', prompt: 'Hero', parameters: { quality: 'medium', output: { aspect_ratio: '1:1', resolution: '1k' } }, library: {} }),
+      /does not support output/i,
+    );
+    assert.equal(posts, 0);
+    assert.equal((await gateway.listJobs()).length, 0);
+  } finally { await gateway.close(); }
+}));

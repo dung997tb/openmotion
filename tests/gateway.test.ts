@@ -479,3 +479,74 @@ test('resolvePublicAddresses resolves proxy Fake-IP (198.18.0.0/15) via public D
     /non-public address/,
   );
 });
+
+test('gateway runs up to 6 remote jobs concurrently while keeping local codex jobs capped at 2', () => fixture(async store => {
+  let inflightRemote = 0, peakRemote = 0;
+  const resolvers: (() => void)[] = [];
+  const gateway = new ModelGateway(store, {
+    detect: agents,
+    pollMs: 1,
+    download: async () => png,
+    fetcher: (async (u, init = {}) => {
+      const url = String(u);
+      if (url.endsWith('/api/v1/media/models')) {
+        return Response.json({ models: [{ model: 'seedream-5.0-flash', kind: 'image', capabilities: { edits: true } }] });
+      }
+      if (init?.method === 'POST' && url.endsWith('/images/generations')) {
+        inflightRemote++;
+        peakRemote = Math.max(peakRemote, inflightRemote);
+        return new Promise<Response>(resolve => {
+          resolvers.push(() => {
+            inflightRemote--;
+            resolve(Response.json({ task_id: `t-${resolvers.length}`, status: 'queued' }));
+          });
+        });
+      }
+      return Response.json({ status: 'succeeded', assets: [{ url: 'https://cdn.example/out.png' }] });
+    }) as Fetcher,
+  });
+  try {
+    await gateway.configureProvider('opendesign', { apiKey: 'test-key', baseUrl: 'https://cloud.example' });
+    const remoteJobs = [];
+    for (let i = 0; i < 8; i++) {
+      remoteJobs.push(await gateway.submit({ modality: 'image', model: 'opendesign:seedream-5.0-flash', prompt: `Tile ${i}`, library: {} }));
+    }
+    await gateway.tick();
+    while (resolvers.length < 6) await new Promise(r => setTimeout(r, 5));
+    assert.equal(gateway.active.size, 6);
+    assert.equal(peakRemote, 6);
+    while (resolvers.length) resolvers.shift()!();
+    await Promise.all([...gateway.active.values()].map(task => task.done));
+    await gateway.tick();
+    while (resolvers.length < 2) await new Promise(r => setTimeout(r, 5));
+    assert.equal(gateway.active.size, 2);
+    while (resolvers.length) resolvers.shift()!();
+    await Promise.all([...gateway.active.values()].map(task => task.done));
+    for (const job of remoteJobs) assert.equal((await gateway.getJob(job.id)).state, 'completed');
+
+    // Local codex jobs stay capped at 2 concurrent workers.
+    let inflightLocal = 0, peakLocal = 0;
+    const localResolvers: (() => void)[] = [];
+    gateway.options.codex = async () => {
+      inflightLocal++;
+      peakLocal = Math.max(peakLocal, inflightLocal);
+      await new Promise<void>(resolve => localResolvers.push(() => { inflightLocal--; resolve(); }));
+      return png;
+    };
+    const localJobs = [];
+    for (let i = 0; i < 4; i++) {
+      localJobs.push(await gateway.submit({ modality: 'image', model: 'codex:image-generation', prompt: `Local ${i}`, library: {} }));
+    }
+    await gateway.tick();
+    while (localResolvers.length < 2) await new Promise(r => setTimeout(r, 5));
+    assert.equal(gateway.active.size, 2);
+    assert.equal(peakLocal, 2);
+    while (localResolvers.length) localResolvers.shift()!();
+    await Promise.all([...gateway.active.values()].map(task => task.done));
+    await gateway.tick();
+    while (localResolvers.length < 2) await new Promise(r => setTimeout(r, 5));
+    while (localResolvers.length) localResolvers.shift()!();
+    await Promise.all([...gateway.active.values()].map(task => task.done));
+    for (const job of localJobs) assert.equal((await gateway.getJob(job.id)).state, 'completed');
+  } finally { await gateway.close(); }
+}));

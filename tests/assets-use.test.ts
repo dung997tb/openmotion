@@ -144,3 +144,37 @@ test('video frames and audio clips are bounded, labelled and returned as media t
   await assert.rejects(api.call('openmotion_assets_use', { action: 'read', assetId: b.id, versionId: b.currentVersionId, duration: 16 }), /INVALID_ARGUMENT/);
   await assert.rejects(api.call('openmotion_assets_use', { action: 'read', assetId: b.id, versionId: b.currentVersionId, start: 2 }), /start/);
 }, false));
+
+test('read supports compact maxEdge previews and batch image contact sheets on both asset tools', () => fixture(async store => {
+  const library = new AssetLibrary(store), api = service(store);
+  const wide = await library.importFile(await media(store.directory, 'wide.png', ['-f', 'lavfi', '-i', 'color=c=orange:s=2048x1024'], ['-frames:v', '1']), { requestId: 'wide', name: 'Wide Backdrop' });
+  const compact = await api.call('openmotion_assets_use', { action: 'read', assetId: wide.id, versionId: wide.currentVersionId, maxEdge: 512 });
+  assert.equal(compact.previews[0].width, 512);
+  assert.equal(compact.previews[0].height, 256);
+
+  const sprites = await Promise.all([
+    library.importFile(await media(store.directory, 's1.png', ['-f', 'lavfi', '-i', 'color=c=red@0.5:s=128x128,format=rgba'], ['-frames:v', '1']), { requestId: 's1', name: 'Strawberry' }),
+    library.importFile(await media(store.directory, 's2.png', ['-f', 'lavfi', '-i', 'color=c=green:s=128x128'], ['-frames:v', '1']), { requestId: 's2', name: 'Mint' }),
+    library.importFile(await media(store.directory, 's3.png', ['-f', 'lavfi', '-i', 'color=c=blue:s=128x128'], ['-frames:v', '1']), { requestId: 's3', name: 'Jam' }),
+  ]);
+  const items = [wide, ...sprites].map(a => ({ assetId: a.id, versionId: a.currentVersionId }));
+  const sheet = await api.call('openmotion_assets_use', { action: 'read', items, maxEdge: 768 });
+  assert.equal(sheet.modality, 'image');
+  assert.deepEqual(sheet.grid, { cols: 2, rows: 2, cellSize: 378 });
+  assert.equal(sheet.items.length, 4);
+  assert.equal(sheet.content.filter((c: any) => c.type === 'image').length, 1);
+  assert.ok(sheet.previews[0].width <= 768 && sheet.previews[0].height <= 768);
+  assert.match(sheet.content[0].text, /Contact sheet \(2x2.*\[1\] Wide Backdrop.*\[4\] Jam/);
+  assert.deepEqual(await readdir(path.join(library.root, 'staging')), []);
+
+  const viaManage = await api.call('openmotion_asset_manage', { action: 'read', items: items.slice(0, 2), maxEdge: 512 });
+  assert.equal(viaManage.items.length, 2);
+  assert.equal(viaManage.content.filter((c: any) => c.type === 'image').length, 1);
+  assert.ok(viaManage.previews[0].width <= 512 && viaManage.previews[0].height <= 512);
+
+  await assert.rejects(api.call('openmotion_assets_use', { action: 'read', assetId: wide.id, versionId: wide.currentVersionId, items }), /INVALID_ARGUMENT/);
+  const tone = await library.importFile(await media(store.directory, 'batch-audio.wav', ['-f', 'lavfi', '-i', 'sine=duration=0.3']), { requestId: 'ba', name: 'Tone' });
+  await assert.rejects(api.call('openmotion_assets_use', { action: 'read', assetId: tone.id, versionId: tone.currentVersionId, maxEdge: 512 }), /image\/video-only/);
+  await assert.rejects(api.call('openmotion_assets_use', { action: 'read', items: [{ assetId: tone.id, versionId: tone.currentVersionId }] }), /image assets only/);
+  assert.deepEqual(await readdir(path.join(library.root, 'staging')), []);
+}, false));

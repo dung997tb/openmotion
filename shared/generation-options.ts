@@ -178,6 +178,36 @@ export function compatibleImageResolutions(model: Model, aspectRatio: unknown, h
   return [...new Set(envelope.profiles.filter(p => p.aspect_ratio === aspectRatio).map(p => p.resolution))];
 }
 
+/** Fail-fast check for unsupported geometry/output fields on OpenDesign image models before queueing remote jobs. */
+function assertOpenDesignImageParameters(model: Model, resolved: Record<string, unknown>, imageProfiles: PublishedImageProfiles | undefined) {
+  if (!isOpenDesignMedia(model) || model.modality !== 'image') return;
+  if (/^gpt-image-2\.6-/.test(model.modelId)) {
+    const unsupported = ['output', 'aspect_ratio', 'resolution', 'size', 'image_size'].filter(key => resolved[key] !== undefined);
+    if (unsupported.length) {
+      throw new Error(`Model ${model.id} does not support ${unsupported.join(', ')}. Supported parameters: quality (low|medium|high) and optional background ("transparent").`);
+    }
+    return;
+  }
+  if (model.modelId === 'seedream-5.0-flash' || model.modelId === 'seedream-5.5') {
+    const unsupported = ['output', 'aspect_ratio', 'resolution', 'background', 'image_size'].filter(key => resolved[key] !== undefined);
+    if (unsupported.length) {
+      const sizes = model.modelId === 'seedream-5.0-flash' ? '1K|1.5K|2K' : '1K|2K';
+      throw new Error(`Model ${model.id} does not support ${unsupported.join(', ')}. Supported parameters: size (${sizes}).`);
+    }
+    return;
+  }
+  if (resolved.output !== undefined) {
+    const out = resolved.output;
+    if (!isRecord(out) || typeof out.aspect_ratio !== 'string' || !out.aspect_ratio.trim()
+      || typeof out.resolution !== 'string' || !out.resolution.trim()) {
+      throw new Error('parameters.output must be an object with non-empty aspect_ratio and resolution strings.');
+    }
+    if (imageProfiles && !imageProfiles.profiles.some(p => p.aspect_ratio === out.aspect_ratio && p.resolution === out.resolution)) {
+      throw new Error(`Output profile ${out.aspect_ratio} / ${out.resolution} is not available for this model.`);
+    }
+  }
+}
+
 /** Resolve defaults without carrying a text-to-video ratio into a first-frame request,
  * and complete published OpenDesign image (aspect_ratio, resolution) output profile pairs. */
 export function resolveGenerationParameters(model: Model, parameters: Record<string, unknown>, hasInputImage = false): Record<string, unknown> {
@@ -235,6 +265,7 @@ export function resolveGenerationParameters(model: Model, parameters: Record<str
           : 'OpenDesign Cloud image requests require both aspect_ratio and resolution together, or an explicit output object.');
       }
     }
+    assertOpenDesignImageParameters(model, resolved, imageProfiles);
   }
   return resolved;
 }
@@ -426,6 +457,7 @@ export function validateGenerationOptions(
     }
   }
   const imageProfiles = publishedImageProfiles(model, isEdit);
+  assertOpenDesignImageParameters(model, parameters, imageProfiles);
   if (imageProfiles && typeof parameters.aspect_ratio === 'string' && typeof parameters.resolution === 'string') {
     if (!imageProfiles.profiles.some(p => p.aspect_ratio === parameters.aspect_ratio && p.resolution === parameters.resolution)) {
       throw new Error(`Resolution ${parameters.resolution} is not available for aspect ratio ${parameters.aspect_ratio}.`);
