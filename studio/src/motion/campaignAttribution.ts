@@ -30,12 +30,18 @@ export function blackFridayHeroActive(now = Date.now()) {
   return now >= BLACK_FRIDAY_HERO_STARTS_AT && now < BLACK_FRIDAY_HERO_ENDS_AT;
 }
 
-export const COUNTDOWN_CYCLE_SECONDS = 24 * 60 * 60; // 24h rolling cycle
+export const COUNTDOWN_CYCLE_SECONDS = 12 * 60 * 60; // 12h rolling cycle anchored at 2026-11-21 18:00 +08:00
 
 export function readBlackFridayCountdown(now = Date.now()) {
   const remainingMs = Math.max(0, BLACK_FRIDAY_ENDS_AT - now);
-  const diffSec = remainingMs > 0 ? Math.floor((remainingMs - 1) / 1000) : 0;
-  const remaining = remainingMs > 0 ? diffSec % COUNTDOWN_CYCLE_SECONDS : 0;
+  if (remainingMs <= 0) {
+    return { hours: '00', minutes: '00', seconds: '00', datetime: 'PT00H00M00S' };
+  }
+  const elapsedSec = Math.floor((now - BLACK_FRIDAY_STARTS_AT) / 1000);
+  const inCycleSec = ((elapsedSec % COUNTDOWN_CYCLE_SECONDS) + COUNTDOWN_CYCLE_SECONDS) % COUNTDOWN_CYCLE_SECONDS;
+  const cycleRemaining = COUNTDOWN_CYCLE_SECONDS - 1 - inCycleSec;
+  const untilEndSec = Math.floor((remainingMs - 1) / 1000);
+  const remaining = Math.min(cycleRemaining, untilEndSec);
   const hours = Math.floor(remaining / 3600);
   const minutes = Math.floor((remaining % 3600) / 60);
   const seconds = remaining % 60;
