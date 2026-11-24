@@ -603,7 +603,7 @@ export class OpenDesignAccount {
       this.billingError = status ? { status, ...(code ? { code } : {}) } : undefined;
     }
   }
-  async login() {
+  async login(entryId?: string) {
     const current = await this.summary();
     if (this.signingOut) throw new Error('Wait for sign-out to finish before connecting an account');
     if (this.connecting || current.state === 'signed-in') return this.summary();
@@ -612,7 +612,7 @@ export class OpenDesignAccount {
     this.authorizationUrl = undefined; this.userCode = undefined; this.syncing = false;
     const generation = ++this.generation;
     this.attempt = { id: randomUUID(), stages: [], persisted: false };
-    this.clock = { start: performance.now(), entryId: randomUUID(), occurredAt: new Date().toISOString() };
+    this.clock = { start: performance.now(), entryId: entryId ?? randomUUID(), occurredAt: new Date().toISOString() };
     void this.authorize(generation).catch(error => {
       if (this.generation !== generation) return;
       this.connecting = false; this.syncing = false; this.child = undefined; this.authorizationUrl = undefined; this.userCode = undefined;
@@ -732,9 +732,9 @@ export class OpenDesignAccount {
    * Opens the subscription page in the system browser, the one the connector used for sign-in, so its OpenDesign session
    * carries over. A one-time account intent makes the page confirm it is the account signed in here before any purchase.
    */
-  async openSubscription(launch: (url: string) => Promise<void> = openSystemBrowser) {
+  async openSubscription(launch: (url: string) => Promise<void> = openSystemBrowser, entryId?: string) {
     const target = '/dashboard?' + new URLSearchParams({ billing: 'plan', od_origin: 'openmotion', od_entry_source: 'openmotion_manage_subscription',
-      od_entry_id: randomUUID(), od_entry_at: new Date().toISOString() });
+      od_entry_id: entryId ?? randomUUID(), od_entry_at: new Date().toISOString() });
     let url = consoleUrl + target;
     const profile = await this.profile();
     if (signedInProfile(profile) && profile!.apiUrl?.replace(/\/$/, '') === productionApi && await this.identity()) {

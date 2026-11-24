@@ -323,6 +323,13 @@ async function invokePhase1WithTracking(
   return result;
 }
 
+// Legacy account actions accept an empty POST. Only a UUID from the optional JSON body may cross the handoff.
+async function accountEntryId(req: IncomingMessage) {
+  if (!req.headers['content-type']?.startsWith('application/json')
+    || (!req.headers['transfer-encoding'] && !Number(req.headers['content-length']))) return undefined;
+  const id: unknown = (await input(req, 4096))?.entryId;
+  return typeof id === 'string' && uuid.test(id) ? id : undefined;
+}
 function revision(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw new Error('需要 openmotion_get_project 返回的 expectedRevision');
 }
@@ -1289,10 +1296,10 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         const body = await input(req); await setDefaultModel(gateway, body.kind, body.model); return json(res, 200, { ok: true });
       }
       if (url.pathname === '/api/settings/account' && req.method === 'GET') return json(res, 200, await gateway.account.summary(url.searchParams.get('refresh') === 'true'));
-      if (url.pathname === '/api/settings/account/login' && req.method === 'POST') return json(res, 200, await gateway.account.login());
+      if (url.pathname === '/api/settings/account/login' && req.method === 'POST') return json(res, 200, await gateway.account.login(await accountEntryId(req)));
       if (url.pathname === '/api/settings/account/cancel' && req.method === 'POST') return json(res, 200, await gateway.account.cancel());
       if (url.pathname === '/api/settings/account/logout' && req.method === 'POST') return json(res, 200, await gateway.account.logout());
-      if (url.pathname === '/api/settings/account/subscription' && req.method === 'POST') return json(res, 200, await gateway.account.openSubscription());
+      if (url.pathname === '/api/settings/account/subscription' && req.method === 'POST') return json(res, 200, await gateway.account.openSubscription(undefined, await accountEntryId(req)));
       return json(res, 404, { error: 'Settings endpoint not found' });
     }
     if (motionRequest && url.pathname.startsWith('/api/capabilities')) {

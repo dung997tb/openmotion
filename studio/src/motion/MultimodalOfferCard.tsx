@@ -1,0 +1,40 @@
+import { useRef, type ReactNode } from 'react';
+import { Button } from 'open-design-ui/button';
+import { useI18n } from '../i18n/I18n';
+import { RemixIcon } from '../icons/RemixIcons';
+import { reportOfferView, type OfferKind, type OfferVisit } from './exploreTracking';
+import { useCardImpressions } from './useTemplateImpressions';
+import type { useSubscriptionOpener } from './useSubscriptionOpener';
+import styles from './GenerationOffer.module.css';
+
+export function MultimodalOfferCard({ title, details, children, visit, kind }: {
+  title: string; details: string; children: ReactNode; visit?: OfferVisit; kind: OfferKind;
+}) {
+  const card = useRef<HTMLElement>(null);
+  useCardImpressions(card, kind, Boolean(visit && !visit.seen.has(kind)), visit?.fields.offer_visit_id ?? '', () => {
+    if (!visit) return false;
+    reportOfferView(visit, kind);
+    return true;
+  }, 'data-generation-offer');
+  return <section ref={card} data-generation-offer={visit ? kind : undefined} className={styles.card} aria-label={title}>
+    <h3>{title}</h3>
+    <p title={details}>{details}</p>
+    {children}
+  </section>;
+}
+
+export function MultimodalUpgradeButton({ subscription }: { subscription: ReturnType<typeof useSubscriptionOpener> }) {
+  const { t } = useI18n();
+  return subscription.link ?? <Button variant="plain" onClick={() => void subscription.openSubscription('view_plans')}>
+    {t('Upgrade to Plus')}<RemixIcon name="arrow-right-up-line" size={12} />
+  </Button>;
+}
+
+export function MultimodalUpgradeCard({ subscription, visit }: {
+  subscription: ReturnType<typeof useSubscriptionOpener>; visit?: OfferVisit;
+}) {
+  const { t } = useI18n();
+  return <MultimodalOfferCard kind="upgrade" visit={visit} title={t('Unlock multimodal creation')} details={t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}>
+    <MultimodalUpgradeButton subscription={subscription} />
+  </MultimodalOfferCard>;
+}
