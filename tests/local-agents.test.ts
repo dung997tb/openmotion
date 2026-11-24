@@ -47,15 +47,21 @@ test('local Codex prefers a newer bundled CLI and respects an explicit binary', 
   clearLocalAgentResolveCache();
 
   assert.equal(await resolveLocalAgent('codex'), bundled);
-  assert.equal(await resolveAgent('codex'), standalone);
+  assert.equal(await resolveAgent('codex'), bundled);
 
   process.env.CODEX_BIN = override;
   assert.equal(await resolveLocalAgent('codex'), override);
+  assert.equal(await resolveAgent('codex'), override);
   delete process.env.CODEX_BIN;
+
+  await writeCli(standalone, '0.100.0');
+  clearLocalAgentResolveCache();
+  assert.equal(await resolveAgent('codex'), standalone);
 
   await writeCli(standalone, '0.101.0');
   clearLocalAgentResolveCache();
   assert.equal(await resolveLocalAgent('codex'), standalone);
+  assert.equal(await resolveAgent('codex'), standalone);
 });
 
 test('Agent discovery excludes hidden models and parses CLI, help, Pi and spinner outputs cleanly', () => {

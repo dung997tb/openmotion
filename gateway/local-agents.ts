@@ -1,9 +1,8 @@
 import path from 'node:path';
-import { access, stat } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import os from 'node:os';
 import { localAgents, type AgentChoice, type AgentDirectory, type AgentLaunch, type AgentModel, type LocalAgent } from '../shared/local-agents.ts';
-import { resolveAgent } from './agents.ts';
+import { resolveLocalAgent } from './agents.ts';
 import {
   discoverAcp,
   discoverClaudeModels,
@@ -23,7 +22,8 @@ import {
 } from './agent-discovery.ts';
 import { readSettings, writeSettings } from './settings-storage.ts';
 import { launchTerminal, terminalCommand } from './agent-terminal.ts';
-import { BoundedLruCache } from '../shared/lifecycle.ts';
+
+export { clearLocalAgentResolveCache, resolveLocalAgent } from './agents.ts';
 
 type AgentDiscoverers = {
   acp: (bin: string, args: string[], options?: AcpDiscoveryOptions) => Promise<AcpDiscoveryResult>;
@@ -38,103 +38,6 @@ const defaultDiscoverers: AgentDiscoverers = {
   claude: discoverClaudeModels,
   pi: discoverPiRpc,
 };
-
-const BIN_ALIASES: Record<string, string[]> = Object.fromEntries(
-  localAgents.filter(agent => agent.binAliases?.length).map(agent => [agent.bin, [agent.bin, ...agent.binAliases!]]),
-);
-
-const RESOLVE_CACHE_TTL_MS = 30_000;
-const resolveCache = new BoundedLruCache<string, { resolved: string | null; expiresAt: number }>({
-  maxEntries: 64,
-});
-
-export function clearLocalAgentResolveCache(): void {
-  resolveCache.clear();
-}
-
-async function findLocalAgent(bin: string): Promise<string | null> {
-  const names = BIN_ALIASES[bin] ?? [bin];
-  for (const name of names) {
-    const found = await resolveAgent(name);
-    if (found) return found;
-  }
-  const home = os.homedir();
-  const dirs = [
-    ...(process.env.PATH || '').split(path.delimiter).filter(dir => path.isAbsolute(dir)),
-    path.join(home, '.local/bin'),
-    path.join(home, '.bun/bin'),
-    path.join(home, '.cargo/bin'),
-    path.join(home, '.npm-global/bin'),
-    path.join(home, '.opencode/bin'),
-    path.join(home, '.cursor/bin'),
-    path.join(home, '.antigravity/bin'),
-    path.join(home, '.claude/local'),
-    path.join(home, '.kiro/bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    ...(process.platform === 'win32' && process.env.APPDATA ? [path.join(process.env.APPDATA, 'npm')] : []),
-  ];
-  for (const dir of dirs) for (const name of names) for (const suffix of process.platform === 'win32' ? ['.exe', '.cmd'] : ['']) {
-    const file = path.join(dir, name + suffix);
-    try {
-      await access(file, constants.X_OK);
-      return file;
-    } catch { /* next */ }
-  }
-  return null;
-}
-
-async function bundledCodex(hostBin: string | undefined): Promise<string | null> {
-  const candidates = [hostBin];
-  if (process.platform === 'darwin') {
-    const bundle = 'ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';
-    candidates.push(path.join(os.homedir(), 'Applications', bundle), path.join('/Applications', bundle));
-  }
-  for (const candidate of candidates) {
-    if (!candidate || !path.isAbsolute(candidate)) continue;
-    try {
-      if (!(await stat(candidate)).isFile()) continue;
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch { /* next */ }
-  }
-  return null;
-}
-
-async function codexReleaseVersion(bin: string): Promise<string | undefined> {
-  const { ok, text } = await probeAgent(bin, ['--version']);
-  return ok ? /^codex-cli (\d+\.\d+\.\d+)(?:\+[\w.-]+)?$/m.exec(text.trim())?.[1] : undefined;
-}
-
-async function preferNewerCodex(standalone: string | null, hostBin: string | undefined): Promise<string | null> {
-  const bundled = await bundledCodex(hostBin);
-  if (!standalone || !bundled || standalone === bundled) return standalone ?? bundled;
-
-  const [standaloneVersion, bundledVersion] = await Promise.all([
-    codexReleaseVersion(standalone),
-    codexReleaseVersion(bundled),
-  ]);
-  if (standaloneVersion && bundledVersion && bundledVersion.localeCompare(standaloneVersion, 'en', { numeric: true }) > 0) {
-    return bundled;
-  }
-  return standalone;
-}
-
-export async function resolveLocalAgent(bin: string): Promise<string | null> {
-  const hostCodex = bin === 'codex' ? process.env.CODEX_APP_RUNTIME_CLI_PATH : undefined;
-  const override = process.env[`${bin.toUpperCase()}_BIN`];
-  const pathKey = `${bin}\0${process.env.PATH || ''}\0${override ?? ''}\0${hostCodex ?? ''}`;
-  const now = Date.now();
-  const hit = resolveCache.get(pathKey);
-  if (hit && hit.expiresAt > now) return hit.resolved;
-
-  const installed = await findLocalAgent(bin);
-  const resolved = bin === 'codex' && installed !== override
-    ? await preferNewerCodex(installed, hostCodex)
-    : installed;
-  resolveCache.set(pathKey, { resolved, expiresAt: now + RESOLVE_CACHE_TTL_MS });
-  return resolved;
-}
 
 function antigravityAcpClientInfo(version?: string): { name: string; version: string } {
   // Antigravity < 1.5.1 only exposes non-Gemini models to allowlisted ACP editors such as Zed.
