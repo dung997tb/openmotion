@@ -11,6 +11,7 @@ import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { gatewayRequest, type CloudApiError } from './gatewayClient';
 import { notifyProvidersChanged } from './useProviderDirectory';
+import { clearPrivateSwrCache } from './swrCache';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
 import {
@@ -322,6 +323,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
       const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
       const data = await response.json().catch(() => ({})) as { ok?: boolean; endSessionUrl?: string };
       if (!response.ok) throw new Error(t('Could not sign out'));
+      clearPrivateSwrCache();
       state.setAccount({ state: 'signed-out', consoleUrl: account?.consoleUrl || DEFAULT_CONSOLE_URL, authMode: account?.authMode ?? 'oidc' });
       setTokens(null);
       setCreatedToken(null);
