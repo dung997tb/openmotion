@@ -1,10 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { PREVIEW_THUMBNAIL_CAPTURE } from '../../src/studio/engine/preview-thumbnail-capture.ts';
 import { PREVIEW_BRIDGE_SCRIPT } from '../../src/studio/engine/preview-bridge.ts';
 import { buildSubCompositionHtmlInMemory } from '../../src/studio/engine/preview-bundler.ts';
-import { SNAPDOM_VENDOR_PATH } from '../../src/studio/routes/preview.ts';
+import { createStudioPreviewRoutes, SNAPDOM_VENDOR_PATH } from '../../src/studio/routes/preview.ts';
 import { computeCompositionRevisions } from '../../src/studio/routes/projects.ts';
 
 describe('preview-thumbnail-capture embedded bridge script', () => {
@@ -593,5 +594,213 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
     assert.ok(interactiveHtml);
     assert.doesNotMatch(interactiveHtml, /snapdom\.js/);
     assert.doesNotMatch(interactiveHtml, /<img[^>]*crossorigin="anonymous"/);
+  });
+
+  it('passes dpr=1, defaults to 160x90, uses 1-frame settle for DOM-only scenes, and skips unchanged static frames with distinct buffers', async () => {
+    const snapOptions: Array<Record<string, unknown>> = [];
+    let rafCalls = 0;
+    let frameBytes = 0;
+    let activeObserverCb: (() => void) | null = null;
+    let disconnected = false;
+    class FakeMutationObserver {
+      private cb: () => void;
+      constructor(cb: () => void) { this.cb = cb; }
+      observe() { activeObserverCb = this.cb; }
+      takeRecords() { return []; }
+      disconnect() { disconnected = true; }
+    }
+
+    const fakeStage = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 1920,
+      clientHeight: 1080,
+      textContent: 'Static tail scene',
+      getAttribute: (name: string) => (name === 'data-width' ? '1920' : name === 'data-height' ? '1080' : null),
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    };
+
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ clearRect: () => {}, drawImage: () => {} }),
+      toBlob: (cb: (blob: { arrayBuffer: () => Promise<ArrayBuffer> }) => void) => {
+        const seq = ++frameBytes;
+        cb({ arrayBuffer: () => Promise.resolve(new Uint8Array([0xff, 0xd8, seq]).buffer) });
+      },
+    };
+
+    const sandbox: Record<string, unknown> = {
+      URL,
+      Promise,
+      Array,
+      Object,
+      Number,
+      Math,
+      String,
+      Boolean,
+      Error,
+      MutationObserver: FakeMutationObserver,
+      setTimeout,
+      clearTimeout,
+      location: { origin: 'https://preview.example.test', href: 'https://preview.example.test/api/projects/p1/preview/comp/s1.html?capture=1&pt=tok' },
+      requestAnimationFrame: (fn: () => void) => {
+        rafCalls += 1;
+        return setTimeout(fn, 0);
+      },
+      player: () => ({
+        pause: () => {},
+        seek: (t: number) => {
+          // Mutate only at t=1; t=2 and t=3 hold the exact same DOM state.
+          if (t === 1) activeObserverCb?.();
+        },
+      }),
+      document: {
+        body: fakeStage,
+        fonts: { ready: Promise.resolve() },
+        getAnimations: () => [],
+        querySelector: () => fakeStage,
+        querySelectorAll: () => [],
+        createElement: (tag: string) => (tag === 'canvas' ? { ...fakeCanvas } : {}),
+      },
+      window: {
+        innerWidth: 1920,
+        innerHeight: 1080,
+        fetch: () => Promise.resolve({ ok: true }),
+        snapdom: async (_el: unknown, opts: Record<string, unknown>) => {
+          snapOptions.push(opts);
+          return { toCanvas: async () => ({}) };
+        },
+      },
+    };
+
+    const capturePreviewFrames = vm.runInNewContext(
+      `(function(){${PREVIEW_THUMBNAIL_CAPTURE}; return capturePreviewFrames;})()`,
+      sandbox,
+    ) as (msg: Record<string, unknown>) => Promise<{ frames: ArrayBuffer[]; width: number; height: number }>;
+
+    const result = await capturePreviewFrames({ times: [0.5, 1, 2, 3] });
+    assert.equal(result.width, 160);
+    assert.equal(result.height, 90);
+    assert.equal(result.frames.length, 4);
+    // Only frame 0 (initial) and frame 1 (mutated) invoke SnapDOM; frames 2 & 3 reuse frame 1's buffer.
+    assert.equal(snapOptions.length, 2);
+    assert.equal(snapOptions[0]?.dpr, 1);
+    assert.equal(snapOptions[1]?.dpr, 1);
+    // 1 animation frame settle per timestamp for DOM-only scenes (4 instead of 8).
+    assert.equal(rafCalls, 4);
+    assert.equal(disconnected, true);
+    // Reused buffers must be distinct ArrayBuffer instances so transferable postMessage never fails.
+    assert.notEqual(result.frames[1], result.frames[2]);
+    assert.notEqual(result.frames[2], result.frames[3]);
+    assert.deepEqual(Array.from(new Uint8Array(result.frames[1]!)), Array.from(new Uint8Array(result.frames[2]!)));
+    assert.deepEqual(Array.from(new Uint8Array(result.frames[1]!)), Array.from(new Uint8Array(result.frames[3]!)));
+  });
+
+  it('uses the direct canvas fast-path even when a pure-canvas composition contains inline script and style tags', async () => {
+    let snapdomCalled = 0;
+    let rafCalls = 0;
+    const pureCanvas = {
+      nodeType: 1,
+      tagName: 'CANVAS',
+      textContent: 'Canvas fallback',
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    };
+    const inlineScript = { nodeType: 1, tagName: 'SCRIPT', textContent: 'drawCube();' };
+    const inlineStyle = { nodeType: 1, tagName: 'STYLE', textContent: 'canvas{width:100%}' };
+    const fakeStage = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 1920,
+      clientHeight: 1080,
+      textContent: 'Canvas fallbackdrawCube();canvas{width:100%}',
+      childNodes: [inlineStyle, pureCanvas, inlineScript],
+      getAttribute: (name: string) => (name === 'data-width' ? '1920' : name === 'data-height' ? '1080' : null),
+      querySelectorAll: (sel: string) => (sel === 'canvas' ? [pureCanvas] : []),
+      querySelector: (sel: string) => (sel === 'canvas,video' ? pureCanvas : null),
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    };
+    const outCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ clearRect: () => {}, drawImage: () => {} }),
+      toBlob: (cb: (blob: { arrayBuffer: () => Promise<ArrayBuffer> }) => void) => {
+        cb({ arrayBuffer: () => Promise.resolve(new Uint8Array([0xff, 0xd8, 0x09]).buffer) });
+      },
+    };
+    const sandbox: Record<string, unknown> = {
+      URL,
+      Promise,
+      Array,
+      Object,
+      Number,
+      Math,
+      String,
+      Boolean,
+      Error,
+      setTimeout,
+      clearTimeout,
+      location: { origin: 'https://preview.example.test', href: 'https://preview.example.test/api/projects/p1/preview/comp/cube.html?capture=1&pt=tok' },
+      requestAnimationFrame: (fn: () => void) => {
+        rafCalls += 1;
+        return setTimeout(fn, 0);
+      },
+      player: () => ({ pause: () => {}, seek: () => {} }),
+      document: {
+        body: fakeStage,
+        fonts: { ready: Promise.resolve() },
+        querySelector: () => fakeStage,
+        querySelectorAll: () => [],
+        createElement: (tag: string) => (tag === 'canvas' ? { ...outCanvas } : {}),
+      },
+      window: {
+        innerWidth: 1920,
+        innerHeight: 1080,
+        fetch: () => Promise.resolve({ ok: true }),
+        snapdom: async () => {
+          snapdomCalled += 1;
+          return { toCanvas: async () => ({}) };
+        },
+      },
+    };
+
+    const capturePreviewFrames = vm.runInNewContext(
+      `(function(){${PREVIEW_THUMBNAIL_CAPTURE}; return capturePreviewFrames;})()`,
+      sandbox,
+    ) as (msg: Record<string, unknown>) => Promise<{ frames: ArrayBuffer[] }>;
+
+    const result = await capturePreviewFrames({ times: [0.5, 2.5] });
+    assert.equal(result.frames.length, 2);
+    assert.equal(snapdomCalled, 0, 'pure canvas with inline script/style must bypass SnapDOM');
+    assert.equal(rafCalls, 4, 'canvas scenes keep 2-frame settle per timestamp');
+  });
+
+  it('serves /api/vendor/snapdom.js pre-compressed with br/gzip when requested and raw otherwise', async () => {
+    const routes = createStudioPreviewRoutes({
+      storage: { putBlobIfAbsent: async () => {} },
+    } as unknown as Parameters<typeof createStudioPreviewRoutes>[0]);
+
+    const brRes = await routes.request(SNAPDOM_VENDOR_PATH, { headers: { 'Accept-Encoding': 'gzip, deflate, br' } });
+    assert.equal(brRes.status, 200);
+    assert.equal(brRes.headers.get('content-encoding'), 'br');
+    assert.equal(brRes.headers.get('vary'), 'Accept-Encoding');
+    const brBuf = Buffer.from(await brRes.arrayBuffer());
+
+    const gzipRes = await routes.request(SNAPDOM_VENDOR_PATH, { headers: { 'Accept-Encoding': 'gzip' } });
+    assert.equal(gzipRes.status, 200);
+    assert.equal(gzipRes.headers.get('content-encoding'), 'gzip');
+    const gzipBuf = Buffer.from(await gzipRes.arrayBuffer());
+
+    const rawRes = await routes.request(SNAPDOM_VENDOR_PATH);
+    assert.equal(rawRes.status, 200);
+    assert.equal(rawRes.headers.get('content-encoding'), null);
+    const rawBuf = Buffer.from(await rawRes.arrayBuffer());
+
+    assert.ok(brBuf.length < rawBuf.length / 2, 'brotli bundle should shrink transfer by >50%');
+    assert.ok(gzipBuf.length < rawBuf.length / 2, 'gzip bundle should shrink transfer by >50%');
+    assert.deepEqual(brotliDecompressSync(brBuf), rawBuf);
+    assert.deepEqual(gunzipSync(gzipBuf), rawBuf);
   });
 });

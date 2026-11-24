@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import { Hono, type Context } from 'hono';
 import {
   extractWildcardPath,
@@ -120,14 +121,27 @@ function documentSignature(revision: string, assetBase?: string): string {
 
 export const SNAPDOM_VENDOR_PATH = '/api/vendor/snapdom.js';
 
-let cachedSnapdomBundle: Promise<Buffer | null> | null = null;
-function loadSnapdomVendorBundle(): Promise<Buffer | null> {
+interface PrecompressedAsset {
+  raw: Buffer;
+  gzip: Buffer;
+  br: Buffer;
+}
+
+let cachedSnapdomBundle: Promise<PrecompressedAsset | null> | null = null;
+function loadSnapdomVendorBundle(): Promise<PrecompressedAsset | null> {
   if (!cachedSnapdomBundle) {
     cachedSnapdomBundle = (async () => {
       try {
         const req = createRequire(import.meta.url);
         const pkgDir = path.dirname(req.resolve('@zumer/snapdom/package.json'));
-        return await readFile(path.join(pkgDir, 'dist', 'snapdom.js'));
+        const raw = await readFile(path.join(pkgDir, 'dist', 'snapdom.js'));
+        return {
+          raw,
+          gzip: gzipSync(raw, { level: 6 }),
+          br: brotliCompressSync(raw, {
+            params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 },
+          }),
+        };
       } catch {
         return null;
       }
@@ -196,7 +210,17 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     c.header('Cache-Control', 'public, max-age=31536000, immutable');
     c.header('Content-Type', 'application/javascript; charset=utf-8');
     c.header('X-Content-Type-Options', 'nosniff');
-    return c.body(new Uint8Array(bundle));
+    c.header('Vary', 'Accept-Encoding');
+    const acceptEncoding = c.req.header('accept-encoding') ?? '';
+    if (/\bbr\b/i.test(acceptEncoding)) {
+      c.header('Content-Encoding', 'br');
+      return c.body(new Uint8Array(bundle.br));
+    }
+    if (/\bgzip\b/i.test(acceptEncoding)) {
+      c.header('Content-Encoding', 'gzip');
+      return c.body(new Uint8Array(bundle.gzip));
+    }
+    return c.body(new Uint8Array(bundle.raw));
   });
 
   async function documentResponse(c: Context<{ Variables: StudioVariables }>, compPath?: string) {
