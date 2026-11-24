@@ -19,8 +19,15 @@ import {
   derivePkceChallengeS256,
   DesktopAuthHandoffManager,
   generatePkceVerifier,
+  parseStudioAuthNavigationUrl,
+  probeDesktopHandoffSupport,
+  sanitizeAuthReturnPath,
   timingSafeEqualStrings,
 } from '../src/auth-handoff.ts';
+import {
+  CapabilityRegistry,
+  createAccountCapabilityModule,
+} from '../src/capability-registry.ts';
 import {
   DESKTOP_DATA_SUBDIRS,
   DesktopDataLayoutVersionError,
@@ -40,6 +47,7 @@ import {
   evaluateWindowOpenPolicy,
   isBillingOrAccountPortalUrl,
   POPUP_HARDENED_WEB_PREFERENCES,
+  resolveDefaultFallbackAuthOrigins,
 } from '../src/window-policy.ts';
 import { authorizePrivilegedIpcSender } from '../src/ipc-guard.ts';
 import { resolvePackagedReleaseChannel } from '../src/updater.ts';
@@ -874,4 +882,159 @@ test('K10 resolvePackagedReleaseChannel preserves packaged test channel and igno
     }),
     'test',
   );
+});
+
+test('K3 login chain helpers: parseStudioAuthNavigationUrl, probeDesktopHandoffSupport, and openInWindowFallback', async () => {
+  const studioOrigin = 'https://openmotion.powerformer.net';
+  assert.deepEqual(
+    parseStudioAuthNavigationUrl(
+      'https://openmotion.powerformer.net/auth/login?switch=1&returnTo=%2Fprojects%2Fabc',
+      studioOrigin,
+    ),
+    { returnPath: '/projects/abc', switchAccount: true },
+  );
+  assert.deepEqual(
+    parseStudioAuthNavigationUrl(
+      'https://openmotion.powerformer.net/auth/login?returnTo=//evil.example.com/phish',
+      studioOrigin,
+    ),
+    { switchAccount: false },
+  );
+  assert.equal(sanitizeAuthReturnPath('/auth/login'), undefined);
+  assert.equal(sanitizeAuthReturnPath('/explore?tab=1'), '/explore?tab=1');
+  assert.equal(
+    parseStudioAuthNavigationUrl('https://evil.example.com/auth/login', studioOrigin),
+    null,
+  );
+  assert.equal(
+    parseStudioAuthNavigationUrl('https://openmotion.powerformer.net/explore', studioOrigin),
+    null,
+  );
+
+  // Probe returns false on 404/405/501 (legacy backend without /auth/desktop/start) and true on 400 (mounted route).
+  assert.equal(
+    await probeDesktopHandoffSupport(studioOrigin, async () => ({ status: 404 })),
+    false,
+  );
+  assert.equal(
+    await probeDesktopHandoffSupport(studioOrigin, async () => ({ status: 400 })),
+    true,
+  );
+  assert.equal(
+    await probeDesktopHandoffSupport(studioOrigin, async () => {
+      throw new Error('network timeout');
+    }),
+    true,
+  );
+
+  let receivedCredentials = '';
+  const manager = new DesktopAuthHandoffManager({
+    studioOrigin,
+    openExternal: () => {},
+    exchangeFetch: async (_url, init) => {
+      receivedCredentials = init.credentials ?? '';
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          user: { id: 'u-1', email: 'test@example.com' },
+          workspaceId: 'ws-1',
+        }),
+      };
+    },
+  });
+
+  const fallbackUrl = manager.openInWindowFallback({ returnPath: '/explore', switchAccount: true });
+  assert.equal(
+    fallbackUrl,
+    'https://openmotion.powerformer.net/auth/login?switch=1&returnTo=%2Fexplore',
+  );
+
+  const started = await manager.startLogin();
+  const callbackUrl = new URL(started.redirectUri);
+  callbackUrl.searchParams.set('code', 'test-code-12345678');
+  callbackUrl.searchParams.set('state', started.state);
+  const res = await fetch(callbackUrl.toString());
+  assert.equal(res.status, 200);
+  const finalState = await started.completion;
+  assert.equal(finalState.status, 'authenticated');
+  assert.equal(receivedCredentials, 'include');
+  manager.dispose();
+});
+
+test('K2 resolveDefaultFallbackAuthOrigins allows test OIDC origins only while inWindowAuthFallbackActive is true', () => {
+  const testOrigins = resolveDefaultFallbackAuthOrigins('test');
+  const stableOrigins = resolveDefaultFallbackAuthOrigins('stable');
+
+  assert.equal(testOrigins.includes('https://vela-api.powerformer.net'), true);
+  assert.equal(testOrigins.includes('https://open-design.powerformer.net'), true);
+  assert.equal(stableOrigins.includes('https://vela-api.powerformer.net'), false);
+  assert.equal(stableOrigins.includes('https://accounts.open-design.ai'), true);
+
+  const baseConfig = {
+    studioOrigin: 'https://openmotion.powerformer.net',
+    channel: 'test',
+    explicitIdpAuthOrigins: testOrigins,
+  };
+
+  assert.equal(
+    evaluateNavigationPolicy('https://vela-api.powerformer.net/api/auth/oauth2/authorize', {
+      ...baseConfig,
+      inWindowAuthFallbackActive: false,
+    }).action,
+    'deny',
+  );
+
+  assert.equal(
+    evaluateNavigationPolicy('https://vela-api.powerformer.net/api/auth/oauth2/authorize', {
+      ...baseConfig,
+      inWindowAuthFallbackActive: true,
+    }).action,
+    'allow',
+  );
+  assert.equal(
+    evaluateNavigationPolicy('https://open-design.powerformer.net/cloud/login?client_id=openmotion-web', {
+      ...baseConfig,
+      inWindowAuthFallbackActive: true,
+    }).action,
+    'allow',
+  );
+
+  const billingDecision = evaluateNavigationPolicy('https://open-design.powerformer.net/billing/plans', {
+    ...baseConfig,
+    inWindowAuthFallbackActive: true,
+  });
+  assert.equal(billingDecision.action, 'deny');
+  assert.equal(billingDecision.reason, 'billing-external');
+});
+
+test('K3 account.startBrowserLogin parses switch=1 from loginUrl and returns structuredClone-safe payload', async () => {
+  const receivedCalls = [];
+  const registry = new CapabilityRegistry();
+  registry.register(
+    createAccountCapabilityModule({
+      startSignIn: async params => {
+        receivedCalls.push(params);
+        return {
+          mode: 'browser-handoff',
+          url: 'https://openmotion.powerformer.net/auth/desktop/start?state=abc',
+          startUrl: 'https://openmotion.powerformer.net/auth/desktop/start?state=abc',
+          redirectUri: 'http://127.0.0.1:43210/callback',
+          state: 'abc',
+          codeChallenge: 'xyz',
+        };
+      },
+      cancelSignIn: () => ({ status: 'canceled' }),
+      refreshAccount: () => ({ status: 'idle' }),
+    }),
+  );
+
+  const result = await registry.invoke('account', 'startBrowserLogin', {
+    loginUrl: '/auth/login?switch=1&returnTo=%2Fsettings',
+    returnTo: '/settings',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(receivedCalls, [{ returnPath: '/settings', switchAccount: true }]);
+  assert.deepEqual(structuredClone(result), result);
 });

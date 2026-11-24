@@ -129,6 +129,30 @@ const DEFAULT_ACCOUNT_PORTAL_HOSTS = new Set([
   'accounts.open-design.ai',
 ]);
 
+export const DEFAULT_FALLBACK_AUTH_ORIGINS_STABLE: readonly string[] = [
+  'https://accounts.open-design.ai',
+  'https://open-design.ai',
+  'https://www.open-design.ai',
+  'https://api.open-design.ai',
+] as const;
+
+export const DEFAULT_FALLBACK_AUTH_ORIGINS_TEST: readonly string[] = [
+  'https://vela-api.powerformer.net',
+  'https://open-design.powerformer.net',
+  'https://sso.powerformer.com',
+  ...DEFAULT_FALLBACK_AUTH_ORIGINS_STABLE,
+] as const;
+
+/**
+ * Built-in first-party OIDC / login origins permitted in the main BrowserWindow
+ * ONLY while `inWindowAuthFallbackActive` is true (with privileged IPC disabled).
+ */
+export function resolveDefaultFallbackAuthOrigins(channel: HostReleaseChannel): readonly string[] {
+  return channel === 'stable'
+    ? DEFAULT_FALLBACK_AUTH_ORIGINS_STABLE
+    : DEFAULT_FALLBACK_AUTH_ORIGINS_TEST;
+}
+
 const DEFAULT_BILLING_EXACT_HOSTS = new Set([
   ...DEFAULT_EXPLICIT_BILLING_HOSTS,
   ...DEFAULT_ACCOUNT_PORTAL_HOSTS,

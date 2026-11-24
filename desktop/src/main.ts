@@ -33,7 +33,12 @@ import {
   createMacOsKeychainSecretStore,
 } from '../../packages/local-atoms/index.ts';
 import { SignedConfigManager } from '../../packages/signed-config/index.ts';
-import { DesktopAuthHandoffManager } from './auth-handoff.ts';
+import {
+  DesktopAuthHandoffManager,
+  parseStudioAuthNavigationUrl,
+  probeDesktopHandoffSupport,
+  sanitizeAuthReturnPath,
+} from './auth-handoff.ts';
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
 import { createDesktopSentryReporter } from './sentry.ts';
 import { DesktopTelemetryCollector } from './telemetry.ts';
@@ -74,6 +79,7 @@ import { DesktopUpdaterController, resolvePackagedReleaseChannel } from './updat
 import {
   attachWindowNavigationPolicies,
   isAllowedExternalUrl,
+  resolveDefaultFallbackAuthOrigins,
   type PolicyWebContentsLike,
   type WindowPolicyConfig,
 } from './window-policy.ts';
@@ -245,6 +251,10 @@ const updater = new DesktopUpdaterController({
   feedUrl: !app.isPackaged ? process.env.MOTION_DESKTOP_UPDATE_URL?.trim() || undefined : undefined,
 });
 
+let pendingLoginReturnPath: string | undefined;
+const handoffSupportCache = new Map<string, { supported: boolean; checkedAt: number }>();
+const HANDOFF_PROBE_CACHE_TTL_MS = 30_000;
+
 const authHandoff = new DesktopAuthHandoffManager({
   getStudioOrigin: () => resolveStudioOrigin(),
   openExternal: async url => {
@@ -255,16 +265,133 @@ const authHandoff = new DesktopAuthHandoffManager({
     if (!win) {
       throw new Error('Main window is unavailable for session exchange');
     }
-    return await win.webContents.session.fetch(url, init);
+    const response = await win.webContents.session.fetch(url, {
+      ...init,
+      credentials: 'include',
+    });
+    if (response.ok) {
+      await win.webContents.session.cookies.flushStore().catch(() => {});
+    }
+    return response;
   },
   onFocusMainWindow: () => {
     inWindowAuthFallbackActive = false;
+    const returnPath = pendingLoginReturnPath;
+    pendingLoginReturnPath = undefined;
     focusOrRestoreMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
-      void mainWindow.loadURL(resolveStudioUrl());
+      const targetUrl = returnPath
+        ? new URL(returnPath, resolveStudioOrigin()).toString()
+        : resolveStudioUrl();
+      void mainWindow.loadURL(targetUrl);
     }
   },
 });
+
+async function isDesktopHandoffSupportedForOrigin(studioOrigin: string): Promise<boolean> {
+  const cached = handoffSupportCache.get(studioOrigin);
+  if (cached && Date.now() - cached.checkedAt < HANDOFF_PROBE_CACHE_TTL_MS) {
+    return cached.supported;
+  }
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const probeFetch = win
+    ? (url: string, init: { method: 'GET'; redirect: 'manual'; signal?: AbortSignal }) =>
+        win.webContents.session.fetch(url, init)
+    : (url: string, init: { method: 'GET'; redirect: 'manual'; signal?: AbortSignal }) => fetch(url, init);
+  const supported = await probeDesktopHandoffSupport(studioOrigin, probeFetch);
+  handoffSupportCache.set(studioOrigin, { supported, checkedAt: Date.now() });
+  return supported;
+}
+
+async function openInWindowLoginFlow(params?: {
+  returnPath?: string;
+  switchAccount?: boolean;
+}): Promise<Record<string, unknown>> {
+  const returnPath = sanitizeAuthReturnPath(params?.returnPath);
+  inWindowAuthFallbackActive = true;
+  const loginUrl = authHandoff.openInWindowFallback({
+    returnPath,
+    switchAccount: params?.switchAccount,
+  });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      await mainWindow.loadURL(loginUrl);
+    } catch (error) {
+      inWindowAuthFallbackActive = false;
+      throw error;
+    }
+  }
+  return { mode: 'in-window', state: 'in-window', url: loginUrl };
+}
+
+async function startDesktopSignIn(params?: {
+  returnPath?: string;
+  switchAccount?: boolean;
+}): Promise<Record<string, unknown>> {
+  const studioOrigin = resolveStudioOrigin();
+  const returnPath = sanitizeAuthReturnPath(params?.returnPath);
+  const supported = await isDesktopHandoffSupportedForOrigin(studioOrigin);
+  if (!supported) {
+    logger.info('main', 'Desktop PKCE handoff route unavailable on Studio origin; using in-window sign-in', {
+      studioOrigin,
+    });
+    return await openInWindowLoginFlow({
+      returnPath,
+      switchAccount: params?.switchAccount,
+    });
+  }
+
+  const startedAt = Date.now();
+  pendingLoginReturnPath = returnPath;
+  try {
+    const result = await authHandoff.startLogin({
+      switchAccount: params?.switchAccount,
+    });
+    void result.completion
+      .then(finalState => {
+        if (finalState.status !== 'authenticated') {
+          pendingLoginReturnPath = undefined;
+        }
+        const outcome =
+          finalState.status === 'authenticated'
+            ? 'authenticated'
+            : finalState.status === 'canceled'
+              ? 'cancelled'
+              : finalState.errorCode === 'TIMEOUT'
+                ? 'timeout'
+                : 'error';
+        telemetry.record({
+          category: 'auth.handoff',
+          outcome,
+          durationMs: Date.now() - startedAt,
+        });
+      })
+      .catch(() => {
+        pendingLoginReturnPath = undefined;
+        telemetry.record({
+          category: 'auth.handoff',
+          outcome: 'error',
+          durationMs: Date.now() - startedAt,
+        });
+      });
+    return {
+      mode: 'browser-handoff',
+      url: result.startUrl,
+      startUrl: result.startUrl,
+      redirectUri: result.redirectUri,
+      state: result.state,
+      codeChallenge: result.codeChallenge,
+    };
+  } catch (error) {
+    pendingLoginReturnPath = undefined;
+    telemetry.record({
+      category: 'auth.handoff',
+      outcome: 'error',
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  }
+}
 
 function formatConfirmationDetail(request: HostConfirmationRequest): string {
   const lines = [
@@ -437,6 +564,7 @@ function getWindowPolicyConfig(): WindowPolicyConfig {
     channel: releaseChannel,
     allowedOrigins: active.allowedOrigins,
     windowPolicy: active.windowPolicy,
+    explicitIdpAuthOrigins: resolveDefaultFallbackAuthOrigins(releaseChannel),
     inWindowAuthFallbackActive,
     allowLocalDevLoopback,
   };
@@ -669,62 +797,12 @@ function registerCapabilities(): void {
 
   registry.register(
     createAccountCapabilityModule({
-      startSignIn: async params => {
-        const startedAt = Date.now();
-        try {
-          const result = await authHandoff.startLogin({
-            switchAccount: params?.switchAccount,
-          });
-          void result.completion
-            .then(finalState => {
-              const outcome =
-                finalState.status === 'authenticated'
-                  ? 'authenticated'
-                  : finalState.status === 'canceled'
-                    ? 'cancelled'
-                    : finalState.errorCode === 'TIMEOUT'
-                      ? 'timeout'
-                      : 'error';
-              telemetry.record({
-                category: 'auth.handoff',
-                outcome,
-                durationMs: Date.now() - startedAt,
-              });
-            })
-            .catch(() => {
-              telemetry.record({
-                category: 'auth.handoff',
-                outcome: 'error',
-                durationMs: Date.now() - startedAt,
-              });
-            });
-          return result as unknown as Record<string, unknown>;
-        } catch (error) {
-          telemetry.record({
-            category: 'auth.handoff',
-            outcome: 'error',
-            durationMs: Date.now() - startedAt,
-          });
-          throw error;
-        }
-      },
+      startSignIn: async params => startDesktopSignIn(params),
       cancelSignIn: () => authHandoff.cancelLogin() as unknown as Record<string, unknown>,
       refreshAccount: () => authHandoff.getState() as unknown as Record<string, unknown>,
       getLoginState: () => authHandoff.getState() as unknown as Record<string, unknown>,
       openBillingPortal: async ({ url }) => openExternalSafe(url),
-      openInWindowLogin: async () => {
-        inWindowAuthFallbackActive = true;
-        const loginUrl = authHandoff.openInWindowFallback();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          try {
-            await mainWindow.loadURL(loginUrl);
-          } catch (error) {
-            inWindowAuthFallbackActive = false;
-            throw error;
-          }
-        }
-        return { state: 'in-window', url: loginUrl };
-      },
+      openInWindowLogin: async params => openInWindowLoginFlow(params),
     }),
   );
 
@@ -945,12 +1023,47 @@ function createMainWindow(): BrowserWindow {
     },
   };
 
+  const maybeResetAuthFallback = (url: string) => {
+    if (!inWindowAuthFallbackActive) return;
+    try {
+      const parsed = new URL(url);
+      if (parsed.origin === resolveStudioOrigin() && parsed.pathname !== '/auth' && !parsed.pathname.startsWith('/auth/')) {
+        inWindowAuthFallbackActive = false;
+      }
+    } catch {
+      // Ignore unparseable URLs.
+    }
+  };
+
+  win.webContents.on('will-navigate', (event, url) => {
+    if (showingRetryPage && url.startsWith('file://') && url.includes('retry.html')) {
+      event.preventDefault();
+      void loadStudioIntoMainWindow();
+      return;
+    }
+    if (!inWindowAuthFallbackActive) {
+      const authNav = parseStudioAuthNavigationUrl(url, resolveStudioOrigin());
+      if (authNav) {
+        event.preventDefault();
+        void startDesktopSignIn(authNav).catch(error => {
+          logger.error('main', 'Desktop sign-in navigation intercept failed', {
+            url,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    }
+  });
+
   attachWindowNavigationPolicies(policyWebContents, {
     getConfig: getWindowPolicyConfig,
     openExternal: async url => {
       await openExternalSafe(url);
     },
     onDecision: (kind, url, decision) => {
+      if (inWindowAuthFallbackActive && decision.action === 'allow' && decision.reason === 'same-origin-studio') {
+        maybeResetAuthFallback(url);
+      }
       if (decision.action === 'deny' && !decision.openExternal) {
         logger.warn('main', `Blocked ${kind}`, { url, reason: decision.reason });
       }
@@ -969,24 +1082,6 @@ function createMainWindow(): BrowserWindow {
     });
   });
 
-  win.webContents.on('will-navigate', (event, url) => {
-    if (showingRetryPage && url.startsWith('file://') && url.includes('retry.html')) {
-      event.preventDefault();
-      void loadStudioIntoMainWindow();
-    }
-  });
-
-  const maybeResetAuthFallback = (url: string) => {
-    if (!inWindowAuthFallbackActive) return;
-    try {
-      const parsed = new URL(url);
-      if (parsed.origin === resolveStudioOrigin() && parsed.pathname !== '/auth' && !parsed.pathname.startsWith('/auth/')) {
-        inWindowAuthFallbackActive = false;
-      }
-    } catch {
-      // Ignore unparseable URLs.
-    }
-  };
   win.webContents.on('did-navigate', (_event, url) => maybeResetAuthFallback(url));
   win.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
     if (isMainFrame) maybeResetAuthFallback(url);

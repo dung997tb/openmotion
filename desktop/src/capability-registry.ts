@@ -515,8 +515,14 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
     events: ['state', 'login-state'],
     methods: {
       startSignIn: {
-        validate: validateStartSignInParams,
-        handler: async (params: { returnPath?: string }) => hostOk(await deps.startSignIn(params)),
+        validate: params => {
+          const base = validateStartSignInParams(params);
+          if (!base.ok) return base;
+          const switchAccount = params.switchAccount === true;
+          return { ok: true, value: { ...base.value, switchAccount } };
+        },
+        handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>
+          hostOk(await deps.startSignIn(params)),
       },
       startBrowserLogin: {
         validate: params => {
@@ -525,7 +531,17 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
             candidate !== undefined ? { returnPath: candidate } : {},
           );
           if (!base.ok) return base;
-          const switchAccount = params.switchAccount === true;
+          let switchAccount = params.switchAccount === true;
+          if (!switchAccount && typeof params.loginUrl === 'string') {
+            try {
+              const parsed = new URL(params.loginUrl, 'https://example.invalid');
+              if (parsed.searchParams.get('switch') === '1') {
+                switchAccount = true;
+              }
+            } catch {
+              // Ignore malformed loginUrl hint.
+            }
+          }
           return { ok: true, value: { ...base.value, switchAccount } };
         },
         handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>

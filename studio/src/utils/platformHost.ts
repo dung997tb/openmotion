@@ -738,19 +738,26 @@ export async function startDesktopBrowserLogin(
   const bridge = getDesktopHostBridge();
   if (bridge && (await hasHostCapability(HOST_CAPABILITIES.ACCOUNT, '1.0.0', bridge))) {
     try {
-      const result = await bridge.invoke<{ url?: string }>(
+      let switchAccount = false;
+      try {
+        switchAccount = new URL(targetUrl, 'https://example.invalid').searchParams.get('switch') === '1';
+      } catch {
+        // Ignore unparseable loginUrl.
+      }
+      const result = await bridge.invoke<{ url?: string; startUrl?: string }>(
         HOST_CAPABILITIES.ACCOUNT,
         'startBrowserLogin',
         {
           ...(options?.loginUrl ? { loginUrl: options.loginUrl } : {}),
           returnTo: fallbackReturnTo,
+          ...(switchAccount ? { switchAccount: true } : {}),
         },
       );
       if (result.ok) {
         return {
           ok: true,
           mode: 'desktop-account',
-          url: result.data?.url ?? targetUrl,
+          url: result.data?.url ?? result.data?.startUrl ?? targetUrl,
         };
       }
       if (result.error.code !== 'UNSUPPORTED') {
