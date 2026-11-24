@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GalleryTemplate } from '../../../shared/catalog';
-import { matchesTemplateSearch, normalizedTemplateQuery, templateSearchBrief, validReferenceLink } from './templateSearch';
+import { matchesTemplateSearch, normalizedTemplateQuery, scoreTemplateSearch, templateSearchBrief, validReferenceLink } from './templateSearch';
 import translations from '../i18n/template-search-ui.json';
 import { languages, translate } from '../i18n/messages';
 const t = (value: string) => value;
@@ -34,6 +34,23 @@ describe('template-only search matching', () => {
     expect(matchesTemplateSearch(entry({ id: 'nyt-graph' }), 'NYT', t)).toBe(true);
     expect(matchesTemplateSearch(entry({ title: 'Figma Motion' }), 'figma motion', t)).toBe(true);
     expect(normalizedTemplateQuery('  Product   Demo  ')).toBe('product demo');
+  });
+  it('supports Chinese natural-language queries, bilingual aliases, fuzzy typos, and relevance ordering', () => {
+    const talkingHead = entry({ title: 'K3.1', tags: ['实拍剪辑', '字幕'], uses: ['Live-action editing'] });
+    const explainer = entry({ title: '数据叙事模板', tags: ['数据叙事', '流程动画'], uses: ['Product demo'] });
+    const ecommerce = entry({ title: 'Black Friday Sale', tags: ['活动推广'], uses: ['Event promotion'] });
+    const logoItem = entry({ title: 'Qwen3.8 材质标志', tags: ['图形动效'], searchAliases: ['Material Logo Reveal'] });
+
+    expect(matchesTemplateSearch(talkingHead, '口播', t)).toBe(true);
+    expect(matchesTemplateSearch(explainer, '我想找一个科普讲解的视频模板', t)).toBe(true);
+    expect(matchesTemplateSearch(ecommerce, '电商', t)).toBe(true);
+    expect(matchesTemplateSearch(talkingHead, 'vlog', t)).toBe(true);
+    expect(matchesTemplateSearch(logoItem, 'logo', t)).toBe(true);
+    expect(matchesTemplateSearch(entry({ title: 'Smooth Animation' }), 'animaton', t)).toBe(true);
+
+    const exact = entry({ id: 'exact', title: 'Logo Reveal' });
+    const aliasOnly = entry({ id: 'alias', title: 'Brand Card', tags: ['标志'] });
+    expect(scoreTemplateSearch(exact, 'logo', t)).toBeGreaterThan(scoreTemplateSearch(aliasOnly, 'logo', t));
   });
 });
 describe('reference handoff', () => {

@@ -8,6 +8,7 @@ import type { WorkspaceStore } from '../workspace.ts';
 import { MAX_ASSET_BYTES } from '../shared/asset-limits.ts';
 import { AUDIO_KINDS, classifyAudioKind, isAudioKind } from '../shared/audio-kind.ts';
 import { knownSpeechVoiceName } from '../shared/generation-options.ts';
+import { rankSearchResults } from '../shared/fuzzy-search.ts';
 import { assetVersion, type AssetListInput, type AssetReference, type AssetVersion, type LibraryAsset, type LibraryGeneration } from '../shared/asset-library.ts';
 import { probeLibraryMedia } from './asset-probe.ts';
 
@@ -41,8 +42,8 @@ export class AssetLibrary {
       || input.source && !['upload', 'generated'].includes(input.source)
       || input.sort && !['newest', 'oldest', 'name'].includes(input.sort) || input.query && (typeof input.query !== 'string' || input.query.length > 200)) throw new Error('Invalid asset filter');
     const names = await readdir(await this.file('records')).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; });
-    const query = input.query?.trim().toLocaleLowerCase();
-    const all = (await Promise.all(names.filter(name => name.endsWith('.json') && libraryId(name.slice(0, -5))).map(name => this.get(name.slice(0, -5)))))
+    const query = input.query?.trim() ?? '';
+    const filtered = (await Promise.all(names.filter(name => name.endsWith('.json') && libraryId(name.slice(0, -5))).map(name => this.get(name.slice(0, -5)))))
       .filter(asset => {
         const current = assetVersion(asset);
         if (Boolean(asset.trashedAt) !== Boolean(input.trash)) return false;
@@ -54,13 +55,30 @@ export class AssetLibrary {
           if (asset.modality !== 'audio' || resolvedKind !== input.audioKind) return false;
         }
         if (input.source && current?.source !== input.source) return false;
-        if (query) {
-          const haystack = `${asset.name} ${asset.versions.map(v => `${v.prompt ?? ''} ${v.model ?? ''} ${v.capabilityId ?? ''} ${typeof v.parameters?.voice === 'string' ? v.parameters.voice : ''} ${knownSpeechVoiceName(v.parameters?.voice) ?? ''}`).join(' ')}`.toLocaleLowerCase();
-          if (!haystack.includes(query)) return false;
-        }
         return true;
       })
       .sort((a, b) => input.sort === 'name' ? a.name.localeCompare(b.name) : input.sort === 'oldest' ? a.updatedAt - b.updatedAt : b.updatedAt - a.updatedAt);
+    const all = query
+      ? rankSearchResults(filtered, query, asset => {
+          const current = assetVersion(asset);
+          return {
+            id: asset.id,
+            title: asset.name,
+            subtitle: current?.model ?? current?.source ?? asset.modality,
+            description: asset.versions.map(v => v.prompt ?? '').filter(Boolean).join(' '),
+            tags: [asset.modality, current?.audioKind ?? ''],
+            aliases: asset.versions.flatMap(v => [
+              v.model ?? '',
+              v.capabilityId ?? '',
+              typeof v.parameters?.voice === 'string' ? v.parameters.voice : '',
+              knownSpeechVoiceName(v.parameters?.voice) ?? '',
+            ]),
+          };
+        }).map(r => r.item)
+      : filtered;
+    if (query && input.sort) {
+      all.sort((a, b) => input.sort === 'name' ? a.name.localeCompare(b.name) : input.sort === 'oldest' ? a.updatedAt - b.updatedAt : b.updatedAt - a.updatedAt);
+    }
     return { assets: all.slice(offset, offset + limit), total: all.length, nextOffset: offset + limit < all.length ? offset + limit : null };
   }
   async resolve(reference: AssetReference, allowTrash = false) {

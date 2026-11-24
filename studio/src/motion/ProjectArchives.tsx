@@ -14,6 +14,7 @@ import { useToast } from '../hooks/useToast';
 import { SettingsDialog } from './settingsPrimitives';
 import { motionApi, type useWorkspace } from './useWorkspace';
 import { PROJECT_ARCHIVE_LIMITS, PROJECT_ARCHIVE_VALIDATION_UNAVAILABLE } from '../../../shared/project-archive';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import type { ProjectLocation, ProjectManagementInput } from '../../../shared/project-management';
 
 type Workspace = ReturnType<typeof useWorkspace>;
@@ -216,8 +217,8 @@ export function useProjectArchives(workspace: Workspace, waitForSaves: () => Pro
   const locked = disabled || Boolean(busy);
   const actions: ProjectMenuActions = { locked, exportProject, beginRename, projectAction };
   const catalog = tab === 'trash' ? workspace.trashedProjects : workspace.projects;
-  const filter = query.trim().toLocaleLowerCase();
-  const visible = catalog.filter(project => project.title.toLocaleLowerCase().includes(filter));
+  const filter = query.trim();
+  const visible = rankSearchResults(catalog, filter, project => ({ id: project.id, title: project.title })).map(r => r.item);
   const selected = catalog.filter(project => selection.has(project.id)).map(({ id, title }) => ({ projectId: id, title }));
   const visibleSelected = visible.filter(project => selection.has(project.id)).length;
   const allVisibleSelected = visible.length > 0 && visibleSelected === visible.length;

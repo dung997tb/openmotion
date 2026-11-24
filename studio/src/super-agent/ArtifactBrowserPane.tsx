@@ -2,6 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { brandCatalogFile, type BrandCatalogEntry } from '../../../shared/brand-catalog';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import type { BrandKit } from '../../../shared/brand-kit';
 import type { GameCard } from '../../../shared/game-contract';
 import type {
@@ -1933,39 +1934,50 @@ export function ArtifactBrowserPane({
     [workspaceItems],
   );
 
-  const normalizedNewTabQuery = newTabQuery.trim().toLowerCase();
+  const normalizedNewTabQuery = newTabQuery.trim();
   const displaySubtitle = (item: SuperAgentArtifact | SuperAgentResourceAttachment) =>
     isPlayableAdArtifact(item) ? t('Playable ad') : item.subtitle;
   const searchableSubtitle = (item: SuperAgentArtifact | SuperAgentResourceAttachment) =>
     `${item.subtitle ?? ''} ${displaySubtitle(item) ?? ''}`;
 
-  const matchesFilterArtifact = (item: SuperAgentArtifact) => {
+  const matchesArtifactTab = (item: SuperAgentArtifact) => {
     if (newTabFilter === 'web-apps' && item.kind !== 'design-project' && item.kind !== 'game-project') return false;
     if (newTabFilter === 'motion' && item.kind !== 'motion-project' && item.kind !== 'motion-export') return false;
     if (newTabFilter === 'media' && !['asset-image', 'asset-video', 'asset-audio'].includes(item.kind)) return false;
     if (newTabFilter === 'brand-kit' && item.kind !== 'brand-kit') return false;
     if (newTabFilter === 'browser' && item.kind !== 'web') return false;
-    if (!normalizedNewTabQuery) return true;
-    return `${item.title} ${searchableSubtitle(item)} ${item.url ?? ''}`.toLowerCase().includes(normalizedNewTabQuery);
+    return true;
   };
 
-  const matchesFilterResource = (item: SuperAgentResourceAttachment) => {
+  const matchesResourceTab = (item: SuperAgentResourceAttachment) => {
     if (newTabFilter === 'web-apps' && item.kind !== 'design-project' && item.kind !== 'game-project') return false;
     if (newTabFilter === 'motion' && item.kind !== 'motion-project') return false;
     if (newTabFilter === 'media' && item.kind !== 'asset') return false;
     if (newTabFilter === 'brand-kit' && item.kind !== 'brand-kit') return false;
     if (newTabFilter === 'browser') return false;
-    if (!normalizedNewTabQuery) return true;
-    return `${item.title} ${searchableSubtitle(item)} ${item.kind}`.toLowerCase().includes(normalizedNewTabQuery);
+    return true;
   };
 
   const filteredArtifacts = useMemo(
-    () => artifacts.filter(matchesFilterArtifact),
+    () =>
+      rankSearchResults(artifacts.filter(matchesArtifactTab), normalizedNewTabQuery, item => ({
+        id: item.id,
+        title: item.title,
+        subtitle: searchableSubtitle(item),
+        aliases: [item.url ?? '', item.kind],
+      })).map(r => r.item),
     [artifacts, newTabFilter, normalizedNewTabQuery, t],
   );
 
   const filteredQuickOpen = useMemo(
-    () => quickOpenItems.filter(matchesFilterResource).slice(0, 12),
+    () =>
+      rankSearchResults(quickOpenItems.filter(matchesResourceTab), normalizedNewTabQuery, item => ({
+        id: item.id,
+        title: item.title,
+        subtitle: searchableSubtitle(item),
+        tags: item.tags,
+        aliases: [item.kind, item.scenario ?? '', item.modality ?? ''],
+      })).slice(0, 12).map(r => r.item),
     [quickOpenItems, newTabFilter, normalizedNewTabQuery, t],
   );
 

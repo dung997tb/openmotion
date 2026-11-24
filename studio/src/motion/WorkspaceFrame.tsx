@@ -5,6 +5,7 @@ import { FieldInput } from "../components/ui/FormField";
 import { DisclosureRow } from "../../../packages/design-system/react/DisclosureRow";
 import { useProjectArchives, ProjectArchiveMenu, type ProjectArchiveActions } from './ProjectArchives';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import type { McpClient } from './mcpClients';
 import { creativeStudios, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import type { Modality } from '../../../shared/gateway';
@@ -544,6 +545,18 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
         scenarioActive={!navTemplatesPage && !navSettings ? (navPage.scenario ?? (navPage.scenarioHub ? 'hub' : null)) : null}
         onOpenScenario={(id, runId) => openScenario(id, runId)}
         onOpenScenarioHub={() => openScenarioHub()}
+        onNewAgentChat={() => navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: null, settings: null, assets: false, skills: false, templates: false, template: null })}
+        onAgentChat={chatId => navigatePage({ superAgent: true, superAgentChat: chatId, superAgentMode: null, settings: null, assets: false, skills: false, templates: false, template: null })}
+        onOpenDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })}
+        onOpenDesignProject={(id, designScene = 'projects') => navigatePage({ designScene, designProject: id, templates: false, ...lastExplore.current })}
+        onOpenMotionProject={id => { void workspace.open('projects', id); }}
+        onOpenGame={gameId => {
+          const gameStudio = creativeStudios.find((entry): entry is TechniqueStudio => entry.id === 'game' && entry.surface === 'techniques');
+          if (gameStudio) navigatePage({ specialty: gameStudio, skill: null, gameId, templates: false, ...lastExplore.current });
+        }}
+        onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId ?? null, assets: false, skills: false, templates: false })}
+        onOpenMcp={() => openMcp(undefined, undefined, false)}
+        onNotify={(msg, tone = 'info') => navigationToast.showToast(msg, tone, 'feedback')}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />
       <div className="motion-workspace">
       {isRoutePending && <div className="motion-route-progress" role="progressbar" aria-hidden="true" />}
@@ -619,7 +632,7 @@ function WorkspaceSidebar({ archives, currentId, close, expand, query, setQuery,
   const { t } = useI18n();
   const { workspace, switchingDisabled } = useWorkspaceChrome();
   const projects = workspace.projects;
-  const filtered = projects.filter(project => project.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const filtered = rankSearchResults(projects, query, project => ({ id: project.id, title: project.title })).map(r => r.item);
   const loadingProjects = !workspace.status && !workspace.error && projects.length === 0;
   return <aside className="motion-sidebar" aria-label={t('Workspace navigation')}>
     <div className="motion-sidebar-brand">

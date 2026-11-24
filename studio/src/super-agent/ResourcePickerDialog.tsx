@@ -120,15 +120,17 @@ export function ResourcePickerPanel({
   onUploaded?: () => void;
   onError: (message: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [category, setCategory] = useState<ResourceCategoryTab>(initialCategory);
   const [query, setQuery] = useState('');
+  const [committedQuery, setCommittedQuery] = useState('');
   const [catalog, setCatalog] = useState<SuperAgentResourceCatalog | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -138,25 +140,27 @@ export function ResourcePickerPanel({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setLoadFailed(false);
     const timer = setTimeout(() => {
-      void fetchWorkspaceResources({ kind: category, query, limit: 200 })
+      void fetchWorkspaceResources({ kind: category, query: committedQuery, limit: 200, locale, signal: controller.signal })
         .then(result => {
           if (!cancelled) setCatalog(result);
         })
         .catch(() => {
-          if (!cancelled) setLoadFailed(true);
+          if (!cancelled && !controller.signal.aborted) setLoadFailed(true);
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, query ? 150 : 0);
+    }, committedQuery ? 160 : 0);
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      controller.abort();
     };
-  }, [open, category, query, retryToken]);
+  }, [open, category, committedQuery, retryToken, locale]);
 
   const selectedKeys = new Set(selected.map(resourceKey));
 
@@ -193,11 +197,24 @@ export function ResourcePickerPanel({
     <div className="om-sa-resource-popover-body" onKeyDown={event => event.stopPropagation()}>
       <div className="om-sa-resource-popover-toolbar">
         <label className="om-sa-resource-search">
-          <RemixIcon name="search-line" size={14} />
+          <RemixIcon name={loading ? 'loader-4-line' : 'search-line'} size={14} />
           <input
             type="search"
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={event => {
+              const next = event.currentTarget.value;
+              composingRef.current = false;
+              setQuery(next);
+              setCommittedQuery(next);
+            }}
+            onChange={event => {
+              const next = event.target.value;
+              setQuery(next);
+              if (!composingRef.current && !(event.nativeEvent as InputEvent).isComposing) {
+                setCommittedQuery(next);
+              }
+            }}
             placeholder={t('Search assets, Brand Kits, templates, skills…')}
             aria-label={t('Search workspace resources')}
           />

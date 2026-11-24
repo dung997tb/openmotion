@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from 'open-design-ui/button';
 import type { Model, ProviderState } from '../../../shared/gateway';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import { cn } from '../components/ui/cn';
 import { FieldInput, FieldTrigger } from '../components/ui/FormField';
 import { MenuPanel } from '../components/ui/MenuPanel';
@@ -48,8 +49,7 @@ export function CreationModelPicker({ models, providers, selected, providerHeadi
   }, [models, providers]);
   const currentProvider = selected?.provider ?? providerIds[0];
   const providerModels = models.filter(model => model.provider === currentProvider);
-  const needle = query.trim().toLowerCase();
-  const matches = (...texts: string[]) => !needle || texts.some(text => text.toLowerCase().includes(needle));
+  const needle = query.trim();
   const close = () => { setOpen(null); setQuery(''); };
   const openChange = (which: 'model' | 'provider') => (next: boolean) => { setOpen(next ? which : null); if (!next) setQuery(''); };
   const providerName = (id: string) => providerDisplayName(id, providers);
@@ -76,7 +76,9 @@ export function CreationModelPicker({ models, providers, selected, providerHeadi
     const next = same ?? candidates[0];
     if (next && next.id !== selected?.id) onChoose(next.id);
   };
-  const visibleProviders = providerIds.filter(id => matches(providerName(id), id));
+  const visibleProviders = open === 'provider' && needle
+    ? rankSearchResults(providerIds, needle, id => ({ id, title: providerName(id) })).map(r => r.item)
+    : providerIds;
   const currentReady = Boolean(currentProvider && providerReady(providers, currentProvider));
   const providerPicker = currentProvider && <Popover side="bottom" align="start" open={open === 'provider'} onOpenChange={openChange('provider')}
     aria-label={t('Provider')} tooltip={providerName(currentProvider)} className={popupClass} renderPanel={menuPanel}
@@ -109,7 +111,9 @@ export function CreationModelPicker({ models, providers, selected, providerHeadi
   </Popover>;
 
   const label = (model: Model) => modelFamilyLabel(model);
-  const visibleModels = providerModels.filter(model => matches(label(model), model.modelId));
+  const visibleModels = open === 'model' && needle
+    ? rankSearchResults(providerModels, needle, model => ({ id: model.modelId, title: label(model), aliases: [model.id, model.provider] })).map(r => r.item)
+    : providerModels;
   const modelPicker = <Popover side="bottom" align="start" open={open === 'model'} onOpenChange={openChange('model')}
     aria-label={t('Generation model')} tooltip={selected ? label(selected) : undefined} className={popupClass} renderPanel={menuPanel}
     trigger={trigger(t('Generation model'), selected ? <>

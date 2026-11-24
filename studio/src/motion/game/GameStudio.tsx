@@ -3,6 +3,7 @@ import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { gameGenres, gameSettings, gameStyles, type GameCard, type GameCreated, type GameGenre, type GameSetting, type GameStyle } from '../../../../shared/game-contract';
+import { rankSearchResults } from '../../../../shared/fuzzy-search';
 import { buildSuperAgentHandoff } from '../../../../shared/capability-hub';
 import { preservePresentation } from '../../../../shared/workspace-url';
 import { StudioToastViewport } from '../../components/StudioToastViewport';
@@ -228,13 +229,27 @@ export function GameStudio({
   const opened = openId ? all.find(game => game.id === openId) ?? null : null;
   const fanned = all.filter(game => game.source !== 'mine' && game.status === 'published' && coverUrl(game)).slice(0, 5);
   const visible = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = query.trim();
     // Explore lists templates and community games only; games made here live in Assets → Games.
-    const list = all.filter(game => game.source !== 'mine' && game.status === 'published'
-      && (category === 'all' || (category === 'portrait' ? game.orientation === 'portrait' : game.genre === category))
-      // Search the shown (localized) title and description as well as the originals, e.g. 小王子 and Little Prince.
-      && (!needle || [game.title, game.description, game.i18n?.[locale]?.title, game.i18n?.[locale]?.description, t(genreLabels[game.genre])].some(text => text?.toLocaleLowerCase().includes(needle))));
-    return sort === 'plays' ? [...list].sort((a, b) => b.plays - a.plays) : sort === 'newest' ? [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : interleavePortrait(list);
+    const byCategory = all.filter(game => game.source !== 'mine' && game.status === 'published'
+      && (category === 'all' || (category === 'portrait' ? game.orientation === 'portrait' : game.genre === category)));
+    const list = needle
+      ? rankSearchResults(byCategory, needle, game => ({
+          id: game.id,
+          title: game.i18n?.[locale]?.title ?? game.title,
+          subtitle: t(genreLabels[game.genre]),
+          description: game.i18n?.[locale]?.description ?? game.description,
+          tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : [])],
+          aliases: [
+            game.title,
+            game.description,
+            ...Object.values(game.i18n ?? {}).flatMap(loc => [loc?.title ?? '', loc?.description ?? '']),
+          ],
+        })).map(r => r.item)
+      : byCategory;
+    if (sort === 'plays') return [...list].sort((a, b) => b.plays - a.plays);
+    if (sort === 'newest') return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return needle ? list : interleavePortrait(list);
   }, [all, category, query, sort, t, locale]);
   // The user's own games, newest first, live in the side list like projects in the Motion editor.
   const mine = useMemo(() => games.filter(game => game.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [games]);
