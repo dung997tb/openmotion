@@ -33,6 +33,9 @@ export type HostRuntimeInfo = {
   dataDir?: string;
   logDir?: string;
   dataLayoutVersion?: number;
+  activeStudioUrl?: string;
+  environmentLabel?: string;
+  isCustomEnvironment?: boolean;
 };
 
 export type HostCapabilityStatus = 'available' | 'degraded' | 'unavailable';
@@ -107,6 +110,7 @@ export const HOST_CAPABILITIES = {
   ACCOUNT: 'account',
   SIGNED_CONFIG: 'signedConfig',
   TELEMETRY: 'telemetry',
+  PREFERENCES: 'preferences',
   ATOM_DETECT: 'atom.detect',
   ATOM_EXEC: 'atom.exec',
   ATOM_INSTALL_COMPONENT: 'atom.installComponent',
@@ -123,6 +127,7 @@ export const HOST_CAPABILITY_VERSIONS: Record<HostCapabilityName, string> = {
   [HOST_CAPABILITIES.ACCOUNT]: '1.0.0',
   [HOST_CAPABILITIES.SIGNED_CONFIG]: '1.0.0',
   [HOST_CAPABILITIES.TELEMETRY]: '1.0.0',
+  [HOST_CAPABILITIES.PREFERENCES]: '1.0.0',
   [HOST_CAPABILITIES.ATOM_DETECT]: '1.0.0',
   [HOST_CAPABILITIES.ATOM_EXEC]: '1.0.0',
   [HOST_CAPABILITIES.ATOM_INSTALL_COMPONENT]: '1.0.0',
@@ -296,6 +301,74 @@ export type AtomConfigWriteResult = {
   configPath: string;
   backupPath?: string;
   changed: boolean;
+};
+
+/**
+ * Desktop-only host preferences (device-local, persisted by the Electron shell).
+ *
+ * `lastDownloadDir` is never accepted as a raw string from the renderer; it can
+ * only be changed via the main-process native folder picker (`pickDownloadDir`)
+ * or cleared via `reset`.
+ */
+export const DESKTOP_PREFERENCE_KEYS = [
+  'confirmBeforeQuit',
+  'openAtLogin',
+  'autoCheckUpdates',
+  'hardwareAcceleration',
+  'locale',
+  'lastDownloadDir',
+] as const;
+
+export type DesktopPreferenceKey = (typeof DESKTOP_PREFERENCE_KEYS)[number];
+
+export type DesktopWritablePreferenceKey = Exclude<DesktopPreferenceKey, 'lastDownloadDir'>;
+
+export type DesktopPreferenceValues = {
+  confirmBeforeQuit: boolean;
+  openAtLogin: boolean;
+  autoCheckUpdates: boolean;
+  hardwareAcceleration: boolean;
+  locale: string | null;
+  lastDownloadDir: string | null;
+};
+
+export type DesktopPreferenceDescriptor = {
+  key: DesktopPreferenceKey;
+  supported: boolean;
+  requiresRestart?: boolean;
+  picker?: boolean;
+  reason?: string;
+};
+
+export type DesktopPreferencesSnapshot = {
+  values: DesktopPreferenceValues;
+  descriptors: DesktopPreferenceDescriptor[];
+  platform: HostPlatform;
+  pendingRestartKeys: DesktopPreferenceKey[];
+};
+
+export type DesktopPreferenceSetParams =
+  | { key: 'confirmBeforeQuit'; value: boolean }
+  | { key: 'openAtLogin'; value: boolean }
+  | { key: 'autoCheckUpdates'; value: boolean }
+  | { key: 'hardwareAcceleration'; value: boolean }
+  | { key: 'locale'; value: string | null };
+
+export type DesktopPreferenceSetResult = {
+  key: DesktopWritablePreferenceKey;
+  value: DesktopPreferenceValues[DesktopWritablePreferenceKey];
+  applied: 'immediate' | 'restart-required';
+  snapshot: DesktopPreferencesSnapshot;
+};
+
+export type DesktopPreferenceResetParams = {
+  key?: DesktopPreferenceKey;
+};
+
+export type DesktopPickDownloadDirResult = {
+  canceled: boolean;
+  path: string | null;
+  snapshot: DesktopPreferencesSnapshot;
 };
 
 export function hostOk<T>(data: T): HostInvokeSuccess<T> {

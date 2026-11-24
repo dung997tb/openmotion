@@ -12,6 +12,7 @@ files:
   - package.json
 
 asar: true
+afterPack: scripts/after-pack.cjs
 npmRebuild: false
 electronLanguages:
   - en
@@ -26,6 +27,22 @@ protocols:
 mac:
   category: public.app-category.video
   icon: build/icon.icns
+  extendInfo:
+    CFBundleIconName: AppIcon
+    CFBundleLocalizations:
+      - en
+      - zh_CN
+      - ja
+    NSAppTransportSecurity:
+      NSAllowsArbitraryLoads: false
+      NSAllowsLocalNetworking: true
+    NSMicrophoneUsageDescription: OpenDesign uses your microphone when you record voiceovers or audio clips in Studio.
+    NSCameraUsageDescription: OpenDesign uses your camera when you capture video clips in Studio.
+  extraResources:
+    - from: build
+      to: .
+      filter:
+        - Assets.car
   sign: scripts/sign-mac.cjs
   hardenedRuntime: true
   gatekeeperAssess: false

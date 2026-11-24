@@ -10,6 +10,7 @@
 
 import { z } from 'zod';
 import {
+  DESKTOP_PREFERENCE_KEYS,
   HOST_CAPABILITIES,
   hostErr,
   type HostInvokeFailure,
@@ -168,7 +169,7 @@ export const TelemetrySetEnabledParamsSchema = z
 
 export const WindowSetThemeParamsSchema = z
   .object({
-    theme: z.enum(['light', 'dark']),
+    theme: z.enum(['light', 'dark', 'system']),
   })
   .strict();
 
@@ -178,9 +179,71 @@ export const WindowOpenExternalParamsSchema = z
   })
   .strict();
 
+export const WindowSetTaskProgressParamsSchema = z
+  .object({
+    taskId: nonEmptyTrimmedString,
+    progress: z.union([z.number().finite().min(-1).max(1), z.literal('indeterminate'), z.null()]),
+  })
+  .strict();
+
+export const WindowAcquireWakeLockParamsSchema = z
+  .object({
+    taskId: nonEmptyTrimmedString,
+    reason: nonEmptyTrimmedString.optional(),
+    ttlMs: z.number().int().min(5_000).max(3_600_000).optional(),
+  })
+  .strict();
+
+export const WindowReleaseWakeLockParamsSchema = z
+  .object({
+    taskId: nonEmptyTrimmedString,
+  })
+  .strict();
+
+export const WindowNotifyParamsSchema = z
+  .object({
+    title: nonEmptyTrimmedString,
+    body: z
+      .string()
+      .trim()
+      .max(512, 'must be at most 512 characters')
+      .refine(value => !/[\0]/.test(value), 'must not contain null bytes')
+      .optional(),
+    bounce: z.boolean().optional(),
+    silent: z.boolean().optional(),
+    whenUnfocusedOnly: z.boolean().optional(),
+  })
+  .strict();
+
 export const AccountStartLoginParamsSchema = z
   .object({
     switchAccount: z.boolean().optional(),
+  })
+  .strict();
+
+const desktopLocaleValueSchema = z
+  .string()
+  .trim()
+  .min(2, 'must be a valid locale tag')
+  .max(32, 'must be at most 32 characters')
+  .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/, 'must be a valid BCP-47 locale tag');
+
+export const PreferencesSetParamsSchema = z.discriminatedUnion('key', [
+  z.object({ key: z.literal('confirmBeforeQuit'), value: z.boolean() }).strict(),
+  z.object({ key: z.literal('openAtLogin'), value: z.boolean() }).strict(),
+  z.object({ key: z.literal('autoCheckUpdates'), value: z.boolean() }).strict(),
+  z.object({ key: z.literal('hardwareAcceleration'), value: z.boolean() }).strict(),
+  z
+    .object({
+      key: z.literal('locale'),
+      value: z.union([desktopLocaleValueSchema, z.null()]),
+    })
+    .strict(),
+]);
+
+export const PreferencesResetParamsSchema = z
+  .object({
+    key: z.enum(DESKTOP_PREFERENCE_KEYS).optional(),
   })
   .strict();
 
@@ -227,9 +290,20 @@ const HOST_METHOD_SCHEMA_REGISTRY: Record<string, Record<string, z.ZodType>> = {
   [HOST_CAPABILITIES.WINDOW]: {
     setTheme: WindowSetThemeParamsSchema,
     openExternal: WindowOpenExternalParamsSchema,
+    setTaskProgress: WindowSetTaskProgressParamsSchema,
+    acquireWakeLock: WindowAcquireWakeLockParamsSchema,
+    releaseWakeLock: WindowReleaseWakeLockParamsSchema,
+    notify: WindowNotifyParamsSchema,
   },
   [HOST_CAPABILITIES.ACCOUNT]: {
     startLogin: AccountStartLoginParamsSchema,
+  },
+  [HOST_CAPABILITIES.PREFERENCES]: {
+    getAll: EmptyParamsSchema,
+    set: PreferencesSetParamsSchema,
+    reset: PreferencesResetParamsSchema,
+    pickDownloadDir: EmptyParamsSchema,
+    relaunch: EmptyParamsSchema,
   },
 };
 

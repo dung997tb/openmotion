@@ -12,13 +12,24 @@ import type { SignedConfigPayload } from '../../shared/signed-config.ts';
 /**
  * Placeholder for the offline Root Ed25519 public key (SPKI DER, base64).
  *
- * PENDING PRODUCTION KEY CEREMONY (Design Doc §5.6):
- * Replace this value with the public key generated during the offline root key
- * ceremony before shipping production desktop builds. Never embed or commit
- * any private key material.
+ * Production desktop builds inject the real SPKI public key at bundle time via
+ * `OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI` in `desktop/scripts/build.mjs`
+ * (esbuild `define` for `__OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__`), or
+ * this constant can be replaced directly after the offline root key ceremony.
+ * Never embed or commit any private key material.
  */
+declare const __OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__: string | undefined;
+
 export const EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64 =
   'PENDING_PRODUCTION_ROOT_KEY_CEREMONY_ED25519_SPKI_BASE64' as const;
+
+export function resolveEmbeddedRootPublicKeySpki(): string {
+  const buildInjected =
+    typeof __OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__ === 'string'
+      ? __OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__.trim()
+      : '';
+  return buildInjected || EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64;
+}
 
 /**
  * Built-in revoked daily signing key IDs shipped with the shell binary.

@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   exportPublicKeySpkiBase64,
+  generateEd25519KeyPair,
   signConfigEnvelope,
   signDailyCertificate,
   signRevocationList,
@@ -31,6 +32,11 @@ function printUsage() {
     'Usage: node --experimental-strip-types scripts/sign-desktop-config.mjs <command> [options]',
     '',
     'Commands:',
+    '  keygen             Generate a fresh Ed25519 keypair (root or daily signing key)',
+    '    --private-out <path>        Write private key PEM with mode 0600 (required)',
+    '    --public-out <path>         Optional path to write public key PEM',
+    '    --spki-out <path>           Optional path to write base64 SPKI DER public key',
+    '',
     '  issue-daily-cert   Sign a daily signing certificate using the offline root private key',
     '    --key-id <id>               Unique daily key identifier (required)',
     '    --root-key <path>           Root private key PEM file (or env OPENMOTION_ROOT_PRIVATE_KEY_PATH / _PEM)',
@@ -159,6 +165,42 @@ export function runCli(argv, io = {}) {
   }
 
   try {
+    if (command === 'keygen') {
+      const privateOut = flags.get('private-out');
+      if (!privateOut) {
+        throw new Error('Missing required --private-out <path> (private key is never printed to stdout)');
+      }
+      const pair = generateEd25519KeyPair();
+      mkdirSync(path.dirname(path.resolve(privateOut)), { recursive: true });
+      writeFileSync(privateOut, pair.privateKeyPem, { encoding: 'utf8', mode: 0o600 });
+
+      const publicOut = flags.get('public-out');
+      if (publicOut) {
+        mkdirSync(path.dirname(path.resolve(publicOut)), { recursive: true });
+        writeFileSync(publicOut, pair.publicKeyPem, 'utf8');
+      }
+      const spkiOut = flags.get('spki-out');
+      if (spkiOut) {
+        mkdirSync(path.dirname(path.resolve(spkiOut)), { recursive: true });
+        writeFileSync(spkiOut, `${pair.publicKeySpkiBase64}\n`, 'utf8');
+      }
+
+      stdout(
+        JSON.stringify(
+          {
+            algorithm: 'Ed25519',
+            privateKeyPath: privateOut,
+            ...(publicOut ? { publicKeyPath: publicOut } : {}),
+            ...(spkiOut ? { spkiPath: spkiOut } : {}),
+            publicKeySpkiBase64: pair.publicKeySpkiBase64,
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      return 0;
+    }
+
     if (command === 'issue-daily-cert') {
       const keyId = flags.get('key-id');
       if (!keyId) throw new Error('Missing required --key-id');

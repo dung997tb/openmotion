@@ -46,6 +46,11 @@ export type WindowPolicyConfig = {
   channel?: HostReleaseChannel;
   /** Allow http://127.0.0.1 / http://localhost ONLY when channel === "dev". */
   allowLocalDevLoopback?: boolean;
+  /**
+   * Optional user-selected test/dev Studio origin (explicitly validated by the
+   * test/dev environment switcher). Strictly ignored when `channel === 'stable'`.
+   */
+  explicitTestStudioOrigin?: string;
   /** Optional extra origins from signed config; filtered through built-in domain scope. */
   allowedOrigins?: readonly string[];
   /** Signed config `windowPolicy` section. */
@@ -367,6 +372,10 @@ export function evaluateNavigationPolicy(
   const channel = config.channel ?? 'stable';
   const allowLocalDevLoopback = Boolean(config.allowLocalDevLoopback && channel === 'dev');
   const scopeOptions = { channel, allowLocalDevLoopback };
+  const explicitTestOrigin =
+    channel !== 'stable' && config.explicitTestStudioOrigin
+      ? normalizeOrigin(config.explicitTestStudioOrigin)
+      : null;
 
   const billingOptions = {
     extraHostnames: config.billingHostnames,
@@ -419,6 +428,14 @@ export function evaluateNavigationPolicy(
   }
 
   const studioOrigin = normalizeOrigin(config.studioOrigin);
+  if (explicitTestOrigin && parsed.origin === explicitTestOrigin) {
+    return {
+      action: 'allow',
+      reason: 'same-origin-studio',
+      openExternal: false,
+      isBillingOrAccountPortal: false,
+    };
+  }
   if (studioOrigin && parsed.origin === studioOrigin) {
     return {
       action: 'allow',
@@ -539,8 +556,21 @@ export function evaluateWindowOpenPolicy(
   const channel = config.channel ?? 'stable';
   const allowLocalDevLoopback = Boolean(config.allowLocalDevLoopback && channel === 'dev');
   const scopeOptions = { channel, allowLocalDevLoopback };
+  const explicitTestOrigin =
+    channel !== 'stable' && config.explicitTestStudioOrigin
+      ? normalizeOrigin(config.explicitTestStudioOrigin)
+      : null;
 
   const studioOrigin = normalizeOrigin(config.studioOrigin);
+  if (explicitTestOrigin && parsed.origin === explicitTestOrigin) {
+    return {
+      action: 'allow',
+      reason: 'same-origin-popup',
+      openExternal: false,
+      isBillingOrAccountPortal: false,
+      overrideBrowserWindowOptions: buildPopupOverrideOptions(),
+    };
+  }
   if (studioOrigin && parsed.origin === studioOrigin) {
     return {
       action: 'allow',

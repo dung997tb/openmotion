@@ -13,6 +13,12 @@
 
 import path from 'node:path';
 import { DESKTOP_PROTOCOL_SCHEME } from '../../shared/desktop-builtin-rules.ts';
+import type { HostReleaseChannel } from '../../shared/desktop-contract.ts';
+import {
+  isEnvironmentSwitcherEnabled,
+  validateTestEnvironmentUrl,
+  type TestEnvironmentValidationOptions,
+} from './env-switcher.ts';
 
 export const DESKTOP_PROTOCOL_PREFIX = `${DESKTOP_PROTOCOL_SCHEME}://` as const;
 export const MAX_DESKTOP_DEEP_LINK_LENGTH = 2048;
@@ -69,12 +75,23 @@ function validateSafeOpenParam(key: string, value: string): boolean {
   return false;
 }
 
+export type ParseDesktopDeepLinkOptions = {
+  now?: () => Date;
+  /**
+   * When true on `test` or `dev` channels, permits an `env` query parameter
+   * validated against `validateTestEnvironmentUrl`. Ignored on `stable`.
+   */
+  allowEnvParam?: boolean;
+  envValidation?: TestEnvironmentValidationOptions;
+  channel?: HostReleaseChannel;
+};
+
 /**
  * Safely parses and validates an incoming `openmotion://` deep-link URL.
  */
 export function parseDesktopDeepLink(
   rawUrl: string,
-  options?: { now?: () => Date },
+  options?: ParseDesktopDeepLinkOptions,
 ): DesktopDeepLinkParseResult {
   if (typeof rawUrl !== 'string') {
     return reject('empty', 'Deep-link URL must be a non-empty string');
@@ -122,10 +139,13 @@ export function parseDesktopDeepLink(
     return reject('unsupported-action', `Unsupported deep-link action: ${actionHost || '<empty>'}`);
   }
 
+  const envChannel: HostReleaseChannel = options?.envValidation?.channel ?? options?.channel ?? 'stable';
+  const envParamAllowed = Boolean(options?.allowEnvParam && isEnvironmentSwitcherEnabled(envChannel));
   const sanitizedParams: Record<string, string> = {};
   const seenKeys = new Set<string>();
   for (const [key, value] of parsed.searchParams.entries()) {
-    if (!ALLOWED_OPEN_PARAMS.has(key)) {
+    const isEnvKey = key === 'env' && envParamAllowed;
+    if (!ALLOWED_OPEN_PARAMS.has(key) && !isEnvKey) {
       return reject('untrusted-parameter', `Untrusted deep-link parameter: ${key}`);
     }
     if (seenKeys.has(key)) {
@@ -133,6 +153,17 @@ export function parseDesktopDeepLink(
     }
     seenKeys.add(key);
     const cleanValue = value.trim();
+    if (isEnvKey) {
+      const checked = validateTestEnvironmentUrl(
+        cleanValue,
+        options?.envValidation ?? { channel: envChannel },
+      );
+      if (!checked.ok) {
+        return reject('invalid-parameter-value', checked.reason);
+      }
+      sanitizedParams[key] = checked.normalizedUrl;
+      continue;
+    }
     if (!validateSafeOpenParam(key, cleanValue)) {
       return reject('invalid-parameter-value', `Invalid value for deep-link parameter "${key}"`);
     }
@@ -216,6 +247,10 @@ export type DesktopProtocolRouterOptions = {
   maxRecordedEvents?: number;
   /** Clock override for deterministic testing. */
   now?: () => Date;
+  /** Permit validated `env` deep-link parameter on test/dev builds. */
+  allowEnvParam?: boolean;
+  /** Validation options for `env` deep-link parameter. */
+  envValidation?: TestEnvironmentValidationOptions;
 };
 
 /**
@@ -226,6 +261,8 @@ export class DesktopProtocolRouter {
   private readonly onRejected?: (rejection: RejectedDesktopDeepLink, rawUrl: string) => void;
   private readonly maxRecordedEvents: number;
   private readonly now?: () => Date;
+  private readonly allowEnvParam: boolean;
+  private readonly envValidation?: TestEnvironmentValidationOptions;
   private readonly recordedEvents: ParsedDesktopDeepLink[] = [];
   private readonly listeners = new Set<(link: ParsedDesktopDeepLink) => void>();
 
@@ -234,10 +271,16 @@ export class DesktopProtocolRouter {
     this.onRejected = options.onRejected;
     this.maxRecordedEvents = Math.max(1, options.maxRecordedEvents ?? DEFAULT_MAX_RECORDED_EVENTS);
     this.now = options.now;
+    this.allowEnvParam = Boolean(options.allowEnvParam);
+    this.envValidation = options.envValidation;
   }
 
   handleUrl(rawUrl: string): DesktopDeepLinkParseResult {
-    const result = parseDesktopDeepLink(rawUrl, this.now ? { now: this.now } : undefined);
+    const result = parseDesktopDeepLink(rawUrl, {
+      ...(this.now ? { now: this.now } : {}),
+      ...(this.allowEnvParam ? { allowEnvParam: true } : {}),
+      ...(this.envValidation ? { envValidation: this.envValidation } : {}),
+    });
     if (!result.ok) {
       this.onRejected?.(result, rawUrl);
       return result;

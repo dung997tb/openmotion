@@ -4,6 +4,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_UPDATE_BASE_URL } from '../../shared/desktop-builtin-rules.ts';
+import { validateSignedConfigPayloadBounds } from '../../shared/signed-config.ts';
+import { generateEd25519KeyPair } from '../../packages/signed-config/index.ts';
+import { resolveBuildTrustAnchors } from '../scripts/build.mjs';
 import {
   buildDesktopReleaseCardPayload,
   formatStructuredReleaseChangelog,
@@ -341,9 +344,11 @@ test('desktop/electron-builder.yml defines thin-shell packaging, openmotion prot
   assert.match(builderYml, /^appId:\s*io\.nexu\.openmotion\.desktop$/m);
   assert.match(builderYml, /^productName:\s*OpenDesign$/m);
 
-  // Thin shell: no bundled app-server extraResources.
-  assert.equal(builderYml.includes('extraResources'), false);
+  // Thin shell: no bundled app-server; mac extraResources is strictly limited to compiled Assets.car icon catalog.
   assert.equal(builderYml.includes('app-server'), false);
+  assert.match(builderYml, /CFBundleIconName:\s*AppIcon/);
+  assert.match(builderYml, /-\s*Assets\.car\b/);
+  assert.match(builderYml, /afterPack:\s*scripts\/after-pack\.cjs/);
 
   // Protocol registration for openmotion://.
   assert.match(builderYml, /^protocols:\s*$/m);
@@ -441,7 +446,8 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /label:\s*"?macOS arm64"?/);
   assert.match(workflowYml, /label:\s*"?macOS x64"?/);
   assert.match(workflowYml, /label:\s*"?Windows x64"?/);
-  assert.match(workflowYml, /os:\s*"?macos-15"?/);
+  assert.match(workflowYml, /os:\s*"?macos-26"?/);
+  assert.match(workflowYml, /Assets\.car/);
   assert.match(workflowYml, /os:\s*"?windows-latest"?/);
   assert.match(workflowYml, /pack_script:\s*"?pack:mac:arm64"?/);
   assert.match(workflowYml, /pack_script:\s*"?pack:mac:x64"?/);
@@ -777,4 +783,69 @@ test('formatStructuredReleaseChangelog groups conventional commits and honors ma
   });
   assert.equal(manual.source, 'manual');
   assert.match(manual.markdown, /修复客户端登录/);
+});
+
+test('resolveBuildTrustAnchors validates and normalizes Ed25519 root key, Apple Team ID, and Windows thumbprints', () => {
+  const empty = resolveBuildTrustAnchors({});
+  assert.equal(empty.rootPublicKeySpki, '');
+  assert.equal(empty.murmurAppleTeamId, '');
+  assert.equal(empty.murmurWinThumbprints, '');
+
+  const pair = generateEd25519KeyPair();
+  const sha1 = 'a'.repeat(40);
+  const sha256 = 'B'.repeat(64);
+  const fromPem = resolveBuildTrustAnchors({
+    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeyPem,
+    OPENMOTION_MURMUR_APPLE_TEAM_ID: 'AB12CD34EF',
+    OPENMOTION_MURMUR_WIN_THUMBPRINTS: ` ${sha1}, ${sha256} `,
+  });
+  assert.equal(fromPem.rootPublicKeySpki, pair.publicKeySpkiBase64);
+  assert.equal(fromPem.murmurAppleTeamId, 'AB12CD34EF');
+  assert.equal(fromPem.murmurWinThumbprints, `${sha1.toUpperCase()},${sha256}`);
+  assert.equal(
+    JSON.parse(fromPem.define.__OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__),
+    pair.publicKeySpkiBase64,
+  );
+
+  const fromBase64 = resolveBuildTrustAnchors({
+    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeySpkiBase64,
+  });
+  assert.equal(fromBase64.rootPublicKeySpki, pair.publicKeySpkiBase64);
+
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: 'not-a-key' }),
+    /Invalid OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI/,
+  );
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_APPLE_TEAM_ID: 'invalid-id' }),
+    /Invalid OPENMOTION_MURMUR_APPLE_TEAM_ID/,
+  );
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_WIN_THUMBPRINTS: '1234' }),
+    /Invalid OPENMOTION_MURMUR_WIN_THUMBPRINTS/,
+  );
+});
+
+test('desktop/config channel payloads pass bounds validation and desktop-signed-config.yml enforces sign-verify-publish', () => {
+  for (const channel of ['test', 'stable']) {
+    const payloadPath = path.join(desktopRoot, 'config', `${channel}.payload.json`);
+    const payload = JSON.parse(readFileSync(payloadPath, 'utf8'));
+    assert.deepEqual(
+      validateSignedConfigPayloadBounds(payload, { channel }),
+      [],
+      `${channel}.payload.json must pass shell security bounds`,
+    );
+  }
+
+  const workflowYml = readFileSync(
+    path.join(repoRoot, '.github', 'workflows', 'desktop-signed-config.yml'),
+    'utf8',
+  );
+  assert.match(workflowYml, /desktop\/config\/test\.payload\.json/);
+  assert.match(workflowYml, /refs\/heads\/main/);
+  assert.match(workflowYml, /refs\/heads\/desktop-test/);
+  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs sign-config/);
+  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs verify-config/);
+  assert.match(workflowYml, /open-motion\/desktop\/config\/\$\{CHANNEL\}\.json/);
+  assert.match(workflowYml, /no-cache, max-age=0/);
 });

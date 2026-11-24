@@ -75,6 +75,233 @@ export function buildAppIconSvg(sourceSvgPath) {
 `;
 }
 
+export const LIQUID_GLASS_ICON_NAME = 'AppIcon';
+
+export function buildLiquidGlassIconBundle(sourceSvgPath, outIconDir) {
+  const { ringPath, arrowPath } = extractBrandSymbolPaths(sourceSvgPath);
+  const assetsDir = path.join(outIconDir, 'Assets');
+  rmSync(outIconDir, { recursive: true, force: true });
+  mkdirSync(assetsDir, { recursive: true });
+
+  // Icon Composer uses a 1024x1024 full-bleed canvas; macOS applies the squircle
+  // mask, outer shadow, and Liquid Glass refraction rim dynamically.
+  // Size the 291x291 symbol to ~580px (~56.6% of canvas) to keep safe bevel clearance.
+  const symbolSize = 580;
+  const symbolScale = symbolSize / 291;
+  const offset = (1024 - symbolSize) / 2;
+
+  const auraSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="aura" cx="56%" cy="46%" r="48%">
+      <stop offset="0%" stop-color="#00ff22" stop-opacity="0.28"/>
+      <stop offset="55%" stop-color="#007a14" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#007a14" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#aura)"/>
+</svg>
+`;
+
+  const ringSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="291" y2="291" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d8dde2"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(${offset.toFixed(2)} ${offset.toFixed(2)}) scale(${symbolScale.toFixed(5)})">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="${ringPath}" fill="url(#ring)"/>
+  </g>
+</svg>
+`;
+
+  const arrowSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="arrow" x1="88" y1="90" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6cff72"/>
+      <stop offset="100%" stop-color="#00e608"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(${offset.toFixed(2)} ${offset.toFixed(2)}) scale(${symbolScale.toFixed(5)})">
+    <path d="${arrowPath}" fill="url(#arrow)"/>
+  </g>
+</svg>
+`;
+
+  const iconManifest = {
+    fill: {
+      'linear-gradient': [
+        'display-p3:0.16,0.175,0.195,1.0',
+        'display-p3:0.06,0.068,0.08,1.0',
+      ],
+    },
+    'fill-specializations': [
+      {
+        appearance: 'dark',
+        value: {
+          'linear-gradient': [
+            'display-p3:0.11,0.125,0.145,1.0',
+            'display-p3:0.035,0.04,0.05,1.0',
+          ],
+        },
+      },
+      {
+        appearance: 'tinted',
+        value: {
+          'linear-gradient': [
+            'display-p3:0.14,0.15,0.17,1.0',
+            'display-p3:0.05,0.055,0.065,1.0',
+          ],
+        },
+      },
+    ],
+    groups: [
+      {
+        layers: [
+          {
+            glass: false,
+            'image-name': 'aura.svg',
+            name: 'aura',
+            'hidden-specializations': [
+              {
+                appearance: 'tinted',
+                value: true,
+              },
+            ],
+          },
+        ],
+        specular: false,
+      },
+      {
+        layers: [
+          {
+            glass: true,
+            'image-name': 'ring.svg',
+            name: 'ring',
+          },
+          {
+            glass: true,
+            'image-name': 'arrow.svg',
+            name: 'arrow',
+          },
+        ],
+        shadow: {
+          kind: 'neutral',
+          opacity: 0.5,
+        },
+        specular: true,
+        translucency: {
+          enabled: true,
+          value: 0.35,
+        },
+      },
+    ],
+    'supported-platforms': {
+      squares: 'shared',
+    },
+  };
+
+  writeFileSync(path.join(assetsDir, 'aura.svg'), auraSvg, 'utf8');
+  writeFileSync(path.join(assetsDir, 'ring.svg'), ringSvg, 'utf8');
+  writeFileSync(path.join(assetsDir, 'arrow.svg'), arrowSvg, 'utf8');
+  writeFileSync(path.join(outIconDir, 'icon.json'), `${JSON.stringify(iconManifest, null, 2)}\n`, 'utf8');
+
+  return { iconDir: outIconDir, iconManifest };
+}
+
+function compileLiquidGlassAssetsCar(iconBundleDir, outDir) {
+  if (process.platform !== 'darwin' || !existsSync(iconBundleDir)) {
+    return null;
+  }
+
+  const assetsCarPath = path.join(outDir, 'Assets.car');
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'om-actool-'));
+  try {
+    const res = spawnSync(
+      'xcrun',
+      [
+        'actool',
+        iconBundleDir,
+        '--compile',
+        tempDir,
+        '--output-format',
+        'human-readable-text',
+        '--notices',
+        '--warnings',
+        '--errors',
+        '--output-partial-info-plist',
+        path.join(tempDir, 'Info.plist'),
+        '--app-icon',
+        LIQUID_GLASS_ICON_NAME,
+        '--include-all-app-icons',
+        '--enable-on-demand-resources',
+        'NO',
+        '--development-region',
+        'en',
+        '--target-device',
+        'mac',
+        '--minimum-deployment-target',
+        '13.0',
+        '--platform',
+        'macosx',
+      ],
+      { stdio: 'pipe', timeout: 30_000 },
+    );
+
+    const compiledCar = path.join(tempDir, 'Assets.car');
+    if (res.status === 0 && existsSync(compiledCar)) {
+      copyFileSync(compiledCar, assetsCarPath);
+      return assetsCarPath;
+    }
+    const detail = `${res.stderr?.toString('utf8') ?? ''}\n${res.stdout?.toString('utf8') ?? ''}`.trim();
+    if (detail) {
+      console.warn(`actool failed to compile Liquid Glass Assets.car (exit=${res.status ?? 'null'}): ${detail.slice(0, 600)}`);
+    }
+    return null;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function resolveElectronBinary() {
+  for (const baseDir of [desktopDir, repoRoot]) {
+    const electronPkgDir = path.join(baseDir, 'node_modules', 'electron');
+    const pathTxt = path.join(electronPkgDir, 'path.txt');
+    if (!existsSync(pathTxt)) continue;
+    const rel = readFileSync(pathTxt, 'utf8').trim();
+    const full = path.join(electronPkgDir, 'dist', rel);
+    if (existsSync(full)) return full;
+  }
+  return null;
+}
+
+function rasterizeSvgViaQuickLook(svgPath, outPngPath, size = 1024) {
+  if (process.platform !== 'darwin') return false;
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ql-icon-'));
+  try {
+    const res = spawnSync('qlmanage', ['-t', '-s', String(size), '-o', tempDir, svgPath], {
+      stdio: 'pipe',
+      timeout: 20_000,
+    });
+    const rendered = path.join(tempDir, `${path.basename(svgPath)}.png`);
+    if (res.status === 0 && existsSync(rendered)) {
+      copyFileSync(rendered, outPngPath);
+      return true;
+    }
+    return false;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function readPngWidth(pngBuffer) {
+  // PNG signature (8 bytes) + IHDR length (4) + "IHDR" (4) + width (4, big-endian).
+  if (pngBuffer.length >= 24 && pngBuffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return pngBuffer.readUInt32BE(16);
+  }
+  return null;
+}
+
 function resolveSharpEntry() {
   for (const baseDir of [repoRoot, desktopDir]) {
     const pkgPath = path.join(baseDir, 'node_modules', 'sharp', 'package.json');
@@ -118,25 +345,6 @@ await Promise.all(
     { stdio: 'pipe', timeout: 30_000 },
   );
   return res.status === 0 && targets.every(t => existsSync(t.outPath));
-}
-
-function rasterizeSvgViaQuickLook(svgPath, outPngPath, size = 1024) {
-  if (process.platform !== 'darwin') return false;
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ql-icon-'));
-  try {
-    const res = spawnSync('qlmanage', ['-t', '-s', String(size), '-o', tempDir, svgPath], {
-      stdio: 'pipe',
-      timeout: 20_000,
-    });
-    const rendered = path.join(tempDir, `${path.basename(svgPath)}.png`);
-    if (res.status === 0 && existsSync(rendered)) {
-      copyFileSync(rendered, outPngPath);
-      return true;
-    }
-    return false;
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
 }
 
 export function rasterizeTargetsViaImageMagick(inputPath, targets) {
@@ -201,22 +409,6 @@ try {
     timeout: 30_000,
   });
   return res.status === 0 && targets.every(t => existsSync(t.outPath));
-}
-
-function resolveElectronBinary() {
-  const electronPkgDir = path.join(desktopDir, 'node_modules', 'electron');
-  const pathTxt = path.join(electronPkgDir, 'path.txt');
-  if (!existsSync(pathTxt)) return null;
-  const rel = readFileSync(pathTxt, 'utf8').trim();
-  const full = path.join(electronPkgDir, 'dist', rel);
-  return existsSync(full) ? full : null;
-}
-
-function readPngWidth(pngBuffer) {
-  if (pngBuffer.length >= 24 && pngBuffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-    return pngBuffer.readUInt32BE(16);
-  }
-  return null;
 }
 
 function rasterizeSvgTargetsViaElectron(svgPath, targets) {
@@ -403,9 +595,15 @@ export function buildDesktopIcons({
   const fallbackPng = path.join(sourceDir, 'apple-touch-icon.png');
   const targetPng = path.join(outDir, 'icon.png');
   const targetSvg = path.join(outDir, 'icon.svg');
+  const targetIconBundle = path.join(outDir, `${LIQUID_GLASS_ICON_NAME}.icon`);
 
+  let iconBundle = null;
+  let assetsCar = null;
   if (existsSync(sourceMarkSvg)) {
     writeFileSync(targetSvg, buildAppIconSvg(sourceMarkSvg), 'utf8');
+    buildLiquidGlassIconBundle(sourceMarkSvg, targetIconBundle);
+    iconBundle = targetIconBundle;
+    assetsCar = compileLiquidGlassAssetsCar(targetIconBundle, outDir);
   }
 
   let preRenderedIcoFrames = null;
@@ -465,10 +663,12 @@ export function buildDesktopIcons({
     fallbackPngPath: fallbackPng,
   });
 
-  return { iconPng: targetPng, iconSvg: targetSvg, iconIcns, iconIco };
+  return { iconPng: targetPng, iconSvg: targetSvg, iconIcns, iconIco, iconBundle, assetsCar };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = buildDesktopIcons();
-  console.log(`Prepared desktop icons: png=${result.iconPng} icns=${result.iconIcns ?? 'n/a'} ico=${result.iconIco ?? 'n/a'}`);
+  console.log(
+    `Prepared desktop icons: png=${result.iconPng} icns=${result.iconIcns ?? 'n/a'} ico=${result.iconIco ?? 'n/a'} assetsCar=${result.assetsCar ?? 'n/a'}`,
+  );
 }

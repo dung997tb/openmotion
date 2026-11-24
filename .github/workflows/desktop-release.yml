@@ -127,7 +127,7 @@ jobs:
             const items = [
               {
                 label: "macOS arm64",
-                os: "macos-15",
+                os: "macos-26",
                 platform: "darwin",
                 arch: "arm64",
                 pack_script: "pack:mac:arm64",
@@ -138,7 +138,7 @@ jobs:
             if (includeMacX64) {
               items.push({
                 label: "macOS x64",
-                os: "macos-15",
+                os: "macos-26",
                 platform: "darwin",
                 arch: "x64",
                 pack_script: "pack:mac:x64",
@@ -363,6 +363,7 @@ jobs:
 
           PUBLIC_ORIGIN="${RELEASE_PUBLIC_ORIGIN%/}"
           FEED_URL="${PUBLIC_ORIGIN}/open-motion/desktop/${OPENMOTION_RELEASE_CHANNEL}"
+          xcodebuild -version || true
           npm --prefix desktop run "${{ matrix.pack_script }}" -- \
             -c.extraMetadata.version="${RELEASE_VERSION}" \
             -c.extraMetadata.openmotionChannel="${OPENMOTION_RELEASE_CHANNEL}" \
@@ -372,6 +373,12 @@ jobs:
             -c.publish.url="${FEED_URL}" \
             -c.publish.channel="${OPENMOTION_RELEASE_CHANNEL}" \
             ${EXTRA_BUILDER_ARGS[@]+"${EXTRA_BUILDER_ARGS[@]}"}
+
+          if [ ! -s desktop/build/Assets.car ]; then
+            echo "::error::Compiled Liquid Glass Assets.car is missing after macOS build; refusing to ship an icon-jailed macOS app."
+            exit 1
+          fi
+          ls -lh desktop/build/Assets.car
 
           {
             echo "### ${{ matrix.label }} · ${RELEASE_VERSION} (${OPENMOTION_RELEASE_CHANNEL})"

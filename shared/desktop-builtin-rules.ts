@@ -42,24 +42,54 @@ export const BUILTIN_CONFIG_FIELD_TYPES: readonly BuiltinConfigFieldType[] = ['r
 
 /**
  * Built-in signed binary publisher allowlist (v1).
- * Contains the Apple Developer Team ID(s) authorized to sign first-party
- * components (such as the Murmur engine and future Local Bridge Daemon).
+ * Contains the Apple Developer Team ID(s) and Windows Authenticode certificate
+ * thumbprints authorized to sign first-party components (such as the Murmur
+ * engine and future Local Bridge Daemon).
  *
- * NOTE: Verify exact Team ID parity between Murmur engine and OpenMotion
- * desktop signing certificates before shipping Stage 3 / Scene B.
+ * Production desktop builds inject the real publisher Team ID and Windows
+ * Authenticode thumbprints at bundle time via `desktop/scripts/build.mjs`.
  */
+declare const __OPENMOTION_MURMUR_APPLE_TEAM_ID__: string | undefined;
+declare const __OPENMOTION_MURMUR_WIN_THUMBPRINTS__: string | undefined;
+
 export type BuiltinPublisherEntry = {
   id: string;
   label: string;
   appleTeamId: string;
+  /** Optional pinned Windows Authenticode signer cert thumbprints (SHA-1 40-hex or SHA-256 64-hex, uppercase). */
+  windowsThumbprints?: readonly string[];
 };
+
+function resolveInjectedMurmurTeamId(): string {
+  const injected =
+    typeof __OPENMOTION_MURMUR_APPLE_TEAM_ID__ === 'string'
+      ? __OPENMOTION_MURMUR_APPLE_TEAM_ID__.trim()
+      : '';
+  return injected || 'POWERFORMER_MURMUR_TEAM_ID_PENDING';
+}
+
+function resolveInjectedMurmurWinThumbprints(): readonly string[] {
+  const raw =
+    typeof __OPENMOTION_MURMUR_WIN_THUMBPRINTS__ === 'string'
+      ? __OPENMOTION_MURMUR_WIN_THUMBPRINTS__.trim()
+      : '';
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map(item => item.trim().toUpperCase())
+    .filter(item => /^[0-9A-F]{40}$|^[0-9A-F]{64}$/.test(item));
+}
+
+const injectedMurmurWinThumbprints = resolveInjectedMurmurWinThumbprints();
 
 export const BUILTIN_PUBLISHERS: readonly BuiltinPublisherEntry[] = [
   {
     id: 'powerformer-murmur',
     label: 'Powerformer / Murmur Signing Team',
-    // Override via build-time injection or update once Murmur Team ID is confirmed (Doc §5.6).
-    appleTeamId: 'POWERFORMER_MURMUR_TEAM_ID_PENDING',
+    appleTeamId: resolveInjectedMurmurTeamId(),
+    ...(injectedMurmurWinThumbprints.length > 0
+      ? { windowsThumbprints: injectedMurmurWinThumbprints }
+      : {}),
   },
 ] as const;
 
