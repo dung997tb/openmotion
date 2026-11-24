@@ -6,6 +6,20 @@ import { assembleBuiltinTemplate, BUILTIN_TEMPLATES } from '../../src/services/b
 import { bundlePreviewInMemory } from '../../src/studio/engine/preview-bundler.ts';
 import { verifiedPreviewLiveEdits } from '../../src/studio/engine/preview-live-edits.ts';
 import { InMemoryVirtualProject } from '../../src/studio/virtual-project-store.ts';
+import { isLiveMediaMove } from '../../shared/preview-live-media.ts';
+import type { PreviewChange } from '../../shared/preview-timing.ts';
+
+test('a media move can extend the root but cannot include another kind of edit', () => {
+  const audio: PreviewChange = { tag:'audio', hfId:'soundtrack', id:'', compositionId:null, attributes:[['data-start','0','2']] };
+  const root: PreviewChange = { tag:'main', hfId:null, id:'', compositionId:'main', attributes:[['data-duration','37.3','39.3']] };
+  assert.ok(isLiveMediaMove([audio]));
+  assert.ok(isLiveMediaMove([root, audio]));
+  assert.equal(isLiveMediaMove([root]), false);
+  assert.equal(isLiveMediaMove([root, root, audio]), false);
+  assert.equal(isLiveMediaMove([{...audio, tag:'video'}]), false);
+  assert.equal(isLiveMediaMove([{...audio, attributes:[['data-playback-start','0','2']]}]), false);
+  assert.equal(isLiveMediaMove([audio, {...root, styles:[['left','0px','20px']]}]), false);
+});
 
 test('only an author-reviewed script set opts into position and media timing updates', async () => {
   const template = await assembleBuiltinTemplate(BUILTIN_TEMPLATES[0]!);
