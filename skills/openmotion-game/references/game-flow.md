@@ -4,7 +4,7 @@
 
 This reference governs authored game assets, not Studio application styling. Use `openmotion_game_create`, `openmotion_game_get`, `openmotion_game_read_file`, `openmotion_game_write_files`, `openmotion_game_update_meta`, `openmotion_game_capture_cover`, `openmotion_game_playtest`, `openmotion_game_simulate`, `openmotion_game_validate`, `openmotion_game_set_status` and authorized **local** `openmotion_game_publish`. Paths below are game-relative. New games use the single-player workflow. The room protocol and co-op kit sections document existing projects.
 
-**Media tools:** generate images, music, speech and video with `openmotion_media_use` (`action` `inspect`, `models`, `reference`; read-only discovery) and `openmotion_assets_use` (`action` `generate`, `status`, `read`; plus `web_publish` for public sharing). Follow the `openmotion-media` provider order (OpenDesign account, then OpenDesign Cloud, then other configured providers) and its consent rule: state the planned assets with provider/model and obtain spending approval before any `generate`. Poll the original job; a queued job is not an asset; never auto-retry a paid request. When the host does not list these tools, use bundled or code-made assets and report the gap. Do not invent tool names or forward old CLI flags.
+**Media tools:** generate images, music, speech and video with `openmotion_media_use` (`action` `inspect`, `models`, `reference`; read-only discovery) and `openmotion_assets_use` (`action` `generate`, `status`, `read`; plus `web_publish` for public sharing). Defer provider ranking and spend approval to `openmotion-media` (`openmotion://workflow/media/start`) before any `generate`. Poll the original job; a queued job is not an asset; never auto-retry a paid request. When the host does not list these tools, use bundled or code-made assets and report the gap. Do not invent tool names or forward old CLI flags.
 
 **Using generated media in a game:** embed each completed version's complete literal `/motion-api/assets/<assetId>/versions/<versionId>/media` URL directly in HTML, JS, CSS, Three.js loaders or a runtime manifest stored outside `design/` (never build the URL by runtime string concatenation, or `web_publish` cannot rewrite it). The game play page, playtest, cover capture and trailer recording load these URLs from the same local service, and `web_publish` bundles them and rewrites literal URLs to relative paths (verify media loading after publish). Do not try to place binaries through `openmotion_game_write_files`; it accepts text only. Record asset id, version id, model, license and approved cost in `design/assets.csv`.
 
@@ -16,11 +16,11 @@ A game is a local HTML project. HTTP and MCP use the same game service and file 
 ## Create
 
 ```json
-{"tool":"openmotion_game_create","arguments":{"prompt":"Defend a crystal through five waves","genre":"shooter","style":"3d"}}
+{"tool":"openmotion_game_create","arguments":{"prompt":"<brief summary>","genre":"shooter","style":"3d"}}
 ```
 
 - Use the supported genres `shooter`, `platformer`, `story`, `casual`, `racing`, `horror` from `shared/game-contract.ts`. Genre is optional, defaults to casual. The original categories arcade, puzzle, RPG, strategy, simulation, adventure, action, fighting, survival, sports, card-board, education, endless-runner, MOBA, music-rhythm and sandbox-building are brief descriptions, not accepted enum values: choose the closest supported genre and preserve the specific idea in `prompt`.
-- Use the returned project id and playUrl. The single-player scaffold uses `templates/game-kits/arcade-2d/` when available. The standalone game runs its own game loop in the browser.
+- Use the returned project id and playUrl. The single-player scaffold uses `templates/game-kits/arcade-2d/` as a **theme-neutral engineering chassis** — always replace its graybox palette, placeholder copy, and rules with the world and mechanics from `design/plan.md` and `design/style.md`. The standalone game runs its own game loop in the browser.
 
 ## Read the shipped contract
 
@@ -110,14 +110,14 @@ After `openmotion_game_capture_cover` has saved the game-only cover, call:
   "tool": "openmotion_game_update_meta",
   "arguments": {
     "id": "<game-id>",
-    "title": "Crystal Guard",
-    "description": "Defend the crystal through five waves.",
+    "title": "<Original Game Title>",
+    "description": "<One-sentence gameplay summary.>",
     "controls": "WASD/arrows or touch joystick; mouse aim/fire; touch auto-fire.",
     "cover": "assets/cover.png",
     "i18n": {
       "zh-CN": {
-        "title": "晶石守卫",
-        "description": "抵御五波敌人，守住中央晶石。",
+        "title": "<原创游戏标题>",
+        "description": "<一句话玩法简介。>",
         "controls": "WASD/方向键或触控摇杆移动；鼠标瞄准射击；触控自动射击。"
       }
     }

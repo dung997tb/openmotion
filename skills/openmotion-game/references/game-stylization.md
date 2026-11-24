@@ -34,15 +34,15 @@ One English paragraph, **60–90 words**, composed once per game right after
 the design brief is parsed, shown to the user for approval, stored in the
 pipeline's state (e.g. `gdd.json.style_formula`).
 
-Concatenate five blocks, in order:
+Concatenate five open structural blocks, in order — fill each slot from the user's explicit style or fresh creative direction rather than reusing any preset palette:
 
-| # | Block | Pins down | Example |
+| # | Block | Pins down | Structural slot pattern |
 |---|---|---|---|
-| 1 | Rendering style | what it's "drawn with" | `flat vector cartoon with soft gradients` / `chunky pixel art, 32x32 grid feel` / `soft hand-painted gouache` |
-| 2 | Shape & line language | silhouettes and outlines | `rounded blobby shapes with thick dark-plum outlines` |
-| 3 | Palette **by role** | readability, not uniformity | `environment in deep violet stone with charcoal shadows, hero in warm coral-cream tones contrasting the surroundings, hazards and pickups marked with acid-green glow` |
-| 4 | Light & mood | one clause | `moody but playful underground atmosphere, flat ambient light` |
-| 5 | Game-readability | contrast + **perspective word** | `high contrast between game elements and backgrounds, clean readable silhouettes, consistent side-view perspective across all assets` |
+| 1 | Rendering medium | what physical or artistic craft it is "made with" | `[chosen medium, texture grain, and surface finish]` |
+| 2 | Shape & line language | silhouettes, proportions, and edge treatment | `[form vocabulary, contour thickness/contrast, and edge style]` |
+| 3 | Palette **by role** | readability, not uniformity | `[environment/ground value & hue family], [contrasting hero hue/luminance that pops cleanly], [one unmistakable signal hue reserved for hazards/pickups]` |
+| 4 | Light & mood | time of day, light quality, and emotional register | `[lighting direction/temperature, atmosphere, and emotional tone]` |
+| 5 | Game-readability | figure-ground separation + **perspective word** | `high contrast between game elements and backgrounds, clean readable silhouettes, consistent [genre perspective word] perspective across all assets` |
 
 Rules:
 
@@ -72,8 +72,8 @@ Some downstream fields are length-limited (e.g. an external 3D provider's
 texture prompt, often ≤600 chars — the full formula usually fits; some UI fields may not). When a
 consumer cannot take the full formula, it takes the **STYLE TOKEN**: blocks
 1 + 3-condensed + one accent from block 4, ≤120 chars, derived ONCE from the
-approved formula and then also frozen byte-identical. Example:
-`flat vector cartoon, deep violet dungeon palette, glowing teal accents, warm amber torchlight, thick dark-plum outlines`.
+approved formula and then also frozen byte-identical. Structure:
+`[medium], [ground palette role], [contrasting hero & signal accents], [lighting mood], [line/shape language]`.
 The formula is the source of truth; the token is its compression — never
 maintain two competing style strings.
 
