@@ -3,11 +3,12 @@ import { gameProjectsFor } from '../game-projects.ts';
 import { brandCatalogFile, type BrandCatalogEntry } from '../shared/brand-catalog.ts';
 import { assetMediaUrl, assetVersion } from '../shared/asset-library.ts';
 import { CAPABILITY_DOMAINS } from '../shared/capability-hub.ts';
-import { designRoutes } from '../shared/design-project.ts';
+import { designRoutes, designScenarios } from '../shared/design-project.ts';
 import { designCatalog } from '../shared/design-catalog.ts';
 import { rankSearchResults } from '../shared/fuzzy-search.ts';
 import { loadLibrarySkills } from '../shared/library-skill-catalog.ts';
 import { scenarioDefinitions } from '../shared/scenarios.ts';
+import { creativeStudios, studioScenes } from '../shared/studio-catalog.ts';
 import type {
   SuperAgentResourceAttachment,
   SuperAgentResourceCatalog,
@@ -266,7 +267,7 @@ export async function collectWorkspaceResources(
           title: game.title,
           subtitle: `${game.genre} · ${game.playableAd ? 'Playable ad' : game.multiplayer ? 'Multiplayer' : 'Single player'}`,
           playableAd: game.playableAd === true,
-          previewUrl: game.cover ?? undefined,
+          previewUrl: game.cover ? game.cover.replace(/^\/api\//, '/motion-api/') : undefined,
           tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : [])],
         }, {
           description: game.description,
@@ -418,6 +419,9 @@ export async function buildResourceContextManifest(
       title: domain.title,
       tools: domain.tools,
     })),
+    studios: creativeStudios.map(studio => ({ id: studio.id, title: studio.title, surface: studio.surface })),
+    scenes: studioScenes.map(scene => ({ id: scene.id, label: scene.label, modality: scene.modality })),
+    designScenarios: designScenarios.map(scenario => ({ id: scenario.id, title: scenario.label, hint: scenario.hint })),
     workflows: scenarioDefinitions.map(wf => ({ id: wf.id, title: wf.title, category: wf.category })),
     recentProjects,
     recentAssets,

@@ -53,6 +53,20 @@ function searchIcon(name: string, tone: Modality | 'agent') {
   );
 }
 
+function CommandThumb({ src, fallbackIcon, tone }: { src?: string; fallbackIcon: string; tone: Modality | 'agent' }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) return searchIcon(fallbackIcon, tone);
+  return (
+    <span className="om-command-thumb" aria-hidden="true">
+      <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+    </span>
+  );
+}
+
+function normalizePreviewUrl(url?: string): string | undefined {
+  return url ? url.replace(/^\/api\//, '/motion-api/') : undefined;
+}
+
 function highlight(text: string, pattern: RegExp | null): ReactNode {
   return pattern
     ? text.split(pattern).map((part, index) =>
@@ -90,9 +104,53 @@ function useAssetMatches(query: string, offset: number) {
   };
 }
 
+function AiSparkleIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      className="om-command-ai-icon"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id="om-ai-sparkle-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="var(--motion-creative-agent)" />
+          <stop offset="45%" stopColor="var(--motion-creative-video)" />
+          <stop offset="80%" stopColor="var(--motion-creative-image)" />
+          <stop offset="100%" stopColor="var(--motion-creative-audio)" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M12 2.25c.45 4.25 1.85 6.4 6.25 7.25-4.4.85-5.8 3-6.25 7.25-.45-4.25-1.85-6.4-6.25-7.25 4.4-.85 5.8-3 6.25-7.25Z"
+        fill="url(#om-ai-sparkle-grad)"
+      />
+      <path
+        d="M18.6 15.1c.22 1.75.85 2.62 2.65 2.95-1.8.33-2.43 1.2-2.65 2.95-.22-1.75-.85-2.62-2.65-2.95 1.8-.33 2.43-1.2 2.65-2.95Z"
+        fill="url(#om-ai-sparkle-grad)"
+      />
+      <circle cx="5.2" cy="18.2" r="1.45" fill="var(--motion-creative-audio)" />
+    </svg>
+  );
+}
+
 function shortcutKeyLabel(): string {
   if (typeof navigator === 'undefined') return 'Ctrl+K';
   return /Mac|iP(?:hone|ad|od)/i.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl+K';
+}
+
+function submitShortcutLabel(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl+↵';
+  return /Mac|iP(?:hone|ad|od)/i.test(navigator.platform || navigator.userAgent) ? '⌘↵' : 'Ctrl+↵';
+}
+
+function buildSemanticSearchPrompt(rawQuery: string, locale: string): string {
+  const q = rawQuery.trim();
+  if (locale.startsWith('zh')) {
+    return `用户通过全局搜索提交了自然语言需求：“${q}”。请先理解其创作意图，调用 openmotion_workspace_resources 检索工作区内的全部动效模板、设计模板、Skills、工作流、游戏、品牌套件、资产与工作室入口，推荐最匹配的方案与对应产品入口；如果用户意图偏向直接创作，请结合最合适的模板或 Skill 直接开始生成或引导下一步。`;
+  }
+  return `The user submitted this natural-language query from global search: "${q}". Understand their intent, search openmotion_workspace_resources across all Motion & Design templates, Skills, workflows, games, brand kits, assets, and Studio entries, recommend the best matching resources and product entries, and offer or start creating directly when appropriate.`;
 }
 
 export type WorkspaceSearchProps = {
@@ -175,6 +233,7 @@ export function WorkspaceSearch({
   const query = useDeferredValue(rawQuery);
   const isQueryPending = open && (isComposing || rawQuery !== query);
   const shortcutLabel = useMemo(() => shortcutKeyLabel(), []);
+  const aiSubmitShortcut = useMemo(() => submitShortcutLabel(), []);
   const covered = useCoveredTemplates(locale, open, { showFirstPage: true });
   const coveredTemplates = useMemo(
     () => covered.catalog ?? covered.firstPage?.items ?? [],
@@ -297,17 +356,28 @@ export function WorkspaceSearch({
   const gameStudioEntry = useMemo(() => creativeStudios.find(s => s.id === 'game') ?? motionStudioEntry, [motionStudioEntry]);
   const canAskSuperAgent = Boolean(chrome?.openInSuperAgent || onNewAgentChat);
 
-  const openNewSuperAgentChat = useCallback((prompt = '') => {
+  const openNewSuperAgentChat = useCallback((prompt = '', autoSend = false) => {
     if (prompt.trim() && chrome?.openInSuperAgent) {
-      chrome.openInSuperAgent({ prompt: prompt.trim(), newChat: true, autoSend: false });
+      chrome.openInSuperAgent({ prompt: prompt.trim(), newChat: true, autoSend });
       return;
     }
     if (onNewAgentChat) {
       onNewAgentChat();
       return;
     }
-    chrome?.openInSuperAgent?.({ prompt: prompt.trim(), newChat: true, autoSend: false });
+    chrome?.openInSuperAgent?.({ prompt: prompt.trim(), newChat: true, autoSend });
   }, [chrome, onNewAgentChat]);
+
+  const submitQueryToSuperAgent = useCallback((rawText: string) => {
+    const trimmed = rawText.trim();
+    choose(() => {
+      if (!trimmed) {
+        openNewSuperAgentChat('', false);
+        return;
+      }
+      openNewSuperAgentChat(buildSemanticSearchPrompt(trimmed, locale), true);
+    });
+  }, [choose, locale, openNewSuperAgentChat]);
 
   const allQuickActions = useMemo((): SearchPaletteItem[] => [
     {
@@ -502,16 +572,10 @@ export function WorkspaceSearch({
       description: template.description,
       badge: t(editable ? 'Editable project' : 'Reference creation'),
       meta: metaParts.join(' · ') || undefined,
-      thumbUrl: template.posterUrl,
+      thumbUrl: normalizePreviewUrl(template.posterUrl),
       tags: template.tags ?? [],
       template,
-      icon: template.posterUrl ? (
-        <span className="om-command-thumb" aria-hidden="true">
-          <img src={template.posterUrl} alt="" loading="lazy" decoding="async" />
-        </span>
-      ) : (
-        searchIcon('film-line', 'video')
-      ),
+      icon: <CommandThumb key={template.posterUrl || template.id} src={normalizePreviewUrl(template.posterUrl)} fallbackIcon="film-line" tone="video" />,
       open: () => chrome?.openLibrary(undefined, template),
     };
   }, [chrome, t]);
@@ -597,6 +661,7 @@ export function WorkspaceSearch({
       };
     }
     if (resource.kind === 'game-project') {
+      const thumb = normalizePreviewUrl(resource.previewUrl);
       return {
         key: `game-project:${resource.id}`,
         id: resource.id,
@@ -605,7 +670,7 @@ export function WorkspaceSearch({
         group: 'Games',
         label: resource.title,
         detail: resource.subtitle || t('Games'),
-        thumbUrl: resource.previewUrl,
+        thumbUrl: thumb,
         tags: resource.tags,
         resource,
         icon: searchIcon('gamepad-line', 'agent'),
@@ -615,6 +680,7 @@ export function WorkspaceSearch({
       };
     }
     if (resource.kind === 'brand-kit') {
+      const thumb = normalizePreviewUrl(resource.previewUrl);
       return {
         key: `brand-kit:${resource.id}`,
         id: resource.id,
@@ -623,7 +689,7 @@ export function WorkspaceSearch({
         group: 'Brand Kits',
         label: resource.title,
         detail: resource.subtitle || t('Brand Kit'),
-        thumbUrl: resource.previewUrl,
+        thumbUrl: thumb,
         swatches: resource.swatches,
         tags: resource.tags,
         resource,
@@ -1233,6 +1299,11 @@ export function WorkspaceSearch({
       event.stopPropagation();
     }
     if (event.nativeEvent.isComposing || composingRef.current) return;
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canAskSuperAgent) {
+      event.preventDefault();
+      submitQueryToSuperAgent(input);
+      return;
+    }
     if (!flatItems.length) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -1334,6 +1405,22 @@ export function WorkspaceSearch({
                     }}
                     icon={<RemixIcon name="close-line" size={14} />}
                   />
+                )}
+                {canAskSuperAgent && (
+                  <Tooltip label={t('Submit query to Super Agent for semantic search, recommendations, and creation')}>
+                    <Button
+                      variant="plain"
+                      type="button"
+                      size="sm"
+                      className="om-command-ai-btn"
+                      data-has-query={Boolean(input.trim()) || undefined}
+                      onClick={() => submitQueryToSuperAgent(input)}
+                    >
+                      <AiSparkleIcon size={15} />
+                      <span className="om-command-ai-label">{t('Ask AI')}</span>
+                      <kbd className="om-command-ai-kbd" aria-hidden="true">{aiSubmitShortcut}</kbd>
+                    </Button>
+                  </Tooltip>
                 )}
                 <kbd className="om-command-kbd" aria-hidden="true">Esc</kbd>
               </div>

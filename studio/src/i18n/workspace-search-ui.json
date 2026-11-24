@@ -50,7 +50,9 @@
     "Preview not available": "暂不支持预览",
     "Prompt copied": "已复制提示词",
     "Waiting for approval": "等待审批",
-    "Open Brand Kit": "打开品牌套件"
+    "Open Brand Kit": "打开品牌套件",
+    "Ask AI": "问 AI",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "一键提交给 Super Agent 进行语义搜索、智能推荐或直接创作"
   },
   "ja": {
     "Search templates, Super Agent chats, actions, files…": "テンプレート、Super Agent チャット、操作、ファイルを検索…",
@@ -103,7 +105,9 @@
     "Preview not available": "プレビューを利用できません",
     "Prompt copied": "プロンプトをコピーしました",
     "Waiting for approval": "承認待ち",
-    "Open Brand Kit": "ブランドキットを開く"
+    "Open Brand Kit": "ブランドキットを開く",
+    "Ask AI": "AIに聞く",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Super Agent に送信して意味検索・おすすめ・生成を依頼"
   },
   "ko": {
     "Search templates, Super Agent chats, actions, files…": "템플릿, Super Agent 채팅, 빠른 작업, 파일 검색…",
@@ -156,7 +160,9 @@
     "Preview not available": "미리보기를 사용할 수 없음",
     "Prompt copied": "프롬프트 복사됨",
     "Waiting for approval": "승인 대기 중",
-    "Open Brand Kit": "브랜드 키트 열기"
+    "Open Brand Kit": "브랜드 키트 열기",
+    "Ask AI": "AI에게 묻기",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Super Agent에 전송해 시맨틱 검색, 추천, 생성을 요청"
   },
   "de": {
     "Search templates, Super Agent chats, actions, files…": "Vorlagen, Super-Agent-Chats, Aktionen, Dateien suchen…",
@@ -209,7 +215,9 @@
     "Preview not available": "Keine Vorschau verfügbar",
     "Prompt copied": "Prompt kopiert",
     "Waiting for approval": "Wartet auf Freigabe",
-    "Open Brand Kit": "Brand Kit öffnen"
+    "Open Brand Kit": "Brand Kit öffnen",
+    "Ask AI": "KI fragen",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "An Super Agent für semantische Suche, Empfehlungen und Erstellung senden"
   },
   "fr": {
     "Search templates, Super Agent chats, actions, files…": "Rechercher modèles, chats Super Agent, actions, fichiers…",
@@ -262,7 +270,9 @@
     "Preview not available": "Aperçu indisponible",
     "Prompt copied": "Prompt copié",
     "Waiting for approval": "En attente d’approbation",
-    "Open Brand Kit": "Ouvrir le Brand Kit"
+    "Open Brand Kit": "Ouvrir le Brand Kit",
+    "Ask AI": "Demander à l’IA",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Envoyer à Super Agent pour recherche sémantique, recommandations et création"
   },
   "ru": {
     "Search templates, Super Agent chats, actions, files…": "Поиск шаблонов, чатов Super Agent, действий и файлов…",
@@ -315,7 +325,9 @@
     "Preview not available": "Предпросмотр недоступен",
     "Prompt copied": "Промпт скопирован",
     "Waiting for approval": "Ожидает подтверждения",
-    "Open Brand Kit": "Открыть бренд-кит"
+    "Open Brand Kit": "Открыть бренд-кит",
+    "Ask AI": "Спросить ИИ",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Отправить в Super Agent для семантического поиска, рекомендаций и создания"
   },
   "es": {
     "Search templates, Super Agent chats, actions, files…": "Buscar plantillas, chats de Super Agent, acciones, archivos…",
@@ -368,7 +380,9 @@
     "Preview not available": "Vista previa no disponible",
     "Prompt copied": "Prompt copiado",
     "Waiting for approval": "Esperando aprobación",
-    "Open Brand Kit": "Abrir Brand Kit"
+    "Open Brand Kit": "Abrir Brand Kit",
+    "Ask AI": "Preguntar a IA",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Enviar a Super Agent para búsqueda semántica, recomendaciones y creación"
   },
   "pt-BR": {
     "Search templates, Super Agent chats, actions, files…": "Buscar modelos, chats do Super Agent, ações, arquivos…",
@@ -421,7 +435,9 @@
     "Preview not available": "Prévia indisponível",
     "Prompt copied": "Prompt copiado",
     "Waiting for approval": "Aguardando aprovação",
-    "Open Brand Kit": "Abrir Brand Kit"
+    "Open Brand Kit": "Abrir Brand Kit",
+    "Ask AI": "Perguntar à IA",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Enviar ao Super Agent para busca semântica, recomendações e criação"
   },
   "it": {
     "Search templates, Super Agent chats, actions, files…": "Cerca modelli, chat Super Agent, azioni, file…",
@@ -474,7 +490,9 @@
     "Preview not available": "Anteprima non disponibile",
     "Prompt copied": "Prompt copiato",
     "Waiting for approval": "In attesa di approvazione",
-    "Open Brand Kit": "Apri Brand Kit"
+    "Open Brand Kit": "Apri Brand Kit",
+    "Ask AI": "Chiedi all’IA",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Invia a Super Agent per ricerca semantica, consigli e creazione"
   },
   "tr": {
     "Search templates, Super Agent chats, actions, files…": "Şablonlar, Super Agent sohbetleri, işlemler ve dosyalarda ara…",
@@ -527,6 +545,8 @@
     "Preview not available": "Önizleme kullanılamıyor",
     "Prompt copied": "İstem kopyalandı",
     "Waiting for approval": "Onay bekleniyor",
-    "Open Brand Kit": "Marka Kitini aç"
+    "Open Brand Kit": "Marka Kitini aç",
+    "Ask AI": "Yapay Zekaya Sor",
+    "Submit query to Super Agent for semantic search, recommendations, and creation": "Anlamsal arama, öneri ve üretim için Super Agent’a gönder"
   }
 }
