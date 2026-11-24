@@ -510,4 +510,56 @@ describe("VideoThumbnail during a trim", () => {
       .mock.calls.map(([r]) => [r.sourceStart, r.sourceRangeDuration]);
     expect(new Set(ranges.map((r) => r.join()))).toEqual(new Set(["1.5,8.5"]));
   });
+
+  it("keeps showing the previous filmstrip instead of shimmer while a trimmed range decodes", async () => {
+    Object.defineProperty(host, "clientWidth", { configurable: true, value: 440 });
+    Object.defineProperty(host, "clientHeight", { configurable: true, value: 40 });
+    let resolveTrimmed:
+      | ((value: { value: { kind: "filmstrip"; urls: string[]; aspect: number }; weight: number }) => void)
+      | null = null;
+    vi.mocked(decodeVideoThumbnail).mockImplementation(({ frameCount, sourceStart }) => {
+      if (sourceStart === 2 && frameCount > 1) {
+        return new Promise((resolve) => {
+          resolveTrimmed = resolve;
+        });
+      }
+      if (frameCount === 1) {
+        return Promise.resolve({
+          value: { kind: "image", url: "blob:poster", aspect: 16 / 9 },
+          weight: 1,
+        });
+      }
+      return Promise.resolve({
+        value: { kind: "filmstrip", urls: ["blob:orig-1", "blob:orig-2"], aspect: 16 / 9 },
+        weight: 2,
+      });
+    });
+
+    const root = harness.mount(host);
+    await act(async () => {
+      root.render(trimmed(10, 0));
+      await Promise.resolve();
+    });
+    expect(new Set(shownSources())).toEqual(new Set(["blob:orig-1", "blob:orig-2"]));
+
+    // Commit a trimmed range whose multi-frame decode is still pending.
+    await act(async () => {
+      root.render(trimmed(8, 2));
+      await Promise.resolve();
+    });
+
+    expect(resolveTrimmed).not.toBeNull();
+    expect(host.querySelector(".animate-pulse")).toBeNull();
+    expect(new Set(shownSources())).toEqual(new Set(["blob:orig-1", "blob:orig-2"]));
+
+    // Swap atomically once the new trimmed filmstrip resolves.
+    await act(async () => {
+      resolveTrimmed?.({
+        value: { kind: "filmstrip", urls: ["blob:trim-1", "blob:trim-2"], aspect: 16 / 9 },
+        weight: 2,
+      });
+      await Promise.resolve();
+    });
+    expect(new Set(shownSources())).toEqual(new Set(["blob:trim-1", "blob:trim-2"]));
+  });
 });

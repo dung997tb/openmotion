@@ -9,6 +9,7 @@ import {
   getCompositionCacheRevision,
   getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
+  peekFallbackCompositionCapture,
   quantizeCompositionFrameCount,
   retainCachedCompositionCapture,
   seedClientCompositionCaptureForTest,
@@ -980,5 +981,45 @@ describe("clientCompositionCapture", () => {
       globalThis.fetch = origFetch;
       meta.remove();
     }
+  });
+
+  it("returns the freshest same-clip filmstrip fallback across revisions and frame counts without bleeding across clips", () => {
+    const previewUrl = "/api/projects/proj-fb/preview/comp/compositions/scene.html";
+    setCachedProjectRevision("proj-fb", "rev-1");
+    const strip4 = seedClientCompositionCaptureForTest(
+      { projectId: "proj-fb", previewUrl, contentRevision: 0, frameCount: 4 },
+      [new Blob(["1"]), new Blob(["2"]), new Blob(["3"]), new Blob(["4"])],
+    );
+    const single1 = seedClientCompositionCaptureForTest(
+      { projectId: "proj-fb", previewUrl, contentRevision: 1, frameCount: 1 },
+      [new Blob(["cover"])],
+    );
+    expect(single1.kind).toBe("image");
+
+    // Prefers the existing multi-frame filmstrip over a 1-frame render for the same clip.
+    setCachedProjectRevision("proj-fb", "rev-2");
+    expect(peekFallbackCompositionCapture({ projectId: "proj-fb", previewUrl })).toBe(strip4);
+
+    // Different clip or selector never receives this clip's fallback.
+    expect(
+      peekFallbackCompositionCapture({
+        projectId: "proj-fb",
+        previewUrl: "/api/projects/proj-fb/preview/comp/compositions/other.html",
+      }),
+    ).toBeNull();
+    expect(
+      peekFallbackCompositionCapture({
+        projectId: "proj-fb",
+        previewUrl,
+        selector: "#headline",
+      }),
+    ).toBeNull();
+
+    // Once a newer filmstrip is seeded, fallback prefers the newest one.
+    const strip8 = seedClientCompositionCaptureForTest(
+      { projectId: "proj-fb", previewUrl, contentRevision: 2, frameCount: 8 },
+      Array.from({ length: 8 }, (_, idx) => new Blob([String(idx)])),
+    );
+    expect(peekFallbackCompositionCapture({ projectId: "proj-fb", previewUrl })).toBe(strip8);
   });
 });

@@ -27,6 +27,7 @@ import {
   getCompositionCacheRevision,
   getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
+  peekFallbackCompositionCapture,
   quantizeCompositionFrameCount,
   retainCachedCompositionCapture,
   selectInitialGateCompositionPaths,
@@ -194,6 +195,94 @@ async function loadCompositionImage(url: string, signal: AbortSignal) {
   }
 }
 
+type RenderedCaptureValue =
+  | Extract<ThumbnailValue, { kind: "filmstrip" }>
+  | (Extract<ThumbnailValue, { kind: "image" }> & { representative: "render" });
+
+function isRenderedCaptureValue(
+  value: ThumbnailValue | null | undefined,
+): value is RenderedCaptureValue {
+  if (!value) return false;
+  if (value.kind === "filmstrip") return value.urls.length > 0;
+  return value.kind === "image" && value.representative === "render";
+}
+
+/**
+ * Keep displaying a clip's already-rendered filmstrip/capture while a refresh
+ * (frame-count change, revision bump, or selector window update) recalculates,
+ * so the clip swaps atomically without flashing skeleton -> text -> filmstrip.
+ */
+function useRetainedCompositionCapture({
+  captureEnabled,
+  projectId,
+  previewUrl,
+  selector,
+  selectorIndex,
+  captureCacheKey,
+  settledCapture,
+  captureFailed,
+}: {
+  captureEnabled: boolean;
+  projectId: string;
+  previewUrl: string;
+  selector?: string;
+  selectorIndex?: number;
+  captureCacheKey: string | null;
+  settledCapture: RenderedCaptureValue | null;
+  captureFailed: boolean;
+}): RenderedCaptureValue | null {
+  const clipIdentity = `${projectId}|${previewUrl}|${selector ?? ""}|${selectorIndex ?? 0}`;
+  const fallbackCachedCapture = useMemo(() => {
+    if (!captureEnabled || settledCapture || captureFailed) return null;
+    const candidate = peekFallbackCompositionCapture({
+      projectId,
+      previewUrl,
+      selector,
+      selectorIndex,
+    });
+    return isRenderedCaptureValue(candidate) ? candidate : null;
+  }, [
+    captureEnabled,
+    captureFailed,
+    captureCacheKey,
+    previewUrl,
+    projectId,
+    selector,
+    selectorIndex,
+    settledCapture,
+  ]);
+
+  const [retained, setRetained] = useState<{
+    identity: string;
+    value: RenderedCaptureValue;
+  } | null>(null);
+
+  if (!captureEnabled || captureFailed) {
+    if (retained !== null) setRetained(null);
+  } else if (settledCapture) {
+    if (retained?.identity !== clipIdentity || retained.value !== settledCapture) {
+      setRetained({ identity: clipIdentity, value: settledCapture });
+    }
+  } else if (retained && retained.identity !== clipIdentity) {
+    setRetained(
+      fallbackCachedCapture ? { identity: clipIdentity, value: fallbackCachedCapture } : null,
+    );
+  } else if (!retained && fallbackCachedCapture) {
+    setRetained({ identity: clipIdentity, value: fallbackCachedCapture });
+  }
+
+  const activeRetained =
+    !captureEnabled || captureFailed
+      ? null
+      : settledCapture ??
+        (retained?.identity === clipIdentity ? retained.value : fallbackCachedCapture);
+
+  // Retain object URLs across LRU eviction and old scheduler/IDB lease cleanup while refreshing.
+  useLayoutEffect(() => retainCachedCompositionCapture(activeRetained), [activeRetained]);
+
+  return activeRetained;
+}
+
 /** Composition poster, deduplicated and budgeted by project/session. */
 export const CompositionThumbnail = memo(function CompositionThumbnail({
   previewUrl,
@@ -343,16 +432,6 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
   const participatesInInitialGate =
     Boolean(captureCacheKey) && !syncCachedValue && inInitialGateSet;
 
-  // Skip HTTP poster fetch when client capture is already cached or still checking fast IDB.
-  const request = useMemo(
-    () =>
-      cachedValue || idbPending
-        ? null
-        : compositionThumbnailRequest(url, projectId, { sessionEpoch, priority, rich: true }),
-    [cachedValue, idbPending, priority, projectId, sessionEpoch, url],
-  );
-  const posterSnapshot = useThumbnailLease(request);
-
   // Tier 2: priority-queued offscreen browser capture (cold misses only).
   const captureRequest = useMemo(
     () =>
@@ -392,9 +471,40 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     ],
   );
   const captureSnapshot = useThumbnailLease(captureRequest);
+  const settledCapture = isRenderedCaptureValue(cachedValue)
+    ? cachedValue
+    : captureSnapshot.status === "ready" && isRenderedCaptureValue(captureSnapshot.value)
+      ? captureSnapshot.value
+      : null;
+  const retainedCapture = useRetainedCompositionCapture({
+    captureEnabled,
+    projectId,
+    previewUrl,
+    selector,
+    selectorIndex,
+    captureCacheKey,
+    settledCapture,
+    captureFailed: captureSnapshot.status === "error",
+  });
+
+  // Skip HTTP poster fetch when client capture is cached, checking IDB, or holding a prior strip.
+  const request = useMemo(
+    () =>
+      cachedValue || idbPending || retainedCapture
+        ? null
+        : compositionThumbnailRequest(url, projectId, { sessionEpoch, priority, rich: true }),
+    [cachedValue, idbPending, priority, projectId, retainedCapture, sessionEpoch, url],
+  );
+  const posterSnapshot = useThumbnailLease(request);
+
   const progressiveTarget = useMemo(
     () =>
-      captureEnabled && captureMeasured && !cachedValue && !idbPending && captureSnapshot.status !== "ready"
+      captureEnabled &&
+      captureMeasured &&
+      !cachedValue &&
+      !idbPending &&
+      !retainedCapture &&
+      captureSnapshot.status !== "ready"
         ? {
             previewUrl,
             projectId,
@@ -417,6 +527,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
       idbPending,
       previewUrl,
       projectId,
+      retainedCapture,
       selector,
       selectorIndex,
       selectorStart,
@@ -464,6 +575,7 @@ export const CompositionThumbnail = memo(function CompositionThumbnail({
     (captureSnapshot.value.kind === "image" || captureSnapshot.value.kind === "filmstrip")
       ? captureSnapshot.value
       : null) ??
+    retainedCapture ??
     (progressiveValue && (progressiveValue.kind === "image" || progressiveValue.kind === "filmstrip")
       ? progressiveValue
       : null) ??
