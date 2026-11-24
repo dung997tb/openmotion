@@ -31,6 +31,23 @@ export type ParsedSentryEndpoints = {
   projectId: string;
 };
 
+declare const __OPENMOTION_DESKTOP_SENTRY_DSN__: string | undefined;
+
+/**
+ * Resolves the DSN for this shell: a runtime environment override first (local
+ * development and ingest mocks), then the value `desktop/scripts/build.mjs`
+ * embeds at build time. Unbundled runs carry no embedded value.
+ */
+export function resolveDesktopSentryDsn(
+  env: NodeJS.ProcessEnv = process.env,
+  embedded: string | undefined = typeof __OPENMOTION_DESKTOP_SENTRY_DSN__ === 'string'
+    ? __OPENMOTION_DESKTOP_SENTRY_DSN__
+    : undefined,
+): string | undefined {
+  const fromEnv = env.SENTRY_DESKTOP_DSN?.trim() || env.OPENMOTION_DESKTOP_SENTRY_DSN?.trim();
+  return fromEnv || embedded?.trim() || undefined;
+}
+
 export type ElectronCrashReporterLike = {
   start: (options: {
     submitURL: string;
@@ -40,6 +57,7 @@ export type ElectronCrashReporterLike = {
     ignoreSystemCrashHandler?: boolean;
     extra?: Record<string, string>;
   }) => void;
+  setUploadToServer?: (uploadToServer: boolean) => void;
 };
 
 export type DesktopSentryReporterOptions = {
@@ -176,6 +194,7 @@ export function createDesktopSentryReporter(
 
   let runtimeEnabled = Boolean(endpoints) && !isOptedOutByEnv(env);
   let crashReporterStarted = false;
+  let crashReporterRef: ElectronCrashReporterLike | null = null;
   const recentSendTimestamps: number[] = [];
 
   const isEnabled = (): boolean => Boolean(endpoints) && runtimeEnabled && !isOptedOutByEnv(env);
@@ -248,38 +267,51 @@ export function createDesktopSentryReporter(
     ...(context?.tags ?? {}),
   });
 
+  const startCrashReporter = (crashReporter: ElectronCrashReporterLike): boolean => {
+    crashReporterRef = crashReporter;
+    if (!endpoints || !isEnabled() || crashReporterStarted) return false;
+    try {
+      crashReporter.start({
+        submitURL: endpoints.minidumpUrl,
+        productName: DESKTOP_PRODUCT_NAME,
+        compress: true,
+        uploadToServer: true,
+        extra: {
+          release: options.release,
+          environment,
+          host_kind: 'desktop',
+          release_channel: options.channel,
+          host_platform: options.platform,
+          host_arch: options.arch,
+          shell_version: options.shellVersion,
+        },
+      });
+      crashReporterStarted = true;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   return {
     isEnabled,
     setEnabled(next: boolean) {
       runtimeEnabled = Boolean(next) && Boolean(endpoints);
+      if (!crashReporterRef) return;
+      if (!crashReporterStarted) {
+        startCrashReporter(crashReporterRef);
+        return;
+      }
+      try {
+        crashReporterRef.setUploadToServer?.(isEnabled());
+      } catch {
+        // The sharing preference still gates every envelope sent by this reporter.
+      }
     },
     getEndpoints() {
       return endpoints;
     },
-    startCrashReporter(crashReporter) {
-      if (!endpoints || !isEnabled() || crashReporterStarted) return false;
-      try {
-        crashReporter.start({
-          submitURL: endpoints.minidumpUrl,
-          productName: DESKTOP_PRODUCT_NAME,
-          compress: true,
-          uploadToServer: true,
-          extra: {
-            release: options.release,
-            environment,
-            host_kind: 'desktop',
-            release_channel: options.channel,
-            host_platform: options.platform,
-            host_arch: options.arch,
-            shell_version: options.shellVersion,
-          },
-        });
-        crashReporterStarted = true;
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    startCrashReporter,
     async captureException(error, context) {
       if (!isEnabled()) return false;
       const errObj = error instanceof Error ? error : new Error(typeof error === 'string' ? error : String(error));

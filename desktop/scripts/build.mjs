@@ -20,6 +20,8 @@ const WIN_THUMBPRINT_RE = /^[0-9A-F]{40}$|^[0-9A-F]{64}$/;
  * - `OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI`: Ed25519 SPKI DER (base64 or PEM)
  * - `OPENMOTION_MURMUR_APPLE_TEAM_ID`: 10-char Apple Developer Team ID
  * - `OPENMOTION_MURMUR_WIN_THUMBPRINTS`: comma-separated SHA-1 (40-hex) / SHA-256 (64-hex) cert thumbprints
+ * - `SENTRY_DESKTOP_DSN`: public Sentry DSN for main-process error and crash reporting; reporting stays
+ *   off when unset, and `OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN=1` turns a missing value into a build failure
  */
 export function resolveBuildTrustAnchors(env = process.env) {
   let rootPublicKeySpki = '';
@@ -75,14 +77,42 @@ export function resolveBuildTrustAnchors(env = process.env) {
     murmurWinThumbprints = parsed.join(',');
   }
 
+  let sentryDsn = '';
+  const rawSentryDsn = (env.SENTRY_DESKTOP_DSN || env.OPENMOTION_DESKTOP_SENTRY_DSN || '').trim();
+  if (rawSentryDsn) {
+    let parsedDsn = null;
+    try {
+      parsedDsn = new URL(rawSentryDsn);
+    } catch {
+      parsedDsn = null;
+    }
+    const projectId = parsedDsn?.pathname.split('/').filter(Boolean).at(-1) ?? '';
+    if (
+      !parsedDsn ||
+      parsedDsn.protocol !== 'https:' ||
+      !parsedDsn.username ||
+      parsedDsn.search ||
+      parsedDsn.hash ||
+      !/^\d+$/.test(projectId)
+    ) {
+      // Never echo the supplied value into build logs.
+      throw new Error('Invalid SENTRY_DESKTOP_DSN (expected https://<public-key>@<host>/<project-id>)');
+    }
+    sentryDsn = parsedDsn.toString();
+  } else if (/^(1|true)$/i.test(env.OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN?.trim() ?? '')) {
+    throw new Error('SENTRY_DESKTOP_DSN is required for this build (OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN is set)');
+  }
+
   return {
     rootPublicKeySpki,
     murmurAppleTeamId,
     murmurWinThumbprints,
+    sentryDsn,
     define: {
       __OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__: JSON.stringify(rootPublicKeySpki),
       __OPENMOTION_MURMUR_APPLE_TEAM_ID__: JSON.stringify(murmurAppleTeamId),
       __OPENMOTION_MURMUR_WIN_THUMBPRINTS__: JSON.stringify(murmurWinThumbprints),
+      __OPENMOTION_DESKTOP_SENTRY_DSN__: JSON.stringify(sentryDsn),
     },
   };
 }

@@ -190,3 +190,25 @@ find studio/build -type f -name '*.map' -delete
    - Matching `.js.map` files contain `"debugId":"<uuid>"`.
 4. **End-to-end Sentry check (staging)**:
    - Open Studio, trigger a controlled uncaught error in browser DevTools (`setTimeout(() => { throw new Error('sentry-smoke-check'); }, 0)`), and verify the event arrives in Sentry with deobfuscated TypeScript stack frames and sanitized URLs.
+
+---
+
+## 7. Desktop Shell Reporting
+
+The Electron shell reports main-process errors, renderer process exits and native crashes on its own, because the Studio page and its Web reporting are unavailable exactly when the shell fails to load it. The reporter lives in [`desktop/src/sentry.ts`](../desktop/src/sentry.ts) and has no SDK dependency.
+
+- **Separate project**: use an **Electron** Sentry project distinct from the Web project. Events carry `release` (`openmotion-desktop@<version>`), `environment` (`production` for the `stable` channel, otherwise the channel name) and the `host_kind`, `release_channel`, `host_platform`, `host_arch` and `shell_version` tags.
+- **Build-time DSN**: [`desktop/scripts/build.mjs`](../desktop/scripts/build.mjs) validates `SENTRY_DESKTOP_DSN` and embeds it into `dist/main.mjs`. The preload bundle and renderer windows never receive it. Without the variable the shell builds with reporting off.
+- **Release gate**: `desktop-release.yml` passes the `SENTRY_DESKTOP_DSN` repository secret and sets `OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN=1`, so a release build fails instead of shipping without reporting when the secret is missing or malformed.
+- **Runtime override**: `SENTRY_DESKTOP_DSN` in the process environment takes precedence over the embedded value, for local development and ingest mocks.
+- **User control**: reporting follows the same **Share usage data** preference as desktop telemetry. The shell persists it and applies it before Studio loads, so a startup failure never reports for a user who turned sharing off; changing it mid-session also switches native crash dump upload. `DO_NOT_TRACK=1` and `OPENMOTION_TELEMETRY=0` disable reporting regardless of the preference.
+- **Network path**: once the app is ready, envelopes go through Chromium's network stack and follow the system proxy.
+
+Verify a local build against a real project:
+
+```bash
+SENTRY_DESKTOP_DSN=https://<public-key>@<sentry-host>/<project-id> npm --prefix desktop run build
+grep -c '<sentry-host>' desktop/dist/main.mjs      # 1: embedded in the main bundle
+grep -c '<sentry-host>' desktop/dist/preload.cjs   # 0: never in the preload bundle
+```
+

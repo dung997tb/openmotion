@@ -714,6 +714,43 @@ test('notify-feishu-release builds signed interactive card payload, validates Fe
   );
 });
 
+test('resolveBuildTrustAnchors embeds a validated Sentry DSN and can require one', () => {
+  const empty = resolveBuildTrustAnchors({});
+  assert.equal(empty.sentryDsn, '');
+  assert.equal(JSON.parse(empty.define.__OPENMOTION_DESKTOP_SENTRY_DSN__), '');
+
+  const dsn = 'https://publickey123@o1.ingest.example.com/42';
+  const resolved = resolveBuildTrustAnchors({ SENTRY_DESKTOP_DSN: ` ${dsn} ` });
+  assert.equal(resolved.sentryDsn, dsn);
+  assert.equal(JSON.parse(resolved.define.__OPENMOTION_DESKTOP_SENTRY_DSN__), dsn);
+
+  for (const bad of [
+    'not-a-dsn',
+    'http://key@example.com/42',
+    'https://example.com/42',
+    'https://key@example.com/project',
+    'https://key@example.com/42?x=1',
+  ]) {
+    assert.throws(
+      () => resolveBuildTrustAnchors({ SENTRY_DESKTOP_DSN: bad }),
+      error => {
+        assert.match(error.message, /Invalid SENTRY_DESKTOP_DSN/);
+        assert.ok(!error.message.includes(bad));
+        return true;
+      },
+    );
+  }
+
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN: '1' }),
+    /SENTRY_DESKTOP_DSN is required/,
+  );
+  assert.equal(
+    resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN: '1', SENTRY_DESKTOP_DSN: dsn }).sentryDsn,
+    dsn,
+  );
+});
+
 test('resolveBuildTrustAnchors validates and normalizes Ed25519 root key, Apple Team ID, and Windows thumbprints', () => {
   const empty = resolveBuildTrustAnchors({});
   assert.equal(empty.rootPublicKeySpki, '');

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, crashReporter, dialog, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, screen, session, shell } from 'electron';
+import { app, BrowserWindow, clipboard, crashReporter, dialog, Menu, nativeTheme, net, Notification, powerSaveBlocker, safeStorage, screen, session, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,7 +40,7 @@ import {
   sanitizeAuthReturnPath,
 } from './auth-handoff.ts';
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
-import { createDesktopSentryReporter } from './sentry.ts';
+import { createDesktopSentryReporter, resolveDesktopSentryDsn } from './sentry.ts';
 import { DesktopTelemetryCollector } from './telemetry.ts';
 import {
   CapabilityRegistry,
@@ -203,7 +203,7 @@ const telemetry = new DesktopTelemetryCollector({
 const appStartupStartedAt = Date.now();
 
 const desktopSentry = createDesktopSentryReporter({
-  dsn: process.env.SENTRY_DESKTOP_DSN ?? process.env.OPENMOTION_DESKTOP_SENTRY_DSN,
+  dsn: resolveDesktopSentryDsn(),
   environment: process.env.SENTRY_ENVIRONMENT,
   release: `openmotion-desktop@${app.getVersion()}`,
   channel: releaseChannel,
@@ -211,7 +211,12 @@ const desktopSentry = createDesktopSentryReporter({
   arch: process.arch,
   shellVersion: app.getVersion(),
   redactPaths: [distDir, dataDir, logDir, os.homedir()],
+  // Chromium's network stack follows the system proxy; Node's fetch does not.
+  fetchImpl: (input, init) =>
+    app.isReady() ? net.fetch(input instanceof URL ? input.toString() : input, init) : fetch(input, init),
 });
+// Honor the persisted sharing preference before Studio loads and syncs it.
+desktopSentry.setEnabled(telemetry.isEnabled());
 desktopSentry.startCrashReporter(crashReporter);
 
 logger.markSessionStarted({

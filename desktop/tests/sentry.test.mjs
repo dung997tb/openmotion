@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   createDesktopSentryReporter,
   parseSentryEnvelopeEndpoints,
+  resolveDesktopSentryDsn,
 } from '../src/sentry.ts';
 
 const TEST_DSN = 'https://publickey123@sentry.open-design.ai/42';
@@ -154,4 +155,64 @@ test('createDesktopSentryReporter sends scrubbed Sentry Envelopes, wires crashRe
   reporter.setEnabled(false);
   assert.equal(await reporter.captureMessage('After opt-out', 'error'), false);
   assert.equal(sentRequests.length, 2);
+});
+
+test('resolveDesktopSentryDsn prefers a runtime override and falls back to the embedded build value', () => {
+  assert.equal(resolveDesktopSentryDsn({}, undefined), undefined);
+  assert.equal(resolveDesktopSentryDsn({}, ''), undefined);
+  assert.equal(resolveDesktopSentryDsn({}, ` ${TEST_DSN} `), TEST_DSN);
+  assert.equal(
+    resolveDesktopSentryDsn({ SENTRY_DESKTOP_DSN: 'https://override@example.com/7' }, TEST_DSN),
+    'https://override@example.com/7',
+  );
+  assert.equal(
+    resolveDesktopSentryDsn(
+      { SENTRY_DESKTOP_DSN: '  ', OPENMOTION_DESKTOP_SENTRY_DSN: 'https://alt@example.com/8' },
+      TEST_DSN,
+    ),
+    'https://alt@example.com/8',
+  );
+});
+
+test('setEnabled applies a persisted opt-out before startup and gates crash dump upload afterwards', async () => {
+  const calls = [];
+  let fetchCalls = 0;
+  const fakeCrashReporter = {
+    start(options) {
+      calls.push(['start', options.uploadToServer]);
+    },
+    setUploadToServer(value) {
+      calls.push(['upload', value]);
+    },
+  };
+  const reporter = createDesktopSentryReporter({
+    dsn: TEST_DSN,
+    release: 'openmotion-desktop@0.2.1',
+    channel: 'stable',
+    platform: 'darwin',
+    arch: 'arm64',
+    shellVersion: '0.2.1',
+    env: {},
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return new Response('ok', { status: 200 });
+    },
+  });
+
+  reporter.setEnabled(false);
+  assert.equal(reporter.startCrashReporter(fakeCrashReporter), false);
+  assert.equal(await reporter.captureException(new Error('startup failure')), false);
+  assert.deepEqual(calls, []);
+  assert.equal(fetchCalls, 0);
+
+  reporter.setEnabled(true);
+  assert.deepEqual(calls, [['start', true]]);
+
+  reporter.setEnabled(false);
+  reporter.setEnabled(true);
+  assert.deepEqual(calls, [
+    ['start', true],
+    ['upload', false],
+    ['upload', true],
+  ]);
 });
