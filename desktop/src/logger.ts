@@ -160,12 +160,19 @@ export class DesktopLogger {
     return text.length > maxChars ? text.slice(text.length - maxChars) : text;
   }
 
-  markSessionStarted(info: { version: string; platform: string; arch: string }): void {
+  markSessionStarted(info: { version: string; platform: string; arch: string }): {
+    previousExitUnclean: boolean;
+    previousVersion?: string;
+  } {
     const sessionFile = path.join(this.logDir, 'session-state.json');
+    let previousExitUnclean = false;
+    let previousVersion: string | undefined;
     if (existsSync(sessionFile)) {
       try {
         const prev = JSON.parse(readFileSync(sessionFile, 'utf8'));
         if (prev?.active === true) {
+          previousExitUnclean = true;
+          previousVersion = typeof prev.version === 'string' ? prev.version : undefined;
           this.writeCrashMarker('unclean-previous-exit', {
             previousSessionStartedAt: prev.startedAt,
             previousVersion: prev.version,
@@ -191,6 +198,7 @@ export class DesktopLogger {
       ),
       'utf8',
     );
+    return { previousExitUnclean, ...(previousVersion ? { previousVersion } : {}) };
   }
 
   markSessionEnded(reason = 'normal-exit'): void {

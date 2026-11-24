@@ -10,6 +10,7 @@ import {
   DESKTOP_PRODUCT_NAME,
   DESKTOP_PROTOCOL_SCHEME,
   isUrlInAllowedDomainScope,
+  DEFAULT_SIGNED_CONFIG_BASE_URL,
 } from '../../shared/desktop-builtin-rules.ts';
 import {
   HOST_CAPABILITIES,
@@ -41,6 +42,7 @@ import {
 } from './auth-handoff.ts';
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
 import { createDesktopSentryReporter, resolveDesktopSentryDsn } from './sentry.ts';
+import { classifyLoadFailure, createIncidentId, probeConnectivity } from './startup-health.ts';
 import { DesktopTelemetryCollector } from './telemetry.ts';
 import {
   CapabilityRegistry,
@@ -210,6 +212,7 @@ const desktopSentry = createDesktopSentryReporter({
   arch: process.arch,
   shellVersion: app.getVersion(),
   redactPaths: [distDir, dataDir, logDir, os.homedir()],
+  outboxPath: path.join(dataDir, 'telemetry', 'sentry-outbox.json'),
   // Chromium's network stack follows the system proxy; Node's fetch does not.
   fetchImpl: (input, init) =>
     app.isReady() ? net.fetch(input instanceof URL ? input.toString() : input, init) : fetch(input, init),
@@ -217,12 +220,20 @@ const desktopSentry = createDesktopSentryReporter({
 // Honor the persisted sharing preference before Studio loads and syncs it.
 desktopSentry.setEnabled(telemetry.isEnabled());
 desktopSentry.startCrashReporter(crashReporter);
+// Deliver what an earlier launch could not send (it may have failed while offline).
+void app.whenReady().then(() => desktopSentry.flushOutbox());
 
-logger.markSessionStarted({
+const previousSession = logger.markSessionStarted({
   version: app.getVersion(),
   platform,
   arch: process.arch,
 });
+if (previousSession.previousExitUnclean) {
+  void desktopSentry.captureMessage('Previous session ended without a clean exit', 'warning', {
+    area: 'lifecycle',
+    tags: { previous_version: previousSession.previousVersion ?? 'unknown' },
+  });
+}
 
 const signedConfig = new SignedConfigManager({
   dataDir: dataLayout.paths.configDir,
@@ -1127,6 +1138,64 @@ function revealMainWindow(): void {
   broadcastChromeState();
 }
 
+const reportedBridgeDenials = new Set<string>();
+
+/**
+ * A page that received the bridge but is refused by the guard means the shell and
+ * the Studio origin disagree (a migrated origin, or an unexpected page in the main
+ * window). Studio silently behaves like a browser tab then, so report it once.
+ */
+function reportBridgeDenied(error: { code: string; message: string }): void {
+  if (reportedBridgeDenials.has(error.message) || reportedBridgeDenials.size >= 5) return;
+  reportedBridgeDenials.add(error.message);
+  logger.warn('main', 'Host bridge call denied', { code: error.code, message: error.message });
+  void desktopSentry.captureMessage(`Host bridge call denied: ${error.code}`, 'warning', {
+    area: 'bridge',
+    tags: { deny_code: error.code },
+    extra: { reason: error.message },
+  });
+}
+
+const CONNECTIVITY_REFERENCE_URL = `${DEFAULT_SIGNED_CONFIG_BASE_URL}/${
+  releaseChannel === 'stable' ? 'stable' : 'test'
+}.json`;
+let startupOutcomeRecorded = false;
+
+/**
+ * Reports a failed Studio load. The retry page is shown exactly when in-page
+ * reporting cannot run, so this is the only signal such a failure produces.
+ */
+function reportLoadFailure(info: { code?: string; detail?: string; incidentId: string }): void {
+  const code = info.code ?? 'UNKNOWN';
+  const failure = classifyLoadFailure(info.code);
+  logger.error('main', 'Studio load failed', { code, incidentId: info.incidentId });
+  if (!startupOutcomeRecorded) {
+    startupOutcomeRecorded = true;
+    telemetry.record({
+      category: 'app.startup',
+      outcome: failure.outcome,
+      durationMs: Date.now() - appStartupStartedAt,
+      errorCode: code,
+    });
+  }
+  void (async () => {
+    const connectivity =
+      failure.network && app.isReady()
+        ? await probeConnectivity(CONNECTIVITY_REFERENCE_URL, (url, init) => net.fetch(url, init))
+        : 'not_checked';
+    // An offline machine is the user's network, not a product fault: keep it out of error alerts.
+    await desktopSentry.captureMessage(
+      `Studio load failed: ${code}`,
+      connectivity === 'offline' ? 'warning' : 'error',
+      {
+        area: 'load',
+        tags: { load_failure_code: code, connectivity, incident_id: info.incidentId },
+        extra: { detail: info.detail },
+      },
+    );
+  })();
+}
+
 async function showRetryPage(info: {
   badge?: string;
   title?: string;
@@ -1134,10 +1203,14 @@ async function showRetryPage(info: {
   message?: string;
   detail?: string;
   force?: boolean;
+  /** Set by a caller that already reported this failure under the same reference. */
+  incidentId?: string;
 }): Promise<void> {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
   if (showingRetryPage && !info.force) return;
+  const incidentId = info.incidentId ?? createIncidentId();
+  if (!info.incidentId) reportLoadFailure({ code: info.code, detail: info.detail, incidentId });
   clearStartupLoadWatchdog();
   clearUnresponsiveTimer();
   dismissBootOverlay({ immediate: true });
@@ -1163,6 +1236,7 @@ async function showRetryPage(info: {
   if (info.code) query.code = info.code;
   if (info.message) query.message = info.message;
   if (info.detail) query.detail = info.detail;
+  query.incident = incidentId;
   await win.loadFile(path.join(distDir, 'retry.html'), { query });
   revealMainWindow();
   refreshDesktopMenus();
@@ -1312,13 +1386,16 @@ function registerCapabilities(): void {
     openExternalSafe,
     onRendererReady: () => {
       clearStartupLoadWatchdog();
-      if (!rendererReady) {
+      if (!startupOutcomeRecorded) {
+        startupOutcomeRecorded = true;
         telemetry.record({
           category: "app.startup",
           outcome: "ok",
           durationMs: Date.now() - appStartupStartedAt,
         });
       }
+      // Studio is up, so the network path works: deliver anything still queued.
+      void desktopSentry.flushOutbox();
       rendererReady = true;
       dismissBootOverlay();
       revealMainWindow();
@@ -1369,6 +1446,7 @@ function registerIpc(): void {
     envController,
     getMainWindow: () => mainWindow,
     getPrivilegedGuardOptions,
+    onPrivilegedIpcDenied: reportBridgeDenied,
     buildRuntimeInfo,
     resolveStudioUrl,
     loadStudioIntoMainWindow,
@@ -1773,15 +1851,17 @@ function createMainWindow(): BrowserWindow {
       exitCode: details.exitCode,
     });
     logger.writeCrashMarker('renderer-gone', details);
+    const incidentId = createIncidentId();
     void desktopSentry.captureMessage(`Renderer process gone: ${details.reason}`, 'fatal', {
       area: 'renderer',
+      tags: { incident_id: incidentId },
       extra: { reason: details.reason, exitCode: details.exitCode },
     });
     if (shuttingDown || win.isDestroyed()) return;
     const decision = crashGuard.recordExit(details.reason);
     if (decision.recover) {
       const retryInfo = buildRendererCrashRetryInfo(decision, details, getEffectiveAppLocale());
-      void showRetryPage({ ...retryInfo, force: true });
+      void showRetryPage({ ...retryInfo, force: true, incidentId });
     }
   });
 
@@ -1990,6 +2070,20 @@ process.on('unhandledRejection', reason => {
   logger.error('main', 'Unhandled rejection', { message });
   logger.writeCrashMarker('unhandled-rejection', reason);
   void desktopSentry.captureException(reason, { area: 'unhandledRejection' });
+});
+
+app.on('child-process-gone', (_event, details) => {
+  if (details.reason === 'clean-exit' || details.reason === 'killed') return;
+  logger.error('main', 'Child process gone', {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+  });
+  void desktopSentry.captureMessage(`Child process gone: ${details.type} (${details.reason})`, 'error', {
+    area: 'child-process',
+    tags: { process_type: details.type, exit_reason: details.reason },
+    extra: { exitCode: details.exitCode, name: details.name, serviceName: details.serviceName },
+  });
 });
 
 app.on('open-url', (event, rawUrl) => {

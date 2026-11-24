@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   createDesktopSentryReporter,
@@ -215,4 +218,117 @@ test('setEnabled applies a persisted opt-out before startup and gates crash dump
     ['upload', false],
     ['upload', true],
   ]);
+});
+
+function makeOutboxReporter(overrides = {}) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'om-sentry-outbox-'));
+  const outboxPath = path.join(dir, 'telemetry', 'sentry-outbox.json');
+  const state = { nowMs: 1_700_000_000_000, responses: [], bodies: [] };
+  const reporter = createDesktopSentryReporter({
+    dsn: TEST_DSN,
+    release: 'openmotion-desktop@0.2.1',
+    channel: 'stable',
+    platform: 'darwin',
+    arch: 'arm64',
+    shellVersion: '0.2.1',
+    env: {},
+    outboxPath,
+    maxEventsPerMinute: 100,
+    now: () => state.nowMs,
+    fetchImpl: async (_url, init) => {
+      state.bodies.push(String(init?.body ?? ''));
+      const next = state.responses.shift() ?? 200;
+      if (next === 'offline') throw new TypeError('fetch failed');
+      return new Response('{}', { status: next });
+    },
+    ...overrides,
+  });
+  const queued = () =>
+    existsSync(outboxPath) ? JSON.parse(readFileSync(outboxPath, 'utf8')).items : [];
+  return { reporter, state, outboxPath, queued, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+const messageOf = body => JSON.parse(body.split('\n')[2]).message;
+const sentAtOf = body => JSON.parse(body.split('\n')[0]).sent_at;
+
+test('an undeliverable event waits in the outbox and is delivered in order once the network is back', async () => {
+  const { reporter, state, outboxPath, queued, cleanup } = makeOutboxReporter();
+  try {
+    state.responses = ['offline', 503, 429];
+    assert.equal(await reporter.captureMessage('first', 'error'), false);
+    assert.equal(await reporter.captureMessage('second', 'error'), false);
+    assert.equal(await reporter.captureMessage('third', 'error'), false);
+    assert.deepEqual(queued().map(item => messageOf(item.body)), ['first', 'second', 'third']);
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(outboxPath).mode & 0o777, 0o600);
+    }
+
+    // Still unreachable: nothing is lost and nothing after the failing item is attempted.
+    state.bodies = [];
+    state.responses = [200, 'offline'];
+    assert.equal(await reporter.flushOutbox(), 1);
+    assert.equal(state.bodies.length, 2);
+    assert.deepEqual(queued().map(item => messageOf(item.body)), ['second', 'third']);
+
+    // Delivered two hours late: the envelope carries the time of this attempt, the event its own.
+    const queuedAtMs = state.nowMs;
+    state.nowMs += 2 * 60 * 60 * 1000;
+    state.bodies = [];
+    assert.equal(await reporter.flushOutbox(), 2);
+    assert.deepEqual(state.bodies.map(messageOf), ['second', 'third']);
+    assert.equal(sentAtOf(state.bodies[0]), new Date(state.nowMs).toISOString());
+    assert.equal(JSON.parse(state.bodies[0].split('\n')[2]).timestamp, queuedAtMs / 1000);
+    assert.equal(existsSync(outboxPath), false);
+    assert.equal(await reporter.flushOutbox(), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test('the outbox drops what ingest rejects, expires old items, stays bounded, and is erased on opt-out', async () => {
+  const { reporter, state, outboxPath, queued, cleanup } = makeOutboxReporter();
+  try {
+    // A payload ingest refuses can never succeed: it is neither queued nor retried.
+    state.responses = [400];
+    assert.equal(await reporter.captureMessage('rejected', 'error'), false);
+    assert.equal(existsSync(outboxPath), false);
+
+    state.responses = ['offline', 400, 200];
+    await reporter.captureMessage('rejected-later', 'error');
+    state.responses = ['offline'];
+    await reporter.captureMessage('kept', 'error');
+    state.responses = [400, 200];
+    assert.equal(await reporter.flushOutbox(), 1);
+    assert.equal(existsSync(outboxPath), false);
+
+    // Bounded: only the most recent failures are worth the disk and the upload.
+    for (let index = 0; index < 25; index += 1) {
+      state.nowMs += 1;
+      state.responses = ['offline'];
+      await reporter.captureMessage(`burst-${index}`, 'error');
+    }
+    assert.equal(queued().length, 20);
+    assert.equal(messageOf(queued()[0].body), 'burst-5');
+    assert.equal(messageOf(queued()[19].body), 'burst-24');
+
+    // A week-old failure is no longer actionable.
+    state.nowMs += 8 * 24 * 60 * 60 * 1000;
+    state.bodies = [];
+    assert.equal(await reporter.flushOutbox(), 0);
+    assert.equal(state.bodies.length, 0);
+    assert.equal(existsSync(outboxPath), false);
+
+    // Turning reporting off removes what was collected but not yet sent.
+    state.responses = ['offline'];
+    await reporter.captureMessage('before-opt-out', 'error');
+    assert.equal(queued().length, 1);
+    reporter.setEnabled(false);
+    assert.equal(existsSync(outboxPath), false);
+    reporter.setEnabled(true);
+    state.bodies = [];
+    assert.equal(await reporter.flushOutbox(), 0);
+    assert.equal(state.bodies.length, 0);
+  } finally {
+    cleanup();
+  }
 });

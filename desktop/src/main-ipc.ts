@@ -31,6 +31,8 @@ export type RegisterDesktopIpcDeps = {
   envController: DesktopEnvironmentController;
   getMainWindow: () => BrowserWindow | null;
   getPrivilegedGuardOptions: () => PrivilegedIpcGuardOptions;
+  /** Called when a page holding the bridge is refused; the caller decides what to report. */
+  onPrivilegedIpcDenied?: (error: { code: string; message: string }) => void;
   buildRuntimeInfo: () => HostRuntimeInfo;
   resolveStudioUrl: () => string;
   loadStudioIntoMainWindow: (targetPath?: string) => Promise<void>;
@@ -80,6 +82,7 @@ export function registerDesktopIpc(deps: RegisterDesktopIpcDeps): void {
   ipcMain.handle(HOST_IPC_CHANNELS.INFO, event => {
     const auth = authorizePrivilegedIpcSender(event, deps.getPrivilegedGuardOptions());
     if (!auth.ok) {
+      deps.onPrivilegedIpcDenied?.(auth.error);
       throw new Error(auth.error.message);
     }
     return deps.buildRuntimeInfo();
@@ -88,6 +91,7 @@ export function registerDesktopIpc(deps: RegisterDesktopIpcDeps): void {
   ipcMain.handle(HOST_IPC_CHANNELS.CAPABILITIES, event => {
     const auth = authorizePrivilegedIpcSender(event, deps.getPrivilegedGuardOptions());
     if (!auth.ok) {
+      deps.onPrivilegedIpcDenied?.(auth.error);
       throw new Error(auth.error.message);
     }
     return deps.registry.listCapabilities();
@@ -96,6 +100,7 @@ export function registerDesktopIpc(deps: RegisterDesktopIpcDeps): void {
   ipcMain.handle(HOST_IPC_CHANNELS.INVOKE, async (event, payload: unknown) => {
     const auth = authorizePrivilegedIpcSender(event, deps.getPrivilegedGuardOptions());
     if (!auth.ok) {
+      deps.onPrivilegedIpcDenied?.(auth.error);
       return auth;
     }
     if (!payload || typeof payload !== 'object') {

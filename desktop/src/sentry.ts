@@ -10,9 +10,14 @@
  * - Strict scrubbing: strips local filesystem paths, Bearer tokens, credentials, and
  *   query parameters using both `redactDesktopText` and `@openmotion/observability/sanitize`.
  * - Bounded sliding-window rate limiting prevents crash loops from flooding ingest.
+ * - Store and forward: an envelope that cannot be delivered (offline, proxy down, ingest 5xx)
+ *   is kept in a small bounded outbox and retried later, because the failures worth reporting
+ *   are often the ones that happen while the network is unavailable.
  */
 
 import { randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { DESKTOP_PRODUCT_NAME } from '../../shared/desktop-builtin-rules.ts';
 import type { HostPlatform, HostReleaseChannel } from '../../shared/desktop-contract.ts';
 import { parseSentryDsn } from '../../packages/observability/config.ts';
@@ -22,6 +27,10 @@ import { redactDesktopText } from './logger.ts';
 const DEFAULT_MAX_EVENTS_PER_MINUTE = 20;
 const DEFAULT_SEND_TIMEOUT_MS = 4_000;
 const RATE_WINDOW_MS = 60_000;
+const OUTBOX_MAX_ITEMS = 20;
+const OUTBOX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+type OutboxItem = { at: number; body: string };
 
 export type ParsedSentryEndpoints = {
   dsn: string;
@@ -69,6 +78,8 @@ export type DesktopSentryReporterOptions = {
   arch: string;
   shellVersion: string;
   redactPaths?: readonly string[];
+  /** File that holds undelivered envelopes; store and forward is off when unset. */
+  outboxPath?: string;
   env?: NodeJS.ProcessEnv;
   maxEventsPerMinute?: number;
   sendTimeoutMs?: number;
@@ -86,6 +97,8 @@ export type DesktopSentryReporter = {
   isEnabled: () => boolean;
   setEnabled: (enabled: boolean) => void;
   getEndpoints: () => ParsedSentryEndpoints | null;
+  /** Retries undelivered envelopes; resolves with how many were delivered. */
+  flushOutbox: () => Promise<number>;
   startCrashReporter: (crashReporter: ElectronCrashReporterLike) => boolean;
   captureException: (error: unknown, context?: DesktopSentryCaptureContext) => Promise<boolean>;
   captureMessage: (
@@ -211,12 +224,117 @@ export function createDesktopSentryReporter(
     return true;
   };
 
+  const outboxPath = options.outboxPath;
+  let flushingOutbox = false;
+
+  const readOutbox = (): OutboxItem[] => {
+    if (!outboxPath) return [];
+    try {
+      const parsed = JSON.parse(readFileSync(outboxPath, 'utf8')) as { items?: unknown };
+      if (!Array.isArray(parsed.items)) return [];
+      return parsed.items.filter(
+        (item): item is OutboxItem =>
+          Boolean(item) &&
+          typeof (item as OutboxItem).at === 'number' &&
+          typeof (item as OutboxItem).body === 'string' &&
+          now() - (item as OutboxItem).at <= OUTBOX_MAX_AGE_MS,
+      );
+    } catch {
+      return [];
+    }
+  };
+
+  const writeOutbox = (items: OutboxItem[]): void => {
+    if (!outboxPath) return;
+    try {
+      if (items.length === 0) {
+        rmSync(outboxPath, { force: true });
+        return;
+      }
+      mkdirSync(path.dirname(outboxPath), { recursive: true });
+      writeFileSync(
+        outboxPath,
+        JSON.stringify({ version: 1, items: items.slice(-OUTBOX_MAX_ITEMS) }),
+        { encoding: 'utf8', mode: 0o600 },
+      );
+    } catch {
+      // Reporting must never break the shell; an unwritable outbox only loses retries.
+    }
+  };
+
+  const enqueue = (body: string): void => {
+    if (!outboxPath) return;
+    writeOutbox([...readOutbox(), { at: now(), body }]);
+  };
+
+  const postEnvelope = async (body: string): Promise<'sent' | 'retry' | 'drop'> => {
+    if (!endpoints) return 'drop';
+    const fetchFn = options.fetchImpl ?? globalThis.fetch;
+    if (typeof fetchFn !== 'function') return 'drop';
+    try {
+      const response = await fetchFn(endpoints.envelopeUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-sentry-envelope',
+          'X-Sentry-Auth': `Sentry sentry_version=7, sentry_client=openmotion-desktop/${options.shellVersion}, sentry_key=${endpoints.publicKey}`,
+        },
+        body,
+        signal: AbortSignal.timeout(sendTimeoutMs),
+      });
+      if (response.ok) return 'sent';
+      // Ingest rejected the payload itself: retrying the same bytes cannot succeed.
+      return response.status >= 500 || response.status === 429 ? 'retry' : 'drop';
+    } catch {
+      return 'retry';
+    }
+  };
+
+  /**
+   * Sentry reads `sent_at` as the client clock at the moment of sending and shifts the
+   * event time by its distance from the receive time. A delayed envelope must therefore
+   * carry the time of the actual attempt, or the failure is dated to when it was delivered.
+   */
+  const withCurrentSentAt = (body: string): string => {
+    const headerEnd = body.indexOf('\n');
+    if (headerEnd < 0) return body;
+    try {
+      const header = JSON.parse(body.slice(0, headerEnd)) as Record<string, unknown>;
+      return JSON.stringify({ ...header, sent_at: new Date(now()).toISOString() }) + body.slice(headerEnd);
+    } catch {
+      return body;
+    }
+  };
+
+  const flushOutbox = async (): Promise<number> => {
+    if (!endpoints || !outboxPath || !isEnabled() || flushingOutbox) return 0;
+    flushingOutbox = true;
+    try {
+      const pending = readOutbox();
+      const undelivered: OutboxItem[] = [];
+      let delivered = 0;
+      for (let index = 0; index < pending.length; index += 1) {
+        const result = await postEnvelope(withCurrentSentAt(pending[index]!.body));
+        if (result === 'sent') {
+          delivered += 1;
+        } else if (result === 'retry') {
+          // Still unreachable: keep this and everything after it for the next attempt.
+          undelivered.push(...pending.slice(index));
+          break;
+        }
+      }
+      const queuedMeanwhile = readOutbox().filter(
+        item => !pending.some(known => known.at === item.at && known.body === item.body),
+      );
+      writeOutbox([...undelivered, ...queuedMeanwhile]);
+      return delivered;
+    } finally {
+      flushingOutbox = false;
+    }
+  };
+
   const sendEvent = async (eventBody: SentryLikeEvent): Promise<boolean> => {
     if (!endpoints || !isEnabled()) return false;
     if (!allowRateLimitedSend()) return false;
-
-    const fetchFn = options.fetchImpl ?? globalThis.fetch;
-    if (typeof fetchFn !== 'function') return false;
 
     const sanitized = sanitizeSentryEvent(eventBody, {
       dsnOrigin: new URL(endpoints.dsn).origin,
@@ -241,20 +359,9 @@ export function createDesktopSentryReporter(
     const itemPayload = JSON.stringify(payload);
     const body = `${envelopeHeader}\n${itemHeader}\n${itemPayload}\n`;
 
-    try {
-      const response = await fetchFn(endpoints.envelopeUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-sentry-envelope',
-          'X-Sentry-Auth': `Sentry sentry_version=7, sentry_client=openmotion-desktop/${options.shellVersion}, sentry_key=${endpoints.publicKey}`,
-        },
-        body,
-        signal: AbortSignal.timeout(sendTimeoutMs),
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+    const result = await postEnvelope(body);
+    if (result === 'retry') enqueue(body);
+    return result === 'sent';
   };
 
   const baseTags = (context?: DesktopSentryCaptureContext): Record<string, string> => ({
@@ -297,6 +404,8 @@ export function createDesktopSentryReporter(
     isEnabled,
     setEnabled(next: boolean) {
       runtimeEnabled = Boolean(next) && Boolean(endpoints);
+      // Turning sharing off also discards what was waiting to be sent.
+      if (!isEnabled()) writeOutbox([]);
       if (!crashReporterRef) return;
       if (!crashReporterStarted) {
         startCrashReporter(crashReporterRef);
@@ -311,6 +420,7 @@ export function createDesktopSentryReporter(
     getEndpoints() {
       return endpoints;
     },
+    flushOutbox,
     startCrashReporter,
     async captureException(error, context) {
       if (!isEnabled()) return false;

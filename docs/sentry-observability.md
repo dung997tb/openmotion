@@ -203,6 +203,10 @@ The Electron shell reports main-process errors, renderer process exits and nativ
 - **Runtime override**: `SENTRY_DESKTOP_DSN` in the process environment takes precedence over the embedded value, for local development and ingest mocks.
 - **User control**: reporting follows the same **Share usage data** preference as desktop telemetry. The shell persists it and applies it before Studio loads, so a startup failure never reports for a user who turned sharing off; changing it mid-session also switches native crash dump upload. `DO_NOT_TRACK=1` and `OPENMOTION_TELEMETRY=0` disable reporting regardless of the preference.
 - **Network path**: once the app is ready, envelopes go through Chromium's network stack and follow the system proxy.
+- **Outbox**: an event that cannot be delivered (no network, `5xx`, `429`) is kept in `telemetry/sentry-outbox.json` under the data directory and sent on the next launch or once Studio loads. It holds at most 20 events for 7 days, is erased when the user turns sharing off, and drops what ingest rejects. A delayed event keeps the time the failure happened.
+- **Load failures**: every path to the retry page reports `Studio load failed: <code>` with a `connectivity` tag. The shell probes the release bucket to tell `offline` (the user's network; reported as a warning) from `studio_unreachable` (the service; reported as an error). Alert on the latter only.
+- **Reference on the retry page**: the retry page shows `Ref: XXXX-XXXX`; the same value is the `incident_id` tag on the event, so a user screenshot leads straight to the report.
+- **Other signals**: `Previous session ended without a clean exit` (the last launch crashed or was killed), `Child process gone: <type>` (GPU or utility process) and `Host bridge call denied: <code>` (the loaded page holds the bridge but the guard refuses it, for example after a Studio origin change).
 
 Verify a local build against a real project:
 

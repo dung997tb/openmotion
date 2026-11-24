@@ -524,6 +524,9 @@
             if (typeof info.code === 'string' && info.code.trim()) {
               parts.push('Error: ' + info.code.trim());
             }
+            if (typeof info.incident === 'string' && info.incident.trim()) {
+              parts.push('Ref: ' + info.incident.trim());
+            }
             if (typeof info.detail === 'string' && info.detail.trim()) {
               parts.push(info.detail.trim());
             }
@@ -544,13 +547,15 @@
         const initialCode = params.get('code');
         const initialMessage = params.get('message');
         const initialDetail = params.get('detail');
-        if (initialBadge || initialTitle || initialCode || initialMessage || initialDetail) {
+        const initialIncident = params.get('incident');
+        if (initialBadge || initialTitle || initialCode || initialMessage || initialDetail || initialIncident) {
           setRetryError({
             badge: initialBadge || undefined,
             title: initialTitle || undefined,
             code: initialCode || undefined,
             message: initialMessage || undefined,
             detail: initialDetail || undefined,
+            incident: initialIncident || undefined,
           });
         }
 

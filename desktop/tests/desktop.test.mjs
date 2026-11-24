@@ -157,7 +157,10 @@ test('DesktopLogger redacts credentials/paths, rotates logs, and records crash m
       maxFiles: 2,
       redactPaths: [sampleHome],
     });
-    logger.markSessionStarted({ version: '1.2.3', platform: 'darwin', arch: 'arm64' });
+    assert.deepEqual(
+      logger.markSessionStarted({ version: '1.2.3', platform: 'darwin', arch: 'arm64' }),
+      { previousExitUnclean: false },
+    );
 
     for (let i = 0; i < 12; i++) {
       logger.info('main', `Entry ${i} token=om_brg_abcdefghijklmnop`);
@@ -168,7 +171,10 @@ test('DesktopLogger redacts credentials/paths, rotates logs, and records crash m
     assert.equal(mainContent.includes('abcdefghijklmnop'), false);
 
     // Simulating a second boot while active=true triggers crash-marker creation.
-    logger.markSessionStarted({ version: '1.2.3', platform: 'darwin', arch: 'arm64' });
+    assert.deepEqual(
+      logger.markSessionStarted({ version: '1.2.4', platform: 'darwin', arch: 'arm64' }),
+      { previousExitUnclean: true, previousVersion: '1.2.3' },
+    );
     assert.ok(existsSync(path.join(logDir, 'crash-marker.json')));
     const marker = JSON.parse(readFileSync(path.join(logDir, 'crash-marker.json'), 'utf8'));
     assert.equal(marker.reason, 'unclean-previous-exit');
