@@ -11,7 +11,7 @@ import { ensureService, VERSION } from './preview.ts';
 import { tools, callTool } from './mcp-tools.ts';
 export { tools, callTool } from './mcp-tools.ts';
 import { createToolRegistry, releaseProfile } from './shared/mcp-registry.ts';
-import { phase1Tools, finalVideoTool, validateInput, phase1TransportTool } from './shared/phase1-tools.ts';
+import { phase1Tools, finalVideoTool, validateInput, normalizeToolInput, phase1TransportTool } from './shared/phase1-tools.ts';
 import { workflowResources, readWorkflowResource, workflowEntryGuide } from './shared/workflow.ts';
 import { ensureEditor, editorRequest, editorHeaders, sharedEditorEnabled } from './editor-runtime.ts';
 import { isMain } from './shared/entry.ts';
@@ -98,7 +98,8 @@ export async function rpc(message: any, store = new WorkspaceStore(), registry =
   const definition = phase1Tools.find(tool => tool.name === publicName)
     ?? (publicName === templatePresentationName ? clientState?.presentation?.tool
       : videoAppClients.has(clientState ?? connection ?? store) ? finalVideoTool : undefined);
-  const args = message.params.arguments;
+  const rawArgs = message.params.arguments;
+  const args = definition ? normalizeToolInput(definition.inputSchema, rawArgs ?? {}) : rawArgs;
   let accepted = false;
   if (definition) {
     try { validateInput(definition.inputSchema, args ?? {}); accepted = true; } catch { /* The invocation reports the validation failure. */ }
@@ -198,9 +199,10 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
         const internalName = legacyToolName(name);
         const finalVideo = name === finalVideoTool.name;
         const definition = finalVideo ? finalVideoTool : phase1Tools.find(tool => tool.name === publicToolName(name))!;
-        const input = message.params.arguments ?? {};
+        const rawInput = message.params.arguments ?? {};
+        const input = normalizeToolInput(definition.inputSchema, rawInput);
         validateInput(definition.inputSchema, input);
-        const args = { ...input };
+        const args = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : input;
         if (internalName === 'motion_open_preview' && args.target !== 'templates' && args.target !== 'providers' && !args.projectId && !args.sessionId && args.action !== 'record_review') args.sessionId = selections.get(store)?.sessionId;
         if (args.sessionId === undefined) delete args.sessionId;
         if (['repository', 'hosted'].includes(templateConfig().source) && ['motion_list_templates', 'motion_get_template', 'motion_list_skills', 'motion_get_skill'].includes(internalName)) {
@@ -269,7 +271,7 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
       return result({ isError: true, content: [{ type: 'text', text: errorMessage }], structuredContent: { error: { code, message: errorMessage,
         ...(invalid_field ? { invalid_field, validation_rule } : {}),
         ...(runtimeFailure && (error as any).details ? { details: (error as any).details } : {}),
-        applied: (error as any).applied === false || runtimeFailure || /^(NATIVE_RUNTIME_NOT_READY|INVALID_|VERSION_CONFLICT|VERSION_NOT_RESTORABLE|PROJECT_NOT_|PROJECT_SESSION_|REQUEST_ID_CONFLICT|MCP_TOOL_NOT_EXPOSED|EXPORT_NOT_|TEMPLATE_NOT_)/.test(code) ? false : 'unknown' } } });
+        applied: (error as any).applied === false || runtimeFailure || /^(NATIVE_RUNTIME_NOT_READY|INVALID_|VERSION_CONFLICT|VERSION_NOT_RESTORABLE|VERSION_NOT_FOUND|PROJECT_NOT_|PROJECT_SESSION_|PROJECT_TRASHED|PROJECT_VALIDATION_FAILED|REQUEST_ID_CONFLICT|SESSION_NOT_FOUND|MCP_TOOL_NOT_EXPOSED|EXPORT_NOT_|TEMPLATE_NOT_|WORK_CLOSED|WORK_VERSION_MISMATCH|WORK_GENERATION_UNTRACKED|WORK_ID_CONFLICT|WORK_NOT_FOUND|GENERATION_CONTENT_UNCHANGED|GENERATION_ARTIFACT_INVALID|DUPLICATE_ITEM_ID|ITEM_ID_CONFLICT|DUPLICATE_FILE_PATH|CONFLICTING_FILE_PATHS|SOURCE_BATCH_TOO_LARGE|REVIEW_VERSION_MISMATCH|REVIEW_OBJECT_MISMATCH|PREVIEW_TARGET_MISMATCH)/.test(code) ? false : 'unknown' } } });
     }
   }
   return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } };

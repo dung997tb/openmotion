@@ -2,6 +2,7 @@ import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useRef, useState } from 'react';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import { superAgentIntentMeta, type SuperAgentChatSummary } from '../../../shared/super-agent';
 import { Menu, MenuItem, MenuSeparator } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -97,10 +98,12 @@ export function ConversationSidebar({
   const pinned = conversations.filter(item => item.pinned);
   const recent = conversations.filter(item => !item.pinned);
 
-  const normalizedQuery = query.trim().toLowerCase();
-  const searchResults = conversations.filter(item =>
-    !normalizedQuery || item.title.toLowerCase().includes(normalizedQuery),
-  );
+  const normalizedQuery = query.trim();
+  const searchResults = rankSearchResults(conversations, normalizedQuery, item => ({
+    id: item.id,
+    title: item.title,
+    subtitle: item.intent,
+  })).map(r => r.item);
 
   const commitRename = async (id: string) => {
     const next = draftTitle.trim();

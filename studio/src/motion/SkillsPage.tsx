@@ -8,12 +8,14 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useToast } from '../hooks/useToast';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { studioSkillDefaults, localizedSkillPrompt, skillShotPrompt, aspectRatios, durations, motionSkills, skillCategories, skillShortcut, type MotionSkill, type SkillCategory, type SkillParameters } from './skillCatalog';
 import type { AssetDraft } from './AssetComposer';
 import { mediaEditorDestination, studioIconTone, studioComingSoon, type StudioDestination } from './creativeStudios';
 import { useOptionalWorkspaceChrome } from './WorkspaceChromeContext';
 import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import { StudioTemplateShelf } from './StudioTemplateShelf';
 import { SkillMedia } from './SkillMedia';
 import { ComingSoonGuide } from './ComingSoonGuide';
@@ -85,9 +87,23 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
   const sourceRepository = githubRepositoryOf(selected?.repository);
   const sharedCoverRepository = sourceRepository !== null && sourceRepository === githubRepositoryOf(selected?.cover?.source);
   const matching = (group: SkillCategory | null, text: string) => {
-    const needle = text.trim().toLocaleLowerCase();
-    return catalog.filter(skill => (!group || skill.category === group)
-      && (!needle || [skill.name, skill.title, displayName(skill), t(skill.useWhen), skill.tagline, t(skill.tagline), t(skill.output), skill.repository ?? 'OpenMotion'].some(value => value.toLocaleLowerCase().includes(needle))));
+    const byCategory = catalog.filter(skill => !group || skill.category === group);
+    if (!text.trim()) return byCategory;
+    return rankSearchResults(byCategory, text, skill => ({
+      id: skill.id,
+      title: displayName(skill),
+      subtitle: t(skill.category),
+      description: t(skill.useWhen),
+      tags: [skill.category, skill.technique, skill.name],
+      aliases: [
+        skill.title,
+        skill.tagline,
+        t(skill.tagline),
+        t(skill.output),
+        skill.example ? t(skill.example) : '',
+        skill.repository ?? 'OpenMotion',
+      ],
+    })).map(result => result.item);
   };
   const visible = useMemo(() => matching(category, query), [query, category, t, catalog]);
   const featured = studio ? catalog[0] : undefined;
@@ -142,7 +158,8 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
     if (surface === 'command') tracking.reportSkillCommandCopyClicked(selected, view, attempt);
     else tracking.reportSkillDetailClick(selected, 'copy_instruction', view, attempt);
     try {
-      await navigator.clipboard.writeText(text); setManualCopy(null); toast.showToast(t('Copied. Paste into your Agent.'), 'info');
+      if (!(await copyTextToClipboard(text))) throw new Error('Clipboard copy failed');
+      setManualCopy(null); toast.showToast(t('Copied. Paste into your Agent.'), 'info');
       tracking.reportSkillCopyResult(selected, surface, 'clipboard_written', attempt, brief, view);
     }
     catch {

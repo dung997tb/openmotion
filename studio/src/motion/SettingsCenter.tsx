@@ -3,6 +3,7 @@ import * as tracking from './pageTracking';
 import type { McpEntry } from './pageTracking';
 import { useEffect, useState, type ReactNode } from 'react';
 import { modelKinds } from '../../../shared/provider-directory';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import { RemixIcon } from '../icons/RemixIcons';
 import { languages, useI18n, type Locale } from '../i18n/I18n';
 import { Select } from '../components/ui/Select';
@@ -29,7 +30,12 @@ import { settingsCenterSections as sections, settingsSectionLabel } from './sett
 export function SettingsCenter({ section, onSection: onSectionRaw, onBack, openConnections, providerId, onProviderChange, mcp, hasProject = false }: { hasProject?: boolean; section: SettingsSection; onSection: (section: SettingsSection) => void; onBack?: () => void; openConnections: (entry: McpEntry) => void; providerId?: string | null; onProviderChange?: (id: string | null) => void; mcp?: ReactNode }) {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
-  const filtered = sections.filter(item => t(item.label).toLowerCase().includes(search.toLowerCase()));
+  const filtered = rankSearchResults(sections, search, item => ({
+    id: item.id,
+    title: t(item.label),
+    subtitle: t(item.group),
+    aliases: [item.label, item.group],
+  })).map(r => r.item);
   // One view per section shown; the section is remounted for each route.
   useEffect(() => { tracking.reportSettingsPageView(section, hasProject); }, [section]);
   const onSection = (next: SettingsSection) => { if (next !== section) tracking.reportSettingsClick('settings_nav', 'section_select', { settings_section: next }); onSectionRaw(next); };

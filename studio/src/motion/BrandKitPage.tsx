@@ -16,6 +16,7 @@ import { StudioToastViewport } from "../components/StudioToastViewport";
 import { TemplateGalleryCard } from "./TemplateGalleryCard";
 import { useTemplatePlayback } from "./useTemplatePlayback";
 import type { GalleryTemplate } from "../../../shared/catalog";
+import { rankSearchResults } from "../../../shared/fuzzy-search";
 import { brandCoverRevision } from "../../../shared/brand-catalog";
 import { buildSuperAgentHandoff } from "../../../shared/capability-hub";
 import { useOptionalWorkspaceChrome } from "./WorkspaceChromeContext";
@@ -118,7 +119,23 @@ export function BrandKitPage({
     };
   }, [revision]);
   const cards = useMemo(() => new Map((kits || []).map(kit => [kit.id, brandCard(kit, t("Style only"))])), [kits, t]);
-  const filtered = useMemo(() => kits?.filter((kit) => `${kit.name} ${kit.url}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name) : sort === "oldest" ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt)) || [], [kits, query, sort]);
+  const filtered = useMemo(() => {
+    if (!kits) return [];
+    const trimmed = query.trim();
+    const ranked = trimmed
+      ? rankSearchResults(kits, trimmed, kit => ({
+          id: kit.id,
+          title: kit.name,
+          subtitle: kit.category,
+          tags: [kit.catalogId ?? ''],
+          aliases: [kit.url],
+        }))
+      : kits.map(item => ({ item, score: 1 }));
+    if (sort === "name") return [...ranked.map(r => r.item)].sort((a, b) => a.name.localeCompare(b.name));
+    if (sort === "oldest") return [...ranked.map(r => r.item)].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (trimmed) return ranked.map(r => r.item);
+    return [...kits].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [kits, query, sort]);
   const playback = useTemplatePlayback(
     root,
     filtered.map((kit) => kit.id + kit.updatedAt).join("|"),

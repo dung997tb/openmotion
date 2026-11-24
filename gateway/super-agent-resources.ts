@@ -5,6 +5,7 @@ import { assetMediaUrl, assetVersion } from '../shared/asset-library.ts';
 import { CAPABILITY_DOMAINS } from '../shared/capability-hub.ts';
 import { designRoutes } from '../shared/design-project.ts';
 import { designCatalog } from '../shared/design-catalog.ts';
+import { rankSearchResults } from '../shared/fuzzy-search.ts';
 import { loadLibrarySkills } from '../shared/library-skill-catalog.ts';
 import { scenarioDefinitions } from '../shared/scenarios.ts';
 import type {
@@ -29,7 +30,7 @@ let brandCatalogCache: TimedEntry<BrandCatalogEntry[]> | null = null;
 let librarySkillsCache: TimedEntry<Awaited<ReturnType<typeof loadLibrarySkills>>> | null = null;
 let designTemplatesCache: TimedEntry<ReturnType<ReturnType<typeof designCatalog>['templates']>['items']> | null = null;
 let designSkillsCache: TimedEntry<ReturnType<ReturnType<typeof designCatalog>['skills']>> | null = null;
-const motionTemplatesCache = new Map<string, TimedEntry<Awaited<ReturnType<ReturnType<typeof templateCatalogFor>['page']>>>>();
+const motionTemplatesCache = new Map<string, TimedEntry<Awaited<ReturnType<ReturnType<typeof templateCatalogFor>['allTemplates']>>>>();
 const dynamicCountCache = new Map<string, TimedEntry<Partial<SuperAgentResourceCounts>>>();
 
 export function clearWorkspaceResourceCache(): void {
@@ -89,12 +90,12 @@ function cachedDesignSkills() {
   return loaded;
 }
 
-async function cachedMotionTemplates(dirKey: string, rootStore: WorkspaceStore) {
-  const cached = readTimed(motionTemplatesCache.get(dirKey));
+async function cachedMotionTemplates(cacheKey: string, rootStore: WorkspaceStore, locale?: string) {
+  const cached = readTimed(motionTemplatesCache.get(cacheKey));
   if (cached) return cached;
-  const page = await templateCatalogFor(rootStore.directory).page({ category: 'all', limit: 500 });
-  motionTemplatesCache.set(dirKey, writeTimed(page, STATIC_CACHE_TTL_MS));
-  return page;
+  const items = await templateCatalogFor(rootStore.directory).allTemplates({ locale });
+  motionTemplatesCache.set(cacheKey, writeTimed(items, STATIC_CACHE_TTL_MS));
+  return items;
 }
 
 function requestedKinds(kind: string): Set<string> {
@@ -119,18 +120,6 @@ function requestedKinds(kind: string): Set<string> {
   return new Set([kind]);
 }
 
-function matchesResourceQuery(item: SuperAgentResourceAttachment, query: string): boolean {
-  if (!query) return true;
-  const hay = [item.id, item.title, item.subtitle, item.scenario, item.modality, ...(item.tags ?? [])]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .every(term => hay.includes(term));
-}
-
 function matchesKindFilter(item: SuperAgentResourceAttachment, kind: string): boolean {
   if (!kind || kind === 'all') return true;
   if (kind === 'templates') return item.kind === 'motion-template' || item.kind === 'design-template';
@@ -143,10 +132,12 @@ function matchesKindFilter(item: SuperAgentResourceAttachment, kind: string): bo
 
 export async function collectWorkspaceResources(
   store: WorkspaceStore,
-  options: { kind?: string; query?: string; limit?: number } = {},
+  options: { kind?: string; query?: string; limit?: number; locale?: string } = {},
 ): Promise<SuperAgentResourceCatalog> {
   const rootStore = store.workspaceStore ?? store;
   const dirKey = path.resolve(rootStore.directory);
+  const locale = typeof options.locale === 'string' && options.locale.trim() ? options.locale.trim() : undefined;
+  const motionCacheKey = `${dirKey}:${locale || 'default'}`;
   const query = typeof options.query === 'string' ? options.query.trim().slice(0, 200) : '';
   const kind = typeof options.kind === 'string' ? options.kind.trim() : 'all';
   const rawLimit = Number(options.limit);
@@ -180,8 +171,8 @@ export async function collectWorkspaceResources(
       ? cachedBrandCatalog()
       : Promise.resolve(readTimed(brandCatalogCache) ?? []),
     wanted.has('motion-template') || needAllCounts
-      ? cachedMotionTemplates(dirKey, rootStore)
-      : Promise.resolve(readTimed(motionTemplatesCache.get(dirKey)) ?? { items: [], catalogTotal: 0 }),
+      ? cachedMotionTemplates(motionCacheKey, rootStore, locale)
+      : Promise.resolve(readTimed(motionTemplatesCache.get(motionCacheKey)) ?? []),
     wanted.has('design-template') || needAllCounts
       ? Promise.resolve(collectAllDesignTemplates())
       : Promise.resolve(readTimed(designTemplatesCache) ?? []),
@@ -211,7 +202,7 @@ export async function collectWorkspaceResources(
   const assets = assetsRes.status === 'fulfilled' && assetsRes.value ? assetsRes.value : null;
   const savedKits = savedKitsRes.status === 'fulfilled' && savedKitsRes.value ? savedKitsRes.value : null;
   const brandCatalogEntries = brandCatalogRes.status === 'fulfilled' ? brandCatalogRes.value : [];
-  const motionTemplates = motionTemplatesRes.status === 'fulfilled' ? motionTemplatesRes.value : { items: [], catalogTotal: 0 };
+  const motionTemplates = motionTemplatesRes.status === 'fulfilled' ? motionTemplatesRes.value : [];
   const designTemplates = designTemplatesRes.status === 'fulfilled' ? designTemplatesRes.value : [];
   const librarySkills = skillsRes.status === 'fulfilled' ? skillsRes.value : [];
   const designSkills = designSkillsRes.status === 'fulfilled' ? designSkillsRes.value : [];
@@ -225,7 +216,7 @@ export async function collectWorkspaceResources(
     assets: assets?.total ?? cachedCounts?.assets ?? 0,
     brandKits: savedKits?.length ?? cachedCounts?.brandKits ?? 0,
     officialBrandKits: brandCatalogEntries.length || cachedCounts?.officialBrandKits || 0,
-    motionTemplates: motionTemplates.catalogTotal || motionTemplates.items.length || cachedCounts?.motionTemplates || 0,
+    motionTemplates: motionTemplates.length || cachedCounts?.motionTemplates || 0,
     designTemplates: designTemplates.length || cachedCounts?.designTemplates || 0,
     skills: librarySkills.length || cachedCounts?.skills || 0,
     designSkills: designSkills.length || cachedCounts?.designSkills || 0,
@@ -242,6 +233,12 @@ export async function collectWorkspaceResources(
   if (kind === 'all') {
     dynamicCountCache.set(dirKey, writeTimed(counts, DYNAMIC_SUMMARY_TTL_MS));
   }
+
+  const searchExtra = new WeakMap<SuperAgentResourceAttachment, { description?: string; aliases?: string[] }>();
+  const track = (item: SuperAgentResourceAttachment, meta: { description?: string; aliases?: string[] }) => {
+    searchExtra.set(item, meta);
+    return item;
+  };
 
   const allItems: SuperAgentResourceAttachment[] = [
     ...(wanted.has('design-project') && designProjects
@@ -263,13 +260,17 @@ export async function collectWorkspaceResources(
         }))
       : []),
     ...(wanted.has('game-project') && gamesResult
-      ? gamesResult.games.map((game): SuperAgentResourceAttachment => ({
+      ? gamesResult.games.map((game): SuperAgentResourceAttachment => track({
           id: game.id,
           kind: 'game-project',
           title: game.title,
           subtitle: `${game.genre} · ${game.multiplayer ? 'Multiplayer' : 'Single player'}`,
           previewUrl: game.cover ?? undefined,
           tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : [])],
+        }, {
+          description: game.description,
+          aliases: Object.values((game.i18n ?? {}) as Record<string, { title?: string; description?: string } | undefined>)
+            .flatMap(loc => [loc?.title ?? '', loc?.description ?? '']),
         }))
       : []),
     ...(wanted.has('asset') && assets
@@ -306,7 +307,7 @@ export async function collectWorkspaceResources(
         }))
       : []),
     ...(wanted.has('design-template')
-      ? designTemplates.map((tpl): SuperAgentResourceAttachment => ({
+      ? designTemplates.map((tpl): SuperAgentResourceAttachment => track({
           id: tpl.id,
           kind: 'design-template',
           title: tpl.title,
@@ -314,39 +315,42 @@ export async function collectWorkspaceResources(
           scenario: tpl.scenario,
           previewUrl: tpl.previewUrl,
           tags: tpl.tags,
-        }))
+        }, { description: tpl.description }))
       : []),
     ...(wanted.has('motion-template')
-      ? motionTemplates.items.map((tpl): SuperAgentResourceAttachment => ({
+      ? motionTemplates.map((tpl): SuperAgentResourceAttachment => track({
           id: tpl.id,
           kind: 'motion-template',
           title: tpl.title,
           subtitle: tpl.subtitle || tpl.collection,
           previewUrl: tpl.posterUrl,
           tags: tpl.tags,
+        }, {
+          description: tpl.description,
+          aliases: [...(tpl.searchAliases ?? []), ...(tpl.uses ?? []), ...(tpl.styles ?? []), tpl.authorName ?? '', tpl.author],
         }))
       : []),
     ...(wanted.has('skill')
-      ? librarySkills.map((skill): SuperAgentResourceAttachment => ({
+      ? librarySkills.map((skill): SuperAgentResourceAttachment => track({
           id: skill.id,
           kind: 'skill',
           title: skill.title,
           subtitle: skill.description,
           tags: skill.tags,
-        }))
+        }, { description: skill.description }))
       : []),
     ...(wanted.has('design-skill')
-      ? designSkills.map((skill): SuperAgentResourceAttachment => ({
+      ? designSkills.map((skill): SuperAgentResourceAttachment => track({
           id: skill.id,
           kind: 'design-skill',
           title: skill.title,
           subtitle: skill.description,
           scenario: skill.scenario ?? undefined,
           tags: skill.category ? [skill.category] : undefined,
-        }))
+        }, { description: skill.description }))
       : []),
     ...(wanted.has('brand-kit')
-      ? brandCatalogEntries.map((entry): SuperAgentResourceAttachment => ({
+      ? brandCatalogEntries.map((entry): SuperAgentResourceAttachment => track({
           id: `catalog:${entry.id}`,
           kind: 'brand-kit',
           title: entry.name,
@@ -354,23 +358,36 @@ export async function collectWorkspaceResources(
           previewUrl: brandCatalogFile(entry.id, 'style-cover.svg'),
           swatches: entry.sample?.colors?.slice(0, 5) ?? entry.colors?.slice(0, 5),
           tags: entry.tags,
-        }))
+        }, { description: entry.description, aliases: [entry.appearance, ...(entry.colors ?? [])] }))
       : []),
     ...(wanted.has('model') && modelsResult
-      ? modelsResult.models.map((model): SuperAgentResourceAttachment => ({
+      ? modelsResult.models.map((model): SuperAgentResourceAttachment => track({
           id: model.id,
           kind: 'model',
           title: model.label,
           subtitle: `${model.provider} · ${model.modelId}`,
           modality: model.modality,
           tags: [model.mode, model.provider],
-        }))
+        }, { description: model.description, aliases: [model.modelId] }))
       : []),
   ];
 
-  const items = allItems
-    .filter(item => matchesKindFilter(item, kind) && matchesResourceQuery(item, query))
-    .slice(0, limit);
+  const byKind = allItems.filter(item => matchesKindFilter(item, kind));
+  const ranked = query
+    ? rankSearchResults(byKind, query, item => {
+        const meta = searchExtra.get(item);
+        return {
+          id: item.id,
+          title: item.title,
+          subtitle: item.subtitle,
+          description: meta?.description,
+          tags: item.tags,
+          aliases: meta?.aliases,
+          extra: [item.scenario ?? '', item.modality ?? '', item.kind],
+        };
+      }).map(result => result.item)
+    : byKind;
+  const items = ranked.slice(0, limit);
 
   return { counts, items, generatedAt: Date.now() };
 }

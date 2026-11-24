@@ -38,6 +38,7 @@ export type I18nExtensionSource =
 export const I18N_EXTENSION_SOURCES: readonly I18nExtensionSource[] = [
   { kind: 'multi-locale-json', path: 'studio/src/i18n/component-inspector-ui.json' },
   { kind: 'multi-locale-json', path: 'studio/src/i18n/studio-navigation-ui.json' },
+  { kind: 'multi-locale-json', path: 'studio/src/i18n/workspace-search-ui.json' },
   { kind: 'multi-locale-json', path: 'studio/src/i18n/review-ui.json' },
   { kind: 'multi-locale-json', path: 'shared/asset-name-ui.json' },
   { kind: 'mvp-split', zhPath: 'studio/src/i18n/mvp-zh-CN.json', othersPath: 'studio/src/i18n/mvp-ui.json' },

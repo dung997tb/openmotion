@@ -20,7 +20,7 @@ import { CommunityLink } from './CommunityLink';
 import { clickMethod, clickOption, trackStudioClick } from './editorTracking';
 import { GitHubLink } from './GitHubLink';
 import { repositorySupportLinks } from './githubRepository';
-import type { SettingsSection } from './workspacePageRouting';
+import type { DesignSceneTarget, SettingsSection } from './workspacePageRouting';
 import { useLayoutEffect, useRef, useState } from 'react';
 
 import { CreativeNavigation, type CreativeNavigationProps } from './CreativeNavigation';
@@ -32,13 +32,39 @@ import { preloadWorkspacePage } from '../router/lazyPages';
 const avatarSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const themeLabels = { light: 'Light', dark: 'Dark', system: 'System' } as const;
 
-export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset, onCommunity, openSettings, ...navigation }: CreativeNavigationProps & {
+export function ApplicationHeader({
+  settings,
+  atExploreHome,
+  onSkill,
+  openAsset,
+  onCommunity,
+  openSettings,
+  onNewAgentChat,
+  onAgentChat,
+  onOpenDesignScene,
+  onOpenDesignProject,
+  onOpenMotionProject,
+  onOpenGame,
+  onOpenBrandKit,
+  onOpenMcp,
+  onNotify,
+  ...navigation
+}: CreativeNavigationProps & {
   onSkill: (id: string) => void;
   atExploreHome: boolean;
   settings: SettingsSection | null;
   openSettings: (section: SettingsSection) => void;
   openAsset: (assetId: string, version: string) => void;
   onCommunity: (community: ExploreCommunity) => void;
+  onNewAgentChat?: () => void;
+  onAgentChat?: (chatId: string) => void;
+  onOpenDesignScene?: (scene: DesignSceneTarget) => void;
+  onOpenDesignProject?: (id: string, scenario?: DesignSceneTarget) => void;
+  onOpenMotionProject?: (id: string) => void;
+  onOpenGame?: (gameId: string) => void;
+  onOpenBrandKit?: (kitId?: string | null) => void;
+  onOpenMcp?: () => void;
+  onNotify?: (message: string, tone?: 'info' | 'error') => void;
 }) {
   const { t } = useI18n();
   const { openAssets, openHome } = useWorkspaceChrome();
@@ -53,17 +79,44 @@ export function ApplicationHeader({ settings, atExploreHome, onSkill, openAsset,
     return () => observer.disconnect();
   }, []);
 
+  function workspaceSearchControl() {
+    return (
+      <WorkspaceSearch
+        onSkill={onSkill}
+        destination={navigation.destination}
+        onLibrary={openAssets}
+        onAccount={() => openSettings('account')}
+        onAsset={openAsset}
+        onScene={navigation.onNavigate}
+        onStudio={navigation.onChooseStudio}
+        onCommunity={onCommunity}
+        onNewAgentChat={onNewAgentChat}
+        onAgentChat={onAgentChat}
+        onOpenDesignScene={onOpenDesignScene}
+        onOpenDesignProject={onOpenDesignProject}
+        onOpenMotionProject={onOpenMotionProject}
+        onOpenGame={onOpenGame}
+        onOpenBrandKit={onOpenBrandKit}
+        onOpenMcp={onOpenMcp}
+        onOpenSettings={openSettings}
+        onOpenScenario={id => navigation.onOpenScenario?.(id)}
+        onOpenScenarioHub={navigation.onOpenScenarioHub}
+        onNotify={onNotify}
+      />
+    );
+  }
+
   function workspaceActions(closeMenu?: () => void) {
-    return <>
-      <WorkspaceSearch onChoose={closeMenu} onSkill={onSkill} destination={navigation.destination} onLibrary={openAssets} onAccount={() => openSettings('account')} onAsset={openAsset} onScene={navigation.onNavigate} onStudio={navigation.onChooseStudio} onCommunity={onCommunity} />
+    return (
       <WorkspaceResourceActions onBrandKit={() => openSettings('brand-kit')} brandKitOpen={settings === 'brand-kit'} closeMenu={closeMenu} />
-    </>;
+    );
   }
 
   return <header ref={header} className="om-app-header">
     <Tooltip label={homeHint} side="bottom"><Button variant="plain" type="button" className="om-nav-item om-app-brand" onPointerEnter={() => preloadWorkspacePage('explore')} onFocus={() => preloadWorkspacePage('explore')} onClick={openHome} aria-label={homeHint ? `${brand.editorName} · ${homeHint}` : brand.editorName}><BrandLogo variant="editor" compact /></Button></Tooltip>
     <CreativeNavigation {...navigation} overflowActions={compactActions ? workspaceActions : undefined} />
     <div className="om-app-header-actions">
+      {workspaceSearchControl()}
       {!compactActions && workspaceActions()}
       <div className="om-app-header-links"><CommunityLink /><GitHubLink /></div>
       <PricingEntry trackingPage={navigation.trackingPage} />
