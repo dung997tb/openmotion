@@ -74,7 +74,7 @@ export function patchCanvasElement(
   takenIds?: ReadonlySet<string>,
 ) {
   checkCanvasTargets(source, [patch.target], { operations: patch.operations });
-  if (findUnsafeDomPatchValues(patch.operations).length) throw new Error("Invalid layout value.");
+  if (findUnsafeDomPatchValues({ operations: patch.operations }).length) throw new Error("Invalid layout value.");
   const result = patchAuthoredElement(source, patch) ?? patchElementInHtml(source, patch.target, patch.operations, takenIds);
   // The SDK DOM patcher accepts HTML nodes. SVG presentation styles use the same authored-tag writer as Studio.
   if (
