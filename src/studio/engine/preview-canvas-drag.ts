@@ -4,6 +4,31 @@ export const PREVIEW_CANVAS_DRAG = `
   let drag = null;
   const pendingDrags = new Map();
 
+  function pendingForSource(path) {
+    return Array.from(pendingDrags.values()).filter(step => step.selection.sourceFile === path);
+  }
+
+  function canvasBase(path) {
+    if (sourceVersions[path]) return sourceVersions[path];
+    // Only a declarative document can verify a local style change without
+    // replacing this frame. Other editors still require a confirmed version.
+    const latest = timingDocumentId && path === compositionPath && pendingForSource(path).at(-1);
+    return latest && (latest.confirmedVersion || latest.sha256);
+  }
+
+  function confirmCanvasVersion(path, version) {
+    const steps = pendingForSource(path);
+    if (steps.length) steps.forEach(step => { step.confirmedVersion = version; });
+    else sourceVersions[path] = version;
+  }
+
+  function newerDragStyle(step, node, name) {
+    if (step?.element !== node || step.applied?.[name] === undefined) return undefined;
+    const steps = pendingForSource(step.selection.sourceFile);
+    const newer = [...steps.slice(steps.indexOf(step) + 1), drag];
+    return newer.findLast(item => item?.element === node && item.applied?.[name] !== undefined)?.applied[name];
+  }
+
   function restoreStyles(element, original, applied) {
     for (const [property, { value, priority }] of Object.entries(original)) {
       // A runtime animation or another edit may have since taken over this property.
@@ -49,7 +74,7 @@ export const PREVIEW_CANVAS_DRAG = `
         element.matches('[data-composition-id],[data-composition-src],[data-hf-scene]') ||
         element.closest('[data-timeline-locked]')) return null;
     const selection = describe(element);
-    if (!Object.hasOwn(sourceVersions, selection.sourceFile)) return null;
+    if (!canvasBase(selection.sourceFile)) return null;
 
     const style = getComputedStyle(element);
     const makeRelative = style.position === 'static';
@@ -79,10 +104,23 @@ export const PREVIEW_CANVAS_DRAG = `
     if (message.phase === 'start') return startDrag(message);
     const pending = pendingDrags.get(message.gestureId);
     if (pending && (message.phase === 'commit' || message.phase === 'cancel')) {
-      if (message.phase === 'cancel') restoreStyles(pending.element, pending.original, pending.applied);
-      // A changed file receives its new version from the verified in-place update or a replacement frame.
-      if (message.phase === 'cancel' || !message.changed) sourceVersions[pending.selection.sourceFile] = pending.sha256;
+      const path = pending.selection.sourceFile;
+      const requiresFreshFrame = message.phase === 'commit' && message.changed && !pending.verifiedVersion;
+      if (message.phase === 'cancel' || requiresFreshFrame) {
+        // Later measurements include this gesture. Unwind newest first.
+        if (drag?.selection.sourceFile === path) {
+          if (drag.applied && !requiresFreshFrame) restoreStyles(drag.element, drag.original, drag.applied);
+          drag = null;
+        }
+        const steps = pendingForSource(path);
+        for (const step of steps.slice(steps.indexOf(pending)).reverse()) {
+          if (!requiresFreshFrame) restoreStyles(step.element, step.original, step.applied);
+          pendingDrags.delete(step.id);
+        }
+      }
       pendingDrags.delete(message.gestureId);
+      const confirmed = !requiresFreshFrame && (pending.confirmedVersion || pending.sha256);
+      if (confirmed) confirmCanvasVersion(path, confirmed);
       return null;
     }
     if (!drag || message.gestureId !== drag.id) return null;
@@ -119,11 +157,12 @@ export const PREVIEW_CANVAS_DRAG = `
     const position = message.wholePath
       ? { time:startPosition.time, delta:{x:round(offsetX), y:round(offsetY)} }
       : { time:startPosition.time, x:round(startPosition.x + offsetX), y:round(startPosition.y + offsetY) };
-    const sha256 = sourceVersions[sourceFile];
-    // A second edit of this source needs a confirmed base. Other source files remain editable.
+    const sha256 = canvasBase(sourceFile);
+    const predecessor = pendingForSource(sourceFile).at(-1)?.id;
+    // Keep general inspectors pinned to the last fully settled document.
     delete sourceVersions[sourceFile];
     pendingDrags.set(drag.id, { ...drag, sha256 });
     drag = null;
-    return { sourceFile, elementId, hfId, ...sourceIdentity(sha256), left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
+    return { sourceFile, elementId, hfId, ...sourceIdentity(sha256), ...(predecessor && {predecessor}), left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
   }
 `;

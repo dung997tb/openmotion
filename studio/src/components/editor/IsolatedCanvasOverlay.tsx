@@ -2,6 +2,7 @@ import { IsolatedCanvasContextMenu, type CanvasMenuPick } from "./IsolatedCanvas
 import { useIsolatedInlineText } from "./useIsolatedInlineText";
 import { isIsolatedSourceTarget, isolatedPatchTarget, type IsolatedSourceTarget } from "./isolatedSourceTarget";
 import { useIsolatedLayerBounds } from "./useIsolatedLayerBounds";
+import { saveCanvasDrag } from "./saveCanvasDrag";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { useDomEditActionsContext } from "../../contexts/DomEditContext";
 import { useStudioShellContext } from "../../contexts/StudioContext";
@@ -28,6 +29,7 @@ type Corner = "nw" | "ne" | "sw" | "se";
 const corners: Corner[] = ["nw", "ne", "sw", "se"];
 
 interface DragResult extends IsolatedSourceTarget {
+  predecessor?: string;
   left: number;
   top: number;
   makeRelative: boolean;
@@ -148,12 +150,17 @@ export function IsolatedCanvasOverlay() {
       if (createPreviewAdapter({ iframe: active.adapter.iframe }).token !== active.adapter.token) return;
       if (!validResult(result) || result.corner !== active.corner || (active.corner &&
         !(Number.isFinite(result.width) && Number.isFinite(result.height) && result.width! > 0 && result.height! > 0))) return;
-      // The scoped frame holds the optimistic styles until this write settles.
-      // Pointer capture can now serve another source file.
+      // Pointer capture is free while this gesture waits for its own save.
       drag.current = null;
-      const saved = await commitDomEditPatchBatches([positionPatch(result)], { label: active.corner ? "Resize layer" : "Move layer", coalesceKey: active.gestureId });
-      committed = saved.durable;
-      changed = saved.changed;
+      const frame = active.adapter.iframe;
+      const saved = await saveCanvasDrag(frame, result.sourceFile, active.gestureId, result.predecessor, async version => {
+        const patch = positionPatch(result);
+        if (version && (previewIframeRef.current !== frame || createPreviewAdapter({ iframe: frame }).token !== active.adapter.token)) return;
+        if (version) patch.ifMatch = version;
+        return commitDomEditPatchBatches([patch], { label: active.corner ? "Resize layer" : "Move layer", coalesceKey: active.gestureId });
+      });
+      committed = saved?.durable === true;
+      changed = saved?.changed === true;
     }, () => { if (drag.current === active) showToast(t("Preview unavailable"), "error"); }).catch(() => {
       // The shared save queue reports the error and reloads the authoritative preview.
     }).finally(() => {
