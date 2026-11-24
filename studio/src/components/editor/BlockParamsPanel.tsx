@@ -11,6 +11,7 @@ import type { BlockParam } from "@hyperframes/core/registry";
 import { useFileManagerContextOptional } from "../../contexts/FileManagerContext";
 import { useStudioPlaybackContext } from "../../contexts/StudioContext";
 import { trackBlockParamCommit } from "../../telemetry/events";
+import { StudioFileConflictError } from "../../utils/studioSaveDiagnostics";
 import { createTypingSave } from "../../utils/typingSave";
 import { serializeStudioFileMutation } from "../../utils/studioFileMutationCoordinator";
 const loadParameterEditor = () => import("../../../../packages/edit-core/composition-variable");
@@ -96,8 +97,20 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
         trackBlockParamCommit({ tone: "saved", blockName, key });
         return true;
       } catch (error) {
+        let confirmed = previous;
+        if (error instanceof StudioFileConflictError && error.filePath === compositionPath) {
+          try {
+            const [source, editor] = await Promise.all([
+              error.currentContent ?? fileManager.readProjectFile(compositionPath), loadParameterEditor(),
+            ]);
+            const values = editor.compositionVariableValues(source, [key]);
+            const id = values && editor.declaredParameterId(values.keys(), key);
+            if (values && id) confirmed = values.get(id) ?? previous;
+          } catch { /* Keep the last known value if the current file is unavailable. */ }
+          appliedRef.current[key] = confirmed;
+        }
         if (isCurrent()) {
-          setValues(drafts => ({ ...drafts, [key]: previous }));
+          setValues(drafts => ({ ...drafts, [key]: confirmed }));
           setCommitState({ tone: "error", message: error instanceof Error ? error.message : "Couldn't save the block file. Retry?" });
         }
         trackBlockParamCommit({ tone: "error", blockName, key });
