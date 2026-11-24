@@ -6,7 +6,7 @@ Use `CLAUDE.md` as the Claude Code instruction entry. Record future repository-r
 
 ## Branch workflow
 
-Branch new work from the latest `main` and target all pull requests at `main`. Merge reviewed changes directly into `main` when authorized; do not use `feature/motion` as an intermediate integration branch.
+Branch new work from the latest `main` and target pull requests at `main` by default. While standalone npm/Desktop work converges on `next`, branch standalone work from the latest `origin/next` and target `next` under the same review, CI, and branch-protection rules. Merge reviewed changes directly into the target integration branch when authorized; do not use `feature/motion` as an intermediate integration branch.
 
 Follow [Repository PR review follow-up](AGENTS.md#repository-pr-review-follow-up) after opening or updating a repository PR: verify feedback, fix and validate, reply and resolve, then report the live review/CI/conflict state. Keep merge and publication authorization separate.
 

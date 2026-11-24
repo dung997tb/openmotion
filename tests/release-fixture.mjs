@@ -9,7 +9,7 @@ import { downloadOrigin, downloadPrefix } from '../integrations/dsh/download.ts'
 export async function candidateFixture(t, branch = 'main', options = {}) {
   const work = await mkdtemp(path.join(os.tmpdir(), 'motion-release-test-'));
   t.after(() => rm(work, { recursive: true, force: true }));
-  const root = fileURLToPath(new URL('../', import.meta.url)), build = path.join(work, 'build'), directory = path.join(work, 'candidate');
+  const root = options.root || fileURLToPath(new URL('../', import.meta.url)), build = path.join(work, 'build'), directory = path.join(work, 'candidate');
   const commit = (await runFile('git', ['rev-parse', 'HEAD'], { cwd: root })).trim(), version = options.version || '0.6.4-test.99';
   const channel = version.includes('-test.') ? 'test' : 'stable', templateEnvironment = channel === 'test' ? 'dev' : 'prod';
   const app = path.join(work, 'app'), pkg = path.join(work, 'package');

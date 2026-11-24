@@ -19,7 +19,7 @@ Keep persistent user instructions for repository work in this file, and keep `CL
 1. All commit messages must be in English, including both the subject and body, as well as merge and revert messages.
 2. All repository collaboration content you create or update must be in English: issue and pull request titles and descriptions, comments, review summaries, discussions, and release notes. This applies even when the user's request is in another language.
 3. Before committing or submitting repository content, verify that it follows these English-language requirements.
-4. Branch new work from the latest `main` and target all pull requests at `main`. Merge reviewed changes directly into `main` when authorized; do not use `feature/motion` as an intermediate integration branch.
+4. Branch new work from the latest `main` and target pull requests at `main` by default. While standalone npm/Desktop work converges on `next`, branch standalone work from the latest `origin/next` and target `next` under the same review, CI, and branch-protection rules. Merge reviewed changes directly into the target integration branch when authorized; do not use `feature/motion` as an intermediate integration branch.
 
 ## Repository PR review follow-up
 

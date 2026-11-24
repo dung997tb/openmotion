@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { candidateFixture } from './release-fixture.mjs';
@@ -219,7 +219,7 @@ for (const [branch, receiptRepository] of [
   ['main', repository], ['next', repository], ['feature/motion', repository], ['feature/motion', 'nexu-io/html-anything'],
 ]) test(`artifact download binds ${branch} / ${receiptRepository} provenance and does not forward credentials to signed URLs`, async t => {
   const f = await candidateFixture(t), zip = path.join(f.work, 'candidate.zip');
-  // Simulate a frozen producer receipt; new candidate builds are main-only.
+  // Simulate frozen producer receipts: historical feature/motion receipts alongside current main/next builds.
   f.candidate.workflow.ref = `refs/heads/${branch}`;
   await writeFile(path.join(f.directory, 'provenance.json'), JSON.stringify({ ...f.provenance, head_branch: branch }));
   const producer = { ...origin, head_branch: branch };
@@ -279,7 +279,7 @@ test('next integration branch supports same-run sealing, verification and operat
   await assert.rejects(recordAuthorization(f.directory, f.inputs, async () => Response.json({ ...run, head_branch: 'main' }), f.env));
 });
 
-test('retained candidate source ancestry always falls back to main for non-release candidate refs', async () => {
+test('retained candidate source ancestry always falls back to main for non-release candidate refs', () => {
   assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/main' } }), 'refs/heads/main');
   assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/next' } }), 'refs/heads/next');
   assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/feature/motion' } }), 'refs/heads/main');
@@ -291,15 +291,34 @@ test('retained candidate source ancestry always falls back to main for non-relea
   assert.throws(() => assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/next' } }, { GITHUB_REF: 'refs/heads/main' }), /Candidate branch does not match/);
   assert.throws(() => assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/main' } }, { GITHUB_REF: 'refs/heads/next' }), /Candidate branch does not match/);
   assert.throws(() => assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/feature/motion' } }, { GITHUB_REF: 'refs/heads/next' }), /Candidate branch does not match/);
-  const script = await readFile(new URL('../.github/scripts/motion-release.mjs', import.meta.url), 'utf8');
-  const installCheck = await readFile(new URL('../.github/workflows/motion-install-check.yml', import.meta.url), 'utf8');
-  assert(script.includes('assertCandidateDispatchBranch(await verifyDownloaded(directory, inputs.expectedSHA256))'));
-  assert(script.includes('validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, candidateSourceRef(c))'));
-  assert(installCheck.includes('validateSource(process.cwd(), c.sourceCommit, c.version, undefined, undefined, candidateSourceRef(c))'));
 });
 
-test('publication and recovery paths reject retained candidates from another release branch', async t => {
-  const nextFixture = await candidateFixture(t, 'next');
+test('publication, recovery, and install-check commands enforce branch binding and fallback ancestry end to end', async t => {
+  const work = await mkdtemp(path.join(os.tmpdir(), 'motion-branch-cli-'));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const repo = path.join(work, 'repo');
+  await mkdir(repo, { recursive: true });
+  const git = (...args) => runFile('git', args, { cwd: repo });
+  const commit = async (file, content, message) => {
+    await writeFile(path.join(repo, file), content);
+    await git('add', file);
+    await git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', message);
+    return (await git('rev-parse', 'HEAD')).trim();
+  };
+  await git('init', '-q');
+  const mainCommit = await commit('package.json', JSON.stringify({ name: 'openmotion', version: '0.0.1' }) + '\n', 'Main commit');
+  await git('update-ref', 'refs/remotes/origin/main', mainCommit);
+  await git('checkout', '--orphan', 'next-only');
+  await git('rm', '-rf', '-q', '.');
+  const nextCommit = await commit('package.json', JSON.stringify({ name: 'openmotion', version: '0.0.1' }) + '\n', 'Next-only commit');
+  await git('update-ref', 'refs/remotes/origin/next', nextCommit);
+
+  const scanner = path.join(work, 'scanner');
+  await writeFile(scanner, "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nconst args = process.argv.slice(2);\nwriteFileSync(args[args.indexOf('--report-path') + 1], '[]');\n");
+  await chmod(scanner, 0o755);
+
+  const nextFixture = await candidateFixture(t, 'next', { root: repo });
+  assert.equal(nextFixture.candidate.sourceCommit, nextCommit);
   const mainDispatchEnv = {
     ...nextFixture.env,
     GITHUB_REF: 'refs/heads/main',
@@ -313,11 +332,80 @@ test('publication and recovery paths reject retained candidates from another rel
   const script = fileURLToPath(new URL('../.github/scripts/motion-release.mjs', import.meta.url));
   for (const command of ['verify', 'rescan']) {
     await assert.rejects(
-      runFile(process.execPath, [script, command, nextFixture.directory, nextFixture.root], { env: { ...process.env, ...mainDispatchEnv } }),
+      runFile(process.execPath, [script, command, nextFixture.directory, repo, scanner], { env: { ...process.env, ...mainDispatchEnv } }),
       /Candidate branch does not match/,
     );
   }
   await runFile(process.execPath, [script, 'verify', nextFixture.directory], { env: { ...process.env, ...nextFixture.env } });
+  await runFile(process.execPath, [script, 'rescan', nextFixture.directory, repo, scanner], { env: { ...process.env, ...nextFixture.env } });
+  assert.equal(JSON.parse(await readFile(path.join(nextFixture.directory, 'publication-source-scan.json'), 'utf8')).status, 'passed');
+  assert.equal(JSON.parse(await readFile(path.join(nextFixture.directory, 'publication-package-scan.json'), 'utf8')).status, 'passed');
+
+  // Historical feature/motion receipt built on mainCommit must pass rescan on main dispatch and fail on next dispatch.
+  await git('checkout', '-q', mainCommit);
+  const legacyFixture = await candidateFixture(t, 'main', { root: repo });
+  assert.equal(legacyFixture.candidate.sourceCommit, mainCommit);
+  legacyFixture.candidate.workflow.ref = 'refs/heads/feature/motion';
+  await writeFile(path.join(legacyFixture.directory, 'candidate.json'), JSON.stringify(legacyFixture.candidate));
+  await writeFile(path.join(legacyFixture.directory, 'provenance.json'), JSON.stringify({ ...legacyFixture.provenance, head_branch: 'feature/motion' }));
+  await runFile(process.execPath, [script, 'rescan', legacyFixture.directory, repo, scanner], { env: { ...process.env, ...legacyFixture.env } });
+  await assert.rejects(
+    runFile(process.execPath, [script, 'rescan', legacyFixture.directory, repo, scanner], {
+      env: { ...process.env, ...legacyFixture.env, GITHUB_REF: 'refs/heads/next', GITHUB_WORKFLOW_REF: `${repository}/${publicationWorkflow}@refs/heads/next` },
+    }),
+    /Candidate branch does not match/,
+  );
+
+  // Execute the actual inline resolution block in motion-install-check.yml for both next and historical feature/motion receipts.
+  const installWorkflow = await readFile(new URL('../.github/workflows/motion-install-check.yml', import.meta.url), 'utf8');
+  const installSnippet = installWorkflow.split("node --input-type=module <<'JS'\n")[1].split('\n          JS')[0]
+    .replaceAll('./.github/scripts/motion-release.mjs', pathToFileURL(script).href);
+  for (const [label, fixture, headBranch] of [['next', nextFixture, 'next'], ['legacy', legacyFixture, 'feature/motion']]) {
+    const zip = path.join(work, `${label}.zip`);
+    await runFile('zip', ['-j', zip, ...['candidate.json', ...Object.keys(fixture.candidate.files)].map(name => path.join(fixture.directory, name))]);
+    const zipBytes = await readFile(zip), digest = 'sha256:' + createHash('sha256').update(zipBytes).digest('hex');
+    const mockFetch = path.join(work, `mock-fetch-${label}.mjs`);
+    await writeFile(mockFetch, `import { readFileSync } from 'node:fs';
+const bytes = readFileSync(${JSON.stringify(zip)});
+const producer = ${JSON.stringify({ ...origin, head_branch: headBranch })};
+const item = ${JSON.stringify({ ...artifact, name: `motion-candidate-${fixture.candidate.version}`, digest, size_in_bytes: zipBytes.length })};
+globalThis.fetch = async url => {
+  const value = String(url);
+  if (value.endsWith('/actions/runs/123')) return Response.json(producer);
+  if (value.includes('/artifacts?')) return Response.json({ total_count: 1, artifacts: [item] });
+  if (value.endsWith('/456/zip')) return new Response(null, { status: 302, headers: { location: 'https://signed.example.invalid/candidate' } });
+  if (value === 'https://signed.example.invalid/candidate') return new Response(bytes);
+  throw new Error('Unexpected fetch: ' + value);
+};
+`);
+    const runnerTemp = path.join(work, `runner-${label}`), githubOutput = path.join(work, `output-${label}`);
+    await mkdir(runnerTemp, { recursive: true });
+    await writeFile(githubOutput, '');
+    await runFile(process.execPath, ['--import', mockFetch, '--input-type=module', '-e', installSnippet], {
+      cwd: repo,
+      env: { ...process.env, GH_TOKEN: 'fixture-token', MOTION_VERSION: fixture.candidate.version, MOTION_CANDIDATE_RUN_ID: '123', RUNNER_TEMP: runnerTemp, GITHUB_OUTPUT: githubOutput },
+    });
+    assert.equal(await readFile(githubOutput, 'utf8'), `tgz_sha256=${fixture.candidate.tgzSHA256}\n`);
+  }
+});
+
+test('default npm package size script reports advisory warnings without failing when exceeding the target', async t => {
+  const f = await candidateFixture(t);
+  const script = fileURLToPath(new URL('../.github/scripts/npm-package-size.py', import.meta.url));
+  const summary = path.join(f.work, 'summary.md');
+  await writeFile(summary, '');
+  const tgz = path.join(f.directory, f.candidate.tgz);
+  const stdout = await runFile('python3', ['-c', `
+import importlib.util
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('npm_package_size', ${JSON.stringify(script)})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+mod.ADVISORY_BYTES = 1
+mod.report(Path(${JSON.stringify(tgz)}))
+`], { env: { ...process.env, GITHUB_STEP_SUMMARY: summary } });
+  assert(stdout.includes('::warning::Default npm package'));
+  assert((await readFile(summary, 'utf8')).includes('warning only; does not block CI or releases'));
 });
 
 test('old main receipts remain readable but unregistered candidate branches cannot seal artifacts', async t => {
