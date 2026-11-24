@@ -204,7 +204,7 @@ export function useTimelineClipTimingEditing({
           );
         const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{
           element, start: updates.start, ...(trackChanged && { track: updates.track }),
-        }]);
+        }], activeCompPath);
         return reorderDone
           .then(() => {
             if (cloud && projectIdRef.current) {
@@ -288,7 +288,7 @@ export function useTimelineClipTimingEditing({
       patchIframeDomTiming(previewIframeRef.current, element, liveAttrs, activeCompPath);
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
-      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{element, ...updates}]);
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{element, ...updates}], activeCompPath);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // Read before the readout sync below: the SDK path (setTiming) can't grow the root duration.
       const needsExtension = extendRootDurationIfNeeded(updates.start + updates.duration);

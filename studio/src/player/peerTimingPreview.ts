@@ -1,5 +1,6 @@
 import { isLiveMediaMove } from "../../../shared/preview-live-media";
 import { createPreviewAdapter } from "./lib/previewAdapter";
+import { capturePresentedTimelineChanges } from "./lib/isolatedTimelineEdits";
 import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
@@ -152,6 +153,7 @@ export async function tryApplyPeerChanges(
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
   const { previous, current } = update;
+  const releasePresented = capturePresentedTimelineChanges(frame, update.path);
   const changes = options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
     await diffMountedPreview(previous.content, current.content);
   if (!changes || !isCurrent()) return false;
@@ -175,6 +177,7 @@ export async function tryApplyPeerChanges(
       return false;
     }
     if (await paint !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    if (!temporary && changes.some(change => change.attributes.length)) releasePresented?.();
     if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
       document.timingFile = { path: update.path, version: current.version };
     }

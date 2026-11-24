@@ -7,6 +7,7 @@ import { knownCompositionSource } from "../player/lib/compositionPosterSource";
 import { expectPosterFileVersion } from "../player/lib/posterFileRead";
 import { usePlayerStore } from "../player/store/playerStore";
 import { clearStudioSaveFailures } from "../utils/studioSaveState";
+import { confirmedSource } from "../utils/confirmedTextSources";
 import {
   deleteExternalConflictSnapshot,
   loadExternalConflictSnapshot,
@@ -77,7 +78,7 @@ export function useStudioExternalFileChanges({
   const refreshFileViews = useCallback((payload: unknown, acceptChange: (unaffectedPreview?: string) => void) => {
     const activePath = activeCompPath ?? masterCompPath;
     const previous = projectId && activePath
-      ? knownCompositionSource(usePlayerStore.getState(), projectId, activePath)
+      ? confirmedSource(projectId, activePath) ?? knownCompositionSource(usePlayerStore.getState(), projectId, activePath)
       : null;
     // Capture the displayed source first. All readers below belong to the new thumbnail revision.
     const paths = changedFilePaths(payload);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from "vitest";
-import { applyHeldTimelineChanges, holdIsolatedTimelineChanges } from "./isolatedTimelineEdits";
+import { applyHeldTimelineChanges, capturePresentedTimelineChanges, holdIsolatedTimelineChanges } from "./isolatedTimelineEdits";
 import type { TimelineElement } from "../store/playerStore";
 
 it("shows the release position through stale frame reports and accepts a new preview or a failed write", () => {
@@ -32,4 +32,16 @@ it("keeps the moved start and authored lane during old-frame reports, including 
   const replacement = document.createElement("iframe");
   replacement.src = frame.src;
   expect(applyHeldTimelineChanges(replacement, [clip])[0]).toBe(clip);
+});
+
+it("accepts the peer's next timing for a presented file while preserving later and unrelated gestures", () => {
+  const frame = document.createElement("iframe");
+  frame.src = "https://preview.example/api/projects/p/preview/?pt=first";
+  const clip = (id: string, sourceFile?: string) => ({ id, start: 0, duration: 2, sourceFile } as TimelineElement);
+  const a = clip("a"), b = clip("b"), nested = clip("nested", "child.html");
+  holdIsolatedTimelineChanges(frame, [a, b, nested].map(element => ({ element, start: 0, duration: 3 })), "main.html");
+  const presented = capturePresentedTimelineChanges(frame, "main.html");
+  holdIsolatedTimelineChanges(frame, [{ element: b, start: 0, duration: 5 }], "main.html");
+  presented?.();
+  expect(applyHeldTimelineChanges(frame, [a, b, nested]).map(row => row.duration)).toEqual([2, 5, 3]);
 });

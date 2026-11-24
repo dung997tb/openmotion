@@ -287,7 +287,7 @@ export function useTimelineGroupEditing({
       const maxEnd = Math.max(...changes.map((change) => change.start + change.element.duration));
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
-      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, changes);
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, changes, activeCompPath);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // needsExtension gates the SDK path (setTiming can't grow the root duration),
       // so read the store BEFORE the readout sync below optimistically updates it.
@@ -415,7 +415,7 @@ export function useTimelineGroupEditing({
       const maxEnd = Math.max(...changes.map((change) => change.start + change.duration));
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
-      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, changes);
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, changes, activeCompPath);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // needsExtension gates the SDK path (setTiming can't grow the root duration),
       // so read the store BEFORE the readout sync below optimistically updates it.
