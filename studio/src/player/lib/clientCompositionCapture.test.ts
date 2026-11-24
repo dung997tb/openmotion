@@ -413,6 +413,7 @@ describe("clientCompositionCapture", () => {
       expect(iframe!.style.height).toBe("1920px");
       expect(posted).toHaveLength(1);
       expect(posted[0]?.targetOrigin).toBe("https://preview.example.test");
+      expect(posted[0]?.message.width).toBe(160);
       expect(loaded.value.kind).toBe("filmstrip");
       if (loaded.value.kind === "filmstrip") {
         expect(loaded.value.urls).toHaveLength(2);
