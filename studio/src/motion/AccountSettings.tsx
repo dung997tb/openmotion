@@ -225,18 +225,13 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
     <div className="om-plan-usage-head">
       <div className="om-plan-usage-identity">
         <h2 className="om-title">{planName}</h2>
-        <p className="om-muted">{periodEnd && <span>{t('Current period ends {date}', { date: periodEnd })}</span>}
-          <Button variant="plain" className="om-plan-usage-link" onClick={() => open('manage_subscription')}>{t('Manage subscription')}</Button></p>
+        {periodEnd && <p className="om-muted">{t('Current period ends {date}', { date: periodEnd })}</p>}
       </div>
-      <div className="om-settings-actions">
-        <Button variant="ghost" className="om-button h-auto" onClick={() => open('open_console')}><RemixIcon name="layout-2-line" size={16} />{t('Console')}<RemixIcon name="external-link-line" size={15} /></Button>
-        {upgradable && <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>}
-      </div>
+      {upgradable && <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>}
     </div>
     <div className="om-plan-usage-quotas">
       <div className="om-plan-usage-quota" data-quota="pay-as-you-go">
         <div className="om-settings-row"><h3 className="om-subtitle">{t('Pay-as-you-go credits')}</h3>{usage.autoRecharge !== undefined && <span className="om-badge">{t(usage.autoRecharge ? 'Auto top-up on' : 'Auto top-up off')}</span>}</div>
-        <span className="om-muted">{t('After your plan quota runs out, keep working with pay-as-you-go credits.')}</span>
         <div className="om-plan-usage-figure"><strong>{formatUsd(usage.payAsYouGoUsd)}</strong>
           <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('recharge')}>{t('Top up')}<RemixIcon name="external-link-line" size={15} /></Button></div>
       </div>
@@ -271,8 +266,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
           {signedIn && !account.billingUnavailable && account.usage && <PlanUsagePanel account={account} upgradable={account.plan?.toLowerCase() !== 'max'} open={element => void subscriptionOpener.open(element)} />}
           {!(signedIn && account.billingUnavailable) && !(signedIn && account.usage) && <div className="om-account-metrics"><div className="om-card"><span className="om-muted">{t('Current plan')}</span><h3 className="om-title">{signedIn && account.plan ? account.plan === 'free' ? t('Free plan') : account.plan : '—'}</h3><p className="om-muted">{t(signedIn ? 'Managed by OpenDesign' : 'Sign in to view your plan')}</p></div><div className="om-card"><span className="om-muted">{t('Available balance')}</span><h3 className="om-title">{signedIn && account.balance != null ? `$${account.balance}` : '—'}</h3><p className="om-muted">{t(signedIn ? 'Account credits in USD' : 'Sign in to view usage')}</p></div></div>}
           {signedIn && account.billingUnavailable && <div className="om-settings-row"><p className="om-muted">{t(account.billingError?.status === 403 ? "The billing service declined this request. Open Manage subscription to check your plan in OpenDesign." : "Couldn't load your plan and balance. Account models are unaffected and can be used as usual.")}</p><Button variant="ghost" className="om-button h-auto" disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()}><RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={15} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />{t('Refresh')}</Button></div>}
-          {signedIn && !plan && !account.usage && <>{subscriptionOpener.button('manage_subscription')}{subscriptionOpener.link}</>}
-          {signedIn && account.usage && subscriptionOpener.link}
+          {signedIn && !plan && <>{subscriptionOpener.button('manage_subscription')}{subscriptionOpener.link}</>}
         </section>
       </> : <section className="om-card om-settings-row">
         <div className="om-account-models-copy">
