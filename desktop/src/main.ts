@@ -405,7 +405,7 @@ const protocolRouter = new DesktopProtocolRouter({
   },
 });
 protocolRouter.subscribe(link => {
-  registry.emit(HOST_CAPABILITIES.WINDOW, 'deep-link', link);
+  registry.emit(HOST_CAPABILITIES.WINDOW, 'deepLink', link);
 });
 
 const updater = new DesktopUpdaterController({
@@ -734,7 +734,6 @@ async function syncWindowChromeCss(): Promise<void> {
 function broadcastChromeState(): void {
   const state = currentChromeState();
   registry.emit(HOST_CAPABILITIES.WINDOW, 'chromeState', state);
-  registry.emit(HOST_CAPABILITIES.WINDOW, 'chrome-state', state);
   void syncWindowChromeCss();
 }
 
@@ -1421,7 +1420,6 @@ function registerCapabilities(): void {
       pendingMenuActions = [];
       for (const action of queued) {
         registry.emit(HOST_CAPABILITIES.WINDOW, "menuAction", action);
-        registry.emit(HOST_CAPABILITIES.WINDOW, "menu-action", action);
       }
     },
     loadStudioIntoMainWindow,

@@ -487,7 +487,7 @@ export function createWindowCapabilityModule(deps: WindowCapabilityDeps): Capabi
     version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.WINDOW],
     status: deps.status ?? 'available',
     ...(deps.reason !== undefined ? { reason: deps.reason } : {}),
-    events: ['chromeState', 'menuAction', 'themeChanged'],
+    events: ['chromeState', 'menuAction', 'themeChanged', 'focus', 'visibility', 'resizing', 'deepLink'],
     methods: {
       getChromeState: {
         handler: async () => hostOk(await deps.getChromeState()),

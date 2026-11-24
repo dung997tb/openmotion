@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -617,7 +617,7 @@ test('shell capabilities expose one canonical name per method and event', () => 
         'releaseWakeLock',
         'notify',
       ],
-      events: ['chromeState', 'menuAction', 'themeChanged'],
+      events: ['chromeState', 'menuAction', 'themeChanged', 'focus', 'visibility', 'resizing', 'deepLink'],
     },
     updater: {
       methods: ['getState', 'checkForUpdates', 'downloadUpdate', 'installNow'],
@@ -656,4 +656,40 @@ test('shell capabilities expose one canonical name per method and event', () => 
     modules.map(mod => [mod.name, { methods: Object.keys(mod.methods), events: [...(mod.events ?? [])] }]),
   );
   assert.deepEqual(actual, expected);
+});
+
+test('the shell only emits events that the capability declares', () => {
+  // Studio discovers events through listCapabilities(); an undeclared or
+  // duplicate emit is invisible there and becomes a name nobody agreed to keep.
+  const declared = new Map(
+    [
+      createWindowCapabilityModule({}),
+      createUpdaterCapabilityModule({}),
+      createDiagnosticsCapabilityModule({}),
+      createAccountCapabilityModule({}),
+      createPreferencesCapabilityModule({}),
+    ].map(mod => [mod.name, new Set(mod.events ?? [])]),
+  );
+  const srcDir = path.join(desktopRoot, 'src');
+  const sources = readdirSync(srcDir)
+    .filter(name => name.endsWith('.ts'))
+    .map(name => [name, readFileSync(path.join(srcDir, name), 'utf8')]);
+  // Capabilities assembled inline (not through a factory) declare their events next to their name.
+  for (const [, source] of sources) {
+    const inline = /name: HOST_CAPABILITIES\.([A-Z_]+),[^{}]*?events: \[([^\]]*)\]/g;
+    for (const match of source.matchAll(inline)) {
+      const events = [...match[2].matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1]);
+      declared.set(HOST_CAPABILITIES[match[1]], new Set(events));
+    }
+  }
+
+  const emitted = [];
+  for (const [name, source] of sources) {
+    for (const match of source.matchAll(/\.emit\(\s*HOST_CAPABILITIES\.([A-Z_]+)\s*,\s*['"]([^'"]+)['"]/g)) {
+      emitted.push({ file: name, capability: HOST_CAPABILITIES[match[1]], event: match[2] });
+    }
+  }
+  assert.ok(emitted.length >= 10, 'expected to find the shell emit sites');
+  const undeclared = emitted.filter(item => !declared.get(item.capability)?.has(item.event));
+  assert.deepEqual(undeclared, []);
 });
