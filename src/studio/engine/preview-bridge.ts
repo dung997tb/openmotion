@@ -68,6 +68,8 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
       width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
       fps:window.__clipManifest&&window.__clipManifest.fps,
       durationInFrames:window.__clipManifest&&Number(window.__clipManifest.durationInFrames)||0,
+      timelinePath:includeManifest?compositionPath:undefined,
+      timelineVersion:includeManifest?sourceIdentity(sourceVersions?.[compositionPath]).fileVersion:undefined,
       clips:includeManifest&&window.__clipManifest&&Array.isArray(window.__clipManifest.clips)?authoredTimelineClips(window.__clipManifest.clips):undefined};
   }
   function sourceFileForElement(element){

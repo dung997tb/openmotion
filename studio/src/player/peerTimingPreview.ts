@@ -5,10 +5,13 @@ import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES,
 type FileSnapshot = { content: string; version: string };
 
 // A WindowProxy survives navigation. Bind a request to the document that acknowledged the handshake.
-const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean; liveEdits: PreviewLiveEdits }>();
+const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean; liveEdits: PreviewLiveEdits; timingFile?: { path: string; version: string } }>();
 export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown, liveEdits: PreviewLiveEdits = {}): void {
   const id = timingId ?? styleId;
-  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id, canRebind: id === timingId, liveEdits });
+  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) {
+    const known = documents.get(frame);
+    if (known?.id !== id || known.token !== token) documents.set(frame, { token, id, canRebind: id === timingId, liveEdits });
+  }
   else documents.delete(frame);
 }
 
@@ -19,6 +22,12 @@ export function hasPeerTimingDocument(frame: HTMLIFrameElement): boolean {
 
 export function hasPeerLiveEdit(frame: HTMLIFrameElement, capability: keyof PreviewLiveEdits): boolean {
   return documents.get(frame)?.liveEdits?.[capability] === true;
+}
+
+/** A queued clip list can outlive the verified in-place edit that replaced its timings. */
+export function acceptsTimingManifest(frame: HTMLIFrameElement, path: unknown, version: unknown): boolean {
+  const expected = documents.get(frame)?.timingFile;
+  return !expected || path !== expected.path || version === expected.version;
 }
 
 export function hasScriptedStylePreview(frame: HTMLIFrameElement) {
@@ -156,6 +165,10 @@ export async function tryApplyPeerChanges(
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
       changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
-    return applied === true && document.id === documents.get(frame)?.id && isCurrent();
+    if (applied !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
+      document.timingFile = { path: update.path, version: current.version };
+    }
+    return true;
   } catch { return false; }
 }

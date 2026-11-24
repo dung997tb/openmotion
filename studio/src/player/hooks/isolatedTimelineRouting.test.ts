@@ -3,6 +3,7 @@ import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { patchTimelineChangesInSource } from "../../hooks/timelineEditingHelpers";
 import { applyPatchByTarget } from "../../utils/sourcePatcher";
 import { expect, it, vi } from "vitest";
+import { rememberPeerTimingDocument, tryApplyPeerChanges } from "../peerTimingPreview";
 import { isCurrentIsolatedManifest } from "../lib/isolatedTimelineManifest";
 import { PREVIEW_BRIDGE_SOURCE, PREVIEW_BRIDGE_VERSION } from "../lib/previewAdapter";
 import { buildTimelineElementsFromClips } from "./timelineSyncHydration";
@@ -37,6 +38,34 @@ it("keeps authored identity across runtime notifications and only accepts it fro
   });
   iframe.src = origin + "/api/projects/p/preview?pt=replacement";
   expect(isCurrentIsolatedManifest(iframe, clips)).toBe(false);
+});
+
+it("rejects a delayed clip list from before a confirmed rebind of the same document", async () => {
+  const origin = "https://preview.test";
+  const frame = document.createElement("iframe");
+  frame.src = origin + "/api/projects/p/preview?pt=active";
+  const envelope = { source: PREVIEW_BRIDGE_SOURCE, version: PREVIEW_BRIDGE_VERSION, projectId: "p", token: "active" };
+  const event = (data: object) => new MessageEvent("message", { source: frame.contentWindow, origin, data: { ...envelope, ...data } });
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage({ requestId }: { requestId: string }) {
+    window.dispatchEvent(event({ type: "response", requestId, result: true }));
+  } } });
+  rememberPeerTimingDocument(frame, "active", undefined, "doc", { mediaTiming: true });
+  const source = '<audio id="sound" data-start="0"></audio>';
+  expect(await tryApplyPeerChanges(frame, { path: "index.html", previous: { content: source, version: "old" },
+    current: { content: source.replace('"0"', '"2"'), version: "new" } }, () => true)).toBe(true);
+  // A duplicate ready handshake still identifies the very same mounted player.
+  rememberPeerTimingDocument(frame, "active", undefined, "doc", { mediaTiming: true });
+  const process = vi.fn();
+  const route = createPreviewMessageHandler({ iframeRef: { current: frame }, processTimelineMessageRef: { current: process },
+    enrichMissingCompositionsRef: { current: vi.fn() }, lastTimelineMessageRef: { current: 0 }, getAdapter: () => null, syncTimelineElements: vi.fn() });
+  const list = { type: "timeline-state", timelinePath: "index.html", clips: [{ id: "sound", start: 0, duration: 2 }], durationInFrames: 60 };
+  route(event({ ...list, timelineVersion: "old" }));
+  expect(process).not.toHaveBeenCalled();
+  route(event({ ...list, timelineVersion: "new" }));
+  expect(process).toHaveBeenCalledTimes(1);
+  rememberPeerTimingDocument(frame, "active", undefined, "replacement", { mediaTiming: true });
+  route(event({ ...list, timelineVersion: "different" }));
+  expect(process).toHaveBeenCalledTimes(2);
 });
 
 it("patches an anonymous legacy clip using exactly the same hf-id as its preview", () => {
