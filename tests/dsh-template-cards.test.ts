@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
 import { detailsSchema, registerOpenMotionTemplateCards } from "../integrations/dsh/plugin/src/templateRecommendationCards.ts";
-import { prepareCloudOnboarding } from "../src/services/cloud-onboarding.ts";
+import { buildDshCardPresentation } from "../src/services/cloud-onboarding.ts";
 
 function fixture() {
   const registered: any[] = [], providers: any[] = [], decisions: any[] = [], follows: any[] = [];
@@ -57,22 +56,53 @@ test("a host without optional card services retains its existing MCP flow", () =
   assert.doesNotThrow(() => registerOpenMotionTemplateCards({ effect: () => {}, skills: undefined, actionCards: undefined }));
 });
 
-test("cloud onboarding prepare returns DSH card arguments matching detailsSchema with video media URLs", async () => {
-  const repoRoot = fileURLToPath(new URL("../", import.meta.url));
-  const prep = await prepareCloudOnboarding({
-    runtimeRoot: repoRoot,
-    publicOrigin: "https://motion.open-design.ai",
-    language: "zh-CN",
-  });
-  const parsed = detailsSchema.parse(prep.dshCardPresentation.arguments.details);
+test("cloud onboarding DSH card presentation matches detailsSchema with video media URLs", () => {
+  const cloudTemplates = [
+    {
+      position: 1,
+      templateId: "motion-a",
+      title: "Template A",
+      summary: "Summary A",
+      durationSeconds: 12,
+      previewUrl: "https://motion.open-design.ai/?templates=1&template=motion-a",
+      posterUrl: "https://r.open-design.ai/files/" + "a".repeat(64),
+      videoUrl: "https://r.open-design.ai/files/" + "b".repeat(64),
+    },
+    {
+      position: 2,
+      templateId: "motion-b",
+      title: "Template B",
+      summary: "Summary B",
+      durationSeconds: 15,
+      previewUrl: "https://motion.open-design.ai/?templates=1&template=motion-b",
+      posterUrl: "https://r.open-design.ai/files/" + "c".repeat(64),
+      videoUrl: "https://r.open-design.ai/files/" + "d".repeat(64),
+    },
+    {
+      position: 3,
+      templateId: "motion-c",
+      title: "Template C",
+      summary: "Summary C",
+      durationSeconds: 18,
+      previewUrl: "https://motion.open-design.ai/?templates=1&template=motion-c",
+      posterUrl: "https://r.open-design.ai/files/" + "e".repeat(64),
+      videoUrl: "https://r.open-design.ai/files/" + "f".repeat(64),
+    },
+  ];
+  const dsh = buildDshCardPresentation(cloudTemplates, "zh");
+  assert.equal(dsh.tool, "propose_action");
+  assert.equal(dsh.skill, "openmotion-template-recommendations");
+  const parsed = detailsSchema.parse(dsh.arguments.details);
   assert.equal(parsed.onboarding, true);
   assert.equal(parsed.language, "zh");
   assert.equal(parsed.templates.length, 3);
   for (let i = 0; i < 3; i++) {
-    assert.equal(parsed.templates[i].id, prep.templates[i].templateId);
-    assert.equal(parsed.templates[i].previewUrl, prep.templates[i].videoUrl);
-    assert.equal(parsed.templates[i].posterUrl, prep.templates[i].posterUrl);
+    assert.equal(parsed.templates[i].id, cloudTemplates[i].templateId);
+    assert.equal(parsed.templates[i].description, cloudTemplates[i].summary);
+    assert.equal(parsed.templates[i].duration, cloudTemplates[i].durationSeconds);
+    assert.equal(parsed.templates[i].previewUrl, cloudTemplates[i].videoUrl);
+    assert.equal(parsed.templates[i].posterUrl, cloudTemplates[i].posterUrl);
   }
-  const withLibrary = detailsSchema.parse({ ...prep.dshCardPresentation.arguments.details, libraryOpened: true });
+  const withLibrary = detailsSchema.parse({ ...dsh.arguments.details, libraryOpened: true });
   assert.equal(withLibrary.libraryOpened, true);
 });

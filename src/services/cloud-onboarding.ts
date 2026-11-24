@@ -523,6 +523,36 @@ export async function renderCloudOnboardingDocument(options: {
   return result;
 }
 
+export function buildDshCardPresentation(
+  templates: readonly CloudOnboardingTemplateItem[],
+  language: OnboardingLanguage,
+): CloudOnboardingPreparePayload['dshCardPresentation'] {
+  // DSH action cards validate against `detailsSchema` (`id`, `title`, `description`,
+  // video `previewUrl`, `posterUrl`, `duration`) rather than the text-fallback HTML URL.
+  const dshTemplates: CloudOnboardingDshTemplateItem[] = templates.map((item) => ({
+    id: item.templateId,
+    title: item.title,
+    description: item.summary.slice(0, 1000),
+    ...(item.videoUrl ? { previewUrl: item.videoUrl } : {}),
+    ...(item.posterUrl ? { posterUrl: item.posterUrl } : {}),
+    duration: item.durationSeconds,
+  }));
+  return {
+    tool: 'propose_action',
+    skill: 'openmotion-template-recommendations',
+    arguments: {
+      action: 'openmotion_template_recommendation',
+      title: 'OpenMotion',
+      brief: 'Choose a template to begin',
+      details: {
+        onboarding: true,
+        language,
+        templates: dshTemplates,
+      },
+    },
+  };
+}
+
 export async function prepareCloudOnboarding(options: {
   runtimeRoot: string;
   publicOrigin: string;
@@ -544,17 +574,6 @@ export async function prepareCloudOnboarding(options: {
 
   const libraryUrl = `${origin}/?templates=1`;
   const inlineHtmlUrl = `${origin}/api/onboarding/cards.html?lang=${encodeURIComponent(language)}&templates=${encodeURIComponent(templateIds.join(','))}`;
-
-  // DSH action cards validate against `detailsSchema` (`id`, `title`, `description`,
-  // video `previewUrl`, `posterUrl`, `duration`) rather than the text-fallback HTML URL.
-  const dshTemplates: CloudOnboardingDshTemplateItem[] = doc.templates.map((item) => ({
-    id: item.templateId,
-    title: item.title,
-    description: item.summary.slice(0, 1000),
-    ...(item.videoUrl ? { previewUrl: item.videoUrl } : {}),
-    ...(item.posterUrl ? { posterUrl: item.posterUrl } : {}),
-    duration: item.durationSeconds,
-  }));
 
   return {
     schemaVersion: 1,
@@ -588,20 +607,7 @@ export async function prepareCloudOnboarding(options: {
         onboarding: false,
       },
     },
-    dshCardPresentation: {
-      tool: 'propose_action',
-      skill: 'openmotion-template-recommendations',
-      arguments: {
-        action: 'openmotion_template_recommendation',
-        title: 'OpenMotion',
-        brief: 'Choose a template to begin',
-        details: {
-          onboarding: true,
-          language,
-          templates: dshTemplates,
-        },
-      },
-    },
+    dshCardPresentation: buildDshCardPresentation(doc.templates, language),
     templates: doc.templates,
   };
 }

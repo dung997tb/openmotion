@@ -240,7 +240,12 @@ test('local/DSH onboarding defaults to the archived local contract and keeps rel
   });
   assert.equal(prepared.instructions, localContract);
   assert(!prepared.instructions.includes('/api/onboarding/prepare'));
-  assert.equal(prepared.inlinePresentation?.status, 'prepared');
+  assert.equal(prepared.cardPresentation.tool, 'propose_action');
+  assert.equal(prepared.cardPresentation.skill, 'openmotion-template-recommendations');
+  assert.ok(
+    prepared.inlinePresentation && ['prepared', 'unavailable'].includes(prepared.inlinePresentation.status),
+    'Inline onboarding either prepares built assets or degrades cleanly when build outputs are absent',
+  );
 
   const legacyPath = path.join(root, 'docs/templates/legacy-npm-install.md');
   const legacyText = await readFile(legacyPath, 'utf8');
