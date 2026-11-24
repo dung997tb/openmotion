@@ -4,6 +4,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_UPDATE_BASE_URL } from '../../shared/desktop-builtin-rules.ts';
+import {
+  buildDesktopReleaseCardPayload,
+  sendFeishuReleaseNotification,
+  signFeishuWebhook,
+  validateFeishuWebhookUrl,
+} from '../scripts/notify-feishu-release.mjs';
 import { resolveDesktopReleaseVersion } from '../scripts/resolve-release-version.mjs';
 import {
   compareSemver,
@@ -479,6 +485,8 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /extraMetadata\.openmotionChannel=/);
   assert.match(workflowYml, /npm --prefix desktop ci/);
   assert.match(workflowYml, /npm --prefix desktop test/);
+  assert.match(workflowYml, /FEISHU_DESKTOP_NOTIFY_WEBHOOK/);
+  assert.match(workflowYml, /notify-feishu-release\.mjs/);
 });
 
 test('desktop/scripts/notarize.cjs skips non-darwin or OM_SKIP_NOTARIZE and resolves Apple credentials', async () => {
@@ -690,4 +698,55 @@ test('DesktopUpdaterController enables allowPrerelease on test channel and disab
   await stableController.checkForUpdates();
   assert.equal(stableFake.updater.allowPrerelease, false);
   assert.equal(stableFake.updater.channel, 'stable');
+});
+
+test('notify-feishu-release builds signed Card 2.0 payload, respects includeMacX64, and validates hosts', async () => {
+  assert.throws(() => validateFeishuWebhookUrl('https://evil.example.com/open-apis/bot/v2/hook/abc'));
+  assert.throws(() => validateFeishuWebhookUrl('http://open.feishu.cn/open-apis/bot/v2/hook/abc'));
+  assert.equal(
+    validateFeishuWebhookUrl('https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id'),
+    'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+  );
+
+  const fullPayload = buildDesktopReleaseCardPayload({
+    channel: 'test',
+    version: '0.2.2-test.2',
+    buildVersion: '0.2.2.2',
+    branch: 'desktop-test',
+    commitSha: '5cdd6dec555422fc',
+    commitSubject: 'fix(desktop-ci): guard bash 3.2 empty arrays',
+    actor: 'heggria',
+    runUrl: 'https://github.com/nexu-io/openmotion/actions/runs/45325228402',
+    includeMacX64: true,
+    secret: 'test-secret',
+    timestampSeconds: 1700000000,
+  });
+  assert.equal(fullPayload.msg_type, 'interactive');
+  assert.equal(fullPayload.card.schema, '2.0');
+  assert.equal(fullPayload.card.header.template, 'blue');
+  assert.equal(fullPayload.card.header.text_tag_list[0].text.content, 'TEST');
+  assert.equal(fullPayload.sign, signFeishuWebhook('test-secret', '1700000000'));
+  const fullText = JSON.stringify(fullPayload.card);
+  assert.equal(fullText.includes('`'), false);
+  assert.match(fullText, /OpenDesign-0\.2\.2-test\.2-mac-arm64\.dmg/);
+  assert.match(fullText, /OpenDesign-0\.2\.2-test\.2-mac-x64\.dmg/);
+  assert.match(fullText, /OpenDesign-Setup-0\.2\.2-test\.2-win-x64\.exe/);
+  assert.match(fullText, /OpenDesign-Portable-0\.2\.2-test\.2-win-x64\.exe/);
+
+  const armOnlyPayload = buildDesktopReleaseCardPayload({
+    channel: 'test',
+    version: '0.2.2-test.3',
+    includeMacX64: false,
+  });
+  const armOnlyText = JSON.stringify(armOnlyPayload.card);
+  assert.match(armOnlyText, /OpenDesign-0\.2\.2-test\.3-mac-arm64\.dmg/);
+  assert.equal(armOnlyText.includes('mac-x64.dmg'), false);
+
+  const result = await sendFeishuReleaseNotification({
+    webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+    channel: 'test',
+    version: '0.2.2-test.2',
+    fetchImpl: async () => new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 }),
+  });
+  assert.equal(result.ok, true);
 });

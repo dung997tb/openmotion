@@ -519,6 +519,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Checkout Feishu release notifier
+        uses: actions/checkout@v6.0.2
+        with:
+          sparse-checkout: |
+            desktop/scripts/notify-feishu-release.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Atomically publish verified macOS and Windows manifests
         shell: bash
         env:
@@ -644,3 +652,20 @@ jobs:
             echo "- macOS feed: [${CHANNEL}-mac.yml](${MAC_MANIFEST_URL})"
             echo "- Windows feed: [${CHANNEL}.yml](${WIN_MANIFEST_URL})"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Notify Feishu desktop release group
+        continue-on-error: true
+        shell: bash
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_DESKTOP_NOTIFY_WEBHOOK }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_DESKTOP_NOTIFY_SECRET }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
+          INCLUDE_MAC_X64: ${{ needs.prepare.outputs.include_mac_x64 }}
+          RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN || 'https://releases.open-design.ai' }}
+        run: |
+          set -euo pipefail
+          COMMIT_SUBJECT="$(git log -1 --pretty=%s 2>/dev/null || true)"
+          export COMMIT_SUBJECT
+          node desktop/scripts/notify-feishu-release.mjs
