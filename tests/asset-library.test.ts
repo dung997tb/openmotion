@@ -132,6 +132,9 @@ test('asset HTTP uploads are replayable and media supports byte ranges; project 
   assert.equal((await new AssetLibrary(store).list()).total, 0);
   const response = await upload(); assert.equal(response.status, 200, await response.clone().text());
   const { asset } = await response.json(); assert.equal((await (await upload()).json()).asset.id, asset.id);
+  const picker = await fetch('/motion-api/super-agent/resources?kind=asset&limit=200');
+  assert.equal(picker.status, 200);
+  assert.deepEqual((await picker.json()).items.map(item => item.id), [asset.id]);
   const url = `/motion-api/assets/${asset.id}/versions/${asset.currentVersionId}/file`;
   const range = await fetch(url, { headers: { Range: 'bytes=0-7' } }); assert.equal(range.status, 206); assert.deepEqual(Buffer.from(await range.arrayBuffer()), bytes.subarray(0, 8));
   const download = await fetch(url + '?download=1'); assert.match(download.headers.get('content-disposition')!, /attachment/);

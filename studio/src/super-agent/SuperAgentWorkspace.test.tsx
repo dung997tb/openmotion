@@ -5338,6 +5338,7 @@ it('opens categorized mention menu via + and @ triggers, filters categories, and
     items: [
       ...sampleResources.items,
       { id: 'skill-brand-motion', kind: 'skill', title: 'Kinetic Brand Titles', subtitle: 'Broadcast opener skill' },
+      { id: 'motion-full-chain', kind: 'workflow', title: 'Idea to Motion Film' },
       { id: 'tpl-saas-hero', kind: 'design-template', title: 'SaaS Hero Kit', subtitle: 'prototype · Marketing', scenario: 'prototype' },
     ],
   };
@@ -5504,11 +5505,27 @@ it('opens categorized mention menu via + and @ triggers, filters categories, and
   // Inline mentions should not duplicate inside the separate tray bar
   expect(container.querySelector('.om-sa-composer-chips')).toBeNull();
 
-  // 3. Pressing Escape from the search input closes the menu
+  // 3. Chinese and English title searches both find the workflow in the English UI.
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Attach workspace resources"]')!.click());
   await flush();
   const searchInput = document.querySelector<HTMLInputElement>('.om-sa-mention-search input')!;
   expect(searchInput).toBeTruthy();
+  const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  for (const query of ['创意到动效短片', 'Idea to Motion Film']) {
+    await act(async () => {
+      setInputValue.call(searchInput, query);
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await vi.waitFor(async () => {
+      await flush();
+      expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) =>
+        String(url).startsWith(`${SUPER_AGENT_API}/resources?`)
+        && new URL(String(url), location.href).searchParams.get('query') === query,
+      )).toBe(true);
+      expect(document.querySelector('.om-sa-mention-list')?.textContent).toContain('Idea to Motion Film');
+    }, { timeout: 3000 });
+  }
+  // Escape closes the menu while searching.
   await act(async () => {
     searchInput.focus();
     searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
