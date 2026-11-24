@@ -29,6 +29,8 @@ export async function buildDesktop() {
   mkdirSync(distDir, { recursive: true });
   mkdirSync(distBrandDir, { recursive: true });
 
+  const desktopNodeModules = path.join(desktopDir, 'node_modules');
+
   await Promise.all([
     esbuild.build({
       entryPoints: [path.join(desktopDir, 'src', 'main.ts')],
@@ -38,6 +40,7 @@ export async function buildDesktop() {
       format: 'esm',
       target: 'node22',
       sourcemap: true,
+      nodePaths: [desktopNodeModules],
       external: ['electron', 'electron-updater'],
       banner: {
         js: "import { createRequire as __desktopCreateRequire } from 'node:module'; const require = __desktopCreateRequire(import.meta.url);",
@@ -51,6 +54,7 @@ export async function buildDesktop() {
       format: 'cjs',
       target: 'node22',
       sourcemap: true,
+      nodePaths: [desktopNodeModules],
       external: ['electron'],
     }),
   ]);

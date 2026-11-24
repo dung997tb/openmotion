@@ -120,6 +120,89 @@ await Promise.all(
   return res.status === 0 && targets.every(t => existsSync(t.outPath));
 }
 
+function rasterizeSvgViaQuickLook(svgPath, outPngPath, size = 1024) {
+  if (process.platform !== 'darwin') return false;
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ql-icon-'));
+  try {
+    const res = spawnSync('qlmanage', ['-t', '-s', String(size), '-o', tempDir, svgPath], {
+      stdio: 'pipe',
+      timeout: 20_000,
+    });
+    const rendered = path.join(tempDir, `${path.basename(svgPath)}.png`);
+    if (res.status === 0 && existsSync(rendered)) {
+      copyFileSync(rendered, outPngPath);
+      return true;
+    }
+    return false;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export function rasterizeTargetsViaImageMagick(inputPath, targets) {
+  if (!existsSync(inputPath) || !Array.isArray(targets) || targets.length === 0) {
+    return false;
+  }
+  const probe = spawnSync('magick', ['-version'], { stdio: 'pipe', timeout: 5_000 });
+  if (probe.status !== 0) return false;
+
+  for (const target of targets) {
+    const res = spawnSync(
+      'magick',
+      ['-background', 'none', inputPath, '-resize', `${target.size}x${target.size}`, `png32:${target.outPath}`],
+      { stdio: 'pipe', timeout: 20_000 },
+    );
+    if (res.status !== 0 || !existsSync(target.outPath)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function rasterizePngTargetsViaPowerShell(inputPngPath, targets) {
+  if (process.platform !== 'win32' || !existsSync(inputPngPath) || !Array.isArray(targets) || targets.length === 0) {
+    return false;
+  }
+  const psScript = `
+Add-Type -AssemblyName System.Drawing
+$src = [System.Drawing.Image]::FromFile($env:OM_ICON_SRC)
+try {
+  $targets = $env:OM_ICON_TARGETS | ConvertFrom-Json
+  foreach ($t in $targets) {
+    $size = [int]$t.size
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    try {
+      $g = [System.Drawing.Graphics]::FromImage($bmp)
+      try {
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.Clear([System.Drawing.Color]::Transparent)
+        $g.DrawImage($src, 0, 0, $size, $size)
+      } finally {
+        $g.Dispose()
+      }
+      $bmp.Save($t.outPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+      $bmp.Dispose()
+    }
+  }
+} finally {
+  $src.Dispose()
+}
+`;
+  const res = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
+    env: {
+      ...process.env,
+      OM_ICON_SRC: inputPngPath,
+      OM_ICON_TARGETS: JSON.stringify(targets),
+    },
+    stdio: 'pipe',
+    timeout: 30_000,
+  });
+  return res.status === 0 && targets.every(t => existsSync(t.outPath));
+}
+
 function resolveElectronBinary() {
   const electronPkgDir = path.join(desktopDir, 'node_modules', 'electron');
   const pathTxt = path.join(electronPkgDir, 'path.txt');
@@ -330,6 +413,7 @@ export function buildDesktopIcons({
   if (existsSync(targetSvg)) {
     if (process.platform === 'darwin') {
       rasterized =
+        rasterizeSvgViaQuickLook(targetSvg, targetPng, 1024) ||
         rasterizeTargetsViaSharp(targetSvg, [{ size: 1024, outPath: targetPng }]) ||
         rasterizeSvgViaElectron(targetSvg, targetPng, 1024);
     } else {
@@ -339,6 +423,7 @@ export function buildDesktopIcons({
         const allTargets = [{ size: 1024, outPath: targetPng }, ...icoTargets];
         rasterized =
           rasterizeTargetsViaSharp(targetSvg, allTargets) ||
+          rasterizeTargetsViaImageMagick(targetSvg, allTargets) ||
           rasterizeSvgTargetsViaElectron(targetSvg, allTargets);
         if (rasterized) {
           preRenderedIcoFrames = icoTargets.map(t => ({ size: t.size, data: readFileSync(t.outPath) }));
@@ -362,7 +447,11 @@ export function buildDesktopIcons({
       const icoTempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ico-fallback-'));
       try {
         const icoTargets = ICO_SIZES.map(size => ({ size, outPath: path.join(icoTempDir, `ico-${size}.png`) }));
-        if (rasterizeTargetsViaSharp(fallbackPng, icoTargets)) {
+        const fallbackOk =
+          rasterizeTargetsViaSharp(fallbackPng, icoTargets) ||
+          rasterizeTargetsViaImageMagick(fallbackPng, icoTargets) ||
+          rasterizePngTargetsViaPowerShell(fallbackPng, icoTargets);
+        if (fallbackOk) {
           preRenderedIcoFrames = icoTargets.map(t => ({ size: t.size, data: readFileSync(t.outPath) }));
         }
       } finally {

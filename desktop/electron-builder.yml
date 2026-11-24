@@ -12,6 +12,11 @@ files:
   - package.json
 
 asar: true
+npmRebuild: false
+electronLanguages:
+  - en
+  - zh_CN
+  - ja
 
 protocols:
   - name: OpenDesign
@@ -31,6 +36,7 @@ mac:
     - target: zip
 
 dmg:
+  format: ULFO
   contents:
     - x: 130
       y: 220

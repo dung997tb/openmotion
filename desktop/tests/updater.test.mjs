@@ -430,29 +430,37 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /-c\.buildNumber=/);
   assert.match(workflowYml, /-c\.buildVersion=/);
 
-  // Per-architecture matrix jobs: macOS arm64, macOS x64, Windows x64.
-  assert.match(workflowYml, /label:\s*macOS arm64/);
-  assert.match(workflowYml, /label:\s*macOS x64/);
-  assert.match(workflowYml, /label:\s*Windows x64/);
-  assert.match(workflowYml, /os:\s*macos-15/);
-  assert.match(workflowYml, /os:\s*windows-latest/);
-  assert.match(workflowYml, /pack_script:\s*pack:mac:arm64/);
-  assert.match(workflowYml, /pack_script:\s*pack:mac:x64/);
-  assert.match(workflowYml, /pack_script:\s*pack:win:x64/);
+  // Per-architecture matrix definitions: macOS arm64, optional macOS x64, Windows x64.
+  assert.match(workflowYml, /label:\s*"?macOS arm64"?/);
+  assert.match(workflowYml, /label:\s*"?macOS x64"?/);
+  assert.match(workflowYml, /label:\s*"?Windows x64"?/);
+  assert.match(workflowYml, /os:\s*"?macos-15"?/);
+  assert.match(workflowYml, /os:\s*"?windows-latest"?/);
+  assert.match(workflowYml, /pack_script:\s*"?pack:mac:arm64"?/);
+  assert.match(workflowYml, /pack_script:\s*"?pack:mac:x64"?/);
+  assert.match(workflowYml, /pack_script:\s*"?pack:win:x64"?/);
 
-  // Apple Developer ID signing & notarization env wiring (org-level secrets with fallback).
+  // Apple Developer ID signing & fast notarization hook wiring (org-level secrets with fallback).
   assert.match(workflowYml, /CSC_LINK:.*APPLE_SIGNING_CERTIFICATE_BASE64/);
   assert.match(workflowYml, /CSC_KEY_PASSWORD:.*APPLE_SIGNING_CERTIFICATE_PASSWORD/);
   assert.match(workflowYml, /APPLE_ID:/);
   assert.match(workflowYml, /APPLE_APP_SPECIFIC_PASSWORD:/);
   assert.match(workflowYml, /APPLE_TEAM_ID:/);
   assert.match(workflowYml, /APPLE_API_KEY:/);
+  assert.match(workflowYml, /-c\.afterSign=scripts\/notarize\.cjs/);
 
-  // Fast single-runner verification & Electron/electron-builder binary caching.
-  assert.match(workflowYml, /verify-desktop:/);
+  // Parallel DAG (prepare -> verify-desktop || build-desktop -> publish-manifests), sparse checkout, and binary caching.
+  assert.match(workflowYml, /^  prepare:/m);
+  assert.match(workflowYml, /^  verify-desktop:/m);
+  assert.match(workflowYml, /^  publish-manifests:/m);
+  assert.match(workflowYml, /needs:\s*\[prepare,\s*verify-desktop,\s*build-desktop\]/);
+  assert.match(workflowYml, /sparse-checkout:/);
   assert.match(workflowYml, /ELECTRON_SKIP_BINARY_DOWNLOAD:\s*'1'/);
   assert.match(workflowYml, /uses:\s*actions\/cache@v4/);
   assert.match(workflowYml, /desktop\/package-lock\.json/);
+  assert.match(workflowYml, /-c\.win\.target=nsis/);
+  assert.match(workflowYml, /\$\{EXTRA_BUILDER_ARGS\[@\]\+"\$\{EXTRA_BUILDER_ARGS\[@\]\}"\}/);
+  assert.match(workflowYml, /max_concurrent_requests/);
 
   // No GitHub Actions artifact upload or GitHub Release binary upload.
   assert.equal(workflowYml.includes('upload-artifact'), false);
@@ -471,6 +479,46 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /extraMetadata\.openmotionChannel=/);
   assert.match(workflowYml, /npm --prefix desktop ci/);
   assert.match(workflowYml, /npm --prefix desktop test/);
+});
+
+test('desktop/scripts/notarize.cjs skips non-darwin or OM_SKIP_NOTARIZE and resolves Apple credentials', async () => {
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const notarizeHook = req(path.join(desktopRoot, 'scripts', 'notarize.cjs'));
+
+  const nonDarwin = await notarizeHook({ electronPlatformName: 'win32' });
+  assert.deepEqual(nonDarwin, { skipped: true, reason: 'non-darwin' });
+
+  const prevSkip = process.env.OM_SKIP_NOTARIZE;
+  process.env.OM_SKIP_NOTARIZE = '1';
+  try {
+    const skipped = await notarizeHook({ electronPlatformName: 'darwin' });
+    assert.deepEqual(skipped, { skipped: true, reason: 'skip-env' });
+  } finally {
+    if (prevSkip === undefined) {
+      delete process.env.OM_SKIP_NOTARIZE;
+    } else {
+      process.env.OM_SKIP_NOTARIZE = prevSkip;
+    }
+  }
+
+  assert.equal(
+    notarizeHook.resolveNotaryCredentials({
+      APPLE_ID: 'dev@example.com',
+      APPLE_APP_SPECIFIC_PASSWORD: 'secret',
+      APPLE_TEAM_ID: 'TEAM123',
+    })?.mode,
+    'apple-id',
+  );
+  assert.equal(
+    notarizeHook.resolveNotaryCredentials({
+      APPLE_API_KEY: '/tmp/key.p8',
+      APPLE_API_KEY_ID: 'KEY123',
+      APPLE_API_ISSUER: 'ISSUER123',
+    })?.mode,
+    'api-key',
+  );
+  assert.equal(notarizeHook.resolveNotaryCredentials({}), null);
 });
 
 test('resolvePackagedReleaseChannel preserves test channel from bundle metadata even for clean semver versions', () => {
