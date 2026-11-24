@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import { compositionVariableValues, setBlockParameter } from '../../packages/edit-core/composition-variable.ts';
 import { getMotionComponent, motionComponentCards, prepareMotionComponent } from '../../src/services/motion-component-registry.ts';
@@ -33,4 +34,20 @@ test('bundled blocks install offline and each advertised control has one editabl
   }
   const magnetic = motionComponentCards.find(card => card.name === 'vfx-magnetic');
   assert.deepEqual(magnetic?.params?.map(param => param.key), ['--bg-color']);
+});
+
+test('Magnetic keeps the original page visible when the browser cannot upload DOM textures', async () => {
+  const source = await readFile(new URL('../../library/components/registry/blocks/vfx-magnetic.html', import.meta.url), 'utf8');
+  const script = source.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  const content = {};
+  let visible: unknown;
+  const canvas = { getContext: () => ({}), replaceWith: (node: unknown) => { visible = node; } };
+  const timeline = { to() {}, seek() {} };
+  runInNewContext(script, {
+    window: {}, document: { getElementById: (id: string) => id === 'gl-canvas' ? canvas : content },
+    gsap: { timeline: () => timeline }, setTimeout: (callback: () => void) => callback(),
+  });
+  assert.equal(visible, content);
+  assert.match(source, /\.page-content\s*\{[^}]*background:\s*var\(--bg-color\)/);
 });
