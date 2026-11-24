@@ -14,6 +14,7 @@ import { TemplateIndustryMenu } from './TemplateIndustryMenu';
 import { useCoveredTemplates } from './useCoveredTemplates';
 import { useTemplatePlayback } from './useTemplatePlayback';
 import { trackMotion } from './tracking';
+import { useLoadMoreOnScroll } from './useLoadMoreOnScroll';
 import { useWorkspaceChrome } from './WorkspaceChromeContext';
 
 const batchSize = 16;
@@ -39,6 +40,12 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
   const count = catalog ? matches.length : firstPage?.total;
   const visible = matches.slice(0, limit);
   const playing = useTemplatePlayback(root, visible.map(item => item.id).join('|'), active, true, priority, true);
+  const hasMore = visible.length < matches.length;
+  // The next batch appears as the user scrolls toward the end of the shelf; no "More templates" click.
+  const sentinel = useLoadMoreOnScroll(root, hasMore, () => {
+    reportCreativeClick('creative_studio', 'studio_bar', 'load_more', { studio: 'motion' });
+    setLimit(previous => previous + batchSize);
+  }, `${collection}:${limit}`);
   const selectCollection = (next: TemplateCollection | null, group: 'uses' | 'industries' | 'editable' | 'brand') => {
     if (next === collection) return;
     setCollection(next);
@@ -88,10 +95,7 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
       })}
     </div>
     {catalog && !matches.length && <p className="om-muted">{t('No matching templates.')}</p>}
-    {visible.length < matches.length && <Button variant="plain" type="button" className="om-button om-shelf-more" onClick={() => {
-      reportCreativeClick('creative_studio', 'studio_bar', 'load_more', { studio: 'motion' });
-      setLimit(previous => previous + batchSize);
-    }}>{t('More templates')}<RemixIcon name="arrow-down-line" size={16} /></Button>}
+    {hasMore && <div ref={sentinel} className="om-shelf-sentinel" aria-hidden="true" />}
     {failed && <div className="om-discovery-empty" role="alert"><span>{t('Templates could not be loaded.')}</span>
       <Button variant="ghost" className="om-button h-auto" onClick={retry}>{t('Retry')}</Button></div>}
   </ExploreShelf>;
