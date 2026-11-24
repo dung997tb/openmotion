@@ -7,6 +7,33 @@ const __filename = fileURLToPath(import.meta.url);
 
 const ALLOWED_FEISHU_HOSTS = new Set(['open.feishu.cn', 'open.larksuite.com']);
 const MAX_CHANGELOG_ITEMS = 5;
+const DEFAULT_MIRROR_ORIGIN = 'https://mirror.inner.nexu.space';
+const DEFAULT_MIRROR_SOURCE = 'od-next';
+const DEFAULT_MIRROR_CONSOLE_URL = 'https://ops.inner.nexu.space/mirror/search';
+const MIRROR_SOURCE_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+function normalizeOptionalHttpsUrl(raw, label) {
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'false') {
+    return '';
+  }
+  if (/[\r\n\0]/.test(trimmed)) {
+    throw new Error(`${label} must not contain control characters`);
+  }
+  const parsed = new URL(trimmed);
+  if (parsed.protocol !== 'https:' || !parsed.hostname) {
+    throw new Error(`${label} must be an https URL: ${trimmed}`);
+  }
+  return trimmed.replace(/\/+$/, '');
+}
+
+function normalizeMirrorSource(raw) {
+  const trimmed = String(raw ?? DEFAULT_MIRROR_SOURCE).trim() || DEFAULT_MIRROR_SOURCE;
+  if (!MIRROR_SOURCE_RE.test(trimmed)) {
+    throw new Error(`Invalid mirror source slug: ${trimmed}`);
+  }
+  return trimmed;
+}
 
 export function validateFeishuWebhookUrl(rawUrl) {
   const trimmed = String(rawUrl ?? '').trim();
@@ -209,6 +236,9 @@ export function buildDesktopReleaseCardPayload({
   buildVersion,
   previousVersion = '',
   publicOrigin = 'https://releases.open-design.ai',
+  mirrorOrigin = DEFAULT_MIRROR_ORIGIN,
+  mirrorSource = DEFAULT_MIRROR_SOURCE,
+  mirrorConsoleUrl = DEFAULT_MIRROR_CONSOLE_URL,
   branch = '',
   commitSha = '',
   commitSubject = '',
@@ -224,6 +254,10 @@ export function buildDesktopReleaseCardPayload({
   const normalizedChannel = channel === 'stable' ? 'stable' : 'test';
   const origin = String(publicOrigin || 'https://releases.open-design.ai').replace(/\/+$/, '');
   const baseUrl = `${origin}/open-motion/desktop/${normalizedChannel}`;
+  const normalizedMirrorOrigin = normalizeOptionalHttpsUrl(mirrorOrigin, 'mirrorOrigin');
+  const normalizedMirrorConsoleUrl = normalizeOptionalHttpsUrl(mirrorConsoleUrl, 'mirrorConsoleUrl');
+  const normalizedMirrorSource =
+    normalizedMirrorOrigin || normalizedMirrorConsoleUrl ? normalizeMirrorSource(mirrorSource) : '';
   const shortSha = commitSha ? String(commitSha).slice(0, 8) : '';
   const isStable = normalizedChannel === 'stable';
 
@@ -231,6 +265,20 @@ export function buildDesktopReleaseCardPayload({
   const x64Dmg = `${baseUrl}/OpenDesign-${version}-mac-x64.dmg`;
   const winSetup = `${baseUrl}/OpenDesign-Setup-${version}-win-x64.exe`;
   const winPortable = `${baseUrl}/OpenDesign-Portable-${version}-win-x64.exe`;
+
+  const mirrorLinks = [];
+  if (normalizedMirrorOrigin) {
+    const mirrorBase = `${normalizedMirrorOrigin}/f/${normalizedMirrorSource}/${normalizedChannel}/${version}`;
+    mirrorLinks.push(`[macOS Apple Silicon](${mirrorBase}/OpenDesign-${version}-mac-arm64.dmg)`);
+    if (includeMacX64) {
+      mirrorLinks.push(`[macOS Intel](${mirrorBase}/OpenDesign-${version}-mac-x64.dmg)`);
+    }
+    mirrorLinks.push(`[Windows 安装版](${mirrorBase}/OpenDesign-Setup-${version}-win-x64.exe)`);
+  }
+  if (normalizedMirrorConsoleUrl) {
+    const query = encodeURIComponent(`${normalizedMirrorSource} ${normalizedChannel}`);
+    mirrorLinks.push(`[历史存档 / 控制台检索](${normalizedMirrorConsoleUrl}?q=${query})`);
+  }
 
   const themeColor = isStable ? 'green' : 'blue';
   const badgeText = isStable ? 'STABLE' : 'TEST';
@@ -419,6 +467,16 @@ export function buildDesktopReleaseCardPayload({
         },
       ],
     },
+    ...(mirrorLinks.length > 0
+      ? [
+          {
+            tag: 'markdown',
+            content: `**内网极速下载（Mirror）**　${mirrorLinks.join(' · ')}\n<font color='grey'>新包发布后约 10 分钟内自动同步至内网；若暂未就绪可进控制台点击「立即刷新」或下载历史存档</font>`,
+            text_size: 'notation',
+            margin: '0px 0px 10px 0px',
+          },
+        ]
+      : []),
     {
       tag: 'markdown',
       content: footerParts.join('　·　'),
@@ -553,6 +611,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename
       ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
       : '';
 
+  const mirrorOriginEnv =
+    process.env.MIRROR_PUBLIC_ORIGIN === undefined
+      ? DEFAULT_MIRROR_ORIGIN
+      : process.env.MIRROR_PUBLIC_ORIGIN.trim();
+  const mirrorConsoleEnv =
+    process.env.MIRROR_CONSOLE_URL === undefined
+      ? DEFAULT_MIRROR_CONSOLE_URL
+      : process.env.MIRROR_CONSOLE_URL.trim();
+
   await sendFeishuReleaseNotification({
     webhookUrl,
     secret: process.env.FEISHU_WEBHOOK_SECRET?.trim() || '',
@@ -561,6 +628,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename
     buildVersion: process.env.RELEASE_BUILD_VERSION || '',
     previousVersion,
     publicOrigin: process.env.RELEASE_PUBLIC_ORIGIN || 'https://releases.open-design.ai',
+    mirrorOrigin: mirrorOriginEnv,
+    mirrorSource: process.env.MIRROR_SOURCE_ID?.trim() || DEFAULT_MIRROR_SOURCE,
+    mirrorConsoleUrl: mirrorConsoleEnv,
     branch: process.env.GITHUB_REF_NAME || '',
     commitSha: process.env.GITHUB_SHA || '',
     commitSubject,

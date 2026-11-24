@@ -741,6 +741,16 @@ test('notify-feishu-release builds signed Card 2.0 payload, respects includeMacX
   assert.match(fullText, /OpenDesign-0\.2\.2-test\.2-mac-x64\.dmg/);
   assert.match(fullText, /OpenDesign-Setup-0\.2\.2-test\.2-win-x64\.exe/);
   assert.match(fullText, /OpenDesign-Portable-0\.2\.2-test\.2-win-x64\.exe/);
+  assert.match(fullText, /内网极速下载（Mirror）/);
+  assert.match(
+    fullText,
+    /https:\/\/mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.2\/OpenDesign-0\.2\.2-test\.2-mac-arm64\.dmg/,
+  );
+  assert.match(
+    fullText,
+    /https:\/\/mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.2\/OpenDesign-Setup-0\.2\.2-test\.2-win-x64\.exe/,
+  );
+  assert.match(fullText, /https:\/\/ops\.inner\.nexu\.space\/mirror\/search\?q=od-next%20test/);
 
   const armOnlyPayload = buildDesktopReleaseCardPayload({
     channel: 'test',
@@ -750,6 +760,27 @@ test('notify-feishu-release builds signed Card 2.0 payload, respects includeMacX
   const armOnlyText = JSON.stringify(armOnlyPayload.card);
   assert.match(armOnlyText, /OpenDesign-0\.2\.2-test\.3-mac-arm64\.dmg/);
   assert.equal(armOnlyText.includes('mac-x64.dmg'), false);
+  assert.match(
+    armOnlyText,
+    /mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.3\/OpenDesign-0\.2\.2-test\.3-mac-arm64\.dmg/,
+  );
+
+  const noMirrorText = JSON.stringify(
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.3',
+      mirrorOrigin: 'none',
+      mirrorConsoleUrl: '',
+    }).card,
+  );
+  assert.equal(noMirrorText.includes('内网极速下载'), false);
+  assert.throws(() =>
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.3',
+      mirrorOrigin: 'http://mirror.inner.nexu.space',
+    }),
+  );
 
   const result = await sendFeishuReleaseNotification({
     webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',

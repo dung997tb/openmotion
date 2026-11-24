@@ -740,6 +740,9 @@ jobs:
           RELEASE_BUILD_VERSION: ${{ needs.prepare.outputs.build_version }}
           INCLUDE_MAC_X64: ${{ needs.prepare.outputs.include_mac_x64 }}
           RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN || 'https://releases.open-design.ai' }}
+          MIRROR_PUBLIC_ORIGIN: ${{ vars.MIRROR_PUBLIC_ORIGIN || 'https://mirror.inner.nexu.space' }}
+          MIRROR_SOURCE_ID: ${{ vars.MIRROR_SOURCE_ID || 'od-next' }}
+          MIRROR_CONSOLE_URL: ${{ vars.MIRROR_CONSOLE_URL || 'https://ops.inner.nexu.space/mirror/search' }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
           set -euo pipefail
