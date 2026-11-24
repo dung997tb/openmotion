@@ -30,7 +30,7 @@ import {
   saveCapabilityOverrides,
   unregisterCapabilityScriptExecutor,
 } from '../gateway/capability-center.ts';
-import { classifySuperAgentTool, describeSuperAgentApproval, formatSuperAgentToolLabel } from '../shared/super-agent.ts';
+import { classifySuperAgentTool, describeSuperAgentApproval, formatSuperAgentToolLabel, type SuperAgentResourceCatalog } from '../shared/super-agent.ts';
 import { execute } from '../hyperframes.ts';
 import { verificationBinaries } from '../scripts/verify-export.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
@@ -64,6 +64,24 @@ test('collectWorkspaceResources and buildResourceContextManifest aggregate works
   assert.match(manifest, /^<openmotion-workspace-context>/);
   assert.match(manifest, /Neon Space Game/);
   assert.match(manifest, /Reference Brand/);
+}));
+
+test('resource searches match both Chinese display titles and English titles for workflows and skills', () => fixture(async store => {
+  const request = transport(store);
+  const cases = [
+    { kind: 'workflow', id: 'motion-full-chain', title: 'Idea to Motion Film', zh: '创意到动效短片' },
+    { kind: 'skills', id: 'openmotion-ad-script', title: 'Product ad script', zh: '带货短视频脚本' },
+    { kind: 'skills', id: 'design-brief', title: 'Design Brief', zh: '设计简报' },
+  ];
+  for (const { kind, id, title, zh } of cases) {
+    for (const [category, query] of [[kind, title], [kind, zh], ['all', zh]]) {
+      const params = new URLSearchParams({ kind: category, query, limit: '200' });
+      const response = await request('/motion-api/super-agent/resources?' + params);
+      assert.equal(response.status, 200);
+      const result = await response.json() as SuperAgentResourceCatalog;
+      assert.ok(result.items.some(item => item.id === id && item.title === title), `${category}: ${query}`);
+    }
+  }
 }));
 
 test('SuperAgentConversations persists CRUD state, recovers interrupted runs, and enforces requestId idempotency', () => fixture(async store => {

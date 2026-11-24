@@ -34,6 +34,7 @@ let designTemplatesCache: TimedEntry<ReturnType<ReturnType<typeof designCatalog>
 let designSkillsCache: TimedEntry<ReturnType<ReturnType<typeof designCatalog>['skills']>> | null = null;
 const motionTemplatesCache = new Map<string, TimedEntry<Awaited<ReturnType<ReturnType<typeof templateCatalogFor>['allTemplates']>>>>();
 const dynamicCountCache = new Map<string, TimedEntry<Partial<SuperAgentResourceCounts>>>();
+let translatedSearchTitles: Promise<ReadonlyMap<string, string>> | undefined;
 
 export function clearWorkspaceResourceCache(): void {
   brandCatalogCache = null;
@@ -100,6 +101,20 @@ async function cachedMotionTemplates(cacheKey: string, rootStore: WorkspaceStore
   return items;
 }
 
+function loadTranslatedSearchTitles() {
+  translatedSearchTitles ??= readFile(new URL('../studio/build/super-agent-search-titles.zh-CN.json', import.meta.url), 'utf8')
+    .then(contents => new Map<string, string>(Object.entries(JSON.parse(contents))))
+    .catch(() => {
+      translatedSearchTitles = undefined;
+      return new Map<string, string>();
+    });
+  return translatedSearchTitles;
+}
+
+function hasTranslatedSearchTitle(kind: string): boolean {
+  return kind === 'skill' || kind === 'design-skill' || kind === 'workflow';
+}
+
 function requestedKinds(kind: string): Set<string> {
   if (!kind || kind === 'all') {
     return new Set([
@@ -164,7 +179,7 @@ export async function collectWorkspaceResources(
     gamesRes,
   ] = await Promise.allSettled([
     wanted.has('asset') || needAllCounts
-      ? new AssetLibrary(rootStore).list({ limit: wanted.has('asset') ? 200 : 1 })
+      ? new AssetLibrary(rootStore).list({ limit: wanted.has('asset') ? 100 : 1 })
       : Promise.resolve(null),
     wanted.has('brand-kit') || needAllCounts
       ? brandKitsFor(rootStore.directory).list()
@@ -376,16 +391,20 @@ export async function collectWorkspaceResources(
   ];
 
   const byKind = allItems.filter(item => matchesKindFilter(item, kind));
+  const translations = /[\p{Script=Han}]/u.test(query) && [...wanted].some(hasTranslatedSearchTitle)
+    ? await loadTranslatedSearchTitles()
+    : undefined;
   const ranked = query
     ? rankSearchResults(byKind, query, item => {
         const meta = searchExtra.get(item);
+        const translatedTitle = hasTranslatedSearchTitle(item.kind) ? translations?.get(item.title) : undefined;
         return {
           id: item.id,
           title: item.title,
           subtitle: item.subtitle,
           description: meta?.description,
           tags: item.tags,
-          aliases: meta?.aliases,
+          aliases: translatedTitle ? [...(meta?.aliases ?? []), translatedTitle] : meta?.aliases,
           extra: [item.scenario ?? '', item.modality ?? '', item.kind],
         };
       }).map(result => result.item)
