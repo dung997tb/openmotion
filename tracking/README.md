@@ -625,12 +625,33 @@ Game Studio reports the try → create/remix → hand off → play → share fun
 
 Game fields are `game_id` (catalogue id or UUID), `game_source` (`template`, `community`, `mine`), `game_genre`,
 `game_status`, `game_orientation` and `multiplayer`. Titles, briefs, prompts, instructions and links are never sent.
+Game detail openings report `surface_view` (`area=game_detail`, `element=detail`), agent handoff views report
+`surface_view` (`area=game_handoff`, `element=handoff`), trailer actions report `ui_click` (`create_trailer`,
+`regenerate_trailer`, `open_trailer_project`) paired with `game_action_result` (`start_trailer`, `regenerate_trailer`,
+`open_trailer_project`), iframe load errors report `game_action_result` (`action=play`, `outcome=failure`), and Assets
+game entries report `ui_click` (`page_name=assets`, `area=assets_library`, `element=open_game|view_all_games|open_game_studio`).
 
 The shared cloud-share popover (Design, Game and Super Agent artifacts) reports `ui_click`
 (`area=web_publish`, `element=open_publish`) when it opens and one `web_publish_result` per operation: `publish`,
 `resume`, `new_link`, `stop`, a user-initiated `copy_link`, and `sign_in` started from sharing. `copied` marks a publish
-that also copied its link; `error_kind` separates `auth_required` and `conflict`. The connector's own
-`account_sign_in_result` remains the sign-in result. URLs and titles are never sent.
+that also copied its link; `error_kind` separates `auth_required` and `conflict`. When opened while signed out, the
+popover reports `surface_view` (`area=entitlement_gate`, `element=gate_card`) with `hook_id` (`game_publish_signin` for
+games, `cloud_share_signin` for other targets) and forwards `hookId` + `entryId` into `POST /api/settings/account/login`
+so `account_sign_in_result` joins 1:1 with the triggering click. URLs and titles are never sent.
+
+### Login & monetization touchpoint attribution (`hook_id` + `entry_id`)
+
+All plugin login and upgrade touchpoints share the closed `entitlementHookIds` enum (`hook_id`) and a per-click UUID
+(`entry_id`):
+- Exposure: `surface_view` (`area=entitlement_gate`, `element=gate_card`, `hook_id`) or `campaign_banner` (`hook_id=bf_banner`).
+- Click: `ui_click` with `hook_id` + `entry_id` across header Pricing (`header_pricing`), Black Friday banner (`bf_banner`),
+  Settings sign-in/subscription (`settings_signin` / `settings_subscription`), Media composer gates (`studio_generate` /
+  `studio_free_gate`), Model Hub (`model_hub_signin` / `model_hub_upgrade`), and Cloud Share (`game_publish_signin` /
+  `cloud_share_signin`).
+- Backend join: `POST /api/settings/account/login` forwards `{ hookId, entryId }` to `account_sign_in_result`;
+  `POST /api/settings/account/subscription` forwards `{ hookId, entryId }` into `od_entry_source` / `od_entry_id`.
+- Return refresh: returning to the window after checkout emits `entitlement_refresh_result` (`hook_id`, `entry_id`,
+  `outcome`, `plan_changed`).
 
 ## Template detail handoff coverage
 

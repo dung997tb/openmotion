@@ -107,8 +107,9 @@ export function WebPublishPopover({
     openRef.current = next;
     setOpenState(next);
   }, [targetKind]);
+  const publishHookId = targetKind === 'game' ? 'game_publish_signin' as const : 'cloud_share_signin' as const;
   const reportPublish = useCallback((action: 'publish' | 'resume' | 'new_link' | 'stop' | 'copy_link' | 'sign_in', outcome: 'success' | 'failure' | 'cancelled',
-    extra: { copied?: boolean; error_kind?: 'auth_required' | 'conflict' | 'other' } = {}) => {
+    extra: { copied?: boolean; error_kind?: 'auth_required' | 'conflict' | 'other'; hook_id?: typeof publishHookId; entry_id?: string } = {}) => {
     send('web_publish_result', { publish_target: targetKind, action, outcome, publish_attempt_id: newTrackingId(), ...extra });
   }, [targetKind]);
   const { account, refresh: refreshAccount, setAccount } = useAccountSummary({ eager: !lazy });
@@ -263,10 +264,15 @@ export function WebPublishPopover({
     setAuthBusy(true);
     setError(null);
     deployAfterSignInRef.current = action === 'login';
+    const entryId = action === 'login' ? newTrackingId() : undefined;
+    if (action === 'login' && entryId) {
+      send('ui_click', { page_name: 'creative_studio', area: 'web_publish', element: 'sign_in', publish_target: targetKind, hook_id: publishHookId, entry_id: entryId });
+    }
     try {
-      const next = await gatewayRequest<AccountSummary>(`settings/account/${action}`, 'POST', {});
+      const payload = action === 'login' && entryId ? { hookId: publishHookId, entryId } : {};
+      const next = await gatewayRequest<AccountSummary>(`settings/account/${action}`, 'POST', payload);
       // The sign-in itself is reported by the connector (account_sign_in_result); this records that it started from sharing.
-      reportPublish('sign_in', action === 'cancel' ? 'cancelled' : 'success');
+      reportPublish('sign_in', action === 'cancel' ? 'cancelled' : 'success', entryId ? { hook_id: publishHookId, entry_id: entryId } : {});
       setAccount(next);
       notifyProvidersChanged();
       window.dispatchEvent(new Event('motion:account-changed'));
@@ -276,7 +282,7 @@ export function WebPublishPopover({
       }
     } catch (err) {
       deployAfterSignInRef.current = false;
-      if (action === 'login') reportPublish('sign_in', 'failure', { error_kind: 'other' });
+      if (action === 'login') reportPublish('sign_in', 'failure', { error_kind: 'other', ...(entryId ? { hook_id: publishHookId, entry_id: entryId } : {}) });
       setError(err instanceof Error ? err.message : t('Could not connect OpenDesign account'));
     } finally {
       setAuthBusy(false);
@@ -286,6 +292,14 @@ export function WebPublishPopover({
   const accountState = account?.state ?? status?.accountState ?? (status?.accountSignedIn ? 'signed-in' : 'signed-out');
   const signedIn = accountState === 'signed-in';
   const authorizing = accountState === 'authorizing';
+  const signInGateReportedRef = useRef(false);
+  useEffect(() => {
+    if (!open) { signInGateReportedRef.current = false; return; }
+    if (!signedIn && !authorizing && !signInGateReportedRef.current) {
+      signInGateReportedRef.current = true;
+      send('surface_view', { page_name: 'creative_studio', area: 'entitlement_gate', element: 'gate_card', hook_id: publishHookId, publish_target: targetKind });
+    }
+  }, [open, signedIn, authorizing, publishHookId, targetKind]);
   const mutating = activeOp !== null;
   const pub = status?.active ?? null;
   const linkStatus = pub?.status ?? 'none';

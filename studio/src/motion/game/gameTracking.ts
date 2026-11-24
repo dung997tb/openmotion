@@ -51,3 +51,15 @@ export function reportGameCreate(route: 'brief' | 'remix', result: { game: GameC
 export function reportGameAction(action: Action, outcome: Outcome, game: GameCard) {
   send('game_action_result', { ...studio, action, outcome, ...gameFields(game) });
 }
+
+export function reportGameDetailShown(game: GameCard) {
+  send('surface_view', { ...studio, area: 'game_detail', element: 'detail', ...gameFields(game) });
+}
+
+export function reportGameHandoffShown(game: GameCard) {
+  send('surface_view', { ...studio, area: 'game_handoff', element: 'handoff', ...gameFields(game) });
+}
+
+export function reportGameAssetClick(element: Extract<Click['element'], 'open_game' | 'view_all_games' | 'open_game_studio'>, game?: GameCard | null) {
+  send('ui_click', { page_name: 'assets', area: 'assets_library', element, ...(game ? gameFields(game) : {}) });
+}

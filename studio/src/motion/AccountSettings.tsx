@@ -19,14 +19,17 @@ type ShowToast = ReturnType<typeof useToast>['showToast'];
 // The local service opens the subscription page in the system browser, where sign-in happened, with a fresh entry
 // and a one-time account intent. When no browser could be launched, Studio tries the returned link itself; the
 // request has used up the click by then, so a blocked popup leaves a link that opens it on the next click.
-function useSubscriptionOpener(area: GuideArea, showToast: ShowToast, markCheckoutReturn: () => () => void) {
+function useSubscriptionOpener(area: GuideArea, showToast: ShowToast, markCheckoutReturn: (entryId: string) => () => void) {
   const { t } = useI18n(), [subscriptionUrl, setSubscriptionUrl] = useState<string>();
+  const pendingEntryId = useRef<string | undefined>(undefined);
   async function openSubscription(element: 'manage_subscription' | 'view_plans') {
-    tracking.reportSettingsClick(area, element);
+    const entryId = tracking.newTrackingId();
+    pendingEntryId.current = entryId;
+    tracking.reportSettingsClick(area, element, { hook_id: 'settings_subscription', entry_id: entryId });
     setSubscriptionUrl(undefined);
-    const cancelCheckoutReturn = markCheckoutReturn();
+    const cancelCheckoutReturn = markCheckoutReturn(entryId);
     try {
-      const { url, opened } = await gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', {});
+      const { url, opened } = await gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', { hookId: 'settings_subscription', entryId });
       if (opened) return;
       const page = window.open(url, '_blank');
       if (page) page.opener = null;
@@ -38,7 +41,7 @@ function useSubscriptionOpener(area: GuideArea, showToast: ShowToast, markChecko
   }
   const button = (element: 'manage_subscription' | 'view_plans', primary = false) => <Button variant="ghost" className="om-button h-auto" data-primary={primary || undefined} onClick={() => void openSubscription(element)}>
     {element === 'view_plans' && <RemixIcon name="sparkling-line" size={16} />}{t(element === 'view_plans' ? 'Upgrade to Plus' : 'Manage subscription')}<RemixIcon name="external-link-line" size={15} /></Button>;
-  const link = subscriptionUrl && <a className="om-button" data-primary href={subscriptionUrl} target="_blank" rel="noreferrer" onClick={() => { markCheckoutReturn(); setSubscriptionUrl(undefined); }}>{t('Continue in browser')}<RemixIcon name="external-link-line" size={15} /></a>;
+  const link = subscriptionUrl && <a className="om-button" data-primary href={subscriptionUrl} target="_blank" rel="noreferrer" onClick={() => { markCheckoutReturn(pendingEntryId.current ?? tracking.newTrackingId()); setSubscriptionUrl(undefined); }}>{t('Continue in browser')}<RemixIcon name="external-link-line" size={15} /></a>;
   return { button, link };
 }
 
@@ -61,6 +64,7 @@ function GuideOffer({ callout = false }: { callout?: boolean }) {
 /** Signed-out guide shared by the account page and the OpenDesign provider: what signing in unlocks. */
 export function SignInGuide({ action }: { action: ReactNode }) {
   const { t } = useI18n();
+  useEffect(() => { tracking.reportEntitlementGateView('settings', 'settings_signin'); }, []);
   return <section className="om-card om-plan-guide" data-guide="sign-in">
     <div className="om-plan-guide-head"><h2 className="om-title">{t('Sign in to start multimodal generation')}</h2><span className="om-badge">{t('Plus and above')}</span></div>
     <p className="om-muted" data-quiet>{t('Sign in, then upgrade to Plus to generate images, video, voiceovers and music right in OpenMotion. No API keys to set up.')}</p>
@@ -72,6 +76,7 @@ export function SignInGuide({ action }: { action: ReactNode }) {
 /** Free / Go guide shared by the account page and the OpenDesign provider: what upgrading to Plus unlocks. */
 export function UpgradeGuide({ plan, subscription }: { plan: 'free' | 'go'; subscription: ReturnType<typeof useSubscriptionOpener> }) {
   const { t } = useI18n();
+  useEffect(() => { tracking.reportEntitlementGateView('settings', 'settings_subscription'); }, []);
   return <section className="om-card om-plan-guide" data-guide="upgrade">
     <div className="om-plan-guide-head"><h2 className="om-title om-plan-name">{plan === 'free' ? t('Free plan') : 'Go'}</h2><span className="om-badge">{t('Current plan')}</span></div>
     <p className="om-muted">{t('Upgrade to Plus to generate images, video, voiceovers and music. Pro and Max include them too.')}</p>
@@ -111,21 +116,25 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
   const { t } = useI18n(), state = useAccountSummary(), [busy, setBusy] = useState(false), previous = useRef<string | undefined>(undefined);
   const { account, refresh } = state;
   const accountState = account?.state;
-  const pendingCheckout = useRef<symbol | undefined>(undefined);
-  const subscription = useSubscriptionOpener(area, showToast, () => {
-    const checkout = pendingCheckout.current = Symbol();
-    return () => { if (pendingCheckout.current === checkout) pendingCheckout.current = undefined; };
+  const pendingCheckout = useRef<{ token: symbol; entryId: string } | undefined>(undefined);
+  const subscription = useSubscriptionOpener(area, showToast, entryId => {
+    const checkout = pendingCheckout.current = { token: Symbol(), entryId };
+    return () => { if (pendingCheckout.current?.token === checkout.token) pendingCheckout.current = undefined; };
   });
-  const refreshBilling = useCallback(async () => {
+  const refreshBilling = useCallback(async (checkoutEntryId?: string) => {
+    const prevPlan = account?.plan?.trim().toLowerCase();
     const updated = await refresh(true);
-    if (updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== account?.plan?.trim().toLowerCase()
-      || Boolean(updated.billingUnavailable) !== Boolean(account?.billingUnavailable))) notifyProvidersChanged();
+    const planChanged = Boolean(updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== prevPlan
+      || Boolean(updated.billingUnavailable) !== Boolean(account?.billingUnavailable)));
+    if (planChanged) notifyProvidersChanged();
+    if (checkoutEntryId) tracking.reportEntitlementRefresh('settings', 'settings_subscription', checkoutEntryId, updated ? 'success' : 'failure', planChanged);
   }, [account, refresh]);
   useEffect(() => {
     const onReturn = () => {
       if (!pendingCheckout.current || document.visibilityState !== 'visible') return;
+      const { entryId } = pendingCheckout.current;
       pendingCheckout.current = undefined;
-      void refreshBilling();
+      void refreshBilling(entryId);
     };
     window.addEventListener('focus', onReturn);
     document.addEventListener('visibilitychange', onReturn);
@@ -143,9 +152,14 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
   }, [accountState, t, showToast]);
   useEffect(() => { if (accountState === 'signed-in') void state.refresh(true); }, [accountState, state.refresh]);
   async function action(name: AccountAction) {
-    tracking.reportSettingsClick(area, name === 'login' ? 'sign_in' : name === 'logout' ? 'sign_out' : 'cancel_sign_in', provider ? { provider } : {});
+    const entryId = name === 'login' ? tracking.newTrackingId() : undefined;
+    tracking.reportSettingsClick(area, name === 'login' ? 'sign_in' : name === 'logout' ? 'sign_out' : 'cancel_sign_in',
+      { ...(provider ? { provider } : {}), ...(entryId ? { hook_id: 'settings_signin' as const, entry_id: entryId } : {}) });
     setBusy(true);
-    try { state.setAccount(await gatewayRequest<AccountSummary>('settings/account/' + name, 'POST', {})); notifyProvidersChanged(); window.dispatchEvent(new Event('motion:account-changed')); }
+    try {
+      const payload = name === 'login' && entryId ? { hookId: 'settings_signin', entryId } : {};
+      state.setAccount(await gatewayRequest<AccountSummary>('settings/account/' + name, 'POST', payload)); notifyProvidersChanged(); window.dispatchEvent(new Event('motion:account-changed'));
+    }
     catch (error) { showToast(error instanceof Error ? error.message : t('Could not update account'), 'error'); }
     finally { setBusy(false); }
   }

@@ -21,7 +21,7 @@ import { GameMasonry, interleavePortrait } from './GameMasonry';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
 import { buildGameContextTags, buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import { optionId as optionFilter } from '../reporting';
-import { reportGameAction, reportGameClick, reportGameCreate } from './gameTracking';
+import { reportGameAction, reportGameClick, reportGameCreate, reportGameDetailShown, reportGameHandoffShown } from './gameTracking';
 import './gameStudio.css';
 
 type Menu = 'genre' | 'style' | 'setting';
@@ -451,11 +451,26 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
     const timer = setInterval(() => { void gameApi.trailer(game.id).then(next => onChange({ ...game, trailer: next })).catch(() => {}); }, 3000);
     return () => clearInterval(timer);
   }, [game.id, trailerBusy]);
-  const startTrailer = async () => {
-    try { onChange({ ...game, trailer: await gameApi.startTrailer(game.id) }); notify(t('Making the trailer. It takes a few minutes; you can keep playing.'), 'info'); }
-    catch (error) { notify(t('The trailer could not be started: {reason}', { reason: (error as Error).message }), 'error'); }
+  const startTrailer = async (regenerate = false) => {
+    reportGameClick('game_detail', regenerate ? 'regenerate_trailer' : 'create_trailer', game);
+    try {
+      const next = await gameApi.startTrailer(game.id);
+      reportGameAction(regenerate ? 'regenerate_trailer' : 'start_trailer', 'success', game);
+      onChange({ ...game, trailer: next });
+      notify(t('Making the trailer. It takes a few minutes; you can keep playing.'), 'info');
+    }
+    catch (error) {
+      reportGameAction(regenerate ? 'regenerate_trailer' : 'start_trailer', 'failure', game);
+      notify(t('The trailer could not be started: {reason}', { reason: (error as Error).message }), 'error');
+    }
   };
-  const openTrailerProject = () => { if (trailer?.projectId) window.location.assign(trailerProjectHref(trailer.projectId, location.search)); };
+  const openTrailerProject = () => {
+    if (!trailer?.projectId) return;
+    reportGameClick('game_detail', 'open_trailer_project', game);
+    reportGameAction('open_trailer_project', 'success', game);
+    window.location.assign(trailerProjectHref(trailer.projectId, location.search));
+  };
+  useEffect(() => { reportGameDetailShown(game); }, [game.id]);
   useEffect(() => { close.current?.focus(); const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && document.activeElement !== frame.current && !(document.activeElement instanceof Element && document.activeElement.closest('.om-web-publish-popover'))) onClose(); }; addEventListener('keydown', key); return () => removeEventListener('keydown', key); }, []);
   const act = (action: 'favorite' | 'unfavorite' | 'like' | 'dislike' | 'clear_reaction', request: () => Promise<GameCard>) => {
     if (offline) { reportGameAction(action, 'unavailable', game); notify(t('Start the local game service to save reactions.'), 'info'); return; }
@@ -497,9 +512,9 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
             <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => setView('trailer')}><RemixIcon name="film-line" size={16} />{t('Trailer')}</Button>
             <span className="om-game-actions">
               {trailer!.projectId && <Button variant="ghost" className="om-button h-auto" onClick={openTrailerProject}><RemixIcon name="edit-line" size={15} />{t('Edit in Motion')}</Button>}
-              <Button variant="ghost" className="om-button h-auto" onClick={() => void startTrailer()}><RemixIcon name="refresh-line" size={15} />{t('Regenerate')}</Button>
+              <Button variant="ghost" className="om-button h-auto" onClick={() => void startTrailer(true)}><RemixIcon name="refresh-line" size={15} />{t('Regenerate')}</Button>
             </span></>
-          : <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => void startTrailer()}><RemixIcon name="film-line" size={16} />{t('Create trailer')}</Button>}
+          : <Button variant="ghost" className="om-button h-auto om-game-trailer-cta" onClick={() => void startTrailer(false)}><RemixIcon name="film-line" size={16} />{t('Create trailer')}</Button>}
         {trailer?.status === 'failed' && <p className="om-game-trailer-error">{t('The trailer could not be made: {reason}', { reason: trailer.error ?? '' })}</p>}
       </div>}
       {playable && !game.external && !mine && <footer className="om-game-actions" role="toolbar" aria-label={t('Game actions')}>
@@ -551,7 +566,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
               <div><strong>{t('This game only runs on the creator’s site.')}</strong>
                 <Button variant="ghost" className="om-button h-auto" data-primary onClick={popout}><RemixIcon name="external-link-line" size={15} />{t('Open original')}</Button></div>
             </div>
-          : url ? <iframe key={reload} ref={frame} src={url} title={game.title} onLoad={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'success', game); } }} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-pointer-lock'} allow="fullscreen; gamepad; autoplay; clipboard-write" />
+          : url ? <iframe key={reload} ref={frame} src={url} title={game.title} onLoad={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'success', game); } }} onError={() => { if (!playReported.current) { playReported.current = true; reportGameAction('play', 'failure', game); } }} sandbox={game.external ? 'allow-scripts allow-same-origin allow-pointer-lock allow-popups' : 'allow-scripts allow-pointer-lock'} allow="fullscreen; gamepad; autoplay; clipboard-write" />
           : <span className="om-muted">{t('Loading game…')}</span>}
       </div>
     </section>
@@ -600,6 +615,7 @@ function GameHandoff({ game, notify, onContinueInSuperAgent }: { game: GameCard;
   const [instruction, setInstruction] = useState<string | null>(() => storedInstruction(game.id));
   const [copied, setCopied] = useState(false);
   useEffect(() => {
+    reportGameHandoffShown(game);
     let live = true;
     void gameApi.handoff(game.id).then(handoff => { if (!live) return; setInstruction(handoff.agentInstruction); rememberInstruction(game.id, handoff.agentInstruction); }).catch(() => { /* keep the stored copy, if any */ });
     return () => { live = false; };
