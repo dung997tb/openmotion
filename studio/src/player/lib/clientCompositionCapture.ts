@@ -119,7 +119,31 @@ let testCapabilityOverride: boolean | null = null;
 let snapdomLoader: Promise<SnapdomModuleFn | null> | null = null;
 const projectRevisionByProjectId = new Map<string, string>();
 const compositionRevisionsByProjectId = new Map<string, Map<string, string>>();
+const projectSharedTagByProjectId = new Map<string, string>();
 const revisionListenersByProjectId = new Map<string, Set<() => void>>();
+let liveSharedDepSeq = 0;
+
+const SHARED_REV_MARKER = "|shared:";
+const DEPS_REV_MARKER = "|deps:";
+const NON_PREVIEW_SHARED_FILES = new Set(["motion-project.json", "motion-assets.json", "LICENSE", "NOTICE.md"]);
+
+function splitSharedRev(rev: string): { base: string; shared: string } {
+  const idx = rev.indexOf(SHARED_REV_MARKER);
+  return idx >= 0
+    ? { base: rev.slice(0, idx), shared: rev.slice(idx + SHARED_REV_MARKER.length) }
+    : { base: rev, shared: "" };
+}
+
+function splitSharedTagParts(tag: string): { head: string; assets: string } {
+  const idx = tag.indexOf(":");
+  return idx >= 0
+    ? { head: tag.slice(0, idx), assets: tag.slice(idx + 1) }
+    : { head: tag, assets: "" };
+}
+
+function joinSharedRev(base: string, shared: string): string {
+  return shared ? `${base}${SHARED_REV_MARKER}${shared}` : base;
+}
 
 function notifyRevisionListeners(projectId: string): void {
   const listeners = revisionListenersByProjectId.get(projectId);
@@ -239,7 +263,9 @@ export function clearClientCompositionCaptureCacheForTest(): void {
   sharedCoverCache.clear();
   projectRevisionByProjectId.clear();
   compositionRevisionsByProjectId.clear();
+  projectSharedTagByProjectId.clear();
   revisionListenersByProjectId.clear();
+  liveSharedDepSeq = 0;
   inFlightIdbReads.clear();
   const prevDbPromise = idbOpenPromise;
   idbOpenPromise = null;
@@ -466,10 +492,23 @@ export function setCachedProjectRevision(
   }
   if (compositionRevisions && typeof compositionRevisions === "object") {
     const normalized = new Map<string, string>();
+    let detectedSharedTag = "";
     for (const [rawPath, compRev] of Object.entries(compositionRevisions)) {
       if (typeof compRev !== "string" || !compRev.trim()) continue;
       const key = normalizeCompositionPathForGate(rawPath);
-      if (key) normalized.set(key, compRev.trim());
+      if (key) {
+        const trimmedRev = compRev.trim();
+        normalized.set(key, trimmedRev);
+        if (!detectedSharedTag) {
+          const { shared } = splitSharedRev(trimmedRev);
+          if (shared) detectedSharedTag = shared;
+        }
+      }
+    }
+    if (detectedSharedTag) {
+      projectSharedTagByProjectId.set(projectId, detectedSharedTag);
+    } else {
+      projectSharedTagByProjectId.delete(projectId);
     }
     const prev = compositionRevisionsByProjectId.get(projectId);
     if (normalized.size > 0) {
@@ -504,6 +543,7 @@ export function setCachedProjectRevision(
   if (compositionRevisionsByProjectId.delete(projectId)) {
     changed = true;
   }
+  projectSharedTagByProjectId.delete(projectId);
   if (changed) {
     evictStaleProjectRevisions(projectId);
     notifyRevisionListeners(projectId);
@@ -513,40 +553,135 @@ export function setCachedProjectRevision(
 const HTML_FILE_RE = /\.html?$/i;
 
 /**
- * Update individual HTML composition file versions in real time (from Studio file saves
- * or SSE `file-change.fileVersions`) so edited scenes refresh immediately using the exact
- * persisted file version returned on later page reloads, while untouched scenes keep
- * hitting their cached strips with zero SnapDOM re-captures.
+ * Update individual HTML composition file versions (and shared CSS/asset/`<head>` render
+ * dependencies) in real time from Studio file saves or SSE `file-change` events so:
+ * - edited scenes refresh immediately using the exact persisted version returned on reload,
+ * - moving/trimming/splitting clips in `index.html <body>` leaves untouched scenes warm,
+ * - shared asset/CSS/`<head>` edits invalidate affected scenes immediately without reload.
  */
 export function updateCachedCompositionRevisions(
   projectId: string,
   fileVersions: Readonly<Record<string, string | null>> | null | undefined,
+  options?: {
+    readonly changedPaths?: readonly string[];
+    readonly indexHeadHash?: string;
+    readonly indexHeadChanged?: boolean;
+  },
 ): void {
-  if (!projectId || !fileVersions) return;
+  if (!projectId) return;
   let perComp = compositionRevisionsByProjectId.get(projectId);
   const changedPaths = new Set<string>();
   let changed = false;
-  for (const [rawPath, rawVersion] of Object.entries(fileVersions)) {
+
+  const isPreviewSharedNonHtml = (rawPath: string): boolean => {
     const key = normalizeCompositionPathForGate(rawPath);
-    if (!key) continue;
-    const tracked = perComp?.has(key) === true;
-    if (!tracked && !HTML_FILE_RE.test(key)) continue;
-    if (typeof rawVersion === "string" && rawVersion.trim()) {
-      const trimmed = rawVersion.trim();
-      if (!perComp) {
-        perComp = new Map();
-        compositionRevisionsByProjectId.set(projectId, perComp);
+    if (!key || key === "." || HTML_FILE_RE.test(key)) return false;
+    return !NON_PREVIEW_SHARED_FILES.has(key);
+  };
+
+  let nonHtmlSharedChanged = false;
+  if (fileVersions) {
+    for (const rawPath of Object.keys(fileVersions)) {
+      if (isPreviewSharedNonHtml(rawPath)) {
+        nonHtmlSharedChanged = true;
+        break;
       }
-      if (perComp.get(key) !== trimmed) {
-        perComp.set(key, trimmed);
-        changedPaths.add(key);
-        changed = true;
-      }
-    } else if (rawVersion === null && perComp?.delete(key)) {
-      changedPaths.add(key);
-      changed = true;
     }
   }
+  if (!nonHtmlSharedChanged && options?.changedPaths) {
+    for (const rawPath of options.changedPaths) {
+      if (isPreviewSharedNonHtml(rawPath)) {
+        nonHtmlSharedChanged = true;
+        break;
+      }
+    }
+  }
+
+  const prevSharedTag = projectSharedTagByProjectId.get(projectId) ?? "";
+  const { head: prevHead, assets: prevAssets } = splitSharedTagParts(prevSharedTag);
+  let nextHead = prevHead;
+  let nextAssets = prevAssets;
+  let sharedTagChanged = false;
+
+  if (options?.indexHeadHash && options.indexHeadHash !== prevHead) {
+    nextHead = options.indexHeadHash;
+    sharedTagChanged = true;
+  } else if (options?.indexHeadChanged) {
+    nextHead = `h${++liveSharedDepSeq}`;
+    sharedTagChanged = true;
+  }
+
+  if (nonHtmlSharedChanged) {
+    nextAssets = `a${++liveSharedDepSeq}`;
+    sharedTagChanged = true;
+  }
+
+  const activeSharedTag = sharedTagChanged ? `${nextHead}:${nextAssets}` : prevSharedTag;
+  if (sharedTagChanged) {
+    projectSharedTagByProjectId.set(projectId, activeSharedTag);
+    if (perComp) {
+      for (const [compKey, existingRev] of perComp) {
+        const { base } = splitSharedRev(existingRev);
+        const rewritten = joinSharedRev(base, activeSharedTag);
+        if (rewritten !== existingRev) {
+          perComp.set(compKey, rewritten);
+          changedPaths.add(compKey);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (fileVersions) {
+    const editedSubComps = new Set<string>();
+    for (const [rawPath, rawVersion] of Object.entries(fileVersions)) {
+      const key = normalizeCompositionPathForGate(rawPath);
+      if (!key) continue;
+      const tracked = perComp?.has(key) === true;
+      if (!tracked && !HTML_FILE_RE.test(key)) continue;
+      if (typeof rawVersion === "string" && rawVersion.trim()) {
+        const trimmed = rawVersion.trim();
+        if (!perComp) {
+          perComp = new Map();
+          compositionRevisionsByProjectId.set(projectId, perComp);
+        }
+        const existingRev = perComp.get(key);
+        const existingDepsIdx = existingRev ? splitSharedRev(existingRev).base.indexOf(DEPS_REV_MARKER) : -1;
+        const existingDepsSuffix =
+          existingRev && existingDepsIdx >= 0 ? splitSharedRev(existingRev).base.slice(existingDepsIdx) : "";
+        const nextRev = trimmed.includes(SHARED_REV_MARKER)
+          ? trimmed
+          : joinSharedRev(`${trimmed}${existingDepsSuffix}`, activeSharedTag);
+        if (existingRev !== nextRev) {
+          perComp.set(key, nextRev);
+          changedPaths.add(key);
+          changed = true;
+          if (key !== "index.html") editedSubComps.add(key);
+        }
+      } else if (rawVersion === null && perComp?.delete(key)) {
+        changedPaths.add(key);
+        changed = true;
+        if (key !== "index.html") editedSubComps.add(key);
+      }
+    }
+    // If a sub-composition changed, invalidate any parent composition that embeds nested scenes (`|deps:`).
+    if (editedSubComps.size > 0 && perComp) {
+      const nestedTag = `d${++liveSharedDepSeq}`;
+      for (const [compKey, existingRev] of perComp) {
+        if (editedSubComps.has(compKey)) continue;
+        const { base, shared } = splitSharedRev(existingRev);
+        const depsIdx = base.indexOf(DEPS_REV_MARKER);
+        if (depsIdx < 0) continue;
+        const rewritten = joinSharedRev(`${base.slice(0, depsIdx)}${DEPS_REV_MARKER}${nestedTag}`, shared);
+        if (rewritten !== existingRev) {
+          perComp.set(compKey, rewritten);
+          changedPaths.add(compKey);
+          changed = true;
+        }
+      }
+    }
+  }
+
   if (changed) {
     evictStaleProjectRevisions(projectId, (compPath) => changedPaths.has(compPath));
     notifyRevisionListeners(projectId);

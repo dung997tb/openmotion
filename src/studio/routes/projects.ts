@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
+import { decodedUrlPath } from '@hyperframes/parsers/asset-paths';
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { FONT_EXT } from '../../../shared/asset-names.ts';
@@ -11,32 +14,123 @@ import {
 } from '../context.ts';
 import { infoInMemory } from '../engine/inspect.ts';
 import { formatFileVersion } from '../etag.ts';
-import { listVirtualCompositions } from '../virtual-project-store.ts';
+import {
+  listVirtualCompositions,
+  resolveVirtualPath,
+  virtualDirname,
+} from '../virtual-project-store.ts';
 import { classifyPreviewProxyTarget } from '../../workers/media-ingest.ts';
 
+const NON_PREVIEW_SHARED_FILES = new Set(['motion-project.json', 'motion-assets.json', 'LICENSE', 'NOTICE.md']);
+
+export function extractIndexHeadMarkup(indexHtml: string | null | undefined): string {
+  if (!indexHtml) return '';
+  return /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml)?.[1] ?? '';
+}
+
+export function hashIndexHeadMarkup(indexHtml: string | null | undefined): string {
+  return createHash('sha256').update(extractIndexHeadMarkup(indexHtml)).digest('hex').slice(0, 12);
+}
+
+function resolveNestedCompositionRef(
+  owner: string,
+  rawRef: string,
+  byPath: ReadonlyMap<string, string>,
+): string | null {
+  const trimmed = rawRef.trim();
+  if (!trimmed || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(trimmed)) return null;
+  const pathOnly = decodedUrlPath(trimmed.split(/[?#]/)[0] ?? '');
+  if (!pathOnly) return null;
+  const local = resolveVirtualPath(virtualDirname(owner), pathOnly);
+  if (local && byPath.has(local)) return local;
+  const fromRoot = resolveVirtualPath('', pathOnly);
+  if (fromRoot && byPath.has(fromRoot)) return fromRoot;
+  return null;
+}
+
+function collectNestedCompositionDeps(
+  rootComp: string,
+  byPath: ReadonlyMap<string, string>,
+  readText?: (filePath: string) => string | null,
+): string[] {
+  if (!readText) return [];
+  const visited = new Set<string>([rootComp]);
+  const queue: string[] = [rootComp];
+  const deps: string[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const html = readText(current);
+    if (!html || !/data-composition-src/i.test(html)) continue;
+    for (const tag of scanHtmlOpeningTags(html)) {
+      const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
+      if (!attr || attr.kind !== 'value') continue;
+      const target = resolveNestedCompositionRef(current, decodeAuthoredAttribute(attr.value), byPath);
+      if (!target || visited.has(target)) continue;
+      visited.add(target);
+      deps.push(target);
+      queue.push(target);
+    }
+  }
+  return deps.sort((a, b) => a.localeCompare(b));
+}
+
 /**
- * Compute per-composition cache revisions directly from each composition file's
- * own content version (`formatFileVersion(blobScope, sha256)`), matching
- * `/api/projects/:id/files` and SSE `file-change.fileVersions`. Unchanged HTML
- * compositions keep their cached filmstrips across timeline edits, sibling edits,
- * asset uploads, and page reloads without re-running SnapDOM.
+ * Compute per-composition cache revisions combining each composition file's own
+ * persisted content version (`formatFileVersion(blobScope, sha256)`) with a shared
+ * render tag covering `index.html`'s `<head>` (ignoring `<body>` clip timing edits)
+ * and non-composition shared project files (CSS, images, fonts, scripts).
+ *
+ * Moving, trimming, or splitting clips in `index.html <body>` and editing sibling
+ * compositions preserve untouched scenes' exact revision tokens across live edits
+ * and page reloads, while shared CSS/asset/`<head>` edits invalidate cleanly.
  */
 export function computeCompositionRevisions(
   fileList: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly blobScope?: string }>,
   compositions: readonly string[],
+  indexHtml: string | null = null,
   projectRevision = '',
+  readText?: (filePath: string) => string | null,
 ): Record<string, string> {
+  const indexHeadHash = hashIndexHeadMarkup(indexHtml);
+  const compSet = new Set(compositions);
   const byPath = new Map<string, string>();
-  for (const file of fileList) {
+  const sharedHash = createHash('sha256');
+  const sorted = [...fileList].sort((a, b) => a.path.localeCompare(b.path));
+  for (const file of sorted) {
     const scope =
       file.blobScope === 'patch' || file.blobScope === 'catalog' || file.blobScope === 'workspace'
         ? file.blobScope
         : 'workspace';
-    byPath.set(file.path, formatFileVersion(scope, file.sha256));
+    const version = formatFileVersion(scope, file.sha256);
+    byPath.set(file.path, version);
+    if (file.path !== 'index.html' && !compSet.has(file.path) && !NON_PREVIEW_SHARED_FILES.has(file.path)) {
+      sharedHash.update(file.path);
+      sharedHash.update(':');
+      sharedHash.update(version);
+      sharedHash.update('\n');
+    }
   }
+  const sharedTag = `${indexHeadHash}:${sharedHash.digest('hex').slice(0, 12)}`;
   const revisions: Record<string, string> = {};
   for (const comp of compositions) {
-    revisions[comp] = byPath.get(comp) ?? projectRevision;
+    const ownVersion = byPath.get(comp);
+    if (!ownVersion) {
+      revisions[comp] = projectRevision;
+      continue;
+    }
+    const nestedDeps = comp === 'index.html' ? [] : collectNestedCompositionDeps(comp, byPath, readText);
+    if (nestedDeps.length === 0) {
+      revisions[comp] = `${ownVersion}|shared:${sharedTag}`;
+      continue;
+    }
+    const nestedHash = createHash('sha256');
+    for (const dep of nestedDeps) {
+      nestedHash.update(dep);
+      nestedHash.update(':');
+      nestedHash.update(byPath.get(dep) ?? '');
+      nestedHash.update('\n');
+    }
+    revisions[comp] = `${ownVersion}|deps:${nestedHash.digest('hex').slice(0, 12)}|shared:${sharedTag}`;
   }
   return revisions;
 }
@@ -74,7 +168,9 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
     const compositionRevisions = computeCompositionRevisions(
       fileList,
       compositions,
+      virtual.readText('index.html'),
       detail.revision,
+      (filePath) => virtual.readText(filePath),
     );
     const info = infoInMemory(virtual);
 

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
+  changedFilePaths,
   changedFileVersion,
   changedFileVersions,
   mergeFileChangePayloads,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
+  readFileChangeIndexHeadHash,
   readFileTreeChanged,
   readFileChangeField,
   readStudioFileChangePath,
@@ -329,7 +331,11 @@ export function useExternalFileChangeCoordinator({
     (owed: unknown, accept = true) => {
       const path = readStudioFileChangePath(owed) ?? ".";
       const versions = changedFileVersions(owed);
-      if (projectId && versions) updateCachedCompositionRevisions(projectId, versions);
+      const changedPaths = readFileChangeAffectsPreview(owed) ? changedFilePaths(owed) ?? undefined : undefined;
+      const indexHeadHash = readFileChangeIndexHeadHash(owed);
+      if (projectId && (versions || changedPaths?.length || indexHeadHash)) {
+        updateCachedCompositionRevisions(projectId, versions, { changedPaths, indexHeadHash });
+      }
       const inPlace = refreshFileViews(owed, unaffectedPreview => {
         const compositions = readFileChangeAffectedCompositions(owed);
         if (accept) onAcceptedPersistedFileChange(path, unaffectedPreview && compositions
@@ -539,7 +545,11 @@ export function useExternalFileChangeCoordinator({
       if (!ownWriteToken) invalidateLatestSourceWrite();
       if (ownWriteToken || ownContentEcho) {
         const versions = changedFileVersions(payload);
-        if (versions) updateCachedCompositionRevisions(projectId, versions);
+        const changedPaths = readFileChangeAffectsPreview(payload) ? changedFilePaths(payload) ?? undefined : undefined;
+        const indexHeadHash = readFileChangeIndexHeadHash(payload);
+        if (versions || changedPaths?.length || indexHeadHash) {
+          updateCachedCompositionRevisions(projectId, versions, { changedPaths, indexHeadHash });
+        }
         const version = changedFileVersion(payload, path);
         const ownWrite = ownWriteToken && token && version && isLatestSourceWrite(token) ? { token, version } : undefined;
         onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(payload), ownWrite);

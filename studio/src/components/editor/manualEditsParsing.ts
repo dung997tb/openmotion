@@ -69,6 +69,11 @@ export function changedFileVersions(
   return hasAny ? out : null;
 }
 
+export function readFileChangeIndexHeadHash(payload: unknown): string | undefined {
+  const hash = asPayloadRecord(payload)?.indexHeadHash;
+  return typeof hash === "string" && /^[a-f0-9]{12}$/.test(hash) ? hash : undefined;
+}
+
 export function readFileTreeChanged(payload: unknown): boolean {
   return asPayloadRecord(payload)?.fileTreeChanged !== false;
 }
@@ -97,6 +102,8 @@ export function mergeFileChangePayloads(waiting: unknown, incoming: unknown): un
     earlierVersions || laterVersions
       ? { ...(earlierVersions ?? {}), ...(laterVersions ?? {}) }
       : undefined;
+  const indexHeadHash =
+    readFileChangeIndexHeadHash(incoming) ?? readFileChangeIndexHeadHash(waiting);
   const fileTreeChanged = readFileTreeChanged(waiting) || readFileTreeChanged(incoming);
   if (readFileChangeAffectsPreview(waiting) && !readFileChangeAffectsPreview(incoming)) {
     return {
@@ -104,6 +111,7 @@ export function mergeFileChangePayloads(waiting: unknown, incoming: unknown): un
       path: readStudioFileChangePath(waiting),
       paths,
       ...(fileVersions ? { fileVersions } : {}),
+      ...(indexHeadHash ? { indexHeadHash } : {}),
       fileTreeChanged,
     };
   }
@@ -117,6 +125,7 @@ export function mergeFileChangePayloads(waiting: unknown, incoming: unknown): un
     return {
       ...next,
       ...(fileVersions ? { fileVersions } : {}),
+      ...(indexHeadHash ? { indexHeadHash } : {}),
       affectsPreview,
       fileTreeChanged,
       affectedCompositions: merged,
@@ -128,6 +137,7 @@ export function mergeFileChangePayloads(waiting: unknown, incoming: unknown): un
     paths,
     projectId: next?.projectId,
     ...(fileVersions ? { fileVersions } : {}),
+    ...(indexHeadHash ? { indexHeadHash } : {}),
     fileTreeChanged,
     affectsPreview,
     affectedCompositions: merged,

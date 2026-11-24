@@ -16,6 +16,11 @@ import { studioApiFetch } from "../utils/studioApiFetch";
 import { trackStudioProjectSave } from "../utils/studioSaveState";
 import { updateCachedCompositionRevisions } from "../player/lib/clientCompositionCapture";
 
+function extractIndexHead(html: string | null | undefined): string {
+  if (!html) return "";
+  return /<head[^>]*>([\s\S]*?)<\/head>/i.exec(html)?.[1] ?? "";
+}
+
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
   onSavedContent?: (projectId: string, path: string, content: string, submitted?: string) => void;
@@ -83,7 +88,13 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
           : await tryStudioTextEdit(projectId, [{ path, before: source.content, after: content }], history);
         if (saved) {
           fileVersions.set(path, saved.versions[path]);
-          updateCachedCompositionRevisions(projectId, saved.versions);
+          const indexHeadChanged =
+            path === "index.html" && extractIndexHead(source.content) !== extractIndexHead(content);
+          updateCachedCompositionRevisions(
+            projectId,
+            saved.versions,
+            indexHeadChanged ? { indexHeadChanged: true } : undefined,
+          );
           if (saved.divergent.length) return saved.divergent[0];
           const accepted = confirmedSource(projectId, path)?.content ?? content;
           if (accepted === content) onSavedContent?.(projectId, path, content);
@@ -145,7 +156,15 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
             const currentVersion = conflict?.currentVersion ?? null;
             if (currentVersion && conflict?.currentContent === content) {
               fileVersions.set(path, currentVersion);
-              updateCachedCompositionRevisions(writeProjectId, { [path]: currentVersion });
+              const indexHeadChanged =
+                path === "index.html" &&
+                source != null &&
+                extractIndexHead(source.content) !== extractIndexHead(content);
+              updateCachedCompositionRevisions(
+                writeProjectId,
+                { [path]: currentVersion },
+                indexHeadChanged ? { indexHeadChanged: true } : undefined,
+              );
               return;
             }
             throw new StudioFileConflictError({
@@ -166,7 +185,15 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
             return rebased;
           }
           fileVersions.set(path, version);
-          updateCachedCompositionRevisions(writeProjectId, { [path]: version });
+          const indexHeadChanged =
+            path === "index.html" &&
+            source != null &&
+            extractIndexHead(source.content) !== extractIndexHead(content);
+          updateCachedCompositionRevisions(
+            writeProjectId,
+            { [path]: version },
+            indexHeadChanged ? { indexHeadChanged: true } : undefined,
+          );
         });
         if (divergent) return divergent;
         onSavedContent?.(writeProjectId, path, content);

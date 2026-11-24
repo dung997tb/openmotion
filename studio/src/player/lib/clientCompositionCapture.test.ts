@@ -1027,7 +1027,7 @@ describe("clientCompositionCapture", () => {
     expect(peekFallbackCompositionCapture({ projectId: "proj-fb", previewUrl })).toBe(strip8);
   });
 
-  it("keys per-file captures strictly by persisted file version, ignores session contentRevision, and reuses canonical strips for narrower frame counts", () => {
+  it("keys per-file captures by file version plus shared head/asset tag, ignores session contentRevision, and reuses canonical strips for narrower frame counts", () => {
     const introUrl = "/api/projects/proj-fv/preview/comp/compositions/intro.html";
     const outroUrl = "/api/projects/proj-fv/preview/comp/compositions/outro.html";
     let seq = 0;
@@ -1035,8 +1035,8 @@ describe("clientCompositionCapture", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
     setCachedProjectRevision("proj-fv", "proj-rev-1", {
-      "compositions/intro.html": '"sha256:intro-v1"',
-      "compositions/outro.html": '"sha256:outro-v1"',
+      "compositions/intro.html": '"sha256:intro-v1"|shared:111111111111:222222222222',
+      "compositions/outro.html": '"sha256:outro-v1"|shared:111111111111:222222222222',
     });
 
     const introV1 = seedClientCompositionCaptureForTest(
@@ -1046,8 +1046,8 @@ describe("clientCompositionCapture", () => {
     const urlsAfterSeed = seq;
 
     // Session-local contentRevision bumps do not bust a persisted file version.
-    expect(getCompositionCacheKeyRevision("proj-fv", introUrl, 0)).toBe('file:"sha256:intro-v1"');
-    expect(getCompositionCacheKeyRevision("proj-fv", introUrl, 5)).toBe('file:"sha256:intro-v1"');
+    expect(getCompositionCacheKeyRevision("proj-fv", introUrl, 0)).toBe('file:"sha256:intro-v1"|shared:111111111111:222222222222');
+    expect(getCompositionCacheKeyRevision("proj-fv", introUrl, 5)).toBe('file:"sha256:intro-v1"|shared:111111111111:222222222222');
     expect(
       peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 5, frameCount: 8 }),
     ).toBe(introV1);
@@ -1068,31 +1068,43 @@ describe("clientCompositionCapture", () => {
     expect(cover?.kind).toBe("image");
     expect(seq).toBe(urlsAfterSeed);
 
-    // Real file-version update (from save or SSE fileVersions) invalidates only intro.html.
+    // index.html <body> edit (same indexHeadHash) & non-preview metadata leave intro.html and outro.html cached.
     const listener = vi.fn();
     const unsub = subscribeCompositionCacheRevision("proj-fv", listener);
-    updateCachedCompositionRevisions("proj-fv", {
-      "index.html": '"patch:idx-2"',
-      "assets/music.mp3": '"sha256:ignored"',
-    });
-    // Non-HTML asset ignored; index.html added -> 1 notification, intro.html still cached.
+    updateCachedCompositionRevisions(
+      "proj-fv",
+      {
+        "index.html": '"patch:idx-2"',
+        "motion-project.json": '"sha256:meta-2"',
+      },
+      { indexHeadHash: "111111111111" },
+    );
     expect(listener).toHaveBeenCalledTimes(1);
     expect(
       peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
     ).toBe(introV1);
 
+    // Real file-version update for intro.html preserves |shared: and invalidates only intro.html.
     updateCachedCompositionRevisions("proj-fv", { "compositions/intro.html": '"patch:intro-v2"' });
     expect(listener).toHaveBeenCalledTimes(2);
     expect(
       peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
     ).toBeNull();
-    expect(getCompositionCacheRevision("proj-fv", outroUrl)).toBe('"sha256:outro-v1"');
+    expect(getCompositionCacheRevision("proj-fv", introUrl)).toBe('"patch:intro-v2"|shared:111111111111:222222222222');
+    expect(getCompositionCacheRevision("proj-fv", outroUrl)).toBe('"sha256:outro-v1"|shared:111111111111:222222222222');
 
     // Undo back to v1 immediately hits the cached v1 strip with zero re-capture.
     updateCachedCompositionRevisions("proj-fv", { "compositions/intro.html": '"sha256:intro-v1"' });
     expect(
       peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
     ).toBe(introV1);
+
+    // Shared stylesheet edit invalidates every composition immediately without a reload.
+    updateCachedCompositionRevisions("proj-fv", { "styles/theme.css": '"patch:css-2"' });
+    expect(
+      peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
+    ).toBeNull();
+    expect(getCompositionCacheRevision("proj-fv", outroUrl)).not.toBe('"sha256:outro-v1"|shared:111111111111:222222222222');
     unsub();
   });
 
