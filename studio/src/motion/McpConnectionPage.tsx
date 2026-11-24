@@ -1,6 +1,5 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { GalleryTemplate } from '../../../shared/catalog';
 import { manualConnection, setupGuideUrl, setupPrompt, transcriptExamplePrompt, type IntegrationInfo } from '../../../shared/integration';
 import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
@@ -23,6 +22,7 @@ import { McpSiteFooter } from './McpSiteFooter';
 import { McpTemplateShowcase } from './McpTemplateShowcase';
 import { mcpCapabilities, mcpScenarios, platformExportExample, searchRecoveryExample } from './mcpCapabilities';
 import { mcpClients as clients, supportsLocalConnection, type McpClient } from './mcpClients';
+import { readMcpGalleryPosition } from './mcpGallery';
 import { mcpAdvantagePillars, mcpQuickFaq, type McpCaseTarget } from './mcpShowcaseData';
 import * as tracking from './pageTracking';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
@@ -120,25 +120,16 @@ export function McpConnectionPage({
     fields: Parameters<typeof tracking.reportMcpClick>[2] = {},
   ) => tracking.reportMcpClick(area, element, { mcp_client: clientKey, ...fields });
 
-  const openLibrary = (area: 'mcp_start' | 'mcp_templates' | 'mcp_footer') => (trigger?: HTMLElement, template?: GalleryTemplate) => {
-    click(area, template ? 'open_detail' : 'open_library', template ? { template: template.id } : {});
-    openLibraryRaw(trigger, template);
+  const openLibrary = (area: 'mcp_templates' | 'mcp_footer') => (trigger?: HTMLElement) => {
+    click(area, 'open_library');
+    openLibraryRaw(trigger);
   };
   const openSkill = (area: 'mcp_templates' | 'mcp_footer', skillId: string) => {
     click(area, 'open_detail', { capability: skillId });
     changeRoute({ settings: null, skills: true, skill: skillId, templates: false, template: null });
   };
-  const openCaseTarget = (target: McpCaseTarget, trigger?: HTMLElement) => {
+  const openCaseTarget = (target: Exclude<McpCaseTarget, { kind: 'template' }>) => {
     const area = 'mcp_templates';
-    if (target.kind === 'template') {
-      openLibrary(area)(trigger, {
-        id: target.templateId,
-        title: target.title,
-        posterUrl: target.posterUrl,
-        previewUrl: target.previewUrl,
-      } as GalleryTemplate);
-      return;
-    }
     if (target.kind === 'skill') {
       openSkill(area, target.skillId);
       return;
@@ -155,9 +146,18 @@ export function McpConnectionPage({
 
   const page = useRef<HTMLElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const [galleryPosition] = useState(readMcpGalleryPosition);
   const example = (route ?? localRoute).mcpExample;
 
   useEffect(() => {
+    if (galleryPosition) {
+      const cover = page.current?.querySelector<HTMLElement>(`[data-mcp-gallery-card="${galleryPosition.cardId}"] .om-mcp-demo-cover`);
+      if (cover) {
+        cover.focus({ preventScroll: true });
+        cover.scrollIntoView({ block: 'center' });
+        return;
+      }
+    }
     const gallery = location.hash === '#gallery' && page.current?.querySelector<HTMLElement>('#mcp-templates');
     if (gallery) {
       gallery.scrollIntoView({ block: 'start' });
@@ -170,11 +170,16 @@ export function McpConnectionPage({
     } else if (!inSettings) {
       heading.current?.focus({ preventScroll: true });
     }
-  }, [example, inSettings]);
+  }, [example, galleryPosition, inSettings]);
 
   const scrollTo = (id: string) => {
     click('mcp_footer', 'scroll_to_section', { section_id: id });
-    page.current?.querySelector<HTMLElement>(`#${id}`)?.scrollIntoView({ block: 'start' });
+    const section = page.current?.querySelector<HTMLElement>(`#${id}`);
+    if (!section) return;
+    const target = section.querySelector<HTMLElement>('h2, button') ?? section;
+    if (target.matches('h1, h2')) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    section.scrollIntoView({ block: 'start' });
   };
 
   const supported = supportsLocalConnection(client);
@@ -500,6 +505,7 @@ export function McpConnectionPage({
         {/* 12-Card Scenario Template Gallery */}
         <McpTemplateShowcase
           enabled={previewsEnabled}
+          initialCategory={galleryPosition?.category ?? 'all'}
           canCopySetup={supported && !desktop}
           openLibrary={openLibrary('mcp_templates')}
           onOpenTarget={openCaseTarget}

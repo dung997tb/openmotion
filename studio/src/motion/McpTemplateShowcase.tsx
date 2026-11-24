@@ -1,10 +1,11 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
+import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { Tabs, TabsList, Tab, TabPanel } from '../components/ui/Tabs';
 import { RemixIcon } from '../icons/RemixIcons';
-import { mcpGalleryCards, mcpGalleryCategories, type McpGalleryCard, type McpGalleryCategory } from './mcpGallery';
+import { mcpGalleryCards, mcpGalleryCategories, recordMcpGalleryPosition, type McpGalleryCard, type McpGalleryCategory } from './mcpGallery';
 import { formatMcpAgentPrompt, localizedMcpExample, type McpCaseTarget } from './mcpShowcaseData';
 
 function cardTarget(card: McpGalleryCard, title: string): McpCaseTarget | null {
@@ -20,17 +21,18 @@ function cardTarget(card: McpGalleryCard, title: string): McpCaseTarget | null {
   return null;
 }
 
-export function McpTemplateShowcase({ enabled, canCopySetup, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
+export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
   enabled: boolean;
+  initialCategory: McpGalleryCategory;
   canCopySetup: boolean;
   onCopy: (id: string, prompt: string, includeSetup: boolean) => Promise<string | undefined>;
   openLibrary: (trigger: HTMLElement) => void;
-  onOpenTarget: (target: McpCaseTarget, trigger?: HTMLElement) => void;
+  onOpenTarget: (target: Exclude<McpCaseTarget, { kind: 'template' }>) => void;
   onCategory: (category: McpGalleryCategory) => void;
   onPreview: (id: string) => void;
 }) {
   const { t, locale } = useI18n();
-  const [category, setCategory] = useState<McpGalleryCategory>('all');
+  const [category, setCategory] = useState(initialCategory);
   const [preview, setPreview] = useState<McpGalleryCard | null>(null);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
@@ -46,12 +48,6 @@ export function McpTemplateShowcase({ enabled, canCopySetup, onCopy, openLibrary
     if (kind === 'skill') return t('Skill');
     if (kind === 'brand-kit') return t('Brand Kit');
     return t('Template');
-  };
-
-  const openActionLabel = (kind: McpGalleryCard['kind']) => {
-    if (kind === 'skill') return t('Open Skill');
-    if (kind === 'brand-kit') return t('Browse Brand Kits');
-    return t('Open template');
   };
 
   useEffect(() => {
@@ -162,7 +158,12 @@ export function McpTemplateShowcase({ enabled, canCopySetup, onCopy, openLibrary
           {preview && <>
             <header>
               <Dialog.Title>{content(preview).title}</Dialog.Title>
-              <Dialog.Close render={<Button variant="plain" className="om-mcp-demo-dismiss" />} aria-label={t('Close')}><RemixIcon name="close-line" size={18} /></Dialog.Close>
+              <Dialog.Close render={<IconButton
+                variant="plain"
+                className="om-mcp-demo-dismiss inline-grid shrink-0 place-items-center"
+                aria-label={t('Close')}
+                icon={<RemixIcon name="close-line" size={18} />}
+              />} />
             </header>
             <div className="om-mcp-demo-preview">
               {preview.showcaseIframe ? (
@@ -194,20 +195,20 @@ export function McpTemplateShowcase({ enabled, canCopySetup, onCopy, openLibrary
             <footer>
               {(() => {
                 const target = cardTarget(preview, content(preview).title);
-                return target ? (
+                return target && target.kind !== 'template' ? (
                   <Button
                     variant="plain"
                     className="om-mcp-demo-copy"
-                    onClick={event => {
+                    onClick={() => {
+                      recordMcpGalleryPosition({ category, cardId: preview.id });
                       setPreview(null);
-                      onOpenTarget(target, previewTrigger.current ?? event.currentTarget);
+                      onOpenTarget(target);
                     }}
                   >
-                    {openActionLabel(preview.kind)}
+                    {target.kind === 'skill' ? t('Open Skill') : t('Browse Brand Kits')}
                   </Button>
                 ) : null;
               })()}
-              <Dialog.Close render={<Button variant="plain" className="om-mcp-demo-copy" />}>{t('Close')}</Dialog.Close>
               <Button variant="plain" className="om-mcp-demo-copy om-mcp-demo-confirm" data-copied={copied?.cardId === preview.id && !copied.includeSetup || undefined} onClick={() => void copyPrompt(preview)}>
                 {t(copied?.cardId === preview.id && !copied.includeSetup ? 'Copied' : 'Copy Prompt')}
               </Button>

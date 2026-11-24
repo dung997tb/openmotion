@@ -12,6 +12,20 @@ export const mcpGalleryCategories = [
 
 export type McpGalleryCategory = (typeof mcpGalleryCategories)[number][0];
 
+export type McpGalleryPosition = { category: McpGalleryCategory; cardId: string };
+
+export function readMcpGalleryPosition(): McpGalleryPosition | null {
+  const position = history.state?.openmotionMcpGalleryPosition as McpGalleryPosition | undefined;
+  if (!position) return null;
+  const card = mcpGalleryCards.find(item => item.id === position.cardId);
+  return card && (position.category === 'all' || position.category === card.category) ? position : null;
+}
+
+export function recordMcpGalleryPosition(position: McpGalleryPosition) {
+  // Attach the return point to this history entry without changing its route or router state.
+  history.replaceState({ ...history.state, openmotionMcpGalleryPosition: position }, '');
+}
+
 export type McpGalleryCard = {
   id: string;
   category: Exclude<McpGalleryCategory, 'all'>;

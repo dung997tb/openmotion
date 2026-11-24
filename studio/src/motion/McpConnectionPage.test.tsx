@@ -273,7 +273,7 @@ it('aborts pending setup discovery when leaving the page', async () => {
 it('shows all twelve curated examples, filters by section and previews video, brand showcase and prompt', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('Clipboard unavailable'));
-  const { openLibrary } = await mount();
+  await mount();
   const gallery = document.querySelector('#gallery')!;
   expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(12);
   for (const [label, count] of [
@@ -298,8 +298,8 @@ it('shows all twelve curated examples, filters by section and previews video, br
   expect(preview.querySelector('video')?.getAttribute('src')).toContain('https://r.open-design.ai/files/');
   await act(async () => [...preview.querySelectorAll('button')].find(node => node.textContent === 'Copy Prompt')!.click());
   expect(preview.querySelector('textarea')?.value).toBe(copy.mock.calls[0][0]);
-  await act(async () => [...preview.querySelectorAll('button')].find(node => node.textContent === 'Open template')!.click());
-  expect(openLibrary).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'motion-f6f244d1-c549-4081-8a5d-f0e1e3660044' }));
+  expect([...preview.querySelectorAll('footer button')].map(node => node.textContent)).toEqual(['Copy Prompt']);
+  await act(async () => preview.querySelector<HTMLButtonElement>('.om-mcp-demo-dismiss')!.click());
   expect(document.querySelector('[role=dialog]')).toBeNull();
 });
 

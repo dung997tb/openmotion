@@ -294,6 +294,34 @@ it.each([
   expect(page()).toMatchObject({ skills: true, skill });
 });
 
+it.each([
+  ['Top Skills (3)', 'talking-head-recreation', 'Open Skill', '/skills/openmotion-talking-head-recreation'],
+  ['Official Brand Kits (2)', 'brandkit-clean', 'Browse Brand Kits', '/brand-kit/official'],
+])('restores the MCP showcase category and card after returning from %s', async (category, cardId, action, destination) => {
+  await mount();
+  await openMcp();
+  const tabs = () => [...container.querySelectorAll<HTMLButtonElement>('.om-mcp-category-tabs [role=tab]')];
+  const cover = () => container.querySelector<HTMLButtonElement>(`[data-mcp-gallery-card="${cardId}"] .om-mcp-demo-cover`)!;
+  await act(async () => tabs().find(tab => tab.textContent?.trim() === category)!.click());
+  await act(async () => cover().click());
+  await click(action);
+  expect(location.pathname).toBe(destination);
+  await traverse(-1);
+  expect(page().settings).toBe('mcp');
+  expect(tabs().find(tab => tab.getAttribute('aria-selected') === 'true')?.textContent?.trim()).toBe(category);
+  expect(document.activeElement).toBe(cover());
+});
+
+it('moves focus to the destination when following an MCP footer section shortcut', async () => {
+  await mount();
+  await openMcp();
+  const footerButtons = [...container.querySelectorAll<HTMLButtonElement>('.om-mcp-site-footer button')];
+  const link = footerButtons.find(item => item.textContent?.trim() === 'Explore more scene templates')!;
+  link.focus();
+  await act(async () => link.click());
+  expect(document.activeElement).toBe(container.querySelector('#mcp-templates'));
+});
+
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
   const detail = 'dialog[aria-label="Template preview"]';
   await mount(); await openMcp(); await click('All 30+ templates');
