@@ -309,10 +309,19 @@
   .om-mcp-tilt:hover .om-mcp-pillar h3 { color: var(--motion-accent); }
 }
 @media (any-hover: hover) and (any-pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .om-mcp-tilt { perspective: 900px; }
+  .om-mcp-tilt {
+    --mcp-tilt-angle: 5deg;
+    perspective: 900px;
+  }
+  .om-mcp-stage-steps .om-mcp-tilt {
+    --mcp-tilt-angle: 8deg;
+    perspective: 550px;
+  }
   .om-mcp-tilt > * {
-    transform: rotateX(clamp(-5deg, calc(var(--mcp-tilt-y, 0) * -10deg), 5deg))
-      rotateY(clamp(-5deg, calc(var(--mcp-tilt-x, 0) * 10deg), 5deg));
+    --mcp-tilt-min: calc(-1 * var(--mcp-tilt-angle));
+    transform:
+      rotateX(clamp(var(--mcp-tilt-min), calc(-2 * var(--mcp-tilt-y, 0) * var(--mcp-tilt-angle)), var(--mcp-tilt-angle)))
+      rotateY(clamp(var(--mcp-tilt-min), calc(2 * var(--mcp-tilt-x, 0) * var(--mcp-tilt-angle)), var(--mcp-tilt-angle)));
   }
 }
 
