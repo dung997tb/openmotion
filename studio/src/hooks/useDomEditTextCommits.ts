@@ -47,7 +47,7 @@ export interface UseDomEditTextCommitsParams {
     options?: ResolveDomSelectionOptions,
   ) => Promise<DomEditSelection | null>;
   persistDomEditOperations: PersistDomEditOperations;
-  persistBoundText?: (selection: DomEditSelection, value: string) => Promise<void>;
+  persistBoundText?: (selection: DomEditSelection, value: string, typingKey?: string) => Promise<void>;
   resolveImportedFontAsset: (fontFamilyValue: string) => ImportedFontAsset | null;
   readOnlyPreview: boolean;
 }
@@ -155,6 +155,7 @@ export function useDomEditTextCommits({
       selection: DomEditSelection,
       value: string,
       fieldKey?: string,
+      continuous = false,
     ): Promise<DomEditCommitOutcome> => {
       if (!isTextEditableSelection(selection)) {
         return domEditCommitDeclined("not-text-editable");
@@ -163,6 +164,7 @@ export function useDomEditTextCommits({
         domTextCommitVersionRef.current,
         getDomEditTargetKey(selection),
       );
+      const typingKey = continuous ? `text:${getDomEditTargetKey(selection)}:${fieldKey ?? ''}` : undefined;
       const nextTextFields = buildNextDomTextFields(selection.textFields, value, fieldKey);
       const textCommit = planDomTextCommit(selection.textFields, nextTextFields, value);
       const iframe = previewIframeRef.current;
@@ -186,9 +188,10 @@ export function useDomEditTextCommits({
             editedElement.textContent = value;
           }
         },
-        persist: () => selection.isolatedTarget?.binding && persistBoundText ? persistBoundText(selection, value) :
+        persist: () => selection.isolatedTarget?.binding && persistBoundText ? persistBoundText(selection, value, typingKey) :
           persistDomEditOperations(selection, textCommit.operations, {
             label: "Edit text",
+            ...(typingKey && { coalesceKey: typingKey, continuous: true }),
             skipRefresh: true,
             shouldSave: isLatestTextCommit,
           }),
@@ -223,9 +226,9 @@ export function useDomEditTextCommits({
   );
 
   const handleDomTextCommit = useCallback(
-    (value: string, fieldKey?: string): Promise<DomEditCommitOutcome> =>
+    (value: string, fieldKey?: string, continuous = true): Promise<DomEditCommitOutcome> =>
       domEditSelection
-        ? handleDomTextCommitForSelection(domEditSelection, value, fieldKey)
+        ? handleDomTextCommitForSelection(domEditSelection, value, fieldKey, continuous)
         : Promise.resolve(domEditCommitDeclined("no-selection")),
     [domEditSelection, handleDomTextCommitForSelection],
   );
@@ -477,7 +480,7 @@ export function useDomEditTextCommits({
       if (!field) return;
 
       if (field.source === "self") {
-        await handleDomTextCommit("", fieldKey);
+        await handleDomTextCommit("", fieldKey, false);
         return;
       }
 

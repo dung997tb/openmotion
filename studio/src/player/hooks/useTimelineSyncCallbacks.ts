@@ -8,6 +8,7 @@
  *  - onIframeLoad             — orchestrates initializeAdapter with a message-based fallback
  */
 
+import { hasPendingHistoryTimeline } from "../timelineRestorePending";
 import { takePreviewPosition } from "../lib/previewReconnect";
 import { appendUntimedText } from "../lib/timelineUntimedText";
 import { useCallback, useRef } from "react";
@@ -171,7 +172,7 @@ export function useTimelineSyncCallbacks({
   // Convert a runtime timeline message (from iframe postMessage) into TimelineElements
   const processTimelineMessage = useCallback(
     (data: RuntimeTimelineMessage) => {
-      if (!data.clips) return;
+      if (!data.clips || hasPendingHistoryTimeline(iframeRef.current)) return;
 
       usePlayerStore.getState().setClipManifest(data.clips);
 
@@ -219,6 +220,7 @@ export function useTimelineSyncCallbacks({
   );
 
   const enrichMissingCompositions = useCallback(() => {
+    if (hasPendingHistoryTimeline(iframeRef.current)) return;
     try {
       const iframe = iframeRef.current;
       const doc = iframe?.contentDocument;
@@ -261,7 +263,7 @@ export function useTimelineSyncCallbacks({
         // Keep non-React listeners such as the time display in sync
         // with the initial adapter seek on iframe load.
         liveTime.notify(startTime);
-        syncAdapterDuration(adapter, setDuration);
+        if (!hasPendingHistoryTimeline(iframeRef.current)) syncAdapterDuration(adapter, setDuration);
         setCurrentTime(startTime);
         if (!isRefreshingRef.current) {
           // Enables Play from actual play-readiness, not just a known duration —

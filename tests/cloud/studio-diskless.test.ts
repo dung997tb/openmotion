@@ -73,6 +73,7 @@ const UUID_TABLES = new Set([
 
 class StudioTestPgClient {
   readonly tables = new Map<string, Row[]>();
+  selectCount = 0;
   private snap: Map<string, Row[]> | null = null;
 
   constructor() {
@@ -133,6 +134,7 @@ class StudioTestPgClient {
   }
 
   private select(sqlText: string, params: unknown[], rowMode?: string): { rows: unknown[] } {
+    this.selectCount++;
     const cleaned = sqlText.replace(/\s+for\s+update\s*$/i, '').trim();
     const m = /^select\s+([\s\S]+?)\s+from\s+"([^"]+)"([\s\S]*)$/i.exec(cleaned)!;
     const selectList = m[1].trim();
@@ -152,8 +154,57 @@ class StudioTestPgClient {
       order = ordM[1].trim();
       rem = rem.slice(0, ordM.index).trim();
     }
-    const whM = /^where\s+([\s\S]+)$/i.exec(rem);
-    if (whM) where = whM[1].trim();
+    const whereIdx = findKw(rem, 'where');
+    const joinsClause = whereIdx >= 0 ? rem.slice(0, whereIdx).trim() : /^left\s+/i.test(rem) ? rem : '';
+    if (whereIdx >= 0) where = rem.slice(whereIdx + 5).trim();
+
+    if (joinsClause) {
+      const joins: { table: string; on: string }[] = [];
+      let jc = joinsClause;
+      while (jc) {
+        const jm = /^left\s+(?:outer\s+)?join\s+"([^"]+)"\s+on\s+/i.exec(jc);
+        if (!jm) throw new Error(`Unsupported JOIN: ${sqlText}`);
+        const joinTable = jm[1];
+        const afterOn = jc.slice(jm[0].length);
+        const nextJoinIdx = findKw(afterOn, 'left');
+        const onExpr = nextJoinIdx >= 0 ? afterOn.slice(0, nextJoinIdx).trim() : afterOn.trim();
+        joins.push({ table: joinTable, on: onExpr });
+        jc = nextJoinIdx >= 0 ? afterOn.slice(nextJoinIdx).trim() : '';
+      }
+      let combined: Map<string, Row | null>[] = this.rows(table).map((r) => new Map([[table, r]]));
+      for (const j of joins) {
+        const next: Map<string, Row | null>[] = [];
+        for (const rowMap of combined) {
+          let found = false;
+          for (const candidate of this.rows(j.table)) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, candidate);
+            if (evalJoinedW(merged, j.on, params)) {
+              next.push(merged);
+              found = true;
+            }
+          }
+          if (!found) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, null);
+            next.push(merged);
+          }
+        }
+        combined = next;
+      }
+      if (where) combined = combined.filter((rowMap) => evalJoinedW(rowMap, where, params));
+      if (limit !== null) combined = combined.slice(0, limit);
+      const specs = splitTop(selectList, ',').map(qualifiedCol);
+      return {
+        rows: combined.map((rowMap) =>
+          rowMode === 'array'
+            ? specs.map((s) => (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null)
+            : Object.fromEntries(
+                specs.map((s) => [s.col, (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null]),
+              ),
+        ),
+      };
+    }
 
     let matched = this.rows(table).filter((r) => (where ? evalW(r, where, params) : true));
     if (/^COALESCE\s*\(\s*MAX\s*\(/i.test(selectList)) {
@@ -268,6 +319,36 @@ class StudioTestPgClient {
 function colName(expr: string): string {
   const m = [...expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').matchAll(/"([^"]+)"/g)];
   return m.length > 0 ? m[m.length - 1][1] : expr.trim();
+}
+function qualifiedCol(expr: string): { table?: string; col: string } {
+  const trimmed = expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').trim();
+  const m = [...trimmed.matchAll(/"([^"]+)"/g)];
+  if (m.length >= 2) return { table: m[m.length - 2][1], col: m[m.length - 1][1] };
+  return { col: m.length === 1 ? m[0][1] : trimmed };
+}
+function evalJoinedOperand(rowMap: Map<string, Row | null>, expr: string, params: unknown[]): unknown {
+  const t = expr.trim();
+  const qm = /^"([^"]+)"\."([^"]+)"$/.exec(t);
+  if (qm) return rowMap.get(qm[1])?.[qm[2]] ?? null;
+  return evalSc(t, params);
+}
+function evalJoinedW(rowMap: Map<string, Row | null>, raw: string, params: unknown[]): boolean {
+  const terms = splitAnd(stripP(raw));
+  if (terms.length > 1) return terms.every((t) => evalJoinedW(rowMap, t, params));
+  const term = stripP(terms[0]);
+  let m: RegExpExecArray | null;
+  if ((m = /^([\s\S]+?)\s+is\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) == null;
+  if ((m = /^([\s\S]+?)\s+is\s+not\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) != null;
+  if ((m = /^([\s\S]+?)\s+in\s*\(([\s\S]+)\)$/i.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    return lv != null && splitTop(m[2], ',').map((v) => evalJoinedOperand(rowMap, v, params)).includes(lv);
+  }
+  if ((m = /^([\s\S]+?)\s*=\s*([\s\S]+)$/.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    const rv = evalJoinedOperand(rowMap, m[2], params);
+    return lv !== null && rv !== null && lv === rv;
+  }
+  throw new Error(`Unsupported joined WHERE: ${term}`);
 }
 function splitTop(input: string, sep: string): string[] {
   const out: string[] = [];
@@ -855,6 +936,36 @@ describe('Pure In-Memory Hyperframes Engines (Bundle, Lint, Info, Timeline)', ()
 });
 
 describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSAP mutations, Render, Media)', () => {
+  it('acknowledges the project event stream after its subscriptions are ready', async () => {
+    const env = createStudioTestEnv();
+    const project = await env.workspace.createProject(env.auth, { title: 'History stream' });
+    const entered = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    const subscribe = env.eventBus.subscribe.bind(env.eventBus);
+    let channelCount = 0;
+    env.eventBus.subscribe = async (channel, listener) => {
+      entered.resolve();
+      await proceed.promise;
+      const stop = await subscribe(channel, listener);
+      channelCount++;
+      return stop;
+    };
+    const response = await env.studioApp.request(`/api/events?projectId=${project.projectId}`);
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    try {
+      const first = reader.read().then(({ value }) => ({ text: new TextDecoder().decode(value), channelCount }));
+      await entered.promise;
+      proceed.resolve();
+      const acknowledgement = await first;
+      assert.match(acknowledgement.text, /event: connected/);
+      assert.equal(acknowledgement.channelCount, 3);
+    } finally {
+      proceed.resolve();
+      await reader.cancel();
+    }
+  });
+
   it('lists the packaged registry and installs its project files atomically without replacing user changes', async t => {
     const env = createStudioTestEnv();
     const { projectId } = await env.workspace.createProject(env.auth);
@@ -893,6 +1004,100 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.deepEqual((await retry.json()).written, written);
     assert.equal(fetcher.mock.callCount(), downloads);
     assert.equal((await env.files.readTextFile(env.auth, projectId, written[0]))?.content, 'edited');
+  });
+
+  it('commits a catalog placement once and undoes a newly installed component with its host', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const host = 'index.html', effect = 'compositions/components/blur-in.html';
+    const original = '<main data-composition-id="root"></main>';
+    const mounted = '<main data-composition-id="root"><div data-composition-src="' + effect + '"></div></main>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: host, content: original }] });
+    const read = (path: string) => env.files.readTextFile(env.auth, projectId, path);
+    const prior = (await read(host))!;
+    let fail = true;
+    const fetcher = t.mock.method(globalThis, 'fetch', async () => fail
+      ? new Response(null, { status: 502 }) : new Response('<div style="background: #000;">Hello</div>'));
+    const add = (version: string, requestId = randomUUID()) => env.studioApp.request(`/api/projects/${projectId}/text-edits`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
+      body: JSON.stringify({ installComponent: 'blur-in', files: [{ path: host, baseVersion: version, content: mounted }], label: 'Add Blur In' }),
+    });
+    assert.equal((await add(prior.version)).status, 502);
+    assert.equal((await read(host))?.version, prior.version);
+    assert.equal(await read(effect), null);
+    fail = false;
+    const id = randomUUID();
+    const response = await add(prior.version, id);
+    assert.equal(response.status, 200, await response.clone().text());
+    const receipt = await response.json();
+    assert.deepEqual(receipt.changedPaths.sort(), [effect, host]);
+    assert.match((await read(effect))!.content, /background: transparent/);
+    const downloads = fetcher.mock.callCount();
+    const replay = await add(prior.version, id);
+    assert.equal((await replay.json()).versionId, receipt.versionId);
+    assert.equal((await add(prior.version)).status, 409);
+    assert.equal(fetcher.mock.callCount(), downloads);
+    await env.history.step(env.auth, projectId, 'back');
+    assert.equal((await read(host))?.version, prior.version);
+    assert.equal(await read(effect), null);
+    await env.history.step(env.auth, projectId, 'forward');
+    assert.equal((await read(host))?.version, receipt.versions[host]);
+    assert.equal((await read(effect))?.version, receipt.versions[effect]);
+    await env.history.step(env.auth, projectId, 'back');
+    const customized = '<div data-composition-id="blur-in" style="background: #000;">Edited locally</div>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: effect, content: customized }] });
+    const previous = (await read(effect))!;
+    const dispatcher = new McpToolDispatcher(parseConfig({
+      NODE_ENV: 'test', AUTH_MODE: 'dev', MODEL_GATEWAY_MODE: 'mock', DATABASE_URL: 'postgres://test:test@localhost/openmotion',
+      REDIS_URL: 'redis://localhost:6379', SESSION_SECRET: '0'.repeat(32),
+    }), { componentFiles: env.files });
+    const mcp = await dispatcher.dispatch('openmotion_assets_use', { action: 'install_component', projectId, name: 'blur-in',
+      requestId: randomUUID(), hostFile: { path: host, baseVersion: prior.version, content: mounted } },
+      { auth: env.auth, supportsMcpAppsUi: false });
+    assert(!mcp.isError, JSON.stringify(mcp.structuredContent));
+    assert.equal((await read(host))?.version, receipt.versions[host]);
+    assert.equal((await read(effect))?.version, previous.version);
+    await env.history.step(env.auth, projectId, 'back');
+    assert.equal((await read(effect))?.version, previous.version);
+    assert.equal(fetcher.mock.callCount(), downloads);
+  });
+
+  it('places preinstalled stock overlays and leaves edited backgrounds untouched', async t => {
+    const env = createStudioTestEnv();
+    const { projectId } = await env.workspace.createProject(env.auth);
+    const host = 'index.html', effect = 'compositions/components/chat-message.html';
+    const source = await readFile(path.join(REPO_ROOT, 'tests/fixtures/motion-components/chat-message.html'), 'utf8');
+    const downloads = t.mock.method(globalThis, 'fetch', async () => new Response(source));
+    const post = (route: string, body: unknown) => env.studioApp.request(`/api/projects/${projectId}/${route}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(body),
+    });
+    const read = (path: string) => env.files.readTextFile(env.auth, projectId, path);
+    const base = '<main data-composition-id="root"></main>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: host, content: base }] });
+    const version = (await read(host))!.version;
+    const place = () => post('text-edits', { installComponent: 'chat-message', files: [{
+      path: host, baseVersion: version, content: base.replace('</main>', `<div data-composition-src="${effect}"></div></main>`),
+    }] });
+    assert.equal((await place()).status, 200);
+    const placed = (await read(effect))!;
+    assert.doesNotMatch(placed.content, /background: #000;/);
+    await env.history.step(env.auth, projectId, 'back');
+
+    assert.equal((await post('registry/install', { blockName: 'chat-message' })).status, 200);
+    const installed = (await read(effect))!;
+    assert.match(installed.content, /background: #000;/);
+    const fetchCount = downloads.mock.callCount();
+    assert.equal((await place()).status, 200);
+    assert.equal((await read(effect))?.version, placed.version);
+    await env.history.step(env.auth, projectId, 'back');
+    assert.equal((await read(effect))?.version, installed.version);
+    assert.equal((await read(host))?.version, version);
+
+    const custom = installed.content + '\n<style>.favorite { background: #000; }</style>';
+    await env.files.commitChanges(env.auth, { projectId, ops: [{ op: 'upsert_text', path: effect, content: custom }] });
+    assert.equal((await place()).status, 200);
+    assert.equal((await read(effect))?.content, custom);
+    assert.equal(downloads.mock.callCount(), fetchCount);
   });
 
   it('installs the same mountable fragment via Studio and MCP, bundles nested references and undoes each installation', async t => {
@@ -1109,7 +1314,8 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(cssJson.writeToken, 'studio-write-77');
     assert.equal(cssJson.version, fileContentVersion('.box { opacity: 1; }'));
 
-    // DELETE emits DELETED_VERSION = '"deleted"'.
+    // A delete emits a single file-change carrying the legacy deletion hint.
+    const beforeDelete = env.published.length;
     const delRes = await env.studioApp.request(`/api/projects/${created.projectId}/files/extra.css`, {
       method: 'DELETE',
     });
@@ -1117,6 +1323,11 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     const delJson = (await delRes.json()) as { version: string };
     assert.equal(delJson.version, DELETED_VERSION);
     assert.equal(DELETED_VERSION, '"deleted"');
+    const deletions = env.published.slice(beforeDelete)
+      .map(e => e.payload as { type?: string; version?: string })
+      .filter(e => e.type === 'file-change');
+    assert.equal(deletions.length, 1);
+    assert.equal(deletions[0].version, DELETED_VERSION);
   });
 
   it('answers HEAD /preview/* and HEAD /render/:jobId/view DIRECTLY (never 302) while GET binary returns 302 with Cache-Control & Vary', async () => {
@@ -1129,8 +1340,9 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
       ops: [{ op: 'upsert_binary', path: 'assets/intro.mp4', data: videoBytes, mimeType: 'video/mp4' }],
     });
 
-    // HEAD /api/projects/:id/preview/assets/intro.mp4 -> 200 DIRECT from PG metadata, ZERO presignGet calls!
+    // HEAD /api/projects/:id/preview/assets/intro.mp4 -> 200 DIRECT from PG metadata (1 SELECT), ZERO presignGet calls!
     const presignBefore = env.storage.presignGetCalls;
+    const headSelectsBefore = env.pgClient.selectCount;
     const headPreview = await env.studioApp.request(
       `/api/projects/${created.projectId}/preview/assets/intro.mp4`,
       { method: 'HEAD' },
@@ -1142,8 +1354,10 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(headPreview.headers.get('etag'), fileContentVersion(videoBytes));
     assert.equal(headPreview.headers.get('x-openmotion-media-track'), 'original');
     assert.equal(env.storage.presignGetCalls, presignBefore, 'HEAD must NEVER call presignGet');
+    assert.equal(env.pgClient.selectCount - headSelectsBefore, 1, 'HEAD preview asset should use 1 joined PG query');
 
-    // GET /api/projects/:id/preview/assets/intro.mp4 -> 302 Found with Cache-Control, Vary & X-OpenMotion-Media-Track: original!
+    // GET /api/projects/:id/preview/assets/intro.mp4 -> 302 Found reusing loaded file (1 SELECT, never re-calling getFile)!
+    const getSelectsBefore = env.pgClient.selectCount;
     const getPreview = await env.studioApp.request(
       `/api/projects/${created.projectId}/preview/assets/intro.mp4`,
       { method: 'GET' },
@@ -1153,6 +1367,7 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     assert.equal(getPreview.headers.get('cache-control'), 'private, max-age=60');
     assert.equal(getPreview.headers.get('vary'), 'Origin, Cookie');
     assert.equal(getPreview.headers.get('x-openmotion-media-track'), 'original');
+    assert.equal(env.pgClient.selectCount - getSelectsBefore, 1, 'GET preview asset must reuse file without a second getFile lookup');
 
     // Seed a completed export job in PG and test HEAD vs GET on /api/render/:jobId/view & /download.
     const jobId = randomUUID();
@@ -1561,9 +1776,14 @@ describe('Diskless Studio HTTP Routes (ETag, HEAD direct, 302 headers, DOM & GSA
     const loads = t.mock.method(env.files, 'loadVirtualProject');
     const results = await Promise.all(Array.from({ length: 8 }, () => env.studioApp.request(url)));
     assert.ok(results.every(response => response.status === 200));
+    assert.equal(results[0]!.headers.get('cache-control'), 'private, no-cache');
+    assert.equal(results[0]!.headers.get('vary'), 'Cookie, Authorization');
     assert.equal(loads.mock.callCount(), 1);
     const etag = results[0]!.headers.get('etag')!;
-    assert.equal((await env.studioApp.request(url, { headers: { 'If-None-Match': etag } })).status, 304);
+    const revalidated = await env.studioApp.request(url, { headers: { 'If-None-Match': etag } });
+    assert.equal(revalidated.status, 304);
+    assert.equal(revalidated.headers.get('cache-control'), 'private, no-cache');
+    assert.equal(revalidated.headers.get('vary'), 'Cookie, Authorization');
     assert.equal(loads.mock.callCount(), 1);
 
     const warm = await env.studioApp.request(url + '?capture=1', { method: 'HEAD' });

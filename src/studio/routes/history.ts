@@ -6,7 +6,7 @@ import {
   type DisklessStudioDeps,
   type StudioVariables,
 } from '../context.ts';
-import { formatVersionFromSha256 } from '../etag.ts';
+import { formatFileVersion } from '../etag.ts';
 
 function parseActorKind(raw: unknown): HistoryActorKind | undefined {
   if (raw === 'user' || raw === 'person') return 'user';
@@ -163,7 +163,7 @@ export function createStudioHistoryRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     const blob = await deps.history.readHistoryBlob(auth, projectId, hash);
     c.header('Content-Type', blob.mimeType);
     c.header('Content-Length', String(blob.buffer.byteLength));
-    c.header('ETag', formatVersionFromSha256(blob.sha256));
+    c.header('ETag', formatFileVersion(blob.blobScope, blob.sha256));
     c.header('Cache-Control', 'private, max-age=31536000, immutable');
     return c.body(new Uint8Array(blob.buffer), 200);
   });
@@ -176,7 +176,7 @@ export function createStudioHistoryRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     const blob = await deps.history.readHistoryBlob(auth, projectId, hash);
     c.header('Content-Type', blob.mimeType);
     c.header('Content-Length', String(blob.buffer.byteLength));
-    c.header('ETag', formatVersionFromSha256(blob.sha256));
+    c.header('ETag', formatFileVersion(blob.blobScope, blob.sha256));
     c.header('Cache-Control', 'private, max-age=31536000, immutable');
     return c.body(new Uint8Array(blob.buffer), 200);
   });

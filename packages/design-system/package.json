@@ -8,6 +8,8 @@
     ".": "./index.js",
     "./ui.css": "./ui.css",
     "./studio.css": "./studio.css",
+    "./studio-shell.css": "./studio-shell.css",
+    "./studio-editor.css": "./studio-editor.css",
     "./tailwind.css": "./tailwind.css",
     "./loading.css": "./loading.css",
     "./tokens.json": "./tokens.json"

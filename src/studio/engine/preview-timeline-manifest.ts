@@ -25,7 +25,9 @@ export const PREVIEW_TIMELINE_MANIFEST = `
       const domId = node.id || undefined;
       const hfId = node.getAttribute('data-hf-id') || undefined;
       const sourceFile = sourceFileForElement(node);
-      if ((!domId && !hfId) || !Object.hasOwn(sourceVersions, sourceFile)) return clip;
+      // The document knows its own project path even when its base version is unavailable.
+      // Nested file markers still need to match a file that was included by the bundler.
+      if ((!domId && !hfId) || (sourceFile !== compositionPath && !Object.hasOwn(sourceVersions, sourceFile))) return clip;
       // A composition's nested media belongs to its own timeline.
       const media = node.matches('audio,video,img,[data-composition-id],[data-composition-src],[data-composition-file]')
         ? node : node.querySelector('audio,video,img');

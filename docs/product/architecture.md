@@ -83,6 +83,8 @@ Managed with Drizzle ORM migrations (`src/db/schema/`):
 
 ### S3-Compatible Content-Addressed Storage (CAS)
 
+Deploy the database migration and revision-aware API, media and render workers before enabling `TEXT_PATCH_WRITES` on the API. It defaults to false. When enabled, PostgreSQL stores small text replacements in `project_text_revisions`. Each revision names its immutable parent. S3 holds complete baselines and media. A save against an indexed baseline needs only the database until a checkpoint is due. On an older unindexed file the service may read its baseline once to check UTF-8 boundaries. Preview, project history, single-file downloads and ZIP exports all resolve the file version pinned by the project. See the [project editing contract](edit-core.md).
+
 - Immutable media blobs, project source files, version snapshots, derived preview proxies (`workspaces/{wid}/derived/{sha256}/proxy.{mp4,webp,m4a}`), and rendered MP4 artifacts are stored under content-addressed keys (`workspaces/{wid}/blobs/{sha256}` and `catalog/blobs/{sha256}` in `src/infra/storage.ts`, plus staging prefixes for presigned uploads and export artifacts).
 - **Time-Window-Aligned Presigned GET Caching**: Immutable CAS objects align presigned GET signing timestamps to UTC buckets (`S3_PRESIGN_CACHE_WINDOW_SEC=3600`) with `immutable` response cache headers so browsers and CDNs reuse cached media across timeline seeks and reloads.
 - **Direct browser & Agent transfers**: Clients never proxy large binary uploads through `api` memory. Uploads follow a 3-step presigned workflow:

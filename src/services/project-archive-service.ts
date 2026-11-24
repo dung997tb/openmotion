@@ -3,7 +3,7 @@ import { crc32 } from 'node:zlib';
 import { and, eq } from 'drizzle-orm';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
-import type { BlobScope, HeadObjectResult, StoragePort } from '../contracts/storage.ts';
+import type { HeadObjectResult, StoragePort } from '../contracts/storage.ts';
 import type { Database } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { idempotencyReceipts } from '../db/schema/jobs.ts';
@@ -13,6 +13,7 @@ import { PROJECT_ARCHIVE_LIMITS } from '../../shared/project-archive.ts';
 import { firstFoldedDuplicate, unsafePortableSegment } from '../../shared/project-name.ts';
 import {
   assertWritableProjectPath,
+  computeProjectRevision,
   isTextProjectPath,
   projectPath,
   validateProjectTitle,
@@ -346,24 +347,6 @@ export class ProjectArchiveService {
       );
     }
 
-    // Check expectedRevisions before reading blobs.
-    if (input.expectedRevisions) {
-      for (const target of targets) {
-        const expected = input.expectedRevisions[target.id];
-        if (expected !== undefined && target.revision.trim() !== expected.trim()) {
-          throw new CloudError(
-            'VERSION_CONFLICT',
-            `Project "${target.title}" (${target.id}) changed since revision ${expected}.`,
-            {
-              status: 409,
-              applied: false,
-              details: { projectId: target.id, expectedRevision: expected, currentRevision: target.revision.trim() },
-            },
-          );
-        }
-      }
-    }
-
     const zipEntries = new Map<string, Buffer>();
     const manifestProjects: ArchiveManifest['projects'] = [];
     const exportedEntries: ArchiveExportedProjectEntry[] = [];
@@ -374,6 +357,15 @@ export class ProjectArchiveService {
     for (const target of targets) {
       const folder = sanitizeFolderSegment(target.title, usedFolders);
       const fileRows = await this.files.listFiles(ctx, target.id, { allowTrashed: false });
+      // This manifest may have advanced since project selection. Every ZIP member and
+      // the revision we return must describe the same captured set of file references.
+      const revision = computeProjectRevision(fileRows.map(f => ({ path: f.path, size: f.sizeBytes, hash: f.sha256 })));
+      const expected = input.expectedRevisions?.[target.id];
+      if (expected !== undefined && expected.trim() !== revision) {
+        throw new CloudError('VERSION_CONFLICT', `Project "${target.title}" changed before export.`, {
+          status: 409, applied: false, details: { projectId: target.id, expectedRevision: expected, currentRevision: revision },
+        });
+      }
       const projectBuffers = new Map<string, Buffer>();
       let projectBytes = 0;
 
@@ -413,13 +405,13 @@ export class ProjectArchiveService {
         sourceProjectId: target.id,
         templateId: target.templateId,
         namingLanguage: target.namingLanguage,
-        revision: target.revision.trim(),
+        revision,
       });
       exportedEntries.push({
         projectId: target.id,
         title: target.title,
         folder,
-        revision: target.revision.trim(),
+        revision,
         fileCount: fileRows.length,
         bytes: projectBytes,
       });
@@ -657,7 +649,7 @@ export class ProjectArchiveService {
 
   /**
    * Duplicate an existing project inside the same workspace by referencing its existing S3 CAS blobs
-   * (zero blob re-upload; increments `workspace_blobs.ref_count` cleanly in PG).
+   * using immutable content blobs, materializing edited text once when needed.
    */
   async duplicateProject(
     ctx: AuthContext,
@@ -671,15 +663,20 @@ export class ProjectArchiveService {
       ? validateProjectTitle(input.title)
       : `${source.title.slice(0, 90)} Copy`;
 
-    const initialFiles: InitialProjectFile[] = sourceFiles.map((f) => ({
-      path: f.path,
-      blobScope: f.blobScope as BlobScope,
-      sha256: f.sha256,
-      sizeBytes: f.sizeBytes,
-      mimeType: f.mimeType,
-      isText: f.isText,
-      metadata: f.metadata,
-    }));
+    const initialFiles: InitialProjectFile[] = [];
+    for (const f of sourceFiles) {
+      // A copy must survive permanent deletion of the source project. Only cross-project
+      // copies materialize patch revisions; normal snapshots within a project share them.
+      let sha256 = f.sha256;
+      if (f.blobScope === 'patch') {
+        if (!this.storage.ensureTextCheckpoint) throw new CloudError('STORAGE_ERROR', 'Text revision store unavailable.', { status: 503 });
+        sha256 = await this.storage.ensureTextCheckpoint(ctx.workspaceId, f.sha256);
+      }
+      initialFiles.push({
+        path: f.path, blobScope: f.blobScope === 'patch' ? 'workspace' : f.blobScope, sha256,
+        sizeBytes: f.sizeBytes, mimeType: f.mimeType, isText: f.isText, metadata: f.metadata,
+      });
+    }
 
     return this.workspace.createProject(ctx, {
       title: copyTitle,

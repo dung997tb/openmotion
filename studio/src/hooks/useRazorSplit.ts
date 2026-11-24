@@ -9,10 +9,12 @@ import { linkedMembersOf } from "../player/components/audioClipLink";
 import { isLinkedSelectionOn } from "../utils/linkedClipPreferences";
 import { buildAtomicCutIntents, runAtomicCutTransaction } from "../utils/razorSplitTransaction";
 import type { RecordEditInput } from "./timelineEditingHelpers";
+import { projectLocalTimelineEdit } from "../player/lib/peerTimeline";
 import { useFreezeFrame } from "./useFreezeFrame";
 import { useMvpEditor } from "../motion/StudioHost";
 
 interface UseRazorSplitOptions {
+  previewIframeRef?: React.RefObject<HTMLIFrameElement | null>;
   projectId: string | null;
   // fallow-ignore-next-line code-duplication
   activeCompPath: string | null;
@@ -27,6 +29,7 @@ interface UseRazorSplitOptions {
 
 export function useRazorSplit({
   projectId,
+  previewIframeRef,
   activeCompPath,
   showToast,
   writeProjectFile,
@@ -73,6 +76,11 @@ export function useRazorSplit({
         writeProjectFile,
         recordEdit,
         observeProjectFileVersion,
+        projectPending: files => {
+          const path = activeCompPath ?? "index.html";
+          const file = files[path];
+          if (file && pid === projectIdRef.current) return projectLocalTimelineEdit(pid, path, file, previewIframeRef?.current ?? null);
+        },
         synchronize: () => synchronize(intents.length === 1 ? intents[0].path : undefined),
       });
       trackStudioRazorSplit({ mode, count: result.splitCount });
@@ -93,6 +101,7 @@ export function useRazorSplit({
     [
       activeCompPath,
       observeProjectFileVersion,
+      previewIframeRef,
       recordEdit,
       showToast,
       synchronize,

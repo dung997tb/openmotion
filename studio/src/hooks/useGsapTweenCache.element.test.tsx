@@ -59,3 +59,28 @@ it("reads a file with no tweens once: the parse endpoint answers from the file o
     vi.useRealTimers();
   }
 });
+
+it("refreshes the inspector only for a selected, affected composition", async () => {
+  vi.mocked(fetchParsedAnimations).mockClear();
+  const selection = { id: "title", sourceFile: "intro.html" } as DomEditSelection;
+  function Harness({ version, paths, target = selection }: {
+    version: number; paths?: string[]; target?: DomEditSelection | null;
+  }) {
+    useGsapAnimationsForElement("p", target?.sourceFile ?? "index.html", target, version, undefined, paths);
+    return null;
+  }
+  const root = mountReactHarness(<Harness version={0} />);
+  try {
+    await act(async () => {});
+    await act(async () => root.render(<Harness version={1} paths={["outro.html"]} />));
+    expect(fetchParsedAnimations).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(<Harness version={2} paths={["intro.html", "scene.html"]} />));
+    expect(fetchParsedAnimations).toHaveBeenCalledTimes(2);
+    await act(async () => root.render(<Harness version={4} paths={["outro.html"]} />));
+    expect(fetchParsedAnimations).toHaveBeenCalledTimes(3);
+    await act(async () => root.render(<Harness version={5} target={null} />));
+    expect(fetchParsedAnimations).toHaveBeenCalledTimes(3);
+  } finally {
+    act(() => root.unmount());
+  }
+});

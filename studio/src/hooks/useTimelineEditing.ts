@@ -210,6 +210,7 @@ export function useTimelineEditing({
   const handleBlockedTimelineEdit = useBlockedTimelineEditToast(showToast);
   const { handleRazorSplit, handleRazorSplitAll, handleSplitAtPlayhead, handleFreezeFrame } = useRazorSplit({
     projectId,
+    previewIframeRef,
     activeCompPath,
     showToast,
     writeProjectFile,

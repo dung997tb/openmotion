@@ -2,21 +2,24 @@ import { createHash } from 'node:crypto';
 import { PREVIEW_FIRST_FRAME } from './preview-first-frame.ts';
 import { PREVIEW_ASSET_READINESS } from './preview-asset-readiness.ts';
 import { PREVIEW_INSPECTOR } from './preview-inspector.ts';
+import { PREVIEW_INSPECTOR_STYLES } from './preview-inspector-styles.ts';
 import { PREVIEW_TIMELINE_MANIFEST } from './preview-timeline-manifest.ts';
 import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
 import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
+import { PREVIEW_PEER_TIMING } from './preview-peer-timing.ts';
+import type { PreviewLiveEdits } from '../../../shared/preview-timing.ts';
 import { PREVIEW_THUMBNAIL_CAPTURE } from './preview-thumbnail-capture.ts';
 
 function scopedScript(configuration: string, body: string): string {
   return `(function(){
   var SOURCE='openmotion-preview-bridge', PARENT='openmotion-studio', VERSION=1;
   ${configuration}
-  var token=new URL(location.href).searchParams.get('pt');
+  var token=new globalThis.URL(location.href).searchParams.get('pt');
   if(!token || window.parent===window) return;
   var parentWindow=window.parent;
   var parentOrigin='*';
-  try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
+  try { if(document.referrer) parentOrigin=new globalThis.URL(document.referrer).origin; } catch (_) {}
   function post(type,payload,requestId){
     var message=Object.assign({source:SOURCE,version:VERSION,type:type,projectId:projectId,token:token},payload||{});
     if(requestId) message.requestId=requestId;
@@ -36,9 +39,17 @@ export function previewBuildBusyScript(projectId: string, retryAfterSeconds: num
  * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
  * same-origin previews keep their existing DOM/runtime fast path.
  */
+export const PREVIEW_SOURCE_IDENTITY = `
+  function sourceIdentity(raw) {
+    if (!raw) return {};
+    return raw.startsWith('"patch:') ? {fileVersion:raw} : {sha256:raw, fileVersion:'"sha256:'+raw+'"'};
+  }
+`;
+
 export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   var settings=JSON.parse(document.currentScript.getAttribute('data-openmotion-preview'));
   var projectId=settings.projectId, compositionPath=settings.compositionPath, sourceVersions=settings.sourceVersions;`, `
+  ${PREVIEW_SOURCE_IDENTITY}
   var pickMode=false, picked=null;
   function player(){ return window.__player || null; }
   ${PREVIEW_FIRST_FRAME}
@@ -57,6 +68,8 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
       width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
       fps:window.__clipManifest&&window.__clipManifest.fps,
       durationInFrames:window.__clipManifest&&Number(window.__clipManifest.durationInFrames)||0,
+      timelinePath:includeManifest?compositionPath:undefined,
+      timelineVersion:includeManifest?sourceIdentity(sourceVersions?.[compositionPath]).fileVersion:undefined,
       clips:includeManifest&&window.__clipManifest&&Array.isArray(window.__clipManifest.clips)?authoredTimelineClips(window.__clipManifest.clips):undefined};
   }
   function sourceFileForElement(element){
@@ -77,7 +90,9 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   ${PREVIEW_TIMELINE_MANIFEST}
   ${PREVIEW_CANVAS_DRAG}
   ${PREVIEW_INLINE_TEXT}
+  ${PREVIEW_PEER_TIMING}
   ${PREVIEW_INSPECTOR}
+  ${PREVIEW_INSPECTOR_STYLES}
   ${PREVIEW_LAYERS}
   ${PREVIEW_THUMBNAIL_CAPTURE}
   function respond(requestId,result,error,transfer){
@@ -87,13 +102,17 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
-  function ready(){ post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
+  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,liveEdits:settings.liveEdits,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
     if(!message || message.source!==PARENT || message.version!==VERSION || message.projectId!==projectId || message.token!==token) return;
     var requestId=message.requestId;
     try {
+      if(message.type==='peer-timing' || message.type==='peer-presentation'){
+        if (!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
+        respond(requestId,applyPeerTiming(message)); return;
+      }
       if(message.type==='handshake'){
         if(message.timelineOnly) post('timeline-state',timeline(true));
         else { ready(); respond(requestId,{ready:true}); }
@@ -126,6 +145,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         respond(requestId,canvas?{sourceFile:compositionPath,fit:canvas.getAttribute('data-canvas-fit')==='cover'?'cover':'contain'}:null); return;
       }
       if(message.type==='inspect-element'){ respond(requestId,inspectPreviewElement(message)); return; }
+      if(message.type==='inspector-styles'){
+        if(settings.studioOrigin && settings.studioOrigin === event.origin) previewInspectorStyles(message);
+        return;
+      }
       if(message.type==='layer-tree'){ previewLayerTree(message); return; }
       if(message.type==='layer-family'){ respond(requestId,previewLayerFamily(message)); return; }
       if(message.type==='layer-select'){ respond(requestId,selectPreviewLayer(message)); return; }
@@ -183,14 +206,22 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
 
 export const PREVIEW_BRIDGE_PATH = '/api/preview-bridge.js';
 export const PREVIEW_BRIDGE_VERSION = createHash('sha256').update(PREVIEW_BRIDGE_SCRIPT).digest('hex');
+export const PREVIEW_BRIDGE_ASSET = '/api/preview-bridge/' + PREVIEW_BRIDGE_VERSION + '.js';
+export const PREVIEW_BRIDGE_ASSET_RE = /^\/api\/preview-bridge\/([a-f0-9]{64})\.js$/;
+const bridgeIntegrity = 'sha256-' + Buffer.from(PREVIEW_BRIDGE_VERSION, 'hex').toString('base64');
 
-export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>) {
-  const src = new URL(PREVIEW_BRIDGE_PATH, origin);
-  src.searchParams.set('v', PREVIEW_BRIDGE_VERSION);
-  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions })
-    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function htmlAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[], liveEdits?: PreviewLiveEdits) {
+  const src = new URL(PREVIEW_BRIDGE_ASSET, origin);
+  const settings = htmlAttribute(JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, liveEdits, ...(canRebindTiming && { canRebindTiming }) }));
+  // A pod from before this route existed may still serve an asset request
+  // during rollout. Reuse the player's bounded preview retry if loading fails.
+  const retry = htmlAttribute(previewBuildBusyScript(projectId, 1));
   return {
-    preload: `<link rel="preload" as="script" href="${src.href}">`,
-    script: `<script src="${src.href}" data-openmotion-preview="${settings}"></script>\n`,
+    preload: `<link rel="preload" as="script" href="${src.href}" integrity="${bridgeIntegrity}">`,
+    script: `<script src="${src.href}" data-openmotion-preview="${settings}" integrity="${bridgeIntegrity}" onerror="${retry}"></script>\n`,
   };
 }

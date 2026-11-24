@@ -297,6 +297,35 @@ it('ships static WebP posters and waits to fetch archived video until playback s
   act(() => root.render(<SkillMedia skill={skill} playing={false} />));
   expect(container.querySelectorAll('video')).toHaveLength(0);
   expect(container.querySelectorAll('img')).toHaveLength(2);
+  // Re-entering playback reuses the cached Blob instead of re-fetching from GitHub Raw.
+  await act(async () => root.render(<SkillMedia skill={skill} playing />));
+  expect(videoRequests()).toEqual([videoUrl]);
+  act(() => root.render(<SkillMedia skill={skill} playing={false} />));
+});
+
+it('keeps a shared in-flight archived preview alive when one of two subscribers unmounts', async () => {
+  const skill = motionSkills.find(entry => entry.cover?.video?.startsWith(skillPreviewSnapshot) && entry.id !== 'motionmaxxing')!;
+  const videoUrl = skill.cover!.video!;
+  let resolveFetch!: (response: Response) => void;
+  let capturedSignal: AbortSignal | undefined;
+  const fetcher = vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input) === videoUrl) {
+      capturedSignal = init?.signal ?? undefined;
+      return new Promise<Response>(resolve => { resolveFetch = resolve; });
+    }
+    return Promise.resolve(new Response(null, { status: 404 }));
+  });
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:shared-preview');
+  act(() => root.render(<><SkillMedia key="a" skill={skill} playing /><SkillMedia key="b" skill={skill} playing /></>));
+  expect(fetcher.mock.calls.filter(([input]) => String(input) === videoUrl)).toHaveLength(1);
+  // Unmounting the first subscriber must not abort the shared request for the remaining subscriber.
+  act(() => root.render(<><SkillMedia key="b" skill={skill} playing /></>));
+  expect(capturedSignal?.aborted).toBe(false);
+  await act(async () => {
+    resolveFetch(new Response('sample', { headers: { 'Content-Type': 'application/octet-stream' } }));
+  });
+  expect(container.querySelectorAll('video')).toHaveLength(1);
+  expect(container.querySelector('video')!.getAttribute('src')).toBe('blob:shared-preview');
 });
 
 it('merges same-repository cover credits while retaining external sources and attribution', () => {

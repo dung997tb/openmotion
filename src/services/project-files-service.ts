@@ -1,17 +1,22 @@
+import { prepareFullBaseline } from './text-patch-boundaries.ts';
+import { appendTextRevisions, commitTextEdits, type PendingTextRevision, type TextEditIdentity } from './project-text-edits.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import { isUtf8 } from 'node:buffer';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
-import { CloudError, isCloudError } from '../contracts/errors.ts';
+import { CloudError } from '../contracts/errors.ts';
 import type { ProjectEvent } from '../contracts/events.ts';
+import { htmlFileVersions } from './event-file-versions.ts';
 import type { BlobMetadata, BlobScope, PresignGetOptions, StoragePort } from '../contracts/storage.ts';
-import { applyWorkspaceBlobRefDeltas, type BlobRefDelta } from '../db/cas.ts';
+import { applyWorkspaceBlobRefDeltas, withBlobGcRetry, type BlobRefDelta } from '../db/cas.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { catalogTemplateFiles, workspaceBlobs } from '../db/schema/blobs-assets.ts';
 import { idempotencyReceipts, jobs } from '../db/schema/jobs.ts';
 import {
   projectFiles,
+  projectTextRevisions,
   projectHistoryEntries,
   projectVersionFiles,
   projectVersions,
@@ -20,7 +25,7 @@ import {
 } from '../db/schema/project-files.ts';
 import { projectGrants, projects } from '../db/schema/projects.ts';
 import { projectChannel, workspaceCatalogChannel } from '../infra/redis.ts';
-import { assertTenantScopedKey, catalogBlobKey, workspaceBlobKey } from '../infra/storage.ts';
+import { assertTenantScopedKey, catalogBlobKey, textRevisionKey, workspaceBlobKey } from '../infra/storage.ts';
 import {
   assertWritableProjectPath,
   computeProjectRevision,
@@ -31,7 +36,8 @@ import {
 import {
   computePreviewImpact,
   createWriteToken,
-  formatVersionFromSha256,
+  DELETED_VERSION,
+  formatFileVersion,
   getMimeType,
   sha256Hex,
 } from '../studio/etag.ts';
@@ -44,7 +50,6 @@ import {
 export const MAX_TEXT_FILE_BYTES = 16 * 1024 * 1024;
 export const MAX_BATCH_FILE_OPS = 256;
 export const DEFAULT_HISTORY_COALESCE_WINDOW_MS = 4000;
-const GC_RETRY_ATTEMPTS = 3;
 
 export interface HotTextCachePort {
   getText(sha256: string): Promise<string | null>;
@@ -66,6 +71,7 @@ export interface ProjectFilesServiceDeps {
   readonly historyCoalesceWindowMs?: number;
   /** Optional clock provider for deterministic tests. Defaults to `() => new Date()`. */
   readonly now?: () => Date;
+  readonly textPatchWrites?: boolean;
 }
 
 export type ProjectFileOp =
@@ -107,6 +113,7 @@ export interface FilePrecondition {
 export interface CommitProjectFilesInput {
   readonly projectId: string;
   readonly ops: readonly ProjectFileOp[];
+  readonly textRevisions?: readonly PendingTextRevision[];
   readonly expectedRevision?: string;
   readonly expectedVersionId?: string;
   readonly filePreconditions?: readonly FilePrecondition[];
@@ -120,6 +127,8 @@ export interface CommitProjectFilesInput {
   readonly actorKind?: HistoryActorKind;
   readonly actorName?: string;
   readonly windowId?: string | null;
+  /** Authenticated user's continuous Studio gesture. Its snapshots remain individually addressable. */
+  readonly undoGroup?: string;
   readonly writeToken?: string | null;
   readonly skipVersion?: boolean;
   readonly forceVersion?: boolean;
@@ -221,6 +230,7 @@ export function isBinaryBuffer(buffer: Buffer): boolean {
 }
 
 export function resolveBlobStorageKey(workspaceId: string, blobScope: BlobScope, sha256: string): string {
+  if (blobScope === 'patch') return textRevisionKey(workspaceId, sha256);
   const key = blobScope === 'catalog' ? catalogBlobKey(sha256) : workspaceBlobKey(workspaceId, sha256);
   return assertTenantScopedKey(workspaceId, key, { allowCatalog: blobScope === 'catalog' });
 }
@@ -229,7 +239,7 @@ export function canonicalInputHash(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-async function readCommitReceipt(
+export async function readCommitReceipt(
   db: DbExecutor, workspaceId: string, scope: string, requestId: string, inputHash: string, lock = false,
 ): Promise<CommitProjectFilesResult | null> {
   const query = db
@@ -368,9 +378,11 @@ export class ProjectFilesService {
   private readonly eventBus?: EventBusPort;
   private readonly historyCoalesceWindowMs: number;
   private readonly nowFn: () => Date;
+  readonly textPatchWrites: boolean;
 
   constructor(deps: ProjectFilesServiceDeps) {
     this.db = deps.db;
+    this.textPatchWrites = deps.textPatchWrites ?? false;
     this.storage = deps.storage;
     this.hotTextCache = deps.hotTextCache;
     this.eventBus = deps.eventBus;
@@ -390,11 +402,14 @@ export class ProjectFilesService {
       allowTrashed: options.allowTrashed ?? true,
       auth: ctx,
     });
+    return this.listFilesForProject(ctx, project.id);
+  }
 
+  private async listFilesForProject(ctx: AuthContext, projectId: string): Promise<VirtualFileRecord[]> {
     const rows = await this.db
       .select()
       .from(projectFiles)
-      .where(and(eq(projectFiles.workspaceId, ctx.workspaceId), eq(projectFiles.projectId, project.id)))
+      .where(and(eq(projectFiles.workspaceId, ctx.workspaceId), eq(projectFiles.projectId, projectId)))
       .orderBy(asc(projectFiles.path));
 
     if (rows.length === 0) return [];
@@ -403,29 +418,35 @@ export class ProjectFilesService {
     const catalogShas = [...new Set(rows.filter((r) => r.blobScope === 'catalog').map((r) => r.sha256.trim()))];
 
     const workspaceMetaMap = new Map<string, BlobMetadata | null>();
-    if (workspaceShas.length > 0) {
-      const blobRows = await this.db
-        .select({ sha256: workspaceBlobs.sha256, metadata: workspaceBlobs.metadata })
-        .from(workspaceBlobs)
-        .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), inArray(workspaceBlobs.sha256, workspaceShas)));
-      for (const blob of blobRows) {
-        workspaceMetaMap.set(blob.sha256.trim(), blob.metadata ?? null);
-      }
-    }
-
     const catalogMetaMap = new Map<string, BlobMetadata | null>();
-    if (catalogShas.length > 0) {
-      const catRows = await this.db
-        .select({ sha256: catalogTemplateFiles.sha256, metadata: catalogTemplateFiles.metadata })
-        .from(catalogTemplateFiles)
-        .where(inArray(catalogTemplateFiles.sha256, catalogShas));
-      for (const cat of catRows) {
-        const key = cat.sha256.trim();
-        if (!catalogMetaMap.has(key) || cat.metadata) {
-          catalogMetaMap.set(key, cat.metadata ?? null);
-        }
-      }
-    }
+
+    await Promise.all([
+      workspaceShas.length > 0
+        ? this.db
+            .select({ sha256: workspaceBlobs.sha256, metadata: workspaceBlobs.metadata })
+            .from(workspaceBlobs)
+            .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), inArray(workspaceBlobs.sha256, workspaceShas)))
+            .then((blobRows) => {
+              for (const blob of blobRows) {
+                workspaceMetaMap.set(blob.sha256.trim(), blob.metadata ?? null);
+              }
+            })
+        : Promise.resolve(),
+      catalogShas.length > 0
+        ? this.db
+            .select({ sha256: catalogTemplateFiles.sha256, metadata: catalogTemplateFiles.metadata })
+            .from(catalogTemplateFiles)
+            .where(inArray(catalogTemplateFiles.sha256, catalogShas))
+            .then((catRows) => {
+              for (const cat of catRows) {
+                const key = cat.sha256.trim();
+                if (!catalogMetaMap.has(key) || cat.metadata) {
+                  catalogMetaMap.set(key, cat.metadata ?? null);
+                }
+              }
+            })
+        : Promise.resolve(),
+    ]);
 
     return rows.map((row) => {
       const sha256 = row.sha256.trim();
@@ -446,6 +467,25 @@ export class ProjectFilesService {
     });
   }
 
+  /** Lightweight existence check for a file in an already-authorized project. */
+  async hasFile(ctx: AuthContext, projectId: string, filePath: string): Promise<boolean> {
+    assertValidUuid(ctx.workspaceId, 'workspaceId');
+    assertValidUuid(projectId, 'projectId');
+    const safePath = normalizeSafeProjectPath(filePath);
+    const rows = await this.db
+      .select({ path: projectFiles.path })
+      .from(projectFiles)
+      .where(
+        and(
+          eq(projectFiles.workspaceId, ctx.workspaceId),
+          eq(projectFiles.projectId, projectId),
+          eq(projectFiles.path, safePath),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+
   /** Lookup metadata for a single project file (PG metadata only, zero S3 read). */
   async getFile(
     ctx: AuthContext,
@@ -453,34 +493,58 @@ export class ProjectFilesService {
     filePath: string,
     options: { allowTrashed?: boolean } = {},
   ): Promise<VirtualFileRecord | null> {
-    const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, {
-      allowTrashed: options.allowTrashed ?? true,
-      auth: ctx,
-    });
+    assertValidUuid(ctx.workspaceId, 'workspaceId');
+    assertValidUuid(projectId, 'projectId');
     const safePath = normalizeSafeProjectPath(filePath);
 
     const rows = await this.db
-      .select()
-      .from(projectFiles)
-      .where(
+      .select({
+        project: projects,
+        file: projectFiles,
+        workspaceBlobMetadata: workspaceBlobs.metadata,
+      })
+      .from(projects)
+      .leftJoin(
+        projectFiles,
         and(
-          eq(projectFiles.workspaceId, ctx.workspaceId),
-          eq(projectFiles.projectId, project.id),
+          eq(projectFiles.workspaceId, projects.workspaceId),
+          eq(projectFiles.projectId, projects.id),
           eq(projectFiles.path, safePath),
         ),
-      );
-    const row = rows[0];
+      )
+      .leftJoin(
+        workspaceBlobs,
+        and(
+          eq(workspaceBlobs.workspaceId, projectFiles.workspaceId),
+          eq(workspaceBlobs.sha256, projectFiles.sha256),
+          eq(projectFiles.blobScope, 'workspace'),
+        ),
+      )
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, ctx.workspaceId)))
+      .limit(1);
+
+    const joined = rows[0];
+    if (!joined) {
+      throw new CloudError('PROJECT_NOT_FOUND', `Project ${projectId} was not found in this workspace.`, {
+        status: 404,
+        applied: false,
+      });
+    }
+    await assertAgentProjectAccess(this.db, ctx, joined.project);
+    if (joined.project.trashed && !(options.allowTrashed ?? true)) {
+      throw new CloudError('PROJECT_TRASHED', `Project ${projectId} is in the trash and cannot be modified.`, {
+        status: 400,
+        applied: false,
+      });
+    }
+
+    const row = joined.file;
     if (!row) return null;
 
     const sha256 = row.sha256.trim();
-    let metadata: BlobMetadata | null = null;
-    if (row.blobScope === 'workspace') {
-      const blobRows = await this.db
-        .select({ metadata: workspaceBlobs.metadata })
-        .from(workspaceBlobs)
-        .where(and(eq(workspaceBlobs.workspaceId, ctx.workspaceId), eq(workspaceBlobs.sha256, sha256)));
-      metadata = blobRows[0]?.metadata ?? null;
-    } else {
+    let metadata: BlobMetadata | null =
+      row.blobScope === 'workspace' ? (joined.workspaceBlobMetadata ?? null) : null;
+    if (row.blobScope === 'catalog') {
       const catRows = await this.db
         .select({ metadata: catalogTemplateFiles.metadata })
         .from(catalogTemplateFiles)
@@ -503,7 +567,7 @@ export class ProjectFilesService {
 
   /** Read a text blob via SHA-256 HotTextCache -> S3 CAS fallback + async cache warm. */
   async readTextBlob(workspaceId: string, blobScope: BlobScope, sha256: string): Promise<string> {
-    if (this.hotTextCache) {
+    if (this.hotTextCache && blobScope !== 'patch') {
       try {
         const cached = await this.hotTextCache.getText(sha256);
         if (cached !== null) return cached;
@@ -516,7 +580,7 @@ export class ProjectFilesService {
     const buffer = await this.storage.getObjectBuffer(key, MAX_TEXT_FILE_BYTES);
     const content = buffer.toString('utf8');
 
-    if (this.hotTextCache) {
+    if (this.hotTextCache && blobScope !== 'patch') {
       void this.hotTextCache.setText(sha256, content).catch(() => {});
     }
     return content;
@@ -545,7 +609,7 @@ export class ProjectFilesService {
       if (requested.get(file.path) !== 'asset' && !file.isText) {
         throw new CloudError('INVALID_ARGUMENT', 'A composition must be a text file', { status: 415 });
       }
-      versions.set(file.path, formatVersionFromSha256(file.sha256.trim()));
+      versions.set(file.path, formatFileVersion(file.blobScope, file.sha256.trim()));
     }
     for (const path of requested.keys()) {
       if (!versions.has(path) && requested.get(path) === 'optional-text') {
@@ -558,6 +622,25 @@ export class ProjectFilesService {
       sources.set(file.path, await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256.trim()));
     }));
     return { kind: 'inputs' as const, revision: project.revision.trim(), versionId: project.currentVersionId, versions, sources, filesByPath: new Map(rows.map(file => [file.path, file] as const)) };
+  }
+
+  /** MCP supplies a project snapshot. Only files actually used by an edit need to match. */
+  async checkObservedFiles(ctx: AuthContext, projectId: string, expected: {expectedVersionId: string; expectedRevision: string},
+    versions: ReadonlyMap<string, string | null>): Promise<void> {
+    if (!isUuid(expected.expectedVersionId)) {
+      throw new CloudError('INVALID_ARGUMENT', 'Invalid project version ID', {status: 400, applied: false});
+    }
+    const [snapshot] = await this.db.select({revision: projectVersions.revision}).from(projectVersions).where(and(
+      eq(projectVersions.workspaceId, ctx.workspaceId), eq(projectVersions.projectId, projectId), eq(projectVersions.id, expected.expectedVersionId)));
+    if (!snapshot || snapshot.revision !== expected.expectedRevision) throw new CloudError('VERSION_CONFLICT',
+      'The original project snapshot is unavailable', {status: 409, applied: false});
+    const entries = await this.db.select().from(projectVersionFiles).where(and(eq(projectVersionFiles.versionId, expected.expectedVersionId),
+      eq(projectVersionFiles.projectId, projectId), inArray(projectVersionFiles.path, [...versions.keys()])));
+    const observed = new Map(entries.map(entry => [entry.path, formatFileVersion(entry.blobScope, entry.sha256)]));
+    for (const [path, currentVersion] of versions) {
+      if ((observed.get(path) ?? null) !== currentVersion) throw new CloudError('VERSION_CONFLICT', 'An input file was changed',
+        {status: 409, applied: false, details: {path, currentVersion}});
+    }
   }
 
   async readTextForCommand(ctx: AuthContext, projectId: string, path: string, scope: string, requestId: string, inputHash: string) {
@@ -583,15 +666,24 @@ export class ProjectFilesService {
       throw new CloudError('INVALID_ARGUMENT', `File "${file.path}" is binary and cannot be read as text.`, {
         status: 415,
         applied: false,
-        details: { why: 'binary', path: file.path, version: formatVersionFromSha256(file.sha256) },
+        details: { why: 'binary', path: file.path, version: formatFileVersion(file.blobScope, file.sha256) },
       });
     }
     const content = await this.readTextBlob(ctx.workspaceId, file.blobScope, file.sha256);
     return {
       file,
       content,
-      version: formatVersionFromSha256(file.sha256),
+      version: formatFileVersion(file.blobScope, file.sha256),
     };
+  }
+
+  /** The caller resolves revisionId from the authorized project's file manifest. */
+  async readParentPatch(workspaceId: string, projectId: string, revisionId: string, baseVersion: string) {
+    const [row] = await this.db.select({
+      parentScope: projectTextRevisions.parentScope, parentId: projectTextRevisions.parentId, patch: projectTextRevisions.patch,
+    }).from(projectTextRevisions).where(and(eq(projectTextRevisions.workspaceId, workspaceId),
+      eq(projectTextRevisions.projectId, projectId), eq(projectTextRevisions.id, revisionId)));
+    return row && formatFileVersion(row.parentScope, row.parentId) === baseVersion ? row.patch : undefined;
   }
 
   /** Read a single file as raw Buffer from S3 CAS. */
@@ -607,20 +699,17 @@ export class ProjectFilesService {
     return {
       file,
       buffer,
-      version: formatVersionFromSha256(file.sha256),
+      version: formatFileVersion(file.blobScope, file.sha256),
     };
   }
 
-  /** Generate a short-lived tenant-scoped Presigned GET URL for a project file. */
-  async presignFileGet(
-    ctx: AuthContext,
-    projectId: string,
-    filePath: string,
+  /** Generate a short-lived tenant-scoped Presigned GET URL for an already-loaded project file (0 DB queries). */
+  async presignResolvedFileGet(
+    workspaceId: string,
+    file: VirtualFileRecord,
     options: PresignGetOptions = {},
-  ): Promise<{ file: VirtualFileRecord; url: string; etag: string } | null> {
-    const file = await this.getFile(ctx, projectId, filePath);
-    if (!file) return null;
-    const key = resolveBlobStorageKey(ctx.workspaceId, file.blobScope, file.sha256);
+  ): Promise<{ file: VirtualFileRecord; url: string; etag: string }> {
+    const key = resolveBlobStorageKey(workspaceId, file.blobScope, file.sha256);
     const url = await this.storage.presignGet(key, {
       expiresInSec: options.expiresInSec ?? 300,
       responseContentType: options.responseContentType ?? file.mimeType,
@@ -631,7 +720,7 @@ export class ProjectFilesService {
     return {
       file,
       url,
-      etag: formatVersionFromSha256(file.sha256),
+      etag: formatFileVersion(file.blobScope, file.sha256),
     };
   }
 
@@ -644,7 +733,7 @@ export class ProjectFilesService {
       allowTrashed: true,
       auth: ctx,
     });
-    const files = await this.listFiles(ctx, projectId, { allowTrashed: true });
+    const files = await this.listFilesForProject(ctx, project.id);
 
     const textContents = new Map<string, string>();
     const textFiles = files.filter((f) => f.isText);
@@ -693,11 +782,15 @@ export class ProjectFilesService {
    * 6. Canonical SHA-256 `revision` recomputation + unified PG version & history append
    * 7. Post-commit `HotTextCache` warm + `RedisEventBus` notification (`om:project:{wid}:{pid}`).
    */
+  async commitTextEdits(ctx: AuthContext, projectId: string, body: unknown, identity: TextEditIdentity) {
+    return commitTextEdits(this, this.db, this.storage, ctx, projectId, body, identity);
+  }
+
   async commitChanges(ctx: AuthContext, input: CommitProjectFilesInput): Promise<CommitProjectFilesResult> {
     assertValidUuid(ctx.workspaceId, 'workspaceId');
     assertValidUuid(input.projectId, 'projectId');
 
-    if (input.ops.length > MAX_BATCH_FILE_OPS) {
+    if (input.ops.length + (input.textRevisions?.length ?? 0) > MAX_BATCH_FILE_OPS) {
       throw new CloudError('INVALID_ARGUMENT', `Too many file operations in one commit (max ${MAX_BATCH_FILE_OPS}).`, {
         status: 400,
         applied: false,
@@ -728,42 +821,13 @@ export class ProjectFilesService {
         })
       : null;
 
-    // Upload every new workspace blob to S3 CAS BEFORE opening the PostgreSQL transaction.
-    const uploadAllBlobs = async () => {
+    const result = await withBlobGcRetry(async () => {
+      // A previous GC claim may have removed the object. Re-publish before retrying the transaction.
       for (const upload of uploads.values()) {
         await this.storage.putBlobIfAbsent(upload.s3Key, upload.buffer, upload.mimeType);
       }
-    };
-    await uploadAllBlobs();
-
-    let result: CommitProjectFilesResult | null = null;
-    for (let attempt = 0; attempt < GC_RETRY_ATTEMPTS; attempt++) {
-      try {
-        result = await this.executeCommitTransaction(
-          ctx,
-          input,
-          preparedOps,
-          uploads,
-          writeToken,
-          scope,
-          inputHash,
-        );
-        break;
-      } catch (error) {
-        if (isCloudError(error) && error.code === 'BLOB_GC_IN_PROGRESS' && attempt + 1 < GC_RETRY_ATTEMPTS) {
-          await uploadAllBlobs();
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (!result) {
-      throw new CloudError('STORAGE_ERROR', 'Failed to commit project file changes.', {
-        status: 500,
-        applied: false,
-      });
-    }
+      return this.executeCommitTransaction(ctx, input, preparedOps, uploads, writeToken, scope, inputHash);
+    });
 
     // Post-commit ONLY: warm HotTextCache and publish to RedisEventBus.
     if (!result.replayed) {
@@ -787,6 +851,8 @@ export class ProjectFilesService {
           revision: result.revision,
           versionId: result.versionId ?? undefined,
           paths: eventPaths,
+          fileVersions: htmlFileVersions(eventPaths, path => result.versionsByPath[path] ?? null),
+          ...(result.changedPaths.length === 0 && { version: DELETED_VERSION }),
           writeToken: result.writeToken,
           affectsPreview: result.affectsPreview,
           fileTreeChanged: result.fileTreeChanged,
@@ -909,7 +975,7 @@ export class ProjectFilesService {
   private async executeCommitTransaction(
     ctx: AuthContext,
     input: CommitProjectFilesInput,
-    preparedOps: readonly PreparedFileOp[],
+    stagedOps: readonly PreparedFileOp[],
     uploads: ReadonlyMap<string, PreparedBlobUpload>,
     writeToken: string,
     scope: string,
@@ -998,7 +1064,7 @@ export class ProjectFilesService {
         for (const pre of input.filePreconditions) {
           const safePath = normalizeSafeProjectPath(pre.path);
           const existing = currentByPath.get(safePath);
-          const currentVersion = existing ? formatVersionFromSha256(existing.sha256) : null;
+          const currentVersion = existing ? formatFileVersion(existing.blobScope, existing.sha256) : null;
 
           if (pre.ifNoneMatch === '*') {
             if (existing) {
@@ -1035,6 +1101,18 @@ export class ProjectFilesService {
           }
         }
       }
+
+      if (this.textPatchWrites) {
+        for (const upload of uploads.values()) {
+          if (upload.textContent !== undefined && upload.buffer.length <= MAX_TEXT_FILE_BYTES &&
+              isUtf8(upload.buffer)) {
+            await prepareFullBaseline(tx, {workspaceId: ctx.workspaceId, projectId: project.id,
+              scope: 'workspace', id: upload.sha256, bytes: upload.buffer});
+          }
+        }
+      }
+      const preparedOps: readonly PreparedFileOp[] = input.textRevisions?.length
+        ? [...stagedOps, ...await appendTextRevisions(tx, ctx.workspaceId, project.id, input.textRevisions)] : stagedOps;
 
       // 5. Compute next live file map and diff.
       const nextByPath = new Map(currentByPath);
@@ -1084,7 +1162,7 @@ export class ProjectFilesService {
       const now = this.nowFn();
       const actor = actorDefaults(ctx, input.actorKind, input.actorName);
       // A completed semantic command is a distinct undo step, including against a subsequent raw save.
-      const safeWindowId = input.commandReceipt ? randomUUID() : input.windowId && isUuid(input.windowId) ? input.windowId : null;
+      const safeWindowId = !input.commandReceipt && input.windowId && isUuid(input.windowId) ? input.windowId : null;
       const effectiveSource: ProjectVersionSource = input.source ?? 'studio';
       const summary = (
         input.summary?.trim() ||
@@ -1100,7 +1178,7 @@ export class ProjectFilesService {
         touchedVersionFiles: Map<string, { blobScope: BlobScope; sha256: string }>;
       } | null = null;
 
-      const isInteractiveStudioEdit =
+      const isInteractiveStudioEdit = !this.textPatchWrites &&
         effectiveSource === 'studio' &&
         (input.origin === undefined || input.origin === 'studio') &&
         input.actorKind !== 'agent' &&
@@ -1456,12 +1534,11 @@ export class ProjectFilesService {
             ),
           );
         const maxSeq = Number(maxSeqRow[0]?.maxSeq ?? project.currentHistorySeq);
-        nextHistorySeq = Math.max(project.currentHistorySeq, maxSeq) + 1;
-
         const parentRows =
           project.currentHistorySeq > 0
             ? await tx
-                .select({ id: projectHistoryEntries.id })
+                .select({ id: projectHistoryEntries.id, versionId: projectHistoryEntries.versionId, undoGroup: projectHistoryEntries.undoGroup,
+                  pinned: projectHistoryEntries.pinned, undone: projectHistoryEntries.undone })
                 .from(projectHistoryEntries)
                 .where(
                   and(
@@ -1471,7 +1548,10 @@ export class ProjectFilesService {
                   ),
                 )
             : [];
-        const parentEntryId = parentRows[0]?.id ?? null;
+        const parent = parentRows[0];
+        const continueGesture = Boolean(input.undoGroup && parent?.undoGroup === input.undoGroup &&
+          !parent.pinned && !parent.undone && parent.versionId === currentVersionId && maxSeq === project.currentHistorySeq);
+        nextHistorySeq = continueGesture ? project.currentHistorySeq : Math.max(project.currentHistorySeq, maxSeq) + 1;
 
         const insertedVersions = await tx
           .insert(projectVersions)
@@ -1511,36 +1591,38 @@ export class ProjectFilesService {
           await tx.insert(projectVersionFiles).values(snapshotValues);
         }
 
-        // Clear abandoned future redo entries so a new forward edit starts a clean linear stack
-        // without touching immutable project_versions / project_version_files snapshots or CAS refcounts.
-        await tx
-          .delete(projectHistoryEntries)
-          .where(
-            and(
+        if (continueGesture) {
+          await tx.update(projectHistoryEntries).set(asUpdate(projectHistoryEntries, {
+            versionId: createdVersion.id, endedAt: now,
+          })).where(eq(projectHistoryEntries.id, parent.id));
+          coalesced = true;
+        } else {
+          // Only the project undo stack changes here. Immutable version snapshots remain readable.
+          if (maxSeq > project.currentHistorySeq) {
+            await tx.delete(projectHistoryEntries).where(and(
               eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
               eq(projectHistoryEntries.projectId, project.id),
               eq(projectHistoryEntries.undone, true),
               gt(projectHistoryEntries.seq, project.currentHistorySeq),
-            ),
-          );
-
-        await tx.insert(projectHistoryEntries).values(
-          asInsert(projectHistoryEntries, {
+            ));
+          }
+          await tx.insert(projectHistoryEntries).values(asInsert(projectHistoryEntries, {
             workspaceId: ctx.workspaceId,
             projectId: project.id,
             seq: nextHistorySeq,
             versionId: createdVersion.id,
-            parentEntryId,
+            parentEntryId: parent?.id ?? null,
             actorKind: actor.actorKind,
             actorName: actor.actorName,
             label: summary,
             windowId: safeWindowId,
+            undoGroup: input.undoGroup ?? null,
             pinned: false,
             undone: false,
             startedAt: now,
             endedAt: now,
-          }),
-        );
+          }));
+        }
       }
 
       // 10. Update project header row.
@@ -1579,7 +1661,7 @@ export class ProjectFilesService {
       for (const filePath of versionPaths) {
         const entry = nextByPath.get(filePath);
         if (entry) {
-          versionsByPath[filePath] = formatVersionFromSha256(entry.sha256);
+          versionsByPath[filePath] = formatFileVersion(entry.blobScope, entry.sha256);
         }
       }
 

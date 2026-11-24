@@ -20,10 +20,13 @@ async function studioCss() {
       id === "tailwindcss" ? path.join(TAILWIND_DIR, "index.css") : path.resolve(base, id);
     return { path: file, base: path.dirname(file), content: readFileSync(file, "utf8") };
   };
-  const compiled = await compile(readFileSync(path.join(STYLES_DIR, "studio.css"), "utf8"), {
-    base: STYLES_DIR,
-    loadStylesheet: load,
-  });
+  const compiled = await compile(
+    '@import "./studio.css";\n@import "./components.css";',
+    {
+      base: STYLES_DIR,
+      loadStylesheet: load,
+    },
+  );
   return compiled.build([]);
 }
 

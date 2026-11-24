@@ -6,6 +6,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   timestamp,
@@ -15,6 +16,7 @@ import {
   varchar,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
+import type { TextPatch } from '../../../shared/text-patch.ts';
 import type { BlobScope } from '../../contracts/storage.ts';
 import { workspaces } from './auth.ts';
 import { projects } from './projects.ts';
@@ -23,8 +25,8 @@ export type ProjectVersionSource = 'baseline' | 'agent' | 'studio' | 'restore';
 export type HistoryActorKind = 'user' | 'agent' | 'system';
 
 /**
- * Live working tree of each project. Text and binary payloads live exclusively in
- * S3 CAS (`workspaces/{wid}/blobs/{sha256}` or `catalog/blobs/{sha256}`) + SHA-256 HotTextCache.
+ * Each path references immutable content. Workspace/catalog references hold SHA-256 digests.
+ * A patch reference holds the logical ID of a project_text_revisions row.
  */
 export const projectFiles = pgTable(
   'project_files',
@@ -49,7 +51,7 @@ export const projectFiles = pgTable(
     index('idx_project_files_workspace_sha')
       .on(t.workspaceId, t.sha256)
       .where(sql`${t.blobScope} = 'workspace'`),
-    check('chk_project_files_blob_scope', sql`${t.blobScope} IN ('workspace', 'catalog')`),
+    check('chk_project_files_blob_scope', sql`${t.blobScope} IN ('workspace', 'catalog') OR (${t.blobScope} = 'patch' AND ${t.isText})`),
     check('chk_project_files_size_nonneg', sql`${t.sizeBytes} >= 0`),
   ],
 );
@@ -107,7 +109,8 @@ export const projectVersionFiles = pgTable(
       .on(t.workspaceId, t.sha256)
       .where(sql`${t.blobScope} = 'workspace'`),
     index('idx_project_version_files_project').on(t.projectId),
-    check('chk_project_version_files_blob_scope', sql`${t.blobScope} IN ('workspace', 'catalog')`),
+    index('idx_project_version_files_path_version').on(t.projectId, t.path, t.sha256),
+    check('chk_project_version_files_blob_scope', sql`${t.blobScope} IN ('workspace', 'catalog', 'patch')`),
     check('chk_project_version_files_size_nonneg', sql`${t.sizeBytes} >= 0`),
   ],
 );
@@ -133,6 +136,7 @@ export const projectHistoryEntries = pgTable(
     actorName: varchar('actor_name', { length: 128 }).notNull(),
     label: varchar('label', { length: 256 }).notNull(),
     windowId: uuid('window_id'),
+    undoGroup: varchar('undo_group', { length: 73 }),
     pinned: boolean('pinned').notNull().default(false),
     undone: boolean('undone').notNull().default(false),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
@@ -148,3 +152,26 @@ export const projectHistoryEntries = pgTable(
     check('chk_project_history_actor', sql`${t.actorKind} IN ('user', 'agent', 'system')`),
   ],
 );
+
+export const projectTextRevisions = pgTable('project_text_revisions', {
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  id: char('id', { length: 64 }).notNull(),
+  parentScope: varchar('parent_scope', { length: 16 }).notNull().$type<BlobScope>(),
+  parentId: char('parent_id', { length: 64 }).notNull(),
+  patch: jsonb('patch').notNull().$type<TextPatch>(),
+  sizeBytes: integer('size_bytes').notNull(),
+  mimeType: varchar('mime_type', { length: 128 }).default('application/octet-stream').notNull(),
+  depth: integer('depth').notNull(),
+  chainPatchBytes: integer('chain_patch_bytes').notNull(),
+  checkpointSha: char('checkpoint_sha', { length: 64 }),
+}, t => [
+  primaryKey({ columns: [t.workspaceId, t.id] }),
+  index('idx_text_revisions_origin').on(t.projectId),
+  index('idx_text_revisions_workspace_base').on(t.workspaceId, t.parentId).where(sql`${t.parentScope} = 'workspace'`),
+  index('idx_text_revisions_checkpoint').on(t.workspaceId, t.checkpointSha).where(sql`${t.checkpointSha} IS NOT NULL`),
+  check('project_text_revisions_parent_scope_check', sql`${t.parentScope} IN ('workspace','catalog','patch')`),
+  check('project_text_revisions_size_bytes_check', sql`${t.sizeBytes} BETWEEN 0 AND 16777216`),
+  check('project_text_revisions_depth_check', sql`${t.depth} BETWEEN 1 AND 32`),
+  check('project_text_revisions_chain_patch_bytes_check', sql`${t.chainPatchBytes} BETWEEN 1 AND 262144`),
+]);

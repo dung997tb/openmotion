@@ -1,8 +1,8 @@
-AlbertSans-VariableFont_wght.ttf
+AlbertSans-VariableFont_wght.woff2 / AlbertSans-VariableFont_wght.ttf
 Copyright 2021 The Albert Sans Project Authors (https://github.com/usted/Albert-Sans).
 SIL Open Font License 1.1; see Albert-Sans-OFL.txt.
 
-IBMPlexMono-Regular.ttf
+IBMPlexMono-Regular.woff2 / IBMPlexMono-Regular.ttf
 Copyright IBM Corp. 2017.
 SIL Open Font License 1.1; see IBM-Plex-Mono-OFL.txt.
 

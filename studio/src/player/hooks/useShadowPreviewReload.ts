@@ -20,8 +20,7 @@ import {
 } from "./useTimelineSyncCallbacks";
 import type { IframeWindow, PlaybackAdapter } from "../lib/playbackTypes";
 import { setPreviewReloading } from "../previewReloading";
-import { studioFileRevision } from "../../utils/studioFileVersion";
-import { announcePreviewPromoted } from "../sceneSwap";
+import { announcePreviewPromoted, previewSourceRevision } from "../sceneSwap";
 import { afterStudioPendingEdits, isStudioEditSaving } from "../../utils/studioPendingEdits";
 import { usePlayerStore } from "../store/playerStore";
 import { READY_TIMEOUT_CAUSE, useShadowReloadRetry } from "./useShadowReloadRetry";
@@ -193,7 +192,7 @@ export function useShadowPreviewReload({
         );
       if (
         gestureSavesOnScreen() === savesAtRequestRef.current &&
-        studioFileRevision() === revisionAtRequestRef.current
+        previewSourceRevision() === revisionAtRequestRef.current
       )
         return false;
       if (isStudioEditSaving()) return waitThenRetry(gen, "save", afterStudioPendingEdits);
@@ -346,7 +345,7 @@ export function useShadowPreviewReload({
       budgetsSpentRef.current = 0;
       shadowUrlRef.current = url;
       savesAtRequestRef.current = gestureSavesOnScreen();
-      revisionAtRequestRef.current = studioFileRevision();
+      revisionAtRequestRef.current = previewSourceRevision();
       armReadyTimer(gen);
       setPreviewSlots((prev) => planShadowReload(prev, gen, url));
       // Thumbnails of the edit wait for the new preview instead of competing with it.

@@ -1,3 +1,5 @@
+import { readVersionedSource } from "../utils/readVersionedSource";
+import { confirmedSource, observeSourceRead, type ConfirmedSource } from "../utils/confirmedTextSources";
 // Soft-reload-first preview sync for timeline timing edits: server GSAP
 // position mutations (shift / scale), folding those rewrites into the timing
 // edit's undo history, and swapping the rewritten script into the live preview
@@ -29,15 +31,18 @@ import {
   serializeStudioFileMutations,
   type StudioProjectFileWriter,
 } from "../utils/studioFileMutationCoordinator";
-import { studioApiFetch } from "../utils/studioApiFetch";
 import { moveLiveTweens } from "../utils/gsapLiveRetime";
+import { hasPeerLiveEdit, hasPeerTimingDocument, tryApplyPeerChanges } from "../player/peerTimingPreview";
+import { isPreviewChanging } from "../player/previewReloading";
+import { announcePreviewScenesSwapped } from "../player/sceneSwap";
 
 export async function readFileContent(projectId: string, targetPath: string): Promise<string> {
   if (targetPath.includes("\0") || targetPath.includes("..")) {
     throw new Error(`Unsafe path: ${targetPath}`);
   }
-  const response = await studioApiFetch(
+  const response = await readVersionedSource(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(targetPath)}`,
+    confirmedSource(projectId, targetPath),
   );
   if (!response.ok) {
     throw new Error(`Failed to read ${targetPath}`);
@@ -46,6 +51,7 @@ export async function readFileContent(projectId: string, targetPath: string): Pr
   if (typeof data.content !== "string") {
     throw new Error(`Missing file contents for ${targetPath}`);
   }
+  observeSourceRead(projectId, targetPath, response, data);
   return data.content;
 }
 
@@ -412,9 +418,19 @@ async function scaleGsapPositions(
 
 /** Rebind the optimistic clip timing or swap the animation script produced by the shared edit. */
 export function refreshCommittedTimeline(iframe: HTMLIFrameElement | null, path: string, projectId: string | null, reloadPreview: () => void) {
-  return async (files: Record<string, {before: string; after: string}>) => {
+  return async (files: Record<string, {before: string; after: string}>, previous?: ConfirmedSource) => {
     const file = files[path];
     if (!file) { reloadPreview(); return; }
+    const current = projectId && confirmedSource(projectId, path);
+    if (projectId && iframe && current && previous?.content === file.before && current.content === file.after &&
+        Object.keys(files).length === 1 && (hasPeerTimingDocument(iframe) || hasPeerLiveEdit(iframe, "mediaTiming"))) {
+      const isCurrent = () => iframe.isConnected && !isPreviewChanging() &&
+        usePlayerStore.getState().timelineProjectId === projectId && confirmedSource(projectId, path)?.version === current.version;
+      if (await tryApplyPeerChanges(iframe, { path, previous, current }, isCurrent)) {
+        announcePreviewScenesSwapped(iframe);
+        return;
+      }
+    }
     const status = sdkTimingGsapSync({status: "committed", version:"", ...file});
     await syncTimingEditPreview(iframe, status ?? UNMUTATED, projectId, reloadPreview, true);
   };

@@ -23,6 +23,7 @@ export type CommitDomEditPatchBatches = (
   options: {
     label: string;
     coalesceKey: string;
+    continuous?: boolean;
     /** Per-entry undo coalesce window override (ms) — see EditHistoryEntry.coalesceMs. */
     coalesceMs?: number;
     /**
@@ -48,6 +49,8 @@ export interface DomEditPatchBatchesResult {
   durable: boolean;
   allMatched: boolean;
   changed: boolean;
+  /** The exact receipt the isolated canvas verified in its mounted document. */
+  confirmedCanvasVersion?: string;
 }
 
 export type PersistDomEditOperations = (
@@ -58,6 +61,7 @@ export type PersistDomEditOperations = (
     canvasPosition?: { x: number; y: number };
     label?: string;
     coalesceKey?: string;
+    continuous?: boolean;
     coalesceMs?: number;
     skipRefresh?: boolean;
     /** Rebind a timing-only source change in the existing preview; reload only if it cannot converge. */

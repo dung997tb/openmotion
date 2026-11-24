@@ -18,10 +18,11 @@ import {
   createPat,
   type AuthEnv,
 } from '../../src/auth/index.ts';
-import { PAT_SCOPES } from '../../src/contracts/auth.ts';
+import { PAT_SCOPES, type AuthContext } from '../../src/contracts/auth.ts';
 import type { StoragePort } from '../../src/contracts/storage.ts';
 import { parseConfig, type AppConfig } from '../../src/infra/config.ts';
-import { mcpEventsChannel } from '../../src/infra/redis.ts';
+import { mcpEventsChannel, RateLimiter } from '../../src/infra/redis.ts';
+import { Redis } from 'ioredis';
 import {
   CloudImportAssetsService,
   InMemoryMcpSessionStore,
@@ -266,6 +267,72 @@ async function rpcPost(
 // ---------------------------------------------------------------------------
 
 describe('Streamable HTTP /mcp Multi-Replica Sessions, 22 Tools, Security & 10 MiB Body Limit', () => {
+  it('charges each RPC message once before dispatch and counts one semantic batch as one tool call', async (t) => {
+    const config = makeMcpConfig();
+    const auth: AuthContext = { userId: randomUUID(), workspaceId: randomUUID(), role: 'owner',
+      scopes: ['workspace:admin'], authMode: 'oidc', authMethod: 'pat' };
+    const dispatcher = new McpToolDispatcher(config, { gateway: new MockModelGateway() });
+    const dispatch = t.mock.method(dispatcher, 'dispatch', async () => ({ content: [] }));
+    const costs: number[] = [];
+    let remaining = 3;
+    const handler = new McpStreamableHttpHandler({ config, dispatcher, sessionStore: new InMemoryMcpSessionStore(),
+      rateLimiter: { async consume(key, limit, window, cost = 1) {
+        assert.equal(key, `mcp:${auth.workspaceId}`);
+        assert.deepEqual([limit, window], [120, 60_000]);
+        costs.push(cost);
+        const allowed = remaining >= cost;
+        if (allowed) remaining -= cost;
+        return { allowed, remaining, limit, resetAtMs: 0, retryAfterSec: allowed ? 0 : 5 };
+      } } });
+    const url = 'https://motion.example.test/mcp';
+    const post = (body: unknown) => handler.handle(new Request(url, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), auth);
+    const message = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call',
+      params: { name: 'openmotion_get_project', arguments: { projectId: randomUUID() } } });
+    assert.equal((await post([message(1), message(2)])).status, 200);
+    assert.equal(dispatch.mock.callCount(), 2);
+    const rejected = await post([message(3), message(4)]);
+    assert.equal(rejected.status, 429);
+    assert.equal(rejected.headers.get('Retry-After'), '5');
+    assert.equal(dispatch.mock.callCount(), 2);
+
+    const args = { projectId: randomUUID(), requestId: randomUUID(), expectedVersionId: randomUUID(), expectedRevision: 'a'.repeat(64),
+      edit: { kind: 'batch', commands: [3, 4].map(start => ({ kind: 'moveClip', compositionPath: 'index.html', hfId: 'title', start })) } };
+    assert.equal((await post({ jsonrpc: '2.0', id: 5, method: 'tools/call',
+      params: { name: 'openmotion_edit_project', arguments: args } })).status, 200);
+    assert.equal(dispatch.mock.callCount(), 3);
+    assert.equal((await handler.handle(new Request(url), auth)).status, 429);
+    assert.deepEqual(costs, [2, 2, 1, 1]);
+  });
+
+  it('reserves a weighted allowance atomically across Redis clients', { skip: !process.env.OPENMOTION_TEST_REDIS_URL }, async () => {
+    const first = new Redis(process.env.OPENMOTION_TEST_REDIS_URL!);
+    const second = first.duplicate();
+    const prefix = `om:test:${randomUUID()}`;
+    try {
+      const a = new RateLimiter(first, prefix);
+      const b = new RateLimiter(second, prefix);
+      const reserve = (limiter: RateLimiter) => limiter.consume('messages', 3, 60_000, 2);
+      const both = await Promise.all([reserve(a), reserve(b)]);
+      assert.equal(both.filter(reply => reply.allowed).length, 1);
+      assert.deepEqual(both.map(reply => reply.remaining), [1, 1]);
+      assert.ok(both.find(reply => !reply.allowed)!.retryAfterSec > 0);
+      assert.equal((await a.consume('messages', 3, 60_000, 4)).allowed, false);
+      assert.equal((await b.consume('messages', 3, 60_000)).remaining, 0);
+      assert.equal(await first.zcard(prefix + ':messages'), 3);
+
+      // A two-message retry must wait until two slots are available.
+      const [sec, us] = await first.time();
+      const now = Number(sec) * 1000 + Math.floor(Number(us) / 1000);
+      const key = prefix + ':expiry';
+      await first.zadd(key, now - 40_000, 'one', now - 20_000, 'two', now - 1_000, 'three');
+      await first.pexpire(key, 60_000);
+      const denied = await a.consume('expiry', 3, 60_000, 2);
+      assert.equal(denied.allowed, false);
+      assert.equal(denied.resetAtMs, now + 40_000);
+    } finally { await Promise.all([first.quit(), second.quit()]); }
+  });
+
   it('supports zero-sticky-session multi-replica execution, owner-bound sessions, 22 domain tools, and negotiated MCP Apps UI', async () => {
     const config = makeMcpConfig();
     const authStore = new InMemoryAuthStore();

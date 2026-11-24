@@ -1,8 +1,9 @@
 import { usePlayerStore } from "../store/playerStore";
+import { thumbnailRevisionOf } from "../store/thumbnailSlice";
 import { compositionPosterSource, MAX_POSTER_SOURCE_LENGTH } from "./compositionPosterSource";
 import { createThumbnailKey } from "./thumbnailScheduler";
-import { studioApiFetch } from "../../utils/studioApiFetch";
-import { buildProjectApiPath, optionalProjectSourceUrl } from "../../utils/projectRouting";
+import { readPosterFile } from "./posterFileRead";
+import { buildProjectApiPath } from "../../utils/projectRouting";
 import { IMAGE_EXT, VIDEO_EXT } from "../../utils/mediaTypes";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
 import { decodeVideoThumbnail } from "./thumbnailVideoDecoder";
@@ -345,11 +346,19 @@ export async function loadCloudCompositionPoster(
   let label = compositionDisplayName(path);
   if (!media) {
     const revision = Number(url.searchParams.get("revision") ?? 0);
-    let content: unknown = compositionPosterSource(state, projectId, sessionEpoch, path, revision);
+    const shared = compositionPosterSource(state, projectId, sessionEpoch, path, revision);
+    let content: unknown = shared;
+    if (shared instanceof Promise) {
+      content = await shared;
+      signal.throwIfAborted();
+      const current = usePlayerStore.getState();
+      if (current.timelineProjectId !== projectId || current.timelineSessionEpoch !== sessionEpoch ||
+          thumbnailRevisionOf(current.thumbnailRevisions, path) !== revision) {
+        throw new DOMException("Superseded composition poster", "AbortError");
+      }
+    }
     if (content === undefined) {
-      const response = await studioApiFetch(optionalProjectSourceUrl(projectId, path), { signal, priority: "low" });
-      if (!response.ok) throw new Error(`Composition source unavailable (${response.status})`);
-      content = (await response.json()).content;
+      content = await readPosterFile(projectId, sessionEpoch, path, revision, signal);
     }
     signal.throwIfAborted();
     const scope = typeof content === "string" && content.length <= MAX_POSTER_SOURCE_LENGTH

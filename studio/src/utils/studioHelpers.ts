@@ -15,6 +15,8 @@ export { getHistoryShortcutLabel };
 export interface EditingFile {
   path: string;
   content: string | null;
+  /** Editor text that produced a normalized write receipt (e.g. generated element IDs). */
+  submitted?: string;
 }
 
 export interface AppToast {

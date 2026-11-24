@@ -8,7 +8,7 @@ import type { PropertyPanelProps } from "./propertyPanelTypes";
 import { useEffect, useState } from "react";
 import { useTrackDesignInput } from "../../contexts/DesignPanelInputContext";
 import { Plus, X } from "../../icons/SystemIcons";
-import { isTextEditableSelection, type DomEditSelection } from "./domEditing";
+import { getDomEditTargetKey, isTextEditableSelection, type DomEditSelection } from "./domEditing";
 import type { ImportedFontAsset, FontImportInput } from "./fontAssets";
 import { normalizeTextMetricValue } from "./propertyPanelHelpers";
 import { ColorField } from "./propertyPanelColor";
@@ -316,7 +316,7 @@ export function FlatTextSection({
           onRemove={onRemoveTextField}
         />
         <FlatTextFieldEditor
-          key={activeField.key}
+          key={JSON.stringify([getDomEditTargetKey(element), activeField.key])}
           field={activeField}
           styles={styles}
           fontAssets={fontAssets}
@@ -333,6 +333,7 @@ export function FlatTextSection({
   return (
     <div className={fieldsClassName}>
       <FlatTextFieldEditor
+        key={JSON.stringify([getDomEditTargetKey(element), activeField.key])}
         field={activeField}
         styles={styles}
         fontAssets={fontAssets}

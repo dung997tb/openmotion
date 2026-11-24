@@ -1,6 +1,6 @@
 @import "tailwindcss" source(none);
 @import "../../../packages/design-system/tailwind.css";
-@import "./components.css";
+@import "./shellPrimitives.css";
 
 /* Explicit sources: Studio TypeScript, shared controls and the shell HTML. Automatic
  * detection would walk up to the repo root and scan `data/projects`, gitignored user content. */

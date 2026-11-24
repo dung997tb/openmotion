@@ -1,3 +1,4 @@
+import { TEXT_PATCH_BASE_HEADER } from '../../shared/text-patch.ts';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -165,8 +166,57 @@ class ApiTestPgClient {
       order = ordM[1].trim();
       rem = rem.slice(0, ordM.index).trim();
     }
-    const whM = /^where\s+([\s\S]+)$/i.exec(rem);
-    if (whM) where = whM[1].trim();
+    const whereIdx = findKw(rem, 'where');
+    const joinsClause = whereIdx >= 0 ? rem.slice(0, whereIdx).trim() : /^left\s+/i.test(rem) ? rem : '';
+    if (whereIdx >= 0) where = rem.slice(whereIdx + 5).trim();
+
+    if (joinsClause) {
+      const joins: { table: string; on: string }[] = [];
+      let jc = joinsClause;
+      while (jc) {
+        const jm = /^left\s+(?:outer\s+)?join\s+"([^"]+)"\s+on\s+/i.exec(jc);
+        if (!jm) throw new Error(`Unsupported JOIN: ${sqlText}`);
+        const joinTable = jm[1];
+        const afterOn = jc.slice(jm[0].length);
+        const nextJoinIdx = findKw(afterOn, 'left');
+        const onExpr = nextJoinIdx >= 0 ? afterOn.slice(0, nextJoinIdx).trim() : afterOn.trim();
+        joins.push({ table: joinTable, on: onExpr });
+        jc = nextJoinIdx >= 0 ? afterOn.slice(nextJoinIdx).trim() : '';
+      }
+      let combined: Map<string, Row | null>[] = this.rows(table).map((r) => new Map([[table, r]]));
+      for (const j of joins) {
+        const next: Map<string, Row | null>[] = [];
+        for (const rowMap of combined) {
+          let found = false;
+          for (const candidate of this.rows(j.table)) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, candidate);
+            if (evalJoinedW(merged, j.on, params)) {
+              next.push(merged);
+              found = true;
+            }
+          }
+          if (!found) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, null);
+            next.push(merged);
+          }
+        }
+        combined = next;
+      }
+      if (where) combined = combined.filter((rowMap) => evalJoinedW(rowMap, where, params));
+      if (offset > 0) combined = combined.slice(offset);
+      if (limit !== null) combined = combined.slice(0, limit);
+      const specs = splitTop(selectList, ',').map(qualifiedCol);
+      const out = combined.map((rowMap) =>
+        rowMode === 'array'
+          ? specs.map((s) => (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null)
+          : Object.fromEntries(
+              specs.map((s) => [s.col, (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null]),
+            ),
+      );
+      return { rows: out };
+    }
 
     let matched = this.rows(table).filter((r) => (where ? evalW(r, where, params) : true));
     if (/^COALESCE\s*\(\s*MAX\s*\(/i.test(selectList)) {
@@ -290,6 +340,36 @@ class ApiTestPgClient {
 function colName(expr: string): string {
   const m = [...expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').matchAll(/"([^"]+)"/g)];
   return m.length > 0 ? m[m.length - 1][1] : expr.trim();
+}
+function qualifiedCol(expr: string): { table?: string; col: string } {
+  const trimmed = expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').trim();
+  const m = [...trimmed.matchAll(/"([^"]+)"/g)];
+  if (m.length >= 2) return { table: m[m.length - 2][1], col: m[m.length - 1][1] };
+  return { col: m.length === 1 ? m[0][1] : trimmed };
+}
+function evalJoinedOperand(rowMap: Map<string, Row | null>, expr: string, params: unknown[]): unknown {
+  const t = expr.trim();
+  const qm = /^"([^"]+)"\."([^"]+)"$/.exec(t);
+  if (qm) return rowMap.get(qm[1])?.[qm[2]] ?? null;
+  return evalSc(t, params);
+}
+function evalJoinedW(rowMap: Map<string, Row | null>, raw: string, params: unknown[]): boolean {
+  const terms = splitAnd(stripP(raw));
+  if (terms.length > 1) return terms.every((t) => evalJoinedW(rowMap, t, params));
+  const term = stripP(terms[0]);
+  let m: RegExpExecArray | null;
+  if ((m = /^([\s\S]+?)\s+is\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) == null;
+  if ((m = /^([\s\S]+?)\s+is\s+not\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) != null;
+  if ((m = /^([\s\S]+?)\s+in\s*\(([\s\S]+)\)$/i.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    return lv != null && splitTop(m[2], ',').map((v) => evalJoinedOperand(rowMap, v, params)).includes(lv);
+  }
+  if ((m = /^([\s\S]+?)\s*=\s*([\s\S]+)$/.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    const rv = evalJoinedOperand(rowMap, m[2], params);
+    return lv !== null && rv !== null && lv === rv;
+  }
+  throw new Error(`Unsupported joined WHERE: ${term}`);
 }
 function splitTop(input: string, sep: string): string[] {
   const out: string[] = [];
@@ -1375,6 +1455,10 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
     assert.equal(fontRes.status, 200);
     assert.equal(fontRes.headers.get('access-control-allow-origin'), '*');
 
+    const woff2Res = await app.request('/web/design-system/fonts/AlbertSans-VariableFont_wght.woff2');
+    assert.equal(woff2Res.status, 200);
+    assert.equal(woff2Res.headers.get('access-control-allow-origin'), '*');
+
     const runtimeJsRes = await app.request('/api/runtime.js');
     assert.equal(runtimeJsRes.status, 200);
     assert.match(runtimeJsRes.headers.get('content-type') ?? '', /javascript/);
@@ -1427,6 +1511,36 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
     const spaRes = await app.request('/projects/client-route');
     const studioBuilt = existsSync(path.join(REPO_ROOT, 'studio/build/index.html'));
     assert.equal(spaRes.status, studioBuilt ? 200 : 503);
+    if (studioBuilt) {
+      const spaHtml = await spaRes.text();
+      assert.match(spaHtml, /<link rel="preconnect" href="https:\/\/r\.open-design\.ai" crossorigin>/);
+      const spaEtag = spaRes.headers.get('etag') ?? '';
+      assert.match(spaEtag, /^"sha256:[a-f0-9]{64}"$/);
+      const spaNotModified = await app.request('/projects/client-route', {
+        headers: { 'If-None-Match': spaEtag },
+      });
+      assert.equal(spaNotModified.status, 304);
+      assert.equal(spaNotModified.headers.get('etag'), spaEtag);
+
+      const isolated = createApiFixture({
+        config: {
+          AUTH_MODE: 'dev',
+          PREVIEW_PUBLIC_ORIGIN: 'https://preview.example.test',
+          PREVIEW_TOKEN_SECRET: 'test-preview-secret-0123456789abcdef',
+        },
+      });
+      const isolatedSpa = await isolated.app.request('/explore');
+      assert.equal(isolatedSpa.status, 200);
+      const isolatedHtml = await isolatedSpa.text();
+      assert.match(
+        isolatedHtml,
+        /<link rel="preconnect" href="https:\/\/preview\.example\.test" crossorigin>/,
+      );
+      assert.match(
+        isolatedHtml,
+        /<link rel="preconnect" href="https:\/\/r\.open-design\.ai" crossorigin>/,
+      );
+    }
   });
 });
 
@@ -1547,6 +1661,65 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal((await json(file)).content, shrunk);
   });
 
+  it('reads only one MCP file, pins pages and downloads, and scopes historical bytes to that project and path', async () => {
+    const { app, services, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = async (url: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    const { projectId } = await (await post('/motion-api/projects', { title: 'Single file' })).json();
+    const { projectId: other } = await (await post('/motion-api/projects', { title: 'Other files' })).json();
+    const auth: AuthContext = { workspaceId: config.DEV_WORKSPACE_ID, userId: config.DEV_USER_ID, role: 'owner',
+      scopes: [...DEFAULT_PAT_SCOPES], authMode: 'dev', authMethod: 'dev_bypass' };
+    const path = 'notes.txt';
+    const before = 'Hello 🌙\r\n原文';
+    const origin = await services.files.commitChanges(auth, { projectId, source: 'agent', ops: [
+      { op: 'upsert_text', path, content: before },
+      { op: 'upsert_binary', path: 'assets/song.mp3', data: Buffer.from([0, 255, 111]) },
+    ] });
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${config.DEV_PAT}`, Accept: 'application/json, text/event-stream',
+    };
+    let rpcId = 1;
+    const rpc = async (method: string, params: unknown) => post('/mcp', { jsonrpc: '2.0', id: rpcId++, method, params }, headers);
+    const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'single-file', version: '1' } });
+    headers['Mcp-Session-Id'] = init.headers.get('mcp-session-id')!;
+    const read = async (file: Record<string, unknown>, id = projectId) => (await (await rpc('tools/call', {
+      name: 'openmotion_get_project', arguments: { projectId: id, file },
+    })).json()).result;
+    services.files.loadVirtualProject = async () => { throw new Error('Single file must not load the project'); };
+    services.files.listFiles = async () => { throw new Error('Single file must not list the project'); };
+
+    const first = (await read({ path, length: 5 })).structuredContent.file;
+    assert.equal(first.content, 'Hello');
+    assert.equal(first.nextOffset, 5);
+    const snapshot = (await read({ path, mode: 'download' })).structuredContent.file;
+    assert.equal(snapshot.fileVersion, first.fileVersion);
+    assert.match(snapshot.downloadUrl, /^https:/);
+    assert.ok(Date.parse(snapshot.expiresAt) > Date.now());
+
+    const changed = await services.files.commitChanges(auth, { projectId, source: 'agent', ops: [
+      { op: 'upsert_text', path, content: 'Changed' },
+    ] });
+    const second = (await read({ path, offset: first.nextOffset, atFileVersion: first.fileVersion })).structuredContent.file;
+    assert.equal(first.content + second.content, before);
+    assert.equal((await read({ path, atProjectVersion: origin.versionId })).structuredContent.file.content, before);
+    assert.equal((await read({ path, atProjectVersion: changed.versionId })).structuredContent.file.content, 'Changed');
+    assert.equal((await read({ path, atProjectVersion: changed.versionId, atFileVersion: first.fileVersion })).isError, true);
+    assert.equal((await read({ path, atProjectVersion: origin.versionId }, other)).isError, true);
+    assert.equal((await read({ path: 'other.txt', atFileVersion: first.fileVersion })).isError, true);
+
+    const baseline = (await read({ path, mode: 'sync', atFileVersion: first.fileVersion })).structuredContent.file;
+    assert.equal(baseline.baseline.downloadUrl, snapshot.downloadUrl);
+    assert.deepEqual(baseline.patches, []);
+    const unchanged = (await read({ path, mode: 'sync', fromFileVersion: baseline.fileVersion, atFileVersion: first.fileVersion })).structuredContent.file;
+    assert.equal(unchanged.baseline, undefined);
+    assert.deepEqual(unchanged.patches, []);
+    assert.equal((await read({ path: 'assets/song.mp3' })).isError, true);
+    const audio = (await read({ path: 'assets/song.mp3', mode: 'download' })).structuredContent.file;
+    assert.equal(audio.bytes, 3);
+    assert.match(audio.downloadUrl, /^https:/);
+    assert.equal((await read({ path, mode: 'download', offset: 1 })).isError, true);
+  });
+
   it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
     const { app, config, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -1559,7 +1732,8 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
       assert.equal(seed.status, 200);
     }
 
-    const base = (await app.request(file('ui.html'))).headers.get('etag')!;
+    const original = await (await app.request(file('ui.html'))).json();
+    const base = original.version;
     const command = { kind: 'moveClip', hfId: 'hf-title', start: 5 };
     const studio = (key: string) => post(`/api/projects/${projectId}/edits/ui.html`, command,
       { 'If-Match': base, 'Idempotency-Key': key });
@@ -1571,6 +1745,11 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.deepEqual(noop.changedPaths, []);
     assert.equal(noop.version, (await app.request(file('ui.html'))).headers.get('etag'));
     const { content } = await (await app.request(file('ui.html'))).json();
+    const synced = await app.request(file('ui.html'), { headers: { [TEXT_PATCH_BASE_HEADER]: base } });
+    assert.equal(synced.headers.get('X-OpenMotion-Representation'), null);
+    assert.equal((await synced.json()).content, content);
+    const missed = await app.request(file('ui.html'), { headers: { [TEXT_PATCH_BASE_HEADER]: '"sha256:' + '0'.repeat(64) + '"' } });
+    assert.equal((await missed.json()).content, content);
     assert.match(content, /data-start="5"/);
     assert.match(content, /duration:0.5},5.25\)/);
     assert.match(content, /"100%":\{x:80\}\}\},5\.5\)/);
@@ -2677,7 +2856,9 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.ok(bridgeSrc);
     const bridgeUrl = new URL(bridgeSrc);
     assert.equal(bridgeUrl.origin, minted.previewOrigin);
-    assert.deepEqual([...bridgeUrl.searchParams.keys()], ['v']);
+    assert.equal(bridgeUrl.search, '');
+    const expectedSha = /^\/api\/preview-bridge\/([a-f0-9]{64})\.js$/.exec(bridgeUrl.pathname)?.[1];
+    assert.ok(expectedSha);
     const bridgeAsset = await app.request(bridgeSrc, { headers: previewHeaders });
     assert.equal(bridgeAsset.status, 200);
     assert.match(bridgeAsset.headers.get('cache-control') ?? '', /immutable/);
@@ -2687,10 +2868,30 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.equal(snapdomAsset.headers.get('set-cookie'), null);
     assert.match(await snapdomAsset.text(), /window\.snapdom/);
     const script = await bridgeAsset.text();
-    assert.equal(createHash('sha256').update(script).digest('hex'), bridgeUrl.searchParams.get('v'));
+    assert.equal(createHash('sha256').update(script).digest('hex'), expectedSha);
+    assert.ok(previewHtml.includes('integrity="sha256-' + Buffer.from(expectedSha, 'hex').toString('base64') + '"'));
+    assert.equal((await fixture.storage.getObjectBuffer('system/preview-bridge/' + expectedSha + '.js')).toString(), script);
     assert.ok(!script.includes(minted.token) && !script.includes(projectA));
-    bridgeUrl.searchParams.set('v', 'retired');
-    assert.equal((await app.request(bridgeUrl.href, { headers: previewHeaders })).headers.get('cache-control'), 'no-store');
+    const legacy = await app.request('/api/preview-bridge.js?v=retired', { headers: previewHeaders });
+    assert.equal(legacy.headers.get('cache-control'), 'no-store');
+    assert.equal(await legacy.text(), script);
+
+    const foreignScript = Buffer.from('// another deployed bridge build');
+    const foreignHash = createHash('sha256').update(foreignScript).digest('hex');
+    const foreignUrl = '/api/preview-bridge/' + foreignHash + '.js';
+    const foreignKey = 'system/preview-bridge/' + foreignHash + '.js';
+    const missing = await app.request(foreignUrl, { headers: previewHeaders });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.headers.get('cdn-cache-control'), 'no-store');
+    await fixture.storage.putObject(foreignKey, 'different bytes', 'application/javascript');
+    const corrupt = await app.request(foreignUrl, { headers: previewHeaders });
+    assert.equal(corrupt.status, 503);
+    assert.equal(corrupt.headers.get('cache-control'), 'no-store');
+    await fixture.storage.putObject(foreignKey, foreignScript, 'application/javascript');
+    const archived = await app.request(foreignUrl, { headers: previewHeaders });
+    assert.equal(archived.status, 200);
+    assert.match(archived.headers.get('cache-control') ?? '', /immutable/);
+    assert.deepEqual(Buffer.from(await archived.arrayBuffer()), foreignScript);
 
     const assetResponse = await app.request(assetUrl.href, { headers: previewHeaders });
     assert.equal(assetResponse.status, 200);

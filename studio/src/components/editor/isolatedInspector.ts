@@ -28,7 +28,7 @@ function plainMap(input: unknown, allowed: (key: string) => boolean, limit: numb
 
 export async function inspectIsolatedElement(adapter: PreviewAdapter, identity: Identity, isMasterView: boolean) {
   if (!identity.elementId && !identity.hfId) return null;
-  const snapshot = await adapter.request<InspectorSnapshot | null>("inspect-element", {
+  const snapshot = await adapter.request<InspectorSnapshot | null | undefined>("inspect-element", {
     elementId: identity.elementId, hfId: identity.hfId, sourceFile: identity.sourceFile, properties: CURATED_STYLE_PROPERTIES,
   }).catch(() => undefined);
   if (snapshot === undefined) return undefined;
@@ -58,7 +58,7 @@ export async function inspectIsolatedElement(adapter: PreviewAdapter, identity: 
   return {
     element, id: id || undefined, hfId: hfId || undefined, selector, sourceFile, compositionPath: sourceFile,
     label: id || hfId || tag, tagName: tag, ...flags, boundingBox: geometry, inlineStyles, computedStyles, dataAttributes,
-    existsInSource: true, textContent, isolatedTarget: { sourceFile, sha256: snapshot.sha256, elementId: id, hfId, binding: snapshot.binding },
+    existsInSource: true, textContent, isolatedTarget: { sourceFile, sha256: snapshot.sha256, ...(snapshot.fileVersion && {fileVersion: snapshot.fileVersion}), elementId: id, hfId, binding: snapshot.binding },
     textFields: textContent === null ? [] : [{ key: "self", label: "Text", value: textContent, tagName: tag,
       attributes: [], inlineStyles, computedStyles, preserveLineBreaks: snapshot.lineBreaks === true, source: "self" as const }],
     capabilities: resolveDomEditCapabilities({ ...flags, selector, tagName: tag, inlineStyles, computedStyles,

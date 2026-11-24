@@ -1,5 +1,6 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { and, eq, sql } from 'drizzle-orm';
-import { CloudError } from '../contracts/errors.ts';
+import { CloudError, isCloudError } from '../contracts/errors.ts';
 import { DEFAULT_BLOB_GC_GRACE_SECONDS } from '../contracts/jobs.ts';
 import type { BlobMetadata } from '../contracts/storage.ts';
 import { isSha256Hex, isUuid } from '../../shared/project-validation.ts';
@@ -8,6 +9,22 @@ import { asInsert, asUpdate } from './helpers.ts';
 import { workspaceBlobs } from './schema/blobs-assets.ts';
 
 export { DEFAULT_BLOB_GC_GRACE_SECONDS };
+
+/** Retry publication when a GC claim forces its transaction to roll back. */
+export async function withBlobGcRetry<T>(publish: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await publish();
+    } catch (error) {
+      if (!isCloudError(error) || error.code !== 'BLOB_GC_IN_PROGRESS') throw error;
+      if (attempt === 3) throw new CloudError('BLOB_GC_IN_PROGRESS', 'Storage cleanup is in progress. Retry the request.', {
+        status: 503, applied: false, cause: error,
+      });
+      // Give the collector time to finish outside the failed transaction and its locks.
+      await delay(50 * attempt);
+    }
+  }
+}
 
 /**
  * Frozen preview proxy metadata written by `worker-media` (`generate_preview_proxy`)
@@ -129,6 +146,26 @@ function assertWorkspaceId(workspaceId: string): void {
   }
 }
 
+// Keep the number of PostgreSQL bind parameters bounded even for a large manifest.
+const MAX_BLOB_REF_BATCH = 1000;
+
+function workspaceBlobInsert(workspaceId: string, item: NormalizedBlobRefDelta) {
+  const sizeBytes = item.sizeBytes;
+  if (sizeBytes === undefined || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new CloudError(
+      'INVALID_ARGUMENT',
+      `Positive CAS refcount delta for ${item.sha256} requires non-negative sizeBytes`,
+      { status: 400, applied: false },
+    );
+  }
+  return asInsert(workspaceBlobs, {
+    workspaceId, sha256: item.sha256, sizeBytes,
+    mimeType: item.mimeType ?? 'application/octet-stream',
+    s3Key: item.s3Key ?? `workspaces/${workspaceId}/blobs/${item.sha256}`,
+    metadata: item.metadata ?? null, refCount: item.delta, zeroRefSince: null, gcState: 'active',
+  });
+}
+
 /**
  * Apply positive and negative workspace CAS refcount deltas inside an open transaction.
  * Locks are acquired in strict lexicographical `sha256` order.
@@ -145,34 +182,23 @@ export async function applyWorkspaceBlobRefDeltas(
   assertWorkspaceId(workspaceId);
   const normalized = normalizeBlobRefDeltas(deltas);
 
-  for (const item of normalized) {
+  for (let i = 0; i < normalized.length; i++) {
+    const item = normalized[i];
     if (item.delta > 0) {
-      const s3Key = item.s3Key ?? `workspaces/${workspaceId}/blobs/${item.sha256}`;
-      const sizeBytes = item.sizeBytes;
-      const mimeType = item.mimeType ?? 'application/octet-stream';
-      if (sizeBytes === undefined || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
-        throw new CloudError(
-          'INVALID_ARGUMENT',
-          `Positive CAS refcount delta for ${item.sha256} requires non-negative sizeBytes`,
-          { status: 400, applied: false },
-        );
+      // Ordinary snapshots retain many existing blobs with the same increment. Keep the
+      // sorted order across batches, decrements and per-blob metadata updates.
+      const batch = [workspaceBlobInsert(workspaceId, item)];
+      if (!item.metadata) {
+        while (batch.length < MAX_BLOB_REF_BATCH) {
+          const next = normalized[i + 1];
+          if (!next || next.delta !== item.delta || next.metadata) break;
+          batch.push(workspaceBlobInsert(workspaceId, next));
+          i++;
+        }
       }
-
       const rows = await tx
         .insert(workspaceBlobs)
-        .values(
-          asInsert(workspaceBlobs, {
-            workspaceId,
-            sha256: item.sha256,
-            sizeBytes,
-            mimeType,
-            s3Key,
-            metadata: item.metadata ?? null,
-            refCount: item.delta,
-            zeroRefSince: null,
-            gcState: 'active',
-          }),
-        )
+        .values(batch)
         .onConflictDoUpdate({
           target: [workspaceBlobs.workspaceId, workspaceBlobs.sha256],
           set: asUpdate(workspaceBlobs, {
@@ -188,11 +214,13 @@ export async function applyWorkspaceBlobRefDeltas(
         })
         .returning({ sha256: workspaceBlobs.sha256 });
 
-      if (rows.length === 0) {
+      if (rows.length !== batch.length) {
+        const retained = new Set(rows.map(row => row.sha256));
+        const sha256 = batch.find(row => !retained.has(row.sha256))!.sha256;
         throw new CloudError(
           'BLOB_GC_IN_PROGRESS',
-          `Blob ${item.sha256} is currently being garbage-collected; re-upload and retry.`,
-          { status: 409, applied: false, details: { sha256: item.sha256 } },
+          `Blob ${sha256} is currently being garbage-collected; re-upload and retry.`,
+          { status: 409, applied: false, details: { sha256 } },
         );
       }
     } else {
@@ -441,6 +469,8 @@ export async function markZeroRefForDeletion(
           WHERE av.workspace_id = wb.workspace_id
             AND av.sha256 = wb.sha256
         )
+        AND NOT EXISTS (SELECT 1 FROM project_text_revisions tr WHERE tr.workspace_id = wb.workspace_id
+          AND ((tr.parent_scope = 'workspace' AND tr.parent_id = wb.sha256) OR tr.checkpoint_sha = wb.sha256))
         AND NOT EXISTS (
           SELECT 1
           FROM upload_tickets ut
@@ -511,6 +541,8 @@ export async function finalizeBlobDeletion(
         WHERE av.workspace_id = wb.workspace_id
           AND av.sha256 = wb.sha256
       )
+      AND NOT EXISTS (SELECT 1 FROM project_text_revisions tr WHERE tr.workspace_id = wb.workspace_id
+          AND ((tr.parent_scope = 'workspace' AND tr.parent_id = wb.sha256) OR tr.checkpoint_sha = wb.sha256))
       AND NOT EXISTS (
         SELECT 1
         FROM upload_tickets ut

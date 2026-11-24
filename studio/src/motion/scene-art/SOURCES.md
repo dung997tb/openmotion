@@ -11,3 +11,5 @@ The Audio navigation menu's Voice changer preview uses two original studio portr
 The AI Influencer cover (`ai-influencer-marketing.webp`) is an original creator-marketing studio photograph generated specifically for OpenMotion.
 
 The background-removal and relighting guides use two original comparison renders (`sofa-cutout.webp` and `sofa-relight.webp`) generated specifically for OpenMotion.
+
+Explore spotlight, story, and scene-showcase posters (`babylon-js.webp`, `bubble-field.webp`, `chalk-blueprint.webp`, `color-pop-poster.webp`, `footage-to-handpainted.webp`, `light-shadow-product.webp`, `multi-clips-to-reels.webp`, `premium-halo.webp`, `retro-print-poster.webp`, `sale-carousel.webp`, `sale-countdown.webp`, `splash-float-product.webp`, and `talking-head-recreation.webp`) are local WebP stills of OpenMotion's own skill artwork (originally added under `studio/src/motion/skill-covers/` in commit `008e46e896a72f4e5bd743fe1c4a5752240d2e8f`) bundled into Studio assets so first-screen Explore cards load from same-origin CDN cache.

@@ -1,8 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rememberCompositionPosterSource } from "./compositionPosterSource";
+import { knownCompositionSource, MAX_POSTER_SOURCE_LENGTH, rememberCompositionPosterSource, shareCompositionPosterRead } from "./compositionPosterSource";
+import { syncPeerComposition } from "../../hooks/syncPeerComposition";
+import { openTimelineSource } from "./peerTimeline";
 import { loadCloudCompositionPoster } from "./cloudCompositionPoster";
+import { expectPosterFileVersion, readPosterFile } from "./posterFileRead";
 import { decodeImageThumbnail } from "./thumbnailImageDecoder";
+import { confirmedSource, forgetSource, rememberSource } from "../../utils/confirmedTextSources";
+import { invalidateLatestSourceWrite, markStudioWriteToken } from "../../utils/studioFileVersion";
 import { usePlayerStore } from "../store/playerStore";
 
 vi.mock("./thumbnailImageDecoder", () => ({ decodeImageThumbnail: vi.fn() }));
@@ -13,6 +18,70 @@ const original = usePlayerStore.getState();
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); usePlayerStore.setState(original); });
 
 describe("cloud composition representatives", () => {
+  it("reuses only the confirmed bytes for this generation, independent of echo/receipt order", async () => {
+    const project = "poster-echo", path = "compositions/scene.html", epoch = 4;
+    const store = usePlayerStore.getState();
+    usePlayerStore.setState({ timelineProjectId: project, timelineSessionEpoch: epoch, thumbnailRevisions: {} });
+    const fetch = vi.fn(async () => Response.json({ content: "from server" }));
+    vi.stubGlobal("fetch", fetch);
+    const read = (revision: number, pid = project, file = path) => readPosterFile(pid, epoch, file, revision, signal());
+    try {
+      rememberSource(project, path, { content: "one", version: "v1" });
+      markStudioWriteToken("local-1");
+      expectPosterFileVersion(project, path, { token: "local-1", version: "v1" });
+      expect(await read(0)).toBe("one");
+      store.bumpThumbnailRevisions([path], path);
+      markStudioWriteToken("local-2");
+      expectPosterFileVersion(project, path, { token: "local-2", version: "v2" });
+      rememberSource(project, path, { content: "two", version: "v2" });
+      expect(await read(1)).toBe("two");
+      expect(fetch).not.toHaveBeenCalled();
+
+      // A failed or superseded local write has no matching confirmed source.
+      store.bumpThumbnailRevisions([path], path);
+      markStudioWriteToken("local-3");
+      expectPosterFileVersion(project, path, { token: "local-3", version: "v3" });
+      expect(await read(2)).toBe("from server");
+      expect(await read(2, "other-project")).toBe("from server");
+      expect(await read(0, project, "other.html")).toBe("from server");
+      // A reconnect discards the echo proof, even when the bytes are still cached.
+      store.bumpThumbnailRevisions(null, ".");
+      expect(await read(3)).toBe("from server");
+      expect(fetch).toHaveBeenCalledTimes(4);
+    } finally {
+      forgetSource(project, path);
+    }
+  });
+
+  it("revalidates a late self echo after another editor writes or the project is reopened", async () => {
+    const project = "poster-order", path = "intro.html", token = "local-late";
+    const store = usePlayerStore.getState();
+    store.beginTimelineSession(project);
+    const read = () => {
+      const s = usePlayerStore.getState();
+      return readPosterFile(project, s.timelineSessionEpoch, path, s.thumbnailRevisions[path] ?? 0, signal());
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: "newer on server" })));
+    try {
+      markStudioWriteToken(token);
+      rememberSource(project, path, { content: "old local", version: "v2" });
+      invalidateLatestSourceWrite();
+      store.bumpThumbnailRevisions([path], path);
+      expect(await read()).toBe("newer on server");
+      store.bumpThumbnailRevisions([path], path);
+      expectPosterFileVersion(project, path, { token, version: "v2" });
+      expect(await read()).toBe("newer on server");
+
+      markStudioWriteToken("prior-session");
+      store.beginTimelineSession("other");
+      store.beginTimelineSession(project);
+      expectPosterFileVersion(project, path, { token: "prior-session", version: "v2" });
+      expect(await read()).toBe("newer on server");
+    } finally {
+      forgetSource(project, path);
+    }
+  });
+
   it("uses the exact current-project manifest without reading HTML", async () => {
     usePlayerStore.setState({ previewBooted: true, timelineProjectId: "p", timelineSessionEpoch: 4,
       elements: [{ id: "photo", tag: "img", src: "../assets/hero.png", sourceFile: "compositions/scene.html", start: 0, duration: 4, track: 0 }] });
@@ -22,6 +91,71 @@ describe("cloud composition representatives", () => {
     expect(decodeImageThumbnail).toHaveBeenCalledWith(new URL("/api/projects/p/preview/assets/hero.png", location.origin).href, expect.anything());
     expect(fetch).not.toHaveBeenCalled();
   });
+  it("seeds a versioned source from the initial poster without replacing a newer edit or a different session", async () => {
+    const path = "compositions/scene.html";
+    const content = '<img src="assets/first.png">';
+    const headers = { "X-OpenMotion-Text-Edits": "1" };
+    const state = { timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: {} };
+    usePlayerStore.setState(state);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content, version: "v1" }, { headers })));
+    vi.mocked(decodeImageThumbnail).mockResolvedValue(picture);
+    try {
+      await loadCloudCompositionPoster(url(), "p", 3, signal());
+      expect(confirmedSource("p", path)).toBeUndefined();
+      await loadCloudCompositionPoster(url(), "p", 4, signal());
+      expect(confirmedSource("p", path)).toEqual({ content, version: "v1" });
+      rememberSource("p", path, { content: "later", version: "v2" });
+      await loadCloudCompositionPoster(url(), "p", 4, signal());
+      expect(confirmedSource("p", path)?.version).toBe("v2");
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      forgetSource("p", path);
+    }
+  });
+  it("shares one authored read across concurrent and later clip posters while retaining each label", async () => {
+    const file = "compositions/scene.html";
+    usePlayerStore.setState({ timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: {} });
+    const content = ["Intro", "Middle", "End"].map(word => `<div class="clip"><h1>${word}</h1></div>`).join("");
+    const fetch = vi.fn(async () => Response.json({ content }));
+    vi.stubGlobal("fetch", fetch);
+    const poster = (index: number, revision = 0) => loadCloudCompositionPoster(
+      url(`?selector=.clip&selectorIndex=${index}&revision=${revision}`), "p", 4, signal());
+    const [intro, middle] = await Promise.all([poster(0), poster(1)]);
+    const end = await poster(2);
+    expect([intro.value, middle.value, end.value]).toMatchObject([{ label: "Intro" }, { label: "Middle" }, { label: "End" }]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    usePlayerStore.getState().bumpThumbnailRevisions([file], file);
+    fetch.mockImplementationOnce(async () => Response.json({ content: content.replace("Intro", "Revised") }));
+    expect((await poster(0, 1)).value).toMatchObject({ label: "Revised" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const result of [intro, middle, end]) result.dispose?.();
+  });
+
+  it("cancels only the departing poster and retries if the last reader cancels or a fetch fails", async () => {
+    usePlayerStore.setState({ timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: {} });
+    const requests: { signal: AbortSignal; respond: (response: Response) => void }[] = [];
+    vi.stubGlobal("fetch", vi.fn((_url, init) => new Promise<Response>((resolve, reject) => {
+      requests.push({ signal: init.signal, respond: resolve });
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    })));
+    const first = new AbortController(), second = new AbortController();
+    const poster = (signal: AbortSignal) => loadCloudCompositionPoster(url(), "p", 4, signal);
+    const a = poster(first.signal), b = poster(second.signal);
+    expect(requests).toHaveLength(1);
+    first.abort();
+    await expect(a).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests[0].signal.aborted).toBe(false);
+    second.abort();
+    await expect(b).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests[0].signal.aborted).toBe(true);
+    const failed = poster(signal());
+    requests[1].respond(new Response("", { status: 503 }));
+    await expect(failed).rejects.toThrow("503");
+    const recovered = poster(signal());
+    requests[2].respond(Response.json({ content: "<h1>Back</h1>" }));
+    expect((await recovered).value).toMatchObject({ label: "Back" });
+  });
+
   it("reuses the editor source only for the same file, thumbnail revision and session", async () => {
     const file = "compositions/scene.html";
     usePlayerStore.setState({ timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: { [file]: 1 } });
@@ -42,6 +176,56 @@ describe("cloud composition representatives", () => {
     await loadCloudCompositionPoster(url("?revision=2"), "p", 4, signal());
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(decodeImageThumbnail).toHaveBeenLastCalledWith(expect.stringContaining("assets/new.png"), expect.anything());
+  });
+  it("shares the active peer read with its poster, without blocking other files or painting a late revision", async () => {
+    const path = "compositions/scene.html";
+    usePlayerStore.setState({ timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: {} });
+    const close = openTimelineSource("p", path);
+    const fetch = vi.fn(async () => Response.json({ content: '<img src="assets/other.png">' }));
+    vi.stubGlobal("fetch", fetch);
+    vi.mocked(decodeImageThumbnail).mockResolvedValue(picture);
+    function startEdit(revision: number) {
+      let finish!: (file: { content: string; version: string; missing: boolean }) => void;
+      const pending = new Promise<Parameters<typeof finish>[0]>(resolve => { finish = resolve; });
+      const read = vi.fn(() => pending);
+      usePlayerStore.getState().bumpThumbnailRevisions([path], path);
+      syncPeerComposition("p", path, [path], read, { current: null }, null);
+      const poster = loadCloudCompositionPoster(url("?revision=" + revision), "p", 4, signal());
+      expect(read).toHaveBeenCalledExactlyOnceWith("p", path);
+      return { finish, poster };
+    }
+    try {
+      const first = startEdit(1);
+      const second = startEdit(2);
+      expect(fetch).not.toHaveBeenCalled();
+      const other = new URL("/api/projects/p/thumbnail/other.html", location.origin);
+      await loadCloudCompositionPoster(other, "p", 4, signal());
+      expect(fetch).toHaveBeenCalledTimes(1);
+      second.finish({ content: '<img src="assets/current.png">', version: "v2", missing: false });
+      expect(await second.poster).toEqual(picture);
+      first.finish({ content: '<img src="assets/stale.png">', version: "v1", missing: false });
+      await expect(first.poster).rejects.toMatchObject({ name: "AbortError" });
+      await loadCloudCompositionPoster(url("?revision=2"), "p", 4, signal());
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(decodeImageThumbnail).toHaveBeenLastCalledWith(expect.stringContaining("assets/current.png"), expect.anything());
+      expect(decodeImageThumbnail).not.toHaveBeenCalledWith(expect.stringContaining("assets/stale.png"), expect.anything());
+    } finally { close(); }
+  });
+  it("recovers a failed shared read and avoids fetching oversized HTML again", async () => {
+    const path = "compositions/scene.html";
+    usePlayerStore.setState({ timelineProjectId: "p", timelineSessionEpoch: 4, thumbnailRevisions: { [path]: 1 } });
+    const state = usePlayerStore.getState();
+    const fetch = vi.fn(async () => Response.json({ content: '<img src="assets/retry.png">' }));
+    vi.stubGlobal("fetch", fetch);
+    vi.mocked(decodeImageThumbnail).mockResolvedValue(picture);
+    shareCompositionPosterRead(state, "p", path, Promise.reject(new Error("offline")));
+    await expect(loadCloudCompositionPoster(url("?revision=1"), "p", 4, signal())).resolves.toEqual(picture);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:text-cover");
+    shareCompositionPosterRead(state, "p", path, Promise.resolve({ content: "x".repeat(MAX_POSTER_SOURCE_LENGTH + 1), version: "big" }));
+    const fallback = await loadCloudCompositionPoster(url("?revision=1"), "p", 4, signal());
+    expect(fallback.value).toMatchObject({ representative: "text" });
+    expect(knownCompositionSource(state, "p", path)).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
   it("respects the selected occurrence in an inert template without external fetches", async () => {
     const html = '<template><div class="tile"><img src="https://example.invalid/logo.png"></div><div class="tile"><video poster="assets/2.jpg"></video></div></template>';

@@ -1,4 +1,6 @@
 import type { PatchOperation } from "../utils/sourcePatcher";
+import { createPreviewAdapter } from "../player/lib/previewAdapter";
+import { isolatedSourceVersion } from "../components/editor/isolatedSourceTarget";
 import { styleEditKind, withEditKind } from "../motion/editorTracking";
 import { styleHistoryLabel } from "../i18n/styleHistory";
 import {
@@ -87,6 +89,10 @@ export async function commitDomStyles(
     }
   }
   const editedElements = new Map<HTMLElement, Map<string, string>>();
+  const target = selection.isolatedTarget;
+  const frame = previewIframeRef.current;
+  const bridge = target && frame && !doc ? createPreviewAdapter({ iframe: frame }) : null;
+  const editId = bridge && crypto.randomUUID();
 
   return runReportedDomEditCommit({
     capture: () => {
@@ -96,6 +102,10 @@ export async function commitDomStyles(
       }
     },
     apply: () => {
+      if (bridge && target && editId) {
+        bridge.send("inspector-styles", { phase: "show", editId, elementId: target.elementId, hfId: target.hfId,
+          sourceFile: target.sourceFile, fileVersion: isolatedSourceVersion(target), styles: liveStyles });
+      }
       for (const el of editedElements.keys()) {
         for (const [property, value] of liveStyles) el.style.setProperty(property, value);
       }
@@ -129,6 +139,7 @@ export async function commitDomStyles(
       }
     },
     onError: (error) => reportDomEditPersistFailure(selection, operations, error, showToast),
+    onSettled: (saved) => bridge?.send("inspector-styles", { phase: "settle", editId, saved }),
     shouldResync: ownsAny,
     resync: () => context.resync?.(selection),
     onFinally: () => owned.forEach(({ isLatest }) => isLatest.release()),
