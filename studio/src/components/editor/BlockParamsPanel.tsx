@@ -77,7 +77,11 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
       try {
         const [content, editor] = await Promise.all([fileManager.readProjectFile(compositionPath), loadParameterEditor()]);
         const after = editor.setBlockParameter(content, key, nextValue, compositionPath, previous);
-        if (after !== content) await fileManager.writeProjectFile(compositionPath, after, content);
+        if (after !== content) {
+          await fileManager.writeProjectFile(compositionPath, after, content, {
+            kind: "setBlockParameter", compositionPath, key, previous, value: nextValue,
+          });
+        }
         appliedRef.current[key] = nextValue;
         setCommitState({ tone: "saved" });
         trackBlockParamCommit({ tone: "saved", blockName, key });

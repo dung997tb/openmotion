@@ -133,3 +133,19 @@ test('updates a named CSS parameter while preserving its documented example and 
   assert.equal(applyContentCommand(html, command), html.replace('{--accent: #aaa', '{--accent: #bbb'));
   assert.throws(() => applyContentCommand(html + '<style>body{--accent:black}</style>', command), /Ambiguous CSS parameter/);
 });
+
+test('document variables and root overrides target their original carrier without touching nested blocks', () => {
+  const attribute = (id: string, value: string) => `data-composition-variables='[{"id":"${id}","type":"string","default":"${value}"}]'`;
+  const cmd = (key: string) => ({kind: 'setBlockParameter', compositionPath: 'intro.html', key, value: 'After'} as const);
+  const doc = `<html ${attribute('title', 'April')}><body><div data-composition-id="intro"><div data-composition-id="nested" ${attribute('title', 'April')}></div></div></body></html>`;
+  assert.equal(applyContentCommand(doc, cmd('title')), doc.replace(attribute('title', 'April'), attribute('title', 'After')));
+  const rootOverride = doc.replace('id="intro"', `id="intro" ${attribute('title', 'May')}`);
+  assert.equal(applyContentCommand(rootOverride, cmd('title')), rootOverride.replace(attribute('title', 'May'), attribute('title', 'After')));
+});
+
+test('declared controls coexist with named legacy CSS controls without guessing a literal', () => {
+  const doc = `<html data-composition-variables='[{"id":"title","type":"string","default":"Ink"}]'><head><style>:root{--accent:#abc;color:#abc}</style></head><body id="stage">Ink</body></html>`;
+  const command = { kind: 'setBlockParameter', compositionPath: 'mixed.html', key: '--accent', previous: '#abc', value: '#123' } as const;
+  assert.equal(applyContentCommand(doc, command), doc.replace('--accent:#abc', '--accent:#123'));
+  assert.throws(() => applyContentCommand(doc, { ...command, key: '--missing', previous: 'stage' }), /Missing/);
+});

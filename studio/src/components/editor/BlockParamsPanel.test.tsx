@@ -135,6 +135,7 @@ describe("BlockParamsPanel commit safety", () => {
   });
   it("hydrates an existing block's saved declaration and edits only its target", async () => {
     const content = { value: `<div data-composition-id="demo" data-composition-variables='[{"id":"bg-color","type":"color","default":"#445566"},{"id":"sibling","type":"color","default":"#445566"}]'></div>` };
+    const before = content.value;
     const fm = makeFileManager(content);
     renderPanel(fm.value);
     await flushCommit();
@@ -143,6 +144,28 @@ describe("BlockParamsPanel commit safety", () => {
     await flushCommit();
     expect(content.value).toContain('"id":"bg-color","type":"color","default":"#abcdef"');
     expect(content.value).toContain('"id":"sibling","type":"color","default":"#445566"');
+    expect(fm.writeProjectFile).toHaveBeenCalledWith("compositions/vfx-demo.html", content.value, before, {
+      kind: "setBlockParameter", compositionPath: "compositions/vfx-demo.html", key: "--bg-color", previous: "#445566", value: "#abcdef",
+    });
+  });
+  it("restores a refused blank legacy text and accepts the next edit", async () => {
+    const content = { value: "<p>North</p>" };
+    const fm = makeFileManager(content);
+    renderPanel(fm.value, "en", [{ key: "place", label: "Place", type: "text", default: "North" }]);
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Place"]')!;
+    const type = async (value: string) => {
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await flushCommit();
+    };
+    await type("");
+    expect(input.value).toBe("North");
+    expect(document.querySelector('[role="alert"]')).toBeTruthy();
+    expect(fm.writeProjectFile).not.toHaveBeenCalled();
+    await type("South");
+    expect(content.value).toBe("<p>South</p>");
   });
   it("refuses a multi-occurrence value and never mutates the unrelated sibling", async () => {
     // The param's default (#0c0c0c) also appears on an UNRELATED element. The
