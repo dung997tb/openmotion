@@ -120,6 +120,15 @@ describe("peer timing classification", () => {
     expect(diffPreviewChanges(before, marked.replace('translate=""', 'translate="90px"'))).toBeNull();
   });
 
+  it("moves a canvas element without altering its drawing buffer, CSS size or script", () => {
+    const before = '<template><canvas id="reel" width="1920" height="1080"></canvas><script>draw();</script></template>';
+    const after = before.replace('id="reel"', 'id="reel" style="left: 45px; top: 12px"');
+    expect(diffPreviewChanges(before, after)?.[0]?.styles).toEqual([["left", "", "45px"], ["top", "", "12px"]]);
+    for (const changed of [after.replace('width="1920"', 'width="1280"'), after.replace('45px;', '45px; width: 50px;'), after.replace('draw();', 'drawNext();')]) {
+      expect(diffPreviewChanges(before, changed)).toBeNull();
+    }
+  });
+
   it("falls back for a changed tween, markup, source, label, style or expression in the same edit", () => {
     const trimmed = source.replace('data-start="2"', 'data-start="3"');
     for (const next of [trimmed.replace('run(1)', 'run(2)'), trimmed.replace('</audio>', '</audio><b></b>'),

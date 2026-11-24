@@ -561,12 +561,12 @@ function canRebindDocumentTiming(doc: Document, runtimeUrl: string): boolean {
     el.getAttributeNames().some(name => name.toLowerCase().startsWith('on')));
 }
 
-function applyStudioPreviewAugmentations(
+async function applyStudioPreviewAugmentations(
   html: string,
   project: VirtualProjectReader,
   activeCompositionPath: string,
   options: { capture: boolean; gsapBaseUrl: string; bridgeOrigin?: string; studioOrigin?: string; canRebindTiming?: boolean; htmlSources?: string[]; variables?: Record<string, unknown> | null },
-): string {
+): Promise<string> {
   let out = repairCodeExtrudeMaterial(html);
 
   // 1. Studio preview marker + early error capture + lazy images
@@ -588,7 +588,7 @@ function applyStudioPreviewAugmentations(
       .map(file => [file.path, file.blobScope === 'patch' ? formatFileVersion(file.blobScope, file.sha256) : file.sha256]));
     const liveEdits = !options.capture && !options.canRebindTiming && !Object.keys(options.variables ?? {}).length &&
       !project.exists(STUDIO_MOTION_PATH) && !project.exists(STUDIO_MANUAL_EDITS_PATH)
-      ? verifiedPreviewLiveEdits(project) : undefined;
+      ? await verifiedPreviewLiveEdits(project) : undefined;
     const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions, options.studioOrigin, options.canRebindTiming, options.htmlSources, liveEdits);
     const snapdomPreload = options.capture
       ? `<link rel="preload" as="script" href="${new URL('/api/vendor/snapdom.js', options.bridgeOrigin).href}">`
@@ -897,7 +897,7 @@ export async function bundlePreviewInMemory(
   html = withPreviewBase(html, baseHref);
   html = await applyDeterministicFonts(html, options);
   html = ensureHfIds(html);
-  html = applyStudioPreviewAugmentations(html, project, entryFile, {
+  html = await applyStudioPreviewAugmentations(html, project, entryFile, {
     capture: Boolean(options.capture),
     gsapBaseUrl,
     variables: options.variables,
@@ -999,7 +999,7 @@ export async function buildSubCompositionHtmlInMemory(
   html = withPreviewBase(html, baseHref);
   html = await applyDeterministicFonts(html, options);
   html = ensureHfIds(html);
-  html = applyStudioPreviewAugmentations(html, project, compPath, {
+  html = await applyStudioPreviewAugmentations(html, project, compPath, {
     capture: Boolean(options.capture),
     gsapBaseUrl,
     variables: options.variables,

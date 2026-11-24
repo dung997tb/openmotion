@@ -33,7 +33,7 @@ export const PREVIEW_PEER_TIMING = `
       });
     }
     if (!change.styles && !change.text) return true;
-    if (!presentationTags.has(node.localName)) return false;
+    if (!presentationTags.has(node.localName) && !(node.localName === 'canvas' && isPositionEdit([change]))) return false;
     if (change.styles) {
       if (!Array.isArray(change.styles) || !change.styles.length || change.styles.length > presentationStyles.size) return false;
       for (const [name, from, to] of change.styles) {

@@ -109,7 +109,7 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
     let styles: PreviewChange["styles"];
     let text: PreviewChange["text"];
     let captureOriginalTranslate: boolean | undefined;
-    if (presentationTags.has(left.localName) && left instanceof HTMLElement && right instanceof HTMLElement) {
+    if ((presentationTags.has(left.localName) || left.localName === "canvas") && left instanceof HTMLElement && right instanceof HTMLElement) {
       if (left.getAttribute("style") !== right.getAttribute("style")) {
         styles = changedStyles(left, right) ?? undefined;
         if (!styles) return null;
@@ -136,7 +136,10 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
     const hfId = left.getAttribute("data-hf-id");
     const compositionId = left.getAttribute("data-composition-id");
     if (!hfId && !left.id && !compositionId) return null;
-    changes.push({ hfId, id: left.id, compositionId, tag: left.localName, attributes, styles, text, captureOriginalTranslate });
+    const change = { hfId, id: left.id, compositionId, tag: left.localName, attributes, styles, text, captureOriginalTranslate };
+    // Moving the canvas DOM box preserves its drawing buffer. Its content and dimensions are owned by the renderer.
+    if (change.tag === "canvas" && (styles || text) && !isLivePositionEdit([change])) return null;
+    changes.push(change);
   }
   if (!changes.length || changes.length > 32 || before.documentElement.outerHTML !== after.documentElement.outerHTML) return null;
   return changes;

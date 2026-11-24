@@ -244,6 +244,29 @@ it('shows a confirmed nested style on the old scripted document while keeping it
   assert.deepEqual(hooks, []);
 });
 
+it('only moves the existing canvas box when the project certifies a placement change', () => {
+  const path = 'scenes/intro.html';
+  const message = (property: string) => ({
+    type: 'peer-presentation', path, before: etag(3), after: etag(4),
+    changes: [{ tag: 'canvas', id: 'reel', attributes: [], styles: [[property, '', '32px']] }],
+  });
+  for (const certified of [false, true]) {
+    const { send, document, hooks } = preview(false, certified ? { position: true } : undefined);
+    const owner = document.querySelector('main')!;
+    owner.setAttribute('data-composition-file', path);
+    const canvas = document.createElement('canvas');
+    canvas.id = 'reel';
+    canvas.setAttribute('width', '1920');
+    owner.appendChild(canvas);
+    assert.equal(send(message('width')), false);
+    assert.equal(send(message('left')), certified);
+    assert.equal(canvas.style.left || '', certified ? '32px' : '');
+    assert.equal(canvas.getAttribute('width'), '1920');
+    assert.equal(document.getElementById('reel'), canvas);
+    assert.deepEqual(hooks, []);
+  }
+});
+
 it('advances a certified child placement through consecutive versions without restarting its animations', () => {
   const { send, document, hooks } = preview(false, { position: true });
   const path = 'scenes/intro.html';

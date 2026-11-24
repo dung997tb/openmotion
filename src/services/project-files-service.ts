@@ -806,6 +806,7 @@ export class ProjectFilesService {
     return new InMemoryVirtualProject({
       projectId: project.id,
       projectName: project.title,
+      templateId: project.templateId,
       // A commit may land between loading the project and listing its files.
       revision: computeProjectRevision(files.map(f => ({ path: f.path, size: f.sizeBytes, hash: f.sha256 }))),
       files,
