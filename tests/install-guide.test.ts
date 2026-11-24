@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, stat, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { generateInstallGuide, validateGuideSpec, validateGuideIdentity } from '../scripts/install-guide.mjs';
 import { movingGuide, publishGuide, storagePlan } from '../.github/scripts/publish-install-guide.mjs';
-import { installationInstructions } from '../scripts/install-onboarding.mjs';
+import { installationInstructions, prepareInstallationOnboarding } from '../scripts/install-onboarding.mjs';
 import { fileURLToPath } from 'node:url';
 import { runFile } from '../scripts/runtime-assets.mjs';
 
@@ -86,7 +86,7 @@ test('guide rendering pins the exact npm package, built source and hash while re
   assert(text.includes('`npm_config_registry` and `npm_config_fetch_retries=0` only for that attempt, including setup\'s npm child process'), 'Temporary registry settings must reach nested dependency installation');
   assert(text.includes('verify any mirrored tgz against the matching immutable guide\'s SHA256 before executing it'), 'Mirror recovery must preserve an independently recorded package identity');
   assert(text.includes('Permission or checksum failures stop immediately') && text.includes('terminal handoff') && text.includes('A local tgz still needs npm access'), 'Retain fail-closed recovery, terminal handoff and the online dependency boundary');
-  assert(text.includes(await installationInstructions(fileURLToPath(new URL('../', import.meta.url)), 'docs/templates/legacy-npm-install.md')), 'Published guide must preserve the exact setup reply contract');
+  assert(text.includes(await installationInstructions(fileURLToPath(new URL('../', import.meta.url)))), 'Published guide must preserve the exact setup reply contract');
   assert.match(text, /^# Install OpenMotion 0\.6\.4-test\.1\n/);
   assert(text.includes(`skills@1.9.0 add https://github.com/nexu-io/openmotion/tree/${manifest.commit} --skill openmotion`));
   assert(!text.includes('skills@1.9.0 add nexu-io/openmotion '), 'A release guide must not pair its app with main-branch Skill instructions');
@@ -219,4 +219,35 @@ test('moving guides use channel tags while immutable guides and current version 
   assert(movingGuide(exact, { ...record, channel: 'stable' }).includes('@openmotion/app@latest'));
   const count = store.writes.length;
   await publishGuide(directory, config, store); assert.equal(store.writes.length, count);
+});
+
+test('local/DSH onboarding defaults to the archived local contract and keeps relative doc links valid', async t => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const localContract = await installationInstructions(root);
+  assert(localContract.includes('scripts/inline-onboarding.mjs --publish-from'));
+  assert(!localContract.includes('/api/onboarding/prepare'), 'Local/DSH contract must not instruct local installers to call cloud /api/onboarding/prepare');
+
+  const cloudContract = await installationInstructions(root, 'docs/install.md');
+  assert(cloudContract.includes('/api/onboarding/prepare'));
+
+  const tempData = await mkdtemp(path.join(os.tmpdir(), 'motion-local-onboarding-'));
+  t.after(() => rm(tempData, { recursive: true, force: true }));
+  const prepared = await prepareInstallationOnboarding({
+    appRoot: root,
+    dataDirectory: tempData,
+    host: 'deepseek',
+    language: 'zh',
+  });
+  assert.equal(prepared.instructions, localContract);
+  assert(!prepared.instructions.includes('/api/onboarding/prepare'));
+  assert.equal(prepared.inlinePresentation?.status, 'prepared');
+
+  const legacyPath = path.join(root, 'docs/templates/legacy-npm-install.md');
+  const legacyText = await readFile(legacyPath, 'utf8');
+  for (const match of legacyText.matchAll(/\]\(([^)]+)\)/g)) {
+    const href = match[1];
+    if (/^(?:https?:|#|mailto:|\{\{)/.test(href)) continue;
+    const target = path.resolve(path.dirname(legacyPath), href.split('#')[0]);
+    await stat(target);
+  }
 });

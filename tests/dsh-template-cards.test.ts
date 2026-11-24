@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { registerOpenMotionTemplateCards } from "../integrations/dsh/plugin/src/templateRecommendationCards.ts";
+import { fileURLToPath } from "node:url";
+import { detailsSchema, registerOpenMotionTemplateCards } from "../integrations/dsh/plugin/src/templateRecommendationCards.ts";
+import { prepareCloudOnboarding } from "../src/services/cloud-onboarding.ts";
 
 function fixture() {
   const registered: any[] = [], providers: any[] = [], decisions: any[] = [], follows: any[] = [];
@@ -53,4 +55,24 @@ test("card preview and selection keep exact IDs and never request automatic proj
 
 test("a host without optional card services retains its existing MCP flow", () => {
   assert.doesNotThrow(() => registerOpenMotionTemplateCards({ effect: () => {}, skills: undefined, actionCards: undefined }));
+});
+
+test("cloud onboarding prepare returns DSH card arguments matching detailsSchema with video media URLs", async () => {
+  const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+  const prep = await prepareCloudOnboarding({
+    runtimeRoot: repoRoot,
+    publicOrigin: "https://motion.open-design.ai",
+    language: "zh-CN",
+  });
+  const parsed = detailsSchema.parse(prep.dshCardPresentation.arguments.details);
+  assert.equal(parsed.onboarding, true);
+  assert.equal(parsed.language, "zh");
+  assert.equal(parsed.templates.length, 3);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(parsed.templates[i].id, prep.templates[i].templateId);
+    assert.equal(parsed.templates[i].previewUrl, prep.templates[i].videoUrl);
+    assert.equal(parsed.templates[i].posterUrl, prep.templates[i].posterUrl);
+  }
+  const withLibrary = detailsSchema.parse({ ...prep.dshCardPresentation.arguments.details, libraryOpened: true });
+  assert.equal(withLibrary.libraryOpened, true);
 });

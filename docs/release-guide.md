@@ -73,7 +73,7 @@ Each defect needs exact package/source/OS/host/environment/catalog identity, pro
 
 ## Hosted installation instructions
 
-[docs/install.md](install.md) is the public Agent-facing installation guide and the release generator's source. It contains source setup, the main Skill installation, npm setup and the shared onboarding contract. The generator omits marked source-only instructions, reads the complete npm tgz and its embedded manifest, pins the npm name/version and built source SHA, and records the guide and package hashes. It does not build or publish the application. Root `install.md` only forwards to this maintained guide.
+[docs/install.md](install.md) is the public Agent-facing Cloud MCP connection guide (and root `install.md` forwards to it). [docs/templates/legacy-npm-install.md](templates/legacy-npm-install.md) is the archived local source/npm template and the release generator's source: `scripts/install-guide.mjs` omits its marked source-only instructions, reads the complete npm tgz and its embedded manifest, pins the npm name/version and built source SHA, and records the guide and package hashes. It does not build or publish the application.
 
 Ordinary npm/DEV CI builds generate a **candidate-only** guide and retain it as an Actions artifact for 14 days. The publisher rejects candidate previews. Public guides require test/DEV or stable/prod identity; private builds cannot produce them.
 

@@ -1,21 +1,29 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  ONBOARDING_HTML_BUDGET_BYTES,
+  SUPPORTED_ONBOARDING_LANGUAGES,
+  loadInlineOnboardingStaticAssets,
+  normalizeOnboardingLanguage,
+  renderInlineOnboardingDocument,
+  type InlineOnboardingRecommendation,
+  type InlineOnboardingStaticAssets,
+  type InlineProjectPreview,
+  type OnboardingLanguage,
+} from '../../shared/inline-onboarding-renderer.ts';
 import { CloudError } from '../contracts/errors.ts';
 
 export const DEFAULT_CLOUD_ORIGIN = 'https://motion.open-design.ai';
-export const ONBOARDING_HTML_BUDGET_BYTES = 1_000_000;
-export const SUPPORTED_ONBOARDING_LANGUAGES = ['zh', 'en', 'ja', 'ko', 'fr', 'es', 'pt'] as const;
-export type OnboardingLanguage = (typeof SUPPORTED_ONBOARDING_LANGUAGES)[number];
+export const MAX_DOCUMENT_CACHE_BYTES = 16 * 1024 * 1024;
+const MAX_RESOURCE_CACHE_VERSIONS = 2;
 
-interface InlineProjectPreview {
-  id: string;
-  durationSeconds: number;
-  videoBase64: string;
-  videoMimeType: 'video/webm';
-  posterBase64: string;
-  posterMimeType: 'image/jpeg';
-}
+export {
+  ONBOARDING_HTML_BUDGET_BYTES,
+  SUPPORTED_ONBOARDING_LANGUAGES,
+  normalizeOnboardingLanguage,
+  type OnboardingLanguage,
+};
 
 interface LoadedTemplatePresentation {
   readonly uri: string;
@@ -30,26 +38,6 @@ interface LoadedTemplatePresentation {
     readonly videoUrl?: string;
     readonly posterUrl?: string;
   }>;
-}
-
-interface TemplateRecommendationCard {
-  position: number;
-  templateId: string;
-  title: string;
-  description: string;
-  durationSeconds: number;
-  actionRequestId: string;
-  templateKind?: 'reference';
-}
-
-interface TemplateRecommendationPayload {
-  schemaVersion: number;
-  resourceVersion: string;
-  recommendationId: string;
-  cards: TemplateRecommendationCard[];
-  language?: string;
-  onboarding?: boolean;
-  selectionGuide: string;
 }
 
 interface OnboardingTemplatesModule {
@@ -69,7 +57,7 @@ interface TemplateRecommendationsModule {
   showTemplateRecommendations: (
     presentation: LoadedTemplatePresentation,
     args: { templateIds: string[]; onboarding?: boolean; language?: string },
-  ) => TemplateRecommendationPayload;
+  ) => InlineOnboardingRecommendation;
 }
 
 interface OnboardingI18nModule {
@@ -92,6 +80,15 @@ export interface CloudOnboardingTemplateItem {
   readonly previewUrl: string;
   readonly posterUrl: string | null;
   readonly videoUrl: string | null;
+}
+
+export interface CloudOnboardingDshTemplateItem {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly previewUrl?: string;
+  readonly posterUrl?: string;
+  readonly duration: number;
 }
 
 export interface CloudOnboardingPreparePayload {
@@ -122,6 +119,20 @@ export interface CloudOnboardingPreparePayload {
       readonly onboarding: false;
     };
   };
+  readonly dshCardPresentation: {
+    readonly tool: 'propose_action';
+    readonly skill: 'openmotion-template-recommendations';
+    readonly arguments: {
+      readonly action: 'openmotion_template_recommendation';
+      readonly title: 'OpenMotion';
+      readonly brief: string;
+      readonly details: {
+        readonly onboarding: true;
+        readonly language: OnboardingLanguage;
+        readonly templates: readonly CloudOnboardingDshTemplateItem[];
+      };
+    };
+  };
   readonly templates: readonly CloudOnboardingTemplateItem[];
 }
 
@@ -135,8 +146,94 @@ export interface RenderedOnboardingDocument {
   readonly templates: readonly CloudOnboardingTemplateItem[];
 }
 
-const MAX_DOCUMENT_CACHE_ENTRIES = 256;
-const documentCache = new Map<string, RenderedOnboardingDocument>();
+export interface ByteBoundedDocumentCache<T extends { readonly bytes: number }> {
+  get(key: string): T | undefined;
+  set(key: string, value: T): void;
+  clear(): void;
+  readonly size: number;
+  readonly totalBytes: number;
+  readonly maxBytes: number;
+}
+
+/**
+ * Byte-bounded LRU cache so unauthenticated permutations of `/api/onboarding/cards.html`
+ * cannot accumulate unbounded heap across languages and template orderings.
+ */
+export function createByteBoundedDocumentCache<T extends { readonly bytes: number }>(
+  maxBytes = MAX_DOCUMENT_CACHE_BYTES,
+): ByteBoundedDocumentCache<T> {
+  const entries = new Map<string, T>();
+  let totalBytes = 0;
+
+  return {
+    get(key: string): T | undefined {
+      const value = entries.get(key);
+      if (!value) return undefined;
+      entries.delete(key);
+      entries.set(key, value);
+      return value;
+    },
+    set(key: string, value: T): void {
+      if (value.bytes > maxBytes) return;
+      const existing = entries.get(key);
+      if (existing) {
+        totalBytes -= existing.bytes;
+        entries.delete(key);
+      }
+      while (totalBytes + value.bytes > maxBytes && entries.size > 0) {
+        const oldestKey = entries.keys().next().value;
+        if (oldestKey === undefined) break;
+        const oldest = entries.get(oldestKey);
+        entries.delete(oldestKey);
+        if (oldest) totalBytes -= oldest.bytes;
+      }
+      entries.set(key, value);
+      totalBytes += value.bytes;
+    },
+    clear(): void {
+      entries.clear();
+      totalBytes = 0;
+    },
+    get size(): number {
+      return entries.size;
+    },
+    get totalBytes(): number {
+      return totalBytes;
+    },
+    get maxBytes(): number {
+      return maxBytes;
+    },
+  };
+}
+
+interface CachedResourceMedia {
+  readonly previewsById: ReadonlyMap<string, InlineProjectPreview>;
+  readonly staticAssets: InlineOnboardingStaticAssets;
+}
+
+const documentCache = createByteBoundedDocumentCache<RenderedOnboardingDocument>(
+  MAX_DOCUMENT_CACHE_BYTES,
+);
+const resourceMediaCache = new Map<string, Promise<CachedResourceMedia>>();
+
+export function clearCloudOnboardingCaches(): void {
+  documentCache.clear();
+  resourceMediaCache.clear();
+}
+
+export function getCloudOnboardingCacheStats(): {
+  readonly documentCount: number;
+  readonly documentBytes: number;
+  readonly documentMaxBytes: number;
+  readonly resourceVersionCount: number;
+} {
+  return {
+    documentCount: documentCache.size,
+    documentBytes: documentCache.totalBytes,
+    documentMaxBytes: documentCache.maxBytes,
+    resourceVersionCount: resourceMediaCache.size,
+  };
+}
 
 let cachedTemplatesModule: Promise<OnboardingTemplatesModule> | null = null;
 let cachedRecommendationsModule: Promise<TemplateRecommendationsModule> | null = null;
@@ -166,6 +263,53 @@ function loadI18nModule(): Promise<OnboardingI18nModule> {
   return cachedI18nModule;
 }
 
+function loadCachedResourceMedia(options: {
+  runtimeRoot: string;
+  directory: string;
+  resourceVersion: string;
+  onboardingTemplateIds: readonly string[];
+  recMod: TemplateRecommendationsModule;
+}): Promise<CachedResourceMedia> {
+  const key = `${options.runtimeRoot}|${options.resourceVersion}`;
+  const existing = resourceMediaCache.get(key);
+  if (existing) {
+    resourceMediaCache.delete(key);
+    resourceMediaCache.set(key, existing);
+    return existing;
+  }
+
+  const pending = (async (): Promise<CachedResourceMedia> => {
+    // Load and base64-encode each curated preview once per resource version (~1.2 MiB total)
+    // instead of duplicating media across every language and permutation.
+    const [previews, staticAssets] = await Promise.all([
+      Promise.resolve(
+        options.recMod.loadInlineProjectPreviews([...options.onboardingTemplateIds], {
+          applicationRoot: options.runtimeRoot,
+          directory: options.directory,
+        }),
+      ),
+      loadInlineOnboardingStaticAssets(options.directory),
+    ]);
+    return {
+      previewsById: new Map(previews.map((item) => [item.id, item])),
+      staticAssets,
+    };
+  })();
+
+  while (resourceMediaCache.size >= MAX_RESOURCE_CACHE_VERSIONS) {
+    const oldestKey = resourceMediaCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    resourceMediaCache.delete(oldestKey);
+  }
+  resourceMediaCache.set(key, pending);
+  pending.catch(() => {
+    if (resourceMediaCache.get(key) === pending) {
+      resourceMediaCache.delete(key);
+    }
+  });
+  return pending;
+}
+
 function deterministicUuid(seed: string): string {
   const hex = createHash('sha256').update(seed).digest('hex');
   // Set RFC 4122 version 4 / variant 10 bits so downstream UUID validators accept it.
@@ -173,14 +317,6 @@ function deterministicUuid(seed: string): string {
   const variantNibble = (8 + (Number.parseInt(hex.slice(16, 17), 16) % 4)).toString(16);
   const part4 = variantNibble + hex.slice(17, 20);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${part3}-${part4}-${hex.slice(20, 32)}`;
-}
-
-export function normalizeOnboardingLanguage(raw?: string | null): OnboardingLanguage {
-  if (typeof raw !== 'string' || !raw.trim()) return 'en';
-  const base = raw.trim().toLowerCase().split(/[-_]/)[0];
-  return (SUPPORTED_ONBOARDING_LANGUAGES as readonly string[]).includes(base)
-    ? (base as OnboardingLanguage)
-    : 'en';
 }
 
 export function normalizePublicOrigin(rawOrigin: string): string {
@@ -258,7 +394,11 @@ export async function renderCloudOnboardingDocument(options: {
 }): Promise<RenderedOnboardingDocument> {
   const origin = normalizePublicOrigin(options.publicOrigin || DEFAULT_CLOUD_ORIGIN);
   const directory = path.join(options.runtimeRoot, 'mcp-ui/template-recommendations');
-  const [recMod, i18nMod] = await Promise.all([loadRecommendationsModule(), loadI18nModule()]);
+  const [templatesMod, recMod, i18nMod] = await Promise.all([
+    loadOnboardingTemplatesModule(),
+    loadRecommendationsModule(),
+    loadI18nModule(),
+  ]);
 
   let presentation: LoadedTemplatePresentation;
   try {
@@ -278,33 +418,6 @@ export async function renderCloudOnboardingDocument(options: {
   const cached = documentCache.get(cacheKey);
   if (cached) return cached;
 
-  const bootstrapMatch = presentation.content.text.match(
-    /window\.__OPENMOTION_TEMPLATE_CARDS__=(.*?);<\/script>/s,
-  );
-  if (!bootstrapMatch) {
-    throw new CloudError('SERVICE_UNAVAILABLE', 'Verified template cards bootstrap is missing', {
-      status: 503,
-      applied: false,
-    });
-  }
-
-  const bootstrap = JSON.parse(bootstrapMatch[1]) as {
-    templates: Array<{
-      id: string;
-      title: string;
-      description: string;
-      descriptions?: Record<string, string>;
-      kind?: string;
-      durationSeconds: number;
-      videoUrl?: string;
-      posterUrl?: string;
-      videoBase64?: string;
-      videoMimeType?: string;
-      posterBase64?: string;
-      posterMimeType?: string;
-    }>;
-  };
-
   const templateIds = [...options.templateIds];
   const rawRecommendation = recMod.showTemplateRecommendations(presentation, {
     templateIds,
@@ -315,7 +428,7 @@ export async function renderCloudOnboardingDocument(options: {
   // Replace random UUIDs with deterministic tuple-derived UUIDs so multi-replica pods
   // return identical HTML bytes and SHA-256 hashes across `/prepare` and `/cards.html`.
   const seedBase = `${presentation.resourceVersion}|${options.language}|${templateIds.join(',')}`;
-  const recommendation: TemplateRecommendationPayload = {
+  const recommendation: InlineOnboardingRecommendation = {
     ...rawRecommendation,
     recommendationId: deterministicUuid(`${seedBase}|rec`),
     cards: rawRecommendation.cards.map((card, index) => ({
@@ -324,123 +437,88 @@ export async function renderCloudOnboardingDocument(options: {
     })),
   };
 
-  // Capture original reference URLs before replacing media with inline project previews.
-  const mediaById = new Map<string, { posterUrl: string | null; videoUrl: string | null; summary: string }>();
-  for (const tpl of bootstrap.templates) {
-    if (!templateIds.includes(tpl.id)) continue;
-    const localizedSummary = tpl.descriptions?.[options.language] ?? tpl.description;
-    mediaById.set(tpl.id, {
-      posterUrl: typeof tpl.posterUrl === 'string' ? tpl.posterUrl : null,
-      videoUrl: typeof tpl.videoUrl === 'string' ? tpl.videoUrl : null,
-      summary: localizedSummary,
+  let resourceMedia: CachedResourceMedia;
+  try {
+    resourceMedia = await loadCachedResourceMedia({
+      runtimeRoot: options.runtimeRoot,
+      directory,
+      resourceVersion: presentation.resourceVersion,
+      onboardingTemplateIds: templatesMod.onboardingTemplateIds,
+      recMod,
     });
-  }
-
-  bootstrap.templates = bootstrap.templates.filter((tpl) => templateIds.includes(tpl.id));
-  const references = bootstrap.templates.filter((tpl) => tpl.kind === 'reference');
-  if (references.length > 0) {
-    const previews = recMod.loadInlineProjectPreviews(
-      references.map((item) => item.id),
-      { applicationRoot: options.runtimeRoot, directory },
-    );
-    const prefix = i18nMod.inlineDescriptionPrefixes[options.language];
-    for (const tpl of references) {
-      const preview = previews.find((item) => item.id === tpl.id);
-      if (!preview) {
-        throw new CloudError('SERVICE_UNAVAILABLE', `Missing inline preview for ${tpl.id}`, {
-          status: 503,
-          applied: false,
-        });
-      }
-      delete tpl.videoUrl;
-      delete tpl.posterUrl;
-      Object.assign(tpl, preview);
-      tpl.description = prefix + tpl.description;
-      if (tpl.descriptions) {
-        for (const loc of Object.keys(tpl.descriptions) as OnboardingLanguage[]) {
-          const locPrefix = i18nMod.inlineDescriptionPrefixes[loc] ?? prefix;
-          tpl.descriptions[loc] = locPrefix + tpl.descriptions[loc];
-        }
-      }
-      const card = recommendation.cards.find((item) => item.templateId === tpl.id);
-      if (card) {
-        card.durationSeconds = preview.durationSeconds;
-        card.description = tpl.description;
-      }
-    }
-  }
-
-  const [fragmentTemplate, inlineCss, inlineJs] = await Promise.all([
-    readFile(path.join(directory, 'inline.fragment.html'), 'utf8'),
-    readFile(path.join(directory, 'build/app.css'), 'utf8'),
-    readFile(path.join(directory, 'build/inline.js'), 'utf8'),
-  ]);
-
-  const rootDomId = `openmotion-onboarding-${createHash('sha256').update(seedBase).digest('hex').slice(0, 16)}`;
-  const safeJson = (value: unknown) => JSON.stringify(value).replaceAll('<', '\\u003c');
-  const replacements: Record<string, string> = {
-    '__OPENMOTION_INLINE_ROOT__': rootDomId,
-    '/*__OPENMOTION_INLINE_STYLE__*/': inlineCss.replace(/<\/style/gi, '<\\/style'),
-    '/*__OPENMOTION_INLINE_APP__*/': inlineJs.replace(/<\/script/gi, '<\\/script'),
-    '/*__OPENMOTION_INLINE_BOOTSTRAP__*/': safeJson(bootstrap),
-    '/*__OPENMOTION_INLINE_RECOMMENDATION__*/': safeJson({ ...recommendation, onboarding: false }),
-  };
-
-  let html = fragmentTemplate;
-  for (const [marker, value] of Object.entries(replacements)) {
-    if (!html.includes(marker)) {
-      throw new CloudError('SERVICE_UNAVAILABLE', `Inline onboarding marker missing: ${marker}`, {
-        status: 503,
-        applied: false,
-      });
-    }
-    html = html.replaceAll(marker, () => value);
-  }
-  if (html.includes('__OPENMOTION_INLINE_')) {
-    throw new CloudError('SERVICE_UNAVAILABLE', 'Inline onboarding document contains unresolved markers', {
-      status: 503,
-      applied: false,
-    });
-  }
-
-  const bytes = Buffer.byteLength(html, 'utf8');
-  if (bytes >= ONBOARDING_HTML_BUDGET_BYTES) {
+  } catch (error) {
     throw new CloudError(
       'SERVICE_UNAVAILABLE',
-      `Inline onboarding document (${bytes} bytes) exceeds 1,000,000-byte host budget`,
-      { status: 500, applied: false },
+      `Onboarding preview assets are unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      { status: 503, applied: false },
     );
   }
 
-  const sha256 = createHash('sha256').update(html, 'utf8').digest('hex');
-  const templates: CloudOnboardingTemplateItem[] = recommendation.cards.map((card) => {
-    const orig = mediaById.get(card.templateId);
-    return {
-      position: card.position,
-      templateId: card.templateId,
-      title: card.title,
-      summary: orig?.summary ?? card.description,
-      durationSeconds: card.durationSeconds,
-      previewUrl: `${origin}/?templates=1&template=${encodeURIComponent(card.templateId)}`,
-      posterUrl: orig?.posterUrl ?? null,
-      videoUrl: orig?.videoUrl ?? null,
-    };
-  });
+  const rootDomId = `openmotion-onboarding-${createHash('sha256').update(seedBase).digest('hex').slice(0, 16)}`;
+  let rendered;
+  try {
+    rendered = await renderInlineOnboardingDocument({
+      directory,
+      language: options.language,
+      templateIds,
+      previewSource: 'project',
+      presentation,
+      recommendation,
+      inlineDescriptionPrefixes: i18nMod.inlineDescriptionPrefixes,
+      rootDomId,
+      loadProjectPreviews: (referenceIds) => {
+        const resolved: InlineProjectPreview[] = [];
+        for (const id of referenceIds) {
+          const hit = resourceMedia.previewsById.get(id);
+          if (hit) {
+            resolved.push(hit);
+          } else {
+            const loaded = recMod.loadInlineProjectPreviews([id], {
+              applicationRoot: options.runtimeRoot,
+              directory,
+            });
+            resolved.push(...loaded);
+          }
+        }
+        return resolved;
+      },
+      loadStaticAssets: async () => resourceMedia.staticAssets,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.includes('host budget') ? 500 : 503;
+    throw new CloudError('SERVICE_UNAVAILABLE', message, { status, applied: false });
+  }
+
+  if (rendered.status !== 'prepared') {
+    throw new CloudError(
+      'SERVICE_UNAVAILABLE',
+      'Inline onboarding document requires native MCP App presentation',
+      { status: 503, applied: false },
+    );
+  }
+
+  const templates: CloudOnboardingTemplateItem[] = rendered.templates.map((item) => ({
+    position: item.position,
+    templateId: item.templateId,
+    title: item.title,
+    summary: item.summary,
+    durationSeconds: item.durationSeconds,
+    previewUrl: `${origin}/?templates=1&template=${encodeURIComponent(item.templateId)}`,
+    posterUrl: item.posterUrl,
+    videoUrl: item.videoUrl,
+  }));
 
   const result: RenderedOnboardingDocument = {
-    html,
-    sha256,
-    bytes,
-    resourceVersion: presentation.resourceVersion,
-    language: options.language,
+    html: rendered.html,
+    sha256: rendered.sha256,
+    bytes: rendered.bytes,
+    resourceVersion: rendered.resourceVersion,
+    language: rendered.language,
     templateIds,
     templates,
   };
 
-  if (documentCache.size >= MAX_DOCUMENT_CACHE_ENTRIES) {
-    const oldestKey = documentCache.keys().next().value;
-    if (oldestKey) documentCache.delete(oldestKey);
-  }
   documentCache.set(cacheKey, result);
   return result;
 }
@@ -466,6 +544,17 @@ export async function prepareCloudOnboarding(options: {
 
   const libraryUrl = `${origin}/?templates=1`;
   const inlineHtmlUrl = `${origin}/api/onboarding/cards.html?lang=${encodeURIComponent(language)}&templates=${encodeURIComponent(templateIds.join(','))}`;
+
+  // DSH action cards validate against `detailsSchema` (`id`, `title`, `description`,
+  // video `previewUrl`, `posterUrl`, `duration`) rather than the text-fallback HTML URL.
+  const dshTemplates: CloudOnboardingDshTemplateItem[] = doc.templates.map((item) => ({
+    id: item.templateId,
+    title: item.title,
+    description: item.summary.slice(0, 1000),
+    ...(item.videoUrl ? { previewUrl: item.videoUrl } : {}),
+    ...(item.posterUrl ? { posterUrl: item.posterUrl } : {}),
+    duration: item.durationSeconds,
+  }));
 
   return {
     schemaVersion: 1,
@@ -497,6 +586,20 @@ export async function prepareCloudOnboarding(options: {
         templateIds: doc.templateIds,
         language,
         onboarding: false,
+      },
+    },
+    dshCardPresentation: {
+      tool: 'propose_action',
+      skill: 'openmotion-template-recommendations',
+      arguments: {
+        action: 'openmotion_template_recommendation',
+        title: 'OpenMotion',
+        brief: 'Choose a template to begin',
+        details: {
+          onboarding: true,
+          language,
+          templates: dshTemplates,
+        },
       },
     },
     templates: doc.templates,

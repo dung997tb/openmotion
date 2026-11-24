@@ -17,10 +17,15 @@ import { phase1Tools } from '../../shared/phase1-tools.ts';
 import { createOnboardingRoutes } from '../../src/routes/onboarding.ts';
 import {
   DEFAULT_CLOUD_ORIGIN,
+  MAX_DOCUMENT_CACHE_BYTES,
   ONBOARDING_HTML_BUDGET_BYTES,
   SUPPORTED_ONBOARDING_LANGUAGES,
+  clearCloudOnboardingCaches,
+  createByteBoundedDocumentCache,
+  getCloudOnboardingCacheStats,
   renderCloudInstallGuide,
 } from '../../src/services/cloud-onboarding.ts';
+import { renderInlineOnboardingDocument } from '../../shared/inline-onboarding-renderer.ts';
 import { renderOAuthConsentHtml } from '../../src/auth/oauth21.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -93,12 +98,36 @@ describe('Cloud install guide and stateless onboarding endpoints', () => {
         tool: string;
         arguments: { templateIds: string[]; language: string; onboarding: boolean };
       };
+      dshCardPresentation: {
+        tool: string;
+        skill: string;
+        arguments: {
+          action: string;
+          title: string;
+          brief: string;
+          details: {
+            onboarding: boolean;
+            language: string;
+            templates: Array<{
+              id: string;
+              title: string;
+              description?: string;
+              previewUrl?: string;
+              posterUrl?: string;
+              duration?: number;
+            }>;
+          };
+        };
+      };
       templates: Array<{
         position: number;
         templateId: string;
         title: string;
         summary: string;
+        durationSeconds: number;
         previewUrl: string;
+        posterUrl: string | null;
+        videoUrl: string | null;
       }>;
     };
 
@@ -116,6 +145,23 @@ describe('Cloud install guide and stateless onboarding endpoints', () => {
     assert.ok(!prep.noSidebarWelcomeMarkdown.includes('右侧就是模板库'));
     assert.equal(prep.cardPresentation.tool, 'openmotion_show_template_recommendations');
     assert.deepEqual(prep.cardPresentation.arguments.templateIds, prep.templateIds);
+    assert.equal(prep.dshCardPresentation.tool, 'propose_action');
+    assert.equal(prep.dshCardPresentation.skill, 'openmotion-template-recommendations');
+    assert.equal(prep.dshCardPresentation.arguments.action, 'openmotion_template_recommendation');
+    assert.equal(prep.dshCardPresentation.arguments.details.onboarding, true);
+    assert.equal(prep.dshCardPresentation.arguments.details.language, 'zh');
+    assert.equal(prep.dshCardPresentation.arguments.details.templates.length, 3);
+    for (let i = 0; i < 3; i++) {
+      const raw = prep.templates[i];
+      const dsh = prep.dshCardPresentation.arguments.details.templates[i];
+      assert.equal(dsh.id, raw.templateId);
+      assert.equal(dsh.title, raw.title);
+      assert.equal(dsh.description, raw.summary);
+      assert.equal(dsh.duration, raw.durationSeconds);
+      assert.equal(dsh.previewUrl, raw.videoUrl, 'DSH previewUrl must be the video stream URL, not the HTML template-library URL');
+      assert.equal(dsh.posterUrl, raw.posterUrl);
+      assert.ok(!dsh.previewUrl?.includes('?templates=1'));
+    }
     assert.equal(prep.templates.length, 3);
     assert.ok(prep.inlineHtmlBytes > 10_000 && prep.inlineHtmlBytes < ONBOARDING_HTML_BUDGET_BYTES);
 
@@ -153,7 +199,8 @@ describe('Cloud install guide and stateless onboarding endpoints', () => {
     assert.ok((await defaultCardsRes.text()).includes('OpenMotionTemplateCards'));
   });
 
-  it('keeps all 4 three-of-four combinations across all 7 languages under the 1,000,000-byte budget', async () => {
+  it('keeps all 4 three-of-four combinations across all 7 languages under the 1,000,000-byte budget and bounds cache memory', async () => {
+    clearCloudOnboardingCaches();
     const app = createOnboardingRoutes({
       config: { APP_PUBLIC_ORIGIN: DEFAULT_CLOUD_ORIGIN },
       runtimeRoot: REPO_ROOT,
@@ -173,6 +220,53 @@ describe('Cloud install guide and stateless onboarding endpoints', () => {
         assert.ok(!html.includes('__OPENMOTION_INLINE_'));
       }
     }
+    const stats = getCloudOnboardingCacheStats();
+    assert.equal(stats.resourceVersionCount, 1, 'Encoded preview media must be cached once per resource version');
+    assert.ok(stats.documentBytes <= MAX_DOCUMENT_CACHE_BYTES, `Rendered cache (${stats.documentBytes}) must stay within ${MAX_DOCUMENT_CACHE_BYTES} bytes`);
+    assert.ok(stats.documentCount < 28, 'Byte cap must evict older rendered documents instead of retaining all 28 × ~700KB copies');
+  });
+
+  it('evicts least-recently-used entries in createByteBoundedDocumentCache and blocks external media in shared inline renderer', async () => {
+    const cache = createByteBoundedDocumentCache<{ id: string; bytes: number }>(100);
+    cache.set('a', { id: 'a', bytes: 45 });
+    cache.set('b', { id: 'b', bytes: 45 });
+    assert.equal(cache.totalBytes, 90);
+    // Touch 'a' so 'b' becomes least-recently-used.
+    assert.equal(cache.get('a')?.id, 'a');
+    cache.set('c', { id: 'c', bytes: 45 });
+    assert.equal(cache.get('b'), undefined, 'LRU entry b must be evicted');
+    assert.equal(cache.get('a')?.id, 'a');
+    assert.equal(cache.get('c')?.id, 'c');
+    assert.equal(cache.totalBytes, 90);
+    cache.set('oversized', { id: 'oversized', bytes: 150 });
+    assert.equal(cache.get('oversized'), undefined, 'Oversized entry must not enter cache');
+
+    const { loadTemplatePresentation, showTemplateRecommendations } = await import(
+      '../../shared/mcp-template-recommendations.ts'
+    );
+    const { inlineDescriptionPrefixes } = await import(
+      '../../mcp-ui/template-recommendations/i18n.ts'
+    );
+    const directory = path.join(REPO_ROOT, 'mcp-ui/template-recommendations');
+    const presentation = loadTemplatePresentation({ applicationRoot: REPO_ROOT, directory });
+    const templateIds = onboardingTemplateIds.slice(0, 3);
+    const recommendation = showTemplateRecommendations(presentation, {
+      templateIds,
+      language: 'en',
+      onboarding: true,
+    });
+    const guarded = await renderInlineOnboardingDocument({
+      directory,
+      language: 'en',
+      templateIds,
+      previewSource: 'reference',
+      presentation,
+      recommendation,
+      inlineDescriptionPrefixes,
+      loadProjectPreviews: () => [],
+    });
+    assert.equal(guarded.status, 'native_required');
+    assert.equal(guarded.reason, 'INLINE_EXTERNAL_MEDIA_BLOCKED');
   });
 
   it('loads native template presentation and cloud onboarding from the minimal api Dockerfile asset slice', async (t) => {
@@ -242,12 +336,16 @@ describe('Cloud install guide and stateless onboarding endpoints', () => {
     assert.ok(setupPrompt(cloudInfo, 'codex', 'en').includes('https://motion.open-design.ai/install.md'));
   });
 
-  it('renders the OpenMotion-styled OAuth consent page with grouped permissions and escaped inputs', () => {
+  it('renders the OpenMotion-styled OAuth consent page using the shared design system with escaped inputs', async () => {
     const html = renderOAuthConsentHtml({
       clientName: 'Codex <test>',
       redirectUri: 'http://127.0.0.1:54321/callback',
       workspaceName: 'Motion Team',
       workspaceId: 'ws-1',
+      workspaces: [
+        { id: 'ws-1', name: 'Motion Team', role: 'owner' },
+        { id: 'ws-2', name: 'Design Lab', role: 'member' },
+      ],
       userDisplayName: 'Alice',
       userEmail: 'alice@example.com',
       switchAccountUrl: '/auth/login?switch=1',
@@ -255,6 +353,30 @@ describe('Cloud install guide and stateless onboarding endpoints', () => {
       formAction: '/oauth/authorize',
       hiddenFields: { consent_token: 'tok-123' },
     });
+
+    assert.ok(html.includes('<html lang="zh-CN" data-motion-ui>'));
+    assert.ok(html.includes('<link rel="stylesheet" href="/design-system/ui.css">'));
+    assert.ok(html.includes('class="ui-button consent-action"'));
+    assert.ok(html.includes('class="ui-button ui-button--primary consent-action"'));
+    assert.ok(html.includes('class="ui-input ws-select"'));
+    assert.ok(html.includes('class="ui-badge unverified-pill"'));
+    assert.ok(html.includes('class="ui-text-link switch-link"'));
+
+    const styleMatch = html.match(/<style>([\s\S]*?)<\/style>/);
+    assert.ok(styleMatch, 'OAuth consent page must include page-layout styles');
+    const styleBlock = styleMatch[1];
+    assert.doesNotMatch(
+      styleBlock,
+      /#[\da-f]{3,8}\b|\brgba?\(|\bhsla?\(/i,
+      'OAuth consent CSS must consume shared --motion-* tokens without raw color literals',
+    );
+    assert.ok(!styleBlock.includes('--om-'), 'OAuth consent CSS must not maintain a parallel --om-* palette');
+
+    const tokensCss = await readFile(path.join(REPO_ROOT, 'packages/design-system/tokens.css'), 'utf8');
+    const definedTokens = new Set([...tokensCss.matchAll(/(--motion-[\w-]+)\s*:/g)].map((m) => m[1]));
+    for (const match of styleBlock.matchAll(/var\((--motion-[\w-]+)/g)) {
+      assert.ok(definedTokens.has(match[1]), `OAuth consent page references undefined token ${match[1]}`);
+    }
 
     assert.ok(html.includes('授权 Codex &lt;test&gt; 连接 OpenMotion'));
     assert.ok(!html.includes('Codex <test>'), 'clientName must be HTML-escaped');

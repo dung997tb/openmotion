@@ -96,7 +96,8 @@ It returns:
 - `welcomeMarkdown`, `fallbackWelcomeMarkdown`, `noSidebarWelcomeMarkdown`, and `noSidebarTextWelcomeMarkdown`: localized maintained welcome copy in `LANG`.
 - `inlineHtmlUrl`, `inlineHtmlSha256`, and `inlineHtmlBytes`: self-contained `< 1,000,000`-byte HTML card fragment with embedded silent VP9 WebM previews and JPEG posters.
 - `cardPresentation`: exact arguments for `openmotion_show_template_recommendations`.
-- `templates`: ordered metadata (`position`, `templateId`, `title`, `summary`, `durationSeconds`, `previewUrl`, `posterUrl`, `videoUrl`) for DSH cards or text fallback.
+- `dshCardPresentation`: exact `propose_action` arguments formatted for DSH's `detailsSchema` (`id`, `title`, `description`, video `previewUrl`, `posterUrl`, `duration`).
+- `templates`: ordered metadata (`position`, `templateId`, `title`, `summary`, `durationSeconds`, `previewUrl`, `posterUrl`, `videoUrl`) for text fallback.
 
 Never substitute built-in examples (`product-promo`, `nyt-graph`, `decision-tree`) for the curated onboarding pool unless the user explicitly asks for them.
 
@@ -124,7 +125,7 @@ Choose the best supported card surface for the current host (host identity alone
      `visualize{"path":"<HOST_VISUALIZATION_DIR>/openmotion-welcome.html"}`
    - Do not summarize the welcome or replace it with a technical status report.
 3. **DSH conversation cards**:
-   - Load `openmotion-template-recommendations` and call `propose_action` with `action: "openmotion_template_recommendation"`, `details.onboarding: true`, `language: LANG`, `libraryOpened` (true only after confirmed opening), and the exact three items from `prepare.templates`.
+   - Load `prepare.dshCardPresentation.skill` (`openmotion-template-recommendations`) and call `propose_action` with `prepare.dshCardPresentation.arguments` (setting `details.libraryOpened: true` only after confirmed library opening). Do **not** pass raw `prepare.templates` directly: DSH expects `id`, `description`, `duration`, and video-stream `previewUrl` (`videoUrl`), which `prepare.dshCardPresentation.arguments.details.templates` already supplies.
 4. **Text fallback (CLI / hosts without card UI, or when card rendering fails)**:
    - Emit `prepare.fallbackWelcomeMarkdown` (if a right-hand library opened) or `prepare.noSidebarTextWelcomeMarkdown` (otherwise), then list the exact three items from `prepare.templates` in order with **title**, **summary**, and clickable **`previewUrl`**, and briefly note that this client does not render interactive preview cards.
 
