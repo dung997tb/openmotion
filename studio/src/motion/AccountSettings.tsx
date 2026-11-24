@@ -109,7 +109,7 @@ export function UpgradeGuide({ plan, subscription }: { plan: 'free' | 'go'; subs
 function withPreviewUsage(value: AccountSummary): AccountSummary {
   if (!import.meta.env.DEV || typeof location === 'undefined' || !new URLSearchParams(location.search).has('mockAccountUsage')) return value;
   return { ...value, state: 'signed-in', user: value.user ?? { email: 'preview@example.com' }, plan: 'pro', balance: '119.13', billingUnavailable: false,
-    usage: { periodEnd: '2026-12-24T00:00:00.000Z', weekly: { remainingPercent: 100, resetsAt: new Date(Date.now() + 7 * 86_400_000).toISOString() }, payAsYouGoUsd: '119.13', autoRecharge: false } };
+    usage: { periodEnd: '2026-12-24T00:00:00.000Z', payAsYouGoUsd: '119.13', autoRecharge: false } };
 }
 
 export function useAccountSummary(options?: { eager?: boolean }) {
@@ -211,27 +211,16 @@ export function AccountStatus({ account, busy, action, showToast }: { account: A
   </section>;
 }
 
-const percentFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
-function resetIn(resetsAt: string | null | undefined, now: number) {
-  const time = resetsAt ? Date.parse(resetsAt) : NaN;
-  if (!Number.isFinite(time)) return undefined;
-  const minutes = Math.max(0, Math.ceil((time - now) / 60_000));
-  return { days: Math.floor(minutes / 1440), hours: Math.floor((minutes % 1440) / 60), minutes: minutes % 60 };
-}
 function formatUsd(value: string | null | undefined) {
   const amount = value == null ? NaN : Number(value);
   return Number.isFinite(amount) ? '$' + amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 }
 
-/** Plan card and the two quotas, laid out like the OpenDesign console dashboard. */
+/** Plan card and pay-as-you-go credits, laid out like the OpenDesign console dashboard. */
 function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary; upgradable: boolean; open: (element: SubscriptionElement) => void }) {
   const { t, locale } = useI18n(), usage = account.usage!;
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60_000); return () => window.clearInterval(timer); }, []);
   const planName = !account.plan || account.plan === 'free' ? t('Free plan') : account.plan.charAt(0).toUpperCase() + account.plan.slice(1);
   const periodEnd = usage.periodEnd && Number.isFinite(Date.parse(usage.periodEnd)) ? new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(usage.periodEnd)) : undefined;
-  const weekly = usage.weekly, percent = weekly ? Math.min(100, Math.max(0, weekly.remainingPercent)) : undefined;
-  const countdown = resetIn(weekly?.resetsAt, now);
   return <section className="om-card om-plan-usage">
     <div className="om-plan-usage-head">
       <div className="om-plan-usage-identity">
@@ -245,13 +234,6 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
       </div>
     </div>
     <div className="om-plan-usage-quotas">
-      <div className="om-plan-usage-quota" data-quota="plan">
-        <h3 className="om-subtitle">{t('Coding Plan quota')}</h3>
-        <span className="om-muted">{t('7-day quota remaining')}</span>
-        <div className="om-plan-usage-figure"><strong>{percent === undefined ? '—' : percentFormat.format(percent) + '%'}</strong>
-          <span className="om-muted">{countdown ? t('Resets in {days}d {hours}h {minutes}m', countdown) : weekly === null ? t('Quota windows temporarily unavailable') : ''}</span></div>
-        <div className="om-plan-usage-meter" role="meter" aria-label={t('7-day quota remaining')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? 0}><span style={{ width: (percent ?? 0) + '%' }} /></div>
-      </div>
       <div className="om-plan-usage-quota" data-quota="pay-as-you-go">
         <div className="om-settings-row"><h3 className="om-subtitle">{t('Pay-as-you-go credits')}</h3>{usage.autoRecharge !== undefined && <span className="om-badge">{t(usage.autoRecharge ? 'Auto top-up on' : 'Auto top-up off')}</span>}</div>
         <span className="om-muted">{t('After your plan quota runs out, keep working with pay-as-you-go credits.')}</span>

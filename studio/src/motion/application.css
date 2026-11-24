@@ -212,16 +212,13 @@
 .om-plan-usage-identity .om-title { margin: 0; font-size: var(--motion-text-display-sm); }
 .om-plan-usage-identity p { display: flex; flex-wrap: wrap; align-items: center; gap: var(--motion-space-12); margin: 0; }
 .om-plan-usage-link { padding: 0; color: inherit; text-decoration: underline; text-underline-offset: 3px; }
-.om-plan-usage-quotas { display: grid; grid-template-columns: 1fr 1fr; padding: var(--motion-space-20) var(--motion-space-24); }
+.om-plan-usage-quotas { display: grid; padding: var(--motion-space-20) var(--motion-space-24); }
 .om-plan-usage-quota { display: grid; align-content: start; gap: var(--motion-space-8); min-width: 0; }
-.om-plan-usage-quota + .om-plan-usage-quota { padding-inline-start: var(--motion-space-24); margin-inline-start: var(--motion-space-24); border-inline-start: 1px solid var(--motion-border-subtle); }
 .om-plan-usage-quota .om-subtitle { margin: 0; }
 .om-plan-usage-quota > .om-settings-row { gap: var(--motion-space-8); }
 .om-plan-usage-figure { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--motion-space-8); }
 .om-plan-usage-figure strong { font-size: var(--motion-text-display-sm); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .om-plan-usage-figure .om-muted { font-size: var(--motion-text-sm); }
-.om-plan-usage-meter { height: 8px; border-radius: var(--motion-radius-full); background: var(--motion-border-subtle); overflow: hidden; }
-.om-plan-usage-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--motion-accent); transition: width .3s ease; }
 .om-account-code { display: block; margin-top: var(--motion-space-12); font-family: var(--motion-font-mono); font-size: var(--motion-text-heading); }
 .om-preference-row { display: flex; align-items: center; justify-content: space-between; gap: var(--motion-space-24); padding-block: var(--motion-space-20); }
 .om-preference-row + .om-preference-row { border-top: 1px solid var(--motion-border-subtle); }
@@ -271,9 +268,7 @@
   .om-settings-page .om-card { padding: var(--motion-space-16); }
   .om-settings-row { flex-wrap: wrap; }
   .om-account-metrics { grid-template-columns: 1fr; }
-  .om-plan-usage-quotas { grid-template-columns: 1fr; gap: var(--motion-space-20); }
-  .om-plan-usage-quota + .om-plan-usage-quota { padding-inline-start: 0; margin-inline-start: 0; border-inline-start: 0; padding-top: var(--motion-space-20); border-top: 1px solid var(--motion-border-subtle); }
-  .om-account-callout { flex-wrap: wrap; align-items: flex-start; gap: var(--motion-space-12); }
+    .om-account-callout { flex-wrap: wrap; align-items: flex-start; gap: var(--motion-space-12); }
   .om-account-callout-action { width: 100%; }
   .om-preference-row { flex-direction: column; align-items: flex-start; gap: var(--motion-space-12); }
   .om-model-row { gap: var(--motion-space-6); flex-wrap: wrap; }
