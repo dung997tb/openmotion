@@ -1,4 +1,6 @@
+import { refreshCommittedTimeline } from "./timelineTimingSync";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { confirmedSource } from "../utils/confirmedTextSources";
 import { saveCloudTimeline, timelineAttributeCommand } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
 import { useCaptionWorkspace } from "../motion/captionWorkspace";
@@ -21,6 +23,16 @@ type ElementAttributeEdits = Parameters<
 >[0];
 
 type PatchTarget = NonNullable<ReturnType<typeof buildPatchTarget>>;
+
+// Legacy cues identify themselves by DOM id. Custom HTML can identify a caption
+// solely by its source attribute, even with an ordinary id and no timeline role.
+function mayChangeCaptionLock(projectId: string, paths: Iterable<string>, edits: ElementAttributeEdits): boolean {
+  if (edits.some(({ element }) => /^(?:transcript|text)-[a-f0-9-]{36}-/.test(element.domId || element.id))) return true;
+  return Array.from(paths).some(path => {
+    const source = confirmedSource(projectId, path);
+    return !source || /data-caption-track/i.test(source.content);
+  });
+}
 
 function editsByFile(
   edits: ElementAttributeEdits,
@@ -48,7 +60,7 @@ function patchLive(
     else node?.setAttribute(attr, value);
     syncStoredElementAttribute(element, attr, value);
   }
-  if (attr === "muted") {
+  if (attr === "muted" && iframe?.contentDocument) {
     // The HTML attribute changes defaultMuted, not the currently playing media.
     // Reapply the monitor state so the runtime also reads each clip's saved mute.
     setPreviewMediaMuted(iframe, usePlayerStore.getState().audioMuted);
@@ -85,17 +97,20 @@ export function useSetElementsAttribute({
         for (const path of byFile.keys()) pendingTimelineEditPathRef.current.add(path);
         const uniform = edits.every(edit => edit.value === edits[0]?.value);
         const state = attr === "muted" ? "muted" : attr === "data-timeline-locked" ? "locked" : null;
+        const iframe = previewIframeRef.current;
+        const cloud = getCachedCloudDisklessMode();
+        const onSaved = cloud && iframe && !iframe.contentDocument && reloadPreview
+          ? refreshCommittedTimeline(iframe, activeCompPath ?? "index.html", projectId, reloadPreview) : undefined;
         let changedPaths: string[];
-        if (state && uniform && getCachedCloudDisklessMode()) {
+        if (state && uniform && cloud) {
           changedPaths = await saveCloudTimeline(
             projectId,
             [...byFile].map(([path, patches]) => ({ path, command: resolve => ({
               kind: "setClipState", hfIds: patches.map(p => resolve({...p.target, domId:p.target.id ?? undefined})), state, enabled: edits[0]!.value !== null,
             }) })),
-            writeProjectFile, recordEdit, label,
+            writeProjectFile, recordEdit, label, onSaved,
           );
         } else {
-          const cloud = getCachedCloudDisklessMode();
           const apply = cloud ? (await import("../../../packages/edit-core/canvas-commands")).applyCanvasCommand : undefined;
           const commands = new Map([...byFile].map(([path, patches]) => [path, timelineAttributeCommand(patches, attr)]));
           const files = Object.fromEntries([...byFile].map(([path, patches]) => [path, (before: string) =>
@@ -106,13 +121,14 @@ export function useSetElementsAttribute({
             projectId, label, files,
             commandForWrite: apply ? (path) => commands.get(path) : undefined,
             readFile: (path) => readFileContent(projectId, path),
-            writeFile: writeProjectFile, recordEdit,
+            writeFile: writeProjectFile, recordEdit, onSaved,
           });
         }
-        const iframe = previewIframeRef.current;
         patchLive(iframe, edits, attr, activeCompPath);
-        if (changedPaths.length && iframe && !iframe.contentDocument) reloadPreview?.();
-        if (attr === "data-timeline-locked") useCaptionWorkspace.getState().changed();
+        if (!onSaved && changedPaths.length && iframe && !iframe.contentDocument) reloadPreview?.();
+        if (attr === "data-timeline-locked" && changedPaths.length && mayChangeCaptionLock(projectId, changedPaths, edits)) {
+          useCaptionWorkspace.getState().changed();
+        }
         return { status: "saved" };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Could not save the clips";

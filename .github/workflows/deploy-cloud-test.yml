@@ -2,20 +2,48 @@ name: Release default cloud test environment
 
 on:
   push:
-    branches: [feat/cloud-container-p1]
+    branches: [main]
+    paths:
+      - .dockerignore
+      - deploy/Dockerfile
+      - package.json
+      - package-lock.json
+      - src/**
+      - shared/**
+      - gateway/**
+      - tracking/**
+      - studio/**
+      - skills/**
+      - packages/**
+      - templates/**
+      - web/**
+      - mcp-ui/**
+      - library/**
+      - template-library/**
+      - scripts/**
+      - docs/transcripts.md
+      - hyperframes.ts
+      - server.ts
+      - template-library.ts
+      - LICENSE
+      - .github/workflows/ci.yml
+      - .github/workflows/container-images.yml
+      - .github/workflows/deploy-cloud-test.yml
+      - .github/scripts/orbit-publish-cloud-test.mjs
+      - .github/scripts/promote-cloud-test.sh
   workflow_dispatch: {}
 
 permissions: {}
 
 jobs:
   checks:
-    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/feat/cloud-container-p1'
+    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
 
   images:
-    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/feat/cloud-container-p1'
+    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/main'
     permissions:
       actions: read
       contents: read
@@ -26,7 +54,7 @@ jobs:
     name: Publish tested image digests for Argo CD
     environment: orbit-cloud-test
     needs: [checks, images]
-    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/feat/cloud-container-p1'
+    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

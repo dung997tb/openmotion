@@ -1,4 +1,5 @@
 import { usePlayerStore } from "../store/playerStore";
+import { thumbnailRevisionOf } from "../store/thumbnailSlice";
 import {
   acquireSharedPreviewGrant,
   clearSharedPreviewGrantsForTest,
@@ -7,6 +8,7 @@ import {
 } from "./previewLease";
 import {
   createThumbnailKey,
+  thumbnailScheduler,
   type ThumbnailLoadedResult,
   type ThumbnailPriority,
   type ThumbnailRequest,
@@ -20,6 +22,8 @@ export const MAX_INITIAL_TIMELINE_PREVIEW_GATE = 4;
 export const TIMELINE_PREVIEW_GATE_TIMEOUT_MS = 4_500;
 
 const CAPTURE_TARGET_WIDTH = 160;
+const CAPTURE_MAX_HEIGHT = 480;
+const CAPTURE_MAX_SCALE = 2;
 const CAPTURE_JPEG_QUALITY = 0.78;
 const CAPTURE_BOOT_TIMEOUT_MS = 12_000;
 const CAPTURE_MEDIA_TIMEOUT_MS = 2_000;
@@ -28,6 +32,7 @@ const CAPTURE_FRAME_YIELD_MS = 8;
 const CAPTURE_IDLE_TEARDOWN_MS = 1_500;
 const MAX_CONCURRENT_ISOLATED_CAPTURES = 3;
 const MAX_CONCURRENT_SAME_ORIGIN_CAPTURES = 2;
+const MAX_CONCURRENT_EDIT_REFRESH_CAPTURES = 1;
 const IDB_NAME = "openmotion-client-comp-thumbs-v1";
 const IDB_STORE = "strips";
 const IDB_MAX_ENTRIES = 120;
@@ -43,6 +48,17 @@ interface CachedStripRecord {
   updatedAt: number;
 }
 
+interface SharedCoverEntry {
+  blob: Blob;
+  aspect: number;
+  width: number;
+  height: number;
+  projectId: string;
+  compPath: string;
+  compRev: string;
+  contentRevision: number;
+}
+
 interface MemoryStripEntry {
   blobs: readonly Blob[];
   value: ThumbnailValue;
@@ -55,6 +71,10 @@ interface MemoryStripEntry {
   baseCoverKey: string;
   compPathKey: string;
   clipIdentityKey: string;
+  projectId: string;
+  compPath: string;
+  compRev: string;
+  contentRevision: number;
   inCache: boolean;
   refCount: number;
   revoked: boolean;
@@ -106,7 +126,7 @@ function notifyRevisionListeners(projectId: string): void {
 }
 // In-memory cover cache keyed by composition identity (ignoring frameCount) so sidebar 1-frame
 // cards immediately reuse frames already captured for a timeline strip without booting a 2nd run.
-const sharedCoverCache = new Map<string, { blob: Blob; aspect: number; width: number; height: number }>();
+const sharedCoverCache = new Map<string, SharedCoverEntry>();
 // In-memory LRU strip cache keyed independent of sessionEpoch so switching projects/compositions
 // renders captured filmstrips synchronously in 0ms without re-queuing or re-fetching posters.
 const memoryStripCache = new Map<string, MemoryStripEntry>();
@@ -136,7 +156,7 @@ function clearProgressiveEntry(idbKey: string): void {
 
 function putSharedCoverCache(
   baseCoverKey: string,
-  entry: { blob: Blob; aspect: number; width: number; height: number },
+  entry: SharedCoverEntry,
 ): void {
   if (sharedCoverCache.has(baseCoverKey)) sharedCoverCache.delete(baseCoverKey);
   sharedCoverCache.set(baseCoverKey, entry);
@@ -187,6 +207,7 @@ export function retainCachedCompositionCapture(
 export function clearClientCompositionCaptureCacheForTest(): void {
   cancelIdleTeardown();
   for (const slot of captureIframePool) {
+    slot.loaded = null;
     try {
       slot.iframe.src = "about:blank";
       slot.iframe.remove();
@@ -195,6 +216,10 @@ export function clearClientCompositionCaptureCacheForTest(): void {
     }
   }
   captureIframePool.length = 0;
+  activeCaptureCount = 0;
+  activeEditRefreshCount = 0;
+  activeDocKeys.clear();
+  pendingCaptureJobs.length = 0;
   for (const entry of memoryStripCache.values()) {
     entry.inCache = false;
     if (!entry.revoked) {
@@ -283,17 +308,137 @@ export function setClientCompositionCaptureCapabilityForTest(enabled: boolean | 
   testCapabilityOverride = enabled;
 }
 
+function evictStaleMemoryStripEntries(isStale: (entry: MemoryStripEntry) => boolean): void {
+  // Preserve at most one freshest fallback entry per clip identity (preferring a multi-frame
+  // filmstrip over a 1-frame render) so refreshing timeline clips keep displaying their previous
+  // filmstrip until the new revision lands, while immediately evicting older superseded entries.
+  const hasFreshFilmstrip = new Set<string>();
+  const hasFreshRender = new Set<string>();
+  const staleEntries: Array<[string, MemoryStripEntry]> = [];
+  for (const pair of memoryStripCache) {
+    const entry = pair[1];
+    if (entry.revoked) continue;
+    if (isStale(entry)) {
+      staleEntries.push(pair);
+    } else if (entry.value.kind === "filmstrip" && entry.value.urls.length > 0) {
+      hasFreshFilmstrip.add(entry.clipIdentityKey);
+    } else if (entry.value.kind === "image" && entry.value.representative === "render") {
+      hasFreshRender.add(entry.clipIdentityKey);
+    }
+  }
+  const preservedFallbackKeys = new Map<string, string>();
+  for (let i = staleEntries.length - 1; i >= 0; i--) {
+    const [key, entry] = staleEntries[i]!;
+    if (hasFreshFilmstrip.has(entry.clipIdentityKey)) continue;
+    if (entry.value.kind === "filmstrip" && entry.value.urls.length > 0) {
+      if (!preservedFallbackKeys.has(entry.clipIdentityKey)) {
+        preservedFallbackKeys.set(entry.clipIdentityKey, key);
+      }
+    }
+  }
+  for (let i = staleEntries.length - 1; i >= 0; i--) {
+    const [key, entry] = staleEntries[i]!;
+    if (
+      hasFreshFilmstrip.has(entry.clipIdentityKey) ||
+      hasFreshRender.has(entry.clipIdentityKey) ||
+      preservedFallbackKeys.has(entry.clipIdentityKey)
+    ) {
+      continue;
+    }
+    if (entry.value.kind === "image" && entry.value.representative === "render") {
+      preservedFallbackKeys.set(entry.clipIdentityKey, key);
+    }
+  }
+  for (const [key, entry] of staleEntries) {
+    if (preservedFallbackKeys.get(entry.clipIdentityKey) === key) continue;
+    memoryStripCache.delete(key);
+    entry.inCache = false;
+    maybeRevokeEntry(entry);
+  }
+}
+
+function evictStaleProjectRevisions(
+  projectId: string,
+  isPathChanged: (compPath: string) => boolean = () => true,
+): void {
+  evictStaleMemoryStripEntries(
+    (entry) =>
+      entry.projectId === projectId &&
+      entry.compRev !== resolveCompositionRevision(projectId, entry.compPath),
+  );
+  thumbnailScheduler.invalidateMatching(projectId, (req) => {
+    if (req.kind !== "composition" || !req.compositionPath) return false;
+    if (req.compositionRevision !== undefined) {
+      return req.compositionRevision !== resolveCompositionRevision(projectId, req.compositionPath);
+    }
+    return isPathChanged(req.compositionPath);
+  });
+  for (const [key, entry] of sharedCoverCache) {
+    if (entry.projectId !== projectId) continue;
+    if (entry.compRev === resolveCompositionRevision(projectId, entry.compPath)) continue;
+    sharedCoverCache.delete(key);
+  }
+  for (const slot of captureIframePool) {
+    if (slot.busy || !slot.loaded || slot.loaded.projectId !== projectId) continue;
+    if (slot.loaded.compRev === resolveCompositionRevision(projectId, slot.loaded.compPath)) continue;
+    slot.loaded = null;
+    resetCaptureIframe(slot.iframe);
+  }
+}
+
+/**
+ * Proactively drop cached strip/cover entries and idle capture iframes whose revision
+ * was superseded by a persisted file edit, freeing old blobs and object URLs immediately
+ * instead of waiting for LRU eviction while keeping at most one fallback strip per clip
+ * until the refreshed capture completes.
+ */
+export function evictStaleCompositionCaptures(
+  projectId: string,
+  compositions: readonly string[] | null = null,
+  currentRevisions?: Readonly<Record<string, number>>,
+): void {
+  if (!projectId) return;
+  const affected =
+    compositions === null
+      ? null
+      : new Set(compositions.map((path) => normalizeCompositionPathForGate(path)).filter(Boolean));
+  const isStale = (compPath: string, contentRevision: number): boolean => {
+    if (affected !== null && !affected.has(compPath)) return false;
+    if (!currentRevisions) return true;
+    return contentRevision < thumbnailRevisionOf(currentRevisions, compPath);
+  };
+  evictStaleMemoryStripEntries(
+    (entry) => entry.projectId === projectId && isStale(entry.compPath, entry.contentRevision),
+  );
+  thumbnailScheduler.invalidateMatching(projectId, (req) => {
+    if (req.kind !== "composition" || !req.compositionPath) return false;
+    return isStale(req.compositionPath, req.contentRevision ?? 0);
+  });
+  for (const [key, entry] of sharedCoverCache) {
+    if (entry.projectId !== projectId || !isStale(entry.compPath, entry.contentRevision)) continue;
+    sharedCoverCache.delete(key);
+  }
+  for (const slot of captureIframePool) {
+    if (slot.busy || !slot.loaded || slot.loaded.projectId !== projectId) continue;
+    if (!isStale(slot.loaded.compPath, slot.loaded.contentRevision)) continue;
+    slot.loaded = null;
+    resetCaptureIframe(slot.iframe);
+  }
+}
+
 export function setCachedProjectRevision(
   projectId: string,
   revision: string | null | undefined,
   compositionRevisions?: Readonly<Record<string, string>> | null,
 ): void {
   if (!projectId) return;
+  let projectRevChanged = false;
   let changed = false;
   if (typeof revision === "string" && revision.trim()) {
     const trimmed = revision.trim();
     if (projectRevisionByProjectId.get(projectId) !== trimmed) {
       projectRevisionByProjectId.set(projectId, trimmed);
+      projectRevChanged = true;
       changed = true;
     }
   }
@@ -306,22 +451,41 @@ export function setCachedProjectRevision(
     }
     const prev = compositionRevisionsByProjectId.get(projectId);
     if (normalized.size > 0) {
+      const changedPaths = new Set<string>();
+      for (const [k, v] of normalized) {
+        if (prev?.get(k) !== v) changedPaths.add(k);
+      }
+      if (prev) {
+        for (const k of prev.keys()) {
+          if (!normalized.has(k)) changedPaths.add(k);
+        }
+      }
       const same =
         prev !== undefined &&
         prev.size === normalized.size &&
-        Array.from(normalized.entries()).every(([k, v]) => prev.get(k) === v);
+        changedPaths.size === 0;
       if (!same) {
         compositionRevisionsByProjectId.set(projectId, normalized);
         changed = true;
       }
-      if (changed) notifyRevisionListeners(projectId);
+      if (changed) {
+        const hadPrev = prev !== undefined;
+        evictStaleProjectRevisions(projectId, (compPath) => {
+          if (normalized.has(compPath)) return changedPaths.has(compPath);
+          return projectRevChanged || (hadPrev && prev.has(compPath));
+        });
+        notifyRevisionListeners(projectId);
+      }
       return;
     }
   }
   if (compositionRevisionsByProjectId.delete(projectId)) {
     changed = true;
   }
-  if (changed) notifyRevisionListeners(projectId);
+  if (changed) {
+    evictStaleProjectRevisions(projectId);
+    notifyRevisionListeners(projectId);
+  }
 }
 
 export function subscribeCompositionCacheRevision(projectId: string, listener: () => void): () => void {
@@ -590,13 +754,28 @@ const CAPTURE_PRIORITY_RANK: Readonly<Record<CaptureQueuePriority, number>> = {
   interaction: 3,
 };
 
+interface LoadedCaptureState {
+  docKey: string;
+  projectId: string;
+  compPath: string;
+  compRev: string;
+  contentRevision: number;
+  origin: string;
+  token: string;
+  tokenExpiresAt: number;
+  duration: number;
+}
+
 interface CaptureIframeSlot {
   iframe: HTMLIFrameElement;
   busy: boolean;
+  loaded: LoadedCaptureState | null;
 }
 
 interface QueuedCaptureJob {
   priority: CaptureQueuePriority;
+  docKey: string;
+  isEditRefresh: boolean;
   seq: number;
   signal: AbortSignal;
   task: () => Promise<unknown>;
@@ -608,7 +787,9 @@ interface QueuedCaptureJob {
 const captureIframePool: CaptureIframeSlot[] = [];
 let teardownTimer: ReturnType<typeof setTimeout> | null = null;
 let activeCaptureCount = 0;
+let activeEditRefreshCount = 0;
 let captureJobSeq = 0;
+const activeDocKeys = new Set<string>();
 const pendingCaptureJobs: QueuedCaptureJob[] = [];
 
 function maxConcurrentCaptures(): number {
@@ -631,6 +812,7 @@ function scheduleIdleTeardown(): void {
     teardownTimer = null;
     if (activeCaptureCount > 0 || pendingCaptureJobs.length > 0 || captureIframePool.length === 0) return;
     for (const slot of captureIframePool) {
+      slot.loaded = null;
       try {
         slot.iframe.src = "about:blank";
         slot.iframe.remove();
@@ -669,31 +851,55 @@ function createCaptureIframe(width: number, height: number): HTMLIFrameElement {
   return iframe;
 }
 
-function acquireCaptureSlot(width = 1280, height = 720): CaptureIframeSlot {
+function acquireCaptureSlot(width = 1280, height = 720, preferredDocKey?: string): CaptureIframeSlot {
   cancelIdleTeardown();
+  let warmMatch: CaptureIframeSlot | null = null;
+  let emptySlot: CaptureIframeSlot | null = null;
+  let fallbackSlot: CaptureIframeSlot | null = null;
   for (let i = captureIframePool.length - 1; i >= 0; i--) {
     const slot = captureIframePool[i]!;
     if (!slot.iframe.isConnected) {
-      if (!slot.busy) captureIframePool.splice(i, 1);
+      if (!slot.busy) {
+        slot.loaded = null;
+        captureIframePool.splice(i, 1);
+      }
       continue;
     }
-    if (!slot.busy) {
-      slot.busy = true;
-      slot.iframe.style.width = `${width}px`;
-      slot.iframe.style.height = `${height}px`;
-      return slot;
+    if (slot.busy) continue;
+    if (preferredDocKey && slot.loaded?.docKey === preferredDocKey) {
+      warmMatch = slot;
+      break;
     }
+    if (!slot.loaded && !emptySlot) {
+      emptySlot = slot;
+    } else if (!fallbackSlot) {
+      fallbackSlot = slot;
+    }
+  }
+  const chosen = warmMatch ?? emptySlot ?? fallbackSlot;
+  if (chosen) {
+    chosen.busy = true;
+    if (!warmMatch) {
+      chosen.loaded = null;
+      chosen.iframe.style.width = `${width}px`;
+      chosen.iframe.style.height = `${height}px`;
+    }
+    return chosen;
   }
   const slot: CaptureIframeSlot = {
     iframe: createCaptureIframe(width, height),
     busy: true,
+    loaded: null,
   };
   captureIframePool.push(slot);
   return slot;
 }
 
 function releaseCaptureSlot(slot: CaptureIframeSlot, reset: boolean): void {
-  if (reset) resetCaptureIframe(slot.iframe);
+  if (reset) {
+    slot.loaded = null;
+    resetCaptureIframe(slot.iframe);
+  }
   slot.busy = false;
 }
 
@@ -769,18 +975,44 @@ export async function withPreviewRedirectSafeFetch<T>(run: () => Promise<T>): Pr
   }
 }
 
+function findIdleWarmDocKeys(): Set<string> {
+  const warm = new Set<string>();
+  for (const slot of captureIframePool) {
+    if (!slot.busy && slot.iframe.isConnected && slot.loaded) {
+      warm.add(slot.loaded.docKey);
+    }
+  }
+  return warm;
+}
+
 function pumpCaptureQueue(): void {
   const limit = maxConcurrentCaptures();
   while (activeCaptureCount < limit && pendingCaptureJobs.length > 0) {
-    let bestIdx = 0;
-    for (let i = 1; i < pendingCaptureJobs.length; i++) {
+    const warmDocKeys = findIdleWarmDocKeys();
+    let bestIdx = -1;
+    for (let i = 0; i < pendingCaptureJobs.length; i++) {
       const cand = pendingCaptureJobs[i]!;
+      // Never load the exact same composition document into two hidden iframes at once;
+      // sibling clips wait briefly and then reuse the warm loaded iframe without reloading.
+      if (activeDocKeys.has(cand.docKey)) continue;
+      if (cand.isEditRefresh && activeEditRefreshCount >= MAX_CONCURRENT_EDIT_REFRESH_CAPTURES) continue;
+      if (bestIdx < 0) {
+        bestIdx = i;
+        continue;
+      }
       const best = pendingCaptureJobs[bestIdx]!;
       const delta = CAPTURE_PRIORITY_RANK[cand.priority] - CAPTURE_PRIORITY_RANK[best.priority];
-      if (delta > 0 || (delta === 0 && cand.seq < best.seq)) {
+      if (delta > 0) {
         bestIdx = i;
+      } else if (delta === 0) {
+        const candWarm = warmDocKeys.has(cand.docKey) ? 1 : 0;
+        const bestWarm = warmDocKeys.has(best.docKey) ? 1 : 0;
+        if (candWarm > bestWarm || (candWarm === bestWarm && cand.seq < best.seq)) {
+          bestIdx = i;
+        }
       }
     }
+    if (bestIdx < 0) break;
     const [job] = pendingCaptureJobs.splice(bestIdx, 1);
     if (!job) break;
     job.signal.removeEventListener("abort", job.onAbort);
@@ -789,12 +1021,18 @@ function pumpCaptureQueue(): void {
       continue;
     }
     activeCaptureCount += 1;
+    activeDocKeys.add(job.docKey);
+    if (job.isEditRefresh) activeEditRefreshCount += 1;
     cancelIdleTeardown();
     Promise.resolve()
       .then(job.task)
       .then(job.resolve, job.reject)
       .finally(() => {
         activeCaptureCount = Math.max(0, activeCaptureCount - 1);
+        activeDocKeys.delete(job.docKey);
+        if (job.isEditRefresh) {
+          activeEditRefreshCount = Math.max(0, activeEditRefreshCount - 1);
+        }
         if (pendingCaptureJobs.length > 0) {
           pumpCaptureQueue();
         } else {
@@ -816,6 +1054,8 @@ function resolveQueuePriority(input: Pick<ClientCaptureInput, "priority" | "gate
 
 function enqueueSerializedCapture<T>(
   priority: CaptureQueuePriority,
+  docKey: string,
+  isEditRefresh: boolean,
   signal: AbortSignal,
   task: () => Promise<T>,
 ): Promise<T> {
@@ -823,6 +1063,8 @@ function enqueueSerializedCapture<T>(
   return new Promise<T>((resolve, reject) => {
     const job: QueuedCaptureJob = {
       priority,
+      docKey,
+      isEditRefresh,
       seq: ++captureJobSeq,
       signal,
       task,
@@ -895,6 +1137,16 @@ function canSkipUnchangedFrame(doc: Document, target: Element): boolean {
   }
 }
 
+function releaseCanvasBacking(canvas: HTMLCanvasElement | null | undefined): void {
+  if (!canvas) return;
+  try {
+    canvas.width = 0;
+    canvas.height = 0;
+  } catch {
+    // ignore teardown errors
+  }
+}
+
 function drawToJpegBlob(
   source: CanvasImageSource,
   outW: number,
@@ -905,12 +1157,16 @@ function drawToJpegBlob(
   if (out.width !== outW) out.width = outW;
   if (out.height !== outH) out.height = outH;
   const ctx = out.getContext("2d");
-  if (!ctx) return Promise.reject(new Error("2D context unavailable"));
+  if (!ctx) {
+    if (!reusable) releaseCanvasBacking(out);
+    return Promise.reject(new Error("2D context unavailable"));
+  }
   ctx.clearRect(0, 0, outW, outH);
   ctx.drawImage(source, 0, 0, outW, outH);
   return new Promise((resolve, reject) => {
     out.toBlob(
       (blob) => {
+        if (!reusable) releaseCanvasBacking(out);
         if (blob && blob.size > 0) resolve(blob);
         else reject(new Error("Failed to encode composition thumbnail frame"));
       },
@@ -953,8 +1209,38 @@ function buildCaptureUrl(previewUrl: string, contentRevision: number): URL {
   return url;
 }
 
+function buildCaptureDocumentKey(
+  input: Pick<ClientCaptureInput, "projectId" | "previewUrl" | "contentRevision">,
+  previewOrigin: string | undefined,
+): string {
+  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  if (previewOrigin) {
+    const expectedOrigin = new URL(previewOrigin).origin;
+    const source = new URL(input.previewUrl, window.location.origin);
+    return `iso|${expectedOrigin}|${source.pathname}|${source.search}|rev=${input.contentRevision}|compRev=${compRev}`;
+  }
+  const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision);
+  return `same|${captureUrl.href}|compRev=${compRev}`;
+}
+
+function computeBoundedCaptureDimensions(
+  targetW: number,
+  targetH: number,
+): { outW: number; outH: number; scale: number; aspect: number } {
+  const safeW = Math.max(1, targetW);
+  const safeH = Math.max(1, targetH);
+  let outW = CAPTURE_TARGET_WIDTH;
+  const outH = Math.max(27, Math.min(CAPTURE_MAX_HEIGHT, Math.round((outW * safeH) / safeW)));
+  if (outH === CAPTURE_MAX_HEIGHT) {
+    outW = Math.max(48, Math.min(CAPTURE_TARGET_WIDTH, Math.round((outH * safeW) / safeH)));
+  }
+  const scale = Math.min(CAPTURE_MAX_SCALE, outW / safeW);
+  return { outW, outH, scale, aspect: safeW / safeH };
+}
+
 async function captureSameOrigin(
   input: ClientCaptureInput,
+  docKey: string,
   signal: AbortSignal,
   onFrame?: ProgressiveFrameCallback,
 ): Promise<{ blobs: Blob[]; aspect: number; width: number; height: number }> {
@@ -962,64 +1248,91 @@ async function captureSameOrigin(
   if (!snapdom) throw new Error("SnapDOM unavailable");
   if (signal.aborted) throw abortError();
 
-  const slot = acquireCaptureSlot(1280, 720);
+  const compPath = normalizeCompositionPathForGate(input.previewUrl);
+  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const slot = acquireCaptureSlot(1280, 720, docKey);
   const iframe = slot.iframe;
   const captureUrl = buildCaptureUrl(input.previewUrl, input.contentRevision);
   let resetSlot = false;
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error("Timed out loading offscreen composition for thumbnail capture"));
-      }, CAPTURE_BOOT_TIMEOUT_MS);
-      const onLoad = () => {
-        cleanup();
-        resolve();
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("Failed to load offscreen composition"));
-      };
-      const onAbort = () => {
-        cleanup();
-        reject(abortError());
-      };
-      function cleanup() {
-        clearTimeout(timeout);
-        iframe.removeEventListener("load", onLoad);
-        iframe.removeEventListener("error", onError);
-        signal.removeEventListener("abort", onAbort);
+    let win = iframe.contentWindow as CapturePreviewWindow | null;
+    let doc = iframe.contentDocument;
+    const canReuseWarm =
+      slot.loaded !== null &&
+      slot.loaded.docKey === docKey &&
+      win !== null &&
+      doc !== null &&
+      typeof win.__player?.seek === "function";
+
+    if (!canReuseWarm) {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out loading offscreen composition for thumbnail capture"));
+        }, CAPTURE_BOOT_TIMEOUT_MS);
+        const onLoad = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error("Failed to load offscreen composition"));
+        };
+        const onAbort = () => {
+          cleanup();
+          reject(abortError());
+        };
+        function cleanup() {
+          clearTimeout(timeout);
+          iframe.removeEventListener("load", onLoad);
+          iframe.removeEventListener("error", onError);
+          signal.removeEventListener("abort", onAbort);
+        }
+        iframe.addEventListener("load", onLoad, { once: true });
+        iframe.addEventListener("error", onError, { once: true });
+        signal.addEventListener("abort", onAbort, { once: true });
+        iframe.src = captureUrl.href;
+      });
+
+      win = iframe.contentWindow as CapturePreviewWindow | null;
+      doc = iframe.contentDocument;
+      if (!win || !doc) throw new Error("Offscreen capture frame is inaccessible");
+
+      // Wait for HyperFrames player bootstrap inside the offscreen document.
+      const deadline = Date.now() + CAPTURE_BOOT_TIMEOUT_MS;
+      while (!signal.aborted) {
+        const dur = win.__player?.getDuration?.() ?? 0;
+        if (win.__player?.seek && Number.isFinite(dur) && dur > 0) break;
+        if (Date.now() >= deadline) throw new Error("Timed out waiting for composition player");
+        await sleepAbortable(30, signal);
       }
-      iframe.addEventListener("load", onLoad, { once: true });
-      iframe.addEventListener("error", onError, { once: true });
-      signal.addEventListener("abort", onAbort, { once: true });
-      iframe.src = captureUrl.href;
-    });
-
-    const win = iframe.contentWindow as CapturePreviewWindow | null;
-    const doc = iframe.contentDocument;
-    if (!win || !doc) throw new Error("Offscreen capture frame is inaccessible");
-
-    // Wait for HyperFrames player bootstrap inside the offscreen document.
-    const deadline = Date.now() + CAPTURE_BOOT_TIMEOUT_MS;
-    while (!signal.aborted) {
-      const dur = win.__player?.getDuration?.() ?? 0;
-      if (win.__player?.seek && Number.isFinite(dur) && dur > 0) break;
-      if (Date.now() >= deadline) throw new Error("Timed out waiting for composition player");
-      await sleepAbortable(30, signal);
+      if (signal.aborted) throw abortError();
     }
-    if (signal.aborted) throw abortError();
+
+    if (!win || !doc) throw new Error("Offscreen capture frame is inaccessible");
 
     win.__player?.pause?.();
     const root = (doc.querySelector("[data-composition-id]") ?? doc.body) as Element;
     const stageW = Number(root.getAttribute("data-width")) || root.clientWidth || 1280;
     const stageH = Number(root.getAttribute("data-height")) || root.clientHeight || 720;
-    iframe.style.width = `${stageW}px`;
-    iframe.style.height = `${stageH}px`;
-
-    await waitForDocumentMedia(doc, signal);
-    if (signal.aborted) throw abortError();
+    if (!canReuseWarm) {
+      iframe.style.width = `${stageW}px`;
+      iframe.style.height = `${stageH}px`;
+      await waitForDocumentMedia(doc, signal);
+      if (signal.aborted) throw abortError();
+      slot.loaded = {
+        docKey,
+        projectId: input.projectId,
+        compPath,
+        compRev,
+        contentRevision: input.contentRevision,
+        origin: window.location.origin,
+        token: "",
+        tokenExpiresAt: Number.POSITIVE_INFINITY,
+        duration: win.__player?.getDuration?.() || 0,
+      };
+    }
 
     let target: Element = root;
     if (input.selector) {
@@ -1040,10 +1353,7 @@ async function captureSameOrigin(
       }
     }
 
-    const outW = CAPTURE_TARGET_WIDTH;
-    const outH = Math.max(27, Math.round((outW * targetH) / Math.max(1, targetW)));
-    const scale = outW / Math.max(1, targetW);
-    const aspect = targetW / Math.max(1, targetH);
+    const { outW, outH, scale, aspect } = computeBoundedCaptureDimensions(targetW, targetH);
     const actualDuration = win.__player?.getDuration?.() || 0;
     const times = captureSampleTimes(actualDuration, input);
     const order: number[] = [];
@@ -1116,7 +1426,11 @@ async function captureSameOrigin(
               });
               return snap.toCanvas();
             });
-            blob = await drawToJpegBlob(rendered, outW, outH, outCanvas);
+            try {
+              blob = await drawToJpegBlob(rendered, outW, outH, outCanvas);
+            } finally {
+              releaseCanvasBacking(rendered);
+            }
           }
         }
         lastBlob = blob;
@@ -1126,6 +1440,7 @@ async function captureSameOrigin(
       }
     } finally {
       observer?.disconnect();
+      releaseCanvasBacking(outCanvas);
     }
 
     return {
@@ -1145,6 +1460,7 @@ async function captureSameOrigin(
 async function captureIsolatedOrigin(
   input: ClientCaptureInput,
   previewOrigin: string,
+  docKey: string,
   signal: AbortSignal,
   onFrame?: ProgressiveFrameCallback,
 ): Promise<{ blobs: Blob[]; aspect: number; width: number; height: number }> {
@@ -1152,6 +1468,8 @@ async function captureIsolatedOrigin(
   const grant = await acquireSharedPreviewGrant(input.projectId, expectedOrigin, signal);
   const token = grant.token;
 
+  const compPath = normalizeCompositionPathForGate(input.previewUrl);
+  const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
   const source = new URL(input.previewUrl, window.location.origin);
   const isolatedUrl = new URL(source.pathname, expectedOrigin);
   isolatedUrl.search = source.search;
@@ -1159,50 +1477,74 @@ async function captureIsolatedOrigin(
   if (input.contentRevision > 0) isolatedUrl.searchParams.set("revision", String(input.contentRevision));
   isolatedUrl.searchParams.set("pt", token);
 
-  const slot = acquireCaptureSlot(1920, 1080);
+  const slot = acquireCaptureSlot(1920, 1080, docKey);
   const iframe = slot.iframe;
   let resetSlot = false;
 
   try {
-    const duration = await new Promise<number>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        if (grant.expiresAt <= Date.now()) {
-          invalidateSharedPreviewGrant(input.projectId, token);
-        }
-        reject(new Error("Timed out waiting for isolated capture bridge"));
-      }, CAPTURE_BOOT_TIMEOUT_MS);
-      const onMessage = (event: MessageEvent) => {
-        if (event.origin !== expectedOrigin || event.source !== iframe.contentWindow) return;
-        const data = event.data;
-        if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
-        if (data.type === "preview-build-busy") {
+    const canReuseWarm =
+      slot.loaded !== null &&
+      slot.loaded.docKey === docKey &&
+      slot.loaded.origin === expectedOrigin &&
+      slot.loaded.token === token &&
+      slot.loaded.tokenExpiresAt > Date.now() + 5_000 &&
+      iframe.contentWindow !== null;
+
+    let duration: number;
+    if (canReuseWarm) {
+      duration = slot.loaded!.duration;
+    } else {
+      duration = await new Promise<number>((resolve, reject) => {
+        const timeout = setTimeout(() => {
           cleanup();
-          reject(new Error("Isolated preview builder is busy"));
-          return;
-        }
-        if (data.type === "timeline-state" && typeof data.duration === "number" && data.duration > 0) {
-          if (typeof data.width === "number" && data.width > 0 && typeof data.height === "number" && data.height > 0) {
-            iframe.style.width = `${data.width}px`;
-            iframe.style.height = `${data.height}px`;
+          if (grant.expiresAt <= Date.now()) {
+            invalidateSharedPreviewGrant(input.projectId, token);
           }
+          reject(new Error("Timed out waiting for isolated capture bridge"));
+        }, CAPTURE_BOOT_TIMEOUT_MS);
+        const onMessage = (event: MessageEvent) => {
+          if (event.origin !== expectedOrigin || event.source !== iframe.contentWindow) return;
+          const data = event.data;
+          if (!data || data.source !== "openmotion-preview-bridge" || data.token !== token) return;
+          if (data.type === "preview-build-busy") {
+            cleanup();
+            reject(new Error("Isolated preview builder is busy"));
+            return;
+          }
+          if (data.type === "timeline-state" && typeof data.duration === "number" && data.duration > 0) {
+            if (typeof data.width === "number" && data.width > 0 && typeof data.height === "number" && data.height > 0) {
+              iframe.style.width = `${data.width}px`;
+              iframe.style.height = `${data.height}px`;
+            }
+            cleanup();
+            resolve(data.duration);
+          }
+        };
+        const onAbort = () => {
           cleanup();
-          resolve(data.duration);
+          reject(abortError());
+        };
+        function cleanup() {
+          clearTimeout(timeout);
+          window.removeEventListener("message", onMessage);
+          signal.removeEventListener("abort", onAbort);
         }
+        window.addEventListener("message", onMessage);
+        signal.addEventListener("abort", onAbort, { once: true });
+        iframe.src = isolatedUrl.href;
+      });
+      slot.loaded = {
+        docKey,
+        projectId: input.projectId,
+        compPath,
+        compRev,
+        contentRevision: input.contentRevision,
+        origin: expectedOrigin,
+        token,
+        tokenExpiresAt: grant.expiresAt,
+        duration,
       };
-      const onAbort = () => {
-        cleanup();
-        reject(abortError());
-      };
-      function cleanup() {
-        clearTimeout(timeout);
-        window.removeEventListener("message", onMessage);
-        signal.removeEventListener("abort", onAbort);
-      }
-      window.addEventListener("message", onMessage);
-      signal.addEventListener("abort", onAbort, { once: true });
-      iframe.src = isolatedUrl.href;
-    });
+    }
 
     const times = captureSampleTimes(duration, input);
     const requestId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1336,16 +1678,36 @@ function clipIdentityCacheKey(
   });
 }
 
+interface StripCacheMeta {
+  clipIdentityKey: string;
+  projectId: string;
+  compPath: string;
+  compRev: string;
+  contentRevision: number;
+}
+
 function stripMemoryCacheKey(
   input: StripCacheInput,
-): { idbKey: string; baseCoverKey: string; compPathKey: string; clipIdentityKey: string } {
+): {
+  idbKey: string;
+  baseCoverKey: string;
+  compPathKey: string;
+  meta: StripCacheMeta;
+} {
+  const compPath = normalizeCompositionPathForGate(input.previewUrl);
   const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
   const baseCoverKey = coverCacheKey(input, compRev);
   return {
     idbKey: `${baseCoverKey}&frames=${input.frameCount}`,
     baseCoverKey,
     compPathKey: compPathCacheTag(input.projectId, input.previewUrl, compRev, input.contentRevision),
-    clipIdentityKey: clipIdentityCacheKey(input),
+    meta: {
+      clipIdentityKey: clipIdentityCacheKey(input),
+      projectId: input.projectId,
+      compPath,
+      compRev,
+      contentRevision: input.contentRevision,
+    },
   };
 }
 
@@ -1353,7 +1715,7 @@ function putMemoryStripCache(
   idbKey: string,
   baseCoverKey: string,
   compPathKey: string,
-  clipIdentityKey: string,
+  meta: StripCacheMeta,
   blobs: readonly Blob[],
   aspect: number,
   width: number,
@@ -1398,13 +1760,47 @@ function putMemoryStripCache(
     weight,
     baseCoverKey,
     compPathKey,
-    clipIdentityKey,
+    clipIdentityKey: meta.clipIdentityKey,
+    projectId: meta.projectId,
+    compPath: meta.compPath,
+    compRev: meta.compRev,
+    contentRevision: meta.contentRevision,
     inCache: true,
     refCount: 0,
     revoked: false,
   };
   entryByValue.set(value, entry);
   if (coverValue !== value) entryByValue.set(coverValue, entry);
+  // Drop superseded revisions for the same clip once a fresh capture lands so repeated drags
+  // do not accumulate stale strips in RAM until the 64-entry LRU ceiling is hit.
+  const currentCompRev = resolveCompositionRevision(meta.projectId, meta.compPath);
+  const isCurrentRev = meta.compRev === currentCompRev;
+  for (const [oldKey, oldEntry] of memoryStripCache) {
+    if (oldEntry.clipIdentityKey !== meta.clipIdentityKey) continue;
+    const isSuperseded =
+      oldEntry.contentRevision < meta.contentRevision ||
+      (isCurrentRev && oldEntry.compRev !== meta.compRev);
+    if (!isSuperseded) continue;
+    // Never replace a multi-frame filmstrip fallback with a 1-frame cover while a strip refresh is pending.
+    if (value.kind !== "filmstrip" && oldEntry.value.kind === "filmstrip") continue;
+    memoryStripCache.delete(oldKey);
+    oldEntry.inCache = false;
+    maybeRevokeEntry(oldEntry);
+  }
+  for (const [oldCoverKey, oldCover] of sharedCoverCache) {
+    if (oldCover.projectId !== meta.projectId || oldCover.compPath !== meta.compPath) continue;
+    const isSuperseded =
+      oldCover.contentRevision < meta.contentRevision ||
+      (isCurrentRev && oldCover.compRev !== meta.compRev);
+    if (isSuperseded) {
+      sharedCoverCache.delete(oldCoverKey);
+    }
+  }
+  thumbnailScheduler.invalidateMatching(meta.projectId, (req) => {
+    if (req.kind !== "composition" || req.compositionPath !== meta.compPath) return false;
+    if ((req.contentRevision ?? 0) < meta.contentRevision) return true;
+    return isCurrentRev && req.compositionRevision !== undefined && req.compositionRevision !== meta.compRev;
+  });
   memoryStripCache.set(idbKey, entry);
   while (memoryStripCache.size > MEMORY_STRIP_CACHE_MAX) {
     const oldestKey = memoryStripCache.keys().next().value;
@@ -1425,7 +1821,13 @@ function retainOrRematerialize(idbKey: string, entry: MemoryStripEntry): MemoryS
     idbKey,
     entry.baseCoverKey,
     entry.compPathKey,
-    entry.clipIdentityKey,
+    {
+      clipIdentityKey: entry.clipIdentityKey,
+      projectId: entry.projectId,
+      compPath: entry.compPath,
+      compRev: entry.compRev,
+      contentRevision: entry.contentRevision,
+    },
     entry.blobs,
     entry.aspect,
     entry.width,
@@ -1448,7 +1850,7 @@ function memoryEntryToThumbnailResult(entry: MemoryStripEntry): ThumbnailLoadedR
 function peekMemoryEntry(
   input: StripCacheInput,
 ): { entry: MemoryStripEntry; value: ThumbnailValue } | null {
-  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
   const exact = memoryStripCache.get(idbKey);
   if (exact) {
     memoryStripCache.delete(idbKey);
@@ -1471,7 +1873,7 @@ function peekMemoryEntry(
         idbKey,
         baseCoverKey,
         compPathKey,
-        clipIdentityKey,
+        meta,
         [shared.blob],
         shared.aspect,
         shared.width,
@@ -1525,22 +1927,22 @@ export function seedClientCompositionCaptureForTest(
   blobs: readonly Blob[],
   dims: { aspect?: number; width?: number; height?: number } = {},
 ): ThumbnailValue {
-  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
   const aspect = dims.aspect ?? 16 / 9;
   const width = dims.width ?? CAPTURE_TARGET_WIDTH;
   const height = dims.height ?? 135;
   const coverBlob = blobs[Math.min(blobs.length - 1, Math.floor(blobs.length / 2))]!;
-  putSharedCoverCache(baseCoverKey, { blob: coverBlob, aspect, width, height });
-  return putMemoryStripCache(
-    idbKey,
-    baseCoverKey,
-    compPathKey,
-    clipIdentityKey,
-    blobs,
+  putSharedCoverCache(baseCoverKey, {
+    blob: coverBlob,
     aspect,
     width,
     height,
-  ).value;
+    projectId: meta.projectId,
+    compPath: meta.compPath,
+    compRev: meta.compRev,
+    contentRevision: meta.contentRevision,
+  });
+  return putMemoryStripCache(idbKey, baseCoverKey, compPathKey, meta, blobs, aspect, width, height).value;
 }
 
 /** True when any frame count for this composition is already cached in RAM (no blocking gate needed). */
@@ -1600,7 +2002,7 @@ export function acquireCachedCompositionCaptureFromIdb(
       release: retainMemoryEntry(syncHit.entry),
     });
   }
-  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
   let entryPromise = inFlightIdbReads.get(idbKey);
   if (!entryPromise) {
     entryPromise = readCachedStrip(idbKey)
@@ -1613,12 +2015,16 @@ export function acquireCachedCompositionCaptureFromIdb(
           aspect: cached.aspect,
           width: cached.width,
           height: cached.height,
+          projectId: meta.projectId,
+          compPath: meta.compPath,
+          compRev: meta.compRev,
+          contentRevision: meta.contentRevision,
         });
         return putMemoryStripCache(
           idbKey,
           baseCoverKey,
           compPathKey,
-          clipIdentityKey,
+          meta,
           cached.blobs,
           cached.aspect,
           cached.width,
@@ -1641,7 +2047,7 @@ async function runClientCompositionCapture(
   input: ClientCaptureInput,
   signal: AbortSignal,
 ): Promise<ThumbnailLoadedResult> {
-  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
 
   // 0. Fast path: synchronous in-memory strip/cover cache hit (0ms across switches).
   const memHit = memoryStripCache.get(idbKey);
@@ -1671,7 +2077,7 @@ async function runClientCompositionCapture(
         idbKey,
         baseCoverKey,
         compPathKey,
-        clipIdentityKey,
+        meta,
         [shared.blob],
         shared.aspect,
         shared.width,
@@ -1691,12 +2097,16 @@ async function runClientCompositionCapture(
       aspect: cached.aspect,
       width: cached.width,
       height: cached.height,
+      projectId: meta.projectId,
+      compPath: meta.compPath,
+      compRev: meta.compRev,
+      contentRevision: meta.contentRevision,
     });
     const entry = putMemoryStripCache(
       idbKey,
       baseCoverKey,
       compPathKey,
-      clipIdentityKey,
+      meta,
       cached.blobs,
       cached.aspect,
       cached.width,
@@ -1747,6 +2157,10 @@ async function runClientCompositionCapture(
         aspect: dims.aspect,
         width: dims.width,
         height: dims.height,
+        projectId: meta.projectId,
+        compPath: meta.compPath,
+        compRev: meta.compRev,
+        contentRevision: meta.contentRevision,
       });
       const firstUrl = precreatedUrls[index] ?? URL.createObjectURL(blob);
       precreatedUrls[index] = firstUrl;
@@ -1770,14 +2184,17 @@ async function runClientCompositionCapture(
     }
   };
 
+  const previewOrigin = isolatedPreviewOrigin();
+  const docKey = buildCaptureDocumentKey(input, previewOrigin);
+  const isEditRefresh = input.contentRevision > 0;
+
   try {
-    const result = await enqueueSerializedCapture(queuePriority, signal, async () => {
+    const result = await enqueueSerializedCapture(queuePriority, docKey, isEditRefresh, signal, async () => {
       await waitUntilInteractiveIdle(signal);
       if (signal.aborted) throw abortError();
-      const previewOrigin = isolatedPreviewOrigin();
       return previewOrigin
-        ? captureIsolatedOrigin(input, previewOrigin, signal, onProgressiveFrame)
-        : captureSameOrigin(input, signal, onProgressiveFrame);
+        ? captureIsolatedOrigin(input, previewOrigin, docKey, signal, onProgressiveFrame)
+        : captureSameOrigin(input, docKey, signal, onProgressiveFrame);
     });
 
     if (signal.aborted) throw abortError();
@@ -1789,6 +2206,10 @@ async function runClientCompositionCapture(
       aspect: result.aspect,
       width: result.width,
       height: result.height,
+      projectId: meta.projectId,
+      compPath: meta.compPath,
+      compRev: meta.compRev,
+      contentRevision: meta.contentRevision,
     });
 
     void writeCachedStrip({
@@ -1804,7 +2225,7 @@ async function runClientCompositionCapture(
       idbKey,
       baseCoverKey,
       compPathKey,
-      clipIdentityKey,
+      meta,
       result.blobs,
       result.aspect,
       result.width,
@@ -1849,6 +2270,9 @@ export function createClientCompositionCaptureRequest(input: ClientCaptureInput)
     concurrencyBucket: "client-capture",
     priority: input.priority ?? "visible",
     rich: input.rich ?? true,
+    compositionPath: normalizeCompositionPathForGate(input.previewUrl),
+    contentRevision: input.contentRevision,
+    compositionRevision: compRev,
     load: (signal) => runClientCompositionCapture(input, signal),
   };
 }

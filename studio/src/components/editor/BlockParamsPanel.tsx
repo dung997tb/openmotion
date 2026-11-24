@@ -12,7 +12,7 @@ import { useStudioPlaybackContext } from "../../contexts/StudioContext";
 import { trackBlockParamCommit } from "../../telemetry/events";
 import { createTypingSave } from "../../utils/typingSave";
 import { serializeStudioFileMutation } from "../../utils/studioFileMutationCoordinator";
-import { compositionVariableValues, declaredParameterId, setBlockParameter } from "../../../../packages/edit-core/composition-variable";
+const loadParameterEditor = () => import("../../../../packages/edit-core/composition-variable");
 
 interface BlockParamsPanelProps {
   blockName: string;
@@ -54,12 +54,12 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
   useEffect(() => {
     if (!read) return;
     let current = true;
-    void read(compositionPath).then(content => {
-      const declared = compositionVariableValues(content);
+    void Promise.all([read(compositionPath), loadParameterEditor()]).then(([content, editor]) => {
+      const declared = editor.compositionVariableValues(content, params.map(param => param.key));
       if (!current || !declared) return;
       const saved: Record<string, string> = {};
       for (const param of params) {
-        const id = declaredParameterId(declared.keys(), param.key);
+        const id = editor.declaredParameterId(declared.keys(), param.key);
         if (id && !edited.current.has(param.key)) saved[param.key] = declared.get(id)!;
       }
       Object.assign(appliedRef.current, saved);
@@ -75,14 +75,19 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
       if (previous === undefined) return;
       setCommitState({ tone: "saving" });
       try {
-        const content = await fileManager.readProjectFile(compositionPath);
-        const after = setBlockParameter(content, key, nextValue, compositionPath, previous);
-        if (after !== content) await fileManager.writeProjectFile(compositionPath, after, content);
+        const [content, editor] = await Promise.all([fileManager.readProjectFile(compositionPath), loadParameterEditor()]);
+        const after = editor.setBlockParameter(content, key, nextValue, compositionPath, previous);
+        if (after !== content) {
+          await fileManager.writeProjectFile(compositionPath, after, content, {
+            kind: "setBlockParameter", compositionPath, key, previous, value: nextValue,
+          });
+        }
         appliedRef.current[key] = nextValue;
         setCommitState({ tone: "saved" });
         trackBlockParamCommit({ tone: "saved", blockName, key });
         setRefreshKey((k) => k + 1);
       } catch (error) {
+        setValues(drafts => drafts[key] === nextValue ? { ...drafts, [key]: previous } : drafts);
         setCommitState({ tone: "error", message: error instanceof Error ? error.message : "Couldn't save the block file. Retry?" });
         trackBlockParamCommit({ tone: "error", blockName, key });
       }

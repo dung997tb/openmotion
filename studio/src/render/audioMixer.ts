@@ -31,9 +31,12 @@ export async function mixTimelineAudio(options: {
   projectId: string;
   elements: readonly TimelineElement[];
   duration: number;
+  origin?: string;
+  documentBaseUri?: string;
+  locationSearch?: string;
   signal?: AbortSignal;
 }): Promise<MixedAudioResult | null> {
-  const { projectId, elements, duration, signal } = options;
+  const { projectId, elements, duration, origin = globalThis.location?.origin, documentBaseUri, locationSearch, signal } = options;
   const audible = elements.filter(isAudibleElement);
   if (audible.length === 0) return null;
 
@@ -70,10 +73,9 @@ export async function mixTimelineAudio(options: {
     return cached;
   };
 
-  const origin = globalThis.location?.origin;
   const entries = await Promise.all(
     audible.map(async (el) => {
-      const url = resolveOriginalPreviewMediaUrl(el.src!, projectId, origin);
+      const url = resolveOriginalPreviewMediaUrl(el.src!, projectId, origin, documentBaseUri, locationSearch);
       const buffer = await loadBuffer(url);
       return { el, buffer };
     }),

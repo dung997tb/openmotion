@@ -215,3 +215,11 @@ it("tracks bridge asset-readiness updates when trackAssets is enabled", () => {
     act(() => root.unmount());
   }
 });
+
+it("resets the iframe document to about:blank on unmount to release cross-origin resources", () => {
+  const player = mountPlayer();
+  const frame = player.host.querySelector("iframe")!;
+  expect(frame.src).toContain("https://preview.test/");
+  player.unmount();
+  expect(frame.src).toBe("about:blank");
+});

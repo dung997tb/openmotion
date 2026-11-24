@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import { Hono, type Context } from 'hono';
 import {
@@ -120,6 +121,7 @@ function documentSignature(revision: string, assetBase?: string): string {
 }
 
 export const SNAPDOM_VENDOR_PATH = '/api/vendor/snapdom.js';
+export const BROWSER_EXPORT_VENDOR_PATH = '/api/vendor/browser-export.js';
 
 interface PrecompressedAsset {
   raw: Buffer;
@@ -148,6 +150,29 @@ function loadSnapdomVendorBundle(): Promise<PrecompressedAsset | null> {
     })();
   }
   return cachedSnapdomBundle;
+}
+
+interface CachedStaticAsset {
+  readonly filePath: string;
+  readonly bytes: Buffer;
+  readonly etag: string;
+}
+
+function createBrowserExportBundleLoader(runtimeRoot?: string): () => Promise<CachedStaticAsset | null> {
+  const rootDir = runtimeRoot ?? fileURLToPath(new URL('../../..', import.meta.url));
+  const filePath = path.join(rootDir, 'studio/build/preview-browser-export.js');
+  let cached: CachedStaticAsset | null = null;
+  return async () => {
+    if (cached && cached.filePath === filePath) return cached;
+    try {
+      const bytes = await readFile(filePath);
+      const etag = `"sha256:${createHash('sha256').update(bytes).digest('hex')}"`;
+      cached = { filePath, bytes, etag };
+      return cached;
+    } catch {
+      return null;
+    }
+  };
 }
 
 export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Variables: StudioVariables }> {
@@ -204,6 +229,8 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     return c.body(body);
   });
 
+  const loadBrowserExportBundle = createBrowserExportBundleLoader(deps.runtimeRoot);
+
   app.get(SNAPDOM_VENDOR_PATH, async c => {
     const bundle = await loadSnapdomVendorBundle();
     if (!bundle) return c.text('SnapDOM bundle unavailable', 404);
@@ -221,6 +248,27 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
       return c.body(new Uint8Array(bundle.gzip));
     }
     return c.body(new Uint8Array(bundle.raw));
+  });
+
+  app.get(BROWSER_EXPORT_VENDOR_PATH, async c => {
+    const asset = await loadBrowserExportBundle();
+    if (!asset) return c.text('Browser export bundle unavailable', 404);
+    if (c.req.header('if-none-match')?.trim() === asset.etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: asset.etag,
+          'Cache-Control': 'no-cache',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+    c.header('Cache-Control', 'no-cache');
+    c.header('ETag', asset.etag);
+    c.header('Content-Type', 'application/javascript; charset=utf-8');
+    c.header('X-Content-Type-Options', 'nosniff');
+    if (c.req.method === 'HEAD') return c.body(null);
+    return c.body(new Uint8Array(asset.bytes));
   });
 
   async function documentResponse(c: Context<{ Variables: StudioVariables }>, compPath?: string) {

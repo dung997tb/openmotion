@@ -48,6 +48,18 @@ describe("peer timing classification", () => {
     ]);
   });
 
+  it("validates media attributes, bounds, and boolean track state", () => {
+    const base = '<audio id="clip" data-start="0"></audio>';
+    const edit = (attributes: string) => base.replace('id="clip"', `id="clip" ${attributes}`);
+    expect(diffPreviewChanges(base, edit('data-volume="0.5" muted=""'))?.[0]?.attributes).toEqual([
+      ["muted", null, ""], ["data-volume", null, "0.5"],
+    ]);
+    for (const invalid of ['data-volume="4"', 'data-hidden="false"', 'muted="false"']) {
+      expect(diffPreviewChanges(base, edit(invalid))).toBeNull();
+    }
+    expect(diffPreviewChanges('<div id="clip"></div>', '<div id="clip" muted></div>')).toBeNull();
+  });
+
   it("clears a fill image in place while loading a new image through the asset pipeline", () => {
     const before = '<div id="tile" style="background-color:red"></div>';
     const filled = '<div id="tile" style="background-color:blue;background-image:none"></div>';

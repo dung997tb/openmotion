@@ -9,6 +9,7 @@ import { useStudioShellContext } from "../../contexts/StudioContext";
 import { useI18n } from "../../i18n/I18n";
 import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/previewAdapter";
 import { projectPreviewAdapter } from "../../player/lib/projectPreviewAdapter";
+import { onPreviewPromoted } from "../../player/sceneSwap";
 import { usePlayerStore } from "../../player/store/playerStore";
 import { canvasBoxOperations, type MeasuredCanvasPosition } from "../../../../packages/edit-core/canvas-box";
 import { saveCanvasDrag } from "./saveCanvasDrag";
@@ -21,6 +22,8 @@ interface Drag {
   startY: number;
   frame: DOMRect;
   finishing: boolean;
+  pickSettled: boolean;
+  finishSettled: boolean;
   corner?: Corner;
   bounds?: LayerBounds;
   offset?: { x: number; y: number };
@@ -77,10 +80,25 @@ export function IsolatedCanvasOverlay() {
     setBox(null);
   }, []);
 
-  useEffect(() => () => {
-    observedFrame.current?.removeEventListener("load", cancel);
-    observedFrame.current = null;
-    cancel();
+  useEffect(() => {
+    const releaseRetired = ({ retired }: { retired: HTMLIFrameElement | null }) => {
+      if (!retired) return;
+      if (observedFrame.current === retired) {
+        retired.removeEventListener("load", cancel);
+        observedFrame.current = null;
+      }
+      if (lastPick.current?.adapter.iframe === retired) {
+        lastPick.current = null;
+      }
+      setMenu((current) => (current?.adapter.iframe === retired ? null : current));
+    };
+    const stopPromoted = onPreviewPromoted(document, releaseRetired);
+    return () => {
+      stopPromoted();
+      observedFrame.current?.removeEventListener("load", cancel);
+      observedFrame.current = null;
+      cancel();
+    };
   }, [projectId, select, writeBlockedReason, cancel]);
 
   function showBounds(active: Drag) {
@@ -109,7 +127,18 @@ export function IsolatedCanvasOverlay() {
       iframe.addEventListener("load", cancel);
     }
     const corner = (event.target as HTMLElement).closest<HTMLElement>("[data-resize-corner]")?.dataset.resizeCorner as Corner | undefined;
-    const active: Drag = { corner, pointer: event.pointerId, gestureId: crypto.randomUUID(), adapter, frame, startX, startY, finishing: false };
+    const active: Drag = {
+      corner,
+      pointer: event.pointerId,
+      gestureId: crypto.randomUUID(),
+      adapter,
+      frame,
+      startX,
+      startY,
+      finishing: false,
+      pickSettled: false,
+      finishSettled: false,
+    };
     drag.current = lastPick.current = active;
     setBox(null);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -120,7 +149,13 @@ export function IsolatedCanvasOverlay() {
         if (!bounds) return;
         active.bounds = bounds;
         showBounds(active);
-      }).catch(() => { if (drag.current === active) setBox(null); });
+      }).catch(() => { if (drag.current === active) setBox(null); })
+      .finally(() => {
+        active.pickSettled = true;
+        if (active.finishSettled && lastPick.current === active) {
+          lastPick.current = null;
+        }
+      });
   }
 
   function update(event: PointerEvent<HTMLDivElement>, phase: "move" | "finish" | "cancel") {
@@ -137,7 +172,9 @@ export function IsolatedCanvasOverlay() {
       return;
     }
     if (phase === "cancel" || !active.offset) {
+      active.finishSettled = true;
       if (phase === "cancel") { setBox(null); lastPick.current = null; }
+      else if (active.pickSettled && lastPick.current === active) { lastPick.current = null; }
       active.adapter.send("canvas-drag", { ...payload, phase: "cancel" });
       drag.current = null;
       return;
@@ -165,11 +202,16 @@ export function IsolatedCanvasOverlay() {
     }, () => { if (drag.current === active) showToast(t("Preview unavailable"), "error"); }).catch(() => {
       // The shared save queue reports the error and reloads the authoritative preview.
     }).finally(() => {
+      active.finishSettled = true;
       active.adapter.send("canvas-drag", { phase: committed ? "commit" : "cancel", changed, gestureId: active.gestureId });
       if (drag.current === active) drag.current = null;
-      if (!committed && lastPick.current === active) {
-        lastPick.current = null;
-        setBox(null);
+      if (lastPick.current === active) {
+        if (!committed) {
+          lastPick.current = null;
+          setBox(null);
+        } else if (active.pickSettled) {
+          lastPick.current = null;
+        }
       }
     });
   }

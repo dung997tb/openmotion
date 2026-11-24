@@ -36,6 +36,12 @@ export interface ThumbnailRequest {
   rich?: boolean;
   /** For work whose result nobody reads: it is dropped, not cached, once its last lease ends. */
   discardWhenReleased?: boolean;
+  /** Normalized composition path when this request renders or captures a composition. */
+  compositionPath?: string;
+  /** Persisted content edit revision associated with this request. */
+  contentRevision?: number;
+  /** Server-side composition content hash revision associated with this request. */
+  compositionRevision?: string;
   load: (signal: AbortSignal) => Promise<ThumbnailLoadedResult>;
 }
 
@@ -76,6 +82,7 @@ interface ThumbnailEntry {
   dispose?: () => void;
   disposed: boolean;
   cached: boolean;
+  discardWhenReleased: boolean;
   lastAccess: number;
   snapshot: ThumbnailSnapshot;
   /** Aborted by the preview-reload hold, to run again once the hold lifts. */
@@ -179,6 +186,7 @@ export class ThumbnailScheduler {
         weight: 0,
         disposed: false,
         cached: false,
+        discardWhenReleased: Boolean(request.discardWhenReleased),
         lastAccess: this.nextSequence++,
         snapshot: Object.freeze({ status: "queued" }),
         preempted: false,
@@ -215,6 +223,8 @@ export class ThumbnailScheduler {
             current.controller?.abort();
             this.deleteEntry(scopedKey, current);
           } else if (current.state === "ready" && !current.cached) {
+            this.deleteEntry(scopedKey, current);
+          } else if (current.state === "error" && current.discardWhenReleased) {
             this.deleteEntry(scopedKey, current);
           }
         }
@@ -281,6 +291,29 @@ export class ThumbnailScheduler {
       if (entry.leases.size > 0) continue;
       entry.controller?.abort();
       this.deleteEntry(key, entry);
+    }
+  }
+
+  /**
+   * Evict cached entries matching `predicate` within `projectId`.
+   * Unleased entries are deleted and disposed immediately; leased entries (including queued
+   * and in-flight loads) are marked `discardWhenReleased` and uncached so they are never
+   * retained after their last consumer releases them.
+   */
+  invalidateMatching(
+    projectId: string,
+    predicate: (request: ThumbnailRequest) => boolean,
+  ): void {
+    for (const [key, entry] of this.entries) {
+      if (entry.request.projectId !== projectId) continue;
+      if (!predicate(entry.request)) continue;
+      entry.discardWhenReleased = true;
+      if (entry.leases.size === 0) {
+        entry.controller?.abort();
+        this.deleteEntry(key, entry);
+      } else if (entry.cached) {
+        this.uncache(entry);
+      }
     }
   }
 
@@ -423,7 +456,7 @@ export class ThumbnailScheduler {
     const byteBudget = isWaveform
       ? this.budgets.waveformCacheBytes
       : this.budgets.thumbnailCacheBytes;
-    entry.cached = !entry.request.discardWhenReleased && entry.weight <= byteBudget;
+    entry.cached = !entry.discardWhenReleased && entry.weight <= byteBudget;
     if (!entry.cached) return;
     if (isWaveform) this.waveformCacheBytes += entry.weight;
     else this.cacheBytes += entry.weight;

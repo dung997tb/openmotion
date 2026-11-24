@@ -146,6 +146,7 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
       img.removeAttribute('sizes');
       img.setAttribute('src',dataUrl);
     }
+    if(scratch) releaseCanvasBacking(scratch);
   }
   function waitForCaptureMedia(timeoutMs){
     var done=false;
@@ -217,16 +218,21 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     } catch(_){ return false; }
     return true;
   }
+  function releaseCanvasBacking(canvas){
+    if(!canvas) return;
+    try { canvas.width=0; canvas.height=0; } catch(_){}
+  }
   function canvasToJpegBuffer(source,outW,outH,reusable){
     var out=reusable||document.createElement('canvas');
     if(out.width!==outW) out.width=outW;
     if(out.height!==outH) out.height=outH;
     var ctx=out.getContext('2d');
-    if(!ctx) return Promise.reject(new Error('2D context unavailable'));
+    if(!ctx){ if(!reusable) releaseCanvasBacking(out); return Promise.reject(new Error('2D context unavailable')); }
     if(typeof ctx.clearRect==='function') ctx.clearRect(0,0,outW,outH);
     ctx.drawImage(source,0,0,outW,outH);
     return new Promise(function(resolve,reject){
       out.toBlob(function(blob){
+        if(!reusable) releaseCanvasBacking(out);
         if(!blob){ reject(new Error('JPEG encode failed')); return; }
         blob.arrayBuffer().then(resolve,reject);
       },'image/jpeg',0.78);
@@ -254,9 +260,13 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
       if(trect.width>0&&trect.height>0){ stageW=trect.width; stageH=trect.height; }
     }
     var maxW=Math.max(48,Math.min(480,Number(message.width)||160));
+    var maxH=Math.max(27,Math.min(480,Math.round(maxW*2)));
     var outW=maxW;
-    var outH=Math.max(27,Math.round(outW*stageH/Math.max(1,stageW)));
-    var scale=outW/Math.max(1,stageW);
+    var outH=Math.max(27,Math.min(maxH,Math.round(outW*stageH/Math.max(1,stageW))));
+    if(outH===maxH&&stageH>0){
+      outW=Math.max(48,Math.min(maxW,Math.round(outH*stageW/Math.max(1,stageH))));
+    }
+    var scale=Math.min(2,outW/Math.max(1,stageW));
     var aspect=stageW/Math.max(1,stageH);
     var progressive=typeof onFrame==='function';
     var order=[];
@@ -316,7 +326,12 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
                 return fn(target,{scale:scale,dpr:1,fast:true,embedFonts:false,exclude:'video'})
                   .then(function(res){ return res.toCanvas(); });
               },fetchCache);
-            }).then(function(cv){ return canvasToJpegBuffer(cv,outW,outH,outCanvas); });
+            }).then(function(cv){
+              return canvasToJpegBuffer(cv,outW,outH,outCanvas).then(
+                function(buf){ releaseCanvasBacking(cv); return buf; },
+                function(err){ releaseCanvasBacking(cv); throw err; }
+              );
+            });
           }).then(function(buf){
             if(observer&&buf&&typeof buf.slice==='function') lastBuffer=buf.slice(0);
             if(progressive){
@@ -328,20 +343,22 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
           });
         })(order[i],times[order[i]]);
       }
-      function cleanupObserver(){
+      function cleanupCapture(){
         if(observer){
           try { observer.disconnect(); } catch(_){}
           observer=null;
         }
+        releaseCanvasBacking(outCanvas);
+        fetchCache=null;
       }
       return chain.then(function(){
-        cleanupObserver();
+        cleanupCapture();
         if(progressive){
           return {frames:[],streamed:true,frameCount:times.length,mimeType:'image/jpeg',width:outW,height:outH,aspect:aspect};
         }
         return {frames:frames,mimeType:'image/jpeg',width:outW,height:outH,aspect:aspect};
       },function(err){
-        cleanupObserver();
+        cleanupCapture();
         throw err;
       });
     });

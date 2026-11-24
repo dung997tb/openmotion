@@ -1,3 +1,4 @@
+import { refreshCommittedTimeline } from "./timelineTimingSync";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
@@ -169,11 +170,14 @@ async function setElementsHidden({
   }
 
   try {
-    const changedPaths = getCachedCloudDisklessMode()
+    const cloud = getCachedCloudDisklessMode();
+    const onSaved = cloud && previewIframe && !previewIframe.contentDocument && reloadPreview
+      ? refreshCommittedTimeline(previewIframe, activeCompPath ?? "index.html", projectId, reloadPreview) : undefined;
+    const changedPaths = cloud
       ? await saveCloudTimeline(projectId, [...groupElementsByTargetPath(elements, activeCompPath)].map(([path, clips]) => {
           pendingTimelineEditPathRef.current.add(path);
           return { path, command: resolve => ({ kind: 'setClipState', state: 'hidden', enabled: hidden, hfIds: clips.map(resolve) }) };
-        }), writeProjectFile, recordEdit, label)
+        }), writeProjectFile, recordEdit, label, onSaved)
       : await saveProjectFilesWithHistory({
       projectId,
       label,
@@ -185,7 +189,7 @@ async function setElementsHidden({
     for (const element of elements) {
       usePlayerStore.getState().updateElement(element.key ?? element.id, { hidden });
     }
-    if (changedPaths.length && previewIframe && !previewIframe.contentDocument) reloadPreview?.();
+    if (!onSaved && changedPaths.length && previewIframe && !previewIframe.contentDocument) reloadPreview?.();
     return changedPaths;
   } catch (error) {
     // The optimistic live patch already ran; a patch-target/save failure here would
