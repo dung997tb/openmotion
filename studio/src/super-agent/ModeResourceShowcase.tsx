@@ -16,6 +16,8 @@ import { groupBrandSeries, rankDiscoverySeries } from '../motion/brandStoryData'
 import { cinemaTemplates } from '../motion/cinemaTemplates';
 import { gptImageStory, seedanceStory } from '../motion/exploreModelStories';
 import { GameMasonry, interleavePortrait } from '../motion/game/GameMasonry';
+import { GameTopChart } from '../motion/game/GameTopChart';
+import { topGameCard, topGames } from '../motion/game/topGames';
 import {
   bundledGames,
   communityGames,
@@ -996,6 +998,7 @@ export function ModeResourceShowcase({
         const portraitCount = publishedGameTemplates.filter(g => g.orientation === 'portrait').length;
         return [
           { id: 'all', label: 'All games', count: publishedGameTemplates.length },
+          ...(topGames.length > 0 ? [{ id: 'top100', label: 'Top 100', count: topGames.length }] : []),
           ...(myGames.length > 0 ? [{ id: 'mine', label: 'My games', count: myGames.length }] : []),
           ...gameGenres
             .map(g => ({
@@ -1958,7 +1961,9 @@ export function ModeResourceShowcase({
           </div>
         )}
 
-        {visibleGames ? (
+        {mode.id === 'game' && activeFilter === 'top100' ? (
+          <GameTopChart query={gameQuery} selectedId={modeOptions?.gameTemplate?.id ?? null} onRemix={game => selectGameForAgent(topGameCard(game))} />
+        ) : visibleGames ? (
           visibleGames.length === 0 ? (
             <div className="om-sa-showcase-empty">
               <p className="om-muted">{t('No matching games')}</p>

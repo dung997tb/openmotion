@@ -242,3 +242,28 @@ button.om-game-chip:hover, .om-game-chip[aria-expanded="true"] { background: var
 .om-game-handoff-link { display: inline-flex; align-items: center; gap: var(--motion-space-6); text-decoration: none; }
 .om-game-handoff-link[aria-disabled] { pointer-events: none; opacity: .5; }
 .om-game-handoff-text { width: 100%; max-height: 220px; margin: 0; overflow: auto; padding: var(--motion-space-12); border: 1px solid var(--motion-border-subtle); border-radius: var(--motion-radius-md); background: var(--motion-inset); color: var(--motion-text); font: var(--motion-text-xs)/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: start; white-space: pre-wrap; word-break: break-word; }
+
+/* Top 100 tab: a ranked chart of money-making mini games, each with 做同款. */
+.om-game-genre-chip[data-variant="top"]:not([aria-selected="true"]) { color: var(--motion-text); }
+.om-game-genre-chip[data-variant="top"] svg { color: var(--motion-warning); }
+.om-game-genre-chip[data-variant="top"][aria-selected="true"] svg { color: inherit; }
+.om-game-top-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--motion-space-12); }
+.om-game-top-head p { margin: var(--motion-space-4) 0 0; max-width: 640px; }
+.om-game-top-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: var(--motion-space-8); margin: 0; padding: 0; list-style: none; }
+.om-game-top-item { display: grid; grid-template-columns: 32px 48px minmax(0, 1fr) auto; align-items: center; gap: var(--motion-space-12); padding: var(--motion-space-12); border-radius: var(--motion-radius-lg); background: var(--motion-inset); }
+.om-game-top-item:hover { background: var(--motion-hover); }
+.om-game-top-rank { font-size: 18px; font-weight: 700; text-align: center; color: var(--motion-muted); font-variant-numeric: tabular-nums; }
+.om-game-top-item[data-rank] .om-game-top-rank { color: var(--motion-text); }
+.om-game-top-art { width: 48px; height: 48px; border-radius: var(--motion-radius-md); overflow: hidden; background: var(--motion-hover); }
+.om-game-top-art img { width: 100%; height: 100%; object-fit: cover; }
+.om-game-top-body { display: grid; gap: 2px; min-width: 0; font-size: var(--motion-text-sm); }
+.om-game-top-body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-game-top-body p { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.om-game-top-tags { display: flex; flex-wrap: wrap; gap: var(--motion-space-4); font-size: var(--motion-text-xs); color: var(--motion-muted); }
+.om-game-top-tags span { padding: 0 var(--motion-space-6); border-radius: var(--motion-radius-full); background: var(--motion-bg); }
+.om-game-top-tags span[data-tone="good"] { color: var(--motion-success); }
+.om-game-top-signal { display: inline-flex; align-items: flex-start; gap: var(--motion-space-4); font-size: var(--motion-text-xs); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-game-top-signal:hover { color: var(--motion-text); text-decoration: underline; }
+.om-game-top-signal svg { flex: none; margin-top: 2px; }
+.om-game-top-remix { white-space: nowrap; }
+@media (max-width: 720px) { .om-game-top-list { grid-template-columns: 1fr; } .om-game-top-item { grid-template-columns: 24px 40px minmax(0, 1fr); } .om-game-top-remix { grid-column: 3; justify-self: start; } }
