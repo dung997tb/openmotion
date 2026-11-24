@@ -73,6 +73,8 @@ const EMPTY_FILE_LIST: string[] = [];
 const EMPTY_PENDING_IMPORTS: PendingExternalImport[] = [];
 
 type TreeListing = {
+  revision?: string;
+  compositionRevisions?: Record<string, string>;
   assetNames?: Record<string, string>;
   assetMetadata?: Record<string, AssetMetadataSummary>;
   pendingImports?: PendingExternalImport[];
@@ -154,8 +156,8 @@ export function useFileTree({ projectId, projectIdRef }: UseFileTreeOptions) {
         if (typeof data.dir === "string" && data.dir.startsWith("/virtual/")) {
           setCachedCloudDisklessMode(true);
         }
-        if (typeof (data as { revision?: unknown }).revision === "string") {
-          setCachedProjectRevision(projectId, (data as { revision?: string }).revision);
+        if (typeof data.revision === "string") {
+          setCachedProjectRevision(projectId, data.revision, data.compositionRevisions);
         }
         const nextEntry: FetchedFileTree = {
           projectId,
@@ -217,8 +219,8 @@ export function useFileTree({ projectId, projectIdRef }: UseFileTreeOptions) {
       if (typeof data.dir === "string" && data.dir.startsWith("/virtual/")) {
         setCachedCloudDisklessMode(true);
       }
-      if (typeof (data as { revision?: unknown }).revision === "string") {
-        setCachedProjectRevision(pid, (data as { revision?: string }).revision);
+      if (typeof data.revision === "string") {
+        setCachedProjectRevision(pid, data.revision, data.compositionRevisions);
       }
       setFetched((prev) => {
         if (prev?.projectId !== pid) return prev;

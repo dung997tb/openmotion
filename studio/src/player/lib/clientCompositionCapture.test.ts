@@ -6,6 +6,8 @@ import {
   clearClientCompositionCaptureCacheForTest,
   computeCompositionSampleTimes,
   createClientCompositionCaptureRequest,
+  getCompositionCacheRevision,
+  getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
   quantizeCompositionFrameCount,
   retainCachedCompositionCapture,
@@ -13,8 +15,11 @@ import {
   selectInitialGateCompositionPaths,
   setCachedProjectRevision,
   setClientCompositionCaptureCapabilityForTest,
+  subscribeCompositionCacheRevision,
+  subscribeProgressiveCompositionCapture,
   withPreviewRedirectSafeFetch,
 } from "./clientCompositionCapture";
+import { bindPreviewLease } from "./previewLease";
 import { ThumbnailScheduler } from "./thumbnailScheduler";
 import { usePlayerStore } from "../store/playerStore";
 
@@ -522,6 +527,458 @@ describe("clientCompositionCapture", () => {
       ]);
     } finally {
       globalThis.fetch = origFetch;
+    }
+  });
+
+  it("keeps withPreviewRedirectSafeFetch re-entrant across concurrent same-origin captures and restores fetch only after the last exits", async () => {
+    const calls: Array<{ input: RequestInfo | URL; credentials?: RequestCredentials }> = [];
+    const origFetch = globalThis.fetch;
+    const stubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, credentials: init?.credentials });
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+    globalThis.fetch = stubFetch;
+
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstGate = new Promise<void>((r) => { releaseFirst = r; });
+    const secondGate = new Promise<void>((r) => { releaseSecond = r; });
+
+    try {
+      const job1 = withPreviewRedirectSafeFetch(async () => {
+        await globalThis.fetch("/api/projects/p1/preview/assets/one.png", { credentials: "include" });
+        await firstGate;
+      });
+      const job2 = withPreviewRedirectSafeFetch(async () => {
+        await secondGate;
+        // Runs AFTER job1 has exited: wrapper must still downgrade preview asset credentials.
+        await globalThis.fetch("/api/projects/p1/preview/assets/two.png", { credentials: "include" });
+      });
+
+      // Finish job1 while job2 is still active.
+      releaseFirst();
+      await job1;
+      expect(globalThis.fetch).not.toBe(stubFetch);
+
+      // Now finish job2 and confirm original fetch is restored exactly.
+      releaseSecond();
+      await job2;
+      expect(globalThis.fetch).toBe(stubFetch);
+      expect(calls).toEqual([
+        { input: "/api/projects/p1/preview/assets/one.png", credentials: "same-origin" },
+        { input: "/api/projects/p1/preview/assets/two.png", credentials: "same-origin" },
+      ]);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("keeps untouched sibling compositions cached when per-composition revisions update only one scene", () => {
+    setCachedProjectRevision("proj-percomp", "rev-1", {
+      "compositions/scene-1.html": "sha1:head:shared",
+      "compositions/scene-2.html": "sha2:head:shared",
+    });
+
+    const scene1Input = {
+      previewUrl: "/api/projects/proj-percomp/preview/comp/compositions/scene-1.html",
+      projectId: "proj-percomp",
+      contentRevision: 0,
+      frameCount: 4,
+    };
+    const scene2Input = {
+      previewUrl: "/api/projects/proj-percomp/preview/comp/compositions/scene-2.html",
+      projectId: "proj-percomp",
+      contentRevision: 0,
+      frameCount: 4,
+    };
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:test/pc-${Math.random()}`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    seedClientCompositionCaptureForTest(scene1Input, [new Blob(["1a"]), new Blob(["1b"])]);
+    seedClientCompositionCaptureForTest(scene2Input, [new Blob(["2a"]), new Blob(["2b"])]);
+    const req1Before = createClientCompositionCaptureRequest({ ...scene1Input, sessionEpoch: 1 });
+    const req2Before = createClientCompositionCaptureRequest({ ...scene2Input, sessionEpoch: 1 });
+
+    // Only scene-2 changed; whole-project revision bumped from rev-1 -> rev-2.
+    const listener = vi.fn();
+    const unsubRev = subscribeCompositionCacheRevision("proj-percomp", listener);
+    setCachedProjectRevision("proj-percomp", "rev-2", {
+      "compositions/scene-1.html": "sha1:head:shared",
+      "compositions/scene-2.html": "sha2-edited:head:shared",
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(getCompositionCacheRevision("proj-percomp", scene1Input.previewUrl)).toBe("sha1:head:shared");
+    expect(getCompositionCacheRevision("proj-percomp", scene2Input.previewUrl)).toBe("sha2-edited:head:shared");
+    // Re-setting identical revisions does not trigger spurious re-renders.
+    setCachedProjectRevision("proj-percomp", "rev-2", {
+      "compositions/scene-1.html": "sha1:head:shared",
+      "compositions/scene-2.html": "sha2-edited:head:shared",
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubRev();
+
+    expect(peekCachedCompositionCapture(scene1Input)).not.toBeNull();
+    expect(peekCachedCompositionCapture(scene2Input)).toBeNull();
+    expect(createClientCompositionCaptureRequest({ ...scene1Input, sessionEpoch: 1 }).key).toBe(req1Before.key);
+    expect(createClientCompositionCaptureRequest({ ...scene2Input, sessionEpoch: 1 }).key).not.toBe(req2Before.key);
+    expect(req1Before.concurrencyBucket).toBe("client-capture");
+  });
+
+  it("reuses one shared preview-token across concurrent capture slots and streams progressive frames without duplicating URLs", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test";
+    document.head.appendChild(meta);
+
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+    });
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        iframeSrcs.set(this, String(value));
+      },
+    });
+
+    const origFetch = globalThis.fetch;
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        token: "tok-shared-pool",
+        previewOrigin: "https://preview.example.test",
+        assetLease: "lease-shared",
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      }),
+    );
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const createdUrls: string[] = [];
+    const revokedUrls: string[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:test/prog-${createdUrls.length + 1}`;
+      createdUrls.push(url);
+      return url;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+      revokedUrls.push(String(url));
+    });
+
+    try {
+      const inputs = [0, 1, 2, 3].map((idx) => ({
+        previewUrl: `/api/projects/proj-pool/preview/comp/compositions/scene-${idx}.html`,
+        projectId: "proj-pool",
+        sessionEpoch: 1,
+        contentRevision: 0,
+        frameCount: 4,
+        duration: 8,
+      }));
+
+      // Subscribe to progressive frame updates on scene-0.
+      const progressiveSnapshots: Array<ReturnType<typeof getProgressiveCompositionCapture>> = [];
+      const unsub = subscribeProgressiveCompositionCapture(inputs[0]!, () => {
+        progressiveSnapshots.push(getProgressiveCompositionCapture(inputs[0]!));
+      });
+
+      const pending = inputs.map((inp) =>
+        createClientCompositionCaptureRequest(inp).load(new AbortController().signal),
+      );
+
+      // Exactly 3 concurrent iframes should be spawned (4th waits in pool) and only 1 preview-token POST made.
+      let iframes: HTMLIFrameElement[] = [];
+      await vi.waitFor(() => {
+        iframes = Array.from(
+          document.querySelectorAll<HTMLIFrameElement>('iframe[data-openmotion-thumb-capture="true"]'),
+        );
+        expect(iframes).toHaveLength(3);
+        expect(iframes.every((f) => f.src.includes("pt=tok-shared-pool"))).toBe(true);
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      // Attach mock contentWindows to all 3 slots; hold scene-0 after frame 1 to inspect progressive UI state.
+      let finishScene0: (() => void) | null = null;
+      const attachMockWindow = (iframe: HTMLIFrameElement, holdMidway: boolean) => {
+        const win = {
+          postMessage: (message: Record<string, unknown>) => {
+            if (message.type !== "capture-frames") return;
+            expect(message.progressive).toBe(true);
+            const sendFrame = (index: number) => {
+              window.dispatchEvent(
+                new MessageEvent("message", {
+                  origin: "https://preview.example.test",
+                  source: win as unknown as Window,
+                  data: {
+                    source: "openmotion-preview-bridge",
+                    version: 1,
+                    type: "capture-frame",
+                    projectId: "proj-pool",
+                    token: "tok-shared-pool",
+                    requestId: message.requestId,
+                    index,
+                    total: 4,
+                    frame: new Uint8Array([index + 1]).buffer,
+                    mimeType: "image/jpeg",
+                    width: 240,
+                    height: 135,
+                    aspect: 16 / 9,
+                  },
+                }),
+              );
+            };
+            const sendDone = () => {
+              window.dispatchEvent(
+                new MessageEvent("message", {
+                  origin: "https://preview.example.test",
+                  source: win as unknown as Window,
+                  data: {
+                    source: "openmotion-preview-bridge",
+                    version: 1,
+                    type: "response",
+                    projectId: "proj-pool",
+                    token: "tok-shared-pool",
+                    requestId: message.requestId,
+                    ok: true,
+                    result: {
+                      frames: [],
+                      streamed: true,
+                      frameCount: 4,
+                      mimeType: "image/jpeg",
+                      width: 240,
+                      height: 135,
+                      aspect: 16 / 9,
+                    },
+                  },
+                }),
+              );
+            };
+            queueMicrotask(() => {
+              sendFrame(2); // Hero cover frame first
+              if (holdMidway) {
+                finishScene0 = () => {
+                  sendFrame(0);
+                  sendFrame(1);
+                  sendFrame(3);
+                  sendDone();
+                };
+              } else {
+                sendFrame(0);
+                sendFrame(1);
+                sendFrame(3);
+                sendDone();
+              }
+            });
+          },
+        };
+        Object.defineProperty(iframe, "contentWindow", { configurable: true, value: win });
+        return win;
+      };
+
+      const slotWins = iframes.map((iframe, idx) => attachMockWindow(iframe, idx === 0));
+      for (const win of slotWins) {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            origin: "https://preview.example.test",
+            source: win as unknown as Window,
+            data: {
+              source: "openmotion-preview-bridge",
+              version: 1,
+              type: "timeline-state",
+              projectId: "proj-pool",
+              token: "tok-shared-pool",
+              duration: 8,
+              width: 1280,
+              height: 720,
+            },
+          }),
+        );
+      }
+
+      // Scene-0 should emit a progressive filmstrip after its very first frame, and seed the 1-frame cover cache.
+      await vi.waitFor(() => {
+        expect(progressiveSnapshots.length).toBeGreaterThanOrEqual(1);
+        expect(finishScene0).not.toBeNull();
+      });
+      const firstProg = progressiveSnapshots[0];
+      expect(firstProg?.kind).toBe("filmstrip");
+      const heroUrl = firstProg?.kind === "filmstrip" ? firstProg.urls[0] : "";
+      expect(heroUrl).toBeTruthy();
+
+      // Scene-1 and Scene-2 finish, freeing a slot for Scene-3 which reuses the same warm iframe + shared token.
+      await vi.waitFor(() => {
+        expect(iframes.some((f) => f.src.includes("scene-3.html"))).toBe(true);
+      });
+      const scene3Idx = iframes.findIndex((f) => f.src.includes("scene-3.html"));
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: slotWins[scene3Idx] as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "timeline-state",
+            projectId: "proj-pool",
+            token: "tok-shared-pool",
+            duration: 8,
+            width: 1280,
+            height: 720,
+          },
+        }),
+      );
+
+      // Complete Scene-0's remaining frames; final filmstrip must reuse heroUrl at index 2 without revoking it.
+      finishScene0!();
+      const results = await Promise.all(pending);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(document.querySelectorAll('iframe[data-openmotion-thumb-capture="true"]')).toHaveLength(3);
+      const scene0Val = results[0]!.value;
+      expect(scene0Val.kind).toBe("filmstrip");
+      if (scene0Val.kind === "filmstrip") {
+        expect(scene0Val.urls).toHaveLength(4);
+        expect(scene0Val.urls[2]).toBe(heroUrl);
+      }
+      expect(revokedUrls).not.toContain(heroUrl);
+      expect(getProgressiveCompositionCapture(inputs[0]!)).toBeNull();
+      unsub();
+      for (const res of results) res.dispose?.();
+    } finally {
+      if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      globalThis.fetch = origFetch;
+      meta.remove();
+    }
+  });
+
+  it("reuses the live player's bindPreviewLease grant with zero extra preview-token requests", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test";
+    document.head.appendChild(meta);
+
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+    });
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        iframeSrcs.set(this, String(value));
+      },
+    });
+
+    const origFetch = globalThis.fetch;
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        token: "tok-live-player",
+        previewOrigin: "https://preview.example.test",
+        assetLease: "lease-live-player",
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      }),
+    );
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:test/live-reuse");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    const navigate = vi.fn();
+    const liveLease = bindPreviewLease(
+      new URL("https://studio.example.test/api/projects/proj-live/preview"),
+      "https://preview.example.test",
+      navigate,
+      vi.fn(),
+    );
+
+    try {
+      await vi.waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      const req = createClientCompositionCaptureRequest({
+        previewUrl: "/api/projects/proj-live/preview/comp/compositions/s1.html",
+        projectId: "proj-live",
+        sessionEpoch: 1,
+        contentRevision: 0,
+        frameCount: 1,
+        duration: 5,
+      });
+      const pending = req.load(new AbortController().signal);
+
+      let iframe: HTMLIFrameElement | null = null;
+      await vi.waitFor(() => {
+        iframe = document.querySelector<HTMLIFrameElement>('iframe[data-openmotion-thumb-capture="true"]');
+        expect(iframe?.src).toContain("pt=tok-live-player");
+      });
+      // Zero additional POST /preview-token calls!
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      const fakeWin = {
+        postMessage: (msg: Record<string, unknown>) => {
+          if (msg.type === "capture-frames") {
+            queueMicrotask(() => {
+              window.dispatchEvent(
+                new MessageEvent("message", {
+                  origin: "https://preview.example.test",
+                  source: fakeWin as unknown as Window,
+                  data: {
+                    source: "openmotion-preview-bridge",
+                    version: 1,
+                    type: "response",
+                    projectId: "proj-live",
+                    token: "tok-live-player",
+                    requestId: msg.requestId,
+                    ok: true,
+                    result: {
+                      frames: [new Uint8Array([9, 8]).buffer],
+                      mimeType: "image/jpeg",
+                      width: 240,
+                      height: 135,
+                      aspect: 16 / 9,
+                    },
+                  },
+                }),
+              );
+            });
+          }
+        },
+      };
+      Object.defineProperty(iframe!, "contentWindow", { configurable: true, value: fakeWin });
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: fakeWin as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "timeline-state",
+            projectId: "proj-live",
+            token: "tok-live-player",
+            duration: 5,
+            width: 1280,
+            height: 720,
+          },
+        }),
+      );
+
+      const loaded = await pending;
+      expect(loaded.value.kind).toBe("image");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      loaded.dispose?.();
+    } finally {
+      liveLease.dispose();
+      if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      globalThis.fetch = origFetch;
+      meta.remove();
     }
   });
 });

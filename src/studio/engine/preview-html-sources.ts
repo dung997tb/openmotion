@@ -21,17 +21,56 @@ function cssMayLoadResources(css: string): boolean {
   return css.replace(numericColor, '$1').includes('(');
 }
 
-function hasUnknownInputs(root: Document | DocumentFragment, runtime?: Element | null): boolean {
+const SAFE_HEAD_LINK_RELS = new Set([
+  'stylesheet',
+  'preconnect',
+  'dns-prefetch',
+  'icon',
+  'shortcut icon',
+  'apple-touch-icon',
+]);
+
+function isSafeHeadLink(el: Element): boolean {
+  if (el.localName !== 'link') return false;
+  if (el.hasAttribute('http-equiv') || el.hasAttribute('srcset')) return false;
+  if (el.getAttributeNames().some(name => /^on/i.test(name))) return false;
+  const rel = (el.getAttribute('rel') ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!SAFE_HEAD_LINK_RELS.has(rel)) return false;
+  const href = (el.getAttribute('href') ?? '').trim();
+  if (!href) return true;
+  if (/^(?:javascript|data|vbscript):/i.test(href)) return false;
+  const pathOnly = href.split(/[?#]/)[0] ?? '';
+  return !/\.html?$/i.test(pathOnly);
+}
+
+function hasUnknownInputs(
+  root: Document | DocumentFragment,
+  runtime?: Element | null,
+  allowSafeHeadLinks = false,
+): boolean {
   return Array.from(root.querySelectorAll('*')).some(el => {
     if (el === runtime) return false;
+    if (allowSafeHeadLinks && isSafeHeadLink(el)) return false;
     if (!passiveTags.has(el.localName) || el.hasAttribute('http-equiv') || el.hasAttribute('srcset')) return true;
-    if (el.localName === 'template' && hasUnknownInputs((el as HTMLTemplateElement).content)) return true;
+    if (el.localName === 'template' && hasUnknownInputs((el as HTMLTemplateElement).content, null, allowSafeHeadLinks)) return true;
     // CSS can load more resources through @import, url(), image-set() or escaped identifiers.
     const css = el.localName === 'style' ? el.textContent : el.getAttribute('style');
     if (css && cssMayLoadResources(css)) return true;
     return el.getAttributeNames().some(name => /^on/i.test(name) ||
       (['src', 'poster', 'href'].includes(name) && !plainMedia.test(el.getAttribute(name) ?? '')));
   });
+}
+
+/**
+ * Returns true when markup contains scripts, event handlers, embedded documents,
+ * dynamic CSS resource loads, or unrecognized tags whose runtime file dependencies
+ * cannot be statically enumerated.
+ */
+export function hasUnknownStaticHtmlInputs(
+  root: Document | DocumentFragment,
+  options?: { runtime?: Element | null; allowSafeHeadLinks?: boolean },
+): boolean {
+  return hasUnknownInputs(root, options?.runtime ?? null, options?.allowSafeHeadLinks === true);
 }
 
 export function staticPreviewHtmlSources(entry: string, doc: Document, runtimeUrl: string) {

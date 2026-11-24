@@ -2,6 +2,7 @@ import { TIMELINE_VIEWPORT_BUDGETS, type TimelineViewportBudgets } from "./timel
 
 export type ThumbnailPriority = "overscan" | "visible" | "interaction";
 export type ThumbnailJobKind = "video" | "image" | "composition" | "waveform";
+export type ThumbnailConcurrencyBucket = "video" | "composition" | "client-capture" | "general";
 
 export type ThumbnailValue =
   | {
@@ -28,6 +29,8 @@ export interface ThumbnailRequest {
   projectId: string;
   sessionEpoch: number;
   kind: ThumbnailJobKind;
+  /** Optional concurrency lane override so browser-side captures do not starve poster fetches. */
+  concurrencyBucket?: ThumbnailConcurrencyBucket;
   priority: ThumbnailPriority;
   /** Rich work is paused while the timeline is fast-scrolling. */
   rich?: boolean;
@@ -87,9 +90,12 @@ const PRIORITY_SCORE: Readonly<Record<ThumbnailPriority, number>> = {
 
 const EMPTY_SNAPSHOT: ThumbnailSnapshot = Object.freeze({ status: "idle" });
 
-function concurrencyBucket(kind: ThumbnailJobKind): "video" | "composition" | "general" {
-  if (kind === "video") return "video";
-  if (kind === "composition") return "composition";
+function concurrencyBucket(
+  request: Pick<ThumbnailRequest, "kind" | "concurrencyBucket">,
+): ThumbnailConcurrencyBucket {
+  if (request.concurrencyBucket) return request.concurrencyBucket;
+  if (request.kind === "video") return "video";
+  if (request.kind === "composition") return "composition";
   return "general";
 }
 
@@ -129,7 +135,12 @@ export class ThumbnailScheduler {
   private pageHidden = false;
   private cacheBytes = 0;
   private waveformCacheBytes = 0;
-  private readonly activeByBucket = { video: 0, composition: 0, general: 0 };
+  private readonly activeByBucket: Record<ThumbnailConcurrencyBucket, number> = {
+    video: 0,
+    composition: 0,
+    "client-capture": 0,
+    general: 0,
+  };
   private readonly activeByKind: Record<ThumbnailJobKind, number> = {
     video: 0,
     image: 0,
@@ -311,7 +322,7 @@ export class ThumbnailScheduler {
 
     for (const entry of queued) {
       if (this.isHeld(entry)) continue;
-      const bucket = concurrencyBucket(entry.request.kind);
+      const bucket = concurrencyBucket(entry.request);
       if (this.activeByBucket[bucket] >= this.bucketLimit(bucket)) continue;
       this.start(entry, bucket);
     }
@@ -328,7 +339,7 @@ export class ThumbnailScheduler {
     );
   }
 
-  private start(entry: ThumbnailEntry, bucket: "video" | "composition" | "general"): void {
+  private start(entry: ThumbnailEntry, bucket: ThumbnailConcurrencyBucket): void {
     entry.state = "loading";
     entry.snapshot = Object.freeze({ status: "loading" });
     const controller = new AbortController();
@@ -426,9 +437,10 @@ export class ThumbnailScheduler {
     return score;
   }
 
-  private bucketLimit(bucket: "video" | "composition" | "general"): number {
+  private bucketLimit(bucket: ThumbnailConcurrencyBucket): number {
     if (bucket === "video") return this.budgets.concurrentVideoDecodes;
     if (bucket === "composition") return this.budgets.concurrentCompositionFetches;
+    if (bucket === "client-capture") return this.budgets.concurrentClientCompositionCaptures;
     return this.budgets.concurrentMetadataJobs;
   }
 
