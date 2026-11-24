@@ -59,6 +59,8 @@ export type ScenarioStudioViewProps = {
   onOpenDesignProject(id: string): void;
   onOpenMotionProject(id: string): Promise<boolean>;
   onCopyAgentPrompt(customPrompt?: string): Promise<boolean>;
+  /** When Super Agent is available, Make the full kit runs there instead of copying the prompt. */
+  onRunInSuperAgent?(idea?: string): Promise<boolean>;
   onExportBundle(options?: PoolExportOptions): Promise<ScenarioBundleReceipt | null>;
   exportingBundle: boolean;
   onSwitchToManual(): void;
@@ -108,7 +110,12 @@ function stepOutputs(step: ScenarioStepDefinition, state: ScenarioStepState | un
   const iteration = latestIteration(state);
   const posts = iteration?.outputs.flatMap(output => output.type === 'social' ? output.posts : []) ?? [];
   const scripts = iteration?.outputs.flatMap(output => output.type === 'script' ? [output.text] : []) ?? [];
-  return { items, posts, scripts };
+  // Overseas platforms lead; domestic ones (Xiaohongshu, Douyin) follow.
+  const domestic = new Set(['xiaohongshu', 'douyin', 'weibo', 'bilibili', 'wechat']);
+  const ordered = posts.map((post, index) => ({ post, index }))
+    .sort((a, b) => Number(domestic.has(a.post.platform)) - Number(domestic.has(b.post.platform)) || a.index - b.index)
+    .map(entry => entry.post);
+  return { items, posts: ordered, scripts };
 }
 
 /** A page shows at desktop width (1280px), scaled to fit the panel, and scrolls inside. */
@@ -214,7 +221,7 @@ function DeliverableTab({ step, state, cover, audioImage, example, selected, onS
 }
 
 export function ScenarioStudioView({
-  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onRegisterFlush, onOpenDesignProject, onOpenMotionProject, onCopyAgentPrompt, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
+  scenario, run, api, toast, poolItems, onAddPoolItems, onRemovePoolItem, onRegisterFlush, onOpenDesignProject, onOpenMotionProject, onCopyAgentPrompt, onRunInSuperAgent, onExportBundle, exportingBundle, onSwitchToManual, onOpenMcp,
 }: ScenarioStudioViewProps) {
   const { t, locale } = useI18n();
   const studio = scenarioStudio(scenario.id);
@@ -422,6 +429,10 @@ export function ScenarioStudioView({
       if (!(await productSyncRef.current())) return;
       if (!(await flush())) {
         toast.showToast(t('Could not save brief revision.'), 'error', 'feedback');
+        return;
+      }
+      if (onRunInSuperAgent) {
+        await onRunInSuperAgent(latest.current.idea);
         return;
       }
       if (await onCopyAgentPrompt(latest.current.idea)) setHandedOffAt(Date.now());

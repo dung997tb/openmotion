@@ -36,6 +36,8 @@ import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useIntegrationInfo } from '../motion/useIntegrationInfo';
+import { useOptionalWorkspaceChrome } from '../motion/WorkspaceChromeContext';
+import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
 import { ScenarioStudioView } from './ScenarioStudioView';
 import { ScenarioAgentModeView } from './ScenarioAgentModeView';
 import { AssetPoolPanel, type PoolPickRequest } from './AssetPoolPanel';
@@ -634,6 +636,42 @@ export function ScenarioWorkspace({
     [copyToClipboard, ensureRun, integration, locale, run, scenario, t],
   );
 
+  const chrome = useOptionalWorkspaceChrome();
+  /**
+   * Make the full kit in Super Agent: a new chat that starts right away, with the
+   * workflow attached and the full run instructions passed behind the scenes.
+   * Without Super Agent (an external Agent host), the prompt is copied instead.
+   */
+  const handleRunInSuperAgent = useCallback(
+    async (idea?: string) => {
+      const openInSuperAgent = chrome?.openInSuperAgent;
+      if (!openInSuperAgent) return handleCopyAgentPrompt(idea);
+      let ensuredRun: ScenarioRun | null = null;
+      try {
+        ensuredRun = await ensureRun();
+      } catch {
+        ensuredRun = run;
+      }
+      const instructions = scenarioConcisePrompt(scenario, ensuredRun, { locale, integration });
+      const visible = (idea ?? '').trim();
+      openInSuperAgent(buildSuperAgentHandoff(
+        { kind: 'workflow', id: scenario.id, title: t(scenario.title), subtitle: t(scenario.subtitle), category: scenario.category, ...(ensuredRun ? { runId: ensuredRun.id } : {}) },
+        {
+          prompt: visible
+            ? t('Make the full kit for this workflow: {idea}', { idea: visible })
+            : t('Make the full kit for this workflow'),
+          hiddenInstructions: instructions,
+          locale,
+          autoSend: true,
+          newChat: true,
+        },
+      ));
+      return true;
+    },
+    [chrome, handleCopyAgentPrompt, ensureRun, integration, locale, run, scenario, t],
+  );
+
+
   const handleCopyAgentHandoff = useCallback(
     () => handleCopyAgentPrompt(),
     [handleCopyAgentPrompt],
@@ -1173,6 +1211,7 @@ export function ScenarioWorkspace({
               onOpenDesignProject={onOpenDesignProject}
               onOpenMotionProject={onOpenMotionProject}
               onCopyAgentPrompt={handleCopyAgentPrompt}
+              onRunInSuperAgent={chrome?.openInSuperAgent ? handleRunInSuperAgent : undefined}
               onExportBundle={handleExportBundle}
               exportingBundle={exportingBundle}
               onSwitchToManual={() => handleModeChange('manual')}
