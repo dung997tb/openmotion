@@ -238,7 +238,8 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
   const { t } = useI18n();
   // Light mode matches the OpenDesign console plan card; dark mode keeps the Studio card.
   const console = useShownStudioTheme() === 'light';
-  const planName = !account.plan || account.plan === 'free' ? t('Free plan') : account.plan.charAt(0).toUpperCase() + account.plan.slice(1);
+  // Before the first billing read the summary has no plan yet: show a dash, not Free, and offer no Upgrade.
+  const planName = !account.plan ? '—' : account.plan === 'free' ? t('Free plan') : account.plan.charAt(0).toUpperCase() + account.plan.slice(1);
   const upgrade = upgradable && (console
     ? <Button variant="plain" className="om-plan-usage-upgrade" onClick={() => open('view_plans')}><RemixIcon name="sparkling-fill" size={14} />{t('Upgrade')}</Button>
     : <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>);
@@ -298,7 +299,7 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
       {subscription ? <>
         {plan && <UpgradeGuide plan={plan} subscription={subscriptionOpener} />}
         <section className="om-settings-section"><div className="om-settings-row"><h2 className="om-subtitle">{t('Subscription & usage')}</h2>{signedIn && <Tooltip label={t('Refresh account')} wrap><IconButton variant="ghost" className="motion-icon-button" aria-label={t('Refresh account')} disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()} icon={<RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={17} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />} /></Tooltip>}</div>
-          {signedIn && !account.billingUnavailable && <PlanUsagePanel account={account} upgradable={!plan && account.plan?.toLowerCase() !== 'max'} open={element => void subscriptionOpener.open(element)} />}
+          {signedIn && !account.billingUnavailable && <PlanUsagePanel account={account} upgradable={!plan && Boolean(account.plan) && account.plan?.toLowerCase() !== 'max'} open={element => void subscriptionOpener.open(element)} />}
           {!signedIn && <div className="om-account-metrics"><div className="om-card"><span className="om-muted">{t('Current plan')}</span><h3 className="om-title">{signedIn && account.plan ? account.plan === 'free' ? t('Free plan') : account.plan : '—'}</h3><p className="om-muted">{t(signedIn ? 'Managed by OpenDesign' : 'Sign in to view your plan')}</p></div><div className="om-card"><span className="om-muted">{t('Available balance')}</span><h3 className="om-title">{signedIn && account.balance != null ? `$${account.balance}` : '—'}</h3><p className="om-muted">{t(signedIn ? 'Account credits in USD' : 'Sign in to view usage')}</p></div></div>}
           {signedIn && account.billingUnavailable && <div className="om-settings-row"><p className="om-muted">{t(account.billingError?.status === 403 ? "The billing service declined this request. Open Manage subscription to check your plan in OpenDesign." : "Couldn't load your plan and balance. Account models are unaffected and can be used as usual.")}</p><Button variant="ghost" className="om-button h-auto" disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()}><RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={15} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />{t('Refresh')}</Button></div>}
           {signedIn && account.billingUnavailable && subscriptionOpener.button('manage_subscription')}{signedIn && subscriptionOpener.link}

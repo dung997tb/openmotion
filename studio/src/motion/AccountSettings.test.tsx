@@ -149,6 +149,13 @@ it('asks the local service to open the subscription page in the system browser, 
   popup.mockRestore();
 });
 
+it('shows an unknown plan, not Free or an Upgrade, until the first billing read arrives', async () => {
+  const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' } }, 'en', 'subscription');
+  expect(page.querySelector('.om-plan-usage h2')?.textContent).toBe('—');
+  expect(page.querySelector('.om-plan-usage [data-quota="balance"]')?.textContent).toContain('—');
+  expect([...page.querySelectorAll('.om-plan-usage button')].map(item => item.textContent)).toEqual(['Go to console', 'Top up']);
+});
+
 it('replaces missing billing metrics with a dashboard link on 403 and restores them on retry', async () => {
   const page = await open({ state: 'signed-in', billingUnavailable: true, billingError: { status: 403 } }, 'zh-CN', 'subscription');
   expect(page.textContent).toContain('账单服务拒绝了本次查询');
