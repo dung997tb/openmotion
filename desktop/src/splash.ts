@@ -50,7 +50,7 @@ export class SplashController {
       autoHideMenuBar: true,
       center: true,
       show: false,
-      title: 'OpenMotion',
+      title: 'OpenDesign',
       backgroundColor: getSplashBackgroundColor(theme),
       webPreferences: {
         preload: preloadPath,

@@ -68,7 +68,7 @@ export type ScenarioStepDefinition = {
   skills?: readonly ScenarioSkillRef[];
   /** image | video: generator scenes; the first one is the default. */
   scenes?: readonly StudioScene['id'][];
-  /** image | video | audio: English template with {field} placeholders seeded from the brief. */
+  /** Identifies prompt inputs and recognizes defaults from drafts saved before localization. */
   promptTemplate?: string;
   audioModes?: readonly ('speech' | 'music')[];
   page?: {
@@ -822,7 +822,7 @@ export const scenarioDefinitions = [
             role: 'Consistent persona portraits from references',
           },
         ],
-        scenes: ['character', 'text-to-image'],
+        scenes: ['image-edit', 'image-blend', 'text-to-image'],
         promptTemplate: 'Consistent portrait of {personaName}, {niche} creator talking about {topic}, natural studio lighting',
       },
       {

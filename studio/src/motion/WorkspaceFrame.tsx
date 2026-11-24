@@ -5,6 +5,7 @@ import { FieldInput } from "../components/ui/FormField";
 import { DisclosureRow } from "../../../packages/design-system/react/DisclosureRow";
 import { useProjectArchives, ProjectArchiveMenu, type ProjectArchiveActions } from './ProjectArchives';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import type { McpClient } from './mcpClients';
 import { creativeStudios, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import type { Modality } from '../../../shared/gateway';
@@ -37,7 +38,9 @@ import { dismissBannerToday, shouldShowBlackFridayBanner, useMinuteCondition } f
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
 import { Skeleton } from '../components/ui/Skeleton';
-import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type SettingsSection, type WorkspacePage } from './workspacePageRouting';
+import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, unresolvedCreateSceneId, workspacePageHref, type SettingsSection, type SuperAgentRouteMode, type WorkspacePage } from './workspacePageRouting';
+import { peekCachedGateway } from './gatewayClient';
+import { useMediaCatalog } from './useMediaCatalog';
 import type { SoundTabId } from './soundTabs';
 import { WORKSPACE_LOCATION_CHANGED, initializeWorkspaceHistory, navigateWorkspaceHistory, readLocationWorkspaceSource, restoreWorkspaceSource, workspaceHistoryIndex, workspaceHistorySource, workspaceSettingsSource, writeWorkspaceHistory } from '../utils/workspaceHistory';
 import { useToast } from '../hooks/useToast';
@@ -45,12 +48,13 @@ import { StudioToastViewport } from '../components/StudioToastViewport';
 import { clickMethod, searchStarted, trackStudioClick } from './editorTracking';
 import { reportCreativePageView } from './exploreTracking';
 import type { ScenarioId } from '../../../shared/scenarios';
-import { isWorkspacePageOpen, resolveNavTrackingPage, resolveRouteArrival } from '../router/routeRegistry';
+import { isWorkspacePageOpen, resolveNavTrackingPage, resolveRouteArrival, routeArrivalTarget } from '../router/routeRegistry';
 import { RouteViewport } from '../router/RouteViewport';
 import { OverlayLayer } from '../router/OverlayLayer';
 import { StudioRouterProvider } from '../router/createAppRouter';
 import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
 import { preloadAllWorkspacePages, preloadStudioRoute } from '../router/lazyPages';
+import { scheduleIdleRouteWarmup } from '../router/routePrefetch';
 
 export type { WorkspaceSurfaceKey } from './WorkspaceChromeContext';
 
@@ -84,11 +88,17 @@ export function WorkspaceFrame(props: WorkspaceFrameProps) {
 function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: WorkspaceFrameProps) {
   const { t, locale } = useI18n();
   const routerLocation = useLocation();
-  const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname));
+  const pendingCreateScene = unresolvedCreateSceneId(routerLocation.search, routerLocation.hash, routerLocation.pathname);
+  const dynamicRouteCatalog = useMediaCatalog(Boolean(pendingCreateScene));
+  const routeCapabilities = dynamicRouteCatalog.catalog?.capabilities ?? peekCachedGateway()?.capabilities;
+  const routeCapabilitiesRef = useRef(routeCapabilities);
+  routeCapabilitiesRef.current = routeCapabilities;
+  const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname, routeCapabilities));
+  const [navPage, setNavPage] = useState(page);
   const [source, setSource] = useState(() => readLocationWorkspaceSource(routerLocation.state));
   const [isRoutePending, startRouteTransition] = useTransition();
   const sourceUrl = source ? new URL(source.href) : null;
-  const sourcePage = sourceUrl && readWorkspacePage(sourceUrl.search, sourceUrl.hash, sourceUrl.pathname);
+  const sourcePage = sourceUrl && readWorkspacePage(sourceUrl.search, sourceUrl.hash, sourceUrl.pathname, routeCapabilities);
   const fromExplore = sourcePage?.explore && !sourcePage.templates && !sourcePage.template;
   const { settings, assets: assetsOpen, skills: skillsOpen, templates: libraryRequested } = page;
   const standaloneMcp = settings === 'mcp' && !page.mcpInSettings;
@@ -114,10 +124,11 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const libraryClosed = useRef(onLibraryClose); libraryClosed.current = onLibraryClose;
   useEffect(() => {
     const sync = (search: string, hash: string, pathname: string, locationState?: unknown) => {
-      const next = readWorkspacePage(search, hash, pathname);
+      const next = readWorkspacePage(search, hash, pathname, routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities);
       if (libraryOpen.current && !next.templates) libraryClosed.current?.();
       libraryOpen.current = next.templates;
       const nextSource = locationState !== undefined ? readLocationWorkspaceSource(locationState) : workspaceHistorySource();
+      setNavPage(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
       startRouteTransition(() => {
         setPage(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
         setSource(previous => previous?.index === nextSource?.index && previous?.href === nextSource?.href ? previous : nextSource);
@@ -129,13 +140,16 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     return () => {
       window.removeEventListener(WORKSPACE_LOCATION_CHANGED, onLocationChanged);
     };
-  }, [routerLocation]);
+  }, [routerLocation, routeCapabilities]);
+  useEffect(() => scheduleIdleRouteWarmup(), []);
   useEffect(() => {
-    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }), true);
+    const capabilities = routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities;
+    if (isLegacyWorkspaceHref(location.search, page, location.pathname)) writeWorkspaceHistory(workspacePageHref(location.href, { studio: page.studio }, capabilities), true);
   }, [page]);
   const navigatePage = useCallback((patch: Partial<WorkspacePage>, replace = false, mode?: 'from-page' | 'keep') => {
     const current = new URL(location.href);
-    const target = new URL(workspacePageHref(current.href, patch), current);
+    const capabilities = routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities;
+    const target = new URL(workspacePageHref(current.href, patch, capabilities), current);
     initializeWorkspaceHistory();
     const index = workspaceHistoryIndex();
     const origin = !replace && index !== null && target.href !== current.href ? { href: current.href, index } : null;
@@ -211,7 +225,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const closeStandalonePreview = () => {
     // A card pushes one preview entry. Copied links start a new history session at index zero.
     if (onNavigate && (workspaceHistoryIndex() ?? 0) > 0) history.back();
-    else writeWorkspaceHistory(workspacePageHref(location.href, { template: null }), true);
+    else writeWorkspaceHistory(workspacePageHref(location.href, { template: null }, routeCapabilitiesRef.current ?? peekCachedGateway()?.capabilities), true);
   };
   const collectionSkillTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -409,8 +423,8 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     if (!routeView) return;
     const hasProject = Boolean(projectId);
     if (routeView === 'explore') reportCreativePageView('explore', hasProject, { community: page.community, medium: page.medium ?? 'all' });
-    else if (routeView === 'motion' || routeView === 'design' || routeView === 'cinema') reportCreativePageView('creative_studio', hasProject, { studio: routeView, landing: true });
-    else reportCreativePageView('model_overview', hasProject, { model: page.modelOverview });
+    else if (routeView.startsWith('model:')) reportCreativePageView('model_overview', hasProject, { model: page.modelOverview });
+    else reportCreativePageView('creative_studio', hasProject, routeArrivalTarget(routeView, page));
     // Only an arrival counts; filter changes within Explore are reported as clicks.
   }, [routeView]);
   // Where the top navigation is shown, so its clicks segment by the page the user was on.
@@ -437,6 +451,9 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
       return;
     }
     openMcp(client, example);
+  };
+  const openAgentStart = (mode: SuperAgentRouteMode | null) => {
+    navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: mode, settings: null, templates: false });
   };
   const desktopMenuHandlerRef = useRef<(action: DesktopMenuAction) => void>(() => {});
   desktopMenuHandlerRef.current = action => {
@@ -503,6 +520,15 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     openProject: (id: string) => workspace.open('projects', id),
     openTemplate: openTemplateFromOverlay,
   };
+  const navTemplatesPage = navPage.templates && !hostChrome;
+  const navConnectionsOpen = navPage.templates || (Boolean(navPage.template) && !navPage.templates);
+  const navStandaloneMcp = navPage.settings === 'mcp' && !navPage.mcpInSettings;
+  const navSettings = navTemplatesPage || navStandaloneMcp ? null : navPage.settings;
+  const navSuperAgentActive = navPage.superAgent && !navSettings && !navTemplatesPage;
+  const navCurrentPage = navTemplatesPage || navPage.explore || (navPage.skills && !navSettings) ? 'explore' : navStandaloneMcp ? 'mcp' : navSuperAgentActive ? 'agent' : null;
+  const navEditorRoute = !navSettings && !isWorkspacePageOpen(navPage, navTemplatesPage);
+  const navEditorActive = navEditorRoute && !navConnectionsOpen;
+
   return <WorkspaceChromeContext.Provider value={value}>
     <StudioToastViewport {...navigationToast} />
     <StudioConnectionToast reconnecting={reconnecting} />
@@ -510,14 +536,27 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     <Dialog.Root open={sidebarOpen && narrow && editorActive} onOpenChange={setSidebarOpen}>
     <div ref={applicationRef} className="om-application" data-embedded={presentation.embedded} data-host-chrome={hostChrome} data-has-bf-banner={bfBannerVisible || undefined} data-navigation-collapsed={navigationCollapsed}>
       {bfBannerVisible && <BlackFridayTopBanner trackingPage={navTrackingPage} onClose={closeBfBanner} onExpire={expireBfBanner} />}
-      <ApplicationHeader atExploreHome={page.explore && !page.community && !page.medium && !connectionsOpen}
-        specialty={page.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
+      <ApplicationHeader atExploreHome={navPage.explore && !navPage.community && !navPage.medium && !navConnectionsOpen}
+        specialty={navPage.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
         openAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion, templates: false })}
-        onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={currentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={visibleSettings} destination={templatesPage ? null : page.studio} soundTab={templatesPage ? null : page.soundTab ?? null} motionActive={!templatesPage && (page.motion || editorActive)}
-        designActive={!templatesPage && Boolean(page.designScene)} cinemaActive={!templatesPage && page.cinemaLanding}
-        scenarioActive={!templatesPage && !settings ? (page.scenario ?? (page.scenarioHub ? 'hub' : null)) : null}
+        onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={navCurrentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={navSettings} destination={navTemplatesPage ? null : navPage.studio} soundTab={navTemplatesPage ? null : navPage.soundTab ?? null} motionActive={!navTemplatesPage && (navPage.motion || navEditorActive)}
+        onOpenAgentStart={openAgentStart}
+        designActive={!navTemplatesPage && Boolean(navPage.designScene)} cinemaActive={!navTemplatesPage && navPage.cinemaLanding}
+        scenarioActive={!navTemplatesPage && !navSettings ? (navPage.scenario ?? (navPage.scenarioHub ? 'hub' : null)) : null}
         onOpenScenario={(id, runId) => openScenario(id, runId)}
         onOpenScenarioHub={() => openScenarioHub()}
+        onNewAgentChat={() => navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: null, settings: null, assets: false, skills: false, templates: false, template: null })}
+        onAgentChat={chatId => navigatePage({ superAgent: true, superAgentChat: chatId, superAgentMode: null, settings: null, assets: false, skills: false, templates: false, template: null })}
+        onOpenDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })}
+        onOpenDesignProject={(id, designScene = 'projects') => navigatePage({ designScene, designProject: id, templates: false, ...lastExplore.current })}
+        onOpenMotionProject={id => { void workspace.open('projects', id); }}
+        onOpenGame={gameId => {
+          const gameStudio = creativeStudios.find((entry): entry is TechniqueStudio => entry.id === 'game' && entry.surface === 'techniques');
+          if (gameStudio) navigatePage({ specialty: gameStudio, skill: null, gameId, templates: false, ...lastExplore.current });
+        }}
+        onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId ?? null, assets: false, skills: false, templates: false })}
+        onOpenMcp={() => openMcp(undefined, undefined, false)}
+        onNotify={(msg, tone = 'info') => navigationToast.showToast(msg, tone, 'feedback')}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />
       <div className="motion-workspace">
       {isRoutePending && <div className="motion-route-progress" role="progressbar" aria-hidden="true" />}
@@ -593,7 +632,7 @@ function WorkspaceSidebar({ archives, currentId, close, expand, query, setQuery,
   const { t } = useI18n();
   const { workspace, switchingDisabled } = useWorkspaceChrome();
   const projects = workspace.projects;
-  const filtered = projects.filter(project => project.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const filtered = rankSearchResults(projects, query, project => ({ id: project.id, title: project.title })).map(r => r.item);
   const loadingProjects = !workspace.status && !workspace.error && projects.length === 0;
   return <aside className="motion-sidebar" aria-label={t('Workspace navigation')}>
     <div className="motion-sidebar-brand">

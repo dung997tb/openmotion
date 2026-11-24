@@ -13,6 +13,7 @@ import { RemixIcon } from '../icons/RemixIcons';
 import { useAccountSummary } from '../motion/AccountSettings';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { notifyProvidersChanged } from '../motion/useProviderDirectory';
+import { newTrackingId, send } from '../motion/reporting';
 import { Popover } from './ui/Popover';
 import { WebPublishApiError, webPublishClient } from './webPublishClient';
 import './webPublishPopover.css';
@@ -22,11 +23,17 @@ export interface WebPublishPopoverProps {
   targetId: string;
   filePath?: string;
   sourcePath?: string;
+  embedUrl?: string;
   title?: string;
   revisionKey?: string;
   compact?: boolean;
+  lazy?: boolean;
   disabled?: boolean;
   triggerLabel?: string;
+  triggerIcon?: string;
+  triggerClassName?: string;
+  autoOpen?: boolean;
+  onAutoOpenConsumed?: () => void;
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
   onNotify?: (message: string, variant?: 'info' | 'error') => void;
@@ -74,11 +81,17 @@ export function WebPublishPopover({
   targetId,
   filePath,
   sourcePath,
+  embedUrl,
   title,
   revisionKey,
   compact = false,
+  lazy = false,
   disabled = false,
   triggerLabel,
+  triggerIcon = 'share-forward-line',
+  triggerClassName,
+  autoOpen = false,
+  onAutoOpenConsumed,
   side = 'bottom',
   align = 'end',
   onNotify,
@@ -86,8 +99,19 @@ export function WebPublishPopover({
   onOpenAccount,
 }: WebPublishPopoverProps) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const { account, refresh: refreshAccount, setAccount } = useAccountSummary();
+  const [open, setOpenState] = useState(false);
+  // Opening the popover is the share intent; the operations below report their observed results.
+  const openRef = useRef(false);
+  const setOpen = useCallback((next: boolean) => {
+    if (next && !openRef.current) send('ui_click', { page_name: 'creative_studio', area: 'web_publish', element: 'open_publish', publish_target: targetKind });
+    openRef.current = next;
+    setOpenState(next);
+  }, [targetKind]);
+  const reportPublish = useCallback((action: 'publish' | 'resume' | 'new_link' | 'stop' | 'copy_link' | 'sign_in', outcome: 'success' | 'failure' | 'cancelled',
+    extra: { copied?: boolean; error_kind?: 'auth_required' | 'conflict' | 'other' } = {}) => {
+    send('web_publish_result', { publish_target: targetKind, action, outcome, publish_attempt_id: newTrackingId(), ...extra });
+  }, [targetKind]);
+  const { account, refresh: refreshAccount, setAccount } = useAccountSummary({ eager: !lazy });
   const [status, setStatus] = useState<WebPublishStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeOp, setActiveOp] = useState<ActiveOp>(null);
@@ -107,6 +131,12 @@ export function WebPublishPopover({
     setCopied(false);
   }, [targetKind, targetId, filePath]);
 
+  useEffect(() => {
+    if (!autoOpen) return;
+    setOpen(true);
+    onAutoOpenConsumed?.();
+  }, [autoOpen, onAutoOpenConsumed]);
+
   useEffect(() => () => {
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
   }, []);
@@ -119,6 +149,8 @@ export function WebPublishPopover({
       const next = await webPublishClient.getStatus(targetKind, targetId, {
         filePath,
         sourcePath,
+        embedUrl,
+        title,
         refresh: refreshRemote,
       });
       setStatus(next);
@@ -127,7 +159,7 @@ export function WebPublishPopover({
     } finally {
       setLoading(false);
     }
-  }, [filePath, sourcePath, t, targetId, targetKind]);
+  }, [embedUrl, filePath, sourcePath, t, targetId, targetKind, title]);
 
   useEffect(() => {
     if (!open) return;
@@ -146,12 +178,14 @@ export function WebPublishPopover({
       setCopied(true);
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
       copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
+      // A copy that follows a publish is part of that publish result.
+      if (notifyUser) reportPublish('copy_link', 'success');
       return true;
     } catch {
-      if (notifyUser) onNotify?.(t('Could not copy share link'), 'error');
+      if (notifyUser) { reportPublish('copy_link', 'failure'); onNotify?.(t('Could not copy share link'), 'error'); }
       return false;
     }
-  }, [onCopyUrl, onNotify, t]);
+  }, [onCopyUrl, onNotify, reportPublish, t]);
 
   const runMutation = useCallback(async (op: Exclude<ActiveOp, null>, copyOnSuccess = false) => {
     if (activeOp) return;
@@ -159,8 +193,9 @@ export function WebPublishPopover({
     setError(null);
     try {
       if (op === 'stop') {
-        const stopped = await webPublishClient.unpublish(targetKind, targetId, { filePath, sourcePath });
+        const stopped = await webPublishClient.unpublish(targetKind, targetId, { filePath, sourcePath, embedUrl });
         setStatus(prev => mergePublicationStatus(prev, targetKind, targetId, stopped.publication, prev?.freshness ?? 'unknown'));
+        reportPublish('stop', 'success');
         onNotify?.(t('Share link disabled'), 'info');
         return;
       }
@@ -168,6 +203,7 @@ export function WebPublishPopover({
       const published = await webPublishClient.publish(targetKind, targetId, {
         filePath,
         sourcePath,
+        embedUrl,
         deployMode: op,
         name: title,
       });
@@ -181,8 +217,9 @@ export function WebPublishPopover({
         ),
       );
 
+      const copiedLink = Boolean(published.url && copyOnSuccess) && await copyUrl(published.url!, false);
+      reportPublish(op, 'success', { copied: copiedLink });
       if (published.url && copyOnSuccess) {
-        await copyUrl(published.url, false);
         onNotify?.(t('Deployed and copied share link'), 'info');
       } else if (op === 'resume') {
         onNotify?.(t('Share link reopened'), 'info');
@@ -192,6 +229,8 @@ export function WebPublishPopover({
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('Cloud share operation failed');
       setError(msg);
+      const authRequired = err instanceof WebPublishApiError && (err.status === 401 || err.code === 'AUTH_REQUIRED');
+      reportPublish(op, 'failure', { error_kind: authRequired ? 'auth_required' : err instanceof WebPublishApiError && err.status === 409 ? 'conflict' : 'other' });
       if (err instanceof WebPublishApiError && (err.status === 401 || err.code === 'AUTH_REQUIRED')) {
         void refreshAccount();
       }
@@ -201,7 +240,7 @@ export function WebPublishPopover({
     } finally {
       setActiveOp(null);
     }
-  }, [activeOp, copyUrl, filePath, onNotify, refreshAccount, refreshStatus, sourcePath, t, targetId, targetKind, title]);
+  }, [activeOp, copyUrl, embedUrl, filePath, onNotify, refreshAccount, refreshStatus, reportPublish, sourcePath, t, targetId, targetKind, title]);
 
   // Automatically continue deploying as soon as an in-popover OpenDesign sign-in completes.
   useEffect(() => {
@@ -226,6 +265,8 @@ export function WebPublishPopover({
     deployAfterSignInRef.current = action === 'login';
     try {
       const next = await gatewayRequest<AccountSummary>(`settings/account/${action}`, 'POST', {});
+      // The sign-in itself is reported by the connector (account_sign_in_result); this records that it started from sharing.
+      reportPublish('sign_in', action === 'cancel' ? 'cancelled' : 'success');
       setAccount(next);
       notifyProvidersChanged();
       window.dispatchEvent(new Event('motion:account-changed'));
@@ -235,6 +276,7 @@ export function WebPublishPopover({
       }
     } catch (err) {
       deployAfterSignInRef.current = false;
+      if (action === 'login') reportPublish('sign_in', 'failure', { error_kind: 'other' });
       setError(err instanceof Error ? err.message : t('Could not connect OpenDesign account'));
     } finally {
       setAuthBusy(false);
@@ -275,15 +317,21 @@ export function WebPublishPopover({
           variant={compact ? 'plain' : 'ghost'}
           type="button"
           disabled={disabled}
-          className={compact ? 'om-web-publish-trigger om-web-publish-trigger--compact' : 'om-button om-web-publish-trigger'}
-          data-primary={compact ? undefined : true}
+          className={
+            triggerClassName
+              ? triggerClassName
+              : compact
+                ? 'om-web-publish-trigger om-web-publish-trigger--compact'
+                : 'om-button om-web-publish-trigger'
+          }
+          data-primary={compact || triggerClassName ? undefined : true}
           data-active={open || undefined}
           data-live={isPublished || undefined}
           aria-label={triggerLabel ?? t('Share')}
           title={triggerLabel ?? t('Share')}
           aria-expanded={open}
         >
-          <RemixIcon name="share-forward-line" size={compact ? 14 : 14} />
+          <RemixIcon name={triggerIcon} size={14} />
           <span className="om-web-publish-trigger-label">{triggerLabel ?? t('Share')}</span>
           {isPublished && <span className="om-web-publish-dot" aria-hidden="true" />}
         </Button>
@@ -292,10 +340,6 @@ export function WebPublishPopover({
       <div className="om-web-publish-head">
         <div className="om-web-publish-head-title">
           <strong>{t('Share')}</strong>
-          <span className="om-web-publish-tag">
-            <RemixIcon name="cloud-line" size={12} />
-            <span>{t('Cloud deploy')}</span>
-          </span>
           {isPublished && status?.freshness === 'outdated' && (
             <span className="om-web-publish-freshness" data-state="outdated">
               {t('Changes pending')}

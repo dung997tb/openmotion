@@ -1,13 +1,12 @@
 import { Suspense, type ReactNode, type RefObject } from 'react';
 import { creativeStudios, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import { findScenario, type ScenarioId } from '../../../shared/scenarios';
-import { Skeleton } from '../components/ui/Skeleton';
+import { OpenDesignLoadingMark } from '../components/ui/OpenDesignLoadingMark';
 import { useI18n } from '../i18n/I18n';
 import type { AssetDraft } from '../motion/AssetComposer';
 import type { CinemaTemplate } from '../motion/cinemaTemplates';
 import { mediaEditorDestination, motionStudio, type StudioDestination } from '../motion/creativeStudios';
 import { reportCreativeClick } from '../motion/exploreTracking';
-import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import type { McpClient } from '../motion/mcpClients';
 import type { McpEntry } from '../motion/pageTracking';
 import { SettingsSurfaceBoundary } from '../motion/SettingsSurfaceBoundary';
@@ -42,15 +41,7 @@ import { resolveActiveWorkspaceRoute } from './routeRegistry';
 function RouteLoadingFallback() {
   return (
     <div className="motion-route-skeleton" role="status" aria-busy="true">
-      <div className="motion-route-skeleton-header">
-        <Skeleton style={{ width: '220px', maxWidth: '45%', height: 'var(--motion-space-24)' }} />
-        <Skeleton style={{ width: '360px', maxWidth: '70%', height: 'var(--motion-space-14)' }} />
-      </div>
-      <div className="motion-route-skeleton-grid">
-        {Array.from({ length: 6 }, (_, index) => (
-          <Skeleton key={index} className="motion-route-skeleton-card" />
-        ))}
-      </div>
+      <OpenDesignLoadingMark height={32} />
     </div>
   );
 }
@@ -220,12 +211,6 @@ export function RouteViewport({
               }
             }}
             onBuildGameInSuperAgent={() => {
-              queueSuperAgentHandoff({
-                prompt: '',
-                mode: 'game',
-                newChat: true,
-                autoSend: false,
-              });
               navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: 'game', templates: false });
             }}
             filters={lastExplore}
@@ -238,7 +223,7 @@ export function RouteViewport({
       </KeepAliveSlot>
 
       {page.scenarioHub && !templatesPage && !settings && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyScenarioHub
               category={page.scenarioCategory}
@@ -252,7 +237,7 @@ export function RouteViewport({
       )}
 
       {page.scenario && !templatesPage && !settings && (
-        <div className="om-assets-host om-scenario-host" style={{ padding: 0 }}>
+        <div className="om-assets-host om-scenario-host om-route-surface" style={{ padding: 0 }}>
           <RouteSurface>
             <LazyScenarioWorkspace
               key={page.scenario}
@@ -304,7 +289,7 @@ export function RouteViewport({
       )}
 
       {page.cinemaLanding && !templatesPage && !settings && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyCinemaStudioPage
               onStart={() => openStudio(mediaEditorDestination('text-to-video'), undefined, true)}
@@ -332,7 +317,7 @@ export function RouteViewport({
       )}
 
       {motionTemplatesOpen && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyMotionStudioPage
               active={!connectionsOpen}
@@ -346,7 +331,7 @@ export function RouteViewport({
       )}
 
       {page.modelHub && !templatesPage && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyModelHub
               id={page.modelHub}
@@ -365,7 +350,7 @@ export function RouteViewport({
       )}
 
       {page.modelOverview && !templatesPage && (
-        <div className="om-explore-host">
+        <div className="om-explore-host om-route-surface">
           <RouteSurface>
             <LazyModelOverview
               id={page.modelOverview}
@@ -446,7 +431,7 @@ export function RouteViewport({
       )}
 
       {page.designScene && !templatesPage && (
-        <div className="om-assets-host" style={{ padding: 0 }}>
+        <div className="om-assets-host om-route-surface" style={{ padding: 0 }}>
           <RouteSurface>
             {page.designProject ? (
               <LazyDesignProjectEditor
@@ -500,12 +485,19 @@ export function RouteViewport({
             active={unifiedSuperAgentActive}
             chatId={gameStudioActive ? null : page.superAgentChat}
             requestedMode={gameStudioActive ? 'game' : (page.superAgentMode ?? null)}
+            requestedDesignModule={gameStudioActive ? null : (page.superAgentDesignModule ?? null)}
             requestedGameId={gameStudioActive ? (page.gameId ?? null) : null}
             onBack={gameStudioActive ? returnToExplore : undefined}
-            onExitRequestedMode={() => {
+            onChangeRequestedMode={mode => {
               navigatePage(
-                { superAgent: true, superAgentChat: gameStudioActive ? null : page.superAgentChat, superAgentMode: null, templates: false },
-                !gameStudioActive,
+                {
+                  superAgent: true,
+                  superAgentChat: gameStudioActive ? null : page.superAgentChat,
+                  superAgentMode: mode,
+                  superAgentDesignModule: mode === 'design' ? page.superAgentDesignModule ?? null : null,
+                  templates: false,
+                },
+                !gameStudioActive && mode === null,
               );
             }}
             onChatIdChange={(chat, replace) =>
@@ -514,6 +506,7 @@ export function RouteViewport({
                   superAgent: true,
                   superAgentChat: chat,
                   superAgentMode: chat ? null : (gameStudioActive ? null : page.superAgentMode ?? null),
+                  superAgentDesignModule: chat ? null : (gameStudioActive ? null : (page.superAgentMode === 'design' ? page.superAgentDesignModule ?? null : null)),
                   templates: false,
                 },
                 replace,
@@ -525,6 +518,7 @@ export function RouteViewport({
             onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId && !kitId.startsWith('catalog:') ? kitId : null, templates: false })}
             onOpenAgentSettings={() => openSettings('local')}
             onOpenModelSettings={() => openSettings('models')}
+            onOpenAccountSettings={() => openSettings('account')}
             onOpenMcp={() => openMcp(undefined, undefined, true)}
           />
         </RouteSurface>
@@ -534,7 +528,7 @@ export function RouteViewport({
         !(page.specialty?.id === 'game' && !skillsOpen) &&
         !settings &&
         !templatesPage && (
-          <div className="om-skills-host">
+          <div className="om-skills-host om-route-surface">
             <RouteSurface>
               <LazySkillsPage
                 previewsEnabled={!connectionsOpen}

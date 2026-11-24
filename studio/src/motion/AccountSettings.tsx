@@ -81,7 +81,8 @@ export function UpgradeGuide({ plan, subscription }: { plan: 'free' | 'go'; subs
   </section>;
 }
 
-export function useAccountSummary() {
+export function useAccountSummary(options?: { eager?: boolean }) {
+  const eager = options?.eager ?? true;
   const [account, updateAccount] = useState<AccountSummary | null>(null), [error, setError] = useState(false);
   const request = useRef(0);
   const setAccount = useCallback((value: AccountSummary) => { request.current++; updateAccount(value); setError(false); }, []);
@@ -94,7 +95,7 @@ export function useAccountSummary() {
       return value;
     } catch { if (current === request.current) setError(true); }
   }, []);
-  useEffect(() => { void refresh(); const update = () => void refresh(); window.addEventListener('motion:account-changed', update); return () => { request.current++; window.removeEventListener('motion:account-changed', update); }; }, [refresh]);
+  useEffect(() => { if (eager) void refresh(); const update = () => void refresh(); window.addEventListener('motion:account-changed', update); return () => { request.current++; window.removeEventListener('motion:account-changed', update); }; }, [eager, refresh]);
   useEffect(() => {
     if (account?.state !== 'authorizing') return;
     const timer = setInterval(() => void refresh(), 1500); return () => clearInterval(timer);

@@ -21,7 +21,7 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { BackToExploreButton } from '../motion/BackToExploreButton';
 import { ScenarioCard } from './ScenarioCard';
-import { scenarioClient } from './scenarioClient';
+import { peekCachedScenarioList, scenarioClient } from './scenarioClient';
 import { scenarioCover } from './scenarioCovers';
 import { RUN_HISTORY_KEEP_LATEST } from './ScenarioRunHistoryDialog';
 import { makeScenarioRequestId } from './useScenarioRun';
@@ -72,9 +72,12 @@ export function ScenarioHub({
 }: ScenarioHubProps) {
   const { t, formatDate } = useI18n();
   const toast = useToast();
-  const [runs, setRuns] = useState<ScenarioRunSummary[]>([]);
-  const [nextOffset, setNextOffset] = useState<number | null>(null);
-  const [runsLoading, setRunsLoading] = useState(true);
+  const initialCachedRuns = peekCachedScenarioList({ offset: 0, limit: HUB_RUNS_PAGE_SIZE });
+  const [runs, setRuns] = useState<ScenarioRunSummary[]>(() =>
+    initialCachedRuns ? (initialCachedRuns.runs ?? []).filter(item => item.archivedAt === null) : [],
+  );
+  const [nextOffset, setNextOffset] = useState<number | null>(() => initialCachedRuns?.nextOffset ?? null);
+  const [runsLoading, setRunsLoading] = useState(() => !initialCachedRuns);
   const [loadingMore, setLoadingMore] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -89,16 +92,25 @@ export function ScenarioHub({
 
   const loadRuns = useCallback(
     async (offset = 0, append = false) => {
-      if (append) setLoadingMore(true);
-      else setRunsLoading(true);
+      const listArgs = {
+        ...(scenarioFilter !== 'all' ? { scenarioId: scenarioFilter } : {}),
+        ...(statusFilter === 'archived' ? { includeArchived: true } : {}),
+        offset,
+        limit: HUB_RUNS_PAGE_SIZE,
+      };
+      const cached = !append ? peekCachedScenarioList(listArgs) : undefined;
+      if (append) {
+        setLoadingMore(true);
+      } else if (cached) {
+        setRuns((cached.runs ?? []).filter(item => statusFilter === 'archived' ? item.archivedAt !== null : item.archivedAt === null));
+        setNextOffset(cached.nextOffset ?? null);
+        setRunsLoading(false);
+      } else {
+        setRunsLoading(true);
+      }
       setRunsError(null);
       try {
-        const res = await scenarioClient.list({
-          ...(scenarioFilter !== 'all' ? { scenarioId: scenarioFilter } : {}),
-          ...(statusFilter === 'archived' ? { includeArchived: true } : {}),
-          offset,
-          limit: HUB_RUNS_PAGE_SIZE,
-        });
+        const res = await scenarioClient.list(listArgs);
         const fetched = (res.runs ?? []).filter(item =>
           statusFilter === 'archived' ? item.archivedAt !== null : item.archivedAt === null,
         );
@@ -109,7 +121,9 @@ export function ScenarioHub({
         });
         setNextOffset(res.nextOffset ?? null);
       } catch (err) {
-        setRunsError(err instanceof Error ? err.message : t('Could not load recent drafts'));
+        if (!cached) {
+          setRunsError(err instanceof Error ? err.message : t('Could not load recent drafts'));
+        }
       } finally {
         setRunsLoading(false);
         setLoadingMore(false);

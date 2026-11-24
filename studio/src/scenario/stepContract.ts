@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type {
   PoolItem,
   ScenarioCommand,
@@ -28,6 +28,8 @@ export type StepOutputPanelMeta = {
   version?: number;
 };
 
+export type BriefSaveRef = RefObject<(() => Promise<string | undefined> | undefined) | null>;
+
 export type StepProps = {
   scenario: ScenarioDefinition;
   step: ScenarioStepDefinition;
@@ -42,6 +44,8 @@ export type StepProps = {
     highlight(ids: string[]): void;
   };
   toast: Pick<ReturnType<typeof useToast>, 'showToast'>;
+  briefSaveRef?: BriefSaveRef;
+  validateNextRef?: RefObject<(() => boolean) | null>;
   nav: {
     openDesignProject(id: string): void;
     openMotionProject(id: string): Promise<boolean>;

@@ -13,7 +13,7 @@ import { planMediaEntitlement } from './account-media.ts';
 import { registeredProvider } from '../shared/provider-registry.ts';
 import { defaultVideoAudioEnabled, resolveGenerationParameters } from '../shared/generation-options.ts';
 import { apiJson, ProviderError, retryRead, type Fetcher } from './network.ts';
-import { cloudImageParameters, uploadInputs } from './opendesign.ts';
+import { cloudImageParameters, mediaSubmitHeaders, productionApi, uploadInputs } from './opendesign.ts';
 import type { ProviderContext } from './providers.ts';
 import { resumableDownload, type DownloadProgress } from './resumable-download.ts';
 import { accountDirectory } from './account-directory.ts';
@@ -54,7 +54,7 @@ type Profile = { apiUrl?: string; controlKey?: string; controlKeyId?: string; ru
 type CredentialsFile = { profiles?: Record<string, Profile>; pendingRevocations?: unknown[] };
 type AccountOptions = {
   pollMs?: number; binary?: string; authorizationMs?: number; log?: (line: string) => void;
-  run?: (args: string[], signal?: AbortSignal) => Promise<string>;
+  run?: (args: string[], signal?: AbortSignal, envOverrides?: Record<string, string>) => Promise<string>;
   runInWorkspace?: (workspaceId: string, args: string[], signal?: AbortSignal) => Promise<string>;
   workspacePrincipal?: (signal?: AbortSignal) => Promise<OpenDesignWorkspacePrincipal | null>;
   spawn?: typeof spawn;
@@ -174,7 +174,6 @@ function failureCode(attempt: AccountAttempt, cancelled: boolean): AccountErrorC
   return 'setup_failed';
 }
 
-const productionApi = 'https://amr-api.open-design.ai';
 /** The account media catalogue does not list these audio models yet, though `audio speech` and `audio music` accept them. */
 const builtinAccountAudioModels: readonly DirectoryModel[] = [
   { id: 'account:elevenlabs-v3', provider: 'account', modelId: 'elevenlabs-v3', label: 'ElevenLabs Voice', kind: 'audio', enabled: true, source: 'builtin', mode: 'text-to-speech' },
@@ -320,7 +319,7 @@ export class OpenDesignAccount {
   private env() {
     // A different application's environment keys must not override this account session.
     const env: NodeJS.ProcessEnv = { ...process.env, AMR_HOME: this.home, OPEN_DESIGN_AMR_PROFILE: 'prod', VELA_PROFILE: 'prod' };
-    for (const key of ['VELA_RUNTIME_KEY', 'VELA_CONTROL_KEY', 'VELA_LINK_URL', 'VELA_API_URL', 'OD_AMR_ENDPOINT_BINDING']) delete env[key];
+    for (const key of ['VELA_RUNTIME_KEY', 'VELA_CONTROL_KEY', 'VELA_LINK_URL', 'VELA_API_URL', 'OD_AMR_ENDPOINT_BINDING', 'VELA_SOURCE_PRODUCT', 'VELA_OPENMOTION_JOB_ID']) delete env[key];
     return env;
   }
   private async credentials() {
@@ -404,9 +403,9 @@ export class OpenDesignAccount {
       throw new AccountRequestError(String((error as { stderr?: unknown }).stderr ?? ''));
     }
   }
-  async run(args: string[], signal?: AbortSignal) {
-    if (this.options.run) return this.options.run(args, signal);
-    return this.executeConnector(args, undefined, 120_000, 2 * 1024 * 1024, signal);
+  async run(args: string[], signal?: AbortSignal, envOverrides?: Record<string, string>) {
+    if (this.options.run) return this.options.run(args, signal, envOverrides);
+    return this.executeConnector(args, envOverrides, 120_000, 2 * 1024 * 1024, signal);
   }
   async runInWorkspace(workspaceId: string, args: string[], signal?: AbortSignal) {
     const trimmedWorkspaceId = workspaceId.trim();
@@ -869,7 +868,9 @@ export class OpenDesignAccount {
       else throw new Error('Invalid account model parameter');
     }
     // Recovery never submits again, even when the draft or reference file has changed.
-    const submitted = job.remoteId ? { task_id: job.remoteId } : direct ? await this.submitImage(job, params, references, signal, progress) : JSON.parse(await this.run(args, signal));
+    const submitted = job.remoteId ? { task_id: job.remoteId } : direct ? await this.submitImage(job, params, references, signal, progress) : JSON.parse(await this.run(args, signal, {
+      VELA_SOURCE_PRODUCT: 'openmotion', VELA_OPENMOTION_JOB_ID: job.id,
+    }));
     if (typeof submitted.task_id !== 'string' || !/^[\w-]{1,180}$/.test(submitted.task_id)) throw new Error('Account provider did not return a task ID');
     const taskId = submitted.task_id;
     await progress('submitted', taskId);
@@ -910,7 +911,7 @@ export class OpenDesignAccount {
     let response: Response;
     try {
       response = await fetcher(api + (images.length ? '/images/edits' : '/images/generations'), {
-        method: 'POST', headers: { ...headers, 'Idempotency-Key': job.id }, redirect: 'error', signal,
+        method: 'POST', headers: { ...headers, ...mediaSubmitHeaders(productionApi, job.id) }, redirect: 'error', signal,
         body: JSON.stringify({ ...cloudImageParameters(parameters), model: job.model.modelId, prompt: job.prompt, ...(images.length ? { images } : {}) }),
       });
     } catch (error) { if (signal.aborted) throw error; throw new Error(jobMessages.connection); }

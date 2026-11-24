@@ -4,11 +4,12 @@ import { groupBrandSeries, rankDiscoverySeries } from './brandStoryData';
 import { collectionFacet, formatCategories, isFormatCategory, templateCollectionFacets, templatesInCollection, type TemplateCollection } from './templateCollections';
 import { aiTechnologyIndustry, purposeOrder } from './templateDiscoveryTaxonomy';
 import { useCoveredTemplates } from './useCoveredTemplates';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { GalleryTemplate, TemplatePage } from '../../../shared/catalog';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { TemplateGalleryCard } from './TemplateGalleryCard';
+import { useTemplatePlaybackActive, type TemplatePlaybackStore } from './useTemplatePlayback';
 import { motionApi } from './useWorkspace';
 import { useWorkspaceChrome } from './WorkspaceChromeContext';
 
@@ -108,27 +109,67 @@ export function ExploreActionLabel({ label }: { label: 'Use this prompt' | 'Use 
   return <>{t(label)}<RemixIcon name="arrow-right-line" size={15} /></>;
 }
 
-export function TemplatePromptAction({ item, onTry }: { item: GalleryTemplate; onTry: (prompt: string) => void }) {
+export const TemplatePromptAction = memo(function TemplatePromptAction({
+  item,
+  onTry,
+}: {
+  item: GalleryTemplate;
+  onTry: (prompt: string, item: GalleryTemplate) => void;
+}) {
   const prompt = [item.description?.trim(), item.styleDescription?.trim()].filter(Boolean).join('\n\n');
   if (!prompt) return null;
-  return <Button variant="plain" className="om-nav-item om-feed-prompt-action" onClick={() => onTry(prompt)}>
+  return <Button variant="plain" className="om-nav-item om-feed-prompt-action" onClick={() => onTry(prompt, item)}>
     <ExploreActionLabel label="Use this prompt" />
   </Button>;
-}
+});
 
-export function ExploreTemplateCard({ item, active, onPriority, onTry, onOpen }: {
-  item: GalleryTemplate; active: boolean; onPriority: (id: string | null) => void; onTry: (prompt: string) => void; onOpen?: () => void;
+const EMPTY_PLAYBACK_STORE: TemplatePlaybackStore = {
+  subscribe: () => () => {},
+  isPlaying: () => false,
+  getSnapshot: () => new Set<string>(),
+  setPriority: () => {},
+};
+
+export const ExploreTemplateCard = memo(function ExploreTemplateCard({
+  item,
+  playback,
+  active,
+  onPriority,
+  onTry,
+  onOpen,
+}: {
+  item: GalleryTemplate;
+  playback?: TemplatePlaybackStore;
+  active?: boolean;
+  onPriority?: (id: string | null) => void;
+  onTry: (prompt: string, item?: GalleryTemplate) => void;
+  onOpen?: (item: GalleryTemplate) => void;
 }) {
   const { t } = useI18n();
   const { openLibrary } = useWorkspaceChrome();
-  return <TemplateGalleryCard brandedFallback showCoverDuration={false} template={item} playbackId={'community/' + item.id} active={active} onPriority={onPriority}
-    onSelect={(template, trigger) => { onOpen?.(); openLibrary(trigger, template); }}
-    footer={<div className="om-feed-template-copy">
+  const playbackId = 'community/' + item.id;
+  const subscribedActive = useTemplatePlaybackActive(playback ?? EMPTY_PLAYBACK_STORE, playback ? playbackId : undefined);
+  const isActive = playback ? subscribedActive : Boolean(active);
+  const priorityHandler = playback ? playback.setPriority : (onPriority ?? EMPTY_PLAYBACK_STORE.setPriority);
+
+  const handleSelect = useCallback((template: GalleryTemplate, trigger: HTMLButtonElement) => {
+    onOpen?.(template);
+    openLibrary(trigger, template);
+  }, [onOpen, openLibrary]);
+
+  const durationLabel = item.duration != null ? t('{value}s', { value: Number(item.duration.toFixed(1)) }) : '';
+  const footer = useMemo(() => (
+    <div className="om-feed-template-copy">
       <strong>{item.title}</strong>
       <p className="om-feed-card-description">
-        {item.duration != null && <small className="om-feed-duration">{t('{value}s', { value: Number(item.duration.toFixed(1)) })}{item.description ? ' · ' : ''}</small>}
+        {item.duration != null && <small className="om-feed-duration">{durationLabel}{item.description ? ' · ' : ''}</small>}
         {item.description}
       </p>
       <TemplatePromptAction item={item} onTry={onTry} />
-    </div>} />;
-}
+    </div>
+  ), [durationLabel, item, onTry]);
+
+  return <TemplateGalleryCard brandedFallback showCoverDuration={false} template={item} playbackId={playbackId} active={isActive} onPriority={priorityHandler}
+    onSelect={handleSelect}
+    footer={footer} />;
+});

@@ -36,15 +36,15 @@ export function useDesignProject(projectId: string): DesignProjectState {
     try {
       const [{ project: detail }, verRes, comRes] = await Promise.all([
         designClient.getProject(projectId),
-        designClient.listVersions(projectId),
-        designClient.listComments(projectId),
+        designClient.listVersions(projectId).catch(() => ({ versions: [] as DesignVersion[], currentVersionId: null })),
+        designClient.listComments(projectId).catch(() => ({ comments: [] as DesignComment[] })),
       ]);
       revRef.current = detail.revision;
       commentsCountRef.current = detail.openComments;
       setProject(detail);
-      setVersions(verRes.versions);
-      setCurrentVersionId(verRes.currentVersionId);
-      setComments(comRes.comments);
+      setVersions(Array.isArray(verRes?.versions) ? verRes.versions : []);
+      setCurrentVersionId(verRes?.currentVersionId ?? detail.versionId ?? null);
+      setComments(Array.isArray(comRes?.comments) ? comRes.comments : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load design project');

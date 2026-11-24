@@ -19,7 +19,9 @@ import { AudioNavMenu } from './AudioNavMenu';
 import type { SoundTabId } from './soundTabs';
 import type { ScenarioId } from '../../../shared/scenarios';
 import { ScenarioMegaMenu } from './ScenarioMegaMenu';
-import { preloadStudioRoute, preloadWorkspacePage } from '../router/lazyPages';
+import { prefetchStudioTarget } from '../router/routePrefetch';
+import { SuperAgentNavMenu } from './SuperAgentNavMenu';
+import type { SuperAgentRouteMode } from './workspacePageRouting';
 
 export type CreativeNavigationProps = {
   onChooseStudio: (studio: CreativeStudio, kind?: Modality) => void;
@@ -36,6 +38,7 @@ export type CreativeNavigationProps = {
   onNavigateSound?: (destination: StudioDestination, soundTab?: SoundTabId | null) => void;
   currentPage: 'explore' | 'mcp' | 'agent' | null;
   onOpenPage: (page: 'explore' | 'mcp' | 'agent', client?: McpClient) => void;
+  onOpenAgentStart: (mode: SuperAgentRouteMode | null) => void;
   /** The page this navigation is shown on, so its clicks segment by where the user was. */
   trackingPage: CreativePage;
 };
@@ -84,13 +87,13 @@ function MediaChoices({ studio, destination, onNavigate, onSelectModel, catalog 
   </div>;
 }
 
-export function CreativeNavigation({ specialty, onChooseStudio, destination, soundTab, motionActive, designActive, cinemaActive, scenarioActive, onOpenScenario, onOpenScenarioHub, onNavigate, onNavigateSound, currentPage, onOpenPage, overflowActions, trackingPage }: CreativeNavigationProps & { overflowActions?: (close: () => void) => ReactNode }) {
+export function CreativeNavigation({ specialty, onChooseStudio, destination, soundTab, motionActive, designActive, cinemaActive, scenarioActive, onOpenScenario, onOpenScenarioHub, onNavigate, onNavigateSound, currentPage, onOpenPage, onOpenAgentStart, overflowActions, trackingPage }: CreativeNavigationProps & { overflowActions?: (close: () => void) => ReactNode }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState<Modality | 'mcp' | 'workflows' | null>(null);
+  const [open, setOpen] = useState<Modality | 'mcp' | 'workflows' | 'agent' | null>(null);
   const [popupHost, setPopupHost] = useState<HTMLElement>();
   const navId = useId();
   const rail = useRef<HTMLElement>(null);
-  const catalog = useMediaCatalog(open !== null && open !== 'mcp' && open !== 'workflows');
+  const catalog = useMediaCatalog(open === 'image' || open === 'video' || open === 'audio');
   const trackPage = trackingPage;
   const track = (element: Parameters<typeof reportCreativeClick>[2], target: CreativeTarget) => reportCreativeClick(trackPage, 'creative_nav', element, target);
 
@@ -174,9 +177,20 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
       setVisibleCount(nextCount);
     };
     update();
-    const observer = new ResizeObserver(update);
+    let frame: number | null = null;
+    const scheduleUpdate = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        update();
+      });
+    };
+    const observer = new ResizeObserver(scheduleUpdate);
     [viewport, trigger, ...items].forEach(element => observer.observe(element));
-    return () => observer.disconnect();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [studioStart]);
 
   useLayoutEffect(() => {
@@ -196,12 +210,12 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
     return <div className="om-nav-row om-creative-split" data-active={Boolean(current)}>
           <Popover container={popupHost} modal={false} openOnHover={!inPanel} open={expanded}
             onOpenChange={value => {
-              if (value) preloadStudioRoute(id);
+              if (value) prefetchStudioTarget(id);
               if (value && !inPanel) setMoreOpen(false);
               setOpen(previous => value ? id : previous === id ? null : previous);
             }}
             aria-label={menuLabel} align="start" className={id === 'mcp' ? 'om-selection-panel om-creative-client-menu' : `om-selection-panel om-creative-menu om-creative-mega om-creative-menu-${id}`}
-            primaryAction={<Button variant="plain" className="om-nav-item om-nav-row-link" aria-label={id === 'workflows' ? label : undefined} aria-describedby={workflowsBadgeId} aria-current={current} onPointerEnter={() => preloadStudioRoute(id)} onFocus={() => preloadStudioRoute(id)} onClick={() => { track(id === 'mcp' ? 'nav_mcp' : id === 'workflows' ? 'nav_studio' : 'nav_media', where); choose(onActivate); }}>{label}{workflowsBadgeId && <span className="om-badge" data-nav-badge="New" id={workflowsBadgeId} lang="en">New</span>}</Button>}
+            primaryAction={<Button variant="plain" className="om-nav-item om-nav-row-link" aria-label={id === 'workflows' ? label : undefined} aria-describedby={workflowsBadgeId} aria-current={current} onPointerEnter={() => prefetchStudioTarget(id)} onPointerDown={() => prefetchStudioTarget(id)} onFocus={() => prefetchStudioTarget(id)} onClick={() => { track(id === 'mcp' ? 'nav_mcp' : id === 'workflows' ? 'nav_studio' : 'nav_media', where); choose(onActivate); }}>{label}{workflowsBadgeId && <span className="om-badge" data-nav-badge="New" id={workflowsBadgeId} lang="en">New</span>}</Button>}
             trigger={<Button variant="plain" className="om-nav-item om-nav-row-action" aria-label={menuLabel} aria-expanded={expanded}><RemixIcon name="arrow-down-s-line" size={12} /></Button>}>
             {id === 'mcp' ? <>
               <h2 lang="en">{menuLabel}</h2>
@@ -240,14 +254,30 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
 
   function item(index: number, inPanel = false) {
     if (index === 0) return <Button variant="plain" className="om-nav-item om-explore-link" aria-label={t('Explore')} title={t('Explore')}
-      aria-current={currentPage === 'explore' ? 'page' : undefined} onPointerEnter={() => preloadWorkspacePage('explore')} onFocus={() => preloadWorkspacePage('explore')} onClick={() => { track('nav_explore', { navTarget: 'explore', inOverflow: inPanel }); choose(() => onOpenPage('explore')); }}>
+      aria-current={currentPage === 'explore' ? 'page' : undefined} onPointerEnter={() => prefetchStudioTarget('explore')} onPointerDown={() => prefetchStudioTarget('explore')} onFocus={() => prefetchStudioTarget('explore')} onClick={() => { track('nav_explore', { navTarget: 'explore', inOverflow: inPanel }); choose(() => onOpenPage('explore')); }}>
       <RemixIcon name="global-line" size={17} /><span>{t('Explore')}</span>
     </Button>;
     if (index < agentIndex) return splitItem(index, inPanel);
-    if (index === agentIndex) return <Button variant="plain" className="om-nav-item om-super-agent-nav-link" aria-label={t('Super Agent')}
-      aria-current={currentPage === 'agent' ? 'page' : undefined} onPointerEnter={() => preloadWorkspacePage('agent')} onFocus={() => preloadWorkspacePage('agent')} onClick={() => choose(() => onOpenPage('agent'))}>
-      <RemixIcon name="sparkling-fill" size={14} /><span>{t('Super Agent')}</span>
-    </Button>;
+    if (index === agentIndex) {
+      const expanded = open === 'agent' && (index >= visibleCount) === inPanel;
+      const menuLabel = t('Super Agent') + ' · ' + t('Features');
+      return <div className="om-nav-row om-creative-split" data-active={currentPage === 'agent'}>
+        <Popover container={popupHost} modal={false} open={expanded} openOnHover={!inPanel}
+          onOpenChange={value => {
+            if (value && !inPanel) setMoreOpen(false);
+            setOpen(previous => value ? 'agent' : previous === 'agent' ? null : previous);
+          }}
+          aria-label={menuLabel} align={inPanel ? 'start' : 'center'}
+          className="om-selection-panel om-creative-menu om-creative-mega om-creative-menu-agent"
+          primaryAction={<Button variant="plain" type="button" className="om-nav-item om-nav-row-link om-super-agent-nav-link" aria-label={t('Super Agent')}
+            aria-current={currentPage === 'agent' ? 'page' : undefined} onPointerEnter={() => prefetchStudioTarget('agent')} onPointerDown={() => prefetchStudioTarget('agent')} onFocus={() => prefetchStudioTarget('agent')} onClick={() => choose(() => onOpenPage('agent'))}>
+            <RemixIcon name="sparkling-fill" size={14} /><span>{t('Super Agent')}</span>
+          </Button>}
+          trigger={<Button variant="plain" type="button" className="om-nav-item om-nav-row-action" aria-label={menuLabel} aria-expanded={expanded}><RemixIcon name="arrow-down-s-line" size={12} /></Button>}>
+          <SuperAgentNavMenu onSelect={mode => choose(() => onOpenAgentStart(mode))} />
+        </Popover>
+      </div>;
+    }
     const studio = creativeStudios[index - studioStart];
     const isCurrent = studio.surface === 'editor' ? motionActive
       : (studio.id === 'design' && Boolean(designActive)) || (studio.id === 'cinema' && Boolean(cinemaActive))
@@ -256,7 +286,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
     const badgeId = badge && studio.id !== '3d' ? navId + '-' + studio.id + (inPanel ? '-more' : '') : undefined;
     const preloadTarget = studio.surface === 'techniques' ? 'skills' : studio.id;
     return <Button variant="plain" className="om-nav-item" data-coming-soon={badge === 'Coming soon' || undefined} aria-current={isCurrent ? 'page' : undefined}
-      aria-label={t(studio.title)} aria-describedby={badgeId} onPointerEnter={() => preloadStudioRoute(preloadTarget)} onFocus={() => preloadStudioRoute(preloadTarget)} onClick={() => { track('nav_studio', { navTarget: studio.id, studio: studio.id, inOverflow: inPanel }); choose(() => onChooseStudio(studio)); }}>
+      aria-label={t(studio.title)} aria-describedby={badgeId} onPointerEnter={() => prefetchStudioTarget(preloadTarget)} onPointerDown={() => prefetchStudioTarget(preloadTarget)} onFocus={() => prefetchStudioTarget(preloadTarget)} onClick={() => { track('nav_studio', { navTarget: studio.id, studio: studio.id, inOverflow: inPanel }); choose(() => onChooseStudio(studio)); }}>
       {inPanel && <span className="om-studio-heading-icon" data-tone={studioIconTone(studio)}><RemixIcon name={studio.icon} size={17} /></span>}
       {t(studio.title)}{badgeId && <span className="om-badge" data-nav-badge={badge} id={badgeId} lang="en">{badge}</span>}
     </Button>;
@@ -276,7 +306,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
             } else {
               setOpen(previous => {
                 if (!previous) return null;
-                const index = splitStart + menuDestinations.findIndex(entry => entry.id === previous);
+                const index = previous === 'agent' ? agentIndex : splitStart + menuDestinations.findIndex(entry => entry.id === previous);
                 return index >= visibleCount ? null : previous;
               });
             }

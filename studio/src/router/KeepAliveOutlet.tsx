@@ -1,6 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useMatches } from 'react-router';
 import { isKeepAliveRoute, type WorkspaceRouteId } from './routeRegistry';
+
+/**
+ * Freeze hidden KeepAlive subtrees so switching routes or chats never re-renders
+ * inactive heavy pages (such as ExploreStudios or AssetsPage). Transitions from
+ * active -> inactive still render once so media pauses and popovers close.
+ */
+const KeepAliveFreeze = memo(
+  function KeepAliveFreeze({ children }: { active: boolean; children: ReactNode }) {
+    return <>{children}</>;
+  },
+  (prev, next) => !prev.active && !next.active,
+);
 
 export type KeepAliveRouteHandle = {
   id: WorkspaceRouteId;
@@ -76,12 +88,12 @@ export function KeepAliveSlot({
 
   return (
     <div
-      className={className}
+      className={className ? `${className} om-route-surface` : 'om-route-surface'}
       hidden={!active}
       aria-hidden={!active}
       inert={!active}
     >
-      {children}
+      <KeepAliveFreeze active={active}>{children}</KeepAliveFreeze>
     </div>
   );
 }

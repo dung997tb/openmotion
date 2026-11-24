@@ -1,19 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { designHttp, designProjectsFor } from '../design-projects.ts';
 import { gameHttp, gameProjectsFor } from '../game-projects.ts';
 import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from '../shared/preview-bridge.ts';
 import { Phase1Service } from '../phase1.ts';
+import { AssetLibrary } from '../gateway/asset-library.ts';
 import { pluginRoot } from '../hyperframes.ts';
 import {
+  CLAUDE_SUPER_AGENT_INSTRUCTIONS,
+  SUPER_AGENT_INSTRUCTIONS,
   SuperAgentConversations,
   extractLocalDevServerUrl,
   formatBrowserAnnotationsContext,
   superAgentConversations,
 } from '../gateway/super-agent.ts';
+import {
+  captureWorkspaceSnapshot,
+  collectTaskProjectRoots,
+  diffWorkspaceSnapshots,
+  listTaskWorkspaceEntries,
+  resolveTaskProjectDir,
+} from '../gateway/super-agent-workspace.ts';
+import { gameAssetInstructions } from '../shared/game-contract.ts';
 import { buildResourceContextManifest, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
+import {
+  registerCapabilityScriptExecutor,
+  saveCapabilityOverrides,
+  unregisterCapabilityScriptExecutor,
+} from '../gateway/capability-center.ts';
+import { classifySuperAgentTool, describeSuperAgentApproval, formatSuperAgentToolLabel } from '../shared/super-agent.ts';
+import { execute } from '../hyperframes.ts';
+import { verificationBinaries } from '../scripts/verify-export.ts';
 import { AssetAgentRpc } from '../gateway/asset-chat.ts';
+import { buildSuperAgentHandoff } from '../shared/capability-hub.ts';
 import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
 
@@ -74,7 +95,12 @@ test('SuperAgentConversations persists CRUD state, recovers interrupted runs, an
   // Persist running state on disk directly to verify restart interruption recovery.
   const file = await service.file(created.id);
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(file, JSON.stringify({ ...updated, state: 'running', approvals: [{ id: 'a1', kind: 'tool', title: 'Pending', detail: '{}' }] }));
+  await writeFile(file, JSON.stringify({
+    ...updated,
+    state: 'running',
+    approvals: [{ id: 'a1', kind: 'tool', title: 'Pending', detail: '{}' }],
+    requestReceipts: [{ requestId: 'req-new-turn', inputHash: 'fixture-hash' }],
+  }));
   const reloaded = new SuperAgentConversations(store);
   const recovered = await reloaded.get(created.id);
   assert.equal(recovered.state, 'failed');
@@ -85,6 +111,7 @@ test('SuperAgentConversations persists CRUD state, recovers interrupted runs, an
   assert.equal(list.length, 1);
   assert.equal(list[0].id, created.id);
   assert.equal(list[0].pinned, true);
+  assert.equal(list[0].lastTurnId, 'req-new-turn');
 
   await reloaded.remove(created.id);
   await assert.rejects(() => reloaded.get(created.id), /CONVERSATION_NOT_FOUND/);
@@ -498,6 +525,7 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
     setting: 'space',
     multiplayer: false,
     orientation: 'portrait',
+    playableAd: true,
   });
   const gameId = createdGame.game.id;
 
@@ -594,6 +622,7 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
       id: `game:${gameId}`,
       kind: 'game-project',
       title: createdGame.game.title,
+      subtitle: 'shooter · Game Studio',
       projectId: gameId,
       scenario: 'portrait',
       url: `/motion-api/games/${gameId}/play/index.html`,
@@ -601,6 +630,7 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   });
   assert.equal(chat.intent, 'game');
   assert.equal(chat.activeArtifactId, `game:${gameId}`);
+  assert.equal((await service.get(chat.id)).artifacts[0].playableAd, true);
 
   await service.start(chat.id, {
     requestId: 'req-game-turn-1',
@@ -625,6 +655,8 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   assert.ok(gameArtifact);
   assert.equal(gameArtifact.title, 'Star Drifter 99');
   assert.equal(gameArtifact.scenario, 'portrait');
+  assert.equal(gameArtifact.playableAd, true);
+  assert.equal(gameArtifact.subtitle, 'shooter · Playable ad');
   assert.equal(gameArtifact.url, `/motion-api/games/${gameId}/play/index.html`);
   assert.equal(done.activeArtifactId, gameArtifact.id);
 
@@ -646,6 +678,17 @@ test('SuperAgentConversations supports game intent, initial game artifact, openm
   const filesRes = JSON.parse(bodyText) as { files: Array<{ path: string; bytes: number }> };
   assert.ok(filesRes.files.some(f => f.path === 'index.html'));
   assert.ok(filesRes.files.some(f => f.path === 'logic.js'));
+
+  const renamed = await service.update(chat.id, { title: '新游戏名' });
+  assert.equal(renamed.title, '新游戏名');
+  assert.equal(renamed.activeArtifactId, gameArtifact.id);
+  const renamedGame = renamed.artifacts.find(item => item.id === gameArtifact.id);
+  assert.equal(renamedGame?.title, renamed.title);
+  assert.equal(renamedGame?.url, gameArtifact.url);
+  assert.equal(renamedGame?.playableAd, true);
+  assert.equal((await gameProjectsFor(store.directory).get(gameId)).title, renamed.title);
+  assert.match((await gameProjectsFor(store.directory).read(gameId, 'index.html')).content, /<title>新游戏名<\/title>/);
+  assert.equal((await service.get(chat.id)).artifacts.find(item => item.id === gameArtifact.id)?.title, renamed.title);
 
   await service.close();
 }));
@@ -1320,4 +1363,1400 @@ test('SuperAgentConversations marks interrupted shutdown runs failed and resets 
   assert.equal(afterClose.state, 'failed');
   assert.match(afterClose.error || '', /Server restarted while the Agent was running/);
   await reloaded.close();
+}));
+
+test('hiddenInstructions stay hidden from stored user messages while reaching the Agent, and approvals summarize cleanly with alwaysAllow', () => fixture(async store => {
+  // 1) buildSuperAgentHandoff keeps user prompt concise while moving directives into hiddenInstructions
+  const zhHandoff = buildSuperAgentHandoff(
+    { kind: 'motion-template', id: 'tpl-launch-1', title: 'Product Launch' },
+    { hiddenInstructions: 'Read openmotion://workflow/template/start and recreate tpl-launch-1.', locale: 'zh-CN' },
+  );
+  assert.equal(zhHandoff.prompt, '基于「Product Launch」模板制作一个动效视频。');
+  assert.ok(zhHandoff.hiddenInstructions?.includes('openmotion://workflow/template/start'));
+  assert.equal(zhHandoff.prompt.includes('openmotion://'), false);
+
+  const designProtoHandoff = buildSuperAgentHandoff({ kind: 'design-template', id: 'tpl-proto', title: 'Landing', scenario: 'prototype' });
+  assert.equal(designProtoHandoff.mode, 'design');
+  assert.equal(designProtoHandoff.designModule, 'prototype');
+
+  const designDeckHandoff = buildSuperAgentHandoff({ kind: 'design-template', id: 'tpl-deck', title: 'Pitch Deck', scenario: 'deck' });
+  assert.equal(designDeckHandoff.mode, 'design');
+  assert.equal(designDeckHandoff.designModule, 'deck');
+
+  const designWebglHandoff = buildSuperAgentHandoff({ kind: 'design-template', id: 'tpl-webgl', title: '3D Globe', scenario: 'webgl' });
+  assert.equal(designWebglHandoff.mode, 'design');
+  assert.equal(designWebglHandoff.designModule, 'webgl');
+
+  const designSkillHandoff = buildSuperAgentHandoff({ kind: 'design-skill', id: 'skill-1', title: 'Editorial' });
+  assert.equal(designSkillHandoff.mode, 'design');
+  assert.equal(designSkillHandoff.designModule, 'prototype');
+
+  const brandKitHandoff = buildSuperAgentHandoff({ kind: 'brand-kit', id: 'catalog:vercel', title: 'Vercel' });
+  assert.equal(brandKitHandoff.mode, 'design');
+  assert.equal(brandKitHandoff.designModule, 'prototype');
+
+  // 2) describeSuperAgentApproval turns raw Codex Python-script JSON into a clear 1-line summary
+  const pythonAudioDetail = JSON.stringify({
+    command: 'python3 - <<\'OPENMOTION_SCORE\'\nfrom pathlib import Path\ndestination = Path("欢快背景音乐.wav")\nOPENMOTION_SCORE',
+    availableDecisions: ['accept', 'cancel'],
+  }, null, 2);
+  const describedAudio = describeSuperAgentApproval({
+    kind: 'command',
+    title: 'Command approval',
+    detail: pythonAudioDetail,
+  });
+  assert.equal(describedAudio.headingKey, 'Create audio file');
+  assert.equal(describedAudio.target, '欢快背景音乐.wav');
+  assert.equal(describedAudio.summaryKey, 'Run a {runtime} script to create "{target}".');
+  assert.deepEqual(describedAudio.summaryVars, { runtime: 'Python', target: '欢快背景音乐.wav' });
+  assert.equal(describedAudio.technicalDetail.includes('availableDecisions'), false);
+  assert.ok(describedAudio.technicalDetail.includes('destination = Path("欢快背景音乐.wav")'));
+
+  const describedFiles = describeSuperAgentApproval({
+    kind: 'file',
+    title: 'File edit approval',
+    detail: JSON.stringify({ changes: [{ path: 'src/index.html' }, { path: 'src/game.js' }] }),
+  });
+  assert.equal(describedFiles.headingKey, 'Edit files');
+  assert.equal(describedFiles.target, 'index.html');
+  assert.deepEqual(describedFiles.summaryVars, { count: 2, target: 'index.html' });
+
+  const describedGen = describeSuperAgentApproval({
+    kind: 'generation',
+    title: 'Generate media asset',
+    detail: JSON.stringify({ modality: 'image', model: 'seedream-4', prompt: 'Neon arcade background' }),
+  });
+  assert.equal(describedGen.headingKey, 'Generate image');
+  assert.equal(describedGen.target, 'seedream-4');
+  assert.equal(describedGen.summaryText, 'Neon arcade background');
+
+  // 3) Backend injects hiddenInstructions into Agent prompt without storing them in user chat message,
+  //    and answer(..., true, true) switches permissionMode to auto and auto-approves subsequent steps.
+  let receivedAgentPrompt = '';
+  const decisions: string[] = [];
+  class ApprovalCodexRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string, params?: any) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-hidden-approval' } };
+      if (method === 'turn/start') {
+        receivedAgentPrompt = String(params?.input?.[0]?.text || '');
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 41,
+            method: 'item/commandExecution/requestApproval',
+            params: {
+              command: 'python3 -c \'from pathlib import Path; Path("bgm.wav").write_bytes(b"RIFF")\'',
+            },
+          });
+        });
+        return { turn: { id: 'turn-hidden-approval' } };
+      }
+      return {};
+    }
+    send(msg: any) {
+      if (msg?.id === 41) {
+        decisions.push(String(msg.result?.decision || ''));
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 42,
+            method: 'item/commandExecution/requestApproval',
+            params: { command: 'npm test' },
+          });
+        });
+      } else if (msg?.id === 42) {
+        decisions.push(String(msg.result?.decision || ''));
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-hidden-approval', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const phase1: any = { call: async () => ({ ok: true }) };
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: ApprovalCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const chat = await service.create({ engine: 'codex', intent: 'game', permissionMode: 'on-request' });
+  await service.start(
+    chat.id,
+    {
+      requestId: 'req-hidden-1',
+      text: '我想做一个2024小游戏',
+      hiddenInstructions: 'Use the openmotion-game Skill. Read openmotion://workflow/game/start.',
+      mode: 'game',
+      contextTags: [
+        { kind: 'mode', label: 'Game', icon: 'gamepad-line', tone: 'agent' },
+        { kind: 'param', label: 'Casual' },
+        { kind: 'param', label: '9:16' },
+        { kind: 'param', label: 'Single player' },
+      ],
+    },
+    { origin: 'http://127.0.0.1:4173', phase1: () => phase1 },
+  );
+
+  let waitingSnap = await service.get(chat.id);
+  for (let i = 0; i < 60 && waitingSnap.approvals.length === 0; i++) {
+    await new Promise(resolve => setTimeout(resolve, 15));
+    waitingSnap = await service.get(chat.id);
+  }
+  assert.equal(waitingSnap.approvals.length, 1);
+  assert.equal(waitingSnap.approvals[0].target, 'bgm.wav');
+  assert.equal(waitingSnap.messages[0].text, '我想做一个2024小游戏');
+  assert.equal(waitingSnap.messages[0].text.includes('openmotion-game'), false);
+  assert.deepEqual(waitingSnap.messages[0].contextTags?.map(tag => tag.label), ['Game', 'Casual', '9:16', 'Single player']);
+  assert.ok(receivedAgentPrompt.includes('<openmotion-task-instructions>'));
+  assert.ok(receivedAgentPrompt.includes('Mode/Skill: game | Selected parameters: Casual · 9:16 · Single player'));
+  assert.ok(receivedAgentPrompt.includes('openmotion://workflow/game/start'));
+
+  // Approve with alwaysAllow=true -> switches chat.permissionMode to 'auto' and auto-approves req #42
+  await service.answer(chat.id, waitingSnap.approvals[0].id, true, true);
+  let doneSnap = await service.get(chat.id);
+  for (let i = 0; i < 60 && doneSnap.state !== 'idle'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 15));
+    doneSnap = await service.get(chat.id);
+  }
+  assert.equal(doneSnap.state, 'idle');
+  assert.equal(doneSnap.permissionMode, 'auto');
+  assert.deepEqual(decisions, ['accept', 'accept']);
+  await service.close();
+}));
+
+test('SuperAgentConversations gates openmotion_capability_run approvals, skips approval on dryRun, wraps asset_manage read media, and isolates artifact extraction', () => fixture(async store => {
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_discover', { action: 'list' }), 'Browsed capability catalog');
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_run', { dryRun: true }), 'Previewed capability execution');
+  assert.equal(formatSuperAgentToolLabel('openmotion_capability_run', { capabilityId: 'remove-background' }), 'Ran media capability');
+  assert.equal(formatSuperAgentToolLabel('openmotion_job_manage', { action: 'status' }), 'Checked generation job status');
+  assert.equal(formatSuperAgentToolLabel('openmotion_asset_manage', { action: 'read' }), 'Inspected media asset');
+  assert.equal(
+    classifySuperAgentTool('openmotion_capability_run', { capabilityId: 'remove-background' }).summary,
+    'remove-background',
+  );
+
+  const phase1 = new Phase1Service(store, pluginRoot, {
+    origin: () => 'http://127.0.0.1:4173',
+    nativeUrl: () => undefined,
+    openProject: async () => {},
+    mutation: async fn => fn(),
+    cancel: async () => ({ id: 'x', state: 'cancelled' } as any),
+  });
+
+  const makePng = async (filename: string, color: string) => {
+    const file = path.join(store.directory, filename);
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', `color=c=${color}:s=32x24`, '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  };
+
+  const rawPng = await makePng('sa-source.png', 'blue');
+  const imported = await phase1.call('openmotion_asset_manage', {
+    action: 'import',
+    requestId: 'sa-import-1',
+    sourcePath: rawPng,
+    name: 'Source Subject',
+  });
+  const sourceRef = { assetId: imported.asset.id, versionId: imported.asset.currentVersionId };
+
+  const scriptId = 'sa-test-cutout';
+  let scriptRuns = 0;
+  registerCapabilityScriptExecutor(scriptId, async () => {
+    scriptRuns += 1;
+    return { sourcePath: await makePng('sa-cutout.png', 'white'), name: 'Cutout Subject' };
+  });
+
+  await saveCapabilityOverrides(store, [
+    { id: 'remove-background', executor: { kind: 'script', scriptId } },
+  ]);
+
+  let producedAssetId = '';
+  let producedVersionId = '';
+  const responses = new Map<number, any>();
+
+  class CapabilityRpc {
+    onNotification: (msg: any) => void;
+    closed = false;
+
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, _onError: (err: Error) => void) {
+      this.onNotification = onNotification;
+    }
+
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-cap-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          // 1. dryRun: true must NOT require approval or run script
+          this.onNotification({
+            id: 201,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-dry',
+              tool: 'openmotion_capability_run',
+              arguments: { capabilityId: 'remove-background', references: [sourceRef], dryRun: true },
+            },
+          });
+        });
+        return { turn: { id: 'turn-cap-1' } };
+      }
+      return {};
+    }
+
+    send(payload: any) {
+      responses.set(payload.id, payload);
+      if (payload.id === 201) {
+        queueMicrotask(() => {
+          // 2. Real capability_run (no requestId passed) must trigger generation approval & inject requestId
+          this.onNotification({
+            id: 202,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-real',
+              tool: 'openmotion_capability_run',
+              arguments: { capabilityId: 'remove-background', references: [sourceRef] },
+            },
+          });
+        });
+      }
+      if (payload.id === 202) {
+        const textItem = payload.result?.contentItems?.find((i: any) => i.type === 'inputText')?.text;
+        const parsed = textItem ? JSON.parse(textItem) : {};
+        producedAssetId = parsed.asset?.id ?? '';
+        producedVersionId = parsed.version?.id ?? '';
+        queueMicrotask(() => {
+          // 3. asset_manage action=get must NOT add an extra artifact
+          this.onNotification({
+            id: 203,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-get',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'get', assetId: imported.asset.id, versionId: imported.asset.currentVersionId },
+            },
+          });
+        });
+      }
+      if (payload.id === 203) {
+        queueMicrotask(() => {
+          // 4. asset_manage action=update (trash) must NOT add an extra artifact
+          this.onNotification({
+            id: 204,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-update',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'update', assetId: imported.asset.id, changes: { trashed: true } },
+            },
+          });
+        });
+      }
+      if (payload.id === 204) {
+        queueMicrotask(() => {
+          // 5. asset_manage action=read must return wrapped image media content
+          this.onNotification({
+            id: 205,
+            method: 'item/tool/call',
+            params: {
+              callId: 'cap-read',
+              tool: 'openmotion_asset_manage',
+              arguments: { action: 'read', assetId: producedAssetId, versionId: producedVersionId },
+            },
+          });
+        });
+      }
+      if (payload.id === 205) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-cap-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: CapabilityRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  try {
+    const chat = await service.create({ engine: 'codex', permissionMode: 'on-request' });
+    await service.start(chat.id, { requestId: 'req-cap-turn-1', text: 'Remove background from subject' }, {
+      origin: 'http://127.0.0.1:4173',
+      phase1: () => phase1,
+    });
+
+    // Wait for the approval triggered ONLY by call 202 (NOT call 201 dryRun)
+    let waiting = await service.get(chat.id);
+    for (let i = 0; i < 80 && waiting.approvals.length === 0; i++) {
+      await new Promise(r => setTimeout(r, 15));
+      waiting = await service.get(chat.id);
+    }
+    assert.equal(responses.has(201), true, 'dryRun should finish without waiting for approval');
+    assert.equal(scriptRuns, 0, 'script must not execute before generation approval');
+    assert.equal(waiting.approvals.length, 1);
+    assert.equal(waiting.approvals[0].kind, 'generation');
+    assert.match(waiting.approvals[0].title, /remove-background/);
+
+    await service.answer(chat.id, waiting.approvals[0].id, true);
+
+    let done = await service.get(chat.id);
+    for (let i = 0; i < 100 && done.state !== 'idle'; i++) {
+      await new Promise(r => setTimeout(r, 15));
+      done = await service.get(chat.id);
+    }
+
+    assert.equal(done.state, 'idle');
+    assert.equal(scriptRuns, 1);
+    assert.ok(producedAssetId && producedVersionId);
+
+    // Only the generated cutout asset should be extracted into chat artifacts (NOT get/update/trash on source)
+    assert.equal(done.artifacts.length, 1);
+    assert.equal(done.artifacts[0].assetId, producedAssetId);
+    assert.equal(done.artifacts[0].versionId, producedVersionId);
+
+    // asset_manage(action="read") must wrap image preview into Codex inputImage content item
+    const readResp = responses.get(205);
+    assert.equal(readResp?.result?.success, true);
+    assert.ok(
+      readResp?.result?.contentItems?.some((item: any) => item.type === 'inputImage' && typeof item.imageUrl === 'string'),
+      'expected wrapped imageUrl content item from openmotion_asset_manage(action="read")',
+    );
+  } finally {
+    unregisterCapabilityScriptExecutor(scriptId);
+    await service.close();
+  }
+}));
+
+test('classifySuperAgentTool extracts every file in multi-file Game, Design, and Motion batches plus capture_cover', () => {
+  const gameBatch = classifySuperAgentTool('mcp__openmotion__openmotion_game_write_files', {
+    id: 'g-1',
+    files: [
+      { path: 'assets/icon.svg', content: '<svg></svg>' },
+      { path: 'index.html', content: '<!doctype html>\n<html></html>' },
+      { path: 'style.css', content: 'body { margin: 0; }\ncanvas { display: block; }' },
+      { path: 'logic.js', content: 'export const meta = {};' },
+      { path: 'client.js', content: 'console.log("ok");' },
+    ],
+  });
+  assert.equal(gameBatch.category, 'file_edit');
+  assert.equal(gameBatch.summary, '5 files');
+  assert.deepEqual(gameBatch.files?.map(f => f.path), [
+    'assets/icon.svg',
+    'index.html',
+    'style.css',
+    'logic.js',
+    'client.js',
+  ]);
+  assert.equal(gameBatch.files?.[1].addedLines, 2);
+  assert.ok(gameBatch.files?.[1].diffPreview?.includes('+<!doctype html>'));
+
+  const designWrite = classifySuperAgentTool('openmotion_design_edit', {
+    action: 'write',
+    files: [
+      { path: 'index.html', content: '<h1>Hi</h1>' },
+      { path: 'app.js', content: 'const a = 1;' },
+    ],
+  });
+  assert.deepEqual(designWrite.files?.map(f => f.path), ['index.html', 'app.js']);
+
+  const designDelete = classifySuperAgentTool('openmotion_design_edit', {
+    action: 'delete',
+    files: [{ path: 'old.css' }],
+  });
+  assert.equal(designDelete.category, 'file_delete');
+  assert.deepEqual(designDelete.files?.map(f => ({ path: f.path, action: f.action })), [
+    { path: 'old.css', action: 'delete' },
+  ]);
+
+  const cover = classifySuperAgentTool('openmotion_game_capture_cover', { id: 'g-1' });
+  assert.equal(cover.category, 'file_write');
+  assert.deepEqual(cover.files, [{ action: 'create', path: 'assets/cover.png', binary: true }]);
+});
+
+test('per-task projectDir, checkpoint diffing, and legacy hydration track all deliverable files accurately', () => fixture(async store => {
+  const service = new SuperAgentConversations(store);
+  const created = await service.create({ intent: 'coding', engine: 'claude' });
+  assert.equal(created.projectKind, 'workspace');
+  assert.equal(created.projectDir, path.join(store.directory, 'super-agent', 'work', created.id));
+  const workDirStat = await stat(created.projectDir!);
+  assert.ok(workDirStat.isDirectory());
+
+  const resolvedCustom = resolveTaskProjectDir(store.directory, {
+    id: created.id,
+    workingDir: '/tmp/custom-repo',
+    artifacts: [{
+      id: 'game:g1',
+      kind: 'game-project',
+      title: 'G1',
+      projectId: 'g1',
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  });
+  assert.deepEqual(resolvedCustom, { projectDir: '/tmp/custom-repo', projectKind: 'custom' });
+
+  // Create a game project with all 9 real deliverable files plus internal scratch/metadata noise
+  const { game } = await gameProjectsFor(store.directory).create({
+    prompt: 'Action game',
+    genre: 'casual',
+    multiplayer: true,
+  });
+  await gameProjectsFor(store.directory).write(game.id, [
+    { path: 'index.html', content: '<!doctype html>\n<title>Action</title>' },
+    { path: 'style.css', content: 'body { color: white; }' },
+    { path: 'logic.js', content: 'export const meta = { minPlayers: 1, maxPlayers: 2, tickRate: 20 };' },
+    { path: 'client.js', content: 'console.log("ready");' },
+    { path: 'assets/icon.svg', content: '<svg></svg>' },
+    { path: 'design/plan.md', content: '# Plan' },
+    { path: 'design/assets.csv', content: 'name,type\ncover,png' },
+    { path: 'design/verification.md', content: '# Verification' },
+  ]);
+  const gameDir = path.join(store.directory, 'games', game.id);
+  await mkdir(path.join(gameDir, 'assets'), { recursive: true });
+  await writeFile(
+    path.join(gameDir, 'assets', 'cover.png'),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  );
+  await mkdir(path.join(gameDir, 'assets', 'playtests'), { recursive: true });
+  await writeFile(path.join(gameDir, 'assets', 'playtests', 'ephemeral.png'), Buffer.from([1, 2, 3]));
+  await mkdir(path.join(gameDir, 'trailer'), { recursive: true });
+  await writeFile(path.join(gameDir, 'trailer', 'clip.mp4'), Buffer.from([4, 5, 6]));
+
+  // Snapshot captures exact 9 deliverable files and excludes internal game metadata/noise
+  const chatWithGame = await service.create({
+    engine: 'claude',
+    initialArtifact: {
+      id: `game:${game.id}`,
+      kind: 'game-project',
+      title: game.title,
+      projectId: game.id,
+      url: `/motion-api/games/${game.id}/play/index.html`,
+    },
+  });
+  assert.equal(chatWithGame.projectKind, 'game');
+  assert.equal(chatWithGame.projectDir, gameDir);
+
+  const roots = collectTaskProjectRoots(store.directory, chatWithGame);
+  const snap = await captureWorkspaceSnapshot(roots);
+  const diffOps = diffWorkspaceSnapshots(undefined, snap);
+  assert.deepEqual(diffOps.map(op => op.path), [
+    'assets/cover.png',
+    'assets/icon.svg',
+    'client.js',
+    'design/assets.csv',
+    'design/plan.md',
+    'design/verification.md',
+    'index.html',
+    'logic.js',
+    'style.css',
+  ]);
+  const coverOp = diffOps.find(op => op.path === 'assets/cover.png');
+  assert.equal(coverOp?.binary, true);
+  assert.equal(coverOp?.previewUrl, `/motion-api/games/${encodeURIComponent(game.id)}/play/assets/cover.png`);
+  assert.equal(coverOp?.artifactId, `game:${game.id}`);
+
+  // Legacy chat persisted without turnChangedFiles is hydrated on get()
+  const chatFile = await service.file(chatWithGame.id);
+  const parsed = JSON.parse(await (await import('node:fs/promises')).readFile(chatFile, 'utf8'));
+  parsed.messages = [{ id: 'turn-u1', role: 'user', text: 'Build game', createdAt: 100 }];
+  delete parsed.turnChangedFiles;
+  await writeFile(chatFile, JSON.stringify(parsed));
+
+  const loaded = await service.get(chatWithGame.id);
+  assert.equal(loaded.turnChangedFiles?.['turn-u1']?.length, 9);
+  assert.ok(loaded.turnChangedFiles?.['turn-u1']?.some(op => op.path === 'index.html'));
+
+  // Run + stop with custom mock agent persists turnChangedFiles in work/<chatId>
+  const runChat = await service.create({ intent: 'coding', engine: 'claude' });
+  const runService = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/fake/claude',
+    runClaude: async ({ cwd, onEvent }) => {
+      await writeFile(path.join(cwd, 'notes.md'), '# Task Notes\nReady\n');
+      await onEvent({ type: 'result', subtype: 'success', result: 'Created notes.' });
+    },
+  });
+  await runService.start(
+    runChat.id,
+    { requestId: 'req-turn-snap-1', text: 'Write notes.md' },
+    { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) },
+  );
+  const finished = await runService.waitForChat(runChat.id);
+  const firstUserMsg = finished.messages.find(m => m.role === 'user');
+  assert.ok(firstUserMsg);
+  assert.equal(finished.turnChangedFiles?.[firstUserMsg!.id]?.[0]?.path, 'notes.md');
+  assert.equal(finished.turnChangedFiles?.[firstUserMsg!.id]?.[0]?.action, 'create');
+
+  await runService.close();
+  await service.close();
+}));
+
+test('Codex and Claude Super Agent prompts share unified gameAssetInstructions without stale optional-generate guidance', () => {
+  for (const prompt of [SUPER_AGENT_INSTRUCTIONS, CLAUDE_SUPER_AGENT_INSTRUCTIONS]) {
+    assert.ok(prompt.includes(gameAssetInstructions), 'Super Agent prompt must embed gameAssetInstructions');
+    assert.doesNotMatch(prompt, /optionally generate visual/i);
+    assert.doesNotMatch(prompt, /openmotion_generate_asset/);
+  }
+});
+
+test('SuperAgentConversations steers active turns while preserving threadId and drains queued items afterwards', () => fixture(async store => {
+  const abortedPrompts: string[] = [];
+  const seenThreads: (string | undefined)[] = [];
+  let releaseFirst!: () => void;
+  const firstStarted = new Promise<void>(resolve => { releaseFirst = resolve; });
+
+  const service = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/fake/claude',
+    runClaude: async ({ prompt, threadId, onEvent, signal }) => {
+      seenThreads.push(threadId);
+      if (prompt.startsWith('Initial prompt')) {
+        await onEvent({ type: 'system', session_id: 'claude-thread-steer' });
+        releaseFirst();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            abortedPrompts.push('Initial prompt');
+            reject(new Error('Agent conversation stopped'));
+          }, { once: true });
+        });
+        return;
+      }
+      if (prompt.startsWith('Steer prompt')) {
+        await onEvent({ type: 'assistant', message: { id: 'a-steer', content: [{ type: 'text', text: 'Steered output' }] } });
+        await onEvent({ type: 'result', subtype: 'success', result: 'Steered output' });
+        return;
+      }
+      if (prompt.startsWith('Queued after steer')) {
+        await onEvent({ type: 'assistant', message: { id: 'a-queued', content: [{ type: 'text', text: 'Queued output' }] } });
+        await onEvent({ type: 'result', subtype: 'success', result: 'Queued output' });
+      }
+    },
+  });
+
+  const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+  const chat = await service.create({ engine: 'claude' });
+  await service.start(chat.id, { requestId: 'req-steer-1', text: 'Initial prompt' }, runtime);
+  await firstStarted;
+
+  // Enqueue a follow-up first, then steer: steer must preserve the queue until the steered run completes.
+  const withQueued = await service.enqueueMessage(chat.id, { requestId: 'req-steer-q1', text: 'Queued after steer' });
+  assert.equal(withQueued.queuedMessages?.length, 1);
+
+  await service.start(chat.id, { requestId: 'req-steer-2', text: 'Steer prompt', followUpBehavior: 'steer' }, runtime);
+  assert.deepEqual(abortedPrompts, ['Initial prompt']);
+
+  // Wait for steered turn and auto-dequeued follow-up to both finish.
+  let finalChat = await service.get(chat.id);
+  for (let i = 0; i < 40 && (finalChat.state === 'running' || (finalChat.queuedMessages?.length ?? 0) > 0); i++) {
+    await new Promise(r => setTimeout(r, 15));
+    finalChat = await service.get(chat.id);
+  }
+  assert.equal(finalChat.state, 'idle');
+  assert.equal(finalChat.queuedMessages, undefined);
+  assert.deepEqual(seenThreads, [undefined, 'claude-thread-steer', 'claude-thread-steer']);
+  assert.ok(finalChat.messages.some(m => m.role === 'user' && m.text === 'Steer prompt'));
+  assert.ok(finalChat.messages.some(m => m.role === 'user' && m.text === 'Queued after steer'));
+  await service.close();
+}));
+
+test('SuperAgentConversations supports queue CRUD, sendQueuedMessageNow, auto-dequeue, and preserves queue on stop or error', () => fixture(async store => {
+  const executed: { text: string; attachmentIds: string[]; tagLabels: string[] }[] = [];
+  let releaseHold: (() => void) | null = null;
+  const nextHold = () => new Promise<void>(resolve => { releaseHold = resolve; });
+
+  const service = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/fake/claude',
+    runClaude: async ({ prompt, onEvent, signal }) => {
+      if (prompt.startsWith('Slow run') || prompt.startsWith('Stop guard run')) {
+        releaseHold?.();
+        releaseHold = null;
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('Agent conversation stopped')), { once: true });
+        });
+        return;
+      }
+      if (prompt.startsWith('Fail now')) {
+        throw new Error('Synthetic provider failure');
+      }
+      const heading = prompt.split('\n')[0];
+      executed.push({
+        text: heading,
+        attachmentIds: [],
+        tagLabels: [],
+      });
+      await onEvent({ type: 'result', subtype: 'success', result: `Done: ${heading}` });
+    },
+  });
+
+  const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+  const chat = await service.create({ engine: 'claude' });
+  const slowStarted = nextHold();
+  await service.start(chat.id, { requestId: 'req-q-init', text: 'Slow run' }, runtime);
+  await slowStarted;
+
+  const afterQ1 = await service.enqueueMessage(chat.id, {
+    requestId: 'req-q-1',
+    text: 'Draft queued 1',
+    attachments: [{ id: 'asset-a', kind: 'asset', title: 'Poster.png' }],
+    contextTags: [{ kind: 'mode', label: 'Image' }],
+  });
+  const afterQ2 = await service.enqueueMessage(chat.id, { requestId: 'req-q-2', text: 'Queued to delete' });
+  const afterQ3 = await service.enqueueMessage(chat.id, { requestId: 'req-q-3', text: 'Run immediately now' });
+  assert.equal(afterQ3.queuedMessages?.length, 3);
+
+  const q1Id = afterQ1.queuedMessages![0].id;
+  const q2Id = afterQ2.queuedMessages![1].id;
+  const q3Id = afterQ3.queuedMessages![2].id;
+
+  const edited = await service.updateQueuedMessage(chat.id, q1Id, {
+    text: 'Edited queued 1',
+    attachments: [{ id: 'asset-b', kind: 'asset', title: 'Hero.png' }],
+    contextTags: [{ kind: 'param', label: '16:9' }],
+  });
+  assert.equal(edited.queuedMessages?.[0]?.text, 'Edited queued 1');
+  assert.equal(edited.queuedMessages?.[0]?.attachments?.[0]?.id, 'asset-b');
+  assert.equal(edited.queuedMessages?.[0]?.contextTags?.[0]?.label, '16:9');
+
+  const removed = await service.removeQueuedMessage(chat.id, q2Id);
+  assert.deepEqual(removed.queuedMessages?.map(m => m.id), [q1Id, q3Id]);
+
+  // Send Q3 immediately -> interrupts Slow run, removes Q3, runs Q3, then auto-dequeues Edited queued 1.
+  await service.sendQueuedMessageNow(chat.id, q3Id, runtime);
+  let settled = await service.get(chat.id);
+  for (let i = 0; i < 40 && (settled.state === 'running' || (settled.queuedMessages?.length ?? 0) > 0); i++) {
+    await new Promise(r => setTimeout(r, 15));
+    settled = await service.get(chat.id);
+  }
+  assert.equal(settled.state, 'idle');
+  assert.equal(settled.queuedMessages, undefined);
+  assert.deepEqual(executed.map(e => e.text), ['Run immediately now', 'Edited queued 1']);
+  const editedUserMsg = settled.messages.find(m => m.role === 'user' && m.text === 'Edited queued 1');
+  assert.equal(editedUserMsg?.attachments?.[0]?.id, 'asset-b');
+  assert.equal(editedUserMsg?.contextTags?.[0]?.label, '16:9');
+
+  // Verify queue is preserved when a turn fails cleanly or is stopped manually.
+  const failChat = await service.create({ engine: 'claude' });
+  await service.enqueueMessage(failChat.id, { requestId: 'req-fail-keep', text: 'Must stay queued on error' });
+  await service.start(failChat.id, { requestId: 'req-fail-trigger', text: 'Fail now' }, runtime);
+  const failedState = await service.waitForChat(failChat.id);
+  assert.equal(failedState.state, 'failed');
+  assert.equal(failedState.queuedMessages?.length, 1);
+
+  const stopChat = await service.create({ engine: 'claude' });
+  const stopStarted = nextHold();
+  await service.start(stopChat.id, { requestId: 'req-stop-trigger', text: 'Stop guard run' }, runtime);
+  await stopStarted;
+  await service.enqueueMessage(stopChat.id, { requestId: 'req-stop-keep', text: 'Must stay queued on stop' });
+  const stoppedState = await service.stop(stopChat.id);
+  assert.equal(stoppedState.state, 'cancelled');
+  assert.equal(stoppedState.queuedMessages?.length, 1);
+
+  await service.close();
+}));
+
+test('SuperAgentConversations awaits closeAndWait() on steer and retries transient active-writer locks', () => fixture(async store => {
+  let instanceCount = 0;
+  let turn1Closed = false;
+  let resumeCalls = 0;
+  let resumeSawTurn1Closed = false;
+  let releaseTurn1Started!: () => void;
+  const turn1Started = new Promise<void>(resolve => { releaseTurn1Started = resolve; });
+
+  class SteerRaceCodexRpc {
+    private readonly instanceId: number;
+    private readonly onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.instanceId = ++instanceCount;
+      this.onNotification = onNotification;
+    }
+    async request(method: string, params?: any) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-steer-race' } };
+      if (method === 'thread/resume') {
+        resumeCalls += 1;
+        assert.equal(params?.threadId, 'thr-steer-race');
+        resumeSawTurn1Closed = turn1Closed;
+        if (resumeCalls <= 2) {
+          throw new Error('thread thr-steer-race already has an active writer');
+        }
+        return { thread: { id: 'thr-steer-race' } };
+      }
+      if (method === 'turn/start') {
+        if (this.instanceId === 1) {
+          releaseTurn1Started();
+          return { turn: { id: 'turn-race-1' } };
+        }
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'item/completed',
+            params: { item: { id: 'msg-race-2', type: 'agentMessage', text: 'Steered after lock release' } },
+          });
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-race-2', status: 'completed' } },
+          });
+        });
+        return { turn: { id: 'turn-race-2' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+    async closeAndWait() {
+      if (this.instanceId === 1) {
+        await new Promise(resolve => setTimeout(resolve, 60));
+        turn1Closed = true;
+      }
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: SteerRaceCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+
+  await service.start(chat.id, { requestId: 'req-race-1', text: 'Initial long turn' }, runtime);
+  await turn1Started;
+
+  await service.start(chat.id, { requestId: 'req-race-2', text: 'Immediate steer turn', followUpBehavior: 'steer' }, runtime);
+  const done = await service.waitForChat(chat.id);
+  for (let i = 0; i < 40 && done.state === 'running'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  const finalChat = await service.get(chat.id);
+  assert.equal(turn1Closed, true);
+  assert.equal(resumeSawTurn1Closed, true);
+  assert.equal(resumeCalls, 3);
+  assert.equal(finalChat.state, 'idle');
+  assert.equal(finalChat.error, undefined);
+  assert.ok(finalChat.messages.some(m => m.role === 'assistant' && m.text === 'Steered after lock release'));
+  await service.close();
+}));
+
+test('SuperAgentConversations ignores late errors or rejections from a stopped/steered turn', () => fixture(async store => {
+  let instanceCount = 0;
+  let releaseTurn1AtThreadStart!: () => void;
+  const turn1ReadyToSteer = new Promise<void>(resolve => { releaseTurn1AtThreadStart = resolve; });
+  let triggerTurn1LateRejection!: (err: Error) => void;
+  let turn1Callbacks: { onNotification: (msg: any) => void; onClose: (err: Error) => void } | null = null;
+
+  class LateErrorCodexRpc {
+    private readonly instanceId: number;
+    private readonly onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, onClose: (err: Error) => void) {
+      this.instanceId = ++instanceCount;
+      this.onNotification = onNotification;
+      if (this.instanceId === 1) {
+        turn1Callbacks = { onNotification, onClose };
+      }
+    }
+    async request(method: string) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-late-err' } };
+      if (method === 'thread/resume') return { thread: { id: 'thr-late-err' } };
+      if (method === 'turn/start') {
+        if (this.instanceId === 1) {
+          releaseTurn1AtThreadStart();
+          return new Promise((_, reject) => { triggerTurn1LateRejection = reject; });
+        }
+        setTimeout(() => {
+          turn1Callbacks?.onNotification({
+            method: 'error',
+            params: { willRetry: false, error: { message: 'late turn 1 protocol error' } },
+          });
+          turn1Callbacks?.onClose(new Error('late turn 1 close error'));
+          triggerTurn1LateRejection?.(new Error('late turn 1 turn/start rejection'));
+        }, 15);
+        setTimeout(() => {
+          this.onNotification({
+            method: 'item/completed',
+            params: { item: { id: 'msg-late-2', type: 'agentMessage', text: 'Turn 2 unaffected' } },
+          });
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-late-2', status: 'completed' } },
+          });
+        }, 55);
+        return { turn: { id: 'turn-late-2' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+    async closeAndWait() {}
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: LateErrorCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+
+  await service.start(chat.id, { requestId: 'req-late-1', text: 'Turn 1' }, runtime);
+  await turn1ReadyToSteer;
+
+  await service.start(chat.id, { requestId: 'req-late-2', text: 'Turn 2 steer', followUpBehavior: 'steer' }, runtime);
+  const done = await service.waitForChat(chat.id);
+  assert.equal(done.state, 'idle');
+  assert.equal(done.error, undefined);
+  assert.ok(done.messages.some(m => m.role === 'assistant' && m.text === 'Turn 2 unaffected'));
+  await service.close();
+}));
+
+test('HTTP /motion-api/super-agent uploads, workspace files, file-content, and security guards', () => fixture(async store => {
+  const req = transport(store);
+
+  // 1. Upload general Markdown/UTF-8 file with CJK filename
+  const mdBody = '# Launch Plan\n\nUse primary tokens from the Brand Kit.\n';
+  const uploadRes = await req('/motion-api/super-agent/uploads', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/markdown',
+      'X-File-Name': encodeURIComponent('产品说明 brief.md'),
+    },
+    body: mdBody,
+  });
+  assert.equal(uploadRes.status, 200);
+  const uploadJson = await uploadRes.json() as { attachment: any };
+  assert.equal(uploadJson.attachment.kind, 'file');
+  assert.equal(uploadJson.attachment.rootKey, 'upload');
+  assert.equal(uploadJson.attachment.title, '产品说明 brief.md');
+  assert.equal(uploadJson.attachment.mimeType, 'text/markdown');
+  assert.equal(uploadJson.attachment.sizeBytes, Buffer.byteLength(mdBody));
+
+  // 2. Read upload metadata + text content via ?format=json and raw download
+  const uploadJsonRes = await req(`${uploadJson.attachment.previewUrl}?format=json`);
+  assert.equal(uploadJsonRes.status, 200);
+  const uploadMeta = await uploadJsonRes.json() as any;
+  assert.equal(uploadMeta.binary, false);
+  assert.equal(uploadMeta.content, mdBody);
+
+  const rawDownloadRes = await req(`${uploadJson.attachment.previewUrl}?download=1`);
+  assert.equal(rawDownloadRes.status, 200);
+  assert.match(rawDownloadRes.headers.get('content-disposition') ?? '', /attachment/i);
+  assert.equal(rawDownloadRes.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+  assert.equal(await rawDownloadRes.text(), mdBody);
+
+  const missingUploadRes = await req('/motion-api/super-agent/uploads/nonexistent-id');
+  assert.equal(missingUploadRes.status, 404);
+
+  // 3. Index and read files/folders under a custom workingDir
+  const workDir = path.join(store.directory, 'custom-repo');
+  await mkdir(path.join(workDir, 'docs'), { recursive: true });
+  await mkdir(path.join(workDir, 'src'), { recursive: true });
+  await writeFile(path.join(workDir, 'docs', 'guide.md'), '# Guide\nHello workspace\n');
+  await writeFile(path.join(workDir, 'src', 'index.ts'), 'export const version = 1;\n');
+
+  const filesRes = await req(`/motion-api/super-agent/files?workingDir=${encodeURIComponent(workDir)}&query=guide`);
+  assert.equal(filesRes.status, 200);
+  const filesJson = await filesRes.json() as { items: any[] };
+  const guideItem = filesJson.items.find(item => item.kind === 'file' && item.filePath === 'docs/guide.md');
+  assert.ok(guideItem, 'expected docs/guide.md in listed workspace entries');
+
+  const folderRes = await req(`/motion-api/super-agent/files?workingDir=${encodeURIComponent(workDir)}&query=docs`);
+  assert.equal(folderRes.status, 200);
+  const folderJson = await folderRes.json() as { items: any[] };
+  assert.ok(folderJson.items.some(item => item.kind === 'folder' && item.filePath === 'docs'));
+
+  const contentRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&rootKey=${encodeURIComponent(guideItem.rootKey)}&path=${encodeURIComponent(guideItem.filePath)}`,
+  );
+  assert.equal(contentRes.status, 200);
+  const contentJson = await contentRes.json() as any;
+  assert.equal(contentJson.content, '# Guide\nHello workspace\n');
+  assert.equal(contentJson.binary, false);
+
+  const rawContentRes = await req(contentJson.previewUrl);
+  assert.equal(rawContentRes.status, 200);
+  assert.equal(await rawContentRes.text(), '# Guide\nHello workspace\n');
+
+  const traversalRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&rootKey=${encodeURIComponent(guideItem.rootKey)}&path=${encodeURIComponent('../../etc/passwd')}`,
+  );
+  assert.equal(traversalRes.status, 400);
+
+  // Omitted rootKey resolves both relative and in-root absolute paths safely, while blocking external paths
+  const noRootRelRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent('docs/guide.md')}`,
+  );
+  assert.equal(noRootRelRes.status, 200);
+  const noRootRelJson = await noRootRelRes.json() as any;
+  assert.equal(noRootRelJson.content, '# Guide\nHello workspace\n');
+  const noRootRawRes = await req(noRootRelJson.previewUrl);
+  assert.equal(noRootRawRes.status, 200);
+  assert.equal(await noRootRawRes.text(), '# Guide\nHello workspace\n');
+
+  const noRootAbsRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent(path.join(workDir, 'docs', 'guide.md'))}`,
+  );
+  assert.equal(noRootAbsRes.status, 200);
+  const noRootAbsJson = await noRootAbsRes.json() as any;
+  assert.equal(noRootAbsJson.content, '# Guide\nHello workspace\n');
+
+  const outsideAbsRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent('/etc/passwd')}`,
+  );
+  assert.equal(outsideAbsRes.status, 400);
+  const noRootTraversalRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent('../../etc/passwd')}`,
+  );
+  assert.equal(noRootTraversalRes.status, 400);
+}));
+
+test('Referenced chats (<openmotion-referenced-conversations>), uploaded textExcerpt, and inline segments persistence', () => fixture(async store => {
+  let capturedPrompt = '';
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/claude',
+    runClaude: async ({ prompt, onEvent }) => {
+      capturedPrompt = prompt;
+      await onEvent({ type: 'result', subtype: 'success', result: 'Combined context applied.' });
+    },
+  });
+
+  // 1. Seed a prior conversation with history and an artifact
+  const sourceChat = await service.create({ engine: 'claude', title: 'Sunset Landing Thread', permissionMode: 'auto' });
+  await service.start(sourceChat.id, {
+    requestId: 'req-src-chat-1',
+    text: 'Create a sunset gradient hero section',
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => ({} as Phase1Service),
+  });
+  await service.waitForChat(sourceChat.id);
+  await service.update(sourceChat.id, {
+    addArtifact: {
+      id: 'design-sunset-1',
+      kind: 'design-project',
+      title: 'Sunset Hero',
+      projectId: '11111111-1111-4111-8111-111111111111',
+      scenario: 'prototype',
+    },
+  });
+
+  // 2. Upload an attachment so its textExcerpt also flows into <openmotion-workspace-context>
+  const uploaded = await service.saveUploadedFile('notes.md', Buffer.from('# Spec Notes\nKeep nav height 56px.\n'), 'text/markdown');
+
+  // 3. Reference the prior chat and uploaded file inline via segments + attachments
+  const targetChat = await service.create({ engine: 'claude', permissionMode: 'auto' });
+  const segments = [
+    { type: 'text' as const, text: 'Reuse tokens from ' },
+    { type: 'mention' as const, attachmentKey: `chat:${sourceChat.id}:`, label: 'Sunset Landing Thread', kind: 'chat' as const },
+    { type: 'text' as const, text: ' and follow ' },
+    { type: 'mention' as const, attachmentKey: `file:${uploaded.id}:`, label: 'notes.md', kind: 'file' as const },
+  ];
+
+  await service.start(targetChat.id, {
+    requestId: 'req-ref-chat-1',
+    text: 'Reuse tokens from @Sunset Landing Thread and follow @notes.md',
+    segments,
+    attachments: [
+      {
+        id: sourceChat.id,
+        chatId: sourceChat.id,
+        kind: 'chat',
+        title: 'Sunset Landing Thread',
+        subtitle: '2 messages',
+      },
+      uploaded,
+    ],
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => ({} as Phase1Service),
+  });
+  const doneTarget = await service.waitForChat(targetChat.id);
+
+  assert.match(capturedPrompt, /<openmotion-referenced-conversations>/);
+  assert.match(capturedPrompt, /Sunset Landing Thread/);
+  assert.match(capturedPrompt, /Create a sunset gradient hero section/);
+  assert.match(capturedPrompt, /Sunset Hero/);
+  assert.match(capturedPrompt, /Keep nav height 56px\./);
+
+  const userMsg = doneTarget.messages.find(m => m.role === 'user');
+  assert.equal(userMsg?.segments?.length, 4);
+  assert.equal(userMsg?.segments?.[1]?.type, 'mention');
+  if (userMsg?.segments?.[1]?.type === 'mention') {
+    assert.equal(userMsg.segments[1].kind, 'chat');
+  }
+
+  // 4. Verify queued message retains updated segments
+  const queued = await service.enqueueMessage(targetChat.id, {
+    requestId: 'req-q-seg',
+    text: 'Initial',
+    segments: [{ type: 'text', text: 'Initial' }],
+  });
+  const qId = queued.queuedMessages![0].id;
+  const updatedQ = await service.updateQueuedMessage(targetChat.id, qId, {
+    text: 'Check @notes.md',
+    segments: [
+      { type: 'text', text: 'Check ' },
+      { type: 'mention', attachmentKey: `file:${uploaded.id}:`, label: 'notes.md', kind: 'file' },
+    ],
+  });
+  assert.equal(updatedQ.queuedMessages?.[0]?.segments?.length, 2);
+
+  await service.close();
+}));
+
+test('SuperAgentConversations accepts asset-* present aliases, extracts multiple assets, and long-polls status', () => fixture(async store => {
+  const lib = new AssetLibrary(store);
+  const img1 = await lib.importFile(await (async () => {
+    const file = path.join(store.directory, 'out1.png');
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=32x24', '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  })(), { requestId: 'sa-out-1', name: 'Output 1' });
+  const img2 = await lib.importFile(await (async () => {
+    const file = path.join(store.directory, 'out2.png');
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=green:s=32x24', '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  })(), { requestId: 'sa-out-2', name: 'Output 2' });
+
+  let statusCalls = 0;
+  let presentedResponse: any;
+  let statusResponse: any;
+  const mockPhase1: any = {
+    call: async (name: string, args: any) => {
+      if (name === 'openmotion_assets_use' && args.action === 'status') {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return { job: { id: args.jobId, state: 'queued', modality: 'image' } };
+        }
+        return {
+          job: {
+            id: args.jobId,
+            state: 'completed',
+            modality: 'image',
+            libraryAssets: [
+              { assetId: img1.id, versionId: img1.currentVersionId },
+              { assetId: img2.id, versionId: img2.currentVersionId },
+            ],
+          },
+        };
+      }
+      return { ok: true };
+    },
+  };
+
+  class MediaRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-media-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 301,
+            method: 'item/tool/call',
+            params: {
+              callId: 'poll-1',
+              tool: 'openmotion_assets_use',
+              arguments: { action: 'status', jobId: 'job-multi-1' },
+            },
+          });
+        });
+        return { turn: { id: 'turn-media-1' } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      if (payload.id === 301) {
+        statusResponse = payload.result;
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 302,
+            method: 'item/tool/call',
+            params: {
+              callId: 'present-alias-1',
+              tool: 'openmotion_present_artifact',
+              arguments: { kind: 'asset-image', assetId: img1.id, versionId: img1.currentVersionId },
+            },
+          });
+        });
+      } else if (payload.id === 302) {
+        presentedResponse = payload.result;
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-media-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: MediaRpc as unknown as typeof AssetAgentRpc,
+    statusPollWaitMs: 3_000,
+  });
+
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+  await service.start(chat.id, { requestId: 'req-media-poll-1', text: 'Check media job' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => mockPhase1,
+  });
+  const done = await service.waitForChat(chat.id);
+  assert.equal(statusCalls, 2);
+  assert.equal(statusResponse?.success, true);
+  assert.equal(presentedResponse?.success, true);
+  assert.equal(done.artifacts.length, 2);
+  assert.ok(done.artifacts.some(a => a.assetId === img1.id && typeof a.presentedAt === 'number'));
+  assert.ok(done.artifacts.some(a => a.assetId === img2.id));
+  await service.close();
+}));
+
+test('listTaskWorkspaceEntries ignores custom root directory name in single-root searches and ranks stem matches first', () => fixture(async store => {
+  const customRootDir = path.join(store.directory, 'design_studio_modules_entry');
+  await mkdir(path.join(customRootDir, 'skills', 'demo', 'agents'), { recursive: true });
+  await writeFile(path.join(customRootDir, 'AGENTS.md'), '# Agents\n');
+  await writeFile(path.join(customRootDir, 'README.md'), '# Readme\n');
+  await writeFile(path.join(customRootDir, 'design-spec.md'), '# Design Spec\n');
+
+  const roots = [
+    {
+      key: `custom:${customRootDir}`,
+      kind: 'custom' as const,
+      dir: customRootDir,
+      label: 'design_studio_modules_entry',
+    },
+  ];
+
+  const agentMatches = await listTaskWorkspaceEntries(roots, { query: 'AGENTS' });
+  assert.ok(agentMatches.length >= 2);
+  assert.equal(agentMatches[0]?.filePath, 'AGENTS.md');
+  assert.equal(agentMatches[0]?.kind, 'file');
+
+  const designMatches = await listTaskWorkspaceEntries(roots, { query: 'design' });
+  assert.equal(designMatches.some(item => item.filePath === 'design-spec.md'), true);
+  assert.equal(designMatches.some(item => item.filePath === 'README.md'), false);
+}));
+
+test('formatBrowserAnnotationsContext serializes Motion, Design comment, and code selections clearly', () => {
+  const ctx = formatBrowserAnnotationsContext([
+    {
+      id: 'att-motion',
+      kind: 'browser-annotation',
+      title: 'Headline · 2.4s',
+      annotation: {
+        mode: 'motion-selection',
+        pageUrl: '/#project/mproj-1',
+        pageTitle: 'Product Reel',
+        artifactId: 'motion:mproj-1',
+        artifactKind: 'motion-project',
+        projectId: 'mproj-1',
+        compositionPath: 'scenes/intro.html',
+        filePath: 'scenes/intro.html',
+        timeSec: 2.4,
+        durationSec: 10,
+        fps: 30,
+        timeRange: { start: 1.5, end: 4.5 },
+        keyframeCount: 2,
+        timelineClips: [
+          {
+            id: 'clip-hero',
+            label: 'Hero Headline',
+            kind: 'text',
+            start: 1.5,
+            duration: 3.0,
+            track: 1,
+            sourceFile: 'scenes/intro.html',
+            selector: '#hero-title',
+          },
+        ],
+        selectedElements: [
+          {
+            label: 'Hero Headline',
+            tagName: 'h1',
+            selector: '#hero-title',
+            hfId: 'hf-1',
+            sourceFile: 'scenes/intro.html',
+            text: 'Launch Day',
+          },
+        ],
+        comment: 'Soften the blur entrance.',
+      },
+    },
+    {
+      id: 'att-design-comment',
+      kind: 'browser-annotation',
+      title: 'Slide #3 spacing',
+      annotation: {
+        mode: 'design-comment',
+        pageUrl: '/motion-api/design/raw/dproj-1/deck.html',
+        pageTitle: 'Launch Deck',
+        artifactKind: 'design-project',
+        projectId: 'dproj-1',
+        filePath: 'deck.html',
+        slideIndex: 2,
+        slideCount: 8,
+        commentId: 'cmt-42',
+        comment: 'Increase card gap',
+      },
+    },
+    {
+      id: 'att-code',
+      kind: 'browser-annotation',
+      title: 'index.html L12-L15',
+      annotation: {
+        mode: 'code-selection',
+        pageUrl: '/motion-api/design/raw/dproj-1/index.html',
+        artifactKind: 'design-project',
+        projectId: 'dproj-1',
+        filePath: 'index.html',
+        lineRange: { start: 12, end: 15 },
+        codeSnippet: '<section class="hero">\n  <h1>Hello</h1>\n</section>',
+      },
+    },
+  ]);
+
+  assert.ok(ctx.includes('"mode": "motion-selection"'));
+  assert.ok(ctx.includes('"projectId": "mproj-1"'));
+  assert.ok(ctx.includes('"compositionPath": "scenes/intro.html"'));
+  assert.ok(ctx.includes('"timeSec": 2.4'));
+  assert.ok(ctx.includes('"durationSec": 10'));
+  assert.ok(ctx.includes('"fps": 30'));
+  assert.ok(ctx.includes('"start": 1.5'));
+  assert.ok(ctx.includes('"end": 4.5'));
+  assert.ok(ctx.includes('"keyframeCount": 2'));
+  assert.ok(ctx.includes('"id": "clip-hero"'));
+  assert.ok(ctx.includes('"selector": "#hero-title"'));
+  assert.ok(ctx.includes('"mode": "design-comment"'));
+  assert.ok(ctx.includes('"slideIndex": 2'));
+  assert.ok(ctx.includes('"slideCount": 8'));
+  assert.ok(ctx.includes('"commentId": "cmt-42"'));
+  assert.ok(ctx.includes('"mode": "code-selection"'));
+  assert.ok(ctx.includes('"start": 12'));
+  assert.ok(ctx.includes('"end": 15'));
+  assert.ok(ctx.includes('<section class=\\"hero\\">'));
+});
+
+test('extractArtifactFromTool auto-presents created design and motion projects so embedded editor opens automatically', () => fixture(async store => {
+  const createdDesign = await designProjectsFor(store.directory).create({
+    scenario: 'prototype',
+    title: 'Interactive Brief',
+    requestId: 'req-auto-present-design',
+  });
+
+  class AutoPresentRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-autopresent-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 401,
+            method: 'item/tool/call',
+            params: {
+              callId: 'call-design-create',
+              tool: 'openmotion_design_project',
+              arguments: { action: 'create', title: 'Interactive Brief', scenario: 'prototype' },
+            },
+          });
+        });
+        return { turn: { id: 'turn-autopresent-1' } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      if (payload.id === 401) {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 402,
+            method: 'item/tool/call',
+            params: {
+              callId: 'call-motion-create',
+              tool: 'openmotion_create_project',
+              arguments: { name: 'MotionOpener' },
+            },
+          });
+        });
+      } else if (payload.id === 402) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-autopresent-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const mockPhase1: any = {
+    call: async (name: string) => {
+      if (name === 'openmotion_design_project') {
+        return {
+          project: createdDesign,
+          editorUrl: `/design/projects/${createdDesign.id}`,
+          previewUrl: `/motion-api/design/raw/${createdDesign.id}/index.html`,
+        };
+      }
+      if (name === 'openmotion_create_project') {
+        return {
+          projectId: 'MotionOpener',
+          sessionId: 'sess-ap-1',
+          revision: 'rev-ap-1',
+          project: { title: 'MotionOpener' },
+        };
+      }
+      return { ok: true };
+    },
+  };
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: AutoPresentRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+  await service.start(chat.id, { requestId: 'req-ap-1', text: 'Create design and motion' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => mockPhase1,
+  });
+  const done = await service.waitForChat(chat.id);
+  const designArt = done.artifacts.find(a => a.kind === 'design-project' && a.projectId === createdDesign.id);
+  const motionArt = done.artifacts.find(a => a.kind === 'motion-project' && a.projectId === 'MotionOpener');
+  assert.ok(designArt);
+  assert.equal(typeof designArt.presentedAt, 'number');
+  assert.ok(motionArt);
+  assert.equal(typeof motionArt.presentedAt, 'number');
+  await service.close();
 }));

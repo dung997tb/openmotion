@@ -6,6 +6,7 @@ import {
   type DesignSkillSummary, type DesignSystemSummary, type DesignTemplateSummary,
   type DesignVersion,
 } from '../../../shared/design-project';
+import { isClientCacheEnabled } from '../utils/clientCacheMode';
 
 export class DesignApiError extends Error {
   readonly code: string;
@@ -50,17 +51,83 @@ export type DesignScenarioCatalogEntry = {
   examples: readonly string[]; guide: string;
 };
 
+export type DesignTemplatesResponse = { items: DesignTemplateSummary[]; nextCursor: string | null };
+export type DesignSkillsResponse = { skills: DesignSkillSummary[] };
+
+const DESIGN_CATALOG_CACHE_TTL_MS = 60_000;
+const designTemplatesCache = new Map<string, { value: DesignTemplatesResponse; expiresAt: number }>();
+const inflightDesignTemplates = new Map<string, Promise<DesignTemplatesResponse>>();
+const designSkillsCache = new Map<string, { value: DesignSkillsResponse; expiresAt: number }>();
+const inflightDesignSkills = new Map<string, Promise<DesignSkillsResponse>>();
+
+function designTemplatesKey(params: { scenario?: string; q?: string; limit?: number; cursor?: string } = {}): string {
+  return JSON.stringify([params.scenario ?? null, params.q?.trim() || null, params.limit ?? null, params.cursor ?? null]);
+}
+
+function designSkillsKey(params: { scenario?: string; q?: string } = {}): string {
+  return JSON.stringify([params.scenario ?? null, params.q?.trim() || null]);
+}
+
+export function peekCachedDesignTemplates(params: { scenario?: string; q?: string; limit?: number; cursor?: string } = {}): DesignTemplatesResponse | undefined {
+  if (!isClientCacheEnabled()) return undefined;
+  return designTemplatesCache.get(designTemplatesKey(params))?.value;
+}
+
+export function peekCachedDesignSkills(params: { scenario?: string; q?: string } = {}): DesignSkillSummary[] | undefined {
+  if (!isClientCacheEnabled()) return undefined;
+  return designSkillsCache.get(designSkillsKey(params))?.value.skills;
+}
+
+export function clearDesignCatalogCache(): void {
+  designTemplatesCache.clear();
+  inflightDesignTemplates.clear();
+  designSkillsCache.clear();
+  inflightDesignSkills.clear();
+}
+
+export function prefetchDesignScene(scenario?: string): void {
+  if (!isClientCacheEnabled()) return;
+  const tplParams = { scenario: scenario ?? 'prototype', limit: 24 };
+  const tplCached = designTemplatesCache.get(designTemplatesKey(tplParams));
+  if (!tplCached || tplCached.expiresAt <= Date.now()) {
+    void designClient.listTemplates(tplParams).catch(() => {});
+  }
+  const skillCached = designSkillsCache.get(designSkillsKey());
+  if (!skillCached || skillCached.expiresAt <= Date.now()) {
+    void designClient.listSkills().catch(() => {});
+  }
+}
+
 export const designClient = {
   // Catalog
   listScenarios: () => requestJson<{ scenarios: DesignScenarioCatalogEntry[] }>(designRoutes.catalogScenarios),
   listTemplates: (params: { scenario?: string; q?: string; limit?: number; cursor?: string } = {}) => {
+    const key = designTemplatesKey(params);
+    if (isClientCacheEnabled()) {
+      const cached = designTemplatesCache.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        return Promise.resolve(cached.value);
+      }
+    }
+    const pending = inflightDesignTemplates.get(key);
+    if (pending) return pending;
+
     const search = new URLSearchParams();
     if (params.scenario) search.set('scenario', params.scenario);
     if (params.q) search.set('q', params.q);
     if (params.limit) search.set('limit', String(params.limit));
     if (params.cursor) search.set('cursor', params.cursor);
     const qs = search.toString();
-    return requestJson<{ items: DesignTemplateSummary[]; nextCursor: string | null }>(`${designRoutes.catalogTemplates}${qs ? `?${qs}` : ''}`);
+    const run = requestJson<DesignTemplatesResponse>(`${designRoutes.catalogTemplates}${qs ? `?${qs}` : ''}`).then(res => {
+      if (isClientCacheEnabled()) {
+        designTemplatesCache.set(key, { value: res, expiresAt: Date.now() + DESIGN_CATALOG_CACHE_TTL_MS });
+      }
+      return res;
+    });
+    inflightDesignTemplates.set(key, run);
+    return run.finally(() => {
+      if (inflightDesignTemplates.get(key) === run) inflightDesignTemplates.delete(key);
+    });
   },
   listSystems: (params: { q?: string; category?: string } = {}) => {
     const search = new URLSearchParams();
@@ -70,11 +137,30 @@ export const designClient = {
     return requestJson<{ systems: DesignSystemSummary[] }>(`${designRoutes.catalogSystems}${qs ? `?${qs}` : ''}`);
   },
   listSkills: (params: { scenario?: string; q?: string } = {}) => {
+    const key = designSkillsKey(params);
+    if (isClientCacheEnabled()) {
+      const cached = designSkillsCache.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        return Promise.resolve(cached.value);
+      }
+    }
+    const pending = inflightDesignSkills.get(key);
+    if (pending) return pending;
+
     const search = new URLSearchParams();
     if (params.scenario) search.set('scenario', params.scenario);
     if (params.q) search.set('q', params.q);
     const qs = search.toString();
-    return requestJson<{ skills: DesignSkillSummary[] }>(`${designRoutes.catalogSkills}${qs ? `?${qs}` : ''}`);
+    const run = requestJson<DesignSkillsResponse>(`${designRoutes.catalogSkills}${qs ? `?${qs}` : ''}`).then(res => {
+      if (isClientCacheEnabled()) {
+        designSkillsCache.set(key, { value: res, expiresAt: Date.now() + DESIGN_CATALOG_CACHE_TTL_MS });
+      }
+      return res;
+    });
+    inflightDesignSkills.set(key, run);
+    return run.finally(() => {
+      if (inflightDesignSkills.get(key) === run) inflightDesignSkills.delete(key);
+    });
   },
 
   // Projects

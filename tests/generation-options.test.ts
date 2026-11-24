@@ -24,6 +24,8 @@ import type { AccountSummary } from '../shared/provider-directory.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+const fixtureJobId = 'a8dafdad-86ed-47e1-ac9a-8392cc71a52e';
+
 for (const provider of ['opendesign', 'account']) for (const modelId of ['wan-2.7', 'doubao-seedance-2-5-260628']) {
   test(`${provider}:${modelId} first-frame parameters follow the image without inheriting a fixed ratio`, () => {
     const model: Model = { id: `${provider}:${modelId}`, provider, modelId, label: modelId, modality: 'video', mode: 'text-to-video', source: 'live',
@@ -60,7 +62,8 @@ test('account first-frame video rejects fixed ratios before running the connecto
   const calls: string[][] = [];
   const account = new OpenDesignAccount(store.directory, {
     pollMs: 0,
-    run: async args => {
+    run: async (args, _signal, env) => {
+      assert.deepEqual(env, args[1] === 'gen' ? { VELA_SOURCE_PRODUCT: 'openmotion', VELA_OPENMOTION_JOB_ID: fixtureJobId } : undefined);
       calls.push(args);
       if (args[1] === 'gen') return JSON.stringify({ task_id: `task-${calls.length}` });
       if (args[1] === 'get') {
@@ -74,7 +77,7 @@ test('account first-frame video rejects fixed ratios before running the connecto
   account.identity = async () => 'fixture-session';
   account.summary = async () => ({ state: 'signed-in' } as AccountSummary);
   const model: Model = { id: 'account:wan-2.7', provider: 'account', modelId: 'wan-2.7', label: 'Wan', modality: 'video', mode: 'text-to-video', source: 'live', maxInputImages: 1, defaults: { ratio: '16:9' } };
-  const job = { model, modality: 'video', prompt: 'Walk forward', providerOrigin: 'fixture-session', parameters: { ratio: '16:9' } } as GenerationJob;
+  const job = { id: fixtureJobId, model, modality: 'video', prompt: 'Walk forward', providerOrigin: 'fixture-session', parameters: { ratio: '16:9' } } as GenerationJob;
   try {
     const run = (parameters: Record<string, unknown>, target: GenerationJob = job) => account.generate({ ...target, parameters }, store.directory, new AbortController().signal, async () => {}, 'first-frame.png');
     await assert.rejects(run({ ratio: '16:9' }), /First-frame video/);
@@ -97,6 +100,11 @@ test('account image jobs with a transparent background or several references go 
   let submitResponse = () => Response.json({ task_id: 'task-1', status: 'queued' }, { status: 202 });
   const fetcher = (async (input: any, init: any = {}) => {
     const url = String(input), method = init.method ?? 'GET';
+    const headers = new Headers(init.headers);
+    const isSubmission = method === 'POST' && /\/images\/(edits|generations)$/.test(url);
+    assert.equal(headers.get('X-Source-Product'), isSubmission ? 'openmotion' : null);
+    assert.equal(headers.get('X-OpenMotion-Job-Id'), isSubmission ? fixtureJobId : null);
+    if (isSubmission) assert.equal(headers.get('Idempotency-Key'), fixtureJobId);
     calls.push({ url, method, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined, auth: init.headers?.Authorization });
     if (url.startsWith('https://storage.example/')) return new Response(null, { status: 200 });
     const api = url.replace('https://amr-api.open-design.ai/api/v1/media', '');
@@ -115,7 +123,7 @@ test('account image jobs with a transparent background or several references go 
   await writeFile(path.join(account.home, 'config.json'), JSON.stringify({ profiles: { prod: { user: { id: 'test' }, controlKey: 'test-control', controlKeyId: 'test-id', runtimeKey: 'test-runtime' } } }));
   const references = await Promise.all(['one', 'two'].map(async name => { const file = path.join(store.directory, name + '.png'); await writeFile(file, png); return { file, mimeType: 'image/png', bytes: png.length }; }));
   const model: Model = { id: 'account:gpt-image-2.6-sunburst', provider: 'account', modelId: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst', modality: 'image', mode: 'text-to-image', source: 'live', supportsImageReference: true, maxInputImages: 16 };
-  const job = { id: 'job-1', model, modality: 'image', prompt: 'Keep only the speaker.', providerOrigin: 'fixture-session', parameters: { background: 'transparent', quality: 'low' } } as unknown as GenerationJob;
+  const job = { id: fixtureJobId, model, modality: 'image', prompt: 'Keep only the speaker.', providerOrigin: 'fixture-session', parameters: { background: 'transparent', quality: 'low' } } as unknown as GenerationJob;
   const run = (input: GenerationJob, inputs = references.slice(0, 1)) => account.generate(input, store.directory, new AbortController().signal, async () => {}, inputs[0]?.file, inputs);
   try {
     await run(job);
@@ -534,12 +542,17 @@ test('OpenDesign Cloud packs image aspect_ratio and resolution into output, pres
     },
   };
   const unprofiled: Model = { id: 'opendesign:custom-image', provider: 'opendesign', modelId: 'custom-image', label: 'Custom Image', modality: 'image', mode: 'text-to-image', source: 'live' };
-  const run = async (target: Model, parameters: Record<string, unknown>) => providerAdapters.opendesign.generate(
-    { id: 'job-1', model: target, modality: 'image', prompt: 'A poster', parameters } as GenerationJob,
+  const run = async (target: Model, parameters: Record<string, unknown>, baseUrl = 'https://cloud.example') => providerAdapters.opendesign.generate(
+    { id: fixtureJobId, model: target, modality: 'image', prompt: 'A poster', parameters } as GenerationJob,
     {
-      key: 'fixture-only', baseUrl: 'https://cloud.example', signal: new AbortController().signal, progress: async () => {}, pollMs: 0,
+      key: 'fixture-only', baseUrl, signal: new AbortController().signal, progress: async () => {}, pollMs: 0,
       fetcher: async (url, init) => {
+        const headers = new Headers(init?.headers);
+        const accountSubmission = init?.method === 'POST' && baseUrl === 'https://amr-api.open-design.ai';
+        assert.equal(headers.get('X-Source-Product'), accountSubmission ? 'openmotion' : null);
+        assert.equal(headers.get('X-OpenMotion-Job-Id'), accountSubmission ? fixtureJobId : null);
         if (init?.method === 'POST') {
+          assert.equal(headers.get('Idempotency-Key'), fixtureJobId);
           bodies.push(JSON.parse(String(init.body)));
           return Response.json({ task_id: 'task_1' });
         }
@@ -548,7 +561,7 @@ test('OpenDesign Cloud packs image aspect_ratio and resolution into output, pres
       },
     },
   );
-  await run(model, { aspect_ratio: '9:16', quality: 'high' });
+  await run(model, { aspect_ratio: '9:16', quality: 'high' }, 'https://amr-api.open-design.ai');
   await run(model, { output: { aspect_ratio: '1:1', resolution: '1K' } });
   await run(unprofiled, { aspect_ratio: '16:9', resolution: '2K' });
   assert.deepEqual(bodies[0], { model: 'nano-banana-2', prompt: 'A poster', quality: 'high', output: { aspect_ratio: '9:16', resolution: '2K' } });
@@ -692,10 +705,10 @@ const placeholderOpenDesignModel = (provider: 'opendesign' | 'account', modelId:
 
 test('existing OpenDesign image and video models keep exact feature eligibility across Cloud, account and placeholders', () => {
   const imageMatrix: [string, Record<ImageFeatureId, boolean>][] = [
-    ['gpt-image-2.6-sunburst', { 'remove-background': true, relight: true, character: true }],
-    ['gpt-image-2.6-flare', { 'remove-background': true, relight: true, character: true }],
-    ['seedream-5.5', { 'remove-background': false, relight: true, character: true }],
-    ['seedream-5.0-flash', { 'remove-background': false, relight: true, character: true }],
+    ['gpt-image-2.6-sunburst', { 'remove-background': true, relight: true, 'image-blend': true }],
+    ['gpt-image-2.6-flare', { 'remove-background': true, relight: true, 'image-blend': true }],
+    ['seedream-5.5', { 'remove-background': false, relight: true, 'image-blend': false }],
+    ['seedream-5.0-flash', { 'remove-background': false, relight: true, 'image-blend': true }],
   ];
   const videoMatrix: [string, Record<VideoFeatureId, boolean>][] = [
     ['doubao-seedance-2-5-260628', { 'camera-control': true, 'multi-shot': true }],
@@ -762,10 +775,11 @@ test('modelCapabilities derives image edit, reference limits and transparent bac
 
   assert.equal(imageFeatureSupported('remove-background', futureTransparent), true);
   assert.equal(imageFeatureSupported('relight', futureTransparent), true);
-  assert.equal(imageFeatureSupported('character', futureTransparent), true);
+  assert.equal(imageFeatureSupported('image-blend', futureTransparent), true);
   assert.equal(imageFeatureSupported('relight', futureNoEdit), false);
-  assert.equal(imageFeatureSupported('character', futureNoEdit), false);
+  assert.equal(imageFeatureSupported('image-blend', futureNoEdit), false);
   assert.equal(imageFeatureSupported('remove-background', zeroRefI2i), false);
+  assert.equal(imageFeatureCapable('image-blend', codex), false);
 
   // Pure capability checks remain provider-agnostic, while Studio feature checks scope to OpenDesign.
   assert.equal(imageFeatureCapable('remove-background', codex), true);
@@ -883,3 +897,51 @@ test('cloudModels populates measured maxInputImages when OpenDesign Cloud omits 
   assert.equal(byId.get('seedream-5.5'), 1);
   assert.equal(byId.get('future-unknown-image'), 1);
 });
+
+test('SSOT metadata attaches standardKey and tier to generationOptions and gateway enriches registry-backed models', () => fixture(async store => {
+  const codexImage: Model = {
+    id: 'codex:image-generation',
+    provider: 'codex',
+    modelId: 'image-generation',
+    label: 'Codex Image',
+    modality: 'image',
+    mode: 'text-to-image',
+    source: 'builtin',
+  };
+  const codexOpts = generationOptions(codexImage)!;
+  assert.equal(codexOpts.fields[0].standardKey, 'aspectRatio');
+  assert.equal(codexOpts.fields[0].tier, 'primary');
+  assert.equal(codexOpts.fields[1].standardKey, 'background');
+  assert.equal(codexOpts.fields[1].tier, 'primary');
+
+  const nano = builtinModels.find(m => m.id === 'atlascloud:google/nano-banana-2/text-to-image')!;
+  const nanoOpts = generationOptions(nano)!;
+  assert.equal(nanoOpts.fields.find(f => f.key === 'aspect_ratio')?.tier, 'primary');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'resolution')?.tier, 'primary');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'output_format')?.tier, 'advanced');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'seed')?.standardKey, 'seed');
+  assert.equal(nanoOpts.fields.find(f => f.key === 'seed')?.tier, 'advanced');
+
+  const gateway = gatewayFor(store);
+  try {
+    await mkdir(gateway.root, { recursive: true });
+    const cachedModel: Model = {
+      id: 'fal:alibaba/wan-3.0-prime/image-to-video',
+      provider: 'fal',
+      modelId: 'alibaba/wan-3.0-prime/image-to-video',
+      label: 'Wan 3.0 Prime',
+      modality: 'video',
+      mode: 'image-to-video',
+      source: 'live',
+    };
+    await writeFile(path.join(gateway.root, 'catalog.json'), JSON.stringify([cachedModel]));
+    const models = await gateway.models();
+    const enriched = models.find(m => m.id === cachedModel.id);
+    assert.ok(enriched?.generationOptions, 'Expected ModelGateway to enrich live fal model from @openmotion/multimodal-models');
+    assert.equal(enriched!.generationOptions!.fields.find(f => f.key === 'resolution')?.tier, 'primary');
+    assert.equal(enriched!.generationOptions!.fields.find(f => f.key === 'duration')?.standardKey, 'duration');
+    assert.equal(enriched!.generationOptions!.fields.find(f => f.key === 'seed')?.tier, 'advanced');
+  } finally {
+    gateway.close();
+  }
+}));

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import type { ScenarioRun, ScenarioRunSummary, StepIteration } from '../../../shared/scenario-runs';
 import { findScenario, scenarioDefinitions, scenarioSkills } from '../../../shared/scenarios';
+import { studioScenes } from '../../../shared/studio-catalog';
 import { I18nProvider } from '../i18n/I18n';
 import { IterationHistory } from './IterationHistory';
 import { ScenarioHub } from './ScenarioHub';
@@ -91,6 +92,8 @@ describe('ScenarioWorkspace', () => {
       if (command === 'get') return jsonResponse({ run });
       if (command === 'list') return jsonResponse({ runs: [], nextOffset: null });
       if (command === 'export') {
+        expect(body.arguments.scenario.activeOnly).toBe(false);
+        expect(body.arguments.scenario.locale).toBe('en');
         return jsonResponse({
           run,
           bundle: {
@@ -183,6 +186,115 @@ describe('ScenarioWorkspace', () => {
       .map(el => el.textContent)
       .join('\n');
     expect(feedbackText).toContain('Copied. Paste into your Agent.');
+  });
+
+  it('validates the image-to-video first frame before Next and lets both asset pickers reopen', async () => {
+    const scenario = findScenario('motion-full-chain')!;
+    const defaultStep = makeRun().steps.brief;
+    const steps = Object.fromEntries(scenario.steps.map(step => [
+      step.id, { ...defaultStep, stepId: step.id },
+    ]));
+    const asset = { source: 'workspace' as const, stepId: null, tags: [], pinned: false, addedAt: 1 };
+    let run = makeRun({
+      scenarioId: scenario.id, activeStepId: 'motion-film', steps, pool: [
+        { ...asset, id: 'image-1', kind: 'image', label: 'Opening shot', ref: { type: 'asset', assetId: 'asset-1', versionId: 'version-1' } },
+        { ...asset, id: 'image-2', kind: 'image', label: 'Closing shot', ref: { type: 'asset', assetId: 'asset-2', versionId: 'version-2' } },
+        { ...asset, id: 'audio-1', kind: 'audio', label: 'Background music', ref: { type: 'asset', assetId: 'asset-3', versionId: 'version-3' } },
+      ],
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).includes('/motion-api/integration')) return jsonResponse({});
+      const args = JSON.parse(String(init?.body ?? '{}')).arguments?.scenario;
+      if (args?.command === 'update_step') {
+        const current = run.steps[args.stepId];
+        run = {
+          ...run,
+          revision: run.revision + 1,
+          steps: {
+            ...run.steps,
+            [args.stepId]: { ...current, bindings: { ...current.bindings, ...args.bindings } },
+          },
+        };
+      }
+      return jsonResponse({ run });
+    });
+    const onRoute = vi.fn();
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <ScenarioWorkspace
+            scenarioId={scenario.id}
+            runId={RUN_ID}
+            stepId="motion-film"
+            active
+            onRoute={onRoute}
+            onExplore={vi.fn()}
+            onOpenHub={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn().mockResolvedValue(true)}
+            onOpenModelHub={vi.fn()}
+            onOpenBlackFriday={vi.fn()}
+            onOpenTemplateLibrary={vi.fn()}
+            onOpenStudioScene={vi.fn()}
+            onOpenProviders={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+
+    const firstFrame = container.querySelector<HTMLElement>('[data-slot="firstFrame"]')!;
+    const next = container.querySelector<HTMLButtonElement>('.om-scenario-primary-cta')!;
+    const error = () => firstFrame.querySelector('[role="alert"]');
+    const clickMode = async (sceneId: 'text-to-video' | 'image-to-video') => {
+      const label = studioScenes.find(scene => scene.id === sceneId)?.label;
+      const mode = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find(button => button.textContent?.trim() === label)!;
+      await act(async () => { mode.click(); });
+    };
+    expect(error()).toBeNull();
+    await act(async () => { next.click(); });
+    expect(onRoute).not.toHaveBeenCalled();
+    expect(error()?.textContent).toBe('Choose a first frame to continue.');
+    expect(firstFrame.querySelector('[aria-invalid="true"]')).toBeTruthy();
+    expect(document.activeElement).toBe(firstFrame.querySelector('.om-step-binding-pick-btn'));
+
+    await clickMode('text-to-video');
+    expect(error()).toBeNull();
+    await act(async () => { next.click(); });
+    expect(onRoute).toHaveBeenLastCalledWith({ run: RUN_ID, step: 'soundtrack' }, false);
+    onRoute.mockClear();
+
+    await clickMode('image-to-video');
+    await act(async () => { next.click(); });
+    expect(onRoute).not.toHaveBeenCalled();
+
+    for (const [slot, kind, count] of [['firstFrame', 'image', 2], ['soundtrack', 'audio', 1]] as const) {
+      const pick = container.querySelector<HTMLButtonElement>(`[data-slot="${slot}"] .om-step-binding-pick-btn`)!;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await act(async () => { pick.click(); });
+        const panel = document.querySelector('#om-scenario-pool')!;
+        expect(panel.querySelector('.om-scenario-pool-title-group .om-badge')?.textContent?.trim()).toBe(String(count));
+        const cards = Array.from(panel.querySelectorAll<HTMLElement>('[data-pool-item]'));
+        expect(cards.map(card => card.dataset.kind)).toEqual(Array(count).fill(kind));
+        const close = panel.querySelector<HTMLButtonElement>('[aria-label="Close assets"], [aria-label="Collapse assets"]')!;
+        await act(async () => { close.click(); });
+        expect(pick.disabled).toBe(false);
+      }
+    }
+
+    const pick = firstFrame.querySelector<HTMLButtonElement>('.om-step-binding-pick-btn')!;
+    await act(async () => { pick.click(); });
+    const panel = document.querySelector('#om-scenario-pool')!;
+    const image = panel.querySelector<HTMLElement>('[data-pool-item] [role="checkbox"]')!;
+    await act(async () => { image.click(); });
+    const apply = Array.from(panel.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.trim() === 'Use 1 selected')!;
+    await act(async () => { apply.click(); });
+    expect(firstFrame.querySelector('[data-pool-item-id]')).toBeTruthy();
+    expect(error()).toBeNull();
+    await act(async () => { next.click(); });
+    expect(onRoute).toHaveBeenLastCalledWith({ run: RUN_ID, step: 'soundtrack' }, false);
   });
 
   it('renders ScenarioHub category tabs and recent runs with resume and archive actions', async () => {
@@ -400,6 +512,71 @@ describe('ScenarioWorkspace', () => {
     expect(comparePanel?.textContent).toContain('Compare v2 and v1');
   });
 
+  it('shows only changed brief fields in version order and highlights separate edits', async () => {
+    const scenario = findScenario('motion-full-chain')!;
+    const previous = {
+      idea: '片头用红色，中间保留原样，结尾用蓝色。',
+      audience: '短视频创作者',
+      tone: 'premium',
+      concept: '旧主题',
+    };
+    const latest = {
+      idea: '片头用绿色，中间保留原样，结尾用金色。',
+      audience: previous.audience,
+      tone: 'bold',
+      visualStyle: '杂志风',
+    };
+    const iterations = [previous, latest, latest].map((values, index): StepIteration => ({
+      id: [ITER_1, ITER_2, ITER_3][index],
+      number: index + 1,
+      createdAt: 1700000000000 + index,
+      source: 'manual',
+      inputs: [],
+      outputs: [{ type: 'brief', values }],
+    }));
+    const onAction = vi.fn(async () => {});
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="zh-CN">
+          <IterationHistory
+            step={scenario.steps[0]}
+            state={{ ...makeRun().steps.brief, iterations, activeIterationId: ITER_3 }}
+            briefFields={scenario.briefFields}
+            renderOutput={() => <p>Version preview</p>}
+            onPromote={onAction}
+            onUseSettings={onAction}
+            onSaveNote={onAction}
+            onRetry={onAction}
+            onCancel={onAction}
+          />
+        </I18nProvider>,
+      );
+    });
+
+    const selectCompare = async (id: string) => {
+      const button = container.querySelector<HTMLButtonElement>(`[data-iteration-id="${id}"] button[aria-pressed]`)!;
+      await act(async () => { button.click(); });
+    };
+    await selectCompare(ITER_2);
+    await selectCompare(ITER_1);
+    const panel = container.querySelector<HTMLElement>('.om-scenario-compare-panel')!;
+    expect(panel.textContent).toContain('对比版本 1 与版本 2');
+    expect(panel.textContent).toContain('有变化的字段（4）');
+    expect(panel.textContent).not.toContain('目标受众');
+    expect(panel.querySelector('[data-brief-change="idea"] del')?.textContent).toBe('红色');
+    expect(Array.from(panel.querySelectorAll('[data-brief-change="idea"] ins'), node => node.textContent)).toEqual(['绿色', '金色']);
+    expect(panel.querySelector('[data-brief-change="tone"] del')?.textContent).toBe('高级质感');
+    expect(panel.querySelector('[data-brief-change="concept"]')?.textContent).toContain('未设置');
+    expect(panel.querySelector('[data-brief-change="visualStyle"] ins')?.textContent).toBe('杂志风');
+    expect(container.querySelector('.om-scenario-history-strip')).toBeNull();
+
+    await act(async () => { panel.querySelector('button')!.click(); });
+    expect(container.querySelectorAll('[data-iteration-id]')).toHaveLength(3);
+    await selectCompare(ITER_3);
+    await selectCompare(ITER_2);
+    expect(container.querySelector('.om-scenario-compare-panel')?.textContent).toContain('两个版本的字段内容一致。');
+  });
+
   it('supports desktop shared assets separator keyboard & pointer resizing within 240..520, dblclick reset to 320, and localStorage persistence', async () => {
     const run = makeRun();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
@@ -597,6 +774,14 @@ describe('ScenarioWorkspace', () => {
     expect(bodyEl.getAttribute('data-pool-collapsed')).toBe('false');
     expect(poolAside.hidden).toBe(false);
     expect(localStorage.getItem('opendesign.scenario.poolCollapsed')).toBe('false');
+    expect(poolAside.textContent).toContain('Select assets for embedImages');
+
+    await act(async () => {
+      poolAside.querySelector<HTMLButtonElement>('button[aria-label="Collapse assets"]')!.click();
+    });
+    expect(chooseAssetsBtn.disabled).toBe(false);
+    await act(async () => { chooseAssetsBtn.click(); });
+    expect(poolAside.hidden).toBe(false);
     expect(poolAside.textContent).toContain('Select assets for embedImages');
   });
 
@@ -979,6 +1164,87 @@ describe('ScenarioWorkspace', () => {
     expect(document.querySelector('.motion-feedback-layer [role="status"]')?.textContent).toContain(
       'Copied. Paste into your Agent.',
     );
+  });
+
+  it('waits for Agent edits before creating a draft and keeps the edits available after a save failure', async () => {
+    let originalRun = makeRun();
+    const newRun = makeRun({ id: ITER_3, title: 'New campaign', brief: {} });
+    const onRoute = vi.fn();
+    const commands: string[] = [];
+    let finishSave: (() => void) | undefined;
+    let rejectSave = true;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const args = JSON.parse(String(init?.body ?? '{}')).arguments?.scenario;
+      if (args?.command === 'get') return jsonResponse({ run: originalRun });
+      if (args?.command === 'list') return jsonResponse({ runs: [], nextOffset: null });
+      if (args?.command === 'update_brief') {
+        commands.push('save');
+        expect(args.runId).toBe(RUN_ID);
+        if (rejectSave) return jsonResponse({ error: 'Save unavailable' }, 500);
+        await new Promise<void>(resolve => { finishSave = resolve; });
+        originalRun = { ...originalRun, brief: { ...originalRun.brief, ...args.brief }, revision: originalRun.revision + 1 };
+        return jsonResponse({ run: originalRun });
+      }
+      if (args?.command === 'create') {
+        commands.push('create');
+        return jsonResponse({ run: newRun });
+      }
+      return jsonResponse({});
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <ScenarioWorkspace
+            scenarioId="black-friday"
+            runId={RUN_ID}
+            stepId="brief"
+            mode="agent"
+            active
+            onRoute={onRoute}
+            onExplore={vi.fn()}
+            onOpenHub={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn().mockResolvedValue(true)}
+            onOpenModelHub={vi.fn()}
+            onOpenBlackFriday={vi.fn()}
+            onOpenTemplateLibrary={vi.fn()}
+            onOpenStudioScene={vi.fn()}
+            onOpenProviders={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+
+    const product = container.querySelector<HTMLInputElement>('[data-agent-field="productName"] input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(product, 'Updated Weekender');
+      product.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    async function clickNewDraft() {
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-scenario-run-switcher]')!.click();
+      });
+      const newDraft = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === 'New draft')!;
+      await act(async () => { newDraft.click(); });
+    }
+
+    await clickNewDraft();
+    expect(commands).toEqual(['save']);
+    expect(onRoute).not.toHaveBeenCalled();
+    expect(product.value).toBe('Updated Weekender');
+
+    rejectSave = false;
+    await clickNewDraft();
+    expect(commands).toEqual(['save', 'save']);
+    expect(onRoute).not.toHaveBeenCalled();
+    await act(async () => { finishSave!(); });
+    expect(commands).toEqual(['save', 'save', 'create']);
+    expect(originalRun.brief.productName).toBe('Updated Weekender');
+    expect(product.value).toBe('');
+    expect(onRoute).toHaveBeenCalledWith({ run: newRun.id }, false);
   });
 
   it('opens a specific step in Step by step mode from Skills workflow and toggles Preview prompt', async () => {

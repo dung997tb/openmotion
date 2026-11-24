@@ -1,4 +1,5 @@
-import type { SuperAgentArtifact, SuperAgentResourceAttachment } from './super-agent.ts';
+import { isDesignScenario } from './design-project.ts';
+import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentDesignModuleId, SuperAgentResourceAttachment } from './super-agent.ts';
 
 export type CapabilityDomainId =
   | 'motion'
@@ -58,7 +59,7 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
   {
     id: 'game',
     title: 'Game Studio',
-    description: 'Build, validate, simulate, playtest, capture covers, and publish single-player or multiplayer HTML games.',
+    description: 'Build, validate, simulate, playtest, capture covers, and publish single-player HTML games.',
     tools: [
       'openmotion_game_create',
       'openmotion_game_get',
@@ -81,6 +82,10 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
     title: 'Media Models & Generation',
     description: 'Discover configured providers and models to generate or edit images, videos, music, SFX, and speech.',
     tools: [
+      'openmotion_capability_discover',
+      'openmotion_capability_run',
+      'openmotion_job_manage',
+      'openmotion_asset_manage',
       'openmotion_media_use',
       'openmotion_assets_use',
     ],
@@ -92,6 +97,7 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
     title: 'Brand Kits',
     description: 'Extract and reuse brand styles, palettes, typography, logos, and visual rules across every workflow.',
     tools: [
+      'openmotion_asset_manage',
       'openmotion_assets_use',
       'openmotion_design_catalog',
     ],
@@ -227,9 +233,14 @@ export type CapabilityResourceRef =
 
 export type SuperAgentHandoffPayload = {
   prompt: string;
+  /** Optional Skill/workflow execution context passed to the Agent behind the scenes without cluttering the user's visible message. */
+  hiddenInstructions?: string;
   attachments?: SuperAgentResourceAttachment[];
+  /** Concise mode/skill and parameter tags displayed above the user message bubble. */
+  contextTags?: SuperAgentContextTag[];
   initialArtifact?: Partial<SuperAgentArtifact>;
-  mode?: 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
+  mode?: 'game' | 'design' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
+  designModule?: SuperAgentDesignModuleId;
   title?: string;
   autoSend?: boolean;
   newChat?: boolean;
@@ -427,15 +438,24 @@ export function buildResourceMcpPrompt(
   }
 }
 
+function defaultDesignModuleForRef(ref: CapabilityResourceRef): SuperAgentDesignModuleId | undefined {
+  switch (ref.kind) {
+    case 'design-template':
+    case 'design-skill':
+      return isDesignScenario(ref.scenario) ? ref.scenario : 'prototype';
+    case 'brand-kit':
+      return 'prototype';
+    default:
+      return undefined;
+  }
+}
+
 function defaultModeForRef(ref: CapabilityResourceRef): SuperAgentHandoffPayload['mode'] {
   switch (ref.kind) {
     case 'design-template':
     case 'design-skill':
-      return ref.scenario === 'deck' || ref.scenario === 'document'
-        ? 'deck'
-        : ref.scenario === 'webgl'
-          ? 'game'
-          : 'website';
+    case 'brand-kit':
+      return 'design';
     case 'motion-template':
     case 'skill':
       return 'motion';
@@ -445,10 +465,35 @@ function defaultModeForRef(ref: CapabilityResourceRef): SuperAgentHandoffPayload
     case 'model':
     case 'scene-prompt':
       return ref.modality === 'audio' ? 'audio' : ref.modality === 'video' ? 'media' : 'image';
-    case 'brand-kit':
-      return 'website';
     case 'workflow':
       return 'motion';
+  }
+}
+
+function buildCompactResourceDirective(ref: CapabilityResourceRef): string {
+  switch (ref.kind) {
+    case 'motion-template':
+      return `Use Motion Studio template "${ref.title}" (id="${ref.id}"). Read workflow "${ref.workflow || 'template'}" if needed, build an editable Motion project inspired by this template, and present it with openmotion_present_artifact(kind="motion-project").`;
+    case 'design-template':
+      return `Use Design Studio template "${ref.title}" (id="${ref.id}", scenario="${ref.scenario || 'prototype'}"). Inspect via openmotion_design_catalog, build a clean HTML project, and open it in the Artifact Viewer.`;
+    case 'skill':
+      return `Apply OpenMotion library Skill "${ref.title}" (id="${ref.id}") via openmotion_get_skill and present the completed deliverable in the Artifact Viewer.`;
+    case 'design-skill':
+      return `Apply Design Studio Skill "${ref.title}" (id="${ref.id}"${ref.scenario ? `, scenario="${ref.scenario}"` : ''}) via openmotion_design_catalog and present the completed deliverable in the Artifact Viewer.`;
+    case 'brand-kit': {
+      const kitId = ref.catalog && !ref.id.startsWith('catalog:') ? `catalog:${ref.id}` : ref.id;
+      return `Apply Brand Kit "${ref.title}" (id="${kitId}") colors, typography, and motion style via openmotion_assets_use(action="brand_kit") or openmotion_design_catalog and present the deliverable in the Artifact Viewer.`;
+    }
+    case 'asset':
+      return `Use workspace ${ref.modality} asset "${ref.title}" (assetId="${ref.id}", versionId="${ref.versionId}") as reference and present the result in the Artifact Viewer.`;
+    case 'model':
+      return `Use configured ${ref.modality} model "${ref.title}" (model="${ref.id}") via openmotion_assets_use(action="generate") and present the generated asset in the Artifact Viewer.`;
+    case 'workflow':
+      return `Execute workflow "${ref.title}" (workflowId="${ref.id}"${ref.runId ? `, runId="${ref.runId}"` : ''}) step by step and present the deliverables in the Artifact Viewer.`;
+    case 'game-project':
+      return `Use the openmotion-game Skill for game "${ref.title}" (id="${ref.id}"). Read openmotion://workflow/game/start and openmotion_game_get(id="${ref.id}"), implement/update and validate, and finish with openmotion_present_artifact(kind="game-project", projectId="${ref.id}").`;
+    case 'scene-prompt':
+      return `Create a ${ref.modality} asset for scene "${ref.title}" (sceneId="${ref.sceneId}"${ref.modelId ? `, model="${ref.modelId}"` : ''}) via openmotion_assets_use(action="generate") and present the result in the Artifact Viewer.`;
   }
 }
 
@@ -456,6 +501,8 @@ export function buildSuperAgentHandoff(
   ref: CapabilityResourceRef,
   options: {
     prompt?: string;
+    hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
     locale?: string;
     autoSend?: boolean;
     newChat?: boolean;
@@ -463,6 +510,7 @@ export function buildSuperAgentHandoff(
   } = {},
 ): SuperAgentHandoffPayload {
   const custom = options.prompt?.trim();
+  const zh = Boolean(options.locale?.toLowerCase().startsWith('zh'));
   const baseAttachment = capabilityRefToAttachment(ref);
   const extraAttachments = ref.kind === 'workflow' || ref.kind === 'scene-prompt'
     ? (ref.attachments ?? [])
@@ -476,45 +524,74 @@ export function buildSuperAgentHandoff(
   if (!prompt) {
     switch (ref.kind) {
       case 'motion-template':
-        prompt = `Create a Motion Studio project inspired by "${ref.title}" (${ref.id}) and customize its visuals and pacing cleanly.`;
+        prompt = zh
+          ? `基于「${ref.title}」模板制作一个动效视频。`
+          : `Create a motion video based on "${ref.title}".`;
         break;
       case 'design-template':
-        prompt = `Create an interactive ${ref.scenario || 'web'} design project starting from template "${ref.title}" (${ref.id}) and open it in the Viewer.`;
+        prompt = zh
+          ? `基于「${ref.title}」模板创建一个设计页面。`
+          : `Create a ${ref.scenario || 'web'} design based on "${ref.title}".`;
         break;
       case 'skill':
-        prompt = `Apply the creative Skill "${ref.title}" (${ref.id}) to build an editable Motion Studio project and present it.`;
+        prompt = zh
+          ? `使用「${ref.title}」技能帮我制作一个作品。`
+          : `Use the "${ref.title}" skill to create a project.`;
         break;
       case 'design-skill':
-        prompt = `Use Design Skill "${ref.title}" (${ref.id}) to design and build an interactive HTML experience.`;
+        prompt = zh
+          ? `使用「${ref.title}」设计技能创建一个交互页面。`
+          : `Use the "${ref.title}" design skill to build an interactive page.`;
         break;
       case 'brand-kit':
-        prompt = `Apply Brand Kit "${ref.title}" colors, typography, and design rules to build a cohesive interactive webpage or motion promo.`;
+        prompt = zh
+          ? `按照「${ref.title}」品牌风格来设计并制作作品。`
+          : `Design using the "${ref.title}" Brand Kit style.`;
         break;
       case 'asset':
-        prompt = ref.modality === 'image'
-          ? `Use workspace asset "${ref.title}" (${ref.id}/${ref.versionId}) as visual reference to remix or compose a polished deliverable.`
-          : `Use workspace ${ref.modality} asset "${ref.title}" (${ref.id}/${ref.versionId}) in a new creative composition.`;
+        prompt = zh
+          ? `基于素材「${ref.title}」帮我继续创作。`
+          : `Create with workspace asset "${ref.title}".`;
         break;
       case 'model':
-        prompt = `Use configured ${ref.modality} model "${ref.title}" (${ref.id}) to generate a creative asset and display the result in the Artifact Viewer.`;
+        prompt = zh
+          ? `使用「${ref.title}」模型生成素材。`
+          : `Generate a ${ref.modality} asset using "${ref.title}".`;
         break;
       case 'workflow':
-        prompt = `Execute workflow "${ref.title}" (${ref.id}${ref.runId ? `, run ${ref.runId}` : ''}) step by step and present the deliverables.`;
+        prompt = zh
+          ? `按「${ref.title}」工作流帮我完成创作。`
+          : `Run the "${ref.title}" workflow.`;
         break;
       case 'game-project':
-        prompt = `Inspect and enhance interactive game "${ref.title}" (${ref.id}), then preview it in the Artifact Viewer.`;
+        prompt = zh
+          ? `帮我制作并完善小游戏「${ref.title}」。`
+          : `Build and polish the game "${ref.title}".`;
         break;
       case 'scene-prompt':
-        prompt = `Create a ${ref.modality} asset using scene "${ref.title}"${ref.modelId ? ` (${ref.modelId})` : ''} and preview it.`;
+        prompt = zh
+          ? `参考「${ref.title}」场景生成素材。`
+          : `Create a ${ref.modality} asset for "${ref.title}".`;
         break;
     }
   }
 
+  const hiddenParts = [
+    options.hiddenInstructions?.trim() || buildCompactResourceDirective(ref),
+    options.locale ? `Reply to the user in ${options.locale}.` : '',
+  ].filter(Boolean);
+  const hiddenInstructions = hiddenParts.join('\n');
+
+  const designModule = defaultDesignModuleForRef(ref);
+
   return {
     prompt,
+    ...(hiddenInstructions ? { hiddenInstructions } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(options.contextTags?.length ? { contextTags: options.contextTags } : {}),
     ...(options.initialArtifact ? { initialArtifact: options.initialArtifact } : {}),
     mode: defaultModeForRef(ref),
+    ...(designModule ? { designModule } : {}),
     title: ref.title,
     autoSend: options.autoSend,
     ...(options.newChat !== undefined ? { newChat: options.newChat } : {}),

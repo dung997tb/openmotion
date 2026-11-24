@@ -7,7 +7,7 @@ export const designSystemBase = '/design-system';
 export const designSystemAsset = (name) => `${designSystemBase}/${name}`;
 export const brand = Object.freeze({
   productName: 'OpenMotion',
-  website: Object.freeze({ name: 'OpenDesign Motion', tagline: 'The fullstack agentic video editor' }),
+  website: Object.freeze({ name: 'OpenDesign', tagline: 'Open-Source AI Game & Video Studio' }),
   editorName: 'OpenDesign',
   editorLogo: Object.freeze({ light: 'opendesign-dark.svg', dark: 'opendesign-light.svg' }),
   productLogo: 'brand/openmotion-logo.svg',

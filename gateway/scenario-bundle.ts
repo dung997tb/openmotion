@@ -4,16 +4,20 @@ import path from 'node:path';
 import { cleanDesignPath } from '../design-projects.ts';
 import { atomicJson, jsonFile } from '../phase1-versions.ts';
 import { zip } from '../scripts/zip.mjs';
+import { foldProjectName } from '../shared/project-name.ts';
 import { readProjectZip } from '../shared/project-zip.ts';
 import { withProcessLock } from '../shared/process-lock.ts';
+import { mediaFilename } from '../shared/render-name.ts';
 import { briefMarkdown, runReadme, socialPostsMarkdown } from '../shared/scenario-content.ts';
-import { SCENARIO_LIMITS, type ScenarioBundleReceipt, type ScenarioRun, type SocialPost } from '../shared/scenario-runs.ts';
+import { localizedScenarioDraftTitle, localizedScenarioMediaLabel } from '../shared/scenario-media-names.ts';
+import { findOutputIteration, SCENARIO_LIMITS, type ScenarioBundleReceipt, type ScenarioRun, type SocialPost } from '../shared/scenario-runs.ts';
 import { findScenarioStep, type ScenarioDefinition } from '../shared/scenarios.ts';
 import { sessionPath } from '../shared/workspace-url.ts';
 import type { ScenarioHost } from './scenario-runs.ts';
 
 export type ScenarioBundleOptions = {
   requestId: string;
+  locale?: string;
   stepIds?: string[];
   poolItemIds?: string[];
   activeOnly?: boolean;
@@ -69,6 +73,7 @@ export async function buildScenarioBundle(
     throw new BundleBuildError('INVALID_ARGUMENT', 'Stable requestId is required for export');
   }
   const activeOnly = options.activeOnly ?? true;
+  const locale = options.locale ?? run.locale;
   const includeStandaloneHtml = options.includeStandaloneHtml ?? true;
   const includeMotionSource = options.includeMotionSource ?? false;
 
@@ -121,6 +126,7 @@ export async function buildScenarioBundle(
     revision: run.revision,
     stepIds: hasPoolFilter ? null : filtered ? selectedSteps : null,
     poolItemIds: hasPoolFilter ? selectedPoolIds : null,
+    locale: options.locale,
     activeOnly,
     includeStandaloneHtml,
     includeMotionSource,
@@ -138,23 +144,26 @@ export async function buildScenarioBundle(
       }
     }
 
-    const rootDir = `${slugify(run.title || scenario.title, scenario.id)}-${formatDateStamp(new Date())}`;
+    const title = localizedScenarioDraftTitle(run.title || scenario.title, scenario.title, locale);
+    const rootDir = `${mediaFilename(title, '')} · ${formatDateStamp(new Date())}`;
     const entries: { name: string; data: Buffer }[] = [];
-    const usedLower = new Set<string>();
+    const usedNames = new Set<string>();
     let totalBytes = 0;
 
     const allocateRelPath = (rawRel: string): string => {
       const cleaned = cleanDesignPath(rawRel);
-      if (!usedLower.has(cleaned.toLowerCase())) {
-        usedLower.add(cleaned.toLowerCase());
+      const key = foldProjectName(cleaned);
+      if (!usedNames.has(key)) {
+        usedNames.add(key);
         return cleaned;
       }
       const ext = path.posix.extname(cleaned);
       const base = ext ? cleaned.slice(0, -ext.length) : cleaned;
       for (let i = 2; i < 10_000; i += 1) {
         const candidate = `${base}-${i}${ext}`;
-        if (!usedLower.has(candidate.toLowerCase())) {
-          usedLower.add(candidate.toLowerCase());
+        const candidateKey = foldProjectName(candidate);
+        if (!usedNames.has(candidateKey)) {
+          usedNames.add(candidateKey);
           return candidate;
         }
       }
@@ -187,8 +196,8 @@ export async function buildScenarioBundle(
       const data = await readFile(resolved.filename);
       const folder = item.kind === 'image' ? 'images' : item.kind === 'video' ? 'video' : 'audio';
       const ext = path.extname(resolved.filename).toLowerCase() || '.bin';
-      const labelSlug = slugify(item.label || resolved.asset.name || item.kind, item.kind);
-      const storedRel = addEntry(`media/${folder}/${labelSlug}-${item.ref.versionId.slice(0, 8)}${ext}`, data);
+      const label = localizedScenarioMediaLabel(item, run, scenario, locale);
+      const storedRel = addEntry(`media/${folder}/${mediaFilename(label, ext)}`, data);
       poolExportPaths.set(item.id, storedRel);
       return storedRel;
     };
@@ -315,10 +324,7 @@ export async function buildScenarioBundle(
         recordStepOutput(stepDef.id, addEntry('brief/brief.md', Buffer.from(briefMarkdown(scenario, run.brief), 'utf8')));
         recordStepOutput(stepDef.id, addEntry('brief/brief.json', Buffer.from(JSON.stringify(run.brief, null, 2), 'utf8')));
 
-        const stepState = run.steps[stepDef.id];
-        const activeIter = stepState?.iterations.find(it => it.id === stepState.activeIterationId)
-          ?? [...(stepState?.iterations ?? [])].reverse().find(it => it.outputs.some(out => out.type === 'script'));
-        const scriptOut = activeIter?.outputs.find((out): out is { type: 'script'; text: string } => out.type === 'script');
+        const scriptOut = findOutputIteration(run.steps[stepDef.id], 'script')?.outputs.find(out => out.type === 'script');
         if (scriptOut?.text.trim()) {
           recordStepOutput(stepDef.id, addEntry('brief/script.md', Buffer.from(scriptOut.text, 'utf8')));
         }
@@ -362,8 +368,22 @@ export async function buildScenarioBundle(
         }
       }
 
-      // 3. Media assets (pinned workspace asset library versions)
       const selectedAssetPoolIds = new Set<string>();
+      // 3. Social posts and their attached workspace assets
+      for (const stepDef of scenario.steps) {
+        if (stepDef.type !== 'social-pack' || !selectedSet.has(stepDef.id)) continue;
+        const socialOut = findOutputIteration(run.steps[stepDef.id], 'social')?.outputs.find(out => out.type === 'social');
+        if (!socialOut?.posts.length) continue;
+
+        recordStepOutput(stepDef.id, addEntry('social/posts.json', Buffer.from(JSON.stringify(socialOut.posts, null, 2), 'utf8')));
+        recordStepOutput(stepDef.id, addEntry('social/posts.md', Buffer.from(socialPostsMarkdown(socialOut.posts), 'utf8')));
+        for (const post of socialOut.posts) {
+          recordStepOutput(stepDef.id, addEntry(`social/${post.platform}.txt`, Buffer.from(formatPlatformText(post), 'utf8')));
+          for (const poolItemId of post.mediaPoolItemIds) selectedAssetPoolIds.add(poolItemId);
+        }
+      }
+
+      // 4. Media assets (pinned workspace asset library versions)
       for (const stepId of selectedSteps) {
         const stepState = run.steps[stepId];
         if (!stepState) continue;
@@ -397,22 +417,6 @@ export async function buildScenarioBundle(
         const storedRel = await addMediaPoolItem(item);
         if (storedRel && item.stepId && selectedSet.has(item.stepId)) {
           recordStepOutput(item.stepId, storedRel);
-        }
-      }
-
-      // 4. Social posts
-      for (const stepDef of scenario.steps) {
-        if (stepDef.type !== 'social-pack' || !selectedSet.has(stepDef.id)) continue;
-        const stepState = run.steps[stepDef.id];
-        const activeIter = stepState?.iterations.find(it => it.id === stepState.activeIterationId)
-          ?? [...(stepState?.iterations ?? [])].reverse().find(it => it.outputs.some(out => out.type === 'social'));
-        const socialOut = activeIter?.outputs.find((out): out is { type: 'social'; posts: SocialPost[] } => out.type === 'social');
-        if (!socialOut?.posts.length) continue;
-
-        recordStepOutput(stepDef.id, addEntry('social/posts.json', Buffer.from(JSON.stringify(socialOut.posts, null, 2), 'utf8')));
-        recordStepOutput(stepDef.id, addEntry('social/posts.md', Buffer.from(socialPostsMarkdown(socialOut.posts), 'utf8')));
-        for (const post of socialOut.posts) {
-          recordStepOutput(stepDef.id, addEntry(`social/${post.platform}.txt`, Buffer.from(formatPlatformText(post), 'utf8')));
         }
       }
 
@@ -463,7 +467,7 @@ export async function buildScenarioBundle(
       pool: manifestPool.map(item => ({
         id: item.id,
         kind: item.kind,
-        label: item.label,
+        label: localizedScenarioMediaLabel(item, run, scenario, locale),
         source: item.source,
         stepId: item.stepId,
         ref: item.ref,

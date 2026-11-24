@@ -11,7 +11,7 @@ import { fixture } from './fixtures.ts';
 import { transport } from './http.ts';
 import { ModelGateway, gatewayFor } from '../gateway/service.ts';
 import { classifyModel, discoverModels, normalizeModels } from '../gateway/catalog.ts';
-import { apiJson, downloadMedia, isPublicAddress, mediaType, providerOrigin, publicProviderFetch, type Fetcher } from '../gateway/network.ts';
+import { apiJson, downloadMedia, isPublicAddress, mediaType, providerOrigin, publicProviderFetch, resolvePublicAddresses, type Fetcher } from '../gateway/network.ts';
 import { publicBrandAddress, brandWebsite } from '../gateway/brand-network.ts';
 import { callTool } from '../mcp.ts';
 import { createTracker, validProperties, type PendingEvent } from '../tracking/core.ts';
@@ -447,3 +447,35 @@ test('account image auto retry verifies Range and never appends changed or corru
     assert.deepEqual(result, expected, mode);
   }
 }));
+
+test('resolvePublicAddresses resolves proxy Fake-IP (198.18.0.0/15) via public DNS while blocking private IPs', async () => {
+  const signal = new AbortController().signal;
+  let queried = 0;
+  const resolved = await resolvePublicAddresses('media.example', signal, 'Generated media points to a non-public address', {
+    lookup: async () => [{ address: '198.18.0.243', family: 4 }],
+    publicDns: async () => { queried += 1; return [{ address: '142.251.35.91', family: 4 }]; },
+  });
+  assert.equal(resolved[0].address, '142.251.35.91');
+  assert.equal(queried, 1);
+
+  for (const literal of ['127.0.0.1', '198.18.0.1', '10.0.0.1']) {
+    await assert.rejects(
+      resolvePublicAddresses(literal, signal, 'Generated media points to a non-public address'),
+      /non-public address/,
+    );
+  }
+  await assert.rejects(
+    resolvePublicAddresses('mixed.example', signal, 'Generated media points to a non-public address', {
+      lookup: async () => [{ address: '198.18.0.243', family: 4 }, { address: '10.0.0.1', family: 4 }],
+      publicDns: async () => [{ address: '142.251.35.91', family: 4 }],
+    }),
+    /non-public address/,
+  );
+  await assert.rejects(
+    resolvePublicAddresses('spoofed.example', signal, 'Generated media points to a non-public address', {
+      lookup: async () => [{ address: '198.18.0.243', family: 4 }],
+      publicDns: async () => [{ address: '10.0.0.1', family: 4 }],
+    }),
+    /non-public address/,
+  );
+});

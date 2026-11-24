@@ -373,7 +373,12 @@
     "Dedicated media · API key": "专用媒体服务 · API 密钥",
     "Local Agent · Uses installed sign-in, no API key needed": "本地 Agent · 复用本机登录，无需 API 密钥",
     "OpenAI compatible": "OpenAI 兼容",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "此协议当前仅支持同步目录与配置文本默认模型，暂不直接执行图片、视频或音频生成。"
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "此协议当前仅支持同步目录与配置文本默认模型，暂不直接执行图片、视频或音频生成。",
+    "Follow-ups": "后续追问",
+    "Follow-up behavior": "跟随提问方式",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "在智能体运行期间将新消息加入队列，或立即打断并引导当前任务。按 ⌘ / Ctrl + Enter 可临时以相反方式发送当前消息。",
+    "Steer": "Steer（即时打断引导）",
+    "Queue": "Queue（加入队列）"
   },
   "ja": {
     "Go back": "戻る",
@@ -513,7 +518,12 @@
     "Dedicated media · API key": "専用メディアサービス · API キー",
     "Local Agent · Uses installed sign-in, no API key needed": "ローカル Agent · 既存のログインを使用、API キー不要",
     "OpenAI compatible": "OpenAI 互換",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "このプロトコルは現在、モデル同期とテキスト既定値の保存のみに対応しており、画像・動画・音声の生成は実行されません。"
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "このプロトコルは現在、モデル同期とテキスト既定値の保存のみに対応しており、画像・動画・音声の生成は実行されません。",
+    "Follow-ups": "フォローアップ",
+    "Follow-up behavior": "フォローアップの動作",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "エージェント実行中の追加入力をキューに入れるか、現在の実行を割り込んで切り替えます。⌘ / Ctrl + Enter で今回のみ逆の方式で送信します。",
+    "Steer": "Steer（即時切り替え）",
+    "Queue": "Queue（キュー待機）"
   },
   "ko": {
     "Go back": "뒤로",
@@ -548,7 +558,12 @@
     "Dedicated media · API key": "전용 미디어 서비스 · API 키",
     "Local Agent · Uses installed sign-in, no API key needed": "로컬 Agent · 기존 로그인 사용, API 키 불필요",
     "OpenAI compatible": "OpenAI 호환",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "이 프로토콜은 현재 모델 동기화와 텍스트 기본값 저장만 지원하며 이미지·비디오·오디오 생성은 실행되지 않습니다."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "이 프로토콜은 현재 모델 동기화와 텍스트 기본값 저장만 지원하며 이미지·비디오·오디오 생성은 실행되지 않습니다.",
+    "Follow-ups": "후속 질문",
+    "Follow-up behavior": "후속 질문 방식",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "에이전트 실행 중 새 메시지를 대기열에 넣거나 현재 실행을 즉시 전환합니다. ⌘ / Ctrl + Enter를 누르면 이번 메시지만 반대 방식으로 전송합니다.",
+    "Steer": "Steer (즉시 전환)",
+    "Queue": "Queue (대기열)"
   },
   "de": {
     "Go back": "Zurück",
@@ -583,7 +598,12 @@
     "Dedicated media · API key": "Dedizierter Mediendienst · API-Schlüssel",
     "Local Agent · Uses installed sign-in, no API key needed": "Lokaler Agent · Nutzt vorhandene Anmeldung, kein API-Schlüssel nötig",
     "OpenAI compatible": "OpenAI-kompatibel",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Dieses Protokoll synchronisiert derzeit nur Modelle und speichert Text-Standardwerte; Bild-, Video- und Audiogenerierung wird darüber nicht ausgeführt."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Dieses Protokoll synchronisiert derzeit nur Modelle und speichert Text-Standardwerte; Bild-, Video- und Audiogenerierung wird darüber nicht ausgeführt.",
+    "Follow-ups": "Nachfragen",
+    "Follow-up behavior": "Verhalten bei Nachfragen",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Nachfragen während eines Laufs in die Warteschlange stellen oder den aktuellen Lauf umlenken. Mit ⌘ / Ctrl + Enter für eine Nachricht umkehren.",
+    "Steer": "Steer (Sofort steuern)",
+    "Queue": "Queue (Warteschlange)"
   },
   "fr": {
     "Go back": "Retour",
@@ -618,7 +638,12 @@
     "Dedicated media · API key": "Service média dédié · Clé API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent local · Utilise la connexion installée, sans clé API",
     "OpenAI compatible": "Compatible OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Ce protocole synchronise actuellement uniquement les modèles et enregistre les valeurs texte par défaut ; la génération d’images, de vidéos et d’audio n’est pas exécutée via ce protocole."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Ce protocole synchronise actuellement uniquement les modèles et enregistre les valeurs texte par défaut ; la génération d’images, de vidéos et d’audio n’est pas exécutée via ce protocole.",
+    "Follow-ups": "Relances",
+    "Follow-up behavior": "Comportement des relances",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Mettez les relances en file d’attente pendant l’exécution ou réorientez la tâche en cours. Appuyez sur ⌘ / Ctrl + Entrée pour inverser sur un message.",
+    "Steer": "Steer (Réorienter)",
+    "Queue": "Queue (File d’attente)"
   },
   "ru": {
     "Go back": "Назад",
@@ -653,7 +678,12 @@
     "Dedicated media · API key": "Медиа-сервис · API-ключ",
     "Local Agent · Uses installed sign-in, no API key needed": "Локальный Agent · Использует текущий вход, API-ключ не нужен",
     "OpenAI compatible": "Совместимый с OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Этот протокол пока поддерживает только синхронизацию каталога и сохранение текстовых настроек по умолчанию; генерация изображений, видео и аудио через него не выполняется."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Этот протокол пока поддерживает только синхронизацию каталога и сохранение текстовых настроек по умолчанию; генерация изображений, видео и аудио через него не выполняется.",
+    "Follow-ups": "Уточнения",
+    "Follow-up behavior": "Поведение при уточнении",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Ставьте новые сообщения в очередь во время работы агента или сразу переключайте текущее выполнение. Нажмите ⌘ / Ctrl + Enter для обратного действия на одно сообщение.",
+    "Steer": "Steer (Переключить)",
+    "Queue": "Queue (В очередь)"
   },
   "es": {
     "Go back": "Volver",
@@ -688,7 +718,12 @@
     "Dedicated media · API key": "Servicio multimedia · Clave API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent local · Usa el inicio de sesión instalado, sin clave API",
     "OpenAI compatible": "Compatible con OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo actualmente solo sincroniza modelos y guarda valores predeterminados de texto; no ejecuta generación de imágenes, video ni audio."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo actualmente solo sincroniza modelos y guarda valores predeterminados de texto; no ejecuta generación de imágenes, video ni audio.",
+    "Follow-ups": "Seguimientos",
+    "Follow-up behavior": "Comportamiento de seguimiento",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Encola los seguimientos mientras el agente ejecuta o redirige la ejecución actual. Pulsa ⌘ / Ctrl + Enter para usar el modo opuesto en un mensaje.",
+    "Steer": "Steer (Redirigir)",
+    "Queue": "Queue (En cola)"
   },
   "pt-BR": {
     "Go back": "Voltar",
@@ -723,7 +758,12 @@
     "Dedicated media · API key": "Serviço de mídia · Chave de API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent local · Usa o login instalado, sem chave de API",
     "OpenAI compatible": "Compatível com OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo atualmente apenas sincroniza modelos e salva padrões de texto; geração de imagem, vídeo e áudio não é executada por ele."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo atualmente apenas sincroniza modelos e salva padrões de texto; geração de imagem, vídeo e áudio não é executada por ele.",
+    "Follow-ups": "Acompanhamentos",
+    "Follow-up behavior": "Comportamento de acompanhamento",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Coloque mensagens na fila enquanto o agente executa ou redirecione a execução atual. Pressione ⌘ / Ctrl + Enter para alternar em uma mensagem.",
+    "Steer": "Steer (Redirecionar)",
+    "Queue": "Queue (Na fila)"
   },
   "it": {
     "Go back": "Indietro",
@@ -758,7 +798,12 @@
     "Dedicated media · API key": "Servizio media dedicato · Chiave API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent locale · Usa l’accesso installato, nessuna chiave API",
     "OpenAI compatible": "Compatibile OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Questo protocollo attualmente sincronizza solo i modelli e salva i valori predefiniti di testo; la generazione di immagini, video e audio non viene eseguita tramite esso."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Questo protocollo attualmente sincronizza solo i modelli e salva i valori predefiniti di testo; la generazione di immagini, video e audio non viene eseguita tramite esso.",
+    "Follow-ups": "Messaggi successivi",
+    "Follow-up behavior": "Comportamento dei messaggi successivi",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Accoda i messaggi mentre l’agente è in esecuzione oppure reindirizza l’attività corrente. Premi ⌘ / Ctrl + Invio per invertire su un singolo messaggio.",
+    "Steer": "Steer (Reindirizza)",
+    "Queue": "Queue (In coda)"
   },
   "tr": {
     "Go back": "Geri",
@@ -793,6 +838,11 @@
     "Dedicated media · API key": "Özel medya servisi · API anahtarı",
     "Local Agent · Uses installed sign-in, no API key needed": "Yerel Agent · Mevcut oturumu kullanır, API anahtarı gerekmez",
     "OpenAI compatible": "OpenAI uyumlu",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Bu protokol şu anda yalnızca modelleri eşitler ve metin varsayılanlarını kaydeder; görsel, video ve ses üretimi bu protokol üzerinden çalıştırılmaz."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Bu protokol şu anda yalnızca modelleri eşitler ve metin varsayılanlarını kaydeder; görsel, video ve ses üretimi bu protokol üzerinden çalıştırılmaz.",
+    "Follow-ups": "Devam mesajları",
+    "Follow-up behavior": "Devam mesajı davranışı",
+    "Queue follow-ups while the agent runs or steer the current run. Press ⌘ / Ctrl + Enter to do the opposite for one message.": "Ajan çalışırken yeni mesajları sıraya alın veya mevcut çalıştırmayı yönlendirin. Tek bir mesajda tersini yapmak için ⌘ / Ctrl + Enter’a basın.",
+    "Steer": "Steer (Yönlendir)",
+    "Queue": "Queue (Kuyruk)"
   }
 }

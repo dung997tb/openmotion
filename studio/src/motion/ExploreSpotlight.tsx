@@ -1,10 +1,10 @@
 import { Button } from 'open-design-ui/button';
 import { ExploreCoverImage } from './ExploreCoverImage';
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { mediaEditorDestination, motionStudio, type StudioDestination, type StudioScene } from './creativeStudios';
-import { sceneExamples } from './sceneShowcase';
+import { studioExamples } from './sceneShowcase';
 import { findModelHub } from './modelHubs';
 import { motionSkills, motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
@@ -57,7 +57,7 @@ const slides: FeaturedSlide[] = [{
 }, ...spotlightScenes.map(target => {
   const { scene } = target;
   const { id } = scene;
-  const example = sceneExamples[id][0];
+  const example = studioExamples(target)[0];
   return { ...example, id, icon: scene.icon, subtitle: target.studio.title, hint: scene.hint, scene: { target, prompt: example.prompt }, scenario: 'design-full-chain' as ScenarioId };
 }), {
   id: 'ai-influencer',
@@ -90,7 +90,7 @@ function FeaturedClip({ src, playing }: { src: string; playing: boolean }) {
     style={{ opacity: ready ? 1 : 0 }} onLoadedData={() => setReady(true)} onError={() => setFailed(true)} /> : null;
 }
 
-export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub, onStartScenario, onOpenGameStudio, onBuildGameInSuperAgent }: {
+export const ExploreSpotlight = memo(function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub, onStartScenario, onOpenGameStudio, onBuildGameInSuperAgent }: {
   active: boolean; onNavigate: (target: StudioDestination, prompt: string) => void;
   onOpenMotionEditor: () => void; motionEditorDisabled: boolean;
   onOpenBlackFriday: (trigger: HTMLButtonElement) => void; onModelHub: (id: string) => void;
@@ -217,4 +217,4 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
       </Button>)}
     </div>
   </section>;
-}
+});

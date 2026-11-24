@@ -120,8 +120,12 @@ test('SPA route allowlist serves Studio HTML while reserved backend and unknown 
   // Standalone SPA routes must not trigger native Studio startup even when ?project is attached.
   assert.equal(ensureCalls, 0);
 
-  // Reserved backend / cloud MCP / unknown paths must never return SPA HTML.
-  for (const route of ['/mcp', '/mcp/stream', '/unknown-page', '/workspace.ts']) {
+  // A GET without a session opens the long-lived MCP event stream. An unknown session returns a finite protocol response.
+  const unknownSession = await request('/mcp', { headers: { 'Mcp-Session-Id': 'missing-session' } });
+  assert.equal(unknownSession.status, 404);
+  assert.match(unknownSession.headers.get('content-type')!, /application\/json/);
+  assert.deepEqual(await unknownSession.json(), { error: 'MCP session not found' });
+  for (const route of ['/mcp/stream', '/unknown-page', '/workspace.ts']) {
     const response = await request(route);
     assert.equal(response.status, 404, `expected 404 for ${route}`);
   }

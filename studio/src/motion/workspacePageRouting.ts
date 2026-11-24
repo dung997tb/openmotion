@@ -1,7 +1,9 @@
+import type { CapabilityDefinition } from '../../../shared/capability-registry';
 import { findTemplateCollection, type TemplateCollection } from './templateCollections';
 import { skillCategories, type SkillCategory } from './skillCategories';
 import { blackFridaySkillIds } from '../../../shared/black-friday-collection';
 import { isDesignScenario, type DesignScenarioId } from '../../../shared/design-project';
+import { isSuperAgentDesignModule, type SuperAgentDesignModuleId } from '../../../shared/super-agent';
 import { editorProjectIdFromPath, isSpaRoutePath, spaPathnameToSearch } from '../../../shared/spa-routes';
 import { workspacePageName } from '../../../shared/workspace-url';
 import { isValidProjectId, parseProjectIdFromHash } from '../utils/projectRouting';
@@ -28,15 +30,24 @@ export { findTemplateCollection, type TemplateCollection } from './templateColle
 export const defaultDesignScene = 'prototype';
 export type DesignSceneTarget = DesignScenarioId | 'projects';
 export type ScenarioWorkspaceMode = 'manual' | 'agent';
-const superAgentModes = ['game', 'coding', 'image', 'motion', 'audio', 'media', 'deck', 'website'] as const;
+const superAgentModes = ['game', 'design', 'research', 'visualization', 'coding', 'image', 'motion', 'audio', 'media', 'deck', 'document', 'website'] as const;
 export type SuperAgentRouteMode = typeof superAgentModes[number];
-export type WorkspacePage = ExploreFilters & { motion: boolean; superAgent: boolean; superAgentChat: string | null; superAgentMode?: SuperAgentRouteMode | null; cinemaLanding?: true; cinemaTemplate?: string | null; designScene?: DesignSceneTarget | null; designProject?: string | null; soundTab?: SoundTabId | null; specialty: TechniqueStudio | null; gameId?: string | null; assetId: string | null; assetVersion: string | null; explore: boolean; scenarioHub: boolean; scenarioCategory: ScenarioCategory | null; scenario: ScenarioId | null; scenarioRun: string | null; scenarioStep: string | null; scenarioMode: ScenarioWorkspaceMode | null; studio: StudioDestination | null; settings: SettingsSection | null; assets: boolean; skills: boolean; skillCategory: SkillCategory | null; skill: string | null; templates: boolean; templateCollection: TemplateCollection | null; modelOverview: string | null; modelHub: string | null; creators: boolean; creator: string | null; mcpInSettings: boolean; mcpExample?: string | null; client: McpClient; setup: 'agent' | 'manual'; provider: string | null; template: string | null; brandKit: string | null };
+export type WorkspacePage = ExploreFilters & { motion: boolean; superAgent: boolean; superAgentChat: string | null; superAgentMode?: SuperAgentRouteMode | null; superAgentDesignModule?: SuperAgentDesignModuleId | null; cinemaLanding?: true; cinemaTemplate?: string | null; designScene?: DesignSceneTarget | null; designProject?: string | null; soundTab?: SoundTabId | null; specialty: TechniqueStudio | null; gameId?: string | null; assetId: string | null; assetVersion: string | null; explore: boolean; scenarioHub: boolean; scenarioCategory: ScenarioCategory | null; scenario: ScenarioId | null; scenarioRun: string | null; scenarioStep: string | null; scenarioMode: ScenarioWorkspaceMode | null; studio: StudioDestination | null; settings: SettingsSection | null; assets: boolean; skills: boolean; skillCategory: SkillCategory | null; skill: string | null; templates: boolean; templateCollection: TemplateCollection | null; modelOverview: string | null; modelHub: string | null; creators: boolean; creator: string | null; mcpInSettings: boolean; mcpExample?: string | null; client: McpClient; setup: 'agent' | 'manual'; provider: string | null; template: string | null; brandKit: string | null };
 
 export function changesWorkspaceDestination(patch: Partial<WorkspacePage>): boolean {
   return ['explore', 'motion', 'superAgent', 'cinemaLanding', 'designScene', 'scenario', 'scenarioHub', 'studio', 'modelOverview', 'modelHub', 'specialty', 'assets', 'skills', 'settings'].some(key => key in patch);
 }
 
-export function readWorkspacePage(search: string, hash = '', pathname = ''): WorkspacePage {
+export function unresolvedCreateSceneId(search: string, hash = '', pathname = ''): string | null {
+  const effectiveSearch = pathname && pathname !== '/' ? spaPathnameToSearch(pathname, search) : search;
+  const query = new URLSearchParams(effectiveSearch);
+  if (workspacePageName(query, hash) !== 'create') return null;
+  const sceneId = query.get('scene');
+  if (!sceneId || findLandingScene(sceneId)) return null;
+  return sceneId;
+}
+
+export function readWorkspacePage(search: string, hash = '', pathname = '', capabilities?: readonly CapabilityDefinition[]): WorkspacePage {
   const effectiveSearch = pathname && pathname !== '/' ? spaPathnameToSearch(pathname, search) : search;
   const query = new URLSearchParams(effectiveSearch), page = workspacePageName(query, hash), section = query.get('section');
   const settings = page === 'brand-kit' ? 'brand-kit' : page === 'mcp' ? 'mcp' : page === 'settings'
@@ -67,13 +78,16 @@ export function readWorkspacePage(search: string, hash = '', pathname = ''): Wor
   const studioKind = collection?.scenes.some(id => id === sceneId) ? collection
     : isDesignHtmlScene || cinemaLanding ? undefined : findMediaStudio(isAudioTab ? 'sound' : page);
   // Bookmarked Design Studio image links open the unified Image editor; HTML design scenarios keep their own page.
+  const requestedDesignScene = page === 'design' && !isDesignHtmlScene ? findLandingScene(sceneId, capabilities) : undefined;
   const legacyDesignImage = page === 'design' && !isDesignHtmlScene
-    ? findMediaStudio('design')!.scenes.map(id => findLandingScene(id)!).find(scene => scene.id === sceneId) ?? findLandingScene('text-to-image')
+    ? (requestedDesignScene && findMediaStudio('design')!.scenes.some(id => id === requestedDesignScene.id)
+      ? requestedDesignScene
+      : findLandingScene('text-to-image'))
     : undefined;
-  const landing = page === 'create' ? findLandingScene(sceneId) : legacyDesignImage;
+  const landing = page === 'create' ? findLandingScene(sceneId, capabilities) : legacyDesignImage;
   const home = Boolean(!landing && !isAudioTab && studioKind && hasStudioHome(studioKind) && query.get('home') === '1');
   const studio = landing ? sceneDestination(landing, null, model)
-    : studioKind ? { ...studioDestination(studioKind, extendedSoundTab?.backingScene ?? sceneId, model), ...(home ? { home: true as const } : {}), ...(isAudioTab ? { mediaTab: true as const } : {}) } : null;
+    : studioKind ? { ...studioDestination(studioKind, extendedSoundTab?.backingScene ?? sceneId, model, capabilities), ...(home ? { home: true as const } : {}), ...(isAudioTab ? { mediaTab: true as const } : {}) } : null;
   const specialty = studio ? null : collection ?? null;
   const gameId = specialty?.id === 'game' ? query.get('game') || null : null;
   const community = exploreCommunities.find(item => item.id === query.get('community'))?.id ?? null;
@@ -87,7 +101,10 @@ export function readWorkspacePage(search: string, hash = '', pathname = ''): Wor
   const rawSuperAgentMode = page === 'agent' ? query.get('mode') : null;
   const superAgentMode: SuperAgentRouteMode | null =
     superAgentModes.find(value => value === rawSuperAgentMode) ?? null;
-  return { motion: page === 'motion', superAgent: page === 'agent', superAgentChat: page === 'agent' ? query.get('chat') || null : null, ...(superAgentMode ? { superAgentMode } : {}), ...(cinemaLanding && { cinemaLanding: true }), ...(cinemaTemplate && { cinemaTemplate }),
+  const rawSuperAgentDesignModule = page === 'agent' && superAgentMode === 'design' ? query.get('scene') : null;
+  const superAgentDesignModule: SuperAgentDesignModuleId | null =
+    isSuperAgentDesignModule(rawSuperAgentDesignModule) ? rawSuperAgentDesignModule : null;
+  return { motion: page === 'motion', superAgent: page === 'agent', superAgentChat: page === 'agent' ? query.get('chat') || null : null, ...(superAgentMode ? { superAgentMode } : {}), ...(superAgentDesignModule ? { superAgentDesignModule } : {}), ...(cinemaLanding && { cinemaLanding: true }), ...(cinemaTemplate && { cinemaTemplate }),
     ...(designScene ? { designScene } : {}), ...(designProject ? { designProject } : {}), ...(extendedSoundTab ? { soundTab: extendedSoundTab.id } : {}),
     modelOverview: page === 'model' ? model : null, modelHub: page === 'model-hub' ? query.get('hub') || null : null, creators, creator: creators ? query.get('creator')?.trim() || null : null, specialty, ...(gameId ? { gameId } : {}), community, medium, assetId: page === 'assets' ? query.get('asset') || null : null,
     assetVersion: page === 'assets' && query.get('asset') ? query.get('version') || null : null, explore: page === 'explore', scenarioHub, scenarioCategory, scenario, scenarioRun, scenarioStep, scenarioMode, studio, settings, brandKit: settings === 'brand-kit' ? query.get('kit') || null : null, assets: page === 'assets', skills: page === 'skills', skillCategory: page === 'skills' ? skillCategories.find(value => value === (query.get('category') ?? query.get('skillCategory'))) ?? null : null, skill: selectedSkill, templates, templateCollection,
@@ -99,8 +116,12 @@ export function readWorkspacePage(search: string, hash = '', pathname = ''): Wor
     template: query.get('template') || null };
 }
 
-export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): string {
-  const url = new URL(href), current = readWorkspacePage(url.search, url.hash, url.pathname), page = { ...current, ...patch };
+export function workspacePageHref(
+  href: string,
+  patch: Partial<WorkspacePage>,
+  capabilities?: readonly CapabilityDefinition[],
+): string {
+  const url = new URL(href), current = readWorkspacePage(url.search, url.hash, url.pathname, capabilities), page = { ...current, ...patch };
   const originalPathname = url.pathname;
   const pathProject = editorProjectIdFromPath(originalPathname);
   const rawRetainedProject = pathProject ?? url.searchParams.get('project') ?? parseProjectIdFromHash(url.hash);
@@ -115,7 +136,10 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
   if (currentSearchPage === 'api') url.searchParams.delete('tool');
   if (current.creators || page.creators) { url.searchParams.delete('view'); url.searchParams.delete('creator'); }
   if (current.assets || page.assets) { url.searchParams.delete('asset'); url.searchParams.delete('version'); }
-  if (current.superAgent || page.superAgent) url.searchParams.delete('chat');
+  if (current.superAgent || page.superAgent) {
+    url.searchParams.delete('chat');
+    url.searchParams.delete('scene');
+  }
   if (current.studio || current.specialty || current.designScene || page.studio || page.designScene || currentSearchPage === 'create' || currentSearchPage === 'model') {
     url.searchParams.delete('scene');
     url.searchParams.delete('model');
@@ -126,6 +150,9 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
     page.superAgent = Boolean(patch.superAgent);
     page.superAgentChat = page.superAgent ? (patch.superAgentChat ?? null) : null;
     page.superAgentMode = page.superAgent ? (patch.superAgentMode ?? null) : null;
+    page.superAgentDesignModule = page.superAgent && page.superAgentMode === 'design'
+      ? (patch.superAgentDesignModule ?? null)
+      : null;
     page.cinemaLanding = patch.cinemaLanding;
     page.cinemaTemplate = patch.cinemaTemplate ?? null;
     page.designScene = patch.designScene ?? null;
@@ -147,7 +174,7 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
     page.skills = Boolean(patch.skills);
     page.settings = patch.settings ?? null;
     page.mcpInSettings = page.settings === 'mcp' && Boolean(patch.mcpInSettings);
-  } else if ('soundTab' in patch || 'gameId' in patch || 'superAgentMode' in patch) {
+  } else if ('soundTab' in patch || 'gameId' in patch || 'superAgentMode' in patch || 'superAgentDesignModule' in patch) {
     if ('soundTab' in patch) {
       page.soundTab = page.studio?.studio.id === 'sound' && !page.studio.landing && isExtendedSoundTab(patch.soundTab) ? patch.soundTab : null;
     }
@@ -156,6 +183,12 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
     }
     if ('superAgentMode' in patch) {
       page.superAgentMode = page.superAgent ? (patch.superAgentMode ?? null) : null;
+      if (page.superAgentMode !== 'design') page.superAgentDesignModule = null;
+    }
+    if ('superAgentDesignModule' in patch) {
+      page.superAgentDesignModule = page.superAgent && page.superAgentMode === 'design'
+        ? (patch.superAgentDesignModule ?? null)
+        : null;
     }
   }
   if (current.specialty?.id === 'game' || page.specialty?.id === 'game') url.searchParams.delete('game');
@@ -168,6 +201,9 @@ export function workspacePageHref(href: string, patch: Partial<WorkspacePage>): 
   } else if (page.superAgent) {
     url.pathname = page.superAgentChat ? `/agent/${encodeURIComponent(page.superAgentChat)}` : '/agent';
     if (page.superAgentMode) url.searchParams.set('mode', page.superAgentMode);
+    if (page.superAgentMode === 'design' && page.superAgentDesignModule) {
+      url.searchParams.set('scene', page.superAgentDesignModule);
+    }
   } else if (page.cinemaLanding) {
     url.pathname = '/cinema';
   } else if (page.designScene) {

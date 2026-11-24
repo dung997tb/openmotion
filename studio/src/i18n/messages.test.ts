@@ -5,6 +5,7 @@ import mvpUi from './mvp-ui.json';
 import errorUi from './error-ui.json';
 import settingsUi from './settings-ui.json';
 import templateUi from './template-ui.json';
+import superAgentUi from './super-agent-ui.json';
 import mcpUi from './mcp-ui.json';
 import studioNavigationUi from './studio-navigation-ui.json';
 import { mcpFaq } from '../motion/mcpCapabilities';
@@ -137,7 +138,7 @@ it('keeps Chinese additions interpolated and preserves fallback for unexposed ad
     const values = Object.fromEntries([...source.matchAll(/\{(\w+)\}/g)].map(match => [match[1], 'sample']));
     expect(translate('zh-CN', source, values)).not.toMatch(/\{\w+\}/);
     for (const { locale } of languages.filter(language => language.locale !== 'zh-CN')) {
-      const additions: Record<string, string> = { ...errorUi[locale as keyof typeof errorUi], ...templateUi[locale as keyof typeof templateUi], ...settingsUi[locale as keyof typeof settingsUi] };
+      const additions: Record<string, string> = { ...errorUi[locale as keyof typeof errorUi], ...templateUi[locale as keyof typeof templateUi], ...settingsUi[locale as keyof typeof settingsUi], ...superAgentUi[locale as keyof typeof superAgentUi] };
       if (!additions[source] && !mvpMessages[locale]?.[source] && (locale === 'en' || !dictionaries[locale]?.[source])) expect(translate(locale, source, values)).toBe(translate('en', source, values));
     }
   }

@@ -11,13 +11,14 @@ import { ensureService, VERSION } from './preview.ts';
 import { tools, callTool } from './mcp-tools.ts';
 export { tools, callTool } from './mcp-tools.ts';
 import { createToolRegistry, releaseProfile } from './shared/mcp-registry.ts';
-import { phase1Tools, finalVideoTool, validateInput, phase1TransportTool } from './shared/phase1-tools.ts';
+import { phase1Tools, finalVideoTool, validateInput, normalizeToolInput, phase1TransportTool } from './shared/phase1-tools.ts';
 import { workflowResources, readWorkflowResource, workflowEntryGuide } from './shared/workflow.ts';
 import { ensureEditor, editorRequest, editorHeaders, sharedEditorEnabled } from './editor-runtime.ts';
 import { isMain } from './shared/entry.ts';
 import { resolveProviderSetupEntry } from './shared/workspace-url.ts';
 import type { Selection } from './editor-runtime.ts';
 import { createAppTracking, closeTracking, type OmTracking } from './shared/tracking.ts';
+import { extractCodexThreadMeta, flushCodexSessionTracking, isCompletedExportToolResult, recordCodexThreadActivity, syncActiveCodexThreads } from './shared/codex-session-tracking.ts';
 import { uuid } from './tracking/core.ts';
 import { mcpToolNames } from './tracking/events.ts';
 import { toolFailureFields, toolInputFields } from './tracking/tool-fields.ts';
@@ -75,14 +76,30 @@ export async function rpc(message: any, store = new WorkspaceStore(), registry =
   }
   const trackingContext = contexts.get(hostKey)!;
   const name = legacyToolName(message?.params?.name);
+  const codexMeta = message?.jsonrpc === '2.0' && message.id !== undefined
+    && (message.method === 'tools/call' || message.method === 'resources/read')
+    ? extractCodexThreadMeta(message.params, host) : null;
   if (message?.jsonrpc !== '2.0' || message.id === undefined || message.method !== 'tools/call'
-    || registry.profile !== 'phase1' || !(mcpToolNames as readonly unknown[]).includes(name)) return invokeRpc(message, store, registry, connection, host, trackingContext, clientState, options);
+    || registry.profile !== 'phase1' || !(mcpToolNames as readonly unknown[]).includes(name)) {
+    const response = await invokeRpc(message, store, registry, connection, host, trackingContext, clientState, options);
+    if (codexMeta && !(response as any)?.error) {
+      const resultValue = (response as any)?.result;
+      const content = resultValue?.structuredContent;
+      void recordCodexThreadActivity(store.directory, codexMeta, {
+        projectId: content?.projectId ?? message.params?.arguments?.projectId,
+        resourceUri: message.method === 'resources/read' ? message.params?.uri : undefined,
+        exportCompleted: message.method === 'tools/call' && isCompletedExportToolResult(name, message.params?.arguments, content, resultValue?.isError),
+      }).catch(() => {});
+    }
+    return response;
+  }
   const tracking = await trackingFor(store), started = performance.now(), callId = crypto.randomUUID();
   const publicName = publicToolName(message.params.name);
   const definition = phase1Tools.find(tool => tool.name === publicName)
     ?? (publicName === templatePresentationName ? clientState?.presentation?.tool
       : videoAppClients.has(clientState ?? connection ?? store) ? finalVideoTool : undefined);
-  const args = message.params.arguments;
+  const rawArgs = message.params.arguments;
+  const args = definition ? normalizeToolInput(definition.inputSchema, rawArgs ?? {}) : rawArgs;
   let accepted = false;
   if (definition) {
     try { validateInput(definition.inputSchema, args ?? {}); accepted = true; } catch { /* The invocation reports the validation failure. */ }
@@ -93,6 +110,12 @@ export async function rpc(message: any, store = new WorkspaceStore(), registry =
   const response = await invokeRpc(message, store, registry, connection, host, trackingContext, clientState, options);
   const value = (response as any)?.result;
   const content = value?.structuredContent;
+  if (codexMeta) {
+    void recordCodexThreadActivity(store.directory, codexMeta, {
+      projectId: content?.projectId ?? args?.projectId,
+      exportCompleted: isCompletedExportToolResult(name, args, content, value?.isError),
+    }).catch(() => {});
+  }
   if (name === 'motion_open_preview' && value && !value.isError && message.params?.arguments?.target === 'providers') {
     tracking.track('provider_setup_opened', {
       entry_from: resolveProviderSetupEntry(message.params.arguments.entry),
@@ -176,9 +199,10 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
         const internalName = legacyToolName(name);
         const finalVideo = name === finalVideoTool.name;
         const definition = finalVideo ? finalVideoTool : phase1Tools.find(tool => tool.name === publicToolName(name))!;
-        const input = message.params.arguments ?? {};
+        const rawInput = message.params.arguments ?? {};
+        const input = normalizeToolInput(definition.inputSchema, rawInput);
         validateInput(definition.inputSchema, input);
-        const args = { ...input };
+        const args = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : input;
         if (internalName === 'motion_open_preview' && args.target !== 'templates' && args.target !== 'providers' && !args.projectId && !args.sessionId && args.action !== 'record_review') args.sessionId = selections.get(store)?.sessionId;
         if (args.sessionId === undefined) delete args.sessionId;
         if (['repository', 'hosted'].includes(templateConfig().source) && ['motion_list_templates', 'motion_get_template', 'motion_list_skills', 'motion_get_skill'].includes(internalName)) {
@@ -209,7 +233,7 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
         if (finalVideo && (!value.inlineWork?.playable || value.inlineWork.state !== 'completed' || !normalized?._meta?.inlineVideo?.video))
           throw new Error('FINAL_VIDEO_NOT_READY: Display only after the MP4 export completes and passes verification');
         if (value.projectId && value.sessionId) selections.set(store, { projectId: value.projectId, sessionId: value.sessionId });
-        if (internalName === 'motion_assets' && args.action === 'read') return result(assetReadToolResult(value));
+        if ((internalName === 'motion_assets' || internalName === 'motion_asset_manage') && args.action === 'read') return result(assetReadToolResult(value));
         const { _inlineMedia: legacyMedia, ...visible } = value;
         if (finalVideo) {
           // Agent execution envelopes can truncate private data URLs. Keep presentation small;
@@ -247,14 +271,15 @@ async function invokeRpc(message: any, store: WorkspaceStore, registry: ReturnTy
       return result({ isError: true, content: [{ type: 'text', text: errorMessage }], structuredContent: { error: { code, message: errorMessage,
         ...(invalid_field ? { invalid_field, validation_rule } : {}),
         ...(runtimeFailure && (error as any).details ? { details: (error as any).details } : {}),
-        applied: (error as any).applied === false || runtimeFailure || /^(NATIVE_RUNTIME_NOT_READY|INVALID_|VERSION_CONFLICT|VERSION_NOT_RESTORABLE|PROJECT_NOT_|PROJECT_SESSION_|REQUEST_ID_CONFLICT|MCP_TOOL_NOT_EXPOSED|EXPORT_NOT_|TEMPLATE_NOT_)/.test(code) ? false : 'unknown' } } });
+        applied: (error as any).applied === false || runtimeFailure || /^(NATIVE_RUNTIME_NOT_READY|INVALID_|VERSION_CONFLICT|VERSION_NOT_RESTORABLE|VERSION_NOT_FOUND|PROJECT_NOT_|PROJECT_SESSION_|PROJECT_TRASHED|PROJECT_VALIDATION_FAILED|REQUEST_ID_CONFLICT|SESSION_NOT_FOUND|MCP_TOOL_NOT_EXPOSED|EXPORT_NOT_|TEMPLATE_NOT_|WORK_CLOSED|WORK_VERSION_MISMATCH|WORK_GENERATION_UNTRACKED|WORK_ID_CONFLICT|WORK_NOT_FOUND|GENERATION_CONTENT_UNCHANGED|GENERATION_ARTIFACT_INVALID|DUPLICATE_ITEM_ID|ITEM_ID_CONFLICT|DUPLICATE_FILE_PATH|CONFLICTING_FILE_PATHS|SOURCE_BATCH_TOO_LARGE|REVIEW_VERSION_MISMATCH|REVIEW_OBJECT_MISMATCH|PREVIEW_TARGET_MISMATCH)/.test(code) ? false : 'unknown' } } });
     }
   }
   return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } };
 }
 if (isMain(import.meta.url)) {
   const store = new WorkspaceStore();
-  if ((await trackingFor(store)).enabled()) process.stderr.write('OpenMotion shares usage data and coarse region. Disable in Studio Privacy settings or set OPENMOTION_TELEMETRY=0.\n');
+  if ((await trackingFor(store)).enabled()) process.stderr.write('OpenMotion collects redacted usage information to improve product and generation quality. Disable in Studio Privacy & data settings or set OPENMOTION_TELEMETRY=0.\n');
+  void syncActiveCodexThreads(store.directory).catch(() => {});
   const connection = sharedEditorEnabled ? { selection: {} } : undefined;
   const clientState = createMcpClientState();
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -265,5 +290,5 @@ if (isMain(import.meta.url)) {
     catch { response = { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }; }
     if (response) process.stdout.write(JSON.stringify(response) + '\n');
   }
-  await closeTracking(await trackingByStore.get(store));
+  await Promise.allSettled([closeTracking(await trackingByStore.get(store)), flushCodexSessionTracking(store.directory)]);
 }

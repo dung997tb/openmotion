@@ -3,11 +3,12 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type {
-  DesktopAppInfo,
-  DesktopChromeInsets,
-  DesktopDiagnosticExportResult,
-  DesktopMenuAction,
+import {
+  MACOS_TRAFFIC_LIGHT_POSITION,
+  type DesktopAppInfo,
+  type DesktopChromeInsets,
+  type DesktopDiagnosticExportResult,
+  type DesktopMenuAction,
 } from '../../shared/platform-host.ts';
 import { createDesktopDiagnosticZip, DesktopLogger } from './logger.ts';
 import { buildDesktopMenuTemplate } from './menu.ts';
@@ -25,7 +26,7 @@ const __filename = fileURLToPath(import.meta.url);
 const distDir = path.dirname(__filename);
 const platform = normalizeDesktopPlatform(process.platform);
 
-app.setName('OpenMotion');
+app.setName('OpenDesign');
 try {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenMotion'));
 } catch {
@@ -135,6 +136,16 @@ function currentChromeState(): DesktopChromeInsets {
   });
 }
 
+function syncMacTrafficLights(win: BrowserWindow | null): void {
+  if (platform !== 'darwin' || !win || win.isDestroyed() || win.isFullScreen()) return;
+  if (typeof win.setWindowButtonPosition !== 'function') return;
+  try {
+    win.setWindowButtonPosition({ ...MACOS_TRAFFIC_LIGHT_POSITION });
+  } catch {
+    // Ignore on unsupported Electron window states.
+  }
+}
+
 function broadcastChromeState(): void {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
@@ -186,7 +197,7 @@ async function exportLogsWithDialog(): Promise<DesktopDiagnosticExportResult> {
           ? splash.window
           : undefined;
     const saveOptions = {
-      title: 'Export OpenMotion Diagnostic Logs',
+      title: 'Export OpenDesign Diagnostic Logs',
       defaultPath: path.join(app.getPath('downloads'), defaultName),
       filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
     };
@@ -225,6 +236,7 @@ function revealMainWindow(): void {
   if (!win.isVisible()) {
     win.show();
   }
+  syncMacTrafficLights(win);
   void splash?.playExitAndClose().catch(() => splash?.close());
   broadcastChromeState();
 }
@@ -375,9 +387,26 @@ async function startBackendAndOpenWindow(): Promise<void> {
         if (mainWindow === win) mainWindow = null;
       });
       win.on('enter-full-screen', broadcastChromeState);
-      win.on('leave-full-screen', broadcastChromeState);
+      win.on('leave-full-screen', () => {
+        syncMacTrafficLights(win);
+        broadcastChromeState();
+      });
+      win.on('enter-html-full-screen', broadcastChromeState);
+      win.on('leave-html-full-screen', () => {
+        syncMacTrafficLights(win);
+        broadcastChromeState();
+      });
+      win.on('show', () => {
+        syncMacTrafficLights(win);
+        broadcastChromeState();
+      });
+      win.on('restore', () => {
+        syncMacTrafficLights(win);
+        broadcastChromeState();
+      });
       win.on('maximize', broadcastChromeState);
       win.on('unmaximize', broadcastChromeState);
+      win.webContents.on('did-finish-load', broadcastChromeState);
 
       win.webContents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown' || input.alt || input.shift) return;
@@ -448,7 +477,7 @@ async function startBackendAndOpenWindow(): Promise<void> {
       splash?.setProgress({
         step: 'ready',
         mode: 'welcome',
-        status: 'Opening OpenMotion Studio',
+        status: 'Opening OpenDesign Studio',
         agentsCount,
         account: {
           state: 'signed-in',
@@ -668,8 +697,8 @@ async function requestQuitWithConfirmation(): Promise<void> {
     const parent = BrowserWindow.getFocusedWindow() ?? (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined);
     const options = {
       type: 'question' as const,
-      title: isZh ? '退出 OpenMotion' : 'Quit OpenMotion',
-      message: isZh ? '确认退出 OpenMotion 吗？' : 'Are you sure you want to quit OpenMotion?',
+      title: isZh ? '退出 OpenDesign' : 'Quit OpenDesign',
+      message: isZh ? '确认退出 OpenDesign 吗？' : 'Are you sure you want to quit OpenDesign?',
       detail: isZh
         ? '退出后将停止本地 Studio 引擎和正在运行的 MCP 服务。'
         : 'Quitting will stop the local Studio engine and active MCP server.',

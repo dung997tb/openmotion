@@ -6,6 +6,16 @@ import { resolveGenerationParameters } from '../shared/generation-options.ts';
 import { apiJson, publicProviderFetch, ProviderError, retryRead, type Fetcher } from './network.ts';
 import type { ProviderAdapter, ProviderContext } from './providers.ts';
 
+export const productionApi = 'https://amr-api.open-design.ai';
+
+/** Custom Cloud gateways keep their existing idempotency protocol. */
+export function mediaSubmitHeaders(baseUrl: string, jobId: string): Record<string, string> {
+  return {
+    'Idempotency-Key': jobId,
+    ...(baseUrl === productionApi ? { 'X-Source-Product': 'openmotion', 'X-OpenMotion-Job-Id': jobId } : {}),
+  };
+}
+
 export async function cloudModels(baseUrl: string, key: string, fetcher: Fetcher = publicProviderFetch): Promise<Model[]> {
   const body = await apiJson(fetcher, baseUrl + '/api/v1/media/models', { headers: { Authorization: `Bearer ${key}` } });
   if (!Array.isArray(body.models)) throw new Error('OpenDesign Cloud catalogue format changed');
@@ -82,7 +92,7 @@ export const opendesign: ProviderAdapter = {
       const payload = audio ? { model: job.model.modelId, ...audioBody }
         : { ...wireParameters, model: job.model.modelId, prompt: job.prompt, ...images };
       const endpoint = audio ? speech ? '/audio/speech' : '/audio/music' : job.modality === 'image' ? inputs.length || Array.isArray(parameters.images) && parameters.images.length ? '/images/edits' : '/images/generations' : '/videos/tasks';
-      const submitted = await apiJson(fetcher, api + endpoint, { method: 'POST', headers: { ...headers, 'Idempotency-Key': job.id }, body: JSON.stringify(payload), signal: ctx.signal });
+      const submitted = await apiJson(fetcher, api + endpoint, { method: 'POST', headers: { ...headers, ...mediaSubmitHeaders(ctx.baseUrl, job.id) }, body: JSON.stringify(payload), signal: ctx.signal });
       if (typeof submitted.task_id !== 'string' || !/^[a-zA-Z0-9_-]{1,180}$/.test(submitted.task_id)) throw new Error('OpenDesign Cloud did not return a task ID');
       remoteId = submitted.task_id;
       await ctx.progress('submitted', remoteId);

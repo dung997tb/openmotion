@@ -11,6 +11,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
+import { localizedScenarioMediaLabel } from '../../../shared/scenario-media-names';
 import {
   scenarioConcisePrompt,
   findScenarioStep,
@@ -44,7 +45,7 @@ import { ScenarioHeader } from './ScenarioHeader';
 import { ScenarioRunHistoryDialog } from './ScenarioRunHistoryDialog';
 import { ScenarioStage } from './ScenarioStage';
 import { ScenarioStepper } from './ScenarioStepper';
-import type { ScenarioWorkspaceProps, StepOutputPanelMeta, StepProps } from './stepContract';
+import type { BriefSaveRef, ScenarioWorkspaceProps, StepOutputPanelMeta, StepProps } from './stepContract';
 import { resolveStepPrompt } from './StepExportMenu';
 import { StepRouter } from './steps/StepRouter';
 import { isScenarioConflictError } from './steps/stepUtils';
@@ -229,10 +230,7 @@ export function ScenarioWorkspace({
   const [hasMoreScenarioRuns, setHasMoreScenarioRuns] = useState(false);
   const [runsLoading, setRunsLoading] = useState(false);
   const [runHistoryOpen, setRunHistoryOpen] = useState(false);
-  const [pickState, setPickState] = useState<{
-    request: PoolPickRequest;
-    resolve: (ids: string[] | null) => void;
-  } | null>(null);
+  const [pickRequest, setPickRequest] = useState<PoolPickRequest | null>(null);
   const [outputHost, setOutputHost] = useState<HTMLDivElement | null>(null);
   const [outputPopoverOpen, setOutputPopoverOpen] = useState(false);
   const [outputMeta, setOutputMeta] = useState<StepOutputToolbarState>({ mounted: false });
@@ -249,6 +247,24 @@ export function ScenarioWorkspace({
   const latestWorkbenchDragWidthRef = useRef<number>(workbenchWidth);
   const highlightTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pickResolveRef = useRef<((ids: string[] | null) => void) | null>(null);
+
+  const finishPick = useCallback((ids: string[] | null) => {
+    const resolve = pickResolveRef.current;
+    if (!resolve) return;
+    pickResolveRef.current = null;
+    setPickRequest(null);
+    setPoolOpen(false);
+    resolve(ids);
+  }, []);
+
+  const handleCancelPick = useCallback(() => finishPick(null), [finishPick]);
+
+  const handlePoolOpenChange = useCallback((open: boolean) => {
+    setPoolOpen(open);
+    if (!open) handleCancelPick();
+  }, [handleCancelPick]);
+
+  const togglePoolOpen = useCallback(() => handlePoolOpenChange(!poolOpen), [handlePoolOpenChange, poolOpen]);
 
   useEffect(() => {
     setCardCoverFailed(false);
@@ -348,8 +364,9 @@ export function ScenarioWorkspace({
   }, []);
 
   const togglePoolCollapsed = useCallback(() => {
-    updatePoolCollapsed(prev => !prev);
-  }, [updatePoolCollapsed]);
+    if (!poolCollapsed) handlePoolOpenChange(false);
+    updatePoolCollapsed(!poolCollapsed);
+  }, [handlePoolOpenChange, poolCollapsed, updatePoolCollapsed]);
 
   const finishPoolResize = useCallback(() => {
     if (!poolDragRef.current) return;
@@ -398,6 +415,8 @@ export function ScenarioWorkspace({
     [onRoute],
   );
 
+  const briefSaveRef: BriefSaveRef = useRef(null);
+  const validateNextRef = useRef<(() => boolean) | null>(null);
   const runState = useScenarioRun({
     scenarioId,
     runId,
@@ -407,6 +426,7 @@ export function ScenarioWorkspace({
     onRunCreated: handleRunCreated,
     onToast: toast.showToast,
     onNewPoolItems: highlight,
+    briefSaveRef,
   });
 
   const { scenario, run, loading, error, busy, ensureRun, mutate, refresh, startNewRun, reload } = runState;
@@ -429,31 +449,36 @@ export function ScenarioWorkspace({
     [activeStep, run],
   );
 
-  // Cancel any open pick request when switching steps.
+  // A pick only belongs to the active step in the current draft and mode.
   useEffect(() => {
-    if (pickResolveRef.current) {
-      pickResolveRef.current(null);
-      pickResolveRef.current = null;
-      setPickState(null);
-    }
-  }, [activeStep.id]);
+    if (pickResolveRef.current) handleCancelPick();
+  }, [active, activeMode, activeStep.id, handleCancelPick, runId, scenarioId]);
 
   // Close per-workflow run history modal when switching to another workflow.
   useEffect(() => {
     setRunHistoryOpen(false);
   }, [scenarioId]);
 
-  const poolItems = useMemo(() => run?.pool ?? [], [run?.pool]);
+  const poolItems = useMemo(() => run?.pool.map(item => {
+    const label = localizedScenarioMediaLabel(item, run, scenario, locale);
+    return label === item.label ? item : { ...item, label };
+  }) ?? [], [locale, run, scenario]);
   const poolById = useMemo(
     () => new Map(poolItems.map(item => [item.id, item])),
     [poolItems],
   );
 
   const selectStep = useCallback(
-    (nextStepId: string) => {
-      onRoute({ run: run?.id ?? runId, step: nextStepId }, false);
+    async (nextStepId: string) => {
+      const leavingBrief = activeMode === 'manual' && activeStep.type === 'brief' && nextStepId !== activeStep.id;
+      try {
+        const savedRunId = leavingBrief && scenario.id === 'motion-full-chain' ? await briefSaveRef.current?.() : undefined;
+        onRoute({ run: savedRunId ?? run?.id ?? runId, step: nextStepId }, false);
+      } catch (error) {
+        if (!isScenarioConflictError(error)) toast.showToast(t('Could not save edits.'), 'error', 'feedback');
+      }
     },
-    [onRoute, run?.id, runId],
+    [activeMode, activeStep.id, activeStep.type, briefSaveRef, onRoute, run?.id, runId, scenario.id, t, toast],
   );
 
   const handleModeChange = useCallback(
@@ -510,11 +535,13 @@ export function ScenarioWorkspace({
       await startNewRun();
       toast.showToast(t('Started a new draft'), 'info', 'feedback');
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : t('Could not start a new draft'),
-        'error',
-        'feedback',
-      );
+      if (!isScenarioConflictError(err)) {
+        toast.showToast(
+          err instanceof Error ? err.message : t('Could not start a new draft'),
+          'error',
+          'feedback',
+        );
+      }
     }
   }, [startNewRun, t, toast]);
 
@@ -615,7 +642,8 @@ export function ScenarioWorkspace({
           `export-bundle:${Date.now()}`,
           'export',
           {
-            activeOnly: options?.activeOnly ?? true,
+            locale,
+            activeOnly: options?.activeOnly ?? false,
             includeStandaloneHtml: options?.includeStandaloneHtml ?? true,
             includeMotionSource: options?.includeMotionSource ?? false,
             ...(options?.poolItemIds?.length ? { poolItemIds: options.poolItemIds } : {}),
@@ -655,7 +683,7 @@ export function ScenarioWorkspace({
         setExportingBundle(false);
       }
     },
-    [exportingBundle, mutate, t, toast],
+    [exportingBundle, locale, mutate, t, toast],
   );
 
   const handleCopySummaryJson = useCallback(async () => {
@@ -686,32 +714,16 @@ export function ScenarioWorkspace({
 
   const requestPick = useCallback(
     (opts: PoolPickRequest): Promise<string[] | null> => {
-      if (pickResolveRef.current) {
-        pickResolveRef.current(null);
-      }
+      pickResolveRef.current?.(null);
       setPoolOpen(true);
       updatePoolCollapsed(false);
       return new Promise<string[] | null>(resolve => {
         pickResolveRef.current = resolve;
-        setPickState({ request: opts, resolve });
+        setPickRequest(opts);
       });
     },
     [updatePoolCollapsed],
   );
-
-  const handleConfirmPick = useCallback((ids: string[]) => {
-    const resolve = pickResolveRef.current;
-    pickResolveRef.current = null;
-    setPickState(null);
-    resolve?.(ids);
-  }, []);
-
-  const handleCancelPick = useCallback(() => {
-    const resolve = pickResolveRef.current;
-    pickResolveRef.current = null;
-    setPickState(null);
-    resolve?.(null);
-  }, []);
 
   const handleAddPoolItems = useCallback(
     async (
@@ -1014,7 +1026,9 @@ export function ScenarioWorkspace({
     api: stepApi,
     pool: stepPool,
     toast: stepToast,
+    briefSaveRef,
     nav: stepNav,
+    validateNextRef,
     renderExportMenu,
     renderIterations,
     renderOutputPanel,
@@ -1046,14 +1060,9 @@ export function ScenarioWorkspace({
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(max-width: 1099px)').matches;
-    if (isNarrow) {
-      setPoolOpen(prev => !prev);
-    } else if (poolCollapsed) {
-      updatePoolCollapsed(false);
-    } else {
-      togglePoolCollapsed();
-    }
-  }, [poolCollapsed, togglePoolCollapsed, updatePoolCollapsed]);
+    if (isNarrow) togglePoolOpen();
+    else togglePoolCollapsed();
+  }, [togglePoolCollapsed, togglePoolOpen]);
 
   const loadingStateNode = (
     <div className="om-scenario-loading" role="status" aria-label={t('Loading workflow…')}>
@@ -1118,7 +1127,7 @@ export function ScenarioWorkspace({
         poolOpen={poolOpen}
         poolCollapsed={poolCollapsed}
         poolCount={poolItems.length}
-        onTogglePool={() => setPoolOpen(prev => !prev)}
+        onTogglePool={togglePoolOpen}
         onTogglePoolCollapsed={togglePoolCollapsed}
         onCopyAgentHandoff={() => void handleCopyAgentHandoff()}
         onExportBundle={() => void handleExportBundle()}
@@ -1143,6 +1152,7 @@ export function ScenarioWorkspace({
               run={run}
               activeStep={activeStep}
               api={stepApi}
+              briefSaveRef={briefSaveRef}
               integration={integration}
               toast={stepToast}
               poolItems={poolItems}
@@ -1358,6 +1368,7 @@ export function ScenarioWorkspace({
                           embedded
                           step={activeStep}
                           state={activeStepState}
+                          briefFields={activeStep.type === 'brief' ? scenario.briefFields : undefined}
                           renderOutput={iteration =>
                             iterationsRenderOutputRef.current?.(iteration) ?? null
                           }
@@ -1502,7 +1513,9 @@ export function ScenarioWorkspace({
                     type="button"
                     className="om-scenario-primary-cta"
                     icon={<RemixIcon name={nextStep.icon} size={15} />}
-                    onClick={() => selectStep(nextStep.id)}
+                    onClick={() => {
+                      if (validateNextRef.current?.() !== false) void selectStep(nextStep.id);
+                    }}
                   >
                     <span>{t('Next: {step}', { step: t(nextStep.title) })}</span>
                     <RemixIcon name="arrow-right-line" size={15} />
@@ -1583,12 +1596,12 @@ export function ScenarioWorkspace({
           items={poolItems}
           highlightedIds={highlightedIds}
           open={poolOpen}
-          onOpenChange={setPoolOpen}
+          onOpenChange={handlePoolOpenChange}
           collapsed={poolCollapsed}
           onToggleCollapsed={togglePoolCollapsed}
           onRefresh={handleRefresh}
-          pickRequest={pickState?.request ?? null}
-          onConfirmPick={handleConfirmPick}
+          pickRequest={pickRequest}
+          onConfirmPick={finishPick}
           onCancelPick={handleCancelPick}
           onAddItems={handleAddPoolItems}
           onUpdateItem={handleUpdatePoolItem}

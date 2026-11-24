@@ -50,12 +50,14 @@ export const webPublishClient = {
   getStatus: (
     targetKind: WebPublishTargetKind,
     targetId: string,
-    options?: { filePath?: string; refresh?: boolean; sourcePath?: string },
+    options?: { filePath?: string; refresh?: boolean; sourcePath?: string; embedUrl?: string; title?: string },
   ) => {
     const query = new URLSearchParams();
     if (options?.filePath) query.set('filePath', options.filePath);
     if (options?.refresh) query.set('refresh', '1');
     if (options?.sourcePath) query.set('sourcePath', options.sourcePath);
+    if (options?.embedUrl) query.set('embedUrl', options.embedUrl);
+    if (options?.title) query.set('title', options.title);
     const suffix = query.toString();
     const base = webPublishRoutes.target(targetKind, targetId);
     return requestJson<WebPublishStatusResponse>(suffix ? `${base}?${suffix}` : base);
@@ -70,6 +72,7 @@ export const webPublishClient = {
       deployMode?: WebPublishMode;
       name?: string;
       sourcePath?: string;
+      embedUrl?: string;
     } = {},
   ) =>
     requestJson<{
@@ -85,7 +88,7 @@ export const webPublishClient = {
   unpublish: (
     targetKind: WebPublishTargetKind,
     targetId: string,
-    payload: { filePath?: string; sourcePath?: string } = {},
+    payload: { filePath?: string; sourcePath?: string; embedUrl?: string } = {},
   ) =>
     requestJson<{
       publication: WebPublicationRecord;

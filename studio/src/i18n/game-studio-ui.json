@@ -24,6 +24,7 @@
     "Dislike": "踩",
     "Fantasy": "奇幻",
     "Full screen": "全屏",
+    "Game generation only supports single-player games.": "目前仅支持生成单人游戏。",
     "Game Studio": "游戏工作室",
     "Game actions": "游戏操作",
     "Game link copied.": "游戏链接已复制。",
@@ -44,8 +45,11 @@
     "Pixel art": "像素艺术",
     "Platformer": "平台跳跃",
     "Play {title}": "玩 {title}",
+    "Try game": "试玩",
+    "Try game: {title}": "试玩：{title}",
     "Racing": "竞速",
     "Relevance": "相关性",
+    "Default sort": "默认排序",
     "Remove from favorites": "取消收藏",
     "Remove genre": "移除类型",
     "Retro": "复古",
@@ -140,7 +144,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "需要 Codex 桌面版。会新开一个对话并填好指令，需要你自己点发送。",
     "Playable ad": "广告游戏",
     "Continue in Super Agent": "在 Super Agent 中继续",
-    "Edit & optimize in Super Agent": "在 Super Agent 中二创与优化"
+    "Edit & optimize in Super Agent": "在 Super Agent 中二创与优化",
+    "Create trailer": "生成宣传片",
+    "Edit in Agent": "在 Agent 中编辑"
   },
   "ja": {
     "3D": "3D",
@@ -167,6 +173,7 @@
     "Dislike": "よくない",
     "Fantasy": "ファンタジー",
     "Full screen": "全画面",
+    "Game generation only supports single-player games.": "生成できるのはシングルプレイのゲームのみです。",
     "Game Studio": "ゲームスタジオ",
     "Game actions": "ゲーム操作",
     "Game link copied.": "ゲームのリンクをコピーしました。",
@@ -187,8 +194,11 @@
     "Pixel art": "ピクセルアート",
     "Platformer": "プラットフォーマー",
     "Play {title}": "{title} をプレイ",
+    "Try game": "試しに遊ぶ",
+    "Try game: {title}": "試しに遊ぶ: {title}",
     "Racing": "レース",
     "Relevance": "関連度",
+    "Default sort": "既定の並び順",
     "Remove from favorites": "お気に入りから削除",
     "Remove genre": "ジャンルを外す",
     "Retro": "レトロ",
@@ -283,7 +293,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex デスクトップ版が必要です。指示を入力した新しいチャットが開きます。送信はご自身で。",
     "Playable ad": "プレイアブル広告",
     "Continue in Super Agent": "Super Agent で続ける",
-    "Edit & optimize in Super Agent": "Super Agent で編集・最適化"
+    "Edit & optimize in Super Agent": "Super Agent で編集・最適化",
+    "Create trailer": "予告編を作成",
+    "Edit in Agent": "Agent で編集"
   },
   "ko": {
     "3D": "3D",
@@ -310,6 +322,7 @@
     "Dislike": "싫어요",
     "Fantasy": "판타지",
     "Full screen": "전체 화면",
+    "Game generation only supports single-player games.": "싱글 플레이어 게임만 생성할 수 있습니다.",
     "Game Studio": "게임 스튜디오",
     "Game actions": "게임 작업",
     "Game link copied.": "게임 링크를 복사했습니다.",
@@ -330,8 +343,11 @@
     "Pixel art": "픽셀 아트",
     "Platformer": "플랫포머",
     "Play {title}": "{title} 플레이",
+    "Try game": "체험 플레이",
+    "Try game: {title}": "체험 플레이: {title}",
     "Racing": "레이싱",
     "Relevance": "관련도",
+    "Default sort": "기본 정렬",
     "Remove from favorites": "즐겨찾기에서 제거",
     "Remove genre": "장르 제거",
     "Retro": "레트로",
@@ -426,7 +442,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex 데스크톱 앱이 필요합니다. 지시가 채워진 새 대화가 열리며, 전송은 직접 눌러야 합니다.",
     "Playable ad": "플레이어블 광고",
     "Continue in Super Agent": "Super Agent에서 계속하기",
-    "Edit & optimize in Super Agent": "Super Agent에서 편집 및 최적화"
+    "Edit & optimize in Super Agent": "Super Agent에서 편집 및 최적화",
+    "Create trailer": "트레일러 생성",
+    "Edit in Agent": "Agent에서 편집"
   },
   "de": {
     "3D": "3D",
@@ -453,6 +471,7 @@
     "Dislike": "Gefällt mir nicht",
     "Fantasy": "Fantasy",
     "Full screen": "Vollbild",
+    "Game generation only supports single-player games.": "Es können nur Einzelspielerspiele erstellt werden.",
     "Game Studio": "Spielestudio",
     "Game actions": "Spielaktionen",
     "Game link copied.": "Spiellink kopiert.",
@@ -473,8 +492,11 @@
     "Pixel art": "Pixel-Art",
     "Platformer": "Plattformer",
     "Play {title}": "{title} spielen",
+    "Try game": "Spiel ausprobieren",
+    "Try game: {title}": "Spiel ausprobieren: {title}",
     "Racing": "Rennen",
     "Relevance": "Relevanz",
+    "Default sort": "Standard",
     "Remove from favorites": "Aus Favoriten entfernen",
     "Remove genre": "Genre entfernen",
     "Retro": "Retro",
@@ -569,7 +591,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Benötigt die Codex-Desktop-App. Öffnet einen neuen Chat mit der Anweisung; senden musst du selbst.",
     "Playable ad": "Playable Ad",
     "Continue in Super Agent": "In Super Agent fortfahren",
-    "Edit & optimize in Super Agent": "In Super Agent bearbeiten & optimieren"
+    "Edit & optimize in Super Agent": "In Super Agent bearbeiten & optimieren",
+    "Create trailer": "Trailer erstellen",
+    "Edit in Agent": "Im Agent bearbeiten"
   },
   "fr": {
     "3D": "3D",
@@ -596,6 +620,7 @@
     "Dislike": "Je n’aime pas",
     "Fantasy": "Fantasy",
     "Full screen": "Plein écran",
+    "Game generation only supports single-player games.": "Seuls les jeux en solo peuvent être générés.",
     "Game Studio": "Studio de jeux",
     "Game actions": "Actions du jeu",
     "Game link copied.": "Lien du jeu copié.",
@@ -616,8 +641,11 @@
     "Pixel art": "Pixel art",
     "Platformer": "Plateforme",
     "Play {title}": "Jouer à {title}",
+    "Try game": "Essayer le jeu",
+    "Try game: {title}": "Essayer le jeu : {title}",
     "Racing": "Course",
     "Relevance": "Pertinence",
+    "Default sort": "Par défaut",
     "Remove from favorites": "Retirer des favoris",
     "Remove genre": "Retirer le genre",
     "Retro": "Rétro",
@@ -712,7 +740,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Nécessite l’app de bureau Codex. Ouvre une nouvelle conversation pré-remplie ; envoyez-la vous-même.",
     "Playable ad": "Publicité jouable",
     "Continue in Super Agent": "Continuer dans Super Agent",
-    "Edit & optimize in Super Agent": "Modifier et optimiser dans Super Agent"
+    "Edit & optimize in Super Agent": "Modifier et optimiser dans Super Agent",
+    "Create trailer": "Créer une bande-annonce",
+    "Edit in Agent": "Modifier dans Agent"
   },
   "ru": {
     "3D": "3D",
@@ -739,6 +769,7 @@
     "Dislike": "Не нравится",
     "Fantasy": "Фэнтези",
     "Full screen": "Во весь экран",
+    "Game generation only supports single-player games.": "Создавать можно только одиночные игры.",
     "Game Studio": "Игровая студия",
     "Game actions": "Действия с игрой",
     "Game link copied.": "Ссылка на игру скопирована.",
@@ -759,8 +790,11 @@
     "Pixel art": "Пиксель-арт",
     "Platformer": "Платформер",
     "Play {title}": "Играть в {title}",
+    "Try game": "Попробовать игру",
+    "Try game: {title}": "Попробовать игру: {title}",
     "Racing": "Гонки",
     "Relevance": "По релевантности",
+    "Default sort": "По умолчанию",
     "Remove from favorites": "Убрать из избранного",
     "Remove genre": "Убрать жанр",
     "Retro": "Ретро",
@@ -855,7 +889,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Нужно настольное приложение Codex. Откроется новый чат с инструкцией; отправьте его сами.",
     "Playable ad": "Играбельная реклама",
     "Continue in Super Agent": "Продолжить в Super Agent",
-    "Edit & optimize in Super Agent": "Редактировать и улучшать в Super Agent"
+    "Edit & optimize in Super Agent": "Редактировать и улучшать в Super Agent",
+    "Create trailer": "Создать трейлер",
+    "Edit in Agent": "Изменить в Agent"
   },
   "es": {
     "3D": "3D",
@@ -882,6 +918,7 @@
     "Dislike": "No me gusta",
     "Fantasy": "Fantasía",
     "Full screen": "Pantalla completa",
+    "Game generation only supports single-player games.": "Solo se pueden generar juegos de un jugador.",
     "Game Studio": "Estudio de juegos",
     "Game actions": "Acciones del juego",
     "Game link copied.": "Enlace del juego copiado.",
@@ -902,8 +939,11 @@
     "Pixel art": "Pixel art",
     "Platformer": "Plataformas",
     "Play {title}": "Jugar a {title}",
+    "Try game": "Probar el juego",
+    "Try game: {title}": "Probar el juego: {title}",
     "Racing": "Carreras",
     "Relevance": "Relevancia",
+    "Default sort": "Por defecto",
     "Remove from favorites": "Quitar de favoritos",
     "Remove genre": "Quitar género",
     "Retro": "Retro",
@@ -998,7 +1038,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requiere la app de escritorio de Codex. Abre un chat nuevo con la instrucción; envíalo tú.",
     "Playable ad": "Anuncio jugable",
     "Continue in Super Agent": "Continuar en Super Agent",
-    "Edit & optimize in Super Agent": "Editar y optimizar en Super Agent"
+    "Edit & optimize in Super Agent": "Editar y optimizar en Super Agent",
+    "Create trailer": "Crear tráiler",
+    "Edit in Agent": "Editar en Agent"
   },
   "pt-BR": {
     "3D": "3D",
@@ -1025,6 +1067,7 @@
     "Dislike": "Não gostei",
     "Fantasy": "Fantasia",
     "Full screen": "Tela cheia",
+    "Game generation only supports single-player games.": "Só é possível gerar jogos de um jogador.",
     "Game Studio": "Estúdio de jogos",
     "Game actions": "Ações do jogo",
     "Game link copied.": "Link do jogo copiado.",
@@ -1045,8 +1088,11 @@
     "Pixel art": "Pixel art",
     "Platformer": "Plataforma",
     "Play {title}": "Jogar {title}",
+    "Try game": "Experimentar o jogo",
+    "Try game: {title}": "Experimentar o jogo: {title}",
     "Racing": "Corrida",
     "Relevance": "Relevância",
+    "Default sort": "Ordem padrão",
     "Remove from favorites": "Remover dos favoritos",
     "Remove genre": "Remover gênero",
     "Retro": "Retrô",
@@ -1141,7 +1187,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Requer o app de desktop do Codex. Abre uma conversa nova com a instrução; envie você mesmo.",
     "Playable ad": "Anúncio jogável",
     "Continue in Super Agent": "Continuar no Super Agent",
-    "Edit & optimize in Super Agent": "Editar e otimizar no Super Agent"
+    "Edit & optimize in Super Agent": "Editar e otimizar no Super Agent",
+    "Create trailer": "Criar trailer",
+    "Edit in Agent": "Editar no Agent"
   },
   "it": {
     "3D": "3D",
@@ -1168,6 +1216,7 @@
     "Dislike": "Non mi piace",
     "Fantasy": "Fantasy",
     "Full screen": "Schermo intero",
+    "Game generation only supports single-player games.": "Si possono generare solo giochi per giocatore singolo.",
     "Game Studio": "Studio giochi",
     "Game actions": "Azioni del gioco",
     "Game link copied.": "Link del gioco copiato.",
@@ -1188,8 +1237,11 @@
     "Pixel art": "Pixel art",
     "Platformer": "Platform",
     "Play {title}": "Gioca a {title}",
+    "Try game": "Prova il gioco",
+    "Try game: {title}": "Prova il gioco: {title}",
     "Racing": "Corse",
     "Relevance": "Pertinenza",
+    "Default sort": "Ordine predefinito",
     "Remove from favorites": "Rimuovi dai preferiti",
     "Remove genre": "Rimuovi genere",
     "Retro": "Retrò",
@@ -1284,7 +1336,9 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Serve l’app desktop di Codex. Apre una nuova chat con l’istruzione; invia tu.",
     "Playable ad": "Annuncio giocabile",
     "Continue in Super Agent": "Continua in Super Agent",
-    "Edit & optimize in Super Agent": "Modifica e ottimizza in Super Agent"
+    "Edit & optimize in Super Agent": "Modifica e ottimizza in Super Agent",
+    "Create trailer": "Crea trailer",
+    "Edit in Agent": "Modifica in Agent"
   },
   "tr": {
     "3D": "3D",
@@ -1311,6 +1365,7 @@
     "Dislike": "Beğenmedim",
     "Fantasy": "Fantastik",
     "Full screen": "Tam ekran",
+    "Game generation only supports single-player games.": "Yalnızca tek oyunculu oyunlar oluşturulabilir.",
     "Game Studio": "Oyun Stüdyosu",
     "Game actions": "Oyun işlemleri",
     "Game link copied.": "Oyun bağlantısı kopyalandı.",
@@ -1331,8 +1386,11 @@
     "Pixel art": "Piksel sanatı",
     "Platformer": "Platform",
     "Play {title}": "{title} oyna",
+    "Try game": "Oyunu dene",
+    "Try game: {title}": "Oyunu dene: {title}",
     "Racing": "Yarış",
     "Relevance": "İlgi",
+    "Default sort": "Varsayılan sıra",
     "Remove from favorites": "Favorilerden kaldır",
     "Remove genre": "Türü kaldır",
     "Retro": "Retro",
@@ -1427,6 +1485,8 @@
     "Needs the Codex desktop app. Opens a new chat with the instruction filled in; press send yourself.": "Codex masaüstü uygulaması gerekir. Talimatla dolu yeni bir sohbet açar; göndermeyi sen yaparsın.",
     "Playable ad": "Oynanabilir reklam",
     "Continue in Super Agent": "Super Agent'ta devam et",
-    "Edit & optimize in Super Agent": "Super Agent'ta düzenle ve iyileştir"
+    "Edit & optimize in Super Agent": "Super Agent'ta düzenle ve iyileştir",
+    "Create trailer": "Fragman oluştur",
+    "Edit in Agent": "Agent’ta düzenle"
   }
 }

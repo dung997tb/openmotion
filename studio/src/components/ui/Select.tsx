@@ -35,6 +35,7 @@ export interface SelectProps {
   /** Called once per committed change, for design-input telemetry. */
   onTrack?: () => void;
   disabled?: boolean;
+  modal?: boolean;
   className?: string;
   popupClassName?: string;
   appearance?: "standard" | "boxed";
@@ -48,6 +49,7 @@ export function Select({
   onCommit,
   onTrack,
   disabled,
+  modal,
   className,
   popupClassName,
   appearance = "standard",
@@ -59,6 +61,7 @@ export function Select({
     <BaseSelect.Root
       value={value}
       disabled={disabled}
+      modal={modal}
       items={options}
       onValueChange={(next) => {
         // Replacing a controlled option set may briefly clear Base UI's value.
@@ -77,7 +80,7 @@ export function Select({
           fieldBase,
           "w-full cursor-pointer justify-between text-left",
           "data-[popup-open]:border-border-strong",
-          rich && "om-select-trigger",
+          appearance === "standard" && rich && "om-select-trigger",
           className,
         )}
         data-preview-state={previewState}

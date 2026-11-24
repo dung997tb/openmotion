@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useMountEffect } from "./useMountEffect";
 import type { AppToast } from "../utils/studioHelpers";
 
@@ -90,6 +90,22 @@ export function useToast() {
     },
     [clearTimer, dismissToast],
   );
+
+  // Safety net: ensure no transient toast can ever be orphaned without a timer
+  // (for example across React StrictMode double-effect cleanup or KeepAlive transitions).
+  useEffect(() => {
+    for (const toast of toasts) {
+      if (toast.leaving) {
+        if (!timersRef.current.has(toast.id)) {
+          const timer = setTimeout(() => removeToast(toast.id), EXIT_MS);
+          timersRef.current.set(toast.id, timer);
+        }
+      } else if (!toast.action && !timersRef.current.has(toast.id)) {
+        const timer = setTimeout(() => dismissToast(toast.id), AUTO_DISMISS_MS);
+        timersRef.current.set(toast.id, timer);
+      }
+    }
+  }, [toasts, dismissToast, removeToast]);
 
   useMountEffect(() => () => {
     for (const timer of timersRef.current.values()) clearTimeout(timer);

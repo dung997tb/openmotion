@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Button } from 'open-design-ui/button';
 import { scenarioDefinitions, type ScenarioId } from '../../../shared/scenarios';
 import { useI18n } from '../i18n/I18n';
@@ -7,7 +8,7 @@ import { HorizontalRail } from './HorizontalRail';
 import { reportCreativeClick } from './exploreTracking';
 import './scenarioNavigation.css';
 
-export function ScenarioHighlights({
+export const ScenarioHighlights = memo(function ScenarioHighlights({
   onStartScenario,
   onOpenHub,
 }: {
@@ -59,4 +60,4 @@ export function ScenarioHighlights({
       </HorizontalRail>
     </section>
   );
-}
+});

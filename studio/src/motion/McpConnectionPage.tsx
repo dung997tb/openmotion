@@ -106,7 +106,7 @@ export function McpConnectionPage({ openLibrary: openLibraryRaw, openProviders: 
     if (!selected) return;
     setClientId(selected.id);
     click('mcp_client', 'client_tab', { mcp_client: selected.id });
-  }} render={<Container ref={page} className="om-mcp-page" data-in-settings={inSettings || undefined} aria-labelledby="mcp-title" onKeyDown={event => event.stopPropagation()} />}>
+  }} render={<Container ref={page} className="om-mcp-page om-route-surface" data-in-settings={inSettings || undefined} aria-labelledby="mcp-title" onKeyDown={event => event.stopPropagation()} />}>
     {breadcrumb}
     <div className="om-page-back-row om-mcp-client-row">
       <HorizontalRail label="Agent client" viewportClassName="om-mcp-client-viewport" selection={client.id} plainArrows>
