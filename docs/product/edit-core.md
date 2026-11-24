@@ -48,7 +48,11 @@ Exercise a migrated action through Studio and remote MCP on identical input. Com
 
 After a file commit, the receiving Studio reads the changed composition it is displaying. Its timeline, SDK session and open source editor share that read. The file source supplies authored clip timing and track placement. The preview refresh proceeds independently so a slow media load cannot delay the timeline update. The outgoing player may still report playback data. Its old manifest cannot replace a newer authored timeline. Switching projects or compositions invalidates outstanding reads.
 
-A supported isolated preview can apply numeric timing changes to the live document. It acknowledges only an exact match for the project, document, file version and affected nodes. Scripted compositions, structural edits and version mismatches refresh through the existing preview replacement flow. The timeline remains usable during that refresh.
+A supported isolated preview can apply numeric timing changes to the live document. It acknowledges only an exact match for the project, document, file version and affected nodes. The timeline remains usable when a change requires rebuilding the preview.
+
+A scripted template can declare the live edits that its author has tested by placing a single `<meta name="openmotion-live-edits" content="mediaTiming position" data-scripts-sha256="…">` in the entry HTML head. For `mediaTiming`, playback and visuals must remain correct when an audio clip moves and the root duration extends. For `position`, animations must remain correct when Studio changes an element's position. Check these properties against a freshly opened copy, including the end of the animation. Startup code that records an audio start or a layout offset can produce different results after an in-place edit.
+
+The author records the digest from `previewBehaviorDigest` for the assembled project and the sorted, space-separated capabilities. It covers script tags and local script file versions. Templates that load behavior dynamically must retain normal preview rebuilding. A missing declaration, an unmatched digest or an unsupported edit uses that same rebuild path. Editing project content and maintaining project history follow the usual commands in all cases.
 
 ### Placing a catalog component
 

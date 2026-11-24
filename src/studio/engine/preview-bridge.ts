@@ -8,6 +8,7 @@ import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
 import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
 import { PREVIEW_PEER_TIMING } from './preview-peer-timing.ts';
+import type { PreviewLiveEdits } from '../../../shared/preview-timing.ts';
 import { PREVIEW_THUMBNAIL_CAPTURE } from './preview-thumbnail-capture.ts';
 
 function scopedScript(configuration: string, body: string): string {
@@ -204,10 +205,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
 export const PREVIEW_BRIDGE_PATH = '/api/preview-bridge.js';
 export const PREVIEW_BRIDGE_VERSION = createHash('sha256').update(PREVIEW_BRIDGE_SCRIPT).digest('hex');
 
-export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[]) {
+export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[], liveEdits?: PreviewLiveEdits) {
   const src = new URL(PREVIEW_BRIDGE_PATH, origin);
   src.searchParams.set('v', PREVIEW_BRIDGE_VERSION);
-  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, ...(canRebindTiming && { canRebindTiming }) })
+  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, liveEdits, ...(canRebindTiming && { canRebindTiming }) })
     .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return {
     preload: `<link rel="preload" as="script" href="${src.href}">`,
