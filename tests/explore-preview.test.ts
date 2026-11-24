@@ -50,3 +50,13 @@ test('all seven welcomes distinguish Explore from the DSH library view', () => {
   assert.equal(translations.en.welcome.discovery, 'Open Templates at the top right to search the library. When you find one you like, choose Recreate template to start creating!');
   assert.equal(translations.zh.welcome.libraryHeading, '🎉 OpenMotion 安装好啦，右侧就是模板库！');
 });
+
+test('opening a workspace page is not reported as opening a project', async () => {
+  const { trackPhase1Result } = await import('../shared/tracking.ts');
+  const events: string[] = [];
+  const tracking = { track: (event: string) => { events.push(event); } } as unknown as Parameters<typeof trackPhase1Result>[0];
+  for (const target of ['explore', 'templates', 'providers']) trackPhase1Result(tracking, 'motion_open_preview', { target, action: 'open' }, { target });
+  assert.deepEqual(events, []);
+  trackPhase1Result(tracking, 'motion_open_preview', { projectId: '11111111-1111-4111-8111-111111111111' }, { projectId: '11111111-1111-4111-8111-111111111111' });
+  assert.deepEqual(events, ['project_open_result']);
+});
