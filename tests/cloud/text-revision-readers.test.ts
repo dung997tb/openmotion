@@ -110,15 +110,42 @@ it('accepts large localized patches from an upgraded editor during a rolling dep
   try {
     const path = 'large.html';
     const original = 'a'.repeat(1024 * 1024);
-    const inserted = 'b'.repeat(300 * 1024);
-    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content: original }] });
+    const inserted = '中\n\\'.repeat(60 * 1024);
+    assert.equal(Buffer.byteLength(inserted), 300 * 1024);
+    const escapedPath = 'escaped.txt';
+    const prefix = 'a'.repeat(300 * 1024);
+    const retained = '\u0001'.repeat(8);
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [
+      { path, content: original }, { path: escapedPath, content: prefix + retained },
+    ] });
     const base = (await files.readTextFile(auth, projectId, path))!;
     const saved = await files.commitTextEdits(auth, projectId, { files: [
-      { path, baseVersion: base.version, patch: [[0, inserted.length, inserted]] },
+      { path, baseVersion: base.version, patch: [[0, Buffer.byteLength(inserted), inserted]] },
     ] }, { source: 'studio', requestId: randomUUID() });
     const current = (await files.readTextFile(auth, projectId, path))!;
     assert.equal(current.version, saved.versionsByPath[path]);
-    assert.equal(current.content, inserted + original.slice(inserted.length));
+    assert.equal(current.content, inserted + original.slice(Buffer.byteLength(inserted)));
+
+    const requestId = randomUUID();
+    const size = Buffer.byteLength(current.content);
+    await assert.rejects(files.commitTextEdits(auth, projectId, { files: [
+      { path, baseVersion: current.version, patch: [[0, size / 2, inserted], [size / 2, size / 2, inserted]] },
+    ] }, { source: 'studio', requestId }), /Send content/);
+    assert.equal((await files.readTextFile(auth, projectId, path))!.version, current.version);
+    const full = await files.commitTextEdits(auth, projectId, { files: [
+      { path, baseVersion: current.version, content: inserted + inserted },
+    ] }, { source: 'studio', requestId });
+    assert.match(full.versionsByPath[path], /^"sha256:/);
+    assert.equal((await files.readTextFile(auth, projectId, path))!.content, inserted + inserted);
+
+    // The patch is bigger than the raw result but smaller than its escaped wire representation.
+    const escapedBase = (await files.readTextFile(auth, projectId, escapedPath))!;
+    const patch = [[0, prefix.length, inserted]] as const;
+    assert.ok(Buffer.byteLength(JSON.stringify({ patch })) > Buffer.byteLength(inserted + retained));
+    assert.ok(Buffer.byteLength(JSON.stringify({ patch })) < Buffer.byteLength(JSON.stringify({ content: inserted + retained })));
+    await files.commitTextEdits(auth, projectId, { files: [{ path: escapedPath, baseVersion: escapedBase.version, patch }] },
+      { source: 'studio', requestId: randomUUID() });
+    assert.equal((await files.readTextFile(auth, projectId, escapedPath))!.content, inserted + retained);
   } finally { await cleanup(); }
 });
 

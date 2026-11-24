@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { componentOverlaySource } from '../../shared/registry-material-compat.ts';
-import type { TextPatch } from '../../shared/text-patch.ts';
+import { MAX_PATCH_BYTES, type TextPatch } from '../../shared/text-patch.ts';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { BlobScope, StoragePort } from '../contracts/storage.ts';
@@ -57,6 +57,15 @@ export async function appendTextRevisions(tx: DbTransaction, workspaceId: string
     op: 'upsert' as const, path, blobScope: 'patch' as const, sha256: record.id,
     sizeBytes: record.sizeBytes, mimeType: record.mimeType, isText: true,
   }));
+}
+
+// The inserted strings have exactly the same JSON escaping in both wire forms. Each
+// retained UTF-8 byte can cost at most six JSON bytes (e.g. a control character).
+// This upper bound rules out wasteful patches without reading the unchanged source.
+function canPatchBeSmaller(patch: TextPatch, baseBytes: number): boolean {
+  const retained = patch.reduce((bytes, [, removed]) => bytes - removed, baseBytes);
+  const envelope = patch.map(([offset, removed]) => [offset, removed, '']);
+  return JSON.stringify({ patch: envelope }).length < '{"content":""}'.length + 6 * retained;
 }
 
 export async function commitTextEdits(files: ProjectFilesService, db: Database, storage: StoragePort,
@@ -116,6 +125,9 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
     if (!parent) throw invalid('Invalid patch base');
     if (!item.patch.length) continue;
     const sizeBytes = await validateTextPatch(db, {workspaceId: ctx.workspaceId, projectId, base: parent, patch: item.patch, storage});
+    if (patchBytes > MAX_PATCH_BYTES && !canPatchBeSmaller(item.patch, parent.sizeBytes)) {
+      throw invalid('Send content for a large replacement whose patch cannot be smaller than the complete file.');
+    }
     let depth = 1;
     let chainPatchBytes = patchBytes;
     if (parent.blobScope === 'patch') {
