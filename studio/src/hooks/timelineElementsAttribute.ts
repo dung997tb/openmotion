@@ -93,9 +93,8 @@ export function useSetElementsAttribute({
         const uniform = edits.every(edit => edit.value === edits[0]?.value);
         const state = attr === "muted" ? "muted" : attr === "data-timeline-locked" ? "locked" : null;
         const iframe = previewIframeRef.current;
-        if (attr === "muted" || attr === "data-timeline-locked") {
-          settle = projectTimelineControl(projectId, activeCompPath, iframe, attr,
-            edits.map(({ element, value }) => ({ element, enabled: value !== null })));
+        if (attr === "muted" || attr === "data-timeline-locked" || attr === "data-volume") {
+          settle = projectTimelineControl(projectId, activeCompPath, iframe, attr, edits);
         }
         const cloud = getCachedCloudDisklessMode();
         const onSaved = cloud && iframe && !iframe.contentDocument && reloadPreview

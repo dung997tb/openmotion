@@ -26,7 +26,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
     __hfForceTimelineRebind: () => { hooks.push('rebind'); },
     addEventListener: (event: string, handler: typeof handle) => { if (event === 'message') handle = handler; },
   };
-  runInNewContext(PREVIEW_BRIDGE_SCRIPT, { window, document, URL, HTMLElement: document.defaultView.HTMLElement, CSS: { escape: (s: string) => s }, crypto: { randomUUID: () => 'document-1' },
+  runInNewContext(PREVIEW_BRIDGE_SCRIPT, { window, document, URL, HTMLElement: document.defaultView?.HTMLElement, CSS: { escape: (s: string) => s }, crypto: { randomUUID: () => 'document-1' },
     setInterval() {}, location: { href: 'https://preview.test/api/projects/p/preview?pt=grant' } });
   function send(overrides: Record<string, unknown> = {}, origin = 'https://studio.test', source = parent) {
     replies.length = 0;
@@ -287,7 +287,7 @@ it('displays the latest control while earlier file versions settle, preserving p
   const title = document.getElementById('title')!;
   const project = (enabled: boolean, settled: boolean) => send({
     type: 'timeline-controls', attr: 'data-hidden',
-    changes: [{ sourceFile: 'index.html', elementId: 'title', enabled, settled }],
+    changes: [{ sourceFile: 'index.html', elementId: 'title', value: enabled ? '' : null, settled }],
   });
   project(true, false);
   assert.equal(title.hasAttribute('data-hidden'), true);

@@ -5,13 +5,13 @@ export const PREVIEW_TIMELINE_CONTROLS = `
   const previewControls = new WeakMap();
   function previewTimelineControls(message) {
     const name = message.attr;
-    if (!['data-hidden','data-timeline-locked','muted'].includes(name) || !Array.isArray(message.changes)) return;
+    if (!['data-hidden','data-timeline-locked','muted','data-volume'].includes(name) || !Array.isArray(message.changes)) return;
     let changed = false;
     for (const item of message.changes) {
-      if (!item || typeof item.enabled !== 'boolean' || typeof item.settled !== 'boolean' ||
+      if (!item || typeof item.settled !== 'boolean' ||
           !Object.hasOwn(sourceVersions, item.sourceFile)) continue;
       const node = inspectorElement(item);
-      if (!node || node.closest('[data-hf-parked-scene]')) continue;
+      if (!node || node.closest('[data-hf-parked-scene]') || !canPatchPreviewAttribute(name,item.value,node.localName)) continue;
       let controls = previewControls.get(node);
       if (!controls) previewControls.set(node, controls = new Map());
       let entry = controls.get(name);
@@ -21,17 +21,19 @@ export const PREVIEW_TIMELINE_CONTROLS = `
         controls.set(name,entry);
       }
       entry.settled = item.settled;
-      if (node.hasAttribute(name) !== item.enabled) {
-        node.toggleAttribute(name, item.enabled);
+      if (node.getAttribute(name) !== item.value) {
+        if (item.value === null) node.removeAttribute(name);
+        else node.setAttribute(name, item.value);
         changed = true;
       }
-      if (item.settled && (entry.base !== null) === item.enabled) controls.delete(name);
+      if (item.settled && entry.base === item.value) controls.delete(name);
     }
-    if (changed && name === 'data-hidden') {
+    if (changed && (name === 'data-hidden' || name === 'data-volume')) {
       const p = player();
       if (p?.seek && p.getTime) {
         const playing = p.isPlaying?.();
         p.seek(p.getTime());
+        if (name === 'data-volume') window.__hfForceTimelineRebind?.();
         if (playing) p.play?.();
       }
     }

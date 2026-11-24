@@ -132,7 +132,7 @@ async function setElementsHidden({
   if (elements.length === 0) return [];
 
   const settle = projectTimelineControl(projectId, activeCompPath, previewIframe, "data-hidden",
-    elements.map(element => ({ element, enabled: hidden })));
+    elements.map(element => ({ element, value: hidden ? "" : null })));
 
   const hiddenOperation: PatchOperation = {
     type: "attribute",
