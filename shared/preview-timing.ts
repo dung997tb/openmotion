@@ -1,4 +1,5 @@
 export const MAX_PEER_PREVIEW_SOURCE_LENGTH = 128 * 1024;
+export type PreviewLiveEdits = { position?: true; mediaTiming?: true };
 export const TIMING_ATTRIBUTES = [
   "data-start", "data-end", "data-duration", "data-track-index", "data-playback-start", "data-media-start",
 ] as const;
@@ -16,4 +17,13 @@ export interface PreviewChange {
   styles?: [typeof PRESENTATION_STYLES[number], string, string][];
   text?: [string, string];
   attributes: [typeof TIMING_ATTRIBUTES[number], string | null, string | null][];
+}
+
+/** Used by Studio and the isolated bridge to validate the complete set of changes. */
+export function isLivePositionEdit(changes: PreviewChange[]): boolean {
+  return Array.isArray(changes) && changes.length > 0 && changes.every(change =>
+    !change?.text && Array.isArray(change?.attributes) && change.attributes.length === 0 &&
+    Array.isArray(change.styles) && change.styles.length > 0 && change.styles.every(style =>
+      Array.isArray(style) && style.length === 3 && (style[0] === "left" || style[0] === "top") &&
+      style.slice(1).every(value => typeof value === "string" && (value === "" || /^-?(?:\d+\.?\d*|\.\d+)px$/.test(value)))));
 }

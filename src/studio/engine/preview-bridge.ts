@@ -8,6 +8,7 @@ import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
 import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
 import { PREVIEW_PEER_TIMING } from './preview-peer-timing.ts';
+import type { PreviewLiveEdits } from '../../../shared/preview-timing.ts';
 import { PREVIEW_THUMBNAIL_CAPTURE } from './preview-thumbnail-capture.ts';
 
 function scopedScript(configuration: string, body: string): string {
@@ -67,6 +68,8 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
       width:window.__clipManifest&&window.__clipManifest.compositionWidth, height:window.__clipManifest&&window.__clipManifest.compositionHeight,
       fps:window.__clipManifest&&window.__clipManifest.fps,
       durationInFrames:window.__clipManifest&&Number(window.__clipManifest.durationInFrames)||0,
+      timelinePath:includeManifest?compositionPath:undefined,
+      timelineVersion:includeManifest?sourceIdentity(sourceVersions?.[compositionPath]).fileVersion:undefined,
       clips:includeManifest&&window.__clipManifest&&Array.isArray(window.__clipManifest.clips)?authoredTimelineClips(window.__clipManifest.clips):undefined};
   }
   function sourceFileForElement(element){
@@ -99,7 +102,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
-  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
+  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,liveEdits:settings.liveEdits,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
@@ -211,9 +214,9 @@ function htmlAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[]) {
+export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[], liveEdits?: PreviewLiveEdits) {
   const src = new URL(PREVIEW_BRIDGE_ASSET, origin);
-  const settings = htmlAttribute(JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, ...(canRebindTiming && { canRebindTiming }) }));
+  const settings = htmlAttribute(JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, liveEdits, ...(canRebindTiming && { canRebindTiming }) }));
   // A pod from before this route existed may still serve an asset request
   // during rollout. Reuse the player's bounded preview retry if loading fails.
   const retry = htmlAttribute(previewBuildBusyScript(projectId, 1));

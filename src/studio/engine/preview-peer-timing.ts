@@ -1,4 +1,5 @@
-import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH } from '../../../shared/preview-timing.ts';
+import { isLiveMediaMove } from '../../../shared/preview-live-media.ts';
+import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit } from '../../../shared/preview-timing.ts';
 
 // Runs inside the token-scoped iframe. Each change targets a verified live node and file revision.
 export const PREVIEW_PEER_TIMING = `
@@ -44,6 +45,8 @@ export const PREVIEW_PEER_TIMING = `
     }
     return true;
   }
+  const isPositionEdit = ${isLivePositionEdit.toString()};
+  const isMediaMove = ${isLiveMediaMove.toString()};
   function applyPeerTiming(m) {
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
     const temporary = m.type === 'peer-presentation' && m.temporary === true;
@@ -51,8 +54,12 @@ export const PREVIEW_PEER_TIMING = `
     const pending = local && pendingDrags.get(m.gestureId);
     const ownDrag = pending && pendingForSource(m.path)[0] === pending;
     const base = ownDrag ? pending.confirmedVersion || pending.sha256 : sourceVersions[m.path];
-    const target = temporary ? styleDocumentId : timingDocumentId;
-    if (!target || m.documentId !== target || (temporary ? !!timingDocumentId : m.path !== compositionPath) ||
+    const position = settings.liveEdits?.position === true && m.type === 'peer-presentation' &&
+      Array.isArray(m.changes) && m.changes.length <= 32 && isPositionEdit(m.changes);
+    const media = settings.liveEdits?.mediaTiming === true && m.type === 'peer-timing' &&
+      Array.isArray(m.changes) && m.changes.length <= 32 && isMediaMove(m.changes);
+    const target = temporary || position || media ? styleDocumentId : timingDocumentId;
+    if (!target || m.documentId !== target || (temporary ? !!timingDocumentId : !position && m.path !== compositionPath) ||
         !before || !after || before !== base ||
         !Number.isFinite(m.expiresAt) || Date.now() >= m.expiresAt ||
         (!ownDrag && (drag || pendingDrags.size)) ||
@@ -70,6 +77,7 @@ export const PREVIEW_PEER_TIMING = `
         node.localName === change.tag && sourceFileForElement(node) === m.path);
       if (matches.length !== 1 || matches[0].closest('[data-hf-parked-scene]')) return false;
       const node = matches[0];
+      if (media && change.tag !== 'audio' && node !== document.querySelector('[data-composition-id]')) return false;
       if (!stagePresentation(node, change, effects, local, pending)) return false;
       for (const [name, from, to] of change.attributes) {
         if (!timingAttributes.has(name) || [from,to].some(value => value !== null &&

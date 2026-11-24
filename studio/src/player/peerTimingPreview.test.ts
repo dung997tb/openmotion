@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
-import { diffPreviewChanges, diffScriptedPreviewStyles } from "./peerTimingPreview";
+import { diffPreviewChanges, diffScriptedPreviewStyles, rememberPeerTimingDocument, tryApplyPeerChanges } from "./peerTimingPreview";
 
 const source = '<!doctype html><main data-composition-id="root" data-duration="15"><audio id="a" data-start="2" data-duration="3"></audio><script>window.run(1)</script></main>';
 
@@ -54,4 +54,18 @@ describe("peer timing classification", () => {
     }
     expect(diffPreviewChanges('<template>' + source + '</template>', '<template>' + trimmed.replace('run(1)', 'run(2)') + '</template>')).toBeNull();
   });
+});
+
+it("keeps an unverified font change visible while the certified project's script rebuilds", async () => {
+  const frame = document.createElement("iframe");
+  frame.src = "https://preview.test/api/projects/p/preview?pt=active";
+  const postMessage = vi.fn();
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage } });
+  rememberPeerTimingDocument(frame, "active", undefined, "document", { position: true });
+  const previous = '<p id="title" style="font-size:10px">Hello</p>';
+  const result = await tryApplyPeerChanges(frame, { path: "scene.html",
+    previous: { content: previous, version: "first" }, current: { content: previous.replace("10px", "12px"), version: "second" },
+  }, () => true, "keep-visible");
+  expect(result).toBe(false);
+  expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "peer-presentation", temporary: true }), "https://preview.test");
 });

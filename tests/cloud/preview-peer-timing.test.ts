@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { PreviewLiveEdits } from '../../shared/preview-timing.ts';
 import { it } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { parseHTMLContent } from '@hyperframes/core/compiler/html-document';
@@ -9,11 +10,11 @@ const etag = (n: number) => '"sha256:' + sha(n) + '"';
 const root = { compositionId: 'root', tag: 'main', attributes: [['data-duration', '15', '14']] };
 const clip = { id: 'clip', tag: 'audio', attributes: [['data-start', '2', '3'], ['data-media-start', null, '1']] };
 
-function preview(canRebindTiming = true) {
+function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
   const document = parseHTMLContent('<html><body><main data-composition-id="root" data-hf-authored-duration="15"><audio id="clip" data-start="2"></audio><div id="title" style="left:10px">Hello</div></main></body></html>');
   const script = document.createElement('script');
   script.setAttribute('data-openmotion-preview', JSON.stringify({
-    projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1), 'scenes/intro.html': sha(3) }, studioOrigin: 'https://studio.test', canRebindTiming,
+    projectId: 'p', compositionPath: 'index.html', sourceVersions: { 'index.html': sha(1), 'scenes/intro.html': sha(3) }, studioOrigin: 'https://studio.test', canRebindTiming, liveEdits,
   }));
   Object.defineProperty(document, 'currentScript', { value: script });
   const replies: { result?: unknown }[] = [];
@@ -89,6 +90,32 @@ it('shows a confirmed nested style on the old scripted document while keeping it
   assert.equal(send({ ...message, before: etag(4), after: etag(5),
     changes: [{ ...change, styles: [['font-size', '54px', '56px']] }] }), false);
   assert.deepEqual(hooks, []);
+});
+
+it('advances a certified child placement through consecutive versions without restarting its animations', () => {
+  const { send, document, hooks } = preview(false, { position: true });
+  const path = 'scenes/intro.html';
+  document.querySelector('main')!.setAttribute('data-composition-file', path);
+  const move = (from: string, to: string) => [{ id: 'title', tag: 'div', attributes: [], styles: [['left', from, to]] }];
+  const message = { type: 'peer-presentation', path, before: etag(3), after: etag(4), changes: move('10px', '18px') };
+  assert.equal(send({ ...message, changes: move('10px', '50%') }), false);
+  assert.equal(send({ ...message, changes: [{ ...move('10px', '18px')[0], text: ['Hello', 'other'] }] }), false);
+  assert.equal(send(message), true);
+  assert.equal(send(message), false);
+  assert.equal(send({ ...message, before: etag(4), after: etag(5), changes: move('18px', '22px') }), true);
+  assert.equal(document.getElementById('title')!.style.left, '22px');
+  assert.deepEqual(hooks, []);
+});
+
+it('limits scripted media timing rebinding to audio moves and the active root duration', () => {
+  const { send, document } = preview(false, { mediaTiming: true });
+  document.getElementById('title')!.setAttribute('data-composition-id', 'child');
+  const audio = { id: 'clip', tag: 'audio', attributes: [['data-start', '2', '3']] };
+  assert.equal(send({ changes: [audio, { compositionId: 'child', tag: 'div', attributes: [['data-duration', null, '4']] }] }), false);
+  assert.equal(document.getElementById('clip')!.getAttribute('data-start'), '2');
+  assert.equal(send({ changes: [clip] }), false);
+  assert.equal(send({ changes: [root, audio] }), true);
+  assert.equal(document.getElementById('clip')!.getAttribute('data-start'), '3');
 });
 
 it('confirms an optimistic inspector value only for the writer and only on its displayed base', () => {

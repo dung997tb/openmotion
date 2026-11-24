@@ -1,19 +1,33 @@
+import { isLiveMediaMove } from "../../../shared/preview-live-media";
 import { createPreviewAdapter } from "./lib/previewAdapter";
-import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
 // A WindowProxy survives navigation. Bind a request to the document that acknowledged the handshake.
-const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean }>();
-export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown): void {
+const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean; liveEdits: PreviewLiveEdits; timingFile?: { path: string; version: string } }>();
+export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown, liveEdits: PreviewLiveEdits = {}): void {
   const id = timingId ?? styleId;
-  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id, canRebind: id === timingId });
+  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) {
+    const known = documents.get(frame);
+    if (known?.id !== id || known.token !== token) documents.set(frame, { token, id, canRebind: id === timingId, liveEdits });
+  }
   else documents.delete(frame);
 }
 
 /** A scripted or older document can start rebuilding in parallel with the source read. */
 export function hasPeerTimingDocument(frame: HTMLIFrameElement): boolean {
   return documents.get(frame)?.canRebind === true;
+}
+
+export function hasPeerLiveEdit(frame: HTMLIFrameElement, capability: keyof PreviewLiveEdits): boolean {
+  return documents.get(frame)?.liveEdits?.[capability] === true;
+}
+
+/** A queued clip list can outlive the verified in-place edit that replaced its timings. */
+export function acceptsTimingManifest(frame: HTMLIFrameElement, path: unknown, version: unknown): boolean {
+  const expected = documents.get(frame)?.timingFile;
+  return !expected || path !== expected.path || version === expected.version;
 }
 
 export function hasScriptedStylePreview(frame: HTMLIFrameElement) {
@@ -109,40 +123,61 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
 }
 
 /** The first visual edit can persist the exact IDs already mounted by the compiler. */
-export async function diffScriptedPreviewStyles(previous: string, current: string) {
+async function diffMountedPreview(previous: string, current: string) {
   if (Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
   if (!previous.includes("data-hf-id=") && current.includes("data-hf-id=")) {
     const { ensureHfIds } = await import("@hyperframes/parsers/hf-ids");
     previous = ensureHfIds(previous);
   }
-  const changes = diffPreviewChanges(previous, current);
-  return changes?.every(change => change.styles && !change.attributes.length && !change.text) ? changes : null;
+  return diffPreviewChanges(previous, current);
+}
+
+function onlyStyles(changes: PreviewChange[]) {
+  return changes.every(change => change.styles && !change.attributes.length && !change.text);
+}
+
+export async function diffScriptedPreviewStyles(previous: string, current: string) {
+  const changes = await diffMountedPreview(previous, current);
+  return changes && onlyStyles(changes) ? changes : null;
 }
 
 export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
   isCurrent: () => boolean,
-  options?: "temporary" | { gestureId?: string },
+  options?: "temporary" | "keep-visible" | { gestureId?: string },
 ): Promise<boolean> {
   if (!frame || !isCurrent()) return false;
   const adapter = createPreviewAdapter({ iframe: frame });
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
-  const temporary = options === "temporary";
-  if (temporary ? document.canRebind : !document.canRebind) return false;
-  const localSave = typeof options === "object" ? options : undefined;
-  const changes = temporary ? await diffScriptedPreviewStyles(update.previous.content, update.current.content) :
-    diffPreviewChanges(update.previous.content, update.current.content);
+  const { previous, current } = update;
+  const changes = options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
+    await diffMountedPreview(previous.content, current.content);
   if (!changes || !isCurrent()) return false;
+  const canAdvance = document.canRebind || (document.liveEdits.position && isLivePositionEdit(changes)) ||
+    (document.liveEdits.mediaTiming && isLiveMediaMove(changes));
+  const temporary = options === "temporary" || (!canAdvance && options === "keep-visible");
+  if (temporary && (document.canRebind || !onlyStyles(changes))) return false;
+  if (!temporary && !canAdvance) return false;
+  const localSave = typeof options === "object" ? options : undefined;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;
   try {
-    const applied = await adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
+    const paint = adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
       changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
-    return applied === true && document.id === documents.get(frame)?.id && isCurrent();
+    // A provisional style can paint in parallel with the authoritative script rebuild.
+    if (temporary && options === "keep-visible") {
+      void paint.catch(() => {});
+      return false;
+    }
+    if (await paint !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
+      document.timingFile = { path: update.path, version: current.version };
+    }
+    return true;
   } catch { return false; }
 }

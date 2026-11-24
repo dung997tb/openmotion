@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import type { CompositionEdit } from "../../../packages/edit-core/commands";
-import { hasPeerTimingDocument, tryApplyPeerChanges } from "../player/peerTimingPreview";
+import { hasPeerLiveEdit, hasPeerTimingDocument, tryApplyPeerChanges } from "../player/peerTimingPreview";
 import { isPreviewChanging } from "../player/previewReloading";
 import { announcePreviewScenesSwapped } from "../player/sceneSwap";
 import { confirmedSource } from "../utils/confirmedTextSources";
@@ -14,7 +14,7 @@ export async function submitIsolatedCanvasEdit(
 ) {
   const path = commands[0]?.compositionPath;
   const frame = frameRef.current;
-  const previous = path && frame && hasPeerTimingDocument(frame) ? confirmedSource(project, path) : undefined;
+  const previous = path && frame && (hasPeerTimingDocument(frame) || hasPeerLiveEdit(frame, "position")) ? confirmedSource(project, path) : undefined;
   const result = await submitStudioCommands(project, commands, versions, history);
   const current = path && previous && confirmedSource(project, path);
   let previewApplied = false;

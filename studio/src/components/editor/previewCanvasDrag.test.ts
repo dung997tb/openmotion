@@ -6,7 +6,7 @@ import { PREVIEW_CANVAS_DRAG } from "../../../../src/studio/engine/preview-canva
 
 const originalHash = "a".repeat(64);
 
-function createScene(declarative = false) {
+function createScene(declarative = false, position = false) {
   const elements = ["one", "two"].map(id => {
     const element = document.createElement("div");
     element.id = id;
@@ -18,11 +18,11 @@ function createScene(declarative = false) {
   vi.spyOn(document, "elementFromPoint").mockImplementation(x => elements[x < 50 ? 0 : 1]!);
   // Execute the exact child-frame script with deterministic layout measurements.
   const dispatch = new Function("document", "getComputedStyle", "HTMLElement", "sourceVersions", "describe",
-    "innerWidth", "innerHeight", "picked", "timingDocumentId", "compositionPath", PREVIEW_SOURCE_IDENTITY + PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
+    "innerWidth", "innerHeight", "picked", "timingDocumentId", "compositionPath", "settings", PREVIEW_SOURCE_IDENTITY + PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
     document, (el: HTMLElement) => ({ position: el.style.position || "static", left: el.style.left, top: el.style.top, width: "20px", height: "10px", transform: "none", display: "block" }),
     HTMLElement, { "one.html": originalHash, "two.html": originalHash },
     (el: HTMLElement) => ({ sourceFile: el.id + ".html", elementId: el.id, geometry: el.getBoundingClientRect(),
-      viewport: { width: 100, height: 100 } }), 100, 100, elements[0], declarative ? "frame" : undefined, "one.html",
+      viewport: { width: 100, height: 100 } }), 100, 100, elements[0], declarative ? "frame" : undefined, "one.html", {liveEdits: {position}},
   );
   return { one: elements[0]!, two: elements[1]!,
     gesture: (phase: string, gestureId: string, fields: Record<string, unknown> = {}) =>
@@ -44,6 +44,17 @@ it("moves immediately across pending saves and rolls back dependent measurements
   expect(one.style.left).toBe("");
   expect(gesture("finish", "third")).toBeNull();
   expect(gesture("start", "retry")).toBeTruthy();
+});
+
+it("chains certified nested moves without requiring the active root", () => {
+  const { two, gesture } = createScene(false, true);
+  two.style.position = "absolute";
+  expect(gesture("start", "first", { x: 1 })).toBeTruthy();
+  gesture("finish", "first");
+  expect(gesture("start", "second", { x: 1 })).toBeTruthy();
+  expect(gesture("finish", "second")).toMatchObject({ predecessor: "first", left: 50 });
+  gesture("cancel", "first");
+  expect(two.style.left).toBe("");
 });
 
 it("holds the released layer, allows an unrelated source to move, and waits for a fresh digest on the saved source", () => {

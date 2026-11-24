@@ -8,11 +8,13 @@ export const PREVIEW_CANVAS_DRAG = `
     return Array.from(pendingDrags.values()).filter(step => step.selection.sourceFile === path);
   }
 
-  function canvasBase(path) {
+  function canvasBase(path, gesture) {
     if (sourceVersions[path]) return sourceVersions[path];
-    // Only a declarative document can verify a local style change without
-    // replacing this frame. Other editors still require a confirmed version.
-    const latest = timingDocumentId && path === compositionPath && pendingForSource(path).at(-1);
+    const steps = pendingForSource(path);
+    const plainMove = step => !step.corner && !step.makeRelative;
+    const canChain = (timingDocumentId && path === compositionPath) ||
+      (settings.liveEdits?.position === true && plainMove(gesture) && steps.every(plainMove));
+    const latest = canChain && steps.at(-1);
     return latest && (latest.confirmedVersion || latest.sha256);
   }
 
@@ -74,10 +76,10 @@ export const PREVIEW_CANVAS_DRAG = `
         element.matches('[data-composition-id],[data-composition-src],[data-hf-scene]') ||
         element.closest('[data-timeline-locked]')) return null;
     const selection = describe(element);
-    if (!canvasBase(selection.sourceFile)) return null;
 
     const style = getComputedStyle(element);
     const makeRelative = style.position === 'static';
+    if (!canvasBase(selection.sourceFile, {corner, makeRelative})) return null;
     const properties = makeRelative ? ['left', 'top', 'position'] : ['left', 'top'];
     const width = parseFloat(style.width), height = parseFloat(style.height);
     if (corner) {
@@ -157,7 +159,7 @@ export const PREVIEW_CANVAS_DRAG = `
     const position = message.wholePath
       ? { time:startPosition.time, delta:{x:round(offsetX), y:round(offsetY)} }
       : { time:startPosition.time, x:round(startPosition.x + offsetX), y:round(startPosition.y + offsetY) };
-    const sha256 = canvasBase(sourceFile);
+    const sha256 = canvasBase(sourceFile, drag);
     const predecessor = pendingForSource(sourceFile).at(-1)?.id;
     // Keep general inspectors pinned to the last fully settled document.
     delete sourceVersions[sourceFile];
