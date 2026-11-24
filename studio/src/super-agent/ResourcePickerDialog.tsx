@@ -197,7 +197,7 @@ export function ResourcePickerPanel({
     <div className="om-sa-resource-popover-body" onKeyDown={event => event.stopPropagation()}>
       <div className="om-sa-resource-popover-toolbar">
         <label className="om-sa-resource-search">
-          <RemixIcon name={loading ? 'loader-4-line' : 'search-line'} size={14} className={loading ? 'om-command-spin' : undefined} />
+          <RemixIcon name={loading ? 'loader-4-line' : 'search-line'} size={14} />
           <input
             type="search"
             value={query}

@@ -94,13 +94,12 @@ export function SkillsPage({ skillId, onSkillChange, routeCategory, onCategoryCh
       title: displayName(skill),
       subtitle: t(skill.category),
       description: t(skill.useWhen),
-      tags: [skill.category, skill.technique, skill.name],
+      tags: [skill.category, skill.name],
       aliases: [
         skill.title,
         skill.tagline,
         t(skill.tagline),
         t(skill.output),
-        skill.example ? t(skill.example) : '',
         skill.repository ?? 'OpenMotion',
       ],
     })).map(result => result.item);

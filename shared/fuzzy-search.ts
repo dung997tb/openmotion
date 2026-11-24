@@ -552,10 +552,11 @@ function matchLiteralTokenInField(
     }
     if (field.text.includes(tok)) return 0.78;
     if (tok.length >= 4) {
-      const maxDist = tok.length <= 6 ? 1 : 2;
+      const maxDist = tok.length >= 8 ? 2 : 1;
       let bestDist = maxDist + 1;
       for (const w of field.words) {
-        if (w.length < 3) continue;
+        if (w.length < 3 || Math.abs(tok.length - w.length) > maxDist) continue;
+        if (maxDist === 2 && w.length < 6) continue;
         const dist = damerauLevenshtein(tok, w, maxDist);
         if (dist < bestDist) {
           bestDist = dist;

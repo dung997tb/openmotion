@@ -7,7 +7,6 @@ import {
 } from "../utils/blockCategories";
 import { studioApiFetch } from "../utils/studioApiFetch";
 import { useI18n } from "../i18n/I18n";
-import { rankSearchResults } from "../../../shared/fuzzy-search";
 
 type CatalogItem = RegistryItem & {
   category: BlockCategory;
@@ -74,18 +73,20 @@ export function useBlockCatalog() {
       result = result.filter((b) => b.category === category);
     }
     if (search.trim()) {
-      const categoryMap = new Map(BLOCK_CATEGORIES.map((item) => [item.id, item.label]));
-      result = rankSearchResults(result, search, (b) => {
-        const catLabel = categoryMap.get(b.category);
-        return {
-          id: b.name,
-          title: b.title,
-          subtitle: catLabel ? t(catLabel) : b.category,
-          description: b.description,
-          tags: b.tags,
-          aliases: [b.category, catLabel ?? ""],
-        };
-      }).map((r) => r.item);
+      const q = search.trim().toLowerCase();
+      const matchingCategories = new Set(
+        BLOCK_CATEGORIES.filter((item) =>
+          [item.id, item.label, t(item.label)].some((label) => label.toLowerCase().includes(q)),
+        ).map((item) => item.id),
+      );
+      result = result.filter(
+        (b) =>
+          b.title.toLowerCase().includes(q) ||
+          b.description.toLowerCase().includes(q) ||
+          b.category.toLowerCase().includes(q) ||
+          matchingCategories.has(b.category) ||
+          b.tags?.some((tag) => tag.toLowerCase().includes(q)),
+      );
     }
     return result;
   }, [blocks, category, search, t]);

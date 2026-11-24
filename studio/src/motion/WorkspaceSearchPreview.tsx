@@ -42,6 +42,7 @@ export function WorkspaceSearchPreview({
   const [playingVideo, setPlayingVideo] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [assetMediaFailed, setAssetMediaFailed] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
   const [settledDesignKey, setSettledDesignKey] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -49,6 +50,7 @@ export function WorkspaceSearchPreview({
     setPlayingVideo(false);
     setVideoFailed(false);
     setAssetMediaFailed(false);
+    setThumbFailed(false);
     const el = videoRef.current;
     return () => releaseMediaElement(el);
   }, [item?.key]);
@@ -373,9 +375,17 @@ export function WorkspaceSearchPreview({
     return (
       <aside className="om-command-preview" aria-label={t('Search results preview')}>
         <div className="om-command-preview-content" key={item.key}>
-        {(item.thumbUrl || swatches.length > 0) && (
-          <div className="om-command-stage om-command-stage-brand" data-aspect="design">
-            {item.thumbUrl && <img src={item.thumbUrl} alt={item.label} />}
+        {((item.thumbUrl && !thumbFailed) || swatches.length > 0) && (
+          <div className="om-command-stage" data-aspect="design">
+            {item.thumbUrl && !thumbFailed ? (
+              <img src={item.thumbUrl} alt={item.label} onError={() => setThumbFailed(true)} />
+            ) : (
+              <div className="om-command-stage-placeholder">
+                <span className="om-creation-icon" data-tone="image" aria-hidden="true">
+                  <RemixIcon name="palette-line" size={22} />
+                </span>
+              </div>
+            )}
             {swatches.length > 0 && (
               <div className="om-command-swatches" aria-hidden="true">
                 {swatches.slice(0, 5).map((color, idx) => (
@@ -444,7 +454,15 @@ export function WorkspaceSearchPreview({
       <div className="om-command-preview-content" key={item.key}>
       {item.thumbUrl && item.kind === 'game-project' && (
         <div className="om-command-stage" data-aspect="design">
-          <img src={item.thumbUrl} alt={item.label} />
+          {!thumbFailed ? (
+            <img src={item.thumbUrl} alt={item.label} onError={() => setThumbFailed(true)} />
+          ) : (
+            <div className="om-command-stage-placeholder">
+              <span className="om-creation-icon" data-tone="agent" aria-hidden="true">
+                <RemixIcon name="gamepad-line" size={22} />
+              </span>
+            </div>
+          )}
         </div>
       )}
 
