@@ -3,12 +3,13 @@ import { useMemo, useState, type RefObject } from 'react';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { groupBrandSeries, rankDiscoverySeries } from './brandStoryData';
 import { ExploreShelf } from './ExploreShelf';
 import { reportCreativeClick } from './exploreTracking';
 import { optionId, send } from './reporting';
 import { collectionFacet, industryCollection, templateCollectionFacets, templatesInCollection, type TemplateCollection } from './templateCollections';
 import { discoveryPurposes } from './templateDiscoveryTaxonomy';
-import { TemplateGalleryCard } from './TemplateGalleryCard';
+import { TemplateGalleryCard, TopBrandsLabel } from './TemplateGalleryCard';
 import { TemplateIndustryMenu } from './TemplateIndustryMenu';
 import { useCoveredTemplates } from './useCoveredTemplates';
 import { useTemplatePlayback } from './useTemplatePlayback';
@@ -16,6 +17,7 @@ import { trackMotion } from './tracking';
 import { useWorkspaceChrome } from './WorkspaceChromeContext';
 
 const batchSize = 16;
+const topBrandsLimit = 100;
 
 export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElement | null>; active: boolean }) {
   const { locale, t } = useI18n();
@@ -27,13 +29,17 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
   const facet = collectionFacet(collection);
   const { purposes, industries } = useMemo(() => templateCollectionFacets(catalog ?? []), [catalog]);
   const categories: readonly (readonly [TemplateCollection | 'all', string])[] = catalog
-    ? [['all', 'All'], ...purposes.map(purpose => [`purpose:${purpose}`, purpose] as const), ['builtin', 'Editable templates']]
+    ? [['all', 'All'], ['top-100-brands', 'TOP 100 brands'], ...purposes.map(purpose => [`purpose:${purpose}`, purpose] as const), ['builtin', 'Editable templates']]
     : [['all', 'All']];
-  const matches = useMemo(() => templatesInCollection(catalog ?? firstPage?.items ?? [], collection), [catalog, firstPage, collection]);
+  const topBrands = collection === 'top-100-brands';
+  // Same ranking as the Explore shelf: one lead work per brand, best-performing brands first.
+  const matches = useMemo(() => topBrands
+    ? rankDiscoverySeries(groupBrandSeries(catalog ?? [])).slice(0, topBrandsLimit).map(brand => brand.items[0])
+    : templatesInCollection(catalog ?? firstPage?.items ?? [], collection), [catalog, firstPage, collection, topBrands]);
   const count = catalog ? matches.length : firstPage?.total;
   const visible = matches.slice(0, limit);
   const playing = useTemplatePlayback(root, visible.map(item => item.id).join('|'), active, true, priority, true);
-  const selectCollection = (next: TemplateCollection | null, group: 'uses' | 'industries' | 'editable') => {
+  const selectCollection = (next: TemplateCollection | null, group: 'uses' | 'industries' | 'editable' | 'brand') => {
     if (next === collection) return;
     setCollection(next);
     setLimit(batchSize);
@@ -43,7 +49,8 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
   };
 
   return <ExploreShelf<TemplateCollection | 'all'> title="Motion templates" categoriesLabel="Template categories" categories={categories} selected={collection ?? 'all'}
-    onCategory={value => selectCollection(value === 'all' ? null : value, value === 'builtin' ? 'editable' : 'uses')}
+    renderCategory={value => value === 'top-100-brands' ? <TopBrandsLabel /> : undefined}
+    onCategory={value => selectCollection(value === 'all' ? null : value, value === 'builtin' ? 'editable' : value === 'top-100-brands' ? 'brand' : 'uses')}
     filters={<TemplateIndustryMenu industries={industries} selected={facet?.key === 'industries' ? [facet.value] : undefined}
       onSelect={value => selectCollection(value ? industryCollection(value) : null, 'industries')} />}
     action="Template library" onOpen={trigger => {
@@ -71,6 +78,7 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
       {visible.map((item, index) => {
         const tags = [...new Set([discoveryPurposes(item)[0], item.styles?.[0]].filter((tag): tag is string => Boolean(tag)))];
         return <TemplateGalleryCard key={item.id} template={item} active={playing.has(item.id)} onPriority={setPriority}
+          brandCredit={topBrands || facet?.key === 'industries'}
           onSelect={(template, trigger) => {
             reportCreativeClick('creative_studio', 'studio_bar', 'open_template', { studio: 'motion', template: template.id, position: index + 1 });
             openLibrary(trigger, template);
