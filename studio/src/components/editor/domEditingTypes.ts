@@ -92,6 +92,8 @@ export interface DomEditSelection extends PatchTarget {
   boundingBox: { x: number; y: number; width: number; height: number };
   /** Layout offsets in the mounted frame, before transforms. The inspector surrogate has no layout. */
   isolatedLayoutBox?: DomEditSelection["boundingBox"];
+  /** Selection bounds as fractions of the mounted preview viewport. */
+  isolatedBounds?: DomEditSelection["boundingBox"];
   textContent: string | null;
   dataAttributes: Record<string, string>;
   inlineStyles: Record<string, string>;

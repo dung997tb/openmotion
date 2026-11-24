@@ -18,11 +18,12 @@ function createScene(declarative = false, position = false) {
   vi.spyOn(document, "elementFromPoint").mockImplementation(x => elements[x < 50 ? 0 : 1]!);
   // Execute the exact child-frame script with deterministic layout measurements.
   const dispatch = new Function("document", "getComputedStyle", "HTMLElement", "sourceVersions", "describe",
-    "innerWidth", "innerHeight", "picked", "timingDocumentId", "compositionPath", "settings", PREVIEW_SOURCE_IDENTITY + PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
+    "innerWidth", "innerHeight", "picked", "timingDocumentId", "compositionPath", "settings", "notifyInspectorSourceReady",
+    PREVIEW_SOURCE_IDENTITY + PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
     document, (el: HTMLElement) => ({ position: el.style.position || "static", left: el.style.left, top: el.style.top, width: "20px", height: "10px", transform: "none", display: "block" }),
     HTMLElement, { "one.html": originalHash, "two.html": originalHash },
     (el: HTMLElement) => ({ sourceFile: el.id + ".html", elementId: el.id, geometry: el.getBoundingClientRect(),
-      viewport: { width: 100, height: 100 } }), 100, 100, elements[0], declarative ? "frame" : undefined, "one.html", {liveEdits: {position}},
+      viewport: { width: 100, height: 100 } }), 100, 100, elements[0], declarative ? "frame" : undefined, "one.html", {liveEdits: {position}}, vi.fn(),
   );
   return { one: elements[0]!, two: elements[1]!,
     gesture: (phase: string, gestureId: string, fields: Record<string, unknown> = {}) =>

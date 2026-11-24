@@ -1,6 +1,11 @@
 // Only scalar presentation facts cross the frame boundary. The host supplies its
 // curated style-property list and persists edits against the authored file.
 export const PREVIEW_INSPECTOR = `
+  const waitingInspectorSources = new Set();
+  function notifyInspectorSourceReady(path) {
+    if (!waitingInspectorSources.delete(path)) return;
+    post('inspect-element', { sourceReady: path });
+  }
   function inspectorElement(message) {
     const id = typeof message.elementId === 'string' && message.elementId;
     const hf = typeof message.hfId === 'string' && message.hfId;
@@ -22,7 +27,10 @@ export const PREVIEW_INSPECTOR = `
     const sha256 = sourceVersions[detail.sourceFile];
     // The node still exists while a saved drag is waiting for the replacement
     // preview. Only a missing target should clear Studio's current selection.
-    if (!sha256) return undefined;
+    if (!sha256) {
+      waitingInspectorSources.add(detail.sourceFile);
+      return undefined;
+    }
     const inline = {}, computed = {}, data = {};
     const style = getComputedStyle(el);
     for (const name of (Array.isArray(message.properties) ? message.properties : []).slice(0,64)) {
@@ -45,7 +53,7 @@ export const PREVIEW_INSPECTOR = `
     const src = el.getAttribute('src');
     return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, ...sourceIdentity(sha256),
       intrinsicMediaDuration: el.matches('audio,video') && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : undefined,
-      tag: el.localName, geometry: detail.geometry,
+      tag: el.localName, geometry: detail.geometry, viewport: detail.viewport,
       layoutBox: el.getClientRects().length ? {x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight} : null,
       inline, computed, data, leafText, lineBreaks: text && el.childElementCount > 0, binding: binding || undefined,
       compositionHost: el.matches('[data-composition-src],[data-composition-file]'),
