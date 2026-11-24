@@ -3353,3 +3353,19 @@ describe('Cloud API Entrypoint — OAuth Agent Project Grants (Import Assets & M
     assert.equal(retrySaveGranted.result?.isError, undefined);
   });
 });
+
+describe('Cloud API Entrypoint — OpenDesign Console URL', () => {
+  it('serves the configured OpenDesign console URL from /motion-api/account/summary', async () => {
+    const readConsoleUrl = async (overrides: Record<string, string>) => {
+      const { app } = createApiFixture({ config: { AUTH_MODE: 'dev', ...overrides } });
+      const res = await app.request('/motion-api/account/summary');
+      assert.equal(res.status, 200);
+      return ((await res.json()) as { consoleUrl: string }).consoleUrl;
+    };
+    assert.equal(await readConsoleUrl({}), 'https://open-design.ai/cloud');
+    assert.equal(
+      await readConsoleUrl({ OPENDESIGN_CONSOLE_URL: 'https://console.example.test/cloud' }),
+      'https://console.example.test/cloud',
+    );
+  });
+});

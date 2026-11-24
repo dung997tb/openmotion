@@ -11,14 +11,11 @@ import { isCloudError } from '../contracts/errors.ts';
 import type { AppConfig } from '../infra/config.ts';
 import { gatewayCallContextFromAuth, type PlatformModelGateway } from '../services/model-gateway.ts';
 
-const DEFAULT_CONSOLE_URL = 'https://open-design.ai/cloud';
-
 export interface AccountRoutesDeps {
   config: AppConfig;
   authStore: AuthStore;
   gateway: PlatformModelGateway;
   cache?: AuthKeyValueCache;
-  consoleUrl?: string;
 }
 
 /**
@@ -28,7 +25,7 @@ export interface AccountRoutesDeps {
  */
 export function createAccountRoutes(deps: AccountRoutesDeps): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
-  const consoleUrl = deps.consoleUrl ?? DEFAULT_CONSOLE_URL;
+  const consoleUrl = deps.config.OPENDESIGN_CONSOLE_URL;
   const oauthCfg = buildOAuth21Config(deps.config);
 
   app.get('/summary', async (c) => {
