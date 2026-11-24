@@ -9,7 +9,7 @@
   border: 0;
   border-radius: var(--motion-radius-step-9);
   background: var(--motion-brand);
-  color: #0d0d0d;
+  color: var(--motion-on-brand);
   font-family: var(--motion-font-sans);
   font-size: var(--motion-text-md);
   font-weight: var(--motion-weight-semibold);

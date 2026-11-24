@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react';
+import { Button } from 'open-design-ui/button';
 import type { AccountSummary } from '../../../shared/provider-directory';
 import { useI18n } from '../i18n/I18n';
 import { gatewayRequest } from './gatewayClient';
@@ -33,7 +34,7 @@ export function StartEntry({ account, trackingPage, openAccount }: { account: Ac
     }
   }
 
-  return <button type="button" className={styles.start} disabled={busy} onClick={event => void start(event)}>
+  return <Button variant="plain" type="button" className={styles.start} disabled={busy} onClick={event => void start(event)}>
     {t(authorizing ? 'Signing in…' : 'Get started')}
-  </button>;
+  </Button>;
 }
