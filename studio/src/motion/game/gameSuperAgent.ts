@@ -126,22 +126,28 @@ const gameBriefOptions = new RegExp(`^${gameBriefOption}(?:, ${gameBriefOption})
 
 /** Show the brief from a stored Game Studio handoff without altering the original turn. */
 export function readDirectGameBrief(text: string, gameId: string): string | undefined {
-  const header = `game ${gameId} in this workspace. Read openmotion://workflow/game/start and openmotion_game_get with id=${gameId}. Brief: `;
+  const header = `game ${gameId} in this workspace. Read openmotion://workflow/game/start`;
   const prefix = ['build', 'remix']
     .map(action => `Use the openmotion-game Skill to ${action} ${header}`)
     .find(candidate => text.startsWith(candidate));
   if (!prefix) return;
+  // Handoffs may include a parenthetical hint about the host's workflow reader.
+  const briefMarker = ` and openmotion_game_get with id=${gameId}. Brief: `;
+  const markerStart = text.indexOf(briefMarker, prefix.length);
+  if (markerStart < 0 || !/^(?: \([^()\r\n]*\))?$/.test(text.slice(prefix.length, markerStart))) return;
+  const briefStart = markerStart + briefMarker.length;
   const context = text.lastIndexOf('\n\nGame Studio context: ');
+  const instructionEnd = context < 0 ? text.length : context;
   const steps = Math.max(
-    text.lastIndexOf('\nAsk whether to publish to the local market only when the decision is missing.', context),
-    text.lastIndexOf('\nAsk at most two short questions (multiplayer mode and local-market publication)', context),
+    text.lastIndexOf('\nAsk whether to publish to the local market only when the decision is missing.', instructionEnd),
+    text.lastIndexOf('\nAsk at most two short questions (multiplayer mode and local-market publication)', instructionEnd),
   );
-  if (context < 0 || steps < prefix.length) return;
+  if (steps < briefStart) return;
 
   const notesMarker = '\n\nAdditional user notes: ';
   const notesStart = text.indexOf(notesMarker, steps);
   if (notesStart >= 0 && notesStart < context) return text.slice(notesStart + notesMarker.length, context).trim();
-  const brief = text.slice(prefix.length, steps)
+  const brief = text.slice(briefStart, steps)
     .split(/\n\n(?:Layout: portrait 9:16 phone game\.|Format: playable ad\. Follow the playable-ad recipe)/, 1)[0]
     .replace(gameBriefOptions, '')
     .trim();

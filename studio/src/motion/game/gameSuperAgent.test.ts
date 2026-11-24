@@ -1,4 +1,8 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { GameProjects } from '../../../../game-projects';
 import type { GameCard } from '../../../../shared/game-contract';
 import { isPlayableAdArtifact } from '../../../../shared/super-agent';
 import { canChoosePlayableAd, isPlayableAd } from '../../super-agent/ModeComposerControls';
@@ -34,24 +38,35 @@ describe('playable ads in Super Agent', () => {
     expect(isPlayableAdArtifact({ kind: 'game-project', subtitle: 'casual · Game Studio' })).toBe(false);
   });
 
-  it('recovers the user brief from saved game instructions', () => {
+  it('recovers the user brief from the instructions Game Studio actually returns', async () => {
     const brief = '制作竖屏街机小游戏。\n支持快速重开。';
-    const instruction = [
-      `Use the openmotion-game Skill to build game g1 in this workspace. Read openmotion://workflow/game/start and openmotion_game_get with id=g1. Brief: 3d style, casual, modern setting. ${brief}`,
-      '\nLayout: portrait 9:16 phone game. Design for upright play.',
-      '\nFormat: playable ad. Follow the playable-ad recipe in the openmotion-game skill.',
-      'Ask whether to publish to the local market only when the decision is missing.',
-    ].join('\n');
-    expect(readDirectGameBrief(buildDirectGamePrompt(game(), instruction), 'g1')).toBe(brief);
-    const legacyInstruction = instruction.replace(
-      'Ask whether to publish to the local market only when the decision is missing.',
-      'Ask at most two short questions (multiplayer mode and local-market publication), only when missing.',
-    );
-    expect(readDirectGameBrief(buildDirectGamePrompt(game(), legacyInstruction), 'g1')).toBe(brief);
-    const notes = '把画面改成暖色。';
-    expect(readDirectGameBrief(buildDirectGamePrompt(game(), instruction, notes), 'g1')).toBe(notes);
-    expect(readDirectGameBrief(buildDirectGamePrompt(game(), instruction), 'other-game')).toBeUndefined();
-    expect(readDirectGameBrief(brief, 'g1')).toBeUndefined();
+    const workspace = await mkdtemp(join(tmpdir(), 'openmotion-game-brief-'));
+    try {
+      const service = new GameProjects(workspace);
+      const { game: created, agentInstruction: instruction } = await service.create({
+        prompt: brief, genre: 'casual', style: 'pixel', setting: 'modern',
+        multiplayer: false, orientation: 'portrait', playableAd: true,
+      });
+      const savedText = buildDirectGamePrompt(created, instruction);
+      expect(readDirectGameBrief(savedText, created.id)).toBe(brief);
+      expect(readDirectGameBrief(instruction, created.id)).toBe(brief);
+      const remix = await service.remix(created.id);
+      expect(readDirectGameBrief(buildDirectGamePrompt(remix.game, remix.agentInstruction), remix.game.id)).toBe(brief);
+
+      const legacyInstruction = instruction
+        .replace(" (or use your host's workflow reader if provided)", '')
+        .replace(
+          'Ask whether to publish to the local market only when the decision is missing.',
+          'Ask at most two short questions (multiplayer mode and local-market publication), only when missing.',
+        );
+      expect(readDirectGameBrief(buildDirectGamePrompt(created, legacyInstruction), created.id)).toBe(brief);
+      const notes = '把画面改成暖色。';
+      expect(readDirectGameBrief(buildDirectGamePrompt(created, instruction, notes), created.id)).toBe(notes);
+      expect(readDirectGameBrief(savedText, 'other-game')).toBeUndefined();
+      expect(readDirectGameBrief(brief, created.id)).toBeUndefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it('offers a portrait single-player playable-ad quick idea', () => {
