@@ -493,11 +493,19 @@ it('round-trips ?mode=design and ?scene=<module> on /agent, preserves legacy mod
   expect(workspacePageHref('http://localhost/agent?mode=design&scene=mobile-app', { explore: true })).toBe('/explore');
   expect(workspacePageHref('http://localhost/agent?mode=design&scene=mobile-app', { superAgentMode: 'game' })).toBe('/agent?mode=game');
 
-  for (const legacy of ['website', 'deck', 'image'] as const) {
+  for (const legacy of ['website', 'deck', 'document', 'image', 'research', 'visualization'] as const) {
     expect(readWorkspacePage(`?mode=${legacy}`, '', '/agent')).toMatchObject({
       superAgent: true,
       superAgentMode: legacy,
     });
+    expect(
+      workspacePageHref('http://localhost/explore', {
+        superAgent: true,
+        superAgentChat: null,
+        superAgentMode: legacy,
+        superAgentDesignModule: null,
+      }),
+    ).toBe(`/agent?mode=${legacy}`);
   }
   expect(readWorkspacePage('', '', '/design/prototype')).toMatchObject({
     designScene: 'prototype',

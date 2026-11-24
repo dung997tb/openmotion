@@ -116,6 +116,9 @@ export default defineConfig({
           if (id.includes('/node_modules/linkedom/')) {
             return 'vendor-linkedom';
           }
+          if (id.includes('/node_modules/lexical/') || id.includes('/node_modules/@lexical/')) {
+            return 'vendor-lexical';
+          }
           if (id.includes('/studio/src/i18n/') && id.endsWith('.json')) {
             return 'vendor-i18n';
           }

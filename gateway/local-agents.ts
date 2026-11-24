@@ -135,6 +135,7 @@ type PersistedAgentCacheEntry = {
   auth?: LocalAgent['auth'];
   models: AgentModel[];
   checkedAt?: string;
+  connectedAt?: string;
 };
 
 type PersistedAgentCache = Record<string, PersistedAgentCacheEntry>;
@@ -182,7 +183,7 @@ export class LocalAgentDirectory {
     await this.cacheLoadPromise;
   }
   private async persistCacheEntry(id: string, bin: string, result: LocalAgent): Promise<void> {
-    if (!result.models.length && result.auth !== 'signed-out') return;
+    if (!result.models.length && result.auth !== 'signed-out' && result.auth !== 'signed-in' && !result.connectedAt) return;
     const entry: PersistedAgentCacheEntry = {
       bin,
       ...(result.version ? { version: result.version } : {}),
@@ -191,6 +192,7 @@ export class LocalAgentDirectory {
       ...(result.auth ? { auth: result.auth } : {}),
       models: result.models,
       ...(result.checkedAt ? { checkedAt: result.checkedAt } : {}),
+      ...(result.connectedAt ? { connectedAt: result.connectedAt } : {}),
     };
     this.persistedCache[id] = entry;
     await this.change(async () => {
@@ -210,7 +212,7 @@ export class LocalAgentDirectory {
       if (installed && !cached) {
         const disk = this.persistedCache[agent.id];
         const ageMs = disk?.checkedAt ? now - Date.parse(disk.checkedAt) : Number.POSITIVE_INFINITY;
-        if (disk && disk.bin === resolvedBin && ageMs >= 0 && ageMs <= DISCOVERY_CACHE_TTL_MS && (disk.models.length > 0 || disk.auth === 'signed-out')) {
+        if (disk && disk.bin === resolvedBin && ageMs >= 0 && ageMs <= DISCOVERY_CACHE_TTL_MS && (disk.models.length > 0 || disk.auth === 'signed-out' || disk.auth === 'signed-in' || Boolean(disk.connectedAt))) {
           cached = {
             ...agent,
             installed: true,
@@ -220,6 +222,7 @@ export class LocalAgentDirectory {
             auth: disk.auth ?? 'unknown',
             models: disk.models,
             checkedAt: disk.checkedAt,
+            ...(disk.connectedAt ? { connectedAt: disk.connectedAt } : {}),
           };
           this.cache.set(agent.id, cached);
         }
@@ -234,10 +237,12 @@ export class LocalAgentDirectory {
     const eagerIds = options.eagerIds ?? ['antigravity', 'codex', 'claude', 'opencode', 'cursor-agent', 'gemini'];
     this.warmupPromise = (async () => {
       const directory = await this.list();
-      const targets = directory.agents
-        .filter(agent => agent.installed && eagerIds.includes(agent.id) && !this.cache.has(agent.id))
-        .slice(0, 6);
-      await Promise.allSettled(targets.map(agent => this.inspect(agent.id)));
+      const installed = directory.agents.filter(agent => agent.installed && !this.cache.has(agent.id));
+      const prioritized = [
+        ...installed.filter(agent => eagerIds.includes(agent.id)),
+        ...installed.filter(agent => !eagerIds.includes(agent.id)),
+      ].slice(0, 8);
+      await Promise.allSettled(prioritized.map(agent => this.inspect(agent.id)));
       return this.list();
     })().finally(() => {
       this.warmupPromise = null;
@@ -338,6 +343,9 @@ export class LocalAgentDirectory {
         applyHelp(help);
         result.discoveryError = 'Could not discover models. Sign in or update the Agent, then refresh.';
       }
+      if (!result.discoveryError && result.auth !== 'signed-out' && (result.auth === 'signed-in' || result.models.length > 0)) {
+        result.connectedAt = result.checkedAt;
+      }
       this.cache.set(id, result);
       await this.persistCacheEntry(id, bin, result);
       return result;
@@ -433,6 +441,9 @@ export class LocalAgentDirectory {
         if (!result.models.length && hasHelp) result.models = parseAgentModels('help', help.text);
       }
     } catch { result.discoveryError = 'Could not discover models. Sign in or update the Agent, then refresh.'; }
+    if (!result.discoveryError && result.auth !== 'signed-out' && (result.auth === 'signed-in' || result.models.length > 0)) {
+      result.connectedAt = result.checkedAt;
+    }
     this.cache.set(id, result);
     await this.persistCacheEntry(id, bin, result);
     return result;

@@ -1,7 +1,7 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { superAgentIntentMeta, type SuperAgentChatSummary } from '../../../shared/super-agent';
 import { Menu, MenuItem, MenuSeparator } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -99,6 +99,40 @@ export function ConversationSidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const cancelRenameRef = useRef(false);
+  const chatListRef = useRef<HTMLDivElement>(null);
+  const scrollTimerRef = useRef<number | null>(null);
+  const [listScrolling, setListScrolling] = useState(false);
+  const [listFadeBottom, setListFadeBottom] = useState(false);
+
+  const syncListFade = useCallback(() => {
+    const el = chatListRef.current;
+    if (!el) return;
+    const hasMoreBelow = el.scrollHeight - el.clientHeight - el.scrollTop > 4;
+    setListFadeBottom(prev => (prev === hasMoreBelow ? prev : hasMoreBelow));
+  }, []);
+
+  const handleListScroll = useCallback(() => {
+    syncListFade();
+    setListScrolling(true);
+    if (scrollTimerRef.current !== null) window.clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = window.setTimeout(() => {
+      scrollTimerRef.current = null;
+      setListScrolling(false);
+    }, 750);
+  }, [syncListFade]);
+
+  useEffect(() => {
+    syncListFade();
+    const el = chatListRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(syncListFade);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [conversations.length, loading, syncListFade]);
+
+  useEffect(() => () => {
+    if (scrollTimerRef.current !== null) window.clearTimeout(scrollTimerRef.current);
+  }, []);
 
   const pinned = conversations.filter(item => item.pinned);
   const recent = conversations.filter(item => !item.pinned);
@@ -268,7 +302,14 @@ export function ConversationSidebar({
         </Button>
       </div>
 
-      <div className="om-sa-chat-list" aria-busy={loading}>
+      <div
+        ref={chatListRef}
+        className="om-sa-chat-list"
+        data-scrolling={listScrolling || undefined}
+        data-fade-bottom={listFadeBottom || undefined}
+        onScroll={handleListScroll}
+        aria-busy={loading}
+      >
         {pinned.length > 0 && (
           <section className="om-sa-chat-group" aria-label={t('Pinned')}>
             <h2 className="om-sa-chat-group-title">{t('Pinned')}</h2>

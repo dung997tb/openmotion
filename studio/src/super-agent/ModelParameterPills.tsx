@@ -247,6 +247,14 @@ export function ModelParameterPills({
                   updateField(field, parsed);
                 }
               }}
+              onBlur={() => {
+                if (typeof rawOverride !== 'number' || !Number.isFinite(rawOverride)) return;
+                let next = rawOverride;
+                if ((field.step ?? 1) === 1) next = Math.round(next);
+                if (field.min !== undefined) next = Math.max(field.min, next);
+                if (field.max !== undefined) next = Math.min(field.max, next);
+                if (next !== rawOverride) updateField(field, next);
+              }}
             />
           </div>
         </div>

@@ -18,7 +18,7 @@ import {
   vibeConfigModels,
 } from '../gateway/agent-discovery.ts';
 import { terminalCommand } from '../gateway/agent-terminal.ts';
-import { localAgents } from '../shared/local-agents.ts';
+import { localAgents, pickPreferredLocalAgent, type LocalAgent } from '../shared/local-agents.ts';
 
 test('Agent discovery excludes hidden models and parses CLI, help, Pi and spinner outputs cleanly', () => {
   assert.deepEqual(
@@ -383,4 +383,37 @@ test('LocalAgentDirectory warms up Antigravity by default and hydrates persisted
   assert.equal(probeCalls > 0, true);
   assert.deepEqual(agy?.models.map(m => m.id), ['gemini-4-neon', 'gemini-4-flash']);
   assert.ok(agy?.checkedAt);
+  assert.ok(agy?.connectedAt);
+});
+
+test('Antigravity is listed first and pickPreferredLocalAgent selects the most recently connected Agent unless manually chosen', () => {
+  assert.equal(localAgents[0]?.id, 'antigravity');
+
+  const mk = (id: string, overrides: Partial<LocalAgent> = {}): LocalAgent => ({
+    ...localAgents.find(a => a.id === id)!,
+    installed: true,
+    auth: 'signed-in',
+    models: [{ id: `${id}-model`, label: `${id} Model`, source: 'cli' }],
+    ...overrides,
+  });
+
+  const agy = mk('antigravity', { connectedAt: '2026-11-23T10:00:00.000Z' });
+  const codex = mk('codex', { connectedAt: '2026-11-23T12:00:00.000Z' });
+  const claude = mk('claude', { auth: 'signed-out', connectedAt: undefined });
+  const failed = mk('gemini', { discoveryError: 'Could not discover models', connectedAt: '2026-11-23T13:00:00.000Z' });
+
+  // Without explicit manual default -> picks most recently connected valid agent (codex at 12:00 > antigravity at 10:00)
+  assert.equal(pickPreferredLocalAgent([agy, codex, claude, failed], null)?.id, 'codex');
+
+  // If Antigravity connected more recently -> picks Antigravity
+  const agyNewer = mk('antigravity', { connectedAt: '2026-11-23T14:00:00.000Z' });
+  assert.equal(pickPreferredLocalAgent([agyNewer, codex, claude], null)?.id, 'antigravity');
+
+  // With explicit manual default -> honors the user's manual selection
+  assert.equal(pickPreferredLocalAgent([agyNewer, codex, claude], { agent: 'codex', model: 'default' })?.id, 'codex');
+
+  // Before any connection checks complete -> falls back to top runnable agent (Antigravity)
+  const uncheckedAgy = mk('antigravity', { auth: 'unknown', models: [], connectedAt: undefined });
+  const uncheckedCodex = mk('codex', { auth: 'unknown', models: [], connectedAt: undefined });
+  assert.equal(pickPreferredLocalAgent([uncheckedAgy, uncheckedCodex], null)?.id, 'antigravity');
 });

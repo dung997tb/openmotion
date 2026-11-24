@@ -2,7 +2,8 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentRuntimeInfo } from '../../../shared/agent-runtimes';
-import { isDesignScenario } from '../../../shared/design-project';
+import { designRoutes, findDesignScenario, isDesignScenario } from '../../../shared/design-project';
+import { designClient } from '../design/designClient';
 import type { GameCard } from '../../../shared/game-contract';
 import type { GatewayStatus, Model } from '../../../shared/gateway';
 import type { LocalAgent } from '../../../shared/local-agents';
@@ -11,6 +12,7 @@ import {
   superAgentIntentMeta,
   type SuperAgentArtifact,
   type SuperAgentChat,
+  type SuperAgentChatSummary,
   type SuperAgentContextTag,
   type SuperAgentDesignModuleId,
   type SuperAgentEngine,
@@ -18,19 +20,31 @@ import {
   type SuperAgentFollowUpMode,
   type SuperAgentMessage,
   type SuperAgentPermissionMode,
+  type SuperAgentPromptSegment,
   type SuperAgentQueuedMessage,
   type SuperAgentResourceAttachment,
   type SuperAgentResourceCounts,
 } from '../../../shared/super-agent';
-import { assetMediaUrl, assetVersion } from '../../../shared/asset-library';
 import { OpenDesignLoadingMark } from '../components/ui/OpenDesignLoadingMark';
 import { Popover } from '../components/ui/Popover';
 import { Select } from '../components/ui/Select';
-import { Skeleton } from '../components/ui/Skeleton';
 import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { uploadLibraryAsset } from '../motion/assetClient';
+import { uploadSuperAgentFile } from './superAgentClient';
+import {
+  ComposerMentionMenu,
+  mapResourceTabToMentionCategory,
+  type ComposerCommandId,
+  type ComposerMentionMenuHandle,
+  type MentionMenuCategory,
+} from './ComposerMentionMenu';
+import {
+  ComposerPromptEditor,
+  type ComposerMentionTrigger,
+  type ComposerPromptEditorHandle,
+  type ComposerSnapshot,
+} from './ComposerPromptEditor';
 import {
   communityRemixPrompt,
   composeBrief,
@@ -46,16 +60,23 @@ import {
   toGameResourceAttachment,
 } from '../motion/game/gameSuperAgent';
 import { gatewayRequest } from '../motion/gatewayClient';
-import { ModelAvatar, ProviderAvatar } from '../motion/settingsPrimitives';
 import { inspectBridgeAgent, notifyRuntimesChanged } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged } from '../motion/useLocalAgents';
 import { WorkspaceBack } from '../motion/WorkspaceBack';
+import { AgentModelPicker } from './AgentModelPicker';
 import { compactDirLabel } from './ChangedFilesTree';
 import { ApprovalCard, ExecutionTimeline } from './ExecutionTimeline';
-import { ResourcePickerPanel, resourceIcon, resourceKey, type ResourceCategoryTab } from './ResourcePickerDialog';
+import {
+  ResourceThumbImage,
+  resourceIcon,
+  resourceImagePreviewUrl,
+  resourceKey,
+  type ResourceCategoryTab,
+} from './ResourcePickerDialog';
 import {
   findSuperAgentMode,
   ModeResourceShowcase,
+  type PickPromptMeta,
   type SuperAgentCreationModeId,
 } from './ModeResourceShowcase';
 import {
@@ -68,6 +89,9 @@ import {
   ModeComposerControls,
   ModeComposerTopBar,
   isPlayableAd,
+  researchDesignScenario,
+  visualizationDesignScenario,
+  type MediaPromptExtra,
   type ModeComposerOptions,
 } from './ModeComposerControls';
 
@@ -79,7 +103,7 @@ export function resolveCreationModeEntry(
     if (designModule && isDesignScenario(designModule)) {
       return { modeId: 'design', optionsPatch: designScenarioOptionsPatch(designModule) };
     }
-    return { modeId: 'design', optionsPatch: { designFormat: 'image' } };
+    return { modeId: 'design', optionsPatch: { designFormat: 'image', imageScene: 'text-to-image' } };
   }
   if (mode === 'website') {
     return { modeId: 'design', optionsPatch: designScenarioOptionsPatch('prototype') };
@@ -87,8 +111,26 @@ export function resolveCreationModeEntry(
   if (mode === 'deck') {
     return { modeId: 'design', optionsPatch: designScenarioOptionsPatch('deck') };
   }
+  if (mode === 'document') {
+    return { modeId: 'design', optionsPatch: designScenarioOptionsPatch('document') };
+  }
   if (mode === 'image') {
-    return { modeId: 'design', optionsPatch: { designFormat: 'image' } };
+    return { modeId: 'design', optionsPatch: { designFormat: 'image', imageScene: 'text-to-image' } };
+  }
+  if (mode === 'motion') {
+    return { modeId: 'motion', optionsPatch: { motionEngine: DEFAULT_MODE_COMPOSER_OPTIONS.motionEngine } };
+  }
+  if (mode === 'media') {
+    return { modeId: 'media', optionsPatch: { mediaSubMode: DEFAULT_MODE_COMPOSER_OPTIONS.mediaSubMode } };
+  }
+  if (mode === 'audio') {
+    return {
+      modeId: 'audio',
+      optionsPatch: {
+        audioType: DEFAULT_MODE_COMPOSER_OPTIONS.audioType,
+        audioModelId: DEFAULT_MODE_COMPOSER_OPTIONS.audioModelId,
+      },
+    };
   }
   return { modeId: mode };
 }
@@ -97,6 +139,7 @@ const PRIMARY_STARTERS: {
   key?: string;
   id: SuperAgentCreationModeId;
   designModule?: SuperAgentDesignModuleId;
+  optionsPatch?: Partial<ModeComposerOptions>;
   tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
@@ -105,23 +148,28 @@ const PRIMARY_STARTERS: {
 }[] = [
   { id: 'game', tone: 'agent', icon: 'gamepad-line', title: 'Build a game', featured: true, badge: 'New' },
   { key: 'design', id: 'design', tone: 'image', icon: 'palette-line', title: 'Design Studio', badge: 'New' },
-  { key: 'image', id: 'design', designModule: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
-  { id: 'motion', tone: 'video', icon: 'movie-line', title: 'Make a video' },
-  { id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
+  { key: 'motion-graphics', id: 'motion', optionsPatch: { motionEngine: 'motion' }, tone: 'video', icon: 'movie-line', title: 'Motion graphics' },
+  { key: 'video', id: 'motion', optionsPatch: { motionEngine: 'video-model' }, tone: 'video', icon: 'clapperboard-line', title: 'Make a video' },
+  { key: 'deck', id: 'design', designModule: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
 ];
 
 const EXTRA_STARTERS: {
   key: string;
   id: SuperAgentCreationModeId;
   designModule?: SuperAgentDesignModuleId;
+  optionsPatch?: Partial<ModeComposerOptions>;
   tone: 'coding' | 'agent' | 'image' | 'video' | 'audio';
   icon: string;
   title: string;
 }[] = [
-  { key: 'coding', id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
-  { key: 'media', id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema video' },
-  { key: 'deck', id: 'design', designModule: 'deck', tone: 'audio', icon: 'slideshow-line', title: 'Create slides' },
+  { key: 'research', id: 'research', tone: 'agent', icon: 'book-open-line', title: 'Research a topic' },
+  { key: 'visualization', id: 'visualization', tone: 'coding', icon: 'bar-chart-box-line', title: 'Visualization' },
+  { key: 'document', id: 'design', designModule: 'document', tone: 'image', icon: 'file-text-line', title: 'Document' },
+  { key: 'image', id: 'design', designModule: 'image', tone: 'image', icon: 'image-line', title: 'Generate image' },
   { key: 'website', id: 'design', designModule: 'prototype', tone: 'image', icon: 'layout-line', title: 'Build a website' },
+  { key: 'audio', id: 'audio', tone: 'audio', icon: 'music-2-line', title: 'Create audio' },
+  { key: 'media', id: 'media', tone: 'video', icon: 'clapperboard-line', title: 'Cinema video' },
+  { key: 'coding', id: 'coding', tone: 'coding', icon: 'code-s-slash-line', title: 'Coding' },
 ];
 
 const COMPOSER_MODES = [...PRIMARY_STARTERS, ...EXTRA_STARTERS]
@@ -135,9 +183,68 @@ export type AgentSelection = {
   reasoning: string;
 };
 
+type MinimalFsEntry = {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+  file?: (success: (file: File) => void, error?: (err: unknown) => void) => void;
+  createReader?: () => { readEntries: (success: (entries: MinimalFsEntry[]) => void, error?: (err: unknown) => void) => void };
+};
+
+async function collectDroppedFiles(dataTransfer: DataTransfer | null): Promise<File[]> {
+  if (!dataTransfer) return [];
+  const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+  const entryGetters = items
+    .map(item => (typeof (item as unknown as { webkitGetAsEntry?: () => MinimalFsEntry | null }).webkitGetAsEntry === 'function'
+      ? (item as unknown as { webkitGetAsEntry: () => MinimalFsEntry | null }).webkitGetAsEntry()
+      : null))
+    .filter((entry): entry is MinimalFsEntry => Boolean(entry));
+
+  if (entryGetters.length > 0) {
+    const collected: File[] = [];
+    const maxFiles = 30;
+    const readEntry = async (entry: MinimalFsEntry, prefix = ''): Promise<void> => {
+      if (collected.length >= maxFiles) return;
+      if (entry.isFile && typeof entry.file === 'function') {
+        const file = await new Promise<File | null>(resolve => {
+          entry.file!(f => resolve(f), () => resolve(null));
+        });
+        if (file) {
+          const nextName = prefix ? `${prefix}/${file.name}` : file.name;
+          collected.push(nextName !== file.name ? new File([file], nextName, { type: file.type, lastModified: file.lastModified }) : file);
+        }
+        return;
+      }
+      if (entry.isDirectory && typeof entry.createReader === 'function') {
+        const reader = entry.createReader();
+        const dirPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+        while (collected.length < maxFiles) {
+          const batch = await new Promise<MinimalFsEntry[]>(resolve => {
+            reader.readEntries(entries => resolve(entries), () => resolve([]));
+          });
+          if (!batch.length) break;
+          for (const child of batch) {
+            if (collected.length >= maxFiles) break;
+            await readEntry(child, dirPrefix);
+          }
+        }
+      }
+    };
+    for (const entry of entryGetters) {
+      if (collected.length >= maxFiles) break;
+      await readEntry(entry);
+    }
+    if (collected.length > 0) return collected;
+  }
+
+  return dataTransfer.files ? Array.from(dataTransfer.files).slice(0, 30) : [];
+}
+
 export function ConversationStream({
   active = true,
   chat,
+  conversations = [],
+  activeArtifacts = [],
   requestedMode = null,
   requestedDesignModule = null,
   playingGameId = null,
@@ -167,7 +274,6 @@ export function ConversationStream({
   onRenameChat,
   onChangeSelection,
   onChangePermissionMode,
-  onChangeFollowUpBehavior,
   onSend,
   onUpdateQueued,
   onDeleteQueued,
@@ -179,9 +285,11 @@ export function ConversationStream({
   onOpenArtifactId,
   onOpenChangedFile,
   onPreviewAttachment,
+  onOpenFilePath,
   onOpenWebUrl,
   onCopyText,
   onNotify,
+  onRunCommand,
   onOpenAccountSettings,
   onOpenInDesignStudio,
   onOpenInMotionStudio,
@@ -196,6 +304,8 @@ export function ConversationStream({
 }: {
   active?: boolean;
   chat: SuperAgentChat | null;
+  conversations?: SuperAgentChatSummary[];
+  activeArtifacts?: SuperAgentArtifact[];
   requestedMode?: SuperAgentCreationModeId | null;
   requestedDesignModule?: SuperAgentDesignModuleId | null;
   playingGameId?: string | null;
@@ -232,10 +342,10 @@ export function ConversationStream({
   onRenameChat: (title: string) => Promise<void> | void;
   onChangeSelection: (next: AgentSelection) => void;
   onChangePermissionMode: (next: SuperAgentPermissionMode) => void;
-  onChangeFollowUpBehavior?: (next: SuperAgentFollowUpMode) => void;
   onSend: (
     text: string,
     meta?: {
+      segments?: SuperAgentPromptSegment[];
       hiddenInstructions?: string;
       contextTags?: SuperAgentContextTag[];
       mode?: SuperAgentCreationModeId;
@@ -249,6 +359,7 @@ export function ConversationStream({
     queueId: string,
     patch: {
       text: string;
+      segments?: SuperAgentPromptSegment[];
       attachments: SuperAgentResourceAttachment[];
       contextTags?: SuperAgentContextTag[];
       hiddenInstructions?: string;
@@ -265,9 +376,11 @@ export function ConversationStream({
   onOpenArtifactId: (artifactId: string) => void;
   onOpenChangedFile?: (file: SuperAgentFileOperation) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
+  onOpenFilePath?: (filePath: string, label?: string) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
+  onRunCommand?: (command: ComposerCommandId) => void;
   onOpenAccountSettings?: () => void;
   onOpenInDesignStudio?: (projectId: string) => void;
   onOpenInMotionStudio?: (projectId: string) => void;
@@ -282,13 +395,25 @@ export function ConversationStream({
 }) {
   const { t, locale } = useI18n();
   const [text, setText] = useState('');
+  const [segments, setSegments] = useState<SuperAgentPromptSegment[]>([]);
+  const [inlineMentions, setInlineMentions] = useState<SuperAgentResourceAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const cancelRenameRef = useRef(false);
-  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
-  const [resourceCategory, setResourceCategory] = useState<ResourceCategoryTab>('all');
+  const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
+  const [mentionMenuSource, setMentionMenuSource] = useState<'at' | 'plus' | 'slash'>('plus');
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionCategory, setMentionCategory] = useState<MentionMenuCategory>('all');
+  const mentionMenuOpenRef = useRef(mentionMenuOpen);
+  mentionMenuOpenRef.current = mentionMenuOpen;
+  const mentionMenuSourceRef = useRef(mentionMenuSource);
+  mentionMenuSourceRef.current = mentionMenuSource;
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const prevInlineKeysRef = useRef<Set<string>>(new Set());
+  const prevChatIdRef = useRef<string | undefined>(chat?.id);
   const [moreStartersOpen, setMoreStartersOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
@@ -306,6 +431,7 @@ export function ConversationStream({
   const [pendingSubmission, setPendingSubmission] = useState<{
     id: string;
     text: string;
+    segments?: SuperAgentPromptSegment[];
     attachments: SuperAgentResourceAttachment[];
     contextTags?: SuperAgentContextTag[];
     startedAt: number;
@@ -313,6 +439,12 @@ export function ConversationStream({
   const [previewingChipKey, setPreviewingChipKey] = useState<string | null>(null);
   const mediaModelsRef = useRef<Model[]>([]);
   const mediaRoutesRef = useRef<GatewayStatus['routes']>({});
+  const mediaProvidersRef = useRef<GatewayStatus['providers']>([]);
+  const sampleReferenceCacheRef = useRef<Map<string, SuperAgentResourceAttachment>>(new Map());
+  const autoSampleKeyRef = useRef<string | null>(null);
+  const sampleAttachSeqRef = useRef(0);
+  const pendingSampleUploadRef = useRef<Promise<void> | null>(null);
+  const submittingRef = useRef(false);
   const activeMode = findSuperAgentMode(activeModeId);
   const headerIntentMeta = superAgentIntentMeta(
     chat?.intent ?? (
@@ -325,26 +457,38 @@ export function ConversationStream({
         : undefined
     ),
   );
+  const modeOptionsRef = useRef<ModeComposerOptions>(modeOptions);
+  modeOptionsRef.current = modeOptions;
   const updateModeOptions = useCallback((patch: Partial<ModeComposerOptions>) => {
-    setModeOptions(prev => ({ ...prev, ...patch }));
+    setModeOptions(prev => {
+      const next = { ...prev, ...patch };
+      modeOptionsRef.current = next;
+      return next;
+    });
   }, []);
-  const enterMode = useCallback((mode: SuperAgentCreationModeId | null, designModule?: SuperAgentDesignModuleId | null) => {
+  const enterMode = useCallback((
+    mode: SuperAgentCreationModeId | null,
+    designModule?: SuperAgentDesignModuleId | null,
+    extraOptions?: Partial<ModeComposerOptions>,
+  ) => {
     const resolved = resolveCreationModeEntry(mode, designModule);
     setActiveModeId(resolved.modeId);
-    if (resolved.optionsPatch) {
-      setModeOptions(prev => ({ ...prev, ...resolved.optionsPatch }));
+    const mergedPatch = {
+      ...(resolved.optionsPatch ?? {}),
+      ...(extraOptions ?? {}),
+    };
+    if (Object.keys(mergedPatch).length > 0) {
+      updateModeOptions(mergedPatch);
     }
-  }, []);
-  useEffect(() => {
-    if (activeModeId === 'motion') {
-      updateModeOptions({ motionEngine: DEFAULT_MODE_COMPOSER_OPTIONS.motionEngine });
-    } else if (activeModeId === 'media') {
-      updateModeOptions({ mediaSubMode: DEFAULT_MODE_COMPOSER_OPTIONS.mediaSubMode });
-    }
-  }, [activeModeId, updateModeOptions]);
-  const handleCatalogChange = useCallback((cat: { models: Model[]; routes: GatewayStatus['routes'] }) => {
+  }, [updateModeOptions]);
+  const handleCatalogChange = useCallback((cat: {
+    models: Model[];
+    routes: GatewayStatus['routes'];
+    providers?: GatewayStatus['providers'];
+  }) => {
     mediaModelsRef.current = cat.models;
     mediaRoutesRef.current = cat.routes;
+    mediaProvidersRef.current = cat.providers ?? [];
   }, []);
 
   useEffect(() => {
@@ -358,6 +502,10 @@ export function ConversationStream({
     if (!draftSeed || appliedDraftSeedRef.current === draftSeed.id) return;
     appliedDraftSeedRef.current = draftSeed.id;
     setText(draftSeed.text);
+    setSegments([]);
+    setInlineMentions([]);
+    prevInlineKeysRef.current = new Set();
+    composerRef.current?.setPlainText(draftSeed.text);
     pendingHiddenInstructionsRef.current = draftSeed.hiddenInstructions?.trim() || undefined;
     pendingContextTagsRef.current = draftSeed.contextTags?.length ? draftSeed.contextTags : undefined;
     if (draftSeed.mode && !chat?.messages.length) {
@@ -388,14 +536,18 @@ export function ConversationStream({
       }));
     } else {
       const displayTitle = localizedGameTitle(picked, locale);
-      setText(prev => (prev.trim() ? prev : t('Remix · {title}', { title: displayTitle })));
+      if (!text.trim()) {
+        const remixPrompt = t('Remix · {title}', { title: displayTitle });
+        setText(remixPrompt);
+        composerRef.current?.setPlainText(remixPrompt);
+      }
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [gameTemplateSeed, chat?.messages.length, locale, t]);
 
   useEffect(() => {
     if (!active) {
-      setResourceMenuOpen(false);
+      setMentionMenuOpen(false);
       setMoreStartersOpen(false);
       setModelMenuOpen(false);
       setApprovalMenuOpen(false);
@@ -411,7 +563,17 @@ export function ConversationStream({
   const listRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
   const uploadInputRef = useRef<HTMLInputElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const mentionMenuRef = useRef<ComposerMentionMenuHandle>(null);
+  const composerRef = useRef<ComposerPromptEditorHandle>(null);
+  const composerShellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (folderInputRef.current) {
+      folderInputRef.current.setAttribute('webkitdirectory', '');
+      folderInputRef.current.setAttribute('directory', '');
+    }
+  }, []);
 
   const activeRuntime = useMemo(() => {
     if (!runtimes?.length) return undefined;
@@ -428,8 +590,6 @@ export function ConversationStream({
     [effectiveAgents, runtimeOnline],
   );
   const activeAgent = effectiveAgents.find(item => item.id === selection.engine) ?? effectiveAgents[0];
-  const selectedModelMeta = activeAgent?.models.find(m => m.id === selection.model);
-  const reasoningEfforts = selectedModelMeta?.reasoning ?? [];
   const [queueCollapsed, setQueueCollapsed] = useState(false);
   const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
   const pendingApprovals = chat?.approvals ?? [];
@@ -461,7 +621,8 @@ export function ConversationStream({
       })
     : '';
   const hasGameStudioBrief = activeMode?.id === 'game' && !hasAttachedGameProject && Boolean(modeOptions.gameTemplate || gameBrief);
-  const hasDraft = Boolean(text.trim()) || hasBrowserAnnotation || hasGameStudioBrief;
+  const hasInlineMentions = inlineMentions.length > 0;
+  const hasDraft = Boolean(text.trim()) || hasInlineMentions || hasBrowserAnnotation || hasGameStudioBrief;
   const canSubmit = hasDraft && !sending && !scaffoldingGame && !hasPendingApproval && !loading && (Boolean(editingQueuedId) || runnableEngines.length > 0);
 
   const engineChoices = useMemo(() => {
@@ -549,15 +710,6 @@ export function ConversationStream({
     };
   }, [modelMenuOpen, activeRuntime?.id, activeRuntime?.kind, activeRuntime?.status, browsingChoice?.id, browsingChoice?.agent]);
 
-  const activeProviderRef = { id: activeAgent?.icon ?? selection.engine, custom: false };
-  const triggerPrimaryLabel = selectedModelMeta?.label
-    ?? (selection.model !== 'default' ? selection.model : activeAgent?.label ?? selection.engine);
-  const triggerSecondaryLabel = selection.reasoning !== 'default' && reasoningEfforts.includes(selection.reasoning)
-    ? t(selection.reasoning)
-    : selection.model !== 'default'
-      ? (activeAgent?.label ?? selection.engine)
-      : t('Default');
-
   useEffect(() => {
     if (requestedMode && !chat?.messages.length) {
       enterMode(requestedMode, requestedDesignModule);
@@ -568,10 +720,24 @@ export function ConversationStream({
   }, [requestedMode, requestedDesignModule, chat?.id, chat?.messages.length, draftSeed?.mode, enterMode]);
 
   useEffect(() => {
+    const prevId = prevChatIdRef.current;
+    prevChatIdRef.current = chat?.id;
     setRenaming(false);
+    setMentionMenuOpen(false);
+    setEditingQueuedId(null);
+    if (prevId && prevId !== chat?.id) {
+      setText('');
+      setSegments([]);
+      setInlineMentions([]);
+      prevInlineKeysRef.current = new Set();
+      composerRef.current?.clear();
+    }
     if (requestedMode && !chat?.messages.length) {
       enterMode(requestedMode, requestedDesignModule);
-    } else if (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode) {
+    } else if (
+      (Boolean(prevId) || Boolean(chat?.messages.length))
+      && (!draftSeed || appliedDraftSeedRef.current !== draftSeed.id || !draftSeed.mode)
+    ) {
       setActiveModeId(null);
       pendingHiddenInstructionsRef.current = undefined;
       pendingContextTagsRef.current = undefined;
@@ -579,6 +745,75 @@ export function ConversationStream({
     }
     followRef.current = true;
   }, [chat?.id]);
+
+  const handleComposerSnapshotChange = useCallback(
+    (snap: ComposerSnapshot) => {
+      setText(snap.text);
+      setSegments(snap.segments);
+      setInlineMentions(snap.mentions);
+
+      const nextKeys = new Set(snap.mentions.map(resourceKey));
+      const removed = new Set<string>();
+      for (const k of prevInlineKeysRef.current) {
+        if (!nextKeys.has(k)) removed.add(k);
+      }
+      prevInlineKeysRef.current = nextKeys;
+
+      const currentAtts = attachmentsRef.current;
+      const existingKeys = new Set(currentAtts.map(resourceKey));
+      const added = snap.mentions.filter(item => !existingKeys.has(resourceKey(item)));
+      if (removed.size > 0 || added.length > 0) {
+        const filtered = currentAtts.filter(item => !removed.has(resourceKey(item)));
+        onAttachmentsChange([...filtered, ...added].slice(0, 30));
+      }
+    },
+    [onAttachmentsChange],
+  );
+
+  const handleComposerTriggerChange = useCallback((trig: ComposerMentionTrigger) => {
+    if (trig?.active) {
+      setMentionQuery(trig.query);
+      setMentionMenuSource(trig.kind);
+      setMentionMenuOpen(prev => {
+        if (!prev) setMentionCategory('all');
+        return true;
+      });
+    } else if (
+      mentionMenuOpenRef.current
+      && (mentionMenuSourceRef.current === 'at' || mentionMenuSourceRef.current === 'slash')
+    ) {
+      setMentionMenuOpen(false);
+    }
+  }, []);
+
+  const handleSelectMentionItem = useCallback(
+    (item: SuperAgentResourceAttachment) => {
+      const replaceTrigger = mentionMenuSourceRef.current === 'at';
+      composerRef.current?.insertMention(item, { replaceTrigger });
+      const key = resourceKey(item);
+      if (!attachmentsRef.current.some(existing => resourceKey(existing) === key)) {
+        onAttachmentsChange([...attachmentsRef.current, item].slice(0, 30));
+      }
+      if (item.kind === 'motion-template') {
+        if (activeModeId === 'motion') updateModeOptions({ motionEngine: 'motion' });
+        else if (activeModeId === 'media') updateModeOptions({ mediaSubMode: 'motion' });
+      }
+      setMentionMenuOpen(false);
+      setMentionQuery('');
+      requestAnimationFrame(() => composerRef.current?.focus());
+    },
+    [onAttachmentsChange, activeModeId, updateModeOptions],
+  );
+
+  const handleMenuKey = useCallback((action: 'up' | 'down' | 'confirm' | 'escape') => {
+    if (action === 'up') mentionMenuRef.current?.move(-1);
+    else if (action === 'down') mentionMenuRef.current?.move(1);
+    else if (action === 'confirm') mentionMenuRef.current?.confirm();
+    else if (action === 'escape') {
+      setMentionMenuOpen(false);
+      composerRef.current?.focus();
+    }
+  }, []);
 
   const toggleResourceAttachment = (item: SuperAgentResourceAttachment) => {
     const key = resourceKey(item);
@@ -619,10 +854,93 @@ export function ConversationStream({
   }, [activeModeId, chat?.id, chat?.messages.length]);
 
   const exitActiveMode = useCallback(() => {
+    sampleAttachSeqRef.current += 1;
+    autoSampleKeyRef.current = null;
+    pendingSampleUploadRef.current = null;
     setActiveModeId(null);
     updateModeOptions({ gameTemplate: null });
     if (requestedMode) onChangeRequestedMode?.(null);
   }, [requestedMode, onChangeRequestedMode, updateModeOptions]);
+
+  const applyPickedPromptMeta = useCallback((meta?: PickPromptMeta) => {
+    const seq = ++sampleAttachSeqRef.current;
+    if (meta?.optionsPatch) {
+      updateModeOptions(meta.optionsPatch);
+    }
+    const prevAutoKey = autoSampleKeyRef.current;
+    const ref = meta?.referenceImage ?? null;
+    if (!ref) {
+      pendingSampleUploadRef.current = null;
+      if (prevAutoKey && attachmentsRef.current.some(att => resourceKey(att) === prevAutoKey)) {
+        const next = attachmentsRef.current.filter(att => resourceKey(att) !== prevAutoKey);
+        attachmentsRef.current = next;
+        onAttachmentsChange(next);
+      }
+      autoSampleKeyRef.current = null;
+      return;
+    }
+
+    const inferSampleMime = (filename: string) => {
+      const lower = filename.toLowerCase();
+      if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+      if (lower.endsWith('.webp')) return 'image/webp';
+      return 'image/png';
+    };
+
+    const attachUploaded = (uploaded: SuperAgentResourceAttachment) => {
+      if (seq !== sampleAttachSeqRef.current) return;
+      const nextKey = resourceKey(uploaded);
+      const base = prevAutoKey && prevAutoKey !== nextKey
+        ? attachmentsRef.current.filter(att => resourceKey(att) !== prevAutoKey)
+        : [...attachmentsRef.current];
+      if (!base.some(att => resourceKey(att) === nextKey)) {
+        base.push(uploaded);
+      }
+      const capped = base.slice(0, 30);
+      autoSampleKeyRef.current = nextKey;
+      attachmentsRef.current = capped;
+      onAttachmentsChange(capped);
+    };
+
+    const cached = sampleReferenceCacheRef.current.get(ref.url);
+    if (cached) {
+      pendingSampleUploadRef.current = null;
+      attachUploaded(cached);
+      return;
+    }
+
+    const uploadTask = (async () => {
+      try {
+        let res = await fetch(ref.url).catch(() => null);
+        if ((!res || !res.ok) && ref.fallbackUrl) {
+          res = await fetch(ref.fallbackUrl).catch(() => null);
+        }
+        if (!res || !res.ok) {
+          throw new Error(`HTTP ${res?.status ?? 0}`);
+        }
+        const blob = await res.blob();
+        if (!blob.size) throw new Error('Reference sample image was empty');
+        const mime = blob.type && blob.type !== 'application/octet-stream' ? blob.type : inferSampleMime(ref.filename);
+        const file = new File([blob], ref.filename, { type: mime });
+        const uploaded = await uploadSuperAgentFile(file);
+        const titled: SuperAgentResourceAttachment = ref.title
+          ? { ...uploaded, title: uploaded.title || ref.title }
+          : uploaded;
+        sampleReferenceCacheRef.current.set(ref.url, titled);
+        if (seq !== sampleAttachSeqRef.current) return;
+        attachUploaded(titled);
+        if (titled.kind === 'asset') onResourcesUploaded?.();
+      } catch (error) {
+        if (seq !== sampleAttachSeqRef.current) return;
+        onError(error instanceof Error ? error.message : t('Could not attach reference sample'));
+      } finally {
+        if (seq === sampleAttachSeqRef.current) {
+          pendingSampleUploadRef.current = null;
+        }
+      }
+    })();
+    pendingSampleUploadRef.current = uploadTask;
+  }, [onAttachmentsChange, onError, onResourcesUploaded, t, updateModeOptions]);
 
   const switchActiveMode = (value: string) => {
     const mode = findSuperAgentMode(value);
@@ -634,7 +952,16 @@ export function ConversationStream({
   const handleStartEditQueued = (item: SuperAgentQueuedMessage) => {
     setEditingQueuedId(item.id);
     setText(item.text);
-    onAttachmentsChange(item.attachments ? [...item.attachments] : []);
+    setSegments(item.segments ?? []);
+    const itemAtts = item.attachments ? [...item.attachments] : [];
+    onAttachmentsChange(itemAtts);
+    const mentionKeys = new Set(
+      (item.segments ?? []).filter(seg => seg.type === 'mention').map(seg => seg.attachmentKey),
+    );
+    const matchedInline = itemAtts.filter(att => mentionKeys.has(resourceKey(att)));
+    setInlineMentions(matchedInline);
+    prevInlineKeysRef.current = new Set(matchedInline.map(resourceKey));
+    composerRef.current?.setStructuredContent(item.text, item.segments, itemAtts);
     pendingHiddenInstructionsRef.current = item.hiddenInstructions;
     pendingContextTagsRef.current = item.contextTags;
     if (item.mode && findSuperAgentMode(item.mode)) {
@@ -651,199 +978,418 @@ export function ConversationStream({
   const handleCancelEditQueued = () => {
     setEditingQueuedId(null);
     setText('');
+    setSegments([]);
+    setInlineMentions([]);
+    prevInlineKeysRef.current = new Set();
+    composerRef.current?.clear();
     onAttachmentsChange([]);
     pendingHiddenInstructionsRef.current = undefined;
     pendingContextTagsRef.current = undefined;
     setActiveModeId(null);
   };
 
-  const handleSubmit = async (overrideBehavior?: SuperAgentFollowUpMode) => {
-    if (!canSubmit) return;
-    if (!editingQueuedId && activeMode?.id === 'game' && !chat?.messages.length && !attachments.some(att => att.kind === 'game-project')) {
-      const selectedTemplate = modeOptions.gameTemplate;
-      setScaffoldingGame(true);
-      try {
-        const created = selectedTemplate && !selectedTemplate.external
-          ? await gameApi.remix(selectedTemplate.id)
-          : await gameApi.create(
-              selectedTemplate?.external
-                ? {
-                    prompt: [communityRemixPrompt(selectedTemplate), text.trim()].filter(Boolean).join('\n\n'),
-                    genre: modeOptions.gameGenre ?? selectedTemplate.genre,
-                    style: modeOptions.gameStyle ?? selectedTemplate.style,
-                    setting: modeOptions.gameSetting ?? selectedTemplate.setting,
-                    multiplayer: modeOptions.gameMultiplayer,
-                    orientation: modeOptions.gameOrientation,
-                    playableAd: isPlayableAd(modeOptions),
-                  }
-                : {
-                    prompt: text.trim() || gameBrief,
-                    genre: modeOptions.gameGenre,
-                    style: modeOptions.gameStyle,
-                    setting: modeOptions.gameSetting,
-                    multiplayer: modeOptions.gameMultiplayer,
-                    orientation: modeOptions.gameOrientation,
-                    playableAd: isPlayableAd(modeOptions),
-                  },
-            );
-        rememberInstruction(created.game.id, created.agentInstruction);
-        const displayTitle = localizedGameTitle(created.game, locale);
-        const ready = created.game.status === 'ready' || created.game.status === 'published';
-        const userVisiblePrompt = text.trim()
-          || (selectedTemplate
-            ? t('Remix · {title}', { title: localizedGameTitle(selectedTemplate, locale) })
-            : buildGameUserPrompt(created.game, locale));
-        const hiddenInstructions = buildGameHiddenInstructions(
-          created.game,
-          created.agentInstruction,
-          selectedTemplate && text.trim() ? text.trim() : undefined,
-        );
-        const contextTags: SuperAgentContextTag[] = [
-          ...buildGameContextTags({ ...created.game, playableAd: isPlayableAd(modeOptions) }, t),
-          ...(selectedTemplate
-            ? [{ kind: 'param' as const, label: `${t('Remix')} · ${localizedGameTitle(selectedTemplate, locale)}` }]
-            : []),
-        ];
-        const nextAttachments = [...attachments, toGameResourceAttachment(created.game, displayTitle)];
-        const ok = await onSend(userVisiblePrompt, {
-          hiddenInstructions,
-          contextTags,
-          mode: 'game',
-          overrideAttachments: nextAttachments,
-          ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
-        });
-        if (ok) {
-          setText('');
-          pendingHiddenInstructionsRef.current = undefined;
-          pendingContextTagsRef.current = undefined;
-          setActiveModeId(null);
-          updateModeOptions({ gameTemplate: null });
-          followRef.current = true;
-        }
-        return;
-      } catch {
-        // Fall back to prompt prefix when offline or local game service is unavailable.
-      } finally {
-        setScaffoldingGame(false);
-      }
+  const clearComposerAfterSubmit = (options?: { clearAttachments?: boolean; resetMode?: boolean }) => {
+    setText('');
+    setSegments([]);
+    setInlineMentions([]);
+    prevInlineKeysRef.current = new Set();
+    composerRef.current?.clear();
+    setMentionMenuOpen(false);
+    autoSampleKeyRef.current = null;
+    pendingHiddenInstructionsRef.current = undefined;
+    pendingContextTagsRef.current = undefined;
+    if (options?.clearAttachments) {
+      attachmentsRef.current = [];
+      onAttachmentsChange([]);
     }
-
-    const hasInputImage = attachments.some(att => att.kind === 'asset' && att.modality === 'image');
-    const mediaExtra = {
-      routes: mediaRoutesRef.current,
-      hasInputImage,
-    };
-    const prefix = activeMode
-      ? formatModePromptPrefix(activeMode, modeOptions, mediaModelsRef.current, mediaExtra)
-      : '';
-    const modeDirective = activeMode
-      ? buildModeHiddenDirective(activeMode, modeOptions, mediaModelsRef.current, mediaExtra)
-      : undefined;
-    const annotationSummary = attachments
-      .filter(att => att.kind === 'browser-annotation')
-      .map(att => att.annotation?.comment?.trim() || '')
-      .filter(Boolean)
-      .join('\n')
-      || (hasBrowserAnnotation ? t('Update the page based on the attached browser preview annotations.') : '');
-    const rawBody = text.trim() || annotationSummary || prefix;
-    const hiddenInstructions = [
-      rawBody === prefix ? '' : prefix,
-      modeDirective,
-      pendingHiddenInstructionsRef.current,
-    ].filter(Boolean).join('\n\n') || undefined;
-    const contextTags = activeMode
-      ? buildModeContextTags(activeMode, modeOptions, mediaModelsRef.current, t, locale, mediaExtra)
-      : pendingContextTagsRef.current;
-    if (editingQueuedId && onUpdateQueued) {
-      const ok = await onUpdateQueued(editingQueuedId, {
-        text: rawBody,
-        attachments,
-        contextTags: contextTags ?? [],
-        hiddenInstructions: hiddenInstructions ?? '',
-        mode: activeMode?.id ?? null,
-        ...(activeMode?.id === 'coding' ? { workingDir: modeOptions.codingWorkdir.trim() } : {}),
-      });
-      if (ok) {
-        setEditingQueuedId(null);
-        setText('');
-        onAttachmentsChange([]);
-        pendingHiddenInstructionsRef.current = undefined;
-        pendingContextTagsRef.current = undefined;
-        setActiveModeId(null);
-        updateModeOptions({ gameTemplate: null });
-      }
-      return;
-    }
-
-    const effectiveFollowUp = isRunning ? (overrideBehavior ?? followUpBehavior) : undefined;
-    const isImmediateTurn = effectiveFollowUp !== 'queue';
-    if (isImmediateTurn) {
-      setPendingSubmission({
-        id: `optimistic-${Date.now()}`,
-        text: rawBody,
-        attachments,
-        contextTags,
-        startedAt: Date.now(),
-      });
-      followRef.current = true;
-    }
-    try {
-      const ok = await onSend(rawBody, {
-        ...(hiddenInstructions ? { hiddenInstructions } : {}),
-        ...(contextTags?.length ? { contextTags } : {}),
-        ...(activeMode ? { mode: activeMode.id } : {}),
-        ...(activeMode?.id === 'coding' && modeOptions.codingWorkdir.trim()
-          ? { workingDir: modeOptions.codingWorkdir.trim() }
-          : {}),
-        ...(effectiveFollowUp ? { followUpBehavior: effectiveFollowUp } : {}),
-      });
-      if (ok) {
-        setText('');
-        pendingHiddenInstructionsRef.current = undefined;
-        pendingContextTagsRef.current = undefined;
-        setActiveModeId(null);
-        updateModeOptions({ gameTemplate: null });
-        if (effectiveFollowUp !== 'queue') {
-          followRef.current = true;
-        }
-      }
-    } finally {
-      if (isImmediateTurn) {
-        setPendingSubmission(null);
-      }
+    if (options?.resetMode) {
+      setActiveModeId(null);
+      updateModeOptions({ gameTemplate: null });
     }
   };
 
-  const handleFilesUpload = async (files: FileList | null) => {
-    if (!files?.length || uploading) return;
+  const restoreComposerDraft = (snapshot: {
+    text: string;
+    segments: SuperAgentPromptSegment[];
+    mentions: SuperAgentResourceAttachment[];
+    attachments: SuperAgentResourceAttachment[];
+    hiddenInstructions?: string;
+    contextTags?: SuperAgentContextTag[];
+    modeId: SuperAgentCreationModeId | null;
+    gameTemplate: ModeComposerOptions['gameTemplate'];
+    editingQueuedId?: string | null;
+  }) => {
+    const currentSnap = composerRef.current?.getSnapshot();
+    if (currentSnap && (currentSnap.text.trim() || currentSnap.mentions.length > 0)) {
+      return;
+    }
+    if (snapshot.editingQueuedId !== undefined) {
+      setEditingQueuedId(snapshot.editingQueuedId);
+    }
+    setText(snapshot.text);
+    setSegments(snapshot.segments);
+    setInlineMentions(snapshot.mentions);
+    prevInlineKeysRef.current = new Set(snapshot.mentions.map(resourceKey));
+    composerRef.current?.setStructuredContent(snapshot.text, snapshot.segments, snapshot.attachments);
+    attachmentsRef.current = snapshot.attachments;
+    onAttachmentsChange(snapshot.attachments);
+    pendingHiddenInstructionsRef.current = snapshot.hiddenInstructions;
+    pendingContextTagsRef.current = snapshot.contextTags;
+    if (snapshot.modeId) {
+      setActiveModeId(snapshot.modeId);
+    }
+    if (snapshot.gameTemplate) {
+      updateModeOptions({ gameTemplate: snapshot.gameTemplate });
+    }
+  };
+
+  const handleSubmit = async (overrideBehavior?: SuperAgentFollowUpMode) => {
+    if (!canSubmit || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      if (pendingSampleUploadRef.current) {
+        await pendingSampleUploadRef.current;
+      }
+      const activeModeOptions = modeOptionsRef.current;
+      const snap = composerRef.current?.getSnapshot() ?? { text, segments, mentions: inlineMentions };
+      const snapText = snap.text || text;
+      const snapHasMentions = snap.segments.some(seg => seg.type === 'mention');
+      const outgoingSegments = snapHasMentions ? snap.segments : undefined;
+      const mergedAttachments: SuperAgentResourceAttachment[] = [...attachmentsRef.current];
+      for (const m of snap.mentions) {
+        if (!mergedAttachments.some(existing => resourceKey(existing) === resourceKey(m))) {
+          mergedAttachments.push(m);
+        }
+      }
+      const cappedAttachments = mergedAttachments.slice(0, 30);
+      const draftSnapshot = {
+        text: snap.text || text,
+        segments: snap.segments,
+        mentions: snap.mentions,
+        attachments: cappedAttachments,
+        hiddenInstructions: pendingHiddenInstructionsRef.current,
+        contextTags: pendingContextTagsRef.current,
+        modeId: activeModeId,
+        gameTemplate: activeModeOptions.gameTemplate ?? null,
+      };
+
+      if (!editingQueuedId && activeMode?.id === 'game' && !chat?.messages.length && !cappedAttachments.some(att => att.kind === 'game-project')) {
+        const selectedTemplate = activeModeOptions.gameTemplate;
+        setScaffoldingGame(true);
+        let gameScaffoldSent = false;
+        try {
+          const created = selectedTemplate && !selectedTemplate.external
+            ? await gameApi.remix(selectedTemplate.id)
+            : await gameApi.create(
+                selectedTemplate?.external
+                  ? {
+                      prompt: [communityRemixPrompt(selectedTemplate), snapText.trim()].filter(Boolean).join('\n\n'),
+                      genre: activeModeOptions.gameGenre ?? selectedTemplate.genre,
+                      style: activeModeOptions.gameStyle ?? selectedTemplate.style,
+                      setting: activeModeOptions.gameSetting ?? selectedTemplate.setting,
+                      multiplayer: activeModeOptions.gameMultiplayer,
+                      orientation: activeModeOptions.gameOrientation,
+                      playableAd: isPlayableAd(activeModeOptions),
+                    }
+                  : {
+                      prompt: snapText.trim() || gameBrief,
+                      genre: activeModeOptions.gameGenre,
+                      style: activeModeOptions.gameStyle,
+                      setting: activeModeOptions.gameSetting,
+                      multiplayer: activeModeOptions.gameMultiplayer,
+                      orientation: activeModeOptions.gameOrientation,
+                      playableAd: isPlayableAd(activeModeOptions),
+                    },
+              );
+          rememberInstruction(created.game.id, created.agentInstruction);
+          const displayTitle = localizedGameTitle(created.game, locale);
+          const ready = created.game.status === 'ready' || created.game.status === 'published';
+          const userVisiblePrompt = snapText.trim()
+            || (selectedTemplate
+              ? t('Remix · {title}', { title: localizedGameTitle(selectedTemplate, locale) })
+              : buildGameUserPrompt(created.game, locale));
+          const hiddenInstructions = buildGameHiddenInstructions(
+            created.game,
+            created.agentInstruction,
+            selectedTemplate && snapText.trim() ? snapText.trim() : undefined,
+          );
+          const contextTags: SuperAgentContextTag[] = [
+            ...buildGameContextTags({ ...created.game, playableAd: isPlayableAd(activeModeOptions) }, t),
+            ...(selectedTemplate
+              ? [{ kind: 'param' as const, label: `${t('Remix')} · ${localizedGameTitle(selectedTemplate, locale)}` }]
+              : []),
+          ];
+          const nextAttachments = [...cappedAttachments, toGameResourceAttachment(created.game, displayTitle)];
+          clearComposerAfterSubmit({ clearAttachments: true, resetMode: true });
+          followRef.current = true;
+          gameScaffoldSent = true;
+          const ok = await onSend(userVisiblePrompt, {
+            ...(outgoingSegments ? { segments: outgoingSegments } : {}),
+            hiddenInstructions,
+            contextTags,
+            mode: 'game',
+            overrideAttachments: nextAttachments,
+            ...(ready ? { initialArtifact: toGameArtifact(created.game, displayTitle) } : {}),
+          });
+          if (!ok) {
+            restoreComposerDraft(draftSnapshot);
+          }
+          return;
+        } catch {
+          if (gameScaffoldSent) {
+            restoreComposerDraft(draftSnapshot);
+            return;
+          }
+          // Fall back to prompt prefix when offline or local game service is unavailable.
+        } finally {
+          setScaffoldingGame(false);
+        }
+      }
+
+      const attachedImageReferences = cappedAttachments
+        .filter((att): att is SuperAgentResourceAttachment & { versionId: string } =>
+          att.kind === 'asset' && att.modality === 'image' && Boolean(att.versionId))
+        .map(att => ({ assetId: att.id, versionId: att.versionId }));
+      const hasInputImage = attachedImageReferences.length > 0
+        || cappedAttachments.some(att => att.kind === 'asset' && att.modality === 'image');
+      const mediaExtra: MediaPromptExtra = {
+        routes: mediaRoutesRef.current,
+        providers: mediaProvidersRef.current,
+        hasInputImage,
+        attachedImageReferences,
+      };
+      const prefix = activeMode
+        ? formatModePromptPrefix(activeMode, activeModeOptions, mediaModelsRef.current, mediaExtra)
+        : '';
+      const modeDirective = activeMode
+        ? buildModeHiddenDirective(activeMode, activeModeOptions, mediaModelsRef.current, mediaExtra)
+        : undefined;
+      const annotationSummary = cappedAttachments
+        .filter(att => att.kind === 'browser-annotation')
+        .map(att => att.annotation?.comment?.trim() || '')
+        .filter(Boolean)
+        .join('\n')
+        || (hasBrowserAnnotation ? t('Update the page based on the attached browser preview annotations.') : '');
+      const rawBody = snapText.trim() || annotationSummary || prefix;
+      let outgoingAttachments = cappedAttachments;
+      let scaffoldNote = '';
+      let initialArtifact: Partial<SuperAgentArtifact> | undefined;
+
+      const deriveDraftTitle = (fallback: string) => {
+        const line = snapText.trim().split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() || '';
+        if (!line) return fallback;
+        return line.length > 48 ? `${line.slice(0, 47).trim()}…` : line;
+      };
+
+      const scaffoldDesignScenario =
+        activeMode?.id === 'design' && activeModeOptions.designFormat === 'html'
+          ? activeModeOptions.designScenario
+          : activeMode?.id === 'research'
+            ? researchDesignScenario(activeModeOptions.researchFormat)
+            : activeMode?.id === 'visualization'
+              ? visualizationDesignScenario(activeModeOptions.vizType)
+              : null;
+
+      if (
+        !editingQueuedId
+        && !chat?.messages.length
+        && scaffoldDesignScenario
+        && !cappedAttachments.some(att => att.kind === 'design-project')
+      ) {
+        try {
+          const tpl = cappedAttachments.find(att => att.kind === 'design-template');
+          const scenarioLabel = findDesignScenario(scaffoldDesignScenario)?.label || 'Design project';
+          const { project } = await designClient.createProject({
+            scenario: scaffoldDesignScenario,
+            title: deriveDraftTitle(t(scenarioLabel)),
+            ...(tpl ? { templateId: tpl.id } : {}),
+          });
+          if (project?.id) {
+            initialArtifact = {
+              id: `design:${project.id}`,
+              kind: 'design-project',
+              title: project.title,
+              subtitle: project.scenario,
+              projectId: project.id,
+              scenario: project.scenario,
+              entry: project.entry,
+              revision: project.revision,
+              url: `${designRoutes.raw(project.id, project.entry)}?rev=${encodeURIComponent(project.revision || '')}`,
+            };
+            outgoingAttachments = [
+              ...cappedAttachments,
+              {
+                id: project.id,
+                kind: 'design-project' as const,
+                title: project.title,
+                subtitle: project.scenario,
+                scenario: project.scenario,
+              },
+            ].slice(0, 30);
+            scaffoldNote = `An editable Design Studio project is already created and open in the right-hand editor: projectId="${project.id}" (scenario="${project.scenario}", entry="${project.entry}", revision="${project.revision}"). Edit this existing project directly with openmotion_design_edit instead of creating a duplicate project.`;
+          }
+        } catch {
+          // Fall back cleanly to Agent tool creation when offline or mocked.
+        }
+      } else if (
+        !editingQueuedId
+        && !chat?.messages.length
+        && ((activeMode?.id === 'motion' && activeModeOptions.motionEngine !== 'video-model')
+          || (activeMode?.id === 'media' && activeModeOptions.mediaSubMode === 'motion'))
+        && !cappedAttachments.some(att => att.kind === 'motion-project')
+      ) {
+        try {
+          const statusRes = await fetch('/motion-api/project/status');
+          if (statusRes.ok) {
+            const status = (await statusRes.json()) as { revision?: string; projectId?: string };
+            if (typeof status?.revision === 'string' && /^[a-f0-9]{64}$/.test(status.revision)) {
+              const tpl = cappedAttachments.find(att => att.kind === 'motion-template');
+              const createRes = await fetch('/motion-api/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  expectedRevision: status.revision,
+                  ...(status.projectId ? { expectedProjectId: status.projectId } : {}),
+                  title: deriveDraftTitle(t('Motion Video')),
+                  instruction: snapText.trim() || prefix,
+                  ...(tpl ? { templateId: tpl.id } : {}),
+                }),
+              });
+              if (createRes.ok) {
+                const created = (await createRes.json()) as {
+                  projectId?: string;
+                  projectTitle?: string;
+                  sessionId?: string;
+                  revision?: string;
+                };
+                if (created?.projectId) {
+                  const title = created.projectTitle || deriveDraftTitle(t('Motion Video'));
+                  initialArtifact = {
+                    id: `motion:${created.projectId}`,
+                    kind: 'motion-project',
+                    title,
+                    subtitle: 'Motion Studio',
+                    projectId: created.projectId,
+                    ...(created.sessionId ? { sessionId: created.sessionId } : {}),
+                    ...(created.revision ? { revision: created.revision } : {}),
+                  };
+                  outgoingAttachments = [
+                    ...cappedAttachments,
+                    {
+                      id: created.projectId,
+                      kind: 'motion-project' as const,
+                      title,
+                      subtitle: 'Motion Studio',
+                    },
+                  ].slice(0, 30);
+                  scaffoldNote = `An editable Motion Studio project is already created and open in the right-hand editor: projectId="${created.projectId}". Edit this existing project directly with openmotion_edit_project instead of creating a duplicate project.`;
+                }
+              }
+            }
+          }
+        } catch {
+          // Fall back cleanly to Agent tool creation when offline, uninitialized, or mocked.
+        }
+      }
+
+      const hiddenInstructions = [
+        scaffoldNote,
+        rawBody === prefix ? '' : prefix,
+        modeDirective,
+        pendingHiddenInstructionsRef.current,
+      ].filter(Boolean).join('\n\n') || undefined;
+      const contextTags = activeMode
+        ? buildModeContextTags(activeMode, activeModeOptions, mediaModelsRef.current, t, locale, mediaExtra)
+        : pendingContextTagsRef.current;
+      if (editingQueuedId && onUpdateQueued) {
+        const targetQueuedId = editingQueuedId;
+        const patch = {
+          text: rawBody,
+          ...(outgoingSegments ? { segments: outgoingSegments } : { segments: [] }),
+          attachments: outgoingAttachments,
+          contextTags: contextTags ?? [],
+          hiddenInstructions: hiddenInstructions ?? '',
+          mode: activeMode?.id ?? null,
+          ...(activeMode?.id === 'coding' ? { workingDir: activeModeOptions.codingWorkdir.trim() } : {}),
+        };
+        setEditingQueuedId(null);
+        clearComposerAfterSubmit({ clearAttachments: true, resetMode: true });
+        const ok = await onUpdateQueued(targetQueuedId, patch);
+        if (!ok) {
+          restoreComposerDraft({ ...draftSnapshot, editingQueuedId: targetQueuedId });
+        }
+        return;
+      }
+
+      const effectiveFollowUp = isRunning ? (overrideBehavior ?? followUpBehavior) : undefined;
+      const isImmediateTurn = effectiveFollowUp !== 'queue';
+      if (isImmediateTurn) {
+        setPendingSubmission({
+          id: `optimistic-${Date.now()}`,
+          text: rawBody,
+          ...(outgoingSegments ? { segments: outgoingSegments } : {}),
+          attachments: outgoingAttachments,
+          contextTags,
+          startedAt: Date.now(),
+        });
+        followRef.current = true;
+      }
+      clearComposerAfterSubmit({ clearAttachments: true, resetMode: true });
+      try {
+        const ok = await onSend(rawBody, {
+          ...(outgoingSegments ? { segments: outgoingSegments } : {}),
+          overrideAttachments: outgoingAttachments,
+          ...(hiddenInstructions ? { hiddenInstructions } : {}),
+          ...(contextTags?.length ? { contextTags } : {}),
+          ...(activeMode ? { mode: activeMode.id } : {}),
+          ...(activeMode?.id === 'coding' && activeModeOptions.codingWorkdir.trim()
+            ? { workingDir: activeModeOptions.codingWorkdir.trim() }
+            : {}),
+          ...(initialArtifact ? { initialArtifact } : {}),
+          ...(effectiveFollowUp ? { followUpBehavior: effectiveFollowUp } : {}),
+        });
+        if (!ok) {
+          restoreComposerDraft(draftSnapshot);
+        }
+      } finally {
+        if (isImmediateTurn) {
+          setPendingSubmission(null);
+        }
+      }
+    } finally {
+      submittingRef.current = false;
+    }
+  };
+
+  const handleFilesUpload = async (input: File[] | FileList | null) => {
+    const fileList = input ? Array.from(input).slice(0, 30) : [];
+    if (!fileList.length || uploading) return;
     setUploading(true);
     try {
       const added: SuperAgentResourceAttachment[] = [];
-      for (const file of Array.from(files)) {
-        const asset = await uploadLibraryAsset(file);
-        const current = assetVersion(asset);
-        added.push({
-          id: asset.id,
-          kind: 'asset',
-          title: asset.name,
-          subtitle: current?.model || current?.source || asset.modality,
-          modality: asset.modality,
-          versionId: asset.currentVersionId,
-          previewUrl: assetMediaUrl(asset.id, asset.currentVersionId),
-        });
+      let uploadedMedia = false;
+      for (const file of fileList) {
+        const attachment = await uploadSuperAgentFile(file);
+        if (attachment.kind === 'asset') uploadedMedia = true;
+        added.push(attachment);
+        composerRef.current?.insertMention(attachment, { replaceTrigger: false });
       }
-      const next = [...attachments];
+      const next = [...attachmentsRef.current];
       for (const item of added) {
         if (!next.some(existing => resourceKey(existing) === resourceKey(item))) {
           next.push(item);
         }
       }
       onAttachmentsChange(next.slice(0, 30));
+      if (uploadedMedia) onResourcesUploaded?.();
+      setMentionMenuOpen(false);
+      requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       onError(error instanceof Error ? error.message : t('Could not upload file'));
     } finally {
       setUploading(false);
       if (uploadInputRef.current) uploadInputRef.current.value = '';
+      if (folderInputRef.current) folderInputRef.current.value = '';
     }
   };
 
@@ -870,13 +1416,13 @@ export function ConversationStream({
         event.preventDefault();
         setDragging(false);
         if (hasPendingApproval) return;
-        void handleFilesUpload(event.dataTransfer.files);
+        void collectDroppedFiles(event.dataTransfer).then(files => handleFilesUpload(files));
       }}
     >
       {dragging && (
         <div className="om-sa-drop-overlay" aria-hidden="true">
           <RemixIcon name="upload-2-line" size={28} />
-          <strong>{t('Drop media files to attach to this conversation')}</strong>
+          <strong>{t('Drop files or folders to attach to this conversation')}</strong>
         </div>
       )}
 
@@ -976,23 +1522,18 @@ export function ConversationStream({
           )}
           {chat && (chat.state !== 'idle' || hasPendingApproval) && (() => {
             const headerState = hasPendingApproval ? 'waiting' : chat.state;
+            if (headerState === 'running') return null;
             return (
               <span
                 className="om-badge om-sa-head-status-badge"
-                data-active={headerState === 'running' || undefined}
                 data-state={headerState}
               >
-                {headerState === 'running' && (
-                  <span className="om-sa-head-spinner" aria-hidden="true">
-                    <RemixIcon name="loader-4-line" size={12} />
-                  </span>
-                )}
                 {headerState === 'waiting' && (
                   <span className="om-sa-head-status-icon" aria-hidden="true">
                     <RemixIcon name="shield-check-line" size={12} />
                   </span>
                 )}
-                <span>{t(headerState === 'running' ? 'Working…' : headerState === 'waiting' ? 'Approval needed' : headerState === 'failed' ? 'Stopped' : 'Cancelled')}</span>
+                <span>{t(headerState === 'waiting' ? 'Approval needed' : headerState === 'failed' ? 'Stopped' : 'Cancelled')}</span>
               </span>
             );
           })()}
@@ -1043,6 +1584,7 @@ export function ConversationStream({
                 role: 'user',
                 text: pendingSubmission.text,
                 createdAt: pendingSubmission.startedAt,
+                ...(pendingSubmission.segments?.length ? { segments: pendingSubmission.segments } : {}),
                 ...(pendingSubmission.attachments.length ? { attachments: pendingSubmission.attachments } : {}),
                 ...(pendingSubmission.contextTags?.length ? { contextTags: pendingSubmission.contextTags } : {}),
               }
@@ -1099,13 +1641,17 @@ export function ConversationStream({
               onPlayGame={onPlayGame}
               onDeployGame={onDeployGame}
               onFocusComposer={() => composerRef.current?.focus()}
-              onPickPrompt={prompt => {
+              onPickPrompt={(prompt, meta) => {
                 setText(prompt);
+                composerRef.current?.setPlainText(prompt);
                 composerRef.current?.focus();
+                applyPickedPromptMeta(meta);
               }}
               onOpenAllResources={category => {
-                setResourceCategory(category ?? 'all');
-                setResourceMenuOpen(true);
+                setMentionCategory(mapResourceTabToMentionCategory(category ?? 'all'));
+                setMentionMenuSource('plus');
+                setMentionQuery('');
+                setMentionMenuOpen(true);
               }}
               onOpenGameStudio={onOpenGameStudio}
               onClose={exitActiveMode}
@@ -1125,7 +1671,7 @@ export function ConversationStream({
                   className="om-sa-starter-card"
                   data-tone={card.tone}
                   onClick={() => {
-                    enterMode(card.id, card.designModule);
+                    enterMode(card.id, card.designModule, card.optionsPatch);
                     composerRef.current?.focus();
                   }}
                 >
@@ -1172,7 +1718,7 @@ export function ConversationStream({
                       className="om-sa-more-item"
                       onClick={() => {
                         setMoreStartersOpen(false);
-                        enterMode(card.id, card.designModule);
+                        enterMode(card.id, card.designModule, card.optionsPatch);
                         composerRef.current?.focus();
                       }}
                     >
@@ -1198,6 +1744,7 @@ export function ConversationStream({
             onOpenArtifactId={onOpenArtifactId}
             onOpenChangedFile={onOpenChangedFile}
             onPreviewAttachment={onPreviewAttachment}
+            onOpenFilePath={onOpenFilePath}
             onOpenWebUrl={onOpenWebUrl}
             onCopyText={onCopyText}
             onNotify={onNotify}
@@ -1368,8 +1915,10 @@ export function ConversationStream({
             onChange={updateModeOptions}
             onCatalogChange={handleCatalogChange}
             onOpenResourcePicker={category => {
-              setResourceCategory(category);
-              setResourceMenuOpen(true);
+              setMentionCategory(mapResourceTabToMentionCategory(category));
+              setMentionMenuSource('plus');
+              setMentionQuery('');
+              setMentionMenuOpen(true);
             }}
             onOpenModelSettings={() => {
               if (onOpenModelSettings) onOpenModelSettings();
@@ -1379,6 +1928,7 @@ export function ConversationStream({
         )}
 
         <div
+          ref={composerShellRef}
           className="om-sa-composer"
           data-approval-pending={hasPendingApproval || undefined}
           data-editing-queued={Boolean(editingQueuedId) || undefined}
@@ -1411,165 +1961,227 @@ export function ConversationStream({
               </Button>
             </div>
           )}
-          {(attachments.length > 0 || (activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate))) && (
-            <div className="om-sa-composer-chips">
-              {activeMode?.id === 'game' && modeOptions.gameTemplate && (
-                <span className="om-sa-attachment-chip">
-                  <RemixIcon name="gamepad-line" size={13} />
-                  <span>{t('Remix · {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
-                  <IconButton
-                    variant="plain"
-                    className="om-sa-chip-remove"
-                    aria-label={t('Remove {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}
-                    onClick={() => updateModeOptions({ gameTemplate: null })}
-                    icon={<RemixIcon name="close-line" size={12} />}
-                  />
-                </span>
-              )}
-              {attachments.map(att => {
-                const key = resourceKey(att);
-                const isBrowserAnnotation = att.kind === 'browser-annotation';
-                const chipTitle = isBrowserAnnotation
-                  ? (att.annotation?.comment || att.title)
-                  : att.title;
-                const tooltipLabel = isBrowserAnnotation
-                  ? [
-                      att.annotation?.element?.componentName,
-                      att.annotation?.element?.selector,
-                      att.annotation?.pageUrl || att.subtitle,
-                    ].filter(Boolean).join(' · ')
-                  : '';
-                if (!isBrowserAnnotation) {
-                  return (
-                    <span key={key} className="om-sa-attachment-chip">
-                      <RemixIcon name={resourceIcon(att)} size={13} />
+          {(() => {
+            const inlineKeySet = new Set(inlineMentions.map(resourceKey));
+            const trayAttachments = attachments.filter(att => !inlineKeySet.has(resourceKey(att)));
+            if (trayAttachments.length === 0 && !(activeMode?.id === 'game' && Boolean(modeOptions.gameTemplate))) {
+              return null;
+            }
+            return (
+              <div className="om-sa-composer-chips">
+                {activeMode?.id === 'game' && modeOptions.gameTemplate && (
+                  <span className="om-sa-attachment-chip">
+                    <RemixIcon name="gamepad-line" size={13} />
+                    <span>{t('Remix · {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}</span>
+                    <IconButton
+                      variant="plain"
+                      className="om-sa-chip-remove"
+                      aria-label={t('Remove {title}', { title: localizedGameTitle(modeOptions.gameTemplate, locale) })}
+                      onClick={() => updateModeOptions({ gameTemplate: null })}
+                      icon={<RemixIcon name="close-line" size={12} />}
+                    />
+                  </span>
+                )}
+                {trayAttachments.map(att => {
+                  const key = resourceKey(att);
+                  const isBrowserAnnotation = att.kind === 'browser-annotation';
+                  const chipTitle = isBrowserAnnotation
+                    ? (att.annotation?.comment || att.title)
+                    : att.title;
+                  const tooltipLabel = isBrowserAnnotation
+                    ? [
+                        att.annotation?.element?.componentName,
+                        att.annotation?.element?.selector,
+                        att.annotation?.pageUrl || att.subtitle,
+                      ].filter(Boolean).join(' · ')
+                    : '';
+                  if (!isBrowserAnnotation) {
+                    return (
+                      <span key={key} className="om-sa-attachment-chip">
+                        <Button
+                          variant="plain"
+                          type="button"
+                          className="om-sa-chip-main"
+                          onClick={() => onPreviewAttachment(att)}
+                        >
+                          <RemixIcon name={resourceIcon(att)} size={13} />
+                          <span>{chipTitle}</span>
+                        </Button>
+                        <IconButton
+                          variant="plain"
+                          className="om-sa-chip-remove"
+                          aria-label={t('Remove {title}', { title: chipTitle })}
+                          onClick={() =>
+                            onAttachmentsChange(attachments.filter(item => resourceKey(item) !== key))
+                          }
+                          icon={<RemixIcon name="close-line" size={12} />}
+                        />
+                      </span>
+                    );
+                  }
+
+                  const annot = att.annotation;
+                  const sourceLoc = annot?.element?.sourceFile
+                    ? `${annot.element.sourceFile}${typeof annot.element.sourceLine === 'number' ? `:${annot.element.sourceLine}` : ''}`
+                    : '';
+                  const chipTrigger = (
+                    <Button
+                      variant="plain"
+                      type="button"
+                      className="om-sa-chip-main"
+                      aria-label={chipTitle}
+                    >
+                      <ResourceThumbImage
+                        className="om-sa-attachment-thumb"
+                        src={resourceImagePreviewUrl(att)}
+                        fallback={<RemixIcon name={resourceIcon(att)} size={13} />}
+                      />
                       <span>{chipTitle}</span>
+                    </Button>
+                  );
+
+                  return (
+                    <span
+                      key={key}
+                      className="om-sa-attachment-chip"
+                      data-kind="browser-annotation"
+                    >
+                      <Popover
+                        open={previewingChipKey === key}
+                        onOpenChange={open => setPreviewingChipKey(open ? key : null)}
+                        side="top"
+                        align="start"
+                        tooltip={tooltipLabel || undefined}
+                        aria-label={chipTitle}
+                        className="om-sa-annot-preview-popover"
+                        trigger={chipTrigger}
+                      >
+                        <div className="om-sa-annot-preview-body">
+                          {att.previewUrl && (
+                            <img className="om-sa-annot-preview-img" src={att.previewUrl} alt={chipTitle} />
+                          )}
+                          <div className="om-sa-annot-preview-meta">
+                            <strong>{chipTitle}</strong>
+                            {(annot?.element?.componentName || annot?.element?.selector) && (
+                              <code>
+                                {annot.element.componentName ? `${annot.element.componentName} · ` : ''}
+                                {annot.element.selector}
+                              </code>
+                            )}
+                            {sourceLoc && <small className="om-sa-annot-preview-source">{sourceLoc}</small>}
+                            {annot?.region && (
+                              <small>
+                                {annot.region.width}×{annot.region.height} @ {annot.region.x},{annot.region.y}
+                              </small>
+                            )}
+                            {annot?.consoleErrors && annot.consoleErrors.length > 0 && (
+                              <pre className="om-sa-annot-preview-logs">
+                                {annot.consoleErrors.slice(0, 4).join('\n')}
+                              </pre>
+                            )}
+                            {(annot?.pageUrl || att.subtitle) && (
+                              <small className="om-sa-annot-preview-url">{annot?.pageUrl || att.subtitle}</small>
+                            )}
+                          </div>
+                          <div className="om-sa-annot-preview-actions">
+                            <Button
+                              variant="plain"
+                              type="button"
+                              className="om-sa-toolbar-btn"
+                              onClick={() => {
+                                setPreviewingChipKey(null);
+                                onPreviewAttachment(att);
+                              }}
+                            >
+                              <RemixIcon name="eye-line" size={13} />
+                              <span>{t('Preview')}</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </Popover>
                       <IconButton
                         variant="plain"
                         className="om-sa-chip-remove"
                         aria-label={t('Remove {title}', { title: chipTitle })}
-                        onClick={() =>
-                          onAttachmentsChange(attachments.filter(item => resourceKey(item) !== key))
-                        }
+                        onClick={() => {
+                          if (previewingChipKey === key) setPreviewingChipKey(null);
+                          onAttachmentsChange(attachments.filter(item => resourceKey(item) !== key));
+                        }}
                         icon={<RemixIcon name="close-line" size={12} />}
                       />
                     </span>
                   );
-                }
+                })}
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-chip-clear"
+                  onClick={() => {
+                    for (const item of inlineMentions) {
+                      composerRef.current?.removeMentionByKey(resourceKey(item));
+                    }
+                    onAttachmentsChange([]);
+                    updateModeOptions({ gameTemplate: null });
+                  }}
+                >
+                  {t('Clear')}
+                </Button>
+              </div>
+            );
+          })()}
 
-                const annot = att.annotation;
-                const sourceLoc = annot?.element?.sourceFile
-                  ? `${annot.element.sourceFile}${typeof annot.element.sourceLine === 'number' ? `:${annot.element.sourceLine}` : ''}`
-                  : '';
-                const chipTrigger = (
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-chip-main"
-                    aria-label={chipTitle}
-                  >
-                    {att.previewUrl ? (
-                      <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
-                    ) : (
-                      <RemixIcon name={resourceIcon(att)} size={13} />
-                    )}
-                    <span>{chipTitle}</span>
-                  </Button>
-                );
+          <ComposerMentionMenu
+            ref={mentionMenuRef}
+            open={mentionMenuOpen && !hasPendingApproval}
+            source={mentionMenuSource}
+            anchorRef={composerShellRef}
+            query={mentionQuery}
+            category={mentionCategory}
+            currentChatId={chat?.id}
+            workingDir={activeMode?.id === 'coding' ? modeOptions.codingWorkdir.trim() || chat?.workingDir : chat?.workingDir}
+            activeArtifacts={activeArtifacts}
+            conversations={conversations}
+            selected={attachments}
+            onQueryChange={setMentionQuery}
+            onCategoryChange={setMentionCategory}
+            onSelectItem={handleSelectMentionItem}
+            onUploadFiles={() => {
+              if (mentionMenuSourceRef.current === 'at' || mentionMenuSourceRef.current === 'slash') {
+                composerRef.current?.clearTrigger();
+              }
+              setMentionMenuOpen(false);
+              setMentionQuery('');
+              uploadInputRef.current?.click();
+            }}
+            onUploadFolder={() => {
+              if (mentionMenuSourceRef.current === 'at' || mentionMenuSourceRef.current === 'slash') {
+                composerRef.current?.clearTrigger();
+              }
+              setMentionMenuOpen(false);
+              setMentionQuery('');
+              folderInputRef.current?.click();
+            }}
+            onRunCommand={
+              onRunCommand
+                ? command => {
+                    if (mentionMenuSourceRef.current === 'at' || mentionMenuSourceRef.current === 'slash') {
+                      composerRef.current?.clearTrigger();
+                    }
+                    setMentionMenuOpen(false);
+                    setMentionQuery('');
+                    onRunCommand(command);
+                  }
+                : undefined
+            }
+            onClose={(refocus = true) => {
+              setMentionMenuOpen(false);
+              if (refocus) requestAnimationFrame(() => composerRef.current?.focus());
+            }}
+          />
 
-                return (
-                  <span
-                    key={key}
-                    className="om-sa-attachment-chip"
-                    data-kind="browser-annotation"
-                  >
-                    <Popover
-                      open={previewingChipKey === key}
-                      onOpenChange={open => setPreviewingChipKey(open ? key : null)}
-                      side="top"
-                      align="start"
-                      tooltip={tooltipLabel || undefined}
-                      aria-label={chipTitle}
-                      className="om-sa-annot-preview-popover"
-                      trigger={chipTrigger}
-                    >
-                      <div className="om-sa-annot-preview-body">
-                        {att.previewUrl && (
-                          <img className="om-sa-annot-preview-img" src={att.previewUrl} alt={chipTitle} />
-                        )}
-                        <div className="om-sa-annot-preview-meta">
-                          <strong>{chipTitle}</strong>
-                          {(annot?.element?.componentName || annot?.element?.selector) && (
-                            <code>
-                              {annot.element.componentName ? `${annot.element.componentName} · ` : ''}
-                              {annot.element.selector}
-                            </code>
-                          )}
-                          {sourceLoc && <small className="om-sa-annot-preview-source">{sourceLoc}</small>}
-                          {annot?.region && (
-                            <small>
-                              {annot.region.width}×{annot.region.height} @ {annot.region.x},{annot.region.y}
-                            </small>
-                          )}
-                          {annot?.consoleErrors && annot.consoleErrors.length > 0 && (
-                            <pre className="om-sa-annot-preview-logs">
-                              {annot.consoleErrors.slice(0, 4).join('\n')}
-                            </pre>
-                          )}
-                          {(annot?.pageUrl || att.subtitle) && (
-                            <small className="om-sa-annot-preview-url">{annot?.pageUrl || att.subtitle}</small>
-                          )}
-                        </div>
-                        <div className="om-sa-annot-preview-actions">
-                          <Button
-                            variant="plain"
-                            type="button"
-                            className="om-sa-toolbar-btn"
-                            onClick={() => {
-                              setPreviewingChipKey(null);
-                              onPreviewAttachment(att);
-                            }}
-                          >
-                            <RemixIcon name="eye-line" size={13} />
-                            <span>{t('Preview')}</span>
-                          </Button>
-                        </div>
-                      </div>
-                    </Popover>
-                    <IconButton
-                      variant="plain"
-                      className="om-sa-chip-remove"
-                      aria-label={t('Remove {title}', { title: chipTitle })}
-                      onClick={() => {
-                        if (previewingChipKey === key) setPreviewingChipKey(null);
-                        onAttachmentsChange(attachments.filter(item => resourceKey(item) !== key));
-                      }}
-                      icon={<RemixIcon name="close-line" size={12} />}
-                    />
-                  </span>
-                );
-              })}
-              <Button
-                variant="plain"
-                type="button"
-                className="om-sa-chip-clear"
-                onClick={() => {
-                  onAttachmentsChange([]);
-                  updateModeOptions({ gameTemplate: null });
-                }}
-              >
-                {t('Clear')}
-              </Button>
-            </div>
-          )}
-
-          <textarea
+          <ComposerPromptEditor
             ref={composerRef}
-            rows={2}
-            value={text}
-            disabled={loading || hasPendingApproval}
-            maxLength={20000}
-            aria-label={t('Message Super Agent')}
+            ariaLabel={t('Message Super Agent')}
             placeholder={
               hasPendingApproval
                 ? t('Confirm or decline the pending action above to continue…')
@@ -1581,23 +2193,32 @@ export function ConversationStream({
                       : t('Send a follow-up to steer the current run…')
                     : getModeComposerPlaceholder(activeMode, modeOptions, t)
             }
-            onChange={event => setText(event.target.value)}
-            onKeyDown={event => {
-              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-              if (event.key === 'Escape' && editingQueuedId) {
-                event.preventDefault();
-                handleCancelEditQueued();
-                return;
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                const oppositeBehavior =
-                  (event.metaKey || event.ctrlKey) && isRunning && !editingQueuedId
-                    ? (followUpBehavior === 'queue' ? 'steer' : 'queue')
-                    : undefined;
-                void handleSubmit(oppositeBehavior);
-              }
+            disabled={loading || hasPendingApproval}
+            mentionMenuOpen={mentionMenuOpen}
+            onMenuKey={handleMenuKey}
+            onChange={handleComposerSnapshotChange}
+            onTriggerChange={handleComposerTriggerChange}
+            onSubmit={oppositeMeta => {
+              const oppositeBehavior =
+                oppositeMeta && isRunning && !editingQueuedId
+                  ? (followUpBehavior === 'queue' ? 'steer' : 'queue')
+                  : undefined;
+              void handleSubmit(oppositeBehavior);
             }}
+            onCancelEdit={editingQueuedId ? handleCancelEditQueued : undefined}
+            onPasteFiles={files => {
+              if (!hasPendingApproval) void handleFilesUpload(files);
+            }}
+            onRestoreMentions={restored => {
+              const next = [...attachmentsRef.current];
+              for (const item of restored) {
+                if (!next.some(existing => resourceKey(existing) === resourceKey(item))) {
+                  next.push(item);
+                }
+              }
+              onAttachmentsChange(next.slice(0, 30));
+            }}
+            onOpenMention={item => onPreviewAttachment(item)}
           />
 
           <input
@@ -1607,49 +2228,36 @@ export function ConversationStream({
             hidden
             onChange={event => void handleFilesUpload(event.target.files)}
           />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={event => void handleFilesUpload(event.target.files)}
+          />
 
           <div className="om-sa-composer-bar">
             <div className="om-sa-composer-tools">
-              <Popover
-                open={resourceMenuOpen}
-                onOpenChange={next => {
-                  setResourceMenuOpen(next);
-                  if (!next) setResourceCategory('all');
-                }}
-                side="top"
-                align="start"
+              <IconButton
+                variant="plain"
+                className="om-sa-composer-icon-btn"
+                data-mention-trigger="plus"
+                data-active={mentionMenuOpen || undefined}
                 aria-label={t('Attach workspace resources')}
-                className="om-sa-resource-popover"
-                trigger={
-                  <IconButton
-                    variant="plain"
-                    className="om-sa-composer-icon-btn"
-                    data-active={resourceMenuOpen || undefined}
-                    aria-label={t('Attach workspace resources')}
-                    disabled={uploading || hasPendingApproval}
-                    icon={<RemixIcon name={uploading ? 'loader-4-line' : 'add-line'} size={18} />}
-                  />
-                }
-              >
-                <ResourcePickerPanel
-                  open={resourceMenuOpen}
-                  initialCategory={resourceCategory}
-                  selected={attachments}
-                  onToggle={toggleResourceAttachment}
-                  onClear={() => onAttachmentsChange([])}
-                  onAddItems={added => {
-                    const next = [...attachments];
-                    for (const item of added) {
-                      if (!next.some(existing => resourceKey(existing) === resourceKey(item))) {
-                        next.push(item);
-                      }
-                    }
-                    onAttachmentsChange(next.slice(0, 30));
-                  }}
-                  onUploaded={onResourcesUploaded}
-                  onError={onError}
-                />
-              </Popover>
+                aria-expanded={mentionMenuOpen}
+                disabled={uploading || hasPendingApproval}
+                onClick={() => {
+                  if (mentionMenuOpen && mentionMenuSource === 'plus') {
+                    setMentionMenuOpen(false);
+                  } else {
+                    setMentionMenuSource('plus');
+                    setMentionQuery('');
+                    setMentionCategory('all');
+                    setMentionMenuOpen(true);
+                  }
+                }}
+                icon={<RemixIcon name={uploading ? 'loader-4-line' : 'add-line'} size={18} />}
+              />
 
               {active && activeMode && (
                 <span className="om-sa-active-mode-pill" data-mode={activeMode.id}>
@@ -1688,303 +2296,23 @@ export function ConversationStream({
                 />
               )}
 
-              <Popover
+              <AgentModelPicker
                 open={modelMenuOpen}
                 onOpenChange={setModelMenuOpen}
-                side="top"
-                align="start"
-                aria-label={t('Agent & model')}
-                className="om-agent-settings-popover om-sa-model-popover"
-                trigger={
-                  <Button
-                    variant="plain"
-                    type="button"
-                    className="om-sa-model-trigger"
-                    disabled={busy || sending}
-                  >
-                    <span className="om-sa-model-avatar" data-engine={selection.engine} aria-hidden="true">
-                      {selection.model !== 'default' ? (
-                        <ModelAvatar name={triggerPrimaryLabel} modelId={selection.model} provider={activeProviderRef} />
-                      ) : (
-                        <ProviderAvatar name={activeAgent?.label ?? selection.engine} provider={activeProviderRef} />
-                      )}
-                    </span>
-                    <span className="om-sa-model-trigger-name">{triggerPrimaryLabel}</span>
-                    {triggerSecondaryLabel && (
-                      <span className="om-sa-model-trigger-sub" data-engine={selection.engine}>{triggerSecondaryLabel}</span>
-                    )}
-                    {activeRuntime && activeRuntime.kind !== 'local-direct' && (
-                      <span className="om-sa-runtime-chip">
-                        <RemixIcon name={activeRuntime.kind === 'local-bridge' ? 'link' : 'plug-line'} size={11} />
-                        <span>{t(activeRuntime.name)}</span>
-                      </span>
-                    )}
-                    <RemixIcon name="arrow-down-s-line" size={15} />
-                  </Button>
-                }
-              >
-                <div className="om-sa-model-menu">
-                  {runtimes && (runtimes.length > 1 || (activeRuntime && activeRuntime.kind !== 'local-direct')) && (
-                    <div className="om-sa-runtime-pills" role="group" aria-label={t('Execution runtime')}>
-                      {runtimes.map(rt => {
-                        const isRtActive = activeRuntime?.id === rt.id;
-                        const icon = rt.kind === 'local-bridge' ? 'link' : rt.kind === 'remote-service' ? 'plug-line' : 'computer-line';
-                        return (
-                          <Button
-                            key={rt.id}
-                            variant="plain"
-                            type="button"
-                            className="om-sa-runtime-pill"
-                            aria-pressed={isRtActive}
-                            data-active={isRtActive || undefined}
-                            disabled={rt.status === 'disabled'}
-                            onClick={() => {
-                              const nextEngine = rt.runnableAgentIds.includes(selection.engine)
-                                ? selection.engine
-                                : rt.runnableAgentIds[0] ?? rt.agents[0]?.id ?? selection.engine;
-                              setBrowsingEngine(nextEngine);
-                              onChangeSelection({
-                                runtimeId: rt.id,
-                                engine: nextEngine,
-                                model: 'default',
-                                reasoning: 'default',
-                              });
-                            }}
-                          >
-                            <RemixIcon name={icon} size={13} />
-                            <span>{t(rt.name)}</span>
-                            <span
-                              className="om-sa-runtime-pill-dot"
-                              data-online={rt.status === 'online' || undefined}
-                              aria-hidden="true"
-                            />
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div className="om-sa-model-agent-select-wrap">
-                    <Select
-                      label={t('Local Agent')}
-                      value={browsingChoice.id}
-                      className="om-sa-model-agent-select"
-                      options={engineChoices.map(choice => ({
-                        value: choice.id,
-                        label: choice.label,
-                        icon: (
-                          <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
-                            <ProviderAvatar
-                              name={choice.label}
-                              provider={{ id: choice.agent?.icon ?? choice.id, custom: false }}
-                            />
-                          </span>
-                        ),
-                        description: choice.ready
-                          ? undefined
-                          : !runtimeOnline
-                            ? t('Runtime offline')
-                            : (!choice.agent?.installed ? t('Not installed') : t('Sign-in required')),
-                      }))}
-                      onCommit={nextId => {
-                        const chosen = engineChoices.find(item => item.id === nextId);
-                        setBrowsingEngine(nextId);
-                        if (chosen?.ready && selection.engine !== nextId) {
-                          onChangeSelection({
-                            ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
-                            engine: nextId,
-                            model: 'default',
-                            reasoning: 'default',
-                          });
-                        }
-                      }}
-                    />
-                  </div>
-
-                  {(() => {
-                    const choice = browsingChoice;
-                    const agentModels = choice.ready ? (choice.agent?.models ?? []) : [];
-                    const providerRef = { id: choice.agent?.icon ?? choice.id, custom: false };
-                    const isDefaultSelected = selection.engine === choice.id && selection.model === 'default';
-                    const hasCustomSelected =
-                      selection.engine === choice.id
-                      && selection.model !== 'default'
-                      && !agentModels.some(m => m.id === selection.model);
-
-                    return (
-                      <div className="om-sa-model-list" role="listbox" aria-label={choice.label}>
-                        {!choice.ready ? (
-                          <div className="om-sa-model-unavailable">
-                            <p className="om-muted">
-                              {!runtimeOnline
-                                ? t('This runtime is currently offline.')
-                                : !choice.agent?.installed
-                                  ? t('Not installed')
-                                  : t('Sign-in required')}
-                            </p>
-                          </div>
-                        ) : (
-                          <>
-                            <Button
-                              variant="plain"
-                              type="button"
-                              role="option"
-                              aria-selected={isDefaultSelected}
-                              data-active={isDefaultSelected || undefined}
-                              className="om-sa-model-option"
-                              onClick={() => onChangeSelection({
-                                ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
-                                engine: choice.id,
-                                model: 'default',
-                                reasoning: 'default',
-                              })}
-                            >
-                              <span className="om-sa-model-option-main">
-                                <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
-                                  <ProviderAvatar name={choice.label} provider={providerRef} />
-                                </span>
-                                <span className="om-sa-model-option-text">
-                                  <strong>{choice.label}</strong>
-                                  <span className="om-sa-model-tag" data-tone="default">{t('Default')}</span>
-                                </span>
-                              </span>
-                              {isDefaultSelected && <RemixIcon name="check-line" size={15} />}
-                            </Button>
-
-                            {hasCustomSelected && (
-                              <Button
-                                key={`${choice.id}:${selection.model}`}
-                                variant="plain"
-                                type="button"
-                                role="option"
-                                aria-selected
-                                data-active
-                                className="om-sa-model-option"
-                                onClick={() => onChangeSelection({
-                                  ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
-                                  engine: choice.id,
-                                  model: selection.model,
-                                  reasoning: selection.reasoning,
-                                })}
-                              >
-                                <span className="om-sa-model-option-main">
-                                  <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
-                                    <ModelAvatar name={selection.model} modelId={selection.model} provider={providerRef} />
-                                  </span>
-                                  <span className="om-sa-model-option-text">
-                                    <strong>{selection.model}</strong>
-                                    <span className="om-sa-model-tag" data-tone={choice.id}>{choice.label}</span>
-                                  </span>
-                                </span>
-                                <RemixIcon name="check-line" size={15} />
-                              </Button>
-                            )}
-
-                            {inspectingEngine === choice.id && !agentModels.length && (
-                              <div className="om-sa-model-loading">
-                                <Skeleton style={{ width: '100%', height: 32 }} />
-                                <Skeleton style={{ width: '82%', height: 32 }} />
-                              </div>
-                            )}
-
-                            {agentModels.map(model => {
-                              const isSelected = selection.engine === choice.id && selection.model === model.id;
-                              const hasReasoning = Boolean(model.reasoning?.length);
-                              return (
-                                <Button
-                                  key={`${choice.id}:${model.id}`}
-                                  variant="plain"
-                                  type="button"
-                                  role="option"
-                                  aria-selected={isSelected}
-                                  data-active={isSelected || undefined}
-                                  className="om-sa-model-option"
-                                  onClick={() => onChangeSelection({
-                                    ...(activeRuntime ? { runtimeId: activeRuntime.id } : selection.runtimeId ? { runtimeId: selection.runtimeId } : {}),
-                                    engine: choice.id,
-                                    model: model.id,
-                                    reasoning: 'default',
-                                  })}
-                                >
-                                  <span className="om-sa-model-option-main">
-                                    <span className="om-sa-model-avatar" data-engine={choice.id} aria-hidden="true">
-                                      <ModelAvatar name={model.label} modelId={model.id} provider={providerRef} />
-                                    </span>
-                                    <span className="om-sa-model-option-text">
-                                      <strong>{model.label}</strong>
-                                      {hasReasoning ? (
-                                        <span className="om-sa-model-tag" data-tone="reasoning">
-                                          <RemixIcon name="sparkling-fill" size={10} />
-                                        </span>
-                                      ) : (
-                                        <span className="om-sa-model-tag" data-tone={choice.id}>{choice.label}</span>
-                                      )}
-                                    </span>
-                                  </span>
-                                  {isSelected && <RemixIcon name="check-line" size={15} />}
-                                </Button>
-                              );
-                            })}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {selection.engine === 'codex' && reasoningEfforts.length > 0 && (
-                    <div className="om-sa-model-reasoning">
-                      <span className="om-sa-popover-label">{t('Reasoning effort')}</span>
-                      <div className="om-sa-popover-pills" role="group" aria-label={t('Reasoning effort')}>
-                        {(['default', ...reasoningEfforts] as const).map(level => {
-                          const activeLevel = (reasoningEfforts.includes(selection.reasoning) ? selection.reasoning : 'default') === level;
-                          return (
-                            <Button
-                              key={level}
-                              variant="plain"
-                              type="button"
-                              className="om-sa-popover-pill"
-                              aria-pressed={activeLevel}
-                              data-active={activeLevel || undefined}
-                              onClick={() => onChangeSelection({ ...selection, reasoning: level })}
-                            >
-                              {t(level === 'default' ? 'Default' : level)}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="om-sa-model-menu-foot">
-                    <Button
-                      variant="plain"
-                      type="button"
-                      className="om-sa-popover-link-row"
-                      onClick={() => {
-                        setModelMenuOpen(false);
-                        (onOpenRuntimeSettings ?? onOpenAgentSettings)();
-                      }}
-                    >
-                      <RemixIcon name="computer-line" size={15} />
-                      <span>{t('Connected Computers')}</span>
-                      <RemixIcon name="arrow-right-up-line" size={14} />
-                    </Button>
-                    <Button
-                      variant="plain"
-                      type="button"
-                      className="om-sa-popover-link-row"
-                      onClick={() => {
-                        setModelMenuOpen(false);
-                        onOpenAgentSettings();
-                      }}
-                    >
-                      <RemixIcon name="robot-line" size={15} />
-                      <span>{t('Manage Local Agents')}</span>
-                      <RemixIcon name="arrow-right-up-line" size={14} />
-                    </Button>
-                  </div>
-                </div>
-              </Popover>
+                disabled={busy || sending}
+                selection={selection}
+                activeAgent={activeAgent}
+                activeRuntime={activeRuntime}
+                runtimes={runtimes}
+                runtimeOnline={runtimeOnline}
+                engineChoices={engineChoices}
+                browsingEngine={browsingEngine}
+                inspectingEngine={inspectingEngine}
+                onBrowseEngine={setBrowsingEngine}
+                onChangeSelection={onChangeSelection}
+                onOpenRuntimeSettings={onOpenRuntimeSettings}
+                onOpenAgentSettings={onOpenAgentSettings}
+              />
             </div>
 
             <div className="om-sa-composer-send">
@@ -2000,7 +2328,7 @@ export function ConversationStream({
                   <IconButton
                     variant="plain"
                     className="om-sa-composer-icon-btn om-sa-settings-trigger"
-                    data-active={(permissionMode === 'auto' || followUpBehavior === 'queue') || undefined}
+                    data-active={permissionMode === 'auto' || undefined}
                     aria-label={t('Agent settings')}
                     disabled={sending || hasPendingApproval}
                     icon={<RemixIcon name="shield-check-line" size={17} />}
@@ -2035,35 +2363,6 @@ export function ConversationStream({
                       </Button>
                     </div>
                   </div>
-                  {onChangeFollowUpBehavior && (
-                    <div className="om-sa-popover-field">
-                      <span className="om-sa-popover-label">{t('Follow-up behavior')}</span>
-                      <div className="om-sa-popover-segment" role="group" aria-label={t('Follow-up behavior')}>
-                        <Button
-                          variant="plain"
-                          type="button"
-                          className="om-sa-popover-seg-btn"
-                          aria-pressed={followUpBehavior === 'steer'}
-                          data-active={followUpBehavior === 'steer' || undefined}
-                          onClick={() => onChangeFollowUpBehavior('steer')}
-                        >
-                          <RemixIcon name="arrow-go-forward-line" size={14} />
-                          <span>{t('Steer current run')}</span>
-                        </Button>
-                        <Button
-                          variant="plain"
-                          type="button"
-                          className="om-sa-popover-seg-btn"
-                          aria-pressed={followUpBehavior === 'queue'}
-                          data-active={followUpBehavior === 'queue' || undefined}
-                          onClick={() => onChangeFollowUpBehavior('queue')}
-                        >
-                          <RemixIcon name="stack-line" size={14} />
-                          <span>{t('Queue after current run')}</span>
-                        </Button>
-                      </div>
-                    </div>
-                  )}
                   <div className="om-sa-popover-links">
                     <Button
                       variant="plain"
@@ -2098,21 +2397,6 @@ export function ConversationStream({
                   </div>
                 </div>
               </Popover>
-
-              {isRunning && !editingQueuedId && onChangeFollowUpBehavior && (
-                <Button
-                  variant="plain"
-                  type="button"
-                  className="om-sa-followup-pill"
-                  data-mode={followUpBehavior}
-                  aria-label={t('Follow-up behavior')}
-                  disabled={sending}
-                  onClick={() => onChangeFollowUpBehavior(followUpBehavior === 'steer' ? 'queue' : 'steer')}
-                >
-                  <RemixIcon name={followUpBehavior === 'steer' ? 'arrow-go-forward-line' : 'stack-line'} size={13} />
-                  <span>{t(followUpBehavior === 'steer' ? 'Steer' : 'Queue')}</span>
-                </Button>
-              )}
 
               {busy && (
                 <IconButton

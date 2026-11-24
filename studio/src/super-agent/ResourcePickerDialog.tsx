@@ -1,15 +1,19 @@
 import { Button } from 'open-design-ui/button';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { findDesignScenario } from '../../../shared/design-project';
-import type { SuperAgentResourceAttachment, SuperAgentResourceCatalog, SuperAgentResourceKind } from '../../../shared/super-agent';
+import {
+  formatAttachmentBytes,
+  resourceAttachmentKey,
+  type SuperAgentResourceAttachment,
+  type SuperAgentResourceCatalog,
+  type SuperAgentResourceKind,
+} from '../../../shared/super-agent';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useI18n } from '../i18n/I18n';
 import type { Translate } from '../i18n/manifest';
 import { RemixIcon } from '../icons/RemixIcons';
 import { genreLabels } from '../motion/game/gameCatalog';
-import { uploadLibraryAsset } from '../motion/assetClient';
-import { assetMediaUrl, assetVersion } from '../../../shared/asset-library';
-import { fetchWorkspaceResources } from './superAgentClient';
+import { fetchWorkspaceResources, uploadSuperAgentFile } from './superAgentClient';
 
 export type ResourceCategoryTab =
   | 'all'
@@ -35,15 +39,89 @@ const CATEGORY_TABS: { id: ResourceCategoryTab; label: string; icon: string }[] 
 ];
 
 export function resourceKey(item: Pick<SuperAgentResourceAttachment, 'kind' | 'id' | 'versionId'>): string {
-  return `${item.kind}:${item.id}:${item.versionId ?? ''}`;
+  return resourceAttachmentKey(item);
 }
 
-export function resourceIcon(item: Pick<SuperAgentResourceAttachment, 'kind' | 'modality' | 'annotation'>): string {
+export function fileAttachmentIcon(filePath?: string, mimeType?: string): string {
+  const lower = (filePath || '').toLowerCase();
+  if (/\.mdx?$/.test(lower)) return 'markdown-line';
+  if (/\.json$/.test(lower)) return 'braces-line';
+  if (/\.(?:ts|tsx|js|jsx|mjs|cjs|html?|css|scss|py|go|rs|sh|ya?ml|xml)$/.test(lower)) return 'file-code-line';
+  if ((mimeType || '').startsWith('image/') || /\.(?:png|jpe?g|webp|gif|avif|svg)$/.test(lower)) return 'file-image-line';
+  if (/\.(?:txt|csv|log|pdf)$/.test(lower) || (mimeType || '').startsWith('text/')) return 'file-text-line';
+  return 'file-line';
+}
+
+const NON_IMAGE_URL_RE = /\.(?:x?html?|htm)(?:$|[?#])/i;
+
+export function resourceImagePreviewUrl(
+  item: Pick<SuperAgentResourceAttachment, 'kind' | 'modality' | 'mimeType' | 'previewUrl' | 'swatches'>,
+): string | null {
+  const raw = item.previewUrl?.trim();
+  if (!raw || NON_IMAGE_URL_RE.test(raw) || /^data:text\/html\b/i.test(raw)) {
+    return null;
+  }
+  switch (item.kind) {
+    case 'motion-template':
+    case 'game-project':
+    case 'browser-annotation':
+      return raw;
+    case 'asset':
+      return item.modality === 'image' ? raw : null;
+    case 'file':
+      return item.mimeType?.startsWith('image/') ? raw : null;
+    case 'brand-kit':
+      return item.swatches?.length ? null : raw;
+    default:
+      return null;
+  }
+}
+
+export function ResourceThumbImage({
+  src,
+  className,
+  fallback,
+}: {
+  src: string | null | undefined;
+  className?: string;
+  fallback: ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
+    return <>{fallback}</>;
+  }
+
+  return (
+    <img
+      className={className}
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+export function resourceIcon(
+  item: Pick<SuperAgentResourceAttachment, 'kind' | 'modality' | 'annotation' | 'filePath' | 'mimeType' | 'title' | 'scenario'>,
+): string {
   if (item.kind === 'browser-annotation') {
     if (item.annotation?.mode === 'screenshot') return 'camera-line';
     if (item.annotation?.mode === 'console') return 'terminal-box-fill';
+    if (item.annotation?.mode === 'motion-selection') return 'movie-line';
+    if (item.annotation?.mode === 'design-comment') return 'chat-1-line';
+    if (item.annotation?.mode === 'code-selection') return 'code-s-slash-line';
     return 'focus-3-line';
   }
+  if (item.kind === 'file') return fileAttachmentIcon(item.filePath || item.title, item.mimeType);
+  if (item.kind === 'folder') return 'folder-line';
+  if (item.kind === 'chat') return 'chat-1-line';
   if (item.kind === 'asset' || item.kind === 'model') {
     if (item.modality === 'video') return 'movie-line';
     if (item.modality === 'audio') return 'music-2-line';
@@ -51,7 +129,9 @@ export function resourceIcon(item: Pick<SuperAgentResourceAttachment, 'kind' | '
   }
   if (item.kind === 'brand-kit') return 'palette-line';
   if (item.kind === 'motion-template') return 'film-line';
-  if (item.kind === 'design-template') return 'layout-line';
+  if (item.kind === 'design-template' || item.kind === 'design-project') {
+    return findDesignScenario(item.scenario)?.icon ?? (item.kind === 'design-template' ? 'layout-line' : 'code-s-slash-line');
+  }
   if (item.kind === 'skill' || item.kind === 'design-skill') return 'sparkling-line';
   if (item.kind === 'motion-project') return 'clapperboard-line';
   if (item.kind === 'game-project') return 'gamepad-line';
@@ -62,6 +142,9 @@ export function resourceIcon(item: Pick<SuperAgentResourceAttachment, 'kind' | '
 export function resourceKindLabel(kind: SuperAgentResourceKind): string {
   switch (kind) {
     case 'asset': return 'Asset';
+    case 'file': return 'File';
+    case 'folder': return 'Folder';
+    case 'chat': return 'Conversation';
     case 'brand-kit': return 'Brand Kit';
     case 'motion-template': return 'Motion template';
     case 'design-template': return 'Design template';
@@ -81,7 +164,13 @@ export function resourceDisplayTitle({ kind, title }: SuperAgentResourceAttachme
   return kind === 'skill' || kind === 'design-skill' || kind === 'workflow' ? t(title) : title;
 }
 
-export function resourceDisplaySubtitle({ kind, subtitle, scenario, modality }: SuperAgentResourceAttachment, t: Translate): string | undefined {
+export function resourceDisplaySubtitle({ kind, subtitle, scenario, modality, sizeBytes }: SuperAgentResourceAttachment, t: Translate): string | undefined {
+  if (kind === 'file') {
+    const size = formatAttachmentBytes(sizeBytes);
+    const cleanSub = subtitle === 'Uploaded file' ? t('Uploaded file') : subtitle;
+    return [cleanSub, size].filter(Boolean).join(' · ') || undefined;
+  }
+  if (kind === 'folder' || kind === 'chat') return subtitle ? t(subtitle) : undefined;
   if (!subtitle) return undefined;
   if (kind === 'model' || kind === 'browser-annotation') return subtitle;
   if (kind === 'asset') {
@@ -166,17 +255,7 @@ export function ResourcePickerPanel({
     try {
       const added: SuperAgentResourceAttachment[] = [];
       for (const file of Array.from(files)) {
-        const asset = await uploadLibraryAsset(file);
-        const current = assetVersion(asset);
-        added.push({
-          id: asset.id,
-          kind: 'asset',
-          title: asset.name,
-          subtitle: current?.model || current?.source || asset.modality,
-          modality: asset.modality,
-          versionId: asset.currentVersionId,
-          previewUrl: assetMediaUrl(asset.id, asset.currentVersionId),
-        });
+        added.push(await uploadSuperAgentFile(file));
       }
       onAddItems(added);
       setRetryToken(value => value + 1);
@@ -262,7 +341,16 @@ export function ResourcePickerPanel({
           catalog.items.map(item => {
             const isSelected = selectedKeys.has(resourceKey(item));
             const subtitle = resourceDisplaySubtitle(item, t);
-            const showThumb = item.previewUrl && (item.kind === 'motion-template' || item.kind === 'brand-kit' || (item.kind === 'asset' && item.modality === 'image'));
+            const thumbUrl = resourceImagePreviewUrl(item);
+            const fallbackThumb = item.swatches?.length ? (
+              <div className="om-sa-resource-swatches">
+                {item.swatches.slice(0, 4).map((swatch, idx) => (
+                  <span key={idx} style={{ background: swatch }} />
+                ))}
+              </div>
+            ) : (
+              <RemixIcon name={resourceIcon(item)} size={15} />
+            );
             return (
               <Button
                 key={resourceKey(item)}
@@ -274,17 +362,7 @@ export function ResourcePickerPanel({
                 onClick={() => onToggle(item)}
               >
                 <div className="om-sa-resource-thumb" aria-hidden="true">
-                  {showThumb ? (
-                    <img src={item.previewUrl} alt="" loading="lazy" decoding="async" />
-                  ) : item.swatches?.length ? (
-                    <div className="om-sa-resource-swatches">
-                      {item.swatches.slice(0, 4).map((swatch, idx) => (
-                        <span key={idx} style={{ background: swatch }} />
-                      ))}
-                    </div>
-                  ) : (
-                    <RemixIcon name={resourceIcon(item)} size={15} />
-                  )}
+                  <ResourceThumbImage src={thumbUrl} fallback={fallbackThumb} />
                 </div>
                 <div className="om-sa-resource-meta">
                   <strong>{resourceDisplayTitle(item, t)}</strong>

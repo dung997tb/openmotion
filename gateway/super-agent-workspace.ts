@@ -1,7 +1,7 @@
 /** Per-task project directory resolution and turn-level filesystem checkpoint diffing for Super Agent. */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -12,6 +12,7 @@ import {
   type SuperAgentFileOperation,
   type SuperAgentMessage,
   type SuperAgentProjectKind,
+  type SuperAgentResourceAttachment,
 } from '../shared/super-agent.ts';
 
 const execFileAsync = promisify(execFile);
@@ -709,4 +710,363 @@ export async function hydrateLegacyTurnChangedFiles(
   const merged = mergeTurnChangedFiles(snapshotFiles, lastTurnToolFiles);
   if (!merged.length) return undefined;
   return { [targetTurnId]: merged };
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.txt': 'text/plain',
+  '.log': 'text/plain',
+  '.json': 'application/json',
+  '.jsonl': 'application/x-ndjson',
+  '.csv': 'text/csv',
+  '.ts': 'text/typescript',
+  '.tsx': 'text/tsx',
+  '.js': 'text/javascript',
+  '.jsx': 'text/jsx',
+  '.mjs': 'text/javascript',
+  '.cjs': 'text/javascript',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.scss': 'text/x-scss',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.avif': 'image/avif',
+  '.pdf': 'application/pdf',
+  '.yaml': 'text/yaml',
+  '.yml': 'text/yaml',
+  '.xml': 'application/xml',
+  '.py': 'text/x-python',
+  '.sh': 'text/x-shellscript',
+  '.zip': 'application/zip',
+};
+
+export function inferAttachmentMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_BY_EXT[ext] ?? (isBinaryFilePath(filePath) ? 'application/octet-stream' : 'text/plain');
+}
+
+export async function resolveBrowsableRoots(
+  storeDir: string,
+  chat: Pick<SuperAgentChat, 'id' | 'workingDir' | 'artifacts'> | null,
+  workingDir?: string,
+  fallbackRepoDir?: string,
+): Promise<TaskProjectRoot[]> {
+  const roots: TaskProjectRoot[] = [];
+  const seenDirs = new Set<string>();
+
+  const pushRoot = async (candidate: TaskProjectRoot) => {
+    const resolved = path.resolve(candidate.dir);
+    if (seenDirs.has(resolved)) return;
+    const st = await lstat(resolved).catch(() => null);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) return;
+    seenDirs.add(resolved);
+    roots.push({ ...candidate, dir: resolved });
+  };
+
+  if (workingDir && workingDir.trim()) {
+    const dir = workingDir.trim();
+    await pushRoot({
+      key: `custom:${dir}`,
+      kind: 'custom',
+      dir,
+      label: path.basename(dir) || 'workspace',
+    });
+  }
+
+  if (chat) {
+    for (const r of collectTaskProjectRoots(storeDir, chat)) {
+      await pushRoot(r);
+    }
+  }
+
+  if (fallbackRepoDir && fallbackRepoDir.trim()) {
+    const resolvedFallback = path.resolve(fallbackRepoDir.trim());
+    if (!seenDirs.has(resolvedFallback)) {
+      const label = path.basename(resolvedFallback) || 'workspace';
+      await pushRoot({
+        key: `custom:${resolvedFallback}`,
+        kind: 'custom',
+        dir: resolvedFallback,
+        label,
+      });
+    }
+  }
+
+  return roots;
+}
+
+export async function listTaskWorkspaceEntries(
+  roots: TaskProjectRoot[],
+  options: { query?: string; limit?: number } = {},
+): Promise<SuperAgentResourceAttachment[]> {
+  const query = typeof options.query === 'string' ? options.query.trim().toLowerCase() : '';
+  const terms = query ? query.split(/\s+/).filter(Boolean) : [];
+  const limit = Number.isFinite(Number(options.limit))
+    ? Math.max(1, Math.min(200, Math.floor(Number(options.limit))))
+    : 80;
+  const multipleRoots = roots.length > 1;
+  const maxScanEntries = 2000;
+
+  type Candidate = {
+    item: SuperAgentResourceAttachment;
+    score: number;
+  };
+  const candidates: Candidate[] = [];
+
+  for (const root of roots) {
+    if (candidates.length >= maxScanEntries) break;
+    const queue: { relPrefix: string; depth: number }[] = [{ relPrefix: '', depth: 0 }];
+    let scannedInRoot = 0;
+
+    while (queue.length > 0 && scannedInRoot < maxScanEntries && candidates.length < maxScanEntries) {
+      const next = queue.shift()!;
+      const absDir = next.relPrefix ? path.join(root.dir, ...next.relPrefix.split('/')) : root.dir;
+      const entries = await readdir(absDir, { withFileTypes: true }).catch(() => null);
+      if (!entries) continue;
+
+      entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (scannedInRoot >= maxScanEntries) break;
+        if (entry.isSymbolicLink()) continue;
+        const isDir = entry.isDirectory();
+        const relPath = next.relPrefix ? `${next.relPrefix}/${entry.name}` : entry.name;
+        if (shouldIgnoreEntry(root.kind, relPath, entry.name, isDir)) continue;
+        scannedInRoot += 1;
+
+        const parentDir = path.posix.dirname(relPath);
+        const subtitleParts: string[] = [];
+        if (multipleRoots) subtitleParts.push(root.label);
+        if (parentDir && parentDir !== '.') subtitleParts.push(parentDir);
+
+        const hay =
+          multipleRoots || root.kind !== 'custom'
+            ? `${entry.name} ${relPath} ${root.label}`.toLowerCase()
+            : `${entry.name} ${relPath}`.toLowerCase();
+        const matches = terms.length === 0 || terms.every(term => hay.includes(term));
+        const lowerTitle = entry.name.toLowerCase();
+        const rootBoost = multipleRoots && root.kind !== 'custom' ? -0.5 : 0;
+
+        if (isDir) {
+          if (next.depth < 6) {
+            queue.push({ relPrefix: relPath, depth: next.depth + 1 });
+          }
+          if (matches) {
+            const score = terms.length === 0
+              ? 40
+              : lowerTitle === query
+                ? 0.8 + next.depth * 0.25
+                : lowerTitle.startsWith(query)
+                  ? 2.2 + next.depth * 0.2
+                  : lowerTitle.includes(terms[0])
+                    ? 3 + next.depth * 0.2
+                    : 5 + next.depth * 0.2;
+            candidates.push({
+              score: score + rootBoost,
+              item: {
+                id: `${root.key}:${relPath}`,
+                kind: 'folder',
+                title: entry.name,
+                subtitle: subtitleParts.join('/') || relPath,
+                filePath: relPath,
+                rootKey: root.key,
+                ...(root.artifactId ? { artifactId: root.artifactId } : {}),
+              },
+            });
+          }
+          continue;
+        }
+
+        if (!entry.isFile() || !matches) continue;
+        const absFile = path.join(root.dir, ...relPath.split('/'));
+        const st = await stat(absFile).catch(() => null);
+        const dotIdx = lowerTitle.lastIndexOf('.');
+        const stem = dotIdx > 0 ? lowerTitle.slice(0, dotIdx) : lowerTitle;
+        const score = terms.length === 0
+          ? (next.depth === 0 ? 10 : 20 + next.depth)
+          : lowerTitle === query || stem === query
+            ? 0 + next.depth * 0.15
+            : lowerTitle.startsWith(query)
+              ? 1 + next.depth * 0.15
+              : lowerTitle.includes(terms[0])
+                ? 2 + next.depth * 0.15
+                : 4 + next.depth * 0.1;
+        candidates.push({
+          score: score + rootBoost,
+          item: {
+            id: `${root.key}:${relPath}`,
+            kind: 'file',
+            title: entry.name,
+            subtitle: subtitleParts.join(' · ') || relPath,
+            filePath: relPath,
+            rootKey: root.key,
+            ...(root.artifactId ? { artifactId: root.artifactId } : {}),
+            ...(st ? { sizeBytes: st.size } : {}),
+            mimeType: inferAttachmentMimeType(relPath),
+          },
+        });
+      }
+    }
+  }
+
+  candidates.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    const depthA = (a.item.filePath ?? '').split('/').length;
+    const depthB = (b.item.filePath ?? '').split('/').length;
+    if (depthA !== depthB) return depthA - depthB;
+    return a.item.title.localeCompare(b.item.title);
+  });
+
+  return candidates.slice(0, limit).map(c => c.item);
+}
+
+async function readResolvedWorkspaceFile(
+  rootKey: string,
+  relPath: string,
+  targetReal: string,
+): Promise<{
+  rootKey: string;
+  path: string;
+  binary: boolean;
+  sizeBytes: number;
+  mimeType: string;
+  content?: string;
+  rawBuffer?: Buffer;
+}> {
+  const st = await lstat(targetReal).catch(() => null);
+  if (!st || !st.isFile()) {
+    throw new Error('FILE_NOT_FOUND');
+  }
+
+  const mimeType = inferAttachmentMimeType(relPath);
+  const maxRawBytes = 15 * 1024 * 1024;
+  if (st.size > maxRawBytes) {
+    return {
+      rootKey,
+      path: relPath,
+      binary: true,
+      sizeBytes: st.size,
+      mimeType,
+    };
+  }
+
+  const buf = await readFile(targetReal);
+  const sample = buf.subarray(0, 4096);
+  const binary = isBinaryFilePath(relPath) || sample.includes(0);
+  if (binary) {
+    return {
+      rootKey,
+      path: relPath,
+      binary: true,
+      sizeBytes: st.size,
+      mimeType,
+      rawBuffer: buf,
+    };
+  }
+
+  const text = buf.subarray(0, MAX_TEXT_READ_BYTES).toString('utf8');
+  return {
+    rootKey,
+    path: relPath,
+    binary: false,
+    sizeBytes: st.size,
+    mimeType,
+    content: text,
+    rawBuffer: buf,
+  };
+}
+
+function isWithinRootLexical(rootDir: string, candidateAbs: string): boolean {
+  const relative = path.relative(path.resolve(rootDir), path.resolve(candidateAbs));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+export async function readTaskWorkspaceFile(
+  roots: TaskProjectRoot[],
+  rootKey: string,
+  rawRelPath: string,
+): Promise<{
+  rootKey: string;
+  path: string;
+  binary: boolean;
+  sizeBytes: number;
+  mimeType: string;
+  content?: string;
+  rawBuffer?: Buffer;
+}> {
+  const trimmedRaw = typeof rawRelPath === 'string' ? rawRelPath.trim() : '';
+  if (!trimmedRaw || trimmedRaw.includes('\0')) {
+    throw new Error('INVALID_FILE_PATH');
+  }
+  const explicitRootKey = typeof rootKey === 'string' ? rootKey.trim() : '';
+  if (explicitRootKey) {
+    const relPath = normalizeRelPath(trimmedRaw);
+    if (!relPath || relPath.split('/').some(seg => seg === '..')) {
+      throw new Error('INVALID_FILE_PATH');
+    }
+    const root = roots.find(item => item.key === explicitRootKey) ?? (roots.length === 1 ? roots[0] : undefined);
+    if (!root) {
+      throw new Error('FILE_ROOT_NOT_FOUND');
+    }
+
+    const rootReal = await realpath(root.dir).catch(() => null);
+    if (!rootReal) throw new Error('FILE_ROOT_NOT_FOUND');
+
+    const absTarget = path.join(rootReal, ...relPath.split('/'));
+    const targetReal = await realpath(absTarget).catch(() => null);
+    if (!targetReal) throw new Error('FILE_NOT_FOUND');
+
+    const relative = path.relative(rootReal, targetReal);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('INVALID_FILE_PATH');
+    }
+    return readResolvedWorkspaceFile(root.key, relPath, targetReal);
+  }
+
+  if (roots.length === 0) {
+    throw new Error('FILE_ROOT_NOT_FOUND');
+  }
+
+  if (path.isAbsolute(trimmedRaw)) {
+    if (trimmedRaw.replace(/\\/g, '/').split('/').some(seg => seg === '..')) {
+      throw new Error('INVALID_FILE_PATH');
+    }
+    const targetReal = await realpath(trimmedRaw).catch(() => null);
+    if (!targetReal) {
+      const lexicallyAllowed = roots.some(root => isWithinRootLexical(root.dir, trimmedRaw));
+      throw new Error(lexicallyAllowed ? 'FILE_NOT_FOUND' : 'INVALID_FILE_PATH');
+    }
+    for (const root of roots) {
+      const rootReal = await realpath(root.dir).catch(() => null);
+      if (!rootReal) continue;
+      const relative = path.relative(rootReal, targetReal);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      return readResolvedWorkspaceFile(root.key, normalizeRelPath(relative), targetReal);
+    }
+    throw new Error('INVALID_FILE_PATH');
+  }
+
+  const relPath = normalizeRelPath(trimmedRaw);
+  if (!relPath || relPath.split('/').some(seg => seg === '..')) {
+    throw new Error('INVALID_FILE_PATH');
+  }
+  for (const root of roots) {
+    const rootReal = await realpath(root.dir).catch(() => null);
+    if (!rootReal) continue;
+    const absTarget = path.join(rootReal, ...relPath.split('/'));
+    const targetReal = await realpath(absTarget).catch(() => null);
+    if (!targetReal) continue;
+    const relative = path.relative(rootReal, targetReal);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    const st = await lstat(targetReal).catch(() => null);
+    if (st?.isFile()) {
+      return readResolvedWorkspaceFile(root.key, relPath, targetReal);
+    }
+  }
+  throw new Error('FILE_NOT_FOUND');
 }

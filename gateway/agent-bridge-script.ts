@@ -765,7 +765,7 @@ async function runMain() {
             const opts = { cwd: execCwd, approvalPolicy: 'on-request', sandbox: resolvedWorkingDir ? 'workspace-write' : 'read-only', developerInstructions: dispatch.instructions, ...(dispatch.model && dispatch.model !== 'default' ? { model: dispatch.model } : {}) };
             const thr = dispatch.threadId ? await rpc.request('thread/resume', { ...opts, threadId: dispatch.threadId }) : await rpc.request('thread/start', { ...opts, dynamicTools: dispatch.dynamicTools });
             if (thr?.thread?.id) await sendEvent(dispatch.runId, { type: 'thread.started', threadId: String(thr.thread.id) });
-            await rpc.request('turn/start', { threadId: thr.thread.id, effort: dispatch.reasoning && dispatch.reasoning !== 'default' ? dispatch.reasoning : null, input: [{ type: 'text', text: dispatch.prompt }] });
+            await rpc.request('turn/start', { threadId: thr.thread.id, ...(dispatch.model && dispatch.model !== 'default' ? { model: dispatch.model } : {}), effort: dispatch.reasoning && dispatch.reasoning !== 'default' ? dispatch.reasoning : null, input: [{ type: 'text', text: dispatch.prompt }] });
           })().catch(finish);
         });
         return;
@@ -790,6 +790,7 @@ async function runMain() {
           '--mcp-config', mcpConfigPath, '--strict-mcp-config', '--allowedTools', 'mcp__openmotion__*',
           '--append-system-prompt', dispatch.claudeInstructions || dispatch.instructions,
           ...(dispatch.model && dispatch.model !== 'default' ? ['--model', dispatch.model] : []),
+          ...(dispatch.reasoning && dispatch.reasoning !== 'default' ? ['--effort', dispatch.reasoning] : []),
           ...(dispatch.threadId ? ['--resume', dispatch.threadId] : []),
         ];
         let msgId = randomUUID();

@@ -6,6 +6,7 @@ import { designHttp, designProjectsFor } from '../design-projects.ts';
 import { gameHttp, gameProjectsFor } from '../game-projects.ts';
 import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from '../shared/preview-bridge.ts';
 import { Phase1Service } from '../phase1.ts';
+import { AssetLibrary } from '../gateway/asset-library.ts';
 import { pluginRoot } from '../hyperframes.ts';
 import {
   CLAUDE_SUPER_AGENT_INSTRUCTIONS,
@@ -19,6 +20,7 @@ import {
   captureWorkspaceSnapshot,
   collectTaskProjectRoots,
   diffWorkspaceSnapshots,
+  listTaskWorkspaceEntries,
   resolveTaskProjectDir,
 } from '../gateway/super-agent-workspace.ts';
 import { gameAssetInstructions } from '../shared/game-contract.ts';
@@ -2049,5 +2051,696 @@ test('SuperAgentConversations supports queue CRUD, sendQueuedMessageNow, auto-de
   assert.equal(stoppedState.state, 'cancelled');
   assert.equal(stoppedState.queuedMessages?.length, 1);
 
+  await service.close();
+}));
+
+test('SuperAgentConversations awaits closeAndWait() on steer and retries transient active-writer locks', () => fixture(async store => {
+  let instanceCount = 0;
+  let turn1Closed = false;
+  let resumeCalls = 0;
+  let resumeSawTurn1Closed = false;
+  let releaseTurn1Started!: () => void;
+  const turn1Started = new Promise<void>(resolve => { releaseTurn1Started = resolve; });
+
+  class SteerRaceCodexRpc {
+    private readonly instanceId: number;
+    private readonly onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.instanceId = ++instanceCount;
+      this.onNotification = onNotification;
+    }
+    async request(method: string, params?: any) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-steer-race' } };
+      if (method === 'thread/resume') {
+        resumeCalls += 1;
+        assert.equal(params?.threadId, 'thr-steer-race');
+        resumeSawTurn1Closed = turn1Closed;
+        if (resumeCalls <= 2) {
+          throw new Error('thread thr-steer-race already has an active writer');
+        }
+        return { thread: { id: 'thr-steer-race' } };
+      }
+      if (method === 'turn/start') {
+        if (this.instanceId === 1) {
+          releaseTurn1Started();
+          return { turn: { id: 'turn-race-1' } };
+        }
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'item/completed',
+            params: { item: { id: 'msg-race-2', type: 'agentMessage', text: 'Steered after lock release' } },
+          });
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-race-2', status: 'completed' } },
+          });
+        });
+        return { turn: { id: 'turn-race-2' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+    async closeAndWait() {
+      if (this.instanceId === 1) {
+        await new Promise(resolve => setTimeout(resolve, 60));
+        turn1Closed = true;
+      }
+    }
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: SteerRaceCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+
+  await service.start(chat.id, { requestId: 'req-race-1', text: 'Initial long turn' }, runtime);
+  await turn1Started;
+
+  await service.start(chat.id, { requestId: 'req-race-2', text: 'Immediate steer turn', followUpBehavior: 'steer' }, runtime);
+  const done = await service.waitForChat(chat.id);
+  for (let i = 0; i < 40 && done.state === 'running'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  const finalChat = await service.get(chat.id);
+  assert.equal(turn1Closed, true);
+  assert.equal(resumeSawTurn1Closed, true);
+  assert.equal(resumeCalls, 3);
+  assert.equal(finalChat.state, 'idle');
+  assert.equal(finalChat.error, undefined);
+  assert.ok(finalChat.messages.some(m => m.role === 'assistant' && m.text === 'Steered after lock release'));
+  await service.close();
+}));
+
+test('SuperAgentConversations ignores late errors or rejections from a stopped/steered turn', () => fixture(async store => {
+  let instanceCount = 0;
+  let releaseTurn1AtThreadStart!: () => void;
+  const turn1ReadyToSteer = new Promise<void>(resolve => { releaseTurn1AtThreadStart = resolve; });
+  let triggerTurn1LateRejection!: (err: Error) => void;
+  let turn1Callbacks: { onNotification: (msg: any) => void; onClose: (err: Error) => void } | null = null;
+
+  class LateErrorCodexRpc {
+    private readonly instanceId: number;
+    private readonly onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void, onClose: (err: Error) => void) {
+      this.instanceId = ++instanceCount;
+      this.onNotification = onNotification;
+      if (this.instanceId === 1) {
+        turn1Callbacks = { onNotification, onClose };
+      }
+    }
+    async request(method: string) {
+      if (method === 'initialize') return { capabilities: {} };
+      if (method === 'thread/start') return { thread: { id: 'thr-late-err' } };
+      if (method === 'thread/resume') return { thread: { id: 'thr-late-err' } };
+      if (method === 'turn/start') {
+        if (this.instanceId === 1) {
+          releaseTurn1AtThreadStart();
+          return new Promise((_, reject) => { triggerTurn1LateRejection = reject; });
+        }
+        setTimeout(() => {
+          turn1Callbacks?.onNotification({
+            method: 'error',
+            params: { willRetry: false, error: { message: 'late turn 1 protocol error' } },
+          });
+          turn1Callbacks?.onClose(new Error('late turn 1 close error'));
+          triggerTurn1LateRejection?.(new Error('late turn 1 turn/start rejection'));
+        }, 15);
+        setTimeout(() => {
+          this.onNotification({
+            method: 'item/completed',
+            params: { item: { id: 'msg-late-2', type: 'agentMessage', text: 'Turn 2 unaffected' } },
+          });
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-late-2', status: 'completed' } },
+          });
+        }, 55);
+        return { turn: { id: 'turn-late-2' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+    async closeAndWait() {}
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: LateErrorCodexRpc as unknown as typeof AssetAgentRpc,
+  });
+  const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+
+  await service.start(chat.id, { requestId: 'req-late-1', text: 'Turn 1' }, runtime);
+  await turn1ReadyToSteer;
+
+  await service.start(chat.id, { requestId: 'req-late-2', text: 'Turn 2 steer', followUpBehavior: 'steer' }, runtime);
+  const done = await service.waitForChat(chat.id);
+  assert.equal(done.state, 'idle');
+  assert.equal(done.error, undefined);
+  assert.ok(done.messages.some(m => m.role === 'assistant' && m.text === 'Turn 2 unaffected'));
+  await service.close();
+}));
+
+test('HTTP /motion-api/super-agent uploads, workspace files, file-content, and security guards', () => fixture(async store => {
+  const req = transport(store);
+
+  // 1. Upload general Markdown/UTF-8 file with CJK filename
+  const mdBody = '# Launch Plan\n\nUse primary tokens from the Brand Kit.\n';
+  const uploadRes = await req('/motion-api/super-agent/uploads', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/markdown',
+      'X-File-Name': encodeURIComponent('产品说明 brief.md'),
+    },
+    body: mdBody,
+  });
+  assert.equal(uploadRes.status, 200);
+  const uploadJson = await uploadRes.json() as { attachment: any };
+  assert.equal(uploadJson.attachment.kind, 'file');
+  assert.equal(uploadJson.attachment.rootKey, 'upload');
+  assert.equal(uploadJson.attachment.title, '产品说明 brief.md');
+  assert.equal(uploadJson.attachment.mimeType, 'text/markdown');
+  assert.equal(uploadJson.attachment.sizeBytes, Buffer.byteLength(mdBody));
+
+  // 2. Read upload metadata + text content via ?format=json and raw download
+  const uploadJsonRes = await req(`${uploadJson.attachment.previewUrl}?format=json`);
+  assert.equal(uploadJsonRes.status, 200);
+  const uploadMeta = await uploadJsonRes.json() as any;
+  assert.equal(uploadMeta.binary, false);
+  assert.equal(uploadMeta.content, mdBody);
+
+  const rawDownloadRes = await req(`${uploadJson.attachment.previewUrl}?download=1`);
+  assert.equal(rawDownloadRes.status, 200);
+  assert.match(rawDownloadRes.headers.get('content-disposition') ?? '', /attachment/i);
+  assert.equal(rawDownloadRes.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+  assert.equal(await rawDownloadRes.text(), mdBody);
+
+  const missingUploadRes = await req('/motion-api/super-agent/uploads/nonexistent-id');
+  assert.equal(missingUploadRes.status, 404);
+
+  // 3. Index and read files/folders under a custom workingDir
+  const workDir = path.join(store.directory, 'custom-repo');
+  await mkdir(path.join(workDir, 'docs'), { recursive: true });
+  await mkdir(path.join(workDir, 'src'), { recursive: true });
+  await writeFile(path.join(workDir, 'docs', 'guide.md'), '# Guide\nHello workspace\n');
+  await writeFile(path.join(workDir, 'src', 'index.ts'), 'export const version = 1;\n');
+
+  const filesRes = await req(`/motion-api/super-agent/files?workingDir=${encodeURIComponent(workDir)}&query=guide`);
+  assert.equal(filesRes.status, 200);
+  const filesJson = await filesRes.json() as { items: any[] };
+  const guideItem = filesJson.items.find(item => item.kind === 'file' && item.filePath === 'docs/guide.md');
+  assert.ok(guideItem, 'expected docs/guide.md in listed workspace entries');
+
+  const folderRes = await req(`/motion-api/super-agent/files?workingDir=${encodeURIComponent(workDir)}&query=docs`);
+  assert.equal(folderRes.status, 200);
+  const folderJson = await folderRes.json() as { items: any[] };
+  assert.ok(folderJson.items.some(item => item.kind === 'folder' && item.filePath === 'docs'));
+
+  const contentRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&rootKey=${encodeURIComponent(guideItem.rootKey)}&path=${encodeURIComponent(guideItem.filePath)}`,
+  );
+  assert.equal(contentRes.status, 200);
+  const contentJson = await contentRes.json() as any;
+  assert.equal(contentJson.content, '# Guide\nHello workspace\n');
+  assert.equal(contentJson.binary, false);
+
+  const rawContentRes = await req(contentJson.previewUrl);
+  assert.equal(rawContentRes.status, 200);
+  assert.equal(await rawContentRes.text(), '# Guide\nHello workspace\n');
+
+  const traversalRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&rootKey=${encodeURIComponent(guideItem.rootKey)}&path=${encodeURIComponent('../../etc/passwd')}`,
+  );
+  assert.equal(traversalRes.status, 400);
+
+  // Omitted rootKey resolves both relative and in-root absolute paths safely, while blocking external paths
+  const noRootRelRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent('docs/guide.md')}`,
+  );
+  assert.equal(noRootRelRes.status, 200);
+  const noRootRelJson = await noRootRelRes.json() as any;
+  assert.equal(noRootRelJson.content, '# Guide\nHello workspace\n');
+  const noRootRawRes = await req(noRootRelJson.previewUrl);
+  assert.equal(noRootRawRes.status, 200);
+  assert.equal(await noRootRawRes.text(), '# Guide\nHello workspace\n');
+
+  const noRootAbsRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent(path.join(workDir, 'docs', 'guide.md'))}`,
+  );
+  assert.equal(noRootAbsRes.status, 200);
+  const noRootAbsJson = await noRootAbsRes.json() as any;
+  assert.equal(noRootAbsJson.content, '# Guide\nHello workspace\n');
+
+  const outsideAbsRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent('/etc/passwd')}`,
+  );
+  assert.equal(outsideAbsRes.status, 400);
+  const noRootTraversalRes = await req(
+    `/motion-api/super-agent/file-content?workingDir=${encodeURIComponent(workDir)}&path=${encodeURIComponent('../../etc/passwd')}`,
+  );
+  assert.equal(noRootTraversalRes.status, 400);
+}));
+
+test('Referenced chats (<openmotion-referenced-conversations>), uploaded textExcerpt, and inline segments persistence', () => fixture(async store => {
+  let capturedPrompt = '';
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/claude',
+    runClaude: async ({ prompt, onEvent }) => {
+      capturedPrompt = prompt;
+      await onEvent({ type: 'result', subtype: 'success', result: 'Combined context applied.' });
+    },
+  });
+
+  // 1. Seed a prior conversation with history and an artifact
+  const sourceChat = await service.create({ engine: 'claude', title: 'Sunset Landing Thread', permissionMode: 'auto' });
+  await service.start(sourceChat.id, {
+    requestId: 'req-src-chat-1',
+    text: 'Create a sunset gradient hero section',
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => ({} as Phase1Service),
+  });
+  await service.waitForChat(sourceChat.id);
+  await service.update(sourceChat.id, {
+    addArtifact: {
+      id: 'design-sunset-1',
+      kind: 'design-project',
+      title: 'Sunset Hero',
+      projectId: '11111111-1111-4111-8111-111111111111',
+      scenario: 'prototype',
+    },
+  });
+
+  // 2. Upload an attachment so its textExcerpt also flows into <openmotion-workspace-context>
+  const uploaded = await service.saveUploadedFile('notes.md', Buffer.from('# Spec Notes\nKeep nav height 56px.\n'), 'text/markdown');
+
+  // 3. Reference the prior chat and uploaded file inline via segments + attachments
+  const targetChat = await service.create({ engine: 'claude', permissionMode: 'auto' });
+  const segments = [
+    { type: 'text' as const, text: 'Reuse tokens from ' },
+    { type: 'mention' as const, attachmentKey: `chat:${sourceChat.id}:`, label: 'Sunset Landing Thread', kind: 'chat' as const },
+    { type: 'text' as const, text: ' and follow ' },
+    { type: 'mention' as const, attachmentKey: `file:${uploaded.id}:`, label: 'notes.md', kind: 'file' as const },
+  ];
+
+  await service.start(targetChat.id, {
+    requestId: 'req-ref-chat-1',
+    text: 'Reuse tokens from @Sunset Landing Thread and follow @notes.md',
+    segments,
+    attachments: [
+      {
+        id: sourceChat.id,
+        chatId: sourceChat.id,
+        kind: 'chat',
+        title: 'Sunset Landing Thread',
+        subtitle: '2 messages',
+      },
+      uploaded,
+    ],
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => ({} as Phase1Service),
+  });
+  const doneTarget = await service.waitForChat(targetChat.id);
+
+  assert.match(capturedPrompt, /<openmotion-referenced-conversations>/);
+  assert.match(capturedPrompt, /Sunset Landing Thread/);
+  assert.match(capturedPrompt, /Create a sunset gradient hero section/);
+  assert.match(capturedPrompt, /Sunset Hero/);
+  assert.match(capturedPrompt, /Keep nav height 56px\./);
+
+  const userMsg = doneTarget.messages.find(m => m.role === 'user');
+  assert.equal(userMsg?.segments?.length, 4);
+  assert.equal(userMsg?.segments?.[1]?.type, 'mention');
+  if (userMsg?.segments?.[1]?.type === 'mention') {
+    assert.equal(userMsg.segments[1].kind, 'chat');
+  }
+
+  // 4. Verify queued message retains updated segments
+  const queued = await service.enqueueMessage(targetChat.id, {
+    requestId: 'req-q-seg',
+    text: 'Initial',
+    segments: [{ type: 'text', text: 'Initial' }],
+  });
+  const qId = queued.queuedMessages![0].id;
+  const updatedQ = await service.updateQueuedMessage(targetChat.id, qId, {
+    text: 'Check @notes.md',
+    segments: [
+      { type: 'text', text: 'Check ' },
+      { type: 'mention', attachmentKey: `file:${uploaded.id}:`, label: 'notes.md', kind: 'file' },
+    ],
+  });
+  assert.equal(updatedQ.queuedMessages?.[0]?.segments?.length, 2);
+
+  await service.close();
+}));
+
+test('SuperAgentConversations accepts asset-* present aliases, extracts multiple assets, and long-polls status', () => fixture(async store => {
+  const lib = new AssetLibrary(store);
+  const img1 = await lib.importFile(await (async () => {
+    const file = path.join(store.directory, 'out1.png');
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=32x24', '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  })(), { requestId: 'sa-out-1', name: 'Output 1' });
+  const img2 = await lib.importFile(await (async () => {
+    const file = path.join(store.directory, 'out2.png');
+    const res = await execute(
+      verificationBinaries().ffmpeg,
+      ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=green:s=32x24', '-frames:v', '1', '-y', file],
+      store.directory,
+      20_000,
+    );
+    assert.equal(res.code, 0, res.stderr);
+    return file;
+  })(), { requestId: 'sa-out-2', name: 'Output 2' });
+
+  let statusCalls = 0;
+  let presentedResponse: any;
+  let statusResponse: any;
+  const mockPhase1: any = {
+    call: async (name: string, args: any) => {
+      if (name === 'openmotion_assets_use' && args.action === 'status') {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return { job: { id: args.jobId, state: 'queued', modality: 'image' } };
+        }
+        return {
+          job: {
+            id: args.jobId,
+            state: 'completed',
+            modality: 'image',
+            libraryAssets: [
+              { assetId: img1.id, versionId: img1.currentVersionId },
+              { assetId: img2.id, versionId: img2.currentVersionId },
+            ],
+          },
+        };
+      }
+      return { ok: true };
+    },
+  };
+
+  class MediaRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-media-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 301,
+            method: 'item/tool/call',
+            params: {
+              callId: 'poll-1',
+              tool: 'openmotion_assets_use',
+              arguments: { action: 'status', jobId: 'job-multi-1' },
+            },
+          });
+        });
+        return { turn: { id: 'turn-media-1' } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      if (payload.id === 301) {
+        statusResponse = payload.result;
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 302,
+            method: 'item/tool/call',
+            params: {
+              callId: 'present-alias-1',
+              tool: 'openmotion_present_artifact',
+              arguments: { kind: 'asset-image', assetId: img1.id, versionId: img1.currentVersionId },
+            },
+          });
+        });
+      } else if (payload.id === 302) {
+        presentedResponse = payload.result;
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-media-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: MediaRpc as unknown as typeof AssetAgentRpc,
+    statusPollWaitMs: 3_000,
+  });
+
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+  await service.start(chat.id, { requestId: 'req-media-poll-1', text: 'Check media job' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => mockPhase1,
+  });
+  const done = await service.waitForChat(chat.id);
+  assert.equal(statusCalls, 2);
+  assert.equal(statusResponse?.success, true);
+  assert.equal(presentedResponse?.success, true);
+  assert.equal(done.artifacts.length, 2);
+  assert.ok(done.artifacts.some(a => a.assetId === img1.id && typeof a.presentedAt === 'number'));
+  assert.ok(done.artifacts.some(a => a.assetId === img2.id));
+  await service.close();
+}));
+
+test('listTaskWorkspaceEntries ignores custom root directory name in single-root searches and ranks stem matches first', () => fixture(async store => {
+  const customRootDir = path.join(store.directory, 'design_studio_modules_entry');
+  await mkdir(path.join(customRootDir, 'skills', 'demo', 'agents'), { recursive: true });
+  await writeFile(path.join(customRootDir, 'AGENTS.md'), '# Agents\n');
+  await writeFile(path.join(customRootDir, 'README.md'), '# Readme\n');
+  await writeFile(path.join(customRootDir, 'design-spec.md'), '# Design Spec\n');
+
+  const roots = [
+    {
+      key: `custom:${customRootDir}`,
+      kind: 'custom' as const,
+      dir: customRootDir,
+      label: 'design_studio_modules_entry',
+    },
+  ];
+
+  const agentMatches = await listTaskWorkspaceEntries(roots, { query: 'AGENTS' });
+  assert.ok(agentMatches.length >= 2);
+  assert.equal(agentMatches[0]?.filePath, 'AGENTS.md');
+  assert.equal(agentMatches[0]?.kind, 'file');
+
+  const designMatches = await listTaskWorkspaceEntries(roots, { query: 'design' });
+  assert.equal(designMatches.some(item => item.filePath === 'design-spec.md'), true);
+  assert.equal(designMatches.some(item => item.filePath === 'README.md'), false);
+}));
+
+test('formatBrowserAnnotationsContext serializes Motion, Design comment, and code selections clearly', () => {
+  const ctx = formatBrowserAnnotationsContext([
+    {
+      id: 'att-motion',
+      kind: 'browser-annotation',
+      title: 'Headline · 2.4s',
+      annotation: {
+        mode: 'motion-selection',
+        pageUrl: '/#project/mproj-1',
+        pageTitle: 'Product Reel',
+        artifactId: 'motion:mproj-1',
+        artifactKind: 'motion-project',
+        projectId: 'mproj-1',
+        compositionPath: 'scenes/intro.html',
+        filePath: 'scenes/intro.html',
+        timeSec: 2.4,
+        durationSec: 10,
+        fps: 30,
+        timeRange: { start: 1.5, end: 4.5 },
+        keyframeCount: 2,
+        timelineClips: [
+          {
+            id: 'clip-hero',
+            label: 'Hero Headline',
+            kind: 'text',
+            start: 1.5,
+            duration: 3.0,
+            track: 1,
+            sourceFile: 'scenes/intro.html',
+            selector: '#hero-title',
+          },
+        ],
+        selectedElements: [
+          {
+            label: 'Hero Headline',
+            tagName: 'h1',
+            selector: '#hero-title',
+            hfId: 'hf-1',
+            sourceFile: 'scenes/intro.html',
+            text: 'Launch Day',
+          },
+        ],
+        comment: 'Soften the blur entrance.',
+      },
+    },
+    {
+      id: 'att-design-comment',
+      kind: 'browser-annotation',
+      title: 'Slide #3 spacing',
+      annotation: {
+        mode: 'design-comment',
+        pageUrl: '/motion-api/design/raw/dproj-1/deck.html',
+        pageTitle: 'Launch Deck',
+        artifactKind: 'design-project',
+        projectId: 'dproj-1',
+        filePath: 'deck.html',
+        slideIndex: 2,
+        slideCount: 8,
+        commentId: 'cmt-42',
+        comment: 'Increase card gap',
+      },
+    },
+    {
+      id: 'att-code',
+      kind: 'browser-annotation',
+      title: 'index.html L12-L15',
+      annotation: {
+        mode: 'code-selection',
+        pageUrl: '/motion-api/design/raw/dproj-1/index.html',
+        artifactKind: 'design-project',
+        projectId: 'dproj-1',
+        filePath: 'index.html',
+        lineRange: { start: 12, end: 15 },
+        codeSnippet: '<section class="hero">\n  <h1>Hello</h1>\n</section>',
+      },
+    },
+  ]);
+
+  assert.ok(ctx.includes('"mode": "motion-selection"'));
+  assert.ok(ctx.includes('"projectId": "mproj-1"'));
+  assert.ok(ctx.includes('"compositionPath": "scenes/intro.html"'));
+  assert.ok(ctx.includes('"timeSec": 2.4'));
+  assert.ok(ctx.includes('"durationSec": 10'));
+  assert.ok(ctx.includes('"fps": 30'));
+  assert.ok(ctx.includes('"start": 1.5'));
+  assert.ok(ctx.includes('"end": 4.5'));
+  assert.ok(ctx.includes('"keyframeCount": 2'));
+  assert.ok(ctx.includes('"id": "clip-hero"'));
+  assert.ok(ctx.includes('"selector": "#hero-title"'));
+  assert.ok(ctx.includes('"mode": "design-comment"'));
+  assert.ok(ctx.includes('"slideIndex": 2'));
+  assert.ok(ctx.includes('"slideCount": 8'));
+  assert.ok(ctx.includes('"commentId": "cmt-42"'));
+  assert.ok(ctx.includes('"mode": "code-selection"'));
+  assert.ok(ctx.includes('"start": 12'));
+  assert.ok(ctx.includes('"end": 15'));
+  assert.ok(ctx.includes('<section class=\\"hero\\">'));
+});
+
+test('extractArtifactFromTool auto-presents created design and motion projects so embedded editor opens automatically', () => fixture(async store => {
+  const createdDesign = await designProjectsFor(store.directory).create({
+    scenario: 'prototype',
+    title: 'Interactive Brief',
+    requestId: 'req-auto-present-design',
+  });
+
+  class AutoPresentRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return {};
+      if (method === 'thread/start') return { thread: { id: 'thread-autopresent-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 401,
+            method: 'item/tool/call',
+            params: {
+              callId: 'call-design-create',
+              tool: 'openmotion_design_project',
+              arguments: { action: 'create', title: 'Interactive Brief', scenario: 'prototype' },
+            },
+          });
+        });
+        return { turn: { id: 'turn-autopresent-1' } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      if (payload.id === 401) {
+        queueMicrotask(() => {
+          this.onNotification({
+            id: 402,
+            method: 'item/tool/call',
+            params: {
+              callId: 'call-motion-create',
+              tool: 'openmotion_create_project',
+              arguments: { name: 'MotionOpener' },
+            },
+          });
+        });
+      } else if (payload.id === 402) {
+        queueMicrotask(() => {
+          this.onNotification({
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-autopresent-1', status: 'completed' } },
+          });
+        });
+      }
+    }
+    close() {}
+  }
+
+  const mockPhase1: any = {
+    call: async (name: string) => {
+      if (name === 'openmotion_design_project') {
+        return {
+          project: createdDesign,
+          editorUrl: `/design/projects/${createdDesign.id}`,
+          previewUrl: `/motion-api/design/raw/${createdDesign.id}/index.html`,
+        };
+      }
+      if (name === 'openmotion_create_project') {
+        return {
+          projectId: 'MotionOpener',
+          sessionId: 'sess-ap-1',
+          revision: 'rev-ap-1',
+          project: { title: 'MotionOpener' },
+        };
+      }
+      return { ok: true };
+    },
+  };
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: AutoPresentRpc as unknown as typeof AssetAgentRpc,
+  });
+
+  const chat = await service.create({ engine: 'codex', permissionMode: 'auto' });
+  await service.start(chat.id, { requestId: 'req-ap-1', text: 'Create design and motion' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => mockPhase1,
+  });
+  const done = await service.waitForChat(chat.id);
+  const designArt = done.artifacts.find(a => a.kind === 'design-project' && a.projectId === createdDesign.id);
+  const motionArt = done.artifacts.find(a => a.kind === 'motion-project' && a.projectId === 'MotionOpener');
+  assert.ok(designArt);
+  assert.equal(typeof designArt.presentedAt, 'number');
+  assert.ok(motionArt);
+  assert.equal(typeof motionArt.presentedAt, 'number');
   await service.close();
 }));

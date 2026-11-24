@@ -19,6 +19,7 @@ import { createAutomationHost } from './gateway/automation-host.ts';
 import { MCP_HTTP_PATH } from './shared/mcp-http.ts';
 import { superAgentConversations } from './gateway/super-agent.ts';
 import { collectWorkspaceResources } from './gateway/super-agent-resources.ts';
+import { listTaskWorkspaceEntries, readTaskWorkspaceFile, resolveBrowsableRoots } from './gateway/super-agent-workspace.ts';
 import { assetHttp } from './gateway/asset-http.ts';
 import { capabilityDiscover, capabilityRun, loadCapabilityCatalog, syncCapabilityRemoteConfig } from './gateway/capability-center.ts';
 import { getWorkflow } from './shared/workflow.ts';
@@ -269,6 +270,19 @@ async function input(req: IncomingMessage, maxBytes = 9 * 1024 * 1024) {
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString());
+}
+async function readRawBuffer(req: IncomingMessage, maxBytes = 50 * 1024 * 1024): Promise<Buffer> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > maxBytes) {
+      throw Object.assign(new Error('提交内容超过大小限制'), { status: 413 });
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
 }
 async function readRawBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string> {
   let size = 0;
@@ -808,6 +822,115 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
           limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined,
         }));
       }
+      if (url.pathname === '/api/super-agent/uploads' && req.method === 'POST') {
+        const rawHeaderName = String(req.headers['x-file-name'] ?? '').trim();
+        let fileName = rawHeaderName;
+        try {
+          fileName = decodeURIComponent(rawHeaderName);
+        } catch {
+          /* keep raw name */
+        }
+        if (!fileName || fileName.length > 260) {
+          return json(res, 400, { error: 'A valid X-File-Name header is required' });
+        }
+        const maxUploadBytes = 50 * 1024 * 1024;
+        if (Number(req.headers['content-length']) > maxUploadBytes) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Uploaded file exceeds 50 MB limit' }));
+          return;
+        }
+        try {
+          const buf = await readRawBuffer(req, maxUploadBytes);
+          const attachment = await superAgent.saveUploadedFile(
+            fileName,
+            buf,
+            typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : undefined,
+          );
+          return json(res, 200, { attachment });
+        } catch (err) {
+          const status = (err as { status?: number })?.status === 413 ? 413 : 400;
+          return json(res, status, { error: err instanceof Error ? err.message : 'Upload failed' });
+        }
+      }
+      const saUpload = url.pathname.match(/^\/api\/super-agent\/uploads\/([^/]+)$/);
+      if (saUpload && (req.method === 'GET' || req.method === 'HEAD')) {
+        const uploadId = decodeURIComponent(saUpload[1]);
+        const loaded = await superAgent.readUploadedFile(uploadId);
+        if (url.searchParams.get('format') === 'json') {
+          return json(res, 200, {
+            path: loaded.meta.name,
+            ...(loaded.content !== undefined ? { content: loaded.content } : {}),
+            binary: loaded.binary,
+            sizeBytes: loaded.meta.sizeBytes,
+            mimeType: loaded.meta.mimeType,
+            previewUrl: `/motion-api/super-agent/uploads/${encodeURIComponent(uploadId)}`,
+          });
+        }
+        res.writeHead(200, {
+          'Content-Type': loaded.meta.mimeType,
+          'Content-Length': loaded.buffer.length,
+          'Cache-Control': 'private, max-age=3600',
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; sandbox",
+          ...(url.searchParams.has('download') ? { 'Content-Disposition': attachmentDisposition(loaded.meta.name, loaded.meta.name) } : {}),
+        });
+        if (req.method === 'HEAD') res.end();
+        else res.end(loaded.buffer);
+        return;
+      }
+      if (url.pathname === '/api/super-agent/files' && req.method === 'GET') {
+        const chatId = url.searchParams.get('chatId')?.trim() || undefined;
+        const workingDir = url.searchParams.get('workingDir')?.trim() || undefined;
+        const query = url.searchParams.get('query') ?? undefined;
+        const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
+        const chat = chatId ? await superAgent.get(chatId).catch(() => null) : null;
+        const roots = await resolveBrowsableRoots(
+          (store.workspaceStore ?? store).directory,
+          chat,
+          workingDir,
+          process.cwd(),
+        );
+        return json(res, 200, {
+          items: await listTaskWorkspaceEntries(roots, { query, limit }),
+        });
+      }
+      if (url.pathname === '/api/super-agent/file-content' && req.method === 'GET') {
+        const chatId = url.searchParams.get('chatId')?.trim() || undefined;
+        const workingDir = url.searchParams.get('workingDir')?.trim() || undefined;
+        const rootKey = url.searchParams.get('rootKey')?.trim() || '';
+        const relPath = url.searchParams.get('path')?.trim() || '';
+        const chat = chatId ? await superAgent.get(chatId).catch(() => null) : null;
+        const roots = await resolveBrowsableRoots(
+          (store.workspaceStore ?? store).directory,
+          chat,
+          workingDir,
+          process.cwd(),
+        );
+        const fileData = await readTaskWorkspaceFile(roots, rootKey, relPath);
+        if (url.searchParams.get('raw') === '1' && fileData.rawBuffer) {
+          res.writeHead(200, {
+            'Content-Type': fileData.mimeType,
+            'Content-Length': fileData.rawBuffer.length,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+          });
+          res.end(fileData.rawBuffer);
+          return;
+        }
+        const resolvedRootKey = fileData.rootKey || rootKey;
+        const previewParams = new URLSearchParams({ rootKey: resolvedRootKey, path: fileData.path, raw: '1' });
+        if (chatId) previewParams.set('chatId', chatId);
+        if (workingDir) previewParams.set('workingDir', workingDir);
+        return json(res, 200, {
+          path: fileData.path,
+          ...(fileData.content !== undefined ? { content: fileData.content } : {}),
+          binary: fileData.binary,
+          sizeBytes: fileData.sizeBytes,
+          mimeType: fileData.mimeType,
+          previewUrl: `/motion-api/super-agent/file-content?${previewParams.toString()}`,
+        });
+      }
       if (url.pathname === '/api/super-agent/chats') {
         if (req.method === 'GET') return json(res, 200, { conversations: await superAgent.list() });
         if (req.method === 'POST') {
@@ -917,7 +1040,11 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         }
         return json(res, 405, { error: 'Unsupported Super Agent queue request' });
       }
-      const saChat = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)(?:\/(events|turn|stop|approve))?$/);
+      if (url.pathname === '/api/super-agent/feedback' && req.method === 'POST') {
+        const data = await input(req, 128 * 1024);
+        return json(res, 200, await superAgent.recordFeedback(data));
+      }
+      const saChat = url.pathname.match(/^\/api\/super-agent\/chats\/([^/]+)(?:\/(events|turn|stop|approve|compact|export))?$/);
       if (saChat) {
         const [, id, action] = saChat;
         if (!action) {
@@ -926,6 +1053,17 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
           if (req.method === 'DELETE') { await superAgent.remove(id); return json(res, 200, { deleted: true }); }
         }
         if (action === 'events' && req.method === 'GET') { await superAgent.subscribe(id, res); return; }
+        if (action === 'export' && req.method === 'GET') {
+          const exported = await superAgent.exportLogZip(id);
+          res.writeHead(200, {
+            'Content-Type': 'application/zip',
+            'Content-Length': exported.data.length,
+            'Content-Disposition': attachmentDisposition(exported.filename, exported.filename),
+            'Cache-Control': 'no-store',
+          });
+          res.end(exported.data);
+          return;
+        }
         if (req.method === 'POST') {
           const data = req.headers['content-type']?.includes('application/json') ? await input(req, 512 * 1024) : {};
           if (action === 'turn') {
@@ -939,6 +1077,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
           }
           if (action === 'stop') return json(res, 200, { conversation: await superAgent.stop(id) });
           if (action === 'approve') return json(res, 200, { conversation: await superAgent.answer(id, data.approvalId, data.accepted, Boolean(data.alwaysAllow)) });
+          if (action === 'compact') return json(res, 200, await superAgent.compact(id));
         }
       }
       return json(res, 405, { error: 'Unsupported Super Agent request' });
@@ -1103,6 +1242,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
       const gateway = gatewayFor(store, context.tracking);
       const agents = localAgentsFor(store.directory);
       if (url.pathname === '/api/settings/agents' && req.method === 'GET') return json(res, 200, await agents.list());
+      if (url.pathname === '/api/settings/agents/check' && req.method === 'POST') return json(res, 200, await agents.warmup());
       if (url.pathname === '/api/settings/default-agent' && req.method === 'PUT') { const body = await input(req); await agents.choose(body.choice); return json(res, 200, { ok: true }); }
       const agentAction = url.pathname.match(/^\/api\/settings\/agents\/([a-z0-9-]+)\/(inspect|models|prepare|open)$/);
       if (agentAction && req.method === 'POST') {
@@ -1388,11 +1528,15 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
     if (res.headersSent) res.destroy();
     else {
       const message = error instanceof Error ? error.message : '操作失败';
-      const status = message === 'CONVERSATION_NOT_FOUND'
-        ? 404
-        : message === 'REQUEST_ID_CONFLICT' || error instanceof Conflict || (error as any).code === 'NATIVE_RUNTIME_NOT_READY'
-          ? 409
-          : 400;
+      const status =
+        message === 'CONVERSATION_NOT_FOUND'
+        || message === 'UPLOAD_NOT_FOUND'
+        || message === 'FILE_NOT_FOUND'
+        || message === 'FILE_ROOT_NOT_FOUND'
+          ? 404
+          : message === 'REQUEST_ID_CONFLICT' || error instanceof Conflict || (error as any).code === 'NATIVE_RUNTIME_NOT_READY'
+            ? 409
+            : 400;
       json(res, status, { error: message, ...((error as any).code === 'NATIVE_RUNTIME_NOT_READY' ? { code: (error as any).code, applied: false, runtime: (error as any).details } : {}) });
     }
   }

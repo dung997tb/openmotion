@@ -28,17 +28,19 @@ import {
   styleCovers,
   styleLabels,
 } from '../motion/game/gameCatalog';
-import { providerReady } from '../motion/imageMenuModels';
+import { providerRank, providerReady } from '../motion/imageMenuModels';
 import { ModelAvatar } from '../motion/settingsPrimitives';
 import { useMediaCatalog } from '../motion/useMediaCatalog';
 import {
   buildMediaHiddenDirective,
   migrateModelParameters,
-  preferredAudioModelFilter,
-  preferredImageModelFilter,
+  preferredAudioModelFilters,
+  preferredImageModelFilters,
+  preferredVideoModelFilter,
   resolveEffectiveMediaModel,
   resolveSubmittedMediaParameters,
   resolveSuperAgentModelSchema,
+  type ModelFilter,
 } from './modelParams';
 import { ModelParameterPills, type ModelParamMenuKey } from './ModelParameterPills';
 import type { SuperAgentCreationModeId, SuperAgentModeSpec } from './ModeResourceShowcase';
@@ -59,6 +61,11 @@ export type WebCloneFidelity = 'faithful' | 'brand-remix' | 'responsive-refresh'
 export type LiveArtifactView = 'kpi' | 'charts' | 'table';
 export type WebglSceneType = 'particles' | 'product-3d' | 'shader' | 'hero';
 export type WebglInteractionType = 'pointer' | 'orbit' | 'scroll';
+export type ResearchDeliverableFormat = 'report' | 'decision-room' | 'deck' | 'memo';
+export type ResearchDepth = 'quick' | 'balanced' | 'deep';
+export type VisualizationType = 'dashboard' | 'chart' | 'infographic' | 'diagram' | 'webgl';
+export type VisualizationEngine = 'html-svg' | 'd3' | 'webgl';
+export type VisualizationStyle = 'editorial' | 'minimal' | 'dark-terminal' | 'bento';
 
 export type ModeComposerOptions = {
   // Design Studio (unified Image design + HTML Design)
@@ -75,6 +82,18 @@ export type ModeComposerOptions = {
   liveDataView: LiveArtifactView;
   webglScene: WebglSceneType;
   webglInteraction: WebglInteractionType;
+
+  // Research a topic
+  researchFormat: ResearchDeliverableFormat;
+  researchDepth: ResearchDepth;
+  researchVisuals: boolean;
+  researchCitations: boolean;
+
+  // Visualization
+  vizType: VisualizationType;
+  vizEngine: VisualizationEngine;
+  vizStyle: VisualizationStyle;
+  vizLiveData: boolean;
 
   // Image Artwork / Image design
   imageScene: ImageDesignScene;
@@ -156,6 +175,16 @@ export const DEFAULT_MODE_COMPOSER_OPTIONS: ModeComposerOptions = {
   liveDataView: 'kpi',
   webglScene: 'particles',
   webglInteraction: 'pointer',
+
+  researchFormat: 'report',
+  researchDepth: 'balanced',
+  researchVisuals: true,
+  researchCitations: true,
+
+  vizType: 'dashboard',
+  vizEngine: 'html-svg',
+  vizStyle: 'editorial',
+  vizLiveData: true,
 
   imageScene: 'text-to-image',
   imageStyle: 'auto',
@@ -345,6 +374,74 @@ const WEBGL_INTERACTION_LABELS: Record<WebglInteractionType, string> = {
   scroll: 'Scroll',
 };
 
+export const RESEARCH_FORMAT_CHOICES: readonly {
+  id: ResearchDeliverableFormat;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  { id: 'report', label: 'Visual Report', icon: 'file-text-line', description: 'Editorial analysis report with charts, KPIs, and sources' },
+  { id: 'decision-room', label: 'Decision Room', icon: 'layout-2-line', description: 'Interactive evidence ledger, confidence matrix, and tradeoffs' },
+  { id: 'deck', label: 'Research Deck', icon: 'slideshow-line', description: 'Presentation slides synthesizing key findings and narrative' },
+  { id: 'memo', label: 'Briefing Memo', icon: 'book-open-line', description: 'Crisp executive summary brief ready for PDF export' },
+];
+
+const RESEARCH_DEPTH_CHOICES: readonly {
+  id: ResearchDepth;
+  label: string;
+  description: string;
+}[] = [
+  { id: 'quick', label: 'Quick brief', description: 'Fast executive synthesis highlighting the key takeaways' },
+  { id: 'balanced', label: 'Balanced', description: 'Structured multi-source comparison with data tables' },
+  { id: 'deep', label: 'Deep dive', description: 'Thorough investigation with full evidence and citations' },
+];
+
+export const VIZ_TYPE_CHOICES: readonly {
+  id: VisualizationType;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  { id: 'dashboard', label: 'KPI Dashboard', icon: 'grid-line', description: 'Multi-metric cockpit backed by interactive data filters' },
+  { id: 'chart', label: 'Chart & Graph', icon: 'bar-chart-box-line', description: 'Custom interactive D3/SVG charts with tooltips and zoom' },
+  { id: 'infographic', label: 'Infographic', icon: 'layout-2-line', description: 'Editorial visual story combining callouts and graphics' },
+  { id: 'diagram', label: 'Diagram & Map', icon: 'route-line', description: 'Architecture flows, knowledge graphs, and visual maps' },
+  { id: 'webgl', label: '3D & WebGL', icon: 'sparkling-line', description: 'GPU-accelerated spatial scenes and particle fields' },
+];
+
+const VIZ_ENGINE_LABELS: Record<VisualizationEngine, string> = {
+  'html-svg': 'Interactive HTML & SVG',
+  d3: 'D3.js',
+  webgl: 'Canvas / WebGL',
+};
+
+const VIZ_STYLE_LABELS: Record<VisualizationStyle, string> = {
+  editorial: 'Editorial NYT',
+  minimal: 'Minimal Swiss',
+  'dark-terminal': 'Dark Terminal',
+  bento: 'Bento SaaS',
+};
+
+export function researchDesignScenario(format: ResearchDeliverableFormat): DesignScenarioId {
+  if (format === 'deck') return 'deck';
+  if (format === 'decision-room') return 'prototype';
+  return 'document';
+}
+
+export function visualizationDesignScenario(type: VisualizationType): DesignScenarioId {
+  if (type === 'webgl') return 'webgl';
+  if (type === 'dashboard' || type === 'chart') return 'live-artifact';
+  return 'prototype';
+}
+
+export function visualizationOptionsPatch(type: VisualizationType): Partial<ModeComposerOptions> {
+  return {
+    vizType: type,
+    vizEngine: type === 'webgl' ? 'webgl' : type === 'chart' ? 'd3' : 'html-svg',
+    vizLiveData: type === 'dashboard' || type === 'chart',
+  };
+}
+
 export const DESIGN_VIEWPORT_CHOICES: readonly {
   id: DesignViewportTarget;
   label: string;
@@ -397,8 +494,26 @@ export function designScenarioOptionsPatch(scenario: DesignScenarioId): Partial<
 
 export type MediaPromptExtra = {
   routes?: GatewayStatus['routes'];
+  providers?: GatewayStatus['providers'];
   hasInputImage?: boolean;
+  attachedImageReferences?: { assetId: string; versionId: string }[];
 };
+
+function resolveImageWireParameters(
+  imageScene: ImageDesignScene,
+  schemaFields: readonly { standardKey?: string; key: string }[],
+  submittedWire: Record<string, unknown>,
+): { hasNativeBackground: boolean; wireParameters: Record<string, unknown> } {
+  const hasNativeBackground = schemaFields.some(
+    field => field.standardKey === 'background' || field.key === 'background',
+  );
+  const wireParameters = imageScene === 'remove-background'
+    && hasNativeBackground
+    && submittedWire.background === undefined
+    ? { ...submittedWire, background: 'transparent' }
+    : submittedWire;
+  return { hasNativeBackground, wireParameters };
+}
 
 export function buildDesignHiddenDirective(
   options: ModeComposerOptions,
@@ -406,13 +521,14 @@ export function buildDesignHiddenDirective(
   extra?: MediaPromptExtra,
 ): string {
   if (options.designFormat === 'image') {
-    const imageFilter = preferredImageModelFilter(options.imageScene);
+    const imageFilter = preferredImageModelFilters(options.imageScene, Boolean(extra?.hasInputImage));
     const effectiveModel = resolveEffectiveMediaModel(
       mediaModels,
       extra?.routes,
       'image',
       options.imageModelId,
       imageFilter,
+      extra?.providers,
     );
     const submitted = resolveSubmittedMediaParameters(
       effectiveModel,
@@ -420,8 +536,10 @@ export function buildDesignHiddenDirective(
       'image',
       Boolean(extra?.hasInputImage),
     );
-    const hasNativeBackground = submitted.schema.fields.some(
-      field => field.standardKey === 'background' || field.key === 'background',
+    const { hasNativeBackground, wireParameters } = resolveImageWireParameters(
+      options.imageScene,
+      submitted.schema.fields,
+      submitted.wireParameters,
     );
     const artNotes: string[] = [];
     if (options.imageStyle !== 'auto') artNotes.push(`style=${IMAGE_STYLE_LABELS[options.imageStyle]}`);
@@ -433,8 +551,9 @@ export function buildDesignHiddenDirective(
       modality: 'image',
       effectiveModel,
       selectedModelId: options.imageModelId,
-      wireParameters: submitted.wireParameters,
+      wireParameters,
       hasInputImage: extra?.hasInputImage,
+      attachedImageReferences: extra?.attachedImageReferences,
       sceneNote: options.imageScene !== 'text-to-image' ? `scene="${options.imageScene}"` : undefined,
       styleNotes: artNotes,
     });
@@ -459,7 +578,7 @@ export function buildDesignHiddenDirective(
     detailNotes.push(`webglScene=${WEBGL_SCENE_LABELS[options.webglScene]}`);
     detailNotes.push(`interaction=${WEBGL_INTERACTION_LABELS[options.webglInteraction]}`);
   }
-  return `Design Studio HTML mode (scenario="${options.designScenario}"): read openmotion://workflow/design/start and the scenario guide via openmotion_design_catalog if needed, create or update an editable HTML/CSS/JS project via openmotion_design_project(action="create", scenario="${options.designScenario}") and openmotion_design_edit(action="write")${detailNotes.length ? ` (${detailNotes.join(', ')})` : ''}${refUrl ? `, inspect reference URL ${refUrl} when adapting layout/brand` : ''}, and finish by calling openmotion_present_artifact(kind="design-project", projectId=...) so it opens in the Artifact Viewer.`;
+  return `Design Studio HTML mode (scenario="${options.designScenario}"): read openmotion://workflow/design/start and the scenario guide via openmotion_design_catalog if needed; if a design-project is already attached or open in this conversation, edit that existing project directly with openmotion_design_edit(action="write") instead of creating a duplicate, otherwise create via openmotion_design_project(action="create", scenario="${options.designScenario}") and openmotion_design_edit(action="write")${detailNotes.length ? ` (${detailNotes.join(', ')})` : ''}${refUrl ? `, inspect reference URL ${refUrl} when adapting layout/brand` : ''}, and ensure openmotion_present_artifact(kind="design-project", projectId=...) is presented so it stays live in the Artifact Viewer.`;
 }
 
 export function buildModeHiddenDirective(
@@ -471,14 +590,34 @@ export function buildModeHiddenDirective(
   if (mode.id === 'design') {
     return buildDesignHiddenDirective(options, mediaModels, extra);
   }
+  if (mode.id === 'research') {
+    const scenario = researchDesignScenario(options.researchFormat);
+    const refUrl = options.webReferenceUrl.trim();
+    const skillHint = options.researchFormat === 'decision-room'
+      ? 'research-decision-room'
+      : options.researchFormat === 'deck'
+        ? 'frontend-slides'
+        : 'data-report';
+    return `Research a topic mode (deliverable="${options.researchFormat}", depth="${options.researchDepth}", scenario="${scenario}"): gather and verify facts from available tools, workspace files, or URLs without fabricating citations; inspect "${skillHint}" and the "${scenario}" guide via openmotion_design_catalog; build a clean, editorial-grade HTML artifact using openmotion_design_project(action="create", scenario="${scenario}") and openmotion_design_edit(action="write") (${options.researchVisuals ? 'include comparison matrices and data visualizations' : 'focus on crisp structured prose'}, ${options.researchCitations ? 'include explicit source attributions and confidence notes' : 'concise synthesis'}${refUrl ? `, incorporate reference URL ${refUrl}` : ''}); finish by calling openmotion_present_artifact(kind="design-project", projectId=...) so it opens in the Artifact Viewer.`;
+  }
+  if (mode.id === 'visualization') {
+    const scenario = visualizationDesignScenario(options.vizType);
+    const refUrl = options.webReferenceUrl.trim();
+    const skillHint = options.vizEngine === 'd3' ? 'd3-visualization' : 'frame-data-chart-nyt';
+    return `Visualization mode (type="${options.vizType}", engine="${options.vizEngine}", style="${VIZ_STYLE_LABELS[options.vizStyle]}", scenario="${scenario}"): consult "${skillHint}" and the "${scenario}" guide via openmotion_design_catalog; author a publication-grade interactive visualization using openmotion_design_project(action="create", scenario="${scenario}") and openmotion_design_edit(action="write") with clear typography, color-coded legends, interactive tooltips/filters${options.vizLiveData ? ', and a structured data.json file backing the charts' : ''}${refUrl ? `, grounded on reference URL ${refUrl}` : ''}; finish by calling openmotion_present_artifact(kind="design-project", projectId=...) so it opens in the Artifact Viewer.`;
+  }
+  if ((mode.id === 'motion' && options.motionEngine !== 'video-model') || (mode.id === 'media' && options.mediaSubMode === 'motion')) {
+    return `Editable Motion graphics mode (aspect="${options.motionAspect}", duration="${options.motionDuration}", fps="${options.motionFps}", style="${MOTION_STYLE_LABELS[options.motionStyle]}"): read openmotion://workflow/production/start via openmotion_read_workflow if needed; if a motion-project is already attached or open in this conversation, inspect and edit that existing project directly via openmotion_edit_project instead of creating a duplicate, otherwise create via openmotion_create_project and edit HTML/CSS/GSAP files with openmotion_edit_project, and ensure openmotion_present_artifact(kind="motion-project", projectId=...) (or openmotion_open_preview) is presented so the Motion Studio Editor updates live in the Artifact Viewer.`;
+  }
   if (mode.id === 'image') {
-    const imageFilter = preferredImageModelFilter(options.imageScene);
+    const imageFilter = preferredImageModelFilters(options.imageScene, Boolean(extra?.hasInputImage));
     const effectiveModel = resolveEffectiveMediaModel(
       mediaModels,
       extra?.routes,
       'image',
       options.imageModelId,
       imageFilter,
+      extra?.providers,
     );
     const submitted = resolveSubmittedMediaParameters(
       effectiveModel,
@@ -486,20 +625,30 @@ export function buildModeHiddenDirective(
       'image',
       Boolean(extra?.hasInputImage),
     );
+    const { wireParameters } = resolveImageWireParameters(
+      options.imageScene,
+      submitted.schema.fields,
+      submitted.wireParameters,
+    );
     return buildMediaHiddenDirective({
       modality: 'image',
       effectiveModel,
       selectedModelId: options.imageModelId,
-      wireParameters: submitted.wireParameters,
+      wireParameters,
       hasInputImage: extra?.hasInputImage,
+      attachedImageReferences: extra?.attachedImageReferences,
+      sceneNote: options.imageScene !== 'text-to-image' ? `scene="${options.imageScene}"` : undefined,
     });
   }
   if ((mode.id === 'media' && options.mediaSubMode === 'video') || (mode.id === 'motion' && options.motionEngine === 'video-model')) {
+    const videoFilter = preferredVideoModelFilter(Boolean(extra?.hasInputImage));
     const effectiveModel = resolveEffectiveMediaModel(
       mediaModels,
       extra?.routes,
       'video',
       options.videoModelId,
+      videoFilter,
+      extra?.providers,
     );
     const submitted = resolveSubmittedMediaParameters(
       effectiveModel,
@@ -513,18 +662,20 @@ export function buildModeHiddenDirective(
       selectedModelId: options.videoModelId,
       wireParameters: submitted.wireParameters,
       hasInputImage: extra?.hasInputImage,
+      attachedImageReferences: extra?.attachedImageReferences,
       inputImageRatioLocked: submitted.schema.inputImageRatioLocked,
       alwaysOnAudio: submitted.schema.alwaysOnAudio,
     });
   }
   if (mode.id === 'audio') {
-    const audioFilter = preferredAudioModelFilter(options.audioType);
+    const audioFilter = preferredAudioModelFilters(options.audioType);
     const effectiveModel = resolveEffectiveMediaModel(
       mediaModels,
       extra?.routes,
       'audio',
       options.audioModelId,
       audioFilter,
+      extra?.providers,
     );
     const submitted = resolveSubmittedMediaParameters(
       effectiveModel,
@@ -582,6 +733,12 @@ export function getModeComposerPlaceholder(
         return t('Describe the interactive WebGL shader, 3D stage, or particle scene you want to build…');
     }
   }
+  if (mode.id === 'research') {
+    return t('Enter a topic, market question, or source URL to research and turn into a visual deliverable…');
+  }
+  if (mode.id === 'visualization') {
+    return t('Describe the chart, KPI dashboard, infographic, or interactive diagram you want to build…');
+  }
   if (mode.id === 'coding') {
     if (options.codingFocus === 'debug') return t('Describe the bug, stack trace, or failing behavior to investigate and fix…');
     if (options.codingFocus === 'refactor') return t('Describe the module or code pattern to refactor cleanly…');
@@ -629,7 +786,7 @@ export function formatModePromptPrefix(
     modality: Modality,
     selectedId: string,
     rawValues: Record<string, unknown>,
-    preferredFilter?: (model: Model) => boolean,
+    preferredFilter?: ModelFilter | readonly ModelFilter[],
     audioType?: 'music' | 'voiceover' | 'sfx',
     includeBackgroundStyle?: boolean,
   ) => {
@@ -639,6 +796,7 @@ export function formatModePromptPrefix(
       modality,
       selectedId,
       preferredFilter,
+      extra?.providers,
     );
     const modelLabel = findModelLabel(selectedId)
       ?? (effectiveModel ? `${effectiveModel.label} (${effectiveModel.id})` : null);
@@ -684,7 +842,7 @@ export function formatModePromptPrefix(
         'image',
         options.imageModelId,
         options.imageParams,
-        preferredImageModelFilter(options.imageScene),
+        preferredImageModelFilters(options.imageScene, Boolean(extra?.hasInputImage)),
         undefined,
         true,
       );
@@ -718,13 +876,31 @@ export function formatModePromptPrefix(
       if (options.designTheme !== 'auto') parts.push(`Theme: ${HTML_DESIGN_THEME_LABELS[options.designTheme]}`);
       if (options.webReferenceUrl.trim()) parts.push(`Reference URL: ${options.webReferenceUrl.trim()}`);
     }
+  } else if (mode.id === 'research') {
+    const fmtMeta = RESEARCH_FORMAT_CHOICES.find(item => item.id === options.researchFormat) ?? RESEARCH_FORMAT_CHOICES[0];
+    const depthMeta = RESEARCH_DEPTH_CHOICES.find(item => item.id === options.researchDepth) ?? RESEARCH_DEPTH_CHOICES[1];
+    parts.push('Mode: Research a topic');
+    parts.push(`Deliverable: ${fmtMeta.label} (scenario=${researchDesignScenario(options.researchFormat)})`);
+    parts.push(`Depth: ${depthMeta.label}`);
+    parts.push(`Visuals: ${options.researchVisuals ? 'Charts & matrices' : 'Text focused'}`);
+    parts.push(`Citations: ${options.researchCitations ? 'Included' : 'Minimal'}`);
+    if (options.webReferenceUrl.trim()) parts.push(`Reference URL: ${options.webReferenceUrl.trim()}`);
+  } else if (mode.id === 'visualization') {
+    const vizMeta = VIZ_TYPE_CHOICES.find(item => item.id === options.vizType) ?? VIZ_TYPE_CHOICES[0];
+    parts.push('Mode: Visualization');
+    parts.push(`Type: ${vizMeta.label} (scenario=${visualizationDesignScenario(options.vizType)})`);
+    parts.push(`Engine: ${VIZ_ENGINE_LABELS[options.vizEngine]}`);
+    parts.push(`Style: ${VIZ_STYLE_LABELS[options.vizStyle]}`);
+    if (options.designTheme !== 'auto') parts.push(`Theme: ${HTML_DESIGN_THEME_LABELS[options.designTheme]}`);
+    if (options.vizLiveData) parts.push('Data: Live data.json');
+    if (options.webReferenceUrl.trim()) parts.push(`Reference URL: ${options.webReferenceUrl.trim()}`);
   } else if (mode.id === 'image') {
     parts.push('Mode: Image Artwork');
     appendMediaParamParts(
       'image',
       options.imageModelId,
       options.imageParams,
-      preferredImageModelFilter(options.imageScene),
+      preferredImageModelFilters(options.imageScene, Boolean(extra?.hasInputImage)),
     );
   } else if (mode.id === 'media') {
     if (options.mediaSubMode === 'motion') {
@@ -733,7 +909,7 @@ export function formatModePromptPrefix(
       parts.push(`Style: ${MOTION_STYLE_LABELS[options.motionStyle]}`);
     } else {
       parts.push('Mode: AI Cinema Video (Video Model)');
-      appendMediaParamParts('video', options.videoModelId, options.videoParams);
+      appendMediaParamParts('video', options.videoModelId, options.videoParams, preferredVideoModelFilter(Boolean(extra?.hasInputImage)));
     }
   } else if (mode.id === 'audio') {
     parts.push('Mode: Audio & Sound');
@@ -742,13 +918,13 @@ export function formatModePromptPrefix(
       'audio',
       options.audioModelId,
       options.audioParams,
-      preferredAudioModelFilter(options.audioType),
+      preferredAudioModelFilters(options.audioType),
       options.audioType,
     );
   } else if (mode.id === 'motion') {
     if (options.motionEngine === 'video-model') {
       parts.push('Mode: AI Cinema Video (Video Model)');
-      appendMediaParamParts('video', options.videoModelId, options.videoParams);
+      appendMediaParamParts('video', options.videoModelId, options.videoParams, preferredVideoModelFilter(Boolean(extra?.hasInputImage)));
     } else {
       parts.push('Mode: Motion graphics (Editable HyperFrames Code)');
       parts.push(`Format: ${options.motionAspect} · ${options.motionDuration} · ${options.motionFps}`);
@@ -799,7 +975,7 @@ export function buildModeContextTags(
     modality: Modality,
     selectedId: string,
     rawValues: Record<string, unknown>,
-    preferredFilter?: (model: Model) => boolean,
+    preferredFilter?: ModelFilter | readonly ModelFilter[],
     audioType?: 'music' | 'voiceover' | 'sfx',
   ) => {
     const effectiveModel = resolveEffectiveMediaModel(
@@ -808,6 +984,7 @@ export function buildModeContextTags(
       modality,
       selectedId,
       preferredFilter,
+      extra?.providers,
     );
     const modelLabel = findModelLabel(selectedId) ?? effectiveModel?.label;
     if (modelLabel) tags.push({ kind: 'param', label: modelLabel });
@@ -871,7 +1048,7 @@ export function buildModeContextTags(
         'image',
         options.imageModelId,
         options.imageParams,
-        preferredImageModelFilter(options.imageScene),
+        preferredImageModelFilters(options.imageScene, Boolean(extra?.hasInputImage)),
       );
     } else {
       const scenario = findDesignScenario(options.designScenario);
@@ -886,13 +1063,30 @@ export function buildModeContextTags(
     return tags;
   }
 
+  if (mode.id === 'research') {
+    const fmtMeta = RESEARCH_FORMAT_CHOICES.find(item => item.id === options.researchFormat) ?? RESEARCH_FORMAT_CHOICES[0];
+    const depthMeta = RESEARCH_DEPTH_CHOICES.find(item => item.id === options.researchDepth) ?? RESEARCH_DEPTH_CHOICES[1];
+    tags.push({ kind: 'mode', label: t('Research a topic'), icon: 'book-open-line', tone: 'agent' });
+    tags.push({ kind: 'param', label: t(fmtMeta.label) });
+    tags.push({ kind: 'param', label: t(depthMeta.label) });
+    return tags;
+  }
+
+  if (mode.id === 'visualization') {
+    const vizMeta = VIZ_TYPE_CHOICES.find(item => item.id === options.vizType) ?? VIZ_TYPE_CHOICES[0];
+    tags.push({ kind: 'mode', label: t('Visualization'), icon: 'bar-chart-box-line', tone: 'coding' });
+    tags.push({ kind: 'param', label: t(vizMeta.label) });
+    tags.push({ kind: 'param', label: t(VIZ_ENGINE_LABELS[options.vizEngine]) });
+    return tags;
+  }
+
   if (mode.id === 'image') {
     tags.push({ kind: 'mode', label: t('Image'), icon: 'image-line', tone: 'image' });
     appendMediaContextTags(
       'image',
       options.imageModelId,
       options.imageParams,
-      preferredImageModelFilter(options.imageScene),
+      preferredImageModelFilters(options.imageScene, Boolean(extra?.hasInputImage)),
     );
     return tags;
   }
@@ -902,7 +1096,7 @@ export function buildModeContextTags(
       || (mode.id === 'motion' && options.motionEngine === 'video-model');
     if (useVideoModel) {
       tags.push({ kind: 'mode', label: t('Video'), icon: 'clapperboard-line', tone: 'video' });
-      appendMediaContextTags('video', options.videoModelId, options.videoParams);
+      appendMediaContextTags('video', options.videoModelId, options.videoParams, preferredVideoModelFilter(Boolean(extra?.hasInputImage)));
     } else {
       tags.push({ kind: 'mode', label: t('Motion'), icon: 'movie-line', tone: 'video' });
       tags.push({ kind: 'param', label: options.motionAspect });
@@ -920,7 +1114,7 @@ export function buildModeContextTags(
       'audio',
       options.audioModelId,
       options.audioParams,
-      preferredAudioModelFilter(options.audioType),
+      preferredAudioModelFilters(options.audioType),
       options.audioType,
     );
     return tags;
@@ -999,7 +1193,7 @@ export function ModeComposerTopBar({
   disabled?: boolean;
   onChange: (patch: Partial<ModeComposerOptions>) => void;
   onCatalogModelsChange?: (models: Model[]) => void;
-  onCatalogChange?: (catalog: { models: Model[]; routes: GatewayStatus['routes'] }) => void;
+  onCatalogChange?: (catalog: { models: Model[]; routes: GatewayStatus['routes']; providers?: GatewayStatus['providers'] }) => void;
   onOpenResourcePicker: (category: ResourceCategoryTab) => void;
   onOpenModelSettings: () => void;
 }) {
@@ -1027,6 +1221,12 @@ export function ModeComposerTopBar({
     | 'design-style'
     | 'design-image-scene'
     | 'design-image-style'
+    | 'research-format'
+    | 'research-depth'
+    | 'research-options'
+    | 'viz-type'
+    | 'viz-engine'
+    | 'viz-style'
     | 'game-genre'
     | 'game-style'
     | 'game-setting'
@@ -1061,7 +1261,7 @@ export function ModeComposerTopBar({
   useEffect(() => {
     if (catalog?.models) {
       onCatalogModelsChange?.(catalog.models);
-      onCatalogChange?.({ models: catalog.models, routes: catalog.status.routes });
+      onCatalogChange?.({ models: catalog.models, routes: catalog.status.routes, providers: catalog.status.providers });
     }
   }, [catalog, onCatalogModelsChange, onCatalogChange]);
 
@@ -1069,20 +1269,30 @@ export function ModeComposerTopBar({
 
   const getModelsFor = useMemo(() => {
     const all = catalog?.models ?? [];
-    return (modality: Modality, preferredFilter?: (model: Model) => boolean) =>
-      all
+    return (modality: Modality, preferredFilter?: ModelFilter | readonly ModelFilter[]) => {
+      const filters = typeof preferredFilter === 'function'
+        ? [preferredFilter]
+        : preferredFilter
+          ? [...preferredFilter]
+          : [];
+      const prefRank = (model: Model) => {
+        if (!filters.length) return 0;
+        const idx = filters.findIndex(fn => fn(model));
+        return idx === -1 ? filters.length : idx;
+      };
+      return all
         .filter(item => item.modality === modality)
         .sort((a, b) => {
           const aReady = providerReady(providers, a.provider) ? 0 : 1;
           const bReady = providerReady(providers, b.provider) ? 0 : 1;
           if (aReady !== bReady) return aReady - bReady;
-          if (preferredFilter) {
-            const aPref = preferredFilter(a) ? 0 : 1;
-            const bPref = preferredFilter(b) ? 0 : 1;
-            if (aPref !== bPref) return aPref - bPref;
-          }
+          const rankDiff = prefRank(a) - prefRank(b);
+          if (rankDiff !== 0) return rankDiff;
+          const provDiff = providerRank(a.provider) - providerRank(b.provider);
+          if (provDiff !== 0) return provDiff;
           return a.label.localeCompare(b.label);
         });
+    };
   }, [catalog?.models, providers]);
 
   const attachedImageAssets = (attachments ?? []).filter(item => item.kind === 'asset' && item.modality === 'image');
@@ -1110,7 +1320,7 @@ export function ModeComposerTopBar({
     </Button>
   );
 
-  const imageFilter = preferredImageModelFilter(options.imageScene);
+  const imageFilter = preferredImageModelFilters(options.imageScene, hasInputImage);
   const imageModelsList = getModelsFor('image', imageFilter);
   const effectiveImageModel = resolveEffectiveMediaModel(
     imageModelsList,
@@ -1118,6 +1328,7 @@ export function ModeComposerTopBar({
     'image',
     options.imageModelId,
     imageFilter,
+    providers,
   );
   const effectiveImageSchema = resolveSuperAgentModelSchema(
     effectiveImageModel,
@@ -1143,7 +1354,7 @@ export function ModeComposerTopBar({
     modality: Modality;
     selectedId: string;
     modelsActive?: boolean;
-    preferredFilter?: (model: Model) => boolean;
+    preferredFilter?: ModelFilter | readonly ModelFilter[];
     fallbackLabel: string;
     title: string;
     onSelect: (id: string, nextModel?: Model) => void;
@@ -1155,6 +1366,7 @@ export function ModeComposerTopBar({
       modality,
       'auto',
       preferredFilter,
+      providers,
     );
     const selectedModel = selectedId !== 'auto' ? list.find(item => item.id === selectedId) : undefined;
     const displayModel = selectedModel ?? defaultRouteModel;
@@ -1285,155 +1497,156 @@ export function ModeComposerTopBar({
     );
   };
 
-  if (modeId === 'design') {
-    const isHtml = options.designFormat === 'html';
-    const activeScenario = findDesignScenario(options.designScenario) ?? designScenarios[0];
-    const activeViewport = DESIGN_VIEWPORT_CHOICES.find(v => v.id === options.designViewport) ?? DESIGN_VIEWPORT_CHOICES[0];
-    const attachedBrandKits = (attachments ?? []).filter(item => item.kind === 'brand-kit');
-    const brandKitLabel = attachedBrandKits.length === 1
-      ? attachedBrandKits[0].title
-      : attachedBrandKits.length > 1
-        ? `${t('Brand Kit')} (${attachedBrandKits.length})`
-        : t('Brand Kit');
-    const hasUrl = Boolean(options.webReferenceUrl.trim());
-    const urlShortLabel = hasUrl
-      ? options.webReferenceUrl.trim().replace(/^https?:\/\//, '').slice(0, 26)
-      : activeScenario.id === 'web-clone'
-        ? t('Reference URL')
-        : t('Import from…');
+  const attachedBrandKits = (attachments ?? []).filter(item => item.kind === 'brand-kit');
+  const brandKitLabel = attachedBrandKits.length === 1
+    ? attachedBrandKits[0].title
+    : attachedBrandKits.length > 1
+      ? `${t('Brand Kit')} (${attachedBrandKits.length})`
+      : t('Brand Kit');
+  const hasUrl = Boolean(options.webReferenceUrl.trim());
+  const buildUrlShortLabel = (emptyLabel: string) =>
+    hasUrl ? options.webReferenceUrl.trim().replace(/^https?:\/\//, '').slice(0, 26) : emptyLabel;
 
-    const renderReferenceUrlPill = (includeBrandKitLink: boolean) => (
-      <Popover
-        open={openMenu === 'import'}
-        onOpenChange={next => setOpenMenu(next ? 'import' : null)}
-        side="top"
-        align="start"
-        aria-label={t('Reference URL')}
-        className="om-sa-mode-popover"
-        trigger={
-          <Button
-            variant="plain"
-            type="button"
-            className="om-sa-composer-top-pill"
-            data-active={hasUrl || openMenu === 'import' || undefined}
-            data-open={openMenu === 'import' || undefined}
-            disabled={disabled}
-          >
-            <RemixIcon name="global-line" size={13} />
-            <span className="om-sa-composer-top-pill-label">{urlShortLabel}</span>
-            <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
-          </Button>
-        }
-      >
-        <div className="om-sa-mode-menu">
-          <div className="om-sa-mode-field">
-            <span className="om-sa-popover-label">{t('Reference website URL')}</span>
-            <div className="om-sa-mode-url-row">
-              <input
-                type="url"
-                className="om-sa-mode-url-input"
-                value={urlDraft}
-                placeholder="https://example.com"
-                onChange={event => setUrlDraft(event.target.value)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    onChange({ webReferenceUrl: urlDraft.trim() });
-                    setOpenMenu(null);
-                  }
-                }}
-              />
+  const renderReferenceUrlPill = (includeBrandKitLink: boolean, emptyLabel = t('Import from…')) => (
+    <Popover
+      open={openMenu === 'import'}
+      onOpenChange={next => setOpenMenu(next ? 'import' : null)}
+      side="top"
+      align="start"
+      aria-label={t('Reference URL')}
+      className="om-sa-mode-popover"
+      trigger={
+        <Button
+          variant="plain"
+          type="button"
+          className="om-sa-composer-top-pill"
+          data-active={hasUrl || openMenu === 'import' || undefined}
+          data-open={openMenu === 'import' || undefined}
+          disabled={disabled}
+        >
+          <RemixIcon name="global-line" size={13} />
+          <span className="om-sa-composer-top-pill-label">{buildUrlShortLabel(emptyLabel)}</span>
+          <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+        </Button>
+      }
+    >
+      <div className="om-sa-mode-menu">
+        <div className="om-sa-mode-field">
+          <span className="om-sa-popover-label">{t('Reference website URL')}</span>
+          <div className="om-sa-mode-url-row">
+            <input
+              type="url"
+              className="om-sa-mode-url-input"
+              value={urlDraft}
+              placeholder="https://example.com"
+              onChange={event => setUrlDraft(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onChange({ webReferenceUrl: urlDraft.trim() });
+                  setOpenMenu(null);
+                }
+              }}
+            />
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-popover-pill"
+              data-active
+              onClick={() => {
+                onChange({ webReferenceUrl: urlDraft.trim() });
+                setOpenMenu(null);
+              }}
+            >
+              {t('Apply')}
+            </Button>
+            {hasUrl && (
               <Button
                 variant="plain"
                 type="button"
                 className="om-sa-popover-pill"
-                data-active
                 onClick={() => {
-                  onChange({ webReferenceUrl: urlDraft.trim() });
+                  setUrlDraft('');
+                  onChange({ webReferenceUrl: '' });
                   setOpenMenu(null);
                 }}
               >
-                {t('Apply')}
-              </Button>
-              {hasUrl && (
-                <Button
-                  variant="plain"
-                  type="button"
-                  className="om-sa-popover-pill"
-                  onClick={() => {
-                    setUrlDraft('');
-                    onChange({ webReferenceUrl: '' });
-                    setOpenMenu(null);
-                  }}
-                >
-                  {t('Clear')}
-                </Button>
-              )}
-            </div>
-          </div>
-          <div className="om-sa-model-menu-foot">
-            {includeBrandKitLink && (
-              <Button
-                variant="plain"
-                type="button"
-                className="om-sa-popover-link-row"
-                onClick={() => {
-                  setOpenMenu(null);
-                  onOpenResourcePicker('brand-kit');
-                }}
-              >
-                <RemixIcon name="palette-line" size={15} />
-                <span>{t('Attach Brand Kit')}</span>
-                <RemixIcon name="arrow-right-up-line" size={14} />
+                {t('Clear')}
               </Button>
             )}
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-popover-link-row"
-              onClick={() => {
-                setOpenMenu(null);
-                onOpenResourcePicker('design-template');
-              }}
-            >
-              <RemixIcon name="layout-line" size={15} />
-              <span>{t('Attach Design Template')}</span>
-              <RemixIcon name="arrow-right-up-line" size={14} />
-            </Button>
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-popover-link-row"
-              onClick={() => {
-                setOpenMenu(null);
-                onOpenResourcePicker('skills');
-              }}
-            >
-              <RemixIcon name="book-open-line" size={15} />
-              <span>{t('Attach Design Skill')}</span>
-              <RemixIcon name="arrow-right-up-line" size={14} />
-            </Button>
           </div>
         </div>
-      </Popover>
-    );
+        <div className="om-sa-model-menu-foot">
+          {includeBrandKitLink && (
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-popover-link-row"
+              onClick={() => {
+                setOpenMenu(null);
+                onOpenResourcePicker('brand-kit');
+              }}
+            >
+              <RemixIcon name="palette-line" size={15} />
+              <span>{t('Attach Brand Kit')}</span>
+              <RemixIcon name="arrow-right-up-line" size={14} />
+            </Button>
+          )}
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-popover-link-row"
+            onClick={() => {
+              setOpenMenu(null);
+              onOpenResourcePicker('design-template');
+            }}
+          >
+            <RemixIcon name="layout-line" size={15} />
+            <span>{t('Attach Design Template')}</span>
+            <RemixIcon name="arrow-right-up-line" size={14} />
+          </Button>
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-popover-link-row"
+            onClick={() => {
+              setOpenMenu(null);
+              onOpenResourcePicker('skills');
+            }}
+          >
+            <RemixIcon name="book-open-line" size={15} />
+            <span>{t('Attach Design Skill')}</span>
+            <RemixIcon name="arrow-right-up-line" size={14} />
+          </Button>
+        </div>
+      </div>
+    </Popover>
+  );
 
-    const renderBrandKitPill = () => (
-      <Button
-        variant="plain"
-        type="button"
-        className="om-sa-composer-top-pill"
-        data-active={attachedBrandKits.length > 0 || undefined}
-        disabled={disabled}
-        onClick={() => {
-          setOpenMenu(null);
-          onOpenResourcePicker('brand-kit');
-        }}
-      >
-        <RemixIcon name="palette-line" size={13} />
-        <span className="om-sa-composer-top-pill-label">{brandKitLabel}</span>
-      </Button>
-    );
+  const renderBrandKitPill = () => (
+    <Button
+      variant="plain"
+      type="button"
+      className="om-sa-composer-top-pill"
+      data-active={attachedBrandKits.length > 0 || undefined}
+      disabled={disabled}
+      onClick={() => {
+        setOpenMenu(null);
+        onOpenResourcePicker('brand-kit');
+      }}
+    >
+      <RemixIcon name="palette-line" size={13} />
+      <span className="om-sa-composer-top-pill-label">{brandKitLabel}</span>
+    </Button>
+  );
+
+  if (modeId === 'design') {
+    const isHtml = options.designFormat === 'html';
+    const activeScenario = findDesignScenario(options.designScenario) ?? designScenarios[0];
+    const activeViewport = DESIGN_VIEWPORT_CHOICES.find(v => v.id === options.designViewport) ?? DESIGN_VIEWPORT_CHOICES[0];
+    const refUrlEmptyLabel = activeScenario.id === 'web-clone' ? t('Reference URL') : t('Import from…');
+    const renderDesignReferenceUrlPill = (includeBrandKitLink: boolean) =>
+      renderReferenceUrlPill(includeBrandKitLink, refUrlEmptyLabel);
 
     const slidesLabel = options.deckSlides === 'auto' ? t('Auto') : options.deckSlides;
     const docFormatLabel = DOC_PAPER_LABELS[options.docPaper];
@@ -1621,7 +1834,7 @@ export function ModeComposerTopBar({
               </div>
             </Popover>
 
-            {activeScenario.id === 'web-clone' && renderReferenceUrlPill(true)}
+            {activeScenario.id === 'web-clone' && renderDesignReferenceUrlPill(true)}
 
             {/* Pill 3: Contextual layout / format / module-specific options pill */}
             {activeScenario.id === 'deck' || activeScenario.id === 'document' ? (
@@ -1974,7 +2187,7 @@ export function ModeComposerTopBar({
             {renderBrandKitPill()}
 
             {/* Pill 6: Import from… pill (when not already shown as Reference URL) */}
-            {activeScenario.id !== 'web-clone' && renderReferenceUrlPill(false)}
+            {activeScenario.id !== 'web-clone' && renderDesignReferenceUrlPill(false)}
           </>
         ) : (
           <>
@@ -2023,31 +2236,36 @@ export function ModeComposerTopBar({
                         data-active={selected || undefined}
                         className="om-sa-game-choice-row"
                         onClick={() => {
-                          if (options.imageModelId === 'auto') {
-                            const nextFilter = preferredImageModelFilter(sc.id);
-                            const nextAuto = resolveEffectiveMediaModel(
-                              getModelsFor('image', nextFilter),
-                              catalog?.status.routes,
-                              'image',
-                              'auto',
-                              nextFilter,
-                            );
-                            if (nextAuto?.id !== effectiveImageModel?.id) {
-                              onChange({
-                                imageScene: sc.id,
-                                imageParams: migrateModelParameters(
-                                  effectiveImageModel,
-                                  nextAuto,
-                                  options.imageParams,
-                                  'image',
-                                  hasInputImage,
-                                ),
-                              });
-                              setOpenMenu(null);
-                              return;
-                            }
+                          const nextFilters = preferredImageModelFilters(sc.id, hasInputImage);
+                          const nextAuto = resolveEffectiveMediaModel(
+                            getModelsFor('image', nextFilters),
+                            catalog?.status.routes,
+                            'image',
+                            'auto',
+                            nextFilters,
+                            providers,
+                          );
+                          const primaryNextFilter = nextFilters[0];
+                          const incompatibleExplicit = options.imageModelId !== 'auto'
+                            && Boolean(primaryNextFilter && effectiveImageModel && !primaryNextFilter(effectiveImageModel))
+                            && Boolean(nextAuto);
+                          const nextModelId = incompatibleExplicit ? 'auto' : options.imageModelId;
+                          const nextModel = nextModelId === 'auto' ? nextAuto : effectiveImageModel;
+                          if (nextModel?.id !== effectiveImageModel?.id || nextModelId !== options.imageModelId) {
+                            onChange({
+                              imageScene: sc.id,
+                              ...(nextModelId !== options.imageModelId ? { imageModelId: nextModelId } : {}),
+                              imageParams: migrateModelParameters(
+                                effectiveImageModel,
+                                nextModel,
+                                options.imageParams,
+                                'image',
+                                hasInputImage,
+                              ),
+                            });
+                          } else {
+                            onChange({ imageScene: sc.id });
                           }
-                          onChange({ imageScene: sc.id });
                           setOpenMenu(null);
                         }}
                       >
@@ -2086,6 +2304,7 @@ export function ModeComposerTopBar({
                   'image',
                   id,
                   imageFilter,
+                  providers,
                 );
                 onChange({
                   imageModelId: id,
@@ -2207,16 +2426,422 @@ export function ModeComposerTopBar({
     );
   }
 
+  if (modeId === 'research') {
+    const activeFormat = RESEARCH_FORMAT_CHOICES.find(item => item.id === options.researchFormat) ?? RESEARCH_FORMAT_CHOICES[0];
+    const activeDepth = RESEARCH_DEPTH_CHOICES.find(item => item.id === options.researchDepth) ?? RESEARCH_DEPTH_CHOICES[1];
+    const visualsSummary = options.researchVisuals && options.researchCitations
+      ? t('Charts & citations')
+      : options.researchVisuals
+        ? t('Charts & tables')
+        : options.researchCitations
+          ? t('Source citations')
+          : t('Text only');
+
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Research options')}>
+        <Popover
+          open={openMenu === 'research-format'}
+          onOpenChange={next => setOpenMenu(next ? 'research-format' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Deliverable')}
+          className="om-sa-mode-popover om-sa-game-choice-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active
+              data-open={openMenu === 'research-format' || undefined}
+              aria-haspopup="listbox"
+              aria-expanded={openMenu === 'research-format'}
+              disabled={disabled}
+            >
+              <span key={activeFormat.id} className="om-sa-pill-swap">
+                <RemixIcon name={activeFormat.icon} size={13} />
+                <span className="om-sa-composer-top-pill-label">{t(activeFormat.label)}</span>
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t('Deliverable')}</span>
+            </div>
+            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Deliverable')}>
+              {RESEARCH_FORMAT_CHOICES.map(item => {
+                const selected = options.researchFormat === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    variant="plain"
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={selected || undefined}
+                    className="om-sa-game-choice-row"
+                    onClick={() => {
+                      onChange({ researchFormat: item.id });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span className="om-sa-game-choice-visual" aria-hidden="true">
+                      <RemixIcon name={item.icon} size={15} />
+                    </span>
+                    <span className="om-sa-game-choice-copy">
+                      <span className="om-sa-game-choice-title">
+                        <strong>{t(item.label)}</strong>
+                      </span>
+                      <span>{t(item.description)}</span>
+                    </span>
+                    <span className="om-sa-game-choice-check" aria-hidden="true">
+                      {selected && <RemixIcon name="check-line" size={15} />}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
+
+        <Popover
+          open={openMenu === 'research-depth'}
+          onOpenChange={next => setOpenMenu(next ? 'research-depth' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Research depth')}
+          className="om-sa-mode-popover om-sa-game-choice-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={options.researchDepth !== 'balanced' || openMenu === 'research-depth' || undefined}
+              data-open={openMenu === 'research-depth' || undefined}
+              aria-haspopup="listbox"
+              aria-expanded={openMenu === 'research-depth'}
+              disabled={disabled}
+            >
+              <RemixIcon name="focus-3-line" size={13} />
+              <span className="om-sa-composer-top-pill-label">{t(activeDepth.label)}</span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t('Research depth')}</span>
+            </div>
+            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Research depth')}>
+              {RESEARCH_DEPTH_CHOICES.map(item => {
+                const selected = options.researchDepth === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    variant="plain"
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={selected || undefined}
+                    className="om-sa-game-choice-row"
+                    onClick={() => {
+                      onChange({ researchDepth: item.id });
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span className="om-sa-game-choice-visual" aria-hidden="true">
+                      <RemixIcon name="focus-3-line" size={15} />
+                    </span>
+                    <span className="om-sa-game-choice-copy">
+                      <span className="om-sa-game-choice-title">
+                        <strong>{t(item.label)}</strong>
+                      </span>
+                      <span>{t(item.description)}</span>
+                    </span>
+                    <span className="om-sa-game-choice-check" aria-hidden="true">
+                      {selected && <RemixIcon name="check-line" size={15} />}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
+
+        <Popover
+          open={openMenu === 'research-options'}
+          onOpenChange={next => setOpenMenu(next ? 'research-options' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Charts & citations')}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={openMenu === 'research-options' || undefined}
+              data-open={openMenu === 'research-options' || undefined}
+              disabled={disabled}
+            >
+              <RemixIcon name="bar-chart-box-line" size={13} />
+              <span className="om-sa-composer-top-pill-label">{visualsSummary}</span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Include in output')}</span>
+              <div className="om-sa-popover-pills">
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  aria-pressed={options.researchVisuals}
+                  data-active={options.researchVisuals || undefined}
+                  onClick={() => onChange({ researchVisuals: !options.researchVisuals })}
+                >
+                  {t('Charts & tables')}
+                </Button>
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  aria-pressed={options.researchCitations}
+                  data-active={options.researchCitations || undefined}
+                  onClick={() => onChange({ researchCitations: !options.researchCitations })}
+                >
+                  {t('Source citations')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Popover>
+
+        {renderBrandKitPill()}
+        {renderReferenceUrlPill(false, t('Import from…'))}
+      </div>
+    );
+  }
+
+  if (modeId === 'visualization') {
+    const activeVizType = VIZ_TYPE_CHOICES.find(item => item.id === options.vizType) ?? VIZ_TYPE_CHOICES[0];
+    return (
+      <div className="om-sa-composer-top-bar" role="group" aria-label={t('Visualization options')}>
+        <Popover
+          open={openMenu === 'viz-type'}
+          onOpenChange={next => setOpenMenu(next ? 'viz-type' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Visual type')}
+          className="om-sa-mode-popover om-sa-game-choice-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active
+              data-open={openMenu === 'viz-type' || undefined}
+              aria-haspopup="listbox"
+              aria-expanded={openMenu === 'viz-type'}
+              disabled={disabled}
+            >
+              <span key={activeVizType.id} className="om-sa-pill-swap">
+                <RemixIcon name={activeVizType.icon} size={13} />
+                <span className="om-sa-composer-top-pill-label">{t(activeVizType.label)}</span>
+              </span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-menu-head">
+              <span className="om-sa-popover-label">{t('Visual type')}</span>
+            </div>
+            <div className="om-sa-game-choice-list" role="listbox" aria-label={t('Visual type')}>
+              {VIZ_TYPE_CHOICES.map(item => {
+                const selected = options.vizType === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    variant="plain"
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={selected || undefined}
+                    className="om-sa-game-choice-row"
+                    onClick={() => {
+                      onChange(visualizationOptionsPatch(item.id));
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span className="om-sa-game-choice-visual" aria-hidden="true">
+                      <RemixIcon name={item.icon} size={15} />
+                    </span>
+                    <span className="om-sa-game-choice-copy">
+                      <span className="om-sa-game-choice-title">
+                        <strong>{t(item.label)}</strong>
+                      </span>
+                      <span>{t(item.description)}</span>
+                    </span>
+                    <span className="om-sa-game-choice-check" aria-hidden="true">
+                      {selected && <RemixIcon name="check-line" size={15} />}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </Popover>
+
+        <Popover
+          open={openMenu === 'viz-engine'}
+          onOpenChange={next => setOpenMenu(next ? 'viz-engine' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Rendering engine')}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={options.vizEngine !== 'html-svg' || options.vizLiveData || openMenu === 'viz-engine' || undefined}
+              data-open={openMenu === 'viz-engine' || undefined}
+              disabled={disabled}
+            >
+              <RemixIcon name="settings-3-line" size={13} />
+              <span className="om-sa-composer-top-pill-label">{t(VIZ_ENGINE_LABELS[options.vizEngine])}</span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Rendering engine')}</span>
+              <div className="om-sa-popover-pills">
+                {(['html-svg', 'd3', 'webgl'] as const).map(engine => (
+                  <Button
+                    key={engine}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.vizEngine === engine}
+                    data-active={options.vizEngine === engine || undefined}
+                    onClick={() => onChange({ vizEngine: engine })}
+                  >
+                    {t(VIZ_ENGINE_LABELS[engine])}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Data binding')}</span>
+              <div className="om-sa-popover-pills">
+                <Button
+                  variant="plain"
+                  type="button"
+                  className="om-sa-popover-pill"
+                  aria-pressed={options.vizLiveData}
+                  data-active={options.vizLiveData || undefined}
+                  onClick={() => onChange({ vizLiveData: !options.vizLiveData })}
+                >
+                  {t('Live data.json')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Popover>
+
+        <Popover
+          open={openMenu === 'viz-style'}
+          onOpenChange={next => setOpenMenu(next ? 'viz-style' : null)}
+          side="top"
+          align="start"
+          initialFocus={false}
+          aria-label={t('Style & Theme')}
+          className="om-sa-mode-popover"
+          trigger={
+            <Button
+              variant="plain"
+              type="button"
+              className="om-sa-composer-top-pill"
+              data-active={options.vizStyle !== 'editorial' || options.designTheme !== 'auto' || openMenu === 'viz-style' || undefined}
+              data-open={openMenu === 'viz-style' || undefined}
+              disabled={disabled}
+            >
+              <RemixIcon name="brush-line" size={13} />
+              <span className="om-sa-composer-top-pill-label">{t(VIZ_STYLE_LABELS[options.vizStyle])}</span>
+              <RemixIcon name="arrow-down-s-line" size={14} className="om-sa-pill-chevron" />
+            </Button>
+          }
+        >
+          <div className="om-sa-mode-menu">
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Visual style')}</span>
+              <div className="om-sa-popover-pills">
+                {(['editorial', 'minimal', 'dark-terminal', 'bento'] as const).map(style => (
+                  <Button
+                    key={style}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.vizStyle === style}
+                    data-active={options.vizStyle === style || undefined}
+                    onClick={() => onChange({ vizStyle: style })}
+                  >
+                    {t(VIZ_STYLE_LABELS[style])}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="om-sa-mode-field">
+              <span className="om-sa-popover-label">{t('Theme')}</span>
+              <div className="om-sa-popover-pills">
+                {(['auto', 'light', 'dark', 'both'] as const).map(theme => (
+                  <Button
+                    key={theme}
+                    variant="plain"
+                    type="button"
+                    className="om-sa-popover-pill"
+                    aria-pressed={options.designTheme === theme}
+                    data-active={options.designTheme === theme || undefined}
+                    onClick={() => onChange({ designTheme: theme })}
+                  >
+                    {t(HTML_DESIGN_THEME_LABELS[theme])}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Popover>
+
+        {renderBrandKitPill()}
+        {renderReferenceUrlPill(false, t('Import from…'))}
+      </div>
+    );
+  }
+
   if (modeId === 'motion' || modeId === 'media') {
     const isVideoModel = modeId === 'motion'
       ? options.motionEngine === 'video-model'
       : options.mediaSubMode === 'video';
-    const videoModelsList = getModelsFor('video');
+    const videoFilter = preferredVideoModelFilter(hasInputImage);
+    const videoModelsList = getModelsFor('video', videoFilter);
     const effectiveVideoModel = resolveEffectiveMediaModel(
       videoModelsList,
       catalog?.status.routes,
       'video',
       options.videoModelId,
+      videoFilter,
+      providers,
     );
 
     return (
@@ -2286,6 +2911,7 @@ export function ModeComposerTopBar({
               menuKey: 'video-model',
               modality: 'video',
               selectedId: options.videoModelId,
+              preferredFilter: videoFilter,
               fallbackLabel: t('Auto'),
               title: t('Video model'),
               modelsActive: true,
@@ -2295,6 +2921,8 @@ export function ModeComposerTopBar({
                   catalog?.status.routes,
                   'video',
                   id,
+                  videoFilter,
+                  providers,
                 );
                 onChange({
                   ...(modeId === 'motion'
@@ -2344,7 +2972,7 @@ export function ModeComposerTopBar({
   }
 
   if (modeId === 'audio') {
-    const audioFilter = preferredAudioModelFilter(options.audioType);
+    const audioFilter = preferredAudioModelFilters(options.audioType);
     const audioModelsList = getModelsFor('audio', audioFilter);
     const effectiveAudioModel = resolveEffectiveMediaModel(
       audioModelsList,
@@ -2352,6 +2980,7 @@ export function ModeComposerTopBar({
       'audio',
       options.audioModelId,
       audioFilter,
+      providers,
     );
     const audioTypeIcon = options.audioType === 'voiceover'
       ? 'mic-line'
@@ -2402,11 +3031,14 @@ export function ModeComposerTopBar({
                   aria-pressed={options.audioType === kind.id}
                   data-active={options.audioType === kind.id || undefined}
                   onClick={() => {
-                    const nextFilter = preferredAudioModelFilter(kind.id);
-                    const nextList = getModelsFor('audio', nextFilter);
-                    const nextModel = options.audioModelId === 'auto'
-                      ? resolveEffectiveMediaModel(nextList, catalog?.status.routes, 'audio', 'auto', nextFilter)
-                      : effectiveAudioModel;
+                    const nextFilters = preferredAudioModelFilters(kind.id);
+                    const nextList = getModelsFor('audio', nextFilters);
+                    const keepExplicit = options.audioModelId !== 'auto'
+                      && Boolean(effectiveAudioModel && nextFilters[0]?.(effectiveAudioModel));
+                    const nextModelId = keepExplicit ? options.audioModelId : 'auto';
+                    const nextModel = keepExplicit
+                      ? effectiveAudioModel
+                      : resolveEffectiveMediaModel(nextList, catalog?.status.routes, 'audio', 'auto', nextFilters, providers);
                     const migrated = migrateModelParameters(
                       effectiveAudioModel,
                       nextModel,
@@ -2415,7 +3047,11 @@ export function ModeComposerTopBar({
                       false,
                       kind.id,
                     );
-                    onChange({ audioType: kind.id, audioParams: migrated });
+                    onChange({
+                      audioType: kind.id,
+                      ...(nextModelId !== options.audioModelId ? { audioModelId: nextModelId } : {}),
+                      audioParams: migrated,
+                    });
                     setOpenMenu(null);
                   }}
                 >
@@ -2441,6 +3077,7 @@ export function ModeComposerTopBar({
               'audio',
               id,
               audioFilter,
+              providers,
             );
             onChange({
               audioModelId: id,
@@ -2487,6 +3124,7 @@ export function ModeComposerTopBar({
               'image',
               id,
               imageFilter,
+              providers,
             );
             onChange({
               imageModelId: id,
@@ -3054,6 +3692,8 @@ export function ModeComposerControls({
 
   if (
     modeId === 'design'
+    || modeId === 'research'
+    || modeId === 'visualization'
     || modeId === 'image'
     || modeId === 'audio'
     || (modeId === 'media' && options.mediaSubMode === 'video')

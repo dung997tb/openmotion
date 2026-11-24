@@ -1,4 +1,5 @@
-import type { GatewayStatus, Modality, Model } from '../../../shared/gateway';
+import { modelReferenceLimit, type GatewayStatus, type Modality, type Model } from '../../../shared/gateway';
+import { providerRank } from '../motion/imageMenuModels';
 import {
   classifyParameterTier,
   compatibleImageResolutions,
@@ -35,40 +36,94 @@ export type MediaParamSummaryEntry = {
   isOverride: boolean;
 };
 
-export function preferredAudioModelFilter(audioType: 'music' | 'voiceover' | 'sfx'): (model: Model) => boolean {
-  if (audioType === 'voiceover') {
-    return model =>
-      model.modality === 'audio'
-      && (model.mode === 'text-to-speech' || /speech|voice|tts|kokoro/i.test(`${model.id} ${model.label}`));
-  }
-  if (audioType === 'sfx') {
-    return model =>
-      model.modality === 'audio'
-      && /sound-effect|sfx|foley/i.test(`${model.id} ${model.label} ${model.mode}`);
-  }
-  return model =>
-    model.modality === 'audio'
-    && model.mode !== 'text-to-speech'
-    && !/sound-effect|sfx|foley/i.test(`${model.id} ${model.label}`);
+export type ModelFilter = (model: Model) => boolean;
+
+function isProviderReady(
+  providers: readonly GatewayStatus['providers'][number][] | undefined,
+  providerId: string,
+): boolean {
+  if (!providers?.length) return true;
+  return providers.some(provider =>
+    provider.id === providerId
+    && provider.available
+    && provider.mediaEntitlement !== 'not-included',
+  );
 }
 
-export function preferredImageModelFilter(scene: string): ((model: Model) => boolean) | undefined {
-  if (scene === 'image-edit' || scene === 'remove-background' || scene === 'relight' || scene === 'character') {
-    return model => model.modality === 'image' && Boolean(model.supportsImageReference);
+export function preferredAudioModelFilters(audioType: 'music' | 'voiceover' | 'sfx'): readonly ModelFilter[] {
+  if (audioType === 'voiceover') {
+    return [
+      model =>
+        model.modality === 'audio'
+        && (model.mode === 'text-to-speech' || /speech|voice|tts|kokoro/i.test(`${model.id} ${model.label}`)),
+    ];
+  }
+  if (audioType === 'sfx') {
+    return [
+      model =>
+        model.modality === 'audio'
+        && /sound-effect|sfx|foley/i.test(`${model.id} ${model.label} ${model.mode}`),
+      model => model.modality === 'audio' && model.mode !== 'text-to-speech',
+    ];
+  }
+  return [
+    model =>
+      model.modality === 'audio'
+      && model.mode !== 'text-to-speech'
+      && !/sound-effect|sfx|foley/i.test(`${model.id} ${model.label}`),
+    model => model.modality === 'audio' && model.mode !== 'text-to-speech',
+  ];
+}
+
+export function preferredAudioModelFilter(audioType: 'music' | 'voiceover' | 'sfx'): ModelFilter {
+  return preferredAudioModelFilters(audioType)[0]!;
+}
+
+function supportsTransparentBackground(model: Model): boolean {
+  return Boolean(
+    model.generationOptions?.fields.some(
+      field =>
+        field.key === 'background'
+        && field.choices?.some(choice => String(choice.value).toLowerCase() === 'transparent'),
+    ),
+  );
+}
+
+export function preferredImageModelFilters(scene: string, hasInputImage = false): readonly ModelFilter[] {
+  if (scene === 'remove-background') {
+    return [
+      model => model.modality === 'image' && Boolean(model.supportsImageReference) && supportsTransparentBackground(model),
+      model => model.modality === 'image' && Boolean(model.supportsImageReference),
+    ];
+  }
+  if (hasInputImage || scene === 'image-edit' || scene === 'relight' || scene === 'character') {
+    return [model => model.modality === 'image' && Boolean(model.supportsImageReference)];
+  }
+  return [];
+}
+
+export function preferredImageModelFilter(scene: string, hasInputImage = false): ModelFilter | undefined {
+  return preferredImageModelFilters(scene, hasInputImage)[0];
+}
+
+export function preferredVideoModelFilter(hasInputImage = false): ModelFilter | undefined {
+  if (hasInputImage) {
+    return model => model.modality === 'video' && (model.maxInputImages ?? 0) > 0;
   }
   return undefined;
 }
 
 /**
  * Resolve which concrete Model is active for a Super Agent modality pill
- * (`selectedId === 'auto'` follows the gateway's default route or best matching model for the active sub-scene).
+ * (`selectedId === 'auto'` follows the gateway's default route or best matching ready model for the active sub-scene).
  */
 export function resolveEffectiveMediaModel(
   models: readonly Model[],
   routes: GatewayStatus['routes'] | undefined,
   modality: Modality,
   selectedId: string,
-  preferredFilter?: (model: Model) => boolean,
+  preferredFilter?: ModelFilter | readonly ModelFilter[],
+  providers?: readonly GatewayStatus['providers'][number][],
 ): Model | undefined {
   const candidates = models.filter(item => item.modality === modality);
   if (!candidates.length) return undefined;
@@ -76,14 +131,26 @@ export function resolveEffectiveMediaModel(
     const explicit = candidates.find(item => item.id === selectedId);
     if (explicit) return explicit;
   }
+  const readyCandidates = providers?.length
+    ? candidates.filter(item => isProviderReady(providers, item.provider))
+    : candidates;
+  const unsortedPool = readyCandidates.length ? readyCandidates : candidates;
+  const pool = [...unsortedPool].sort(
+    (a, b) => providerRank(a.provider) - providerRank(b.provider) || a.label.localeCompare(b.label),
+  );
   const routeId = routes?.[modality];
-  const routeModel = routeId ? candidates.find(item => item.id === routeId) : undefined;
-  if (preferredFilter) {
-    if (routeModel && preferredFilter(routeModel)) return routeModel;
-    const preferred = candidates.find(preferredFilter);
+  const routeModel = routeId ? pool.find(item => item.id === routeId) : undefined;
+  const filters = typeof preferredFilter === 'function'
+    ? [preferredFilter]
+    : preferredFilter
+      ? [...preferredFilter]
+      : [];
+  for (const filter of filters) {
+    if (routeModel && filter(routeModel)) return routeModel;
+    const preferred = pool.find(filter);
     if (preferred) return preferred;
   }
-  return routeModel ?? candidates[0];
+  return routeModel ?? pool[0];
 }
 
 function buildCanonicalFallbackOptions(
@@ -231,7 +298,11 @@ export function applyModelParamChange(
   return next;
 }
 
-function coerceValueForField(field: GenerationOption, rawValue: unknown): unknown | undefined {
+function coerceValueForField(
+  field: GenerationOption,
+  rawValue: unknown,
+  prevField?: GenerationOption,
+): unknown | undefined {
   if (rawValue === undefined || rawValue === null) return undefined;
   if (field.kind === 'choice') {
     const choices = field.choices ?? [];
@@ -239,6 +310,18 @@ function coerceValueForField(field: GenerationOption, rawValue: unknown): unknow
     if (exact) return exact.value;
     const stringMatch = choices.find(choice => String(choice.value) === String(rawValue));
     if (stringMatch) return stringMatch.value;
+    if (prevField?.presentation === 'ratio' || field.presentation === 'ratio') {
+      const sourceChoice = prevField?.choices?.find(
+        choice => choice.value === rawValue || String(choice.value) === String(rawValue),
+      );
+      const sourceLabel = (sourceChoice?.label ?? String(rawValue)).trim().toLowerCase();
+      const labelMatch = choices.find(choice => choice.label.trim().toLowerCase() === sourceLabel);
+      if (labelMatch) return labelMatch.value;
+      const normalizeRatio = (text: string) => text.replace(/\s+hd$/i, '').trim();
+      const normalizedSource = normalizeRatio(sourceLabel);
+      const ratioMatch = choices.find(choice => normalizeRatio(choice.label.trim().toLowerCase()) === normalizedSource);
+      if (ratioMatch) return ratioMatch.value;
+    }
     if (field.allowCustom && typeof rawValue === 'string' && rawValue.trim()) {
       return rawValue.trim();
     }
@@ -288,9 +371,10 @@ export function migrateModelParameters(
     const prevField = prevSchema.fields.find(f => f.key === wireKey);
     const stdKey = prevField?.standardKey ?? mapWireKeyToStandard(wireKey, modality);
     const targetField = nextSchema.fields.find(f => f.key === wireKey)
-      ?? (stdKey ? nextSchema.fields.find(f => f.standardKey === stdKey) : undefined);
+      ?? (stdKey ? nextSchema.fields.find(f => f.standardKey === stdKey) : undefined)
+      ?? (prevField?.presentation === 'ratio' ? nextSchema.fields.find(f => f.presentation === 'ratio') : undefined);
     if (!targetField) continue;
-    const coerced = coerceValueForField(targetField, rawValue);
+    const coerced = coerceValueForField(targetField, rawValue, prevField);
     if (coerced === undefined) continue;
     migrated[targetField.key] = coerced;
     const chosen = targetField.choices?.find(choice => choice.value === coerced);
@@ -437,6 +521,7 @@ export function buildMediaHiddenDirective({
   selectedModelId,
   wireParameters,
   hasInputImage,
+  attachedImageReferences,
   inputImageRatioLocked,
   alwaysOnAudio,
   sceneNote,
@@ -447,6 +532,7 @@ export function buildMediaHiddenDirective({
   selectedModelId: string;
   wireParameters: Record<string, unknown>;
   hasInputImage?: boolean;
+  attachedImageReferences?: readonly { assetId: string; versionId: string }[];
   inputImageRatioLocked?: boolean;
   alwaysOnAudio?: boolean;
   sceneNote?: string;
@@ -457,14 +543,22 @@ export function buildMediaHiddenDirective({
     : effectiveModel?.id;
   const isPromptDelivery = effectiveModel?.generationOptions?.delivery === 'prompt'
     || effectiveModel?.provider === 'codex';
-  const artifactKind = modality === 'image' ? 'asset-image' : modality === 'video' ? 'asset-video' : 'asset-audio';
+  const refLimit = effectiveModel ? modelReferenceLimit(effectiveModel) : (modality === 'video' ? 1 : undefined);
+  const resolvedRefs = attachedImageReferences?.length
+    ? (refLimit === undefined ? [...attachedImageReferences] : attachedImageReferences.slice(0, Math.max(0, refLimit)))
+    : [];
+  const referenceArg = resolvedRefs.length > 0
+    ? `references=${JSON.stringify(resolvedRefs)}`
+    : hasInputImage && refLimit !== 0
+      ? 'references=[<attached image assetId/versionId>]'
+      : null;
 
   const toolArgs: string[] = [
     'action="generate"',
     `modality="${modality}"`,
     ...(effectiveModel?.mode && modality === 'audio' ? [`mode="${effectiveModel.mode}"`] : []),
     ...(modelId ? [`model="${modelId}"`] : []),
-    ...(hasInputImage ? ['references=[<attached image assetId/versionId>]'] : []),
+    ...(referenceArg ? [referenceArg] : []),
     ...(Object.keys(wireParameters).length > 0 ? [`parameters=${JSON.stringify(wireParameters)}`] : []),
   ];
 
@@ -473,6 +567,12 @@ export function buildMediaHiddenDirective({
   if (styleNotes.length > 0) constraints.push(styleNotes.join(', '));
   if (inputImageRatioLocked) constraints.push('aspect ratio follows attached first-frame image');
   if (alwaysOnAudio) constraints.push('selected video model generates native audio automatically');
+  if (modality === 'audio' && effectiveModel?.mode === 'text-to-speech') {
+    constraints.push('for text-to-speech, pass only the exact spoken narration words as prompt (no meta-instructions)');
+  }
+  if (hasInputImage && refLimit === 0) {
+    constraints.push(`selected model ${modelId ?? ''} does not accept input image references; omit references or switch to a reference-capable model`);
+  }
   if (!modelId) constraints.push('inspect configured providers via openmotion_media_use first');
 
   const prefix = modality === 'image'
@@ -480,10 +580,11 @@ export function buildMediaHiddenDirective({
     : modality === 'video'
       ? 'Super Agent AI Video mode'
       : 'Super Agent Audio mode';
+  const pollInstruction = 'keep calling openmotion_assets_use(action="status", jobId=...) sequentially until job.state reaches "completed" or "failed" (each status call automatically waits up to ~55s; NEVER call schedule, timers, or shell sleep, and NEVER end your turn while queued or running; video jobs can take 60-180s)';
 
   if (isPromptDelivery && modelId) {
-    return `${prefix} (model="${modelId}"): generate or refine the ${modality} asset via openmotion_assets_use(${toolArgs.join(', ')}) (honor parameters in the generation prompt when using prompt-delivery model ${modelId})${constraints.length ? ` (${constraints.join('; ')})` : ''}, poll with status, inspect with read to iterate/optimize if needed, and present it in the Artifact Viewer via openmotion_present_artifact(kind="${artifactKind}", assetId=..., versionId=...).`;
+    return `${prefix} (model="${modelId}"): generate or refine the ${modality} asset via openmotion_assets_use(${toolArgs.join(', ')}) (honor parameters in the generation prompt when using prompt-delivery model ${modelId})${constraints.length ? ` (${constraints.join('; ')})` : ''}, ${pollInstruction}, inspect with read to iterate/optimize if needed, and present it in the Artifact Viewer via openmotion_present_artifact(kind="asset", assetId=..., versionId=...).`;
   }
 
-  return `${prefix}: generate and optimize the ${modality} asset via openmotion_assets_use(${toolArgs.join(', ')})${constraints.length ? ` (${constraints.join('; ')})` : ''}, poll job status if queued, inspect the result with openmotion_assets_use(action="read", assetId=..., versionId=...) so you can refine parameters/prompt if needed, and present the completed output in the Artifact Viewer via openmotion_present_artifact(kind="${artifactKind}", assetId=..., versionId=...).`;
+  return `${prefix}: generate and optimize the ${modality} asset via openmotion_assets_use(${toolArgs.join(', ')})${constraints.length ? ` (${constraints.join('; ')})` : ''}, ${pollInstruction}, inspect the result with openmotion_assets_use(action="read", assetId=..., versionId=...) so you can refine parameters/prompt if needed, and present the completed output in the Artifact Viewer via openmotion_present_artifact(kind="asset", assetId=..., versionId=...).`;
 }

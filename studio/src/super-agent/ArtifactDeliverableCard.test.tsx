@@ -127,7 +127,7 @@ describe('ArtifactDeliverableCard', () => {
           createdAt: 1,
           updatedAt: 2,
         },
-        expected: ['Preview', 'Share', 'Export', 'Edit in Studio'],
+        expected: ['Open editor', 'Share', 'Export'],
       },
       {
         artifact: {
@@ -138,7 +138,7 @@ describe('ArtifactDeliverableCard', () => {
           createdAt: 1,
           updatedAt: 2,
         },
-        expected: ['Preview', 'Share', 'Export video'],
+        expected: ['Open editor', 'Share'],
       },
       {
         artifact: {
@@ -194,6 +194,12 @@ describe('ArtifactDeliverableCard', () => {
       const actionText = container.querySelector('.om-sa-deliverable-actions')?.textContent ?? '';
       for (const label of item.expected) {
         expect(actionText).toContain(label);
+      }
+      if (item.artifact.kind === 'design-project') {
+        expect(actionText).not.toContain('Edit in Studio');
+      }
+      if (item.artifact.kind === 'motion-project') {
+        expect(actionText).not.toContain('Export video');
       }
       act(() => root.unmount());
       container.remove();
