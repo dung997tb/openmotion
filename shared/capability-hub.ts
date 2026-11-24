@@ -58,7 +58,7 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
   {
     id: 'game',
     title: 'Game Studio',
-    description: 'Build, validate, simulate, playtest, capture covers, and publish single-player or multiplayer HTML games.',
+    description: 'Build, validate, simulate, playtest, capture covers, and publish single-player HTML games.',
     tools: [
       'openmotion_game_create',
       'openmotion_game_get',

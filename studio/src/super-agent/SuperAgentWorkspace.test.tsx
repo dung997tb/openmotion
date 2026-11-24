@@ -13,7 +13,7 @@ import { SUPER_AGENT_API } from '../../../shared/super-agent';
 import { buildSuperAgentHandoff } from '../../../shared/capability-hub';
 import { queueSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { clampSuperAgentViewerWidth, SuperAgentWorkspace } from './SuperAgentWorkspace';
-import { ExecutionTimeline, SuperAgentLiveProgressDock } from './ExecutionTimeline';
+import { ExecutionTimeline, formatElapsedDuration, SuperAgentLiveProgressDock } from './ExecutionTimeline';
 import { SimpleMarkdown } from './SimpleMarkdown';
 import { DEFAULT_MODE_COMPOSER_OPTIONS, getModeComposerPlaceholder } from './ModeComposerControls';
 import { SUPER_AGENT_MODES } from './ModeResourceShowcase';
@@ -1245,7 +1245,7 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Running node -v');
   expect(document.querySelector('.om-sa-plan-card')?.textContent).toContain('Check Node version');
 
-  // Long user prompt defaults to collapsed, expands on click, and collapses cleanly via top pill
+  // Long user prompts stay collapsed until expanded.
   const longPromptChat: SuperAgentChat = {
     ...timelineChat,
     messages: [
@@ -1280,15 +1280,17 @@ it('renders ExecutionTimeline live status, grouped Work Log with diffs/commands,
   expect(bubble.textContent).toContain('Show full prompt');
   expect(bubble.textContent).toContain('12 lines');
 
+  const promptDisclosure = bubble.querySelector<HTMLButtonElement>('.om-sa-user-bubble-toggle')!;
   await act(async () => {
-    bubble.querySelector<HTMLButtonElement>('.om-sa-user-bubble-toggle')!.click();
+    promptDisclosure.click();
   });
   await flush();
   expect(bubble.hasAttribute('data-expanded')).toBe(true);
-  expect(bubble.querySelector('.om-sa-user-collapse-pill')?.textContent).toContain('Collapse');
+  expect(promptDisclosure.textContent).toContain('Collapse');
+  expect(bubble.querySelector('.om-sa-user-bubble-text')?.textContent).toContain('Brief line 12');
 
   await act(async () => {
-    bubble.querySelector<HTMLButtonElement>('.om-sa-user-collapse-pill')!.click();
+    promptDisclosure.click();
   });
   await flush();
   expect(bubble.hasAttribute('data-collapsed')).toBe(true);
@@ -1688,6 +1690,18 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   const iframe = viewer.querySelector('iframe');
   expect(iframe?.getAttribute('src')).toContain(`/motion-api/games/${GAME_ID}/play/index.html`);
 
+  const menuBtn = viewer.querySelector('button[aria-label="Browser options"]') as HTMLButtonElement;
+  expect(menuBtn).toBeTruthy();
+  expect(viewer.querySelector('.om-sa-viewer-toolbar button[aria-label="Capture screenshot to chat"]')).toBeTruthy();
+  await act(async () => menuBtn.click());
+  await flush();
+  const previewMenu = document.querySelector('.om-sa-browser-menu');
+  expect(previewMenu?.textContent).toContain('Console & errors');
+  expect(previewMenu?.textContent).not.toContain('Capture screenshot to chat');
+  expect(previewMenu?.textContent).toContain('Attach');
+  await act(async () => menuBtn.click());
+  await flush();
+
   // Responsive viewport dropdown switches Game preview viewports without adding a secondary bar
   const deviceBtn = viewer.querySelector('button[aria-label="Viewport presets"]') as HTMLButtonElement;
   expect(deviceBtn).toBeTruthy();
@@ -1724,8 +1738,6 @@ it('auto-sends queued game handoffs from Game Studio, renders gamepad-line icon,
   expect(designFolder?.hasAttribute('open')).toBe(true);
   expect(vendorFolder?.hasAttribute('open')).toBe(false);
 
-  const menuBtn = viewer.querySelector('button[aria-label="Browser options"]') as HTMLButtonElement;
-  expect(menuBtn).toBeTruthy();
   await act(async () => menuBtn.click());
   await flush();
   const openStudioBtn = [...document.querySelectorAll('.om-sa-browser-menu button')].find(b => b.textContent?.includes('Open in Game Studio')) as HTMLButtonElement;
@@ -1949,7 +1961,7 @@ it('supports web preview device toolbar, browser options menu, and visual elemen
   expect(lastTurnBody.attachments?.[0]?.annotation?.comment).toBe('Make button rounded');
 });
 
-it('switches Super Agent Game mode into Game Studio UI, supports style/orientation/multiplayer pickers, and scaffolds playable game chats', async () => {
+it('keeps multiplayer games playable in the catalog and only scaffolds single-player or playable ad games', async () => {
   const GAME_CHAT_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
   const CREATED_GAME_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
   let createGameBody: any = null;
@@ -2018,13 +2030,19 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
       return json({ conversation: { ...createdChat, state: 'running' } });
     }
     if (url === `${SUPER_AGENT_API}/chats/${GAME_CHAT_ID}`) return json({ conversation: createdChat });
-    if (url.endsWith('/motion-api/games') && method === 'GET') return json({ games: [] });
+    if (url.endsWith('/motion-api/games') && method === 'GET') {
+      const template = { ...communityGames[0], external: undefined, cover: null, source: 'template', playUrl: '/api/games/example/play/index.html' };
+      return json({ games: [
+        { ...template, id: 'legacy-arena', title: 'Legacy Arena', multiplayer: true, maxPlayers: 4 },
+        ...Array.from({ length: 26 }, (_, i) => ({ ...template, id: `example-${i}`, title: `Example ${i + 1}` })),
+      ] });
+    }
     if (url.endsWith('/motion-api/games') && method === 'POST') {
       createGameBody = JSON.parse(String(init?.body ?? '{}'));
       return json({
         game: {
           id: CREATED_GAME_ID,
-          title: 'Neon Co-op',
+          title: 'Neon Arena',
           description: createGameBody.prompt,
           genre: createGameBody.genre ?? 'shooter',
           style: createGameBody.style ?? null,
@@ -2032,6 +2050,7 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
           multiplayer: Boolean(createGameBody.multiplayer),
           maxPlayers: createGameBody.multiplayer ? 4 : 1,
           orientation: createGameBody.orientation ?? 'landscape',
+          playableAd: createGameBody.playableAd,
           status: 'draft',
           cover: null,
           playUrl: `/api/games/${CREATED_GAME_ID}/play/index.html`,
@@ -2046,7 +2065,7 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
           createdAt: '2026-11-22T00:00:00.000Z',
           updatedAt: '2026-11-22T00:00:00.000Z',
         },
-        agentInstruction: 'Use openmotion_game_* tools to build Neon Co-op.',
+        agentInstruction: 'Use openmotion_game_* tools to build Neon Arena.',
       });
     }
     return json({});
@@ -2096,13 +2115,35 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     expect(container.querySelectorAll('.om-sa-game-genre-card').length).toBe(6);
     expect(container.querySelectorAll('.om-sa-game-showcase-card').length).toBeGreaterThan(0);
 
+    const filters = container.querySelector('.om-sa-showcase-tabs')!;
+    const gameTab = [...filters.querySelectorAll('button')].find(tab => tab.textContent?.includes('All games'))!;
+    const brandTab = [...filters.querySelectorAll('button')].find(tab => tab.textContent?.includes('Brand Kits'))!;
+    const viewAll = container.querySelector<HTMLButtonElement>('.om-sa-showcase-bar .om-sa-showcase-more')!;
+    const gameCount = Number(gameTab.querySelector('.om-sa-tab-count')?.textContent);
+    expect(viewAll.textContent).toBe('View all');
+    expect(container.querySelectorAll('.om-sa-game-showcase-card').length).toBeLessThan(gameCount);
+    await act(async () => viewAll.click());
+    expect(container.querySelectorAll('.om-sa-game-showcase-card')).toHaveLength(gameCount);
+    const legacyCard = container.querySelector('[aria-label="Play Legacy Arena"]')?.closest('article');
+    expect(legacyCard).toBeTruthy();
+    expect(legacyCard?.querySelector('.om-sa-game-tile-remix')).toBeNull();
+    expect(container.querySelector('.om-sa-mode-ideas')?.textContent).not.toContain('Co-op 3D crystal defense');
+    await act(async () => brandTab.click());
+    expect(container.querySelector('.om-sa-showcase-more')).toBe(viewAll);
+    expect(container.querySelector('.om-sa-game-search')).toBeNull();
+    await act(async () => gameTab.click());
+    expect(container.querySelector('.om-sa-showcase-more')).toBe(viewAll);
+    expect(container.querySelector('.om-sa-game-search')).toBeTruthy();
+
     const topBar = container.querySelector('.om-sa-composer-top-bar')!;
     expect(topBar).toBeTruthy();
     expect(topBar.textContent).toContain('Shooter');
     expect(topBar.textContent).toContain('Style');
     expect(topBar.textContent).toContain('Setting');
     expect(topBar.textContent).toContain('Landscape');
-    expect(topBar.textContent).toContain('Single player');
+    const adSwitch = topBar.querySelector<HTMLElement>('[role="switch"][aria-label="Playable ad"]')!;
+    const adSwitchLabel = adSwitch.closest('label')!;
+    expect(adSwitch.getAttribute('aria-checked')).toBe('false');
 
     // Open Style popover and pick Pixel art
     const styleTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Style')) as HTMLButtonElement;
@@ -2124,41 +2165,29 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     await act(async () => portraitOption.click());
     await flush();
     expect(topBar.textContent).toContain('Portrait');
-    // Portrait defaults to a playable ad, like Game Studio.
-    expect(topBar.textContent).toContain('Playable ad');
-
-    // Open Players dropdown: portrait offers Single player, Multiplayer and Playable ad; select Multiplayer
-    const playersTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Playable ad')) as HTMLButtonElement;
-    expect(playersTrigger.getAttribute('aria-haspopup')).toBe('listbox');
-    await act(async () => playersTrigger.click());
+    expect(adSwitch.getAttribute('aria-checked')).toBe('true');
+    await act(async () => adSwitchLabel.click());
     await flush();
-    const playerRows = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Players"] .om-sa-game-choice-row')];
-    expect(playerRows.map(row => row.querySelector('strong')?.textContent)).toEqual(['Single player', 'Multiplayer', 'Playable ad']);
-    expect(playerRows.find(row => row.textContent?.includes('Playable ad'))?.getAttribute('aria-selected')).toBe('true');
-    const multiplayerOption = playerRows.find(row => row.querySelector('strong')?.textContent === 'Multiplayer')!;
-    expect(multiplayerOption).toBeTruthy();
-    await act(async () => multiplayerOption.click());
-    await flush();
-    expect(topBar.textContent).toContain('Multiplayer');
+    expect(topBar.textContent).toContain('Portrait');
+    expect(adSwitch.getAttribute('aria-checked')).toBe('false');
 
-    // Switching back to portrait selects Playable ad again; then pick Multiplayer for the send below.
-    const pickRow = async (pill: string, row: string) => {
-      const trigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes(pill)) as HTMLButtonElement;
-      await act(async () => trigger.click()); await flush();
-      const option = [...document.querySelectorAll('.om-sa-game-choice-row')].find(b => b.querySelector('strong')?.textContent === row) as HTMLButtonElement;
-      await act(async () => option.click()); await flush();
-    };
-    await pickRow('Portrait', 'Landscape');
-    await pickRow('Landscape', 'Portrait');
-    expect(topBar.textContent).toContain('Playable ad');
-    await pickRow('Playable ad', 'Multiplayer');
-    expect(topBar.textContent).toContain('Multiplayer');
+    const portraitTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Portrait'))!;
+    await act(async () => portraitTrigger.click());
+    await flush();
+    const landscapeOption = [...document.querySelectorAll<HTMLButtonElement>('.om-sa-game-choice-row')].find(b => b.querySelector('strong')?.textContent === 'Landscape')!;
+    await act(async () => landscapeOption.click());
+    await flush();
+    expect(adSwitch.getAttribute('aria-checked')).toBe('false');
+    await act(async () => adSwitchLabel.click());
+    await flush();
+    expect(topBar.textContent).toContain('Portrait');
+    expect(adSwitch.getAttribute('aria-checked')).toBe('true');
 
     // Send brief -> creates Game Studio project and starts Super Agent game turn
     const textarea = container.querySelector('.om-sa-composer textarea') as HTMLTextAreaElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-      setter.call(textarea, 'Co-op pixel shooter in space');
+      setter.call(textarea, 'Pixel shooter in space');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const sendBtn = container.querySelector('.om-sa-send-btn') as HTMLButtonElement;
@@ -2167,25 +2196,25 @@ it('switches Super Agent Game mode into Game Studio UI, supports style/orientati
     await flush();
 
     expect(createGameBody).toEqual({
-      prompt: 'Co-op pixel shooter in space',
+      prompt: 'Pixel shooter in space',
       genre: 'shooter',
       style: 'pixel',
       setting: null,
-      multiplayer: true,
+      multiplayer: false,
       orientation: 'portrait',
-      playableAd: false,
+      playableAd: true,
     });
     expect(createChatBody?.intent).toBe('game');
     expect(turnBody?.mode).toBe('game');
     expect(turnBody?.attachments?.some((att: any) => att.kind === 'game-project' && att.id === CREATED_GAME_ID)).toBe(true);
-    expect(turnBody?.text).toBe('Co-op pixel shooter in space');
+    expect(turnBody?.text).toBe('Pixel shooter in space');
     expect(turnBody?.hiddenInstructions).toContain('openmotion_present_artifact');
     expect(turnBody?.contextTags?.map((tag: any) => tag.label)).toEqual([
       'Game',
       'Shooter',
       'Pixel art',
       '9:16',
-      'Multiplayer',
+      'Playable ad',
     ]);
   } finally {
     await act(async () => root.unmount());
@@ -2652,6 +2681,7 @@ it('renders persistent live progress dock, ticking step timers, and Continue rec
           startedAt: Date.now() - 3_200,
         },
       },
+      { id: 'r-empty', role: 'reasoning', text: '', status: 'streaming', createdAt: Date.now() - 3_000 },
       {
         id: 'r-1',
         role: 'reasoning',
@@ -2698,7 +2728,9 @@ it('renders persistent live progress dock, ticking step timers, and Continue rec
   expect(progressBar.getAttribute('data-determinate')).toBe('true');
   expect(progressBar.style.width).toBe('33%');
   expect(document.querySelector('.om-sa-work-summary-timer')).toBeTruthy();
+  expect(document.querySelectorAll('.om-sa-reasoning-row')).toHaveLength(1);
   expect(document.querySelector('.om-sa-reasoning-label')?.textContent).toMatch(/Thinking… · \d+(?:\.\d+)?s/);
+  expect(document.querySelector('.om-sa-work-summary-label')?.textContent).toBe('Running steps (2)');
 
   // 2. Cancelled mid-run turn renders recovery card with step summary and Continue button
   const cancelledChat: SuperAgentChat = {
@@ -2720,10 +2752,12 @@ it('renders persistent live progress dock, ticking step timers, and Continue rec
           status: 'completed',
           category: 'mcp',
           startedAt: 2000,
-          finishedAt: 3200,
-          durationMs: 1200,
+          finishedAt: 2006,
+          durationMs: 6,
+          inputPreview: JSON.stringify({ workflow: 'game', section: 'review' }),
         },
       },
+      { id: 'r-old-empty', role: 'reasoning', text: '', status: 'completed', durationMs: 110_000, createdAt: 3000 },
       {
         id: 'r-done',
         role: 'reasoning',
@@ -2758,6 +2792,9 @@ it('renders persistent live progress dock, ticking step timers, and Continue rec
   expect(interruptedCard).toBeTruthy();
   expect(interruptedCard.textContent).toContain('Stopped before finishing');
   expect(interruptedCard.textContent).toContain('2 steps');
+  expect(document.querySelectorAll('.om-sa-reasoning-row')).toHaveLength(1);
+  expect(document.querySelector('.om-sa-tool-summary')?.textContent).toBe('Game review rubric');
+  expect(document.querySelector('.om-sa-step-time')?.textContent).toBe('6ms');
   const continueBtn = interruptedCard.querySelector('.om-sa-continue-btn') as HTMLButtonElement;
   expect(continueBtn.textContent).toContain('Continue');
   await act(async () => continueBtn.click());
@@ -3463,4 +3500,66 @@ it('SuperAgentWorkspace shows task project directory in header and opens changed
   );
   expect(selectedTab?.textContent).toContain('style.css');
   expect(container.textContent).toContain('.hud { color: red; }');
+});
+
+
+it('shows game validation failures in the step list without relying on an expanded output', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const rowResults = [
+    { tool: 'openmotion_game_validate', outputPreview: '{"id":"old","passed":false,"diagnostics":[\n…' },
+    { tool: 'openmotion_game_validate', validationPassed: false, outputPreview: 'Truncated MCP output' },
+    { tool: 'openmotion_game_validate', outputPreview: '{"passed":true,"diagnostics":[]}' },
+    { tool: 'other_tool', outputPreview: '{"passed":false}' },
+  ];
+  try {
+    await act(async () => root.render(
+      <I18nProvider initialLocale="en">
+        <ExecutionTimeline
+          chat={{ ...sampleChat, state: 'idle', approvals: [], artifacts: [], messages: [
+            { id: 'user', role: 'user', text: 'Validate game', createdAt: 1000 },
+            ...rowResults.map((event, index) => ({
+              id: `row-${index}`,
+              role: 'tool' as const,
+              text: event.tool,
+              createdAt: 2000 + index,
+              toolEvent: {
+                ...event, callId: `call-${index}`,
+                label: event.tool === 'other_tool' ? 'Other tool' : 'Validated game build',
+                status: 'completed' as const, startedAt: 2000 + index,
+              },
+            })),
+            { id: 'assistant', role: 'assistant', text: 'Done checking', createdAt: 3000 },
+          ] }}
+          busy={false}
+          sending={false}
+          engineLabel="Codex"
+          onOpenArtifactId={vi.fn()}
+          onPreviewAttachment={vi.fn()}
+          onCopyText={vi.fn()}
+          onApprove={vi.fn()}
+        />
+      </I18nProvider>,
+    ));
+    const toggle = container.querySelector<HTMLButtonElement>('.om-sa-work-summary-btn')!;
+    if (toggle.getAttribute('aria-expanded') === 'false') await act(async () => toggle.click());
+    const rows = [...container.querySelectorAll('.om-sa-tool-row')];
+    expect(rows.map(row => row.querySelector('.om-sa-tool-label')?.textContent)).toEqual([
+      'Game validation failed', 'Game validation failed', 'Validated game build', 'Other tool',
+    ]);
+    expect(rows.map(row => row.querySelector('.om-sa-tool-status')?.getAttribute('data-status'))).toEqual([
+      'failed', 'failed', 'completed', 'completed',
+    ]);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it('formats measured step durations without a minimum or a 60-second remainder', () => {
+  expect(formatElapsedDuration(0)).toBe('<1ms');
+  expect(formatElapsedDuration(1)).toBe('1ms');
+  expect(formatElapsedDuration(8)).toBe('8ms');
+  expect(formatElapsedDuration(119_999)).toBe('2m 0s');
 });

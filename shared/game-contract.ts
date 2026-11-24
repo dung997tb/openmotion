@@ -2,7 +2,7 @@
  * Game Studio contract shared by Studio (studio/src/motion/game) and the local
  * service (game-projects.ts, mounted at /api/games/).
  *
- * Flow: pick genre / style / setting / multiplayer → one-line brief → the Agent
+ * Flow: pick genre / style / setting → one-line single-player brief → the Agent
  * interviews, fixes a style formula, writes the game and validates it → the game
  * is published to the local game market where anyone can play it and remix it.
  */
@@ -33,6 +33,8 @@ export type GameBrief = {
 export type GameCard = {
   id: string;
   title: string;
+  /** The workspace owner named the game explicitly. Keep it when the Agent revises the game. */
+  titleCustomized?: boolean;
   description: string;
   genre: GameGenre;
   style: GameStyle | null;

@@ -1,7 +1,7 @@
 import { Button } from 'open-design-ui/button';
 import { useState } from 'react';
 import type { DesignExportFormat } from '../../../shared/design-project';
-import type { SuperAgentArtifact } from '../../../shared/super-agent';
+import { isPlayableAdArtifact, type SuperAgentArtifact } from '../../../shared/super-agent';
 import type { WebPublishTargetKind } from '../../../shared/web-publish';
 import { Popover } from '../components/ui/Popover';
 import { WebPublishPopover } from '../components/WebPublishPopover';
@@ -260,7 +260,9 @@ export function ArtifactDeliverableCard({
   const meta = artifactDeliverableMeta(artifact);
   const rawSub = (artifact.subtitle ?? '').trim();
   const subDetail = rawSub && !RAW_ARTIFACT_SUBTITLES.has(rawSub.toLowerCase()) ? rawSub : '';
-  const subtitleText = subDetail ? `${t(meta.typeLabel)} · ${subDetail}` : t(meta.typeLabel);
+  const subtitleText = isPlayableAdArtifact(artifact)
+    ? t('Playable ad')
+    : subDetail ? `${t(meta.typeLabel)} · ${subDetail}` : t(meta.typeLabel);
   const cloudTarget = resolveArtifactCloudTarget(artifact);
 
   const thumbUrl = !thumbFailed && artifact.kind === 'asset-image' && artifact.url
