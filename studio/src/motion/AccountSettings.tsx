@@ -49,12 +49,18 @@ function requestSubscriptionPage(destination?: 'console') {
   return gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', destination ? { destination } : {});
 }
 
-/** Account menu「Console」: opens the OpenDesign console dashboard in the browser the account signed in with. */
+/**
+ * Account menu「Console」: opens the OpenDesign console dashboard in the browser the account signed in with. Resolves
+ * false when neither the system browser nor a popup opened, so the caller can fall back to Subscription & usage.
+ */
 export async function openOpenDesignConsole() {
-  const { url, opened } = await requestSubscriptionPage('console');
-  if (opened) return;
-  const page = window.open(url, '_blank');
-  if (page) page.opener = null;
+  try {
+    const { url, opened } = await requestSubscriptionPage('console');
+    if (opened) return true;
+    const page = window.open(url, '_blank');
+    if (page) page.opener = null;
+    return Boolean(page);
+  } catch { return false; }
 }
 
 /** Free and Go accounts are guided to Plus; other plans, unknown billing and signed-out accounts are not. */
