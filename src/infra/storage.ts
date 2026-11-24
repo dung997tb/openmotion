@@ -1,4 +1,6 @@
-import type { Readable } from 'node:stream';
+import type { Database } from '../db/client.ts';
+import { TextRevisionStorage } from './text-revisions.ts';
+import { Readable } from 'node:stream';
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -106,6 +108,18 @@ export function workspaceBlobKey(workspaceId: string, sha256: string): string {
   assertUuid(workspaceId, 'workspaceId');
   assertSha256(sha256);
   return `workspaces/${workspaceId}/blobs/${sha256}`;
+}
+
+// This logical address is resolved using PostgreSQL before any S3 request is made.
+export function textRevisionKey(workspaceId: string, id: string): string {
+  assertUuid(workspaceId, 'workspaceId');
+  assertSha256(id);
+  return `workspaces/${workspaceId}/text-revisions/${id}`;
+}
+
+function revisionAddress(key: string): [string, string] | null {
+  const match = /^workspaces\/([a-f0-9-]{36})\/text-revisions\/([a-f0-9]{64})$/i.exec(key);
+  return match ? [match[1], match[2]] : null;
 }
 
 export function catalogBlobKey(sha256: string): string {
@@ -236,6 +250,7 @@ export function resolveCorsAllowedOrigins(
 // ---------------------------------------------------------------------------
 
 export interface StorageServiceOptions {
+  textRevisionDb?: Database;
   bucket: string;
   region: string;
   endpoint?: string;
@@ -293,6 +308,7 @@ function buildS3Client(options: StorageServiceOptions, endpoint?: string): S3Cli
 }
 
 export class StorageService implements StoragePort {
+  private readonly revisions?: TextRevisionStorage;
   readonly bucket: string;
   readonly internalClient: S3Client;
   readonly signerClient: S3Client;
@@ -303,6 +319,7 @@ export class StorageService implements StoragePort {
 
   constructor(options: StorageServiceOptions) {
     this.bucket = options.bucket;
+    if (options.textRevisionDb) this.revisions = new TextRevisionStorage(options.textRevisionDb, this);
     this.internalClient = buildS3Client(options, options.endpoint);
     const signerEndpoint = options.publicEndpoint ?? options.endpoint;
     this.signerClient =
@@ -314,6 +331,15 @@ export class StorageService implements StoragePort {
     this.defaultPresignCacheWindowSec =
       options.defaultPresignCacheWindowSec ?? DEFAULT_PRESIGN_CACHE_WINDOW_SEC;
     this.publicOrigin = options.publicOrigin;
+  }
+
+  private revisionStore(): TextRevisionStorage {
+    if (!this.revisions) throw new CloudError('STORAGE_ERROR', 'Text revision store is unavailable.', { status: 503 });
+    return this.revisions;
+  }
+
+  ensureTextCheckpoint(workspaceId: string, id: string) {
+    return this.revisionStore().checkpoint(workspaceId, id);
   }
 
   async putObject(
@@ -361,6 +387,8 @@ export class StorageService implements StoragePort {
   }
 
   async copyObject(sourceKey: string, destinationKey: string, contentType?: string): Promise<void> {
+    const address = revisionAddress(sourceKey);
+    if (address) sourceKey = workspaceBlobKey(address[0], await this.ensureTextCheckpoint(...address));
     const encodedSource = `${encodeURIComponent(this.bucket)}/${sourceKey
       .split('/')
       .map((seg) => encodeURIComponent(seg))
@@ -381,6 +409,8 @@ export class StorageService implements StoragePort {
   }
 
   async getObjectBuffer(key: string, maxBytes?: number): Promise<Buffer> {
+    const address = revisionAddress(key);
+    if (address) return this.revisionStore().read(...address, maxBytes);
     const response = await this.internalClient.send(
       new GetObjectCommand({
         Bucket: this.bucket,
@@ -413,6 +443,12 @@ export class StorageService implements StoragePort {
   }
 
   async getObjectStream(key: string, range?: string): Promise<ObjectStreamResult> {
+    const address = revisionAddress(key);
+    if (address) {
+      if (range) return this.getObjectStream(workspaceBlobKey(address[0], await this.ensureTextCheckpoint(...address)), range);
+      const bytes = await this.revisionStore().read(...address);
+      return { stream: Readable.from([bytes]), contentLength: bytes.length };
+    }
     const response = await this.internalClient.send(
       new GetObjectCommand({
         Bucket: this.bucket,
@@ -433,6 +469,8 @@ export class StorageService implements StoragePort {
   }
 
   async headObject(key: string): Promise<HeadObjectResult | null> {
+    const address = revisionAddress(key);
+    if (address) return this.revisionStore().head(...address);
     try {
       const response = await this.internalClient.send(
         new HeadObjectCommand({
@@ -504,6 +542,8 @@ export class StorageService implements StoragePort {
   }
 
   async presignGet(key: string, options: StoragePresignGetOptions = {}): Promise<string> {
+    const address = revisionAddress(key);
+    if (address) key = workspaceBlobKey(address[0], await this.ensureTextCheckpoint(...address));
     const immutable = options.immutable ?? isImmutableCasKey(key);
     const rawWindowSec =
       options.cacheWindowSec !== undefined

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, expect, it, vi } from "vitest";
+import { PREVIEW_SOURCE_IDENTITY } from "../../../../src/studio/engine/preview-bridge";
 import { PREVIEW_CANVAS_DRAG } from "../../../../src/studio/engine/preview-canvas-drag";
 
 const originalHash = "a".repeat(64);
@@ -17,7 +18,7 @@ function createScene() {
   vi.spyOn(document, "elementFromPoint").mockImplementation(x => elements[x < 50 ? 0 : 1]!);
   // Execute the exact child-frame script with deterministic layout measurements.
   const dispatch = new Function("document", "getComputedStyle", "HTMLElement", "sourceVersions", "describe",
-    "innerWidth", "innerHeight", "picked", PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
+    "innerWidth", "innerHeight", "picked", PREVIEW_SOURCE_IDENTITY + PREVIEW_CANVAS_DRAG + "\nreturn canvasDrag;")(
     document, (el: HTMLElement) => ({ position: el.style.position || "static", left: el.style.left, top: el.style.top, width: "20px", height: "10px", transform: "none", display: "block" }),
     HTMLElement, { "one.html": originalHash, "two.html": originalHash },
     (el: HTMLElement) => ({ sourceFile: el.id + ".html", elementId: el.id, geometry: el.getBoundingClientRect(),

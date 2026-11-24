@@ -203,7 +203,7 @@ export function useWorkspace(
       if (event === 'reconnected') {
         refreshStatus(0);
         refreshCatalog(0);
-      } else refreshStatus(activeWorkspaceInterval);
+      } else if (event === 'render-updated') refreshStatus(activeWorkspaceInterval);
     });
     return () => { controller.abort(); unsubscribeSaves(); unsubscribeActivity(); };
   }, [projectId, sessionWithoutProject, updateCatalog, request, connectionCheck, navigate]);

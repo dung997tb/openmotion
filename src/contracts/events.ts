@@ -6,6 +6,10 @@ export type ProjectEvent =
       revision: string;
       versionId?: string;
       paths: string[];
+      /** Exact ETags of changed HTML files. A null value means the path was deleted. */
+      fileVersions?: Record<string, string | null>;
+      /** Legacy deletion sentinel for commits containing only removals. */
+      version?: string;
       writeToken?: string;
       affectsPreview?: boolean;
       fileTreeChanged?: boolean;

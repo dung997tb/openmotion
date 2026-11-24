@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
+import { decodedUrlPath } from '@hyperframes/parsers/asset-paths';
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { FONT_EXT } from '../../../shared/asset-names.ts';
@@ -11,20 +13,68 @@ import {
   type StudioVariables,
 } from '../context.ts';
 import { infoInMemory } from '../engine/inspect.ts';
-import { formatVersionFromSha256 } from '../etag.ts';
-import { listVirtualCompositions } from '../virtual-project-store.ts';
+import { formatFileVersion } from '../etag.ts';
+import {
+  listVirtualCompositions,
+  resolveVirtualPath,
+  virtualDirname,
+} from '../virtual-project-store.ts';
 import { classifyPreviewProxyTarget } from '../../workers/media-ingest.ts';
+
+function resolveNestedCompositionPath(
+  owner: string,
+  rawRef: string,
+  byPath: ReadonlyMap<string, string>,
+): string | null {
+  const trimmed = rawRef.trim();
+  if (!trimmed || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(trimmed)) return null;
+  const pathOnly = decodedUrlPath(trimmed.split(/[?#]/)[0] ?? '');
+  if (!pathOnly) return null;
+  const local = resolveVirtualPath(virtualDirname(owner), pathOnly);
+  if (local && byPath.has(local)) return local;
+  const fromRoot = resolveVirtualPath('', pathOnly);
+  if (fromRoot && byPath.has(fromRoot)) return fromRoot;
+  return null;
+}
+
+function collectNestedCompositionDeps(
+  rootComp: string,
+  byPath: ReadonlyMap<string, string>,
+  readText?: (filePath: string) => string | null,
+): string[] {
+  if (!readText) return [];
+  const visited = new Set<string>([rootComp]);
+  const queue: string[] = [rootComp];
+  const deps: string[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const html = readText(current);
+    if (!html || !/data-composition-src/i.test(html)) continue;
+    for (const tag of scanHtmlOpeningTags(html)) {
+      const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
+      if (attr?.kind !== 'value') continue;
+      const target = resolveNestedCompositionPath(current, decodeAuthoredAttribute(attr.value), byPath);
+      if (!target || visited.has(target)) continue;
+      visited.add(target);
+      deps.push(target);
+      queue.push(target);
+    }
+  }
+  return deps.sort((a, b) => a.localeCompare(b));
+}
 
 /**
  * Compute per-composition cache revisions so editing one sub-composition does not
  * invalidate thumbnail caches for untouched sibling scenes, while edits to shared
- * assets or `index.html`'s `<head>` still invalidate all dependent compositions.
+ * assets, `index.html`'s `<head>`, or transitively embedded `data-composition-src`
+ * compositions still invalidate all dependent compositions.
  */
 export function computeCompositionRevisions(
-  fileList: ReadonlyArray<{ readonly path: string; readonly sha256: string }>,
+  fileList: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly blobScope?: string }>,
   compositions: readonly string[],
   indexHtml: string | null,
   projectRevision: string,
+  readText?: (filePath: string) => string | null,
 ): Record<string, string> {
   const indexHead = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml ?? '')?.[1] ?? '';
   const indexHeadHash = createHash('sha256').update(indexHead).digest('hex').slice(0, 12);
@@ -33,11 +83,12 @@ export function computeCompositionRevisions(
   const sharedHash = createHash('sha256');
   const sorted = [...fileList].sort((a, b) => a.path.localeCompare(b.path));
   for (const file of sorted) {
-    byPath.set(file.path, file.sha256);
+    const version = file.blobScope ? `${file.blobScope}:${file.sha256}` : file.sha256;
+    byPath.set(file.path, version);
     if (file.path !== 'index.html' && !compSet.has(file.path)) {
       sharedHash.update(file.path);
       sharedHash.update(':');
-      sharedHash.update(file.sha256);
+      sharedHash.update(version);
       sharedHash.update('\n');
     }
   }
@@ -48,8 +99,29 @@ export function computeCompositionRevisions(
       revisions[comp] = projectRevision;
       continue;
     }
-    const sha = byPath.get(comp);
-    revisions[comp] = sha ? `${sha.slice(0, 16)}:${indexHeadHash}:${sharedTag}` : projectRevision;
+    const selfVersion = byPath.get(comp);
+    if (!selfVersion) {
+      revisions[comp] = projectRevision;
+      continue;
+    }
+    const deps = collectNestedCompositionDeps(comp, byPath, readText);
+    const ownTag =
+      deps.length === 0
+        ? createHash('sha256').update(selfVersion).digest('hex').slice(0, 16)
+        : (() => {
+            const h = createHash('sha256');
+            h.update(comp);
+            h.update(':');
+            h.update(selfVersion);
+            for (const dep of deps) {
+              h.update('\n');
+              h.update(dep);
+              h.update(':');
+              h.update(byPath.get(dep) ?? '');
+            }
+            return h.digest('hex').slice(0, 16);
+          })();
+    revisions[comp] = `${ownTag}:${indexHeadHash}:${sharedTag}`;
   }
   return revisions;
 }
@@ -89,6 +161,7 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
       compositions,
       virtual.readText('index.html'),
       detail.revision,
+      (filePath) => virtual.readText(filePath),
     );
     const info = infoInMemory(virtual);
 
@@ -341,7 +414,7 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
         size: f.sizeBytes,
         type: f.mimeType,
         isText: f.isText,
-        version: formatVersionFromSha256(f.sha256),
+        version: formatFileVersion(f.blobScope, f.sha256),
         modifiedAt: f.updatedAt.toISOString(),
         metadata: f.metadata ?? null,
       })),

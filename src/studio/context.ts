@@ -63,6 +63,7 @@ export interface DisklessStudioDeps {
   readonly fontCatalog?: ContainerFontCatalog;
   readonly fontsDir?: string;
   readonly runtimeRoot?: string;
+  readonly studioOrigin?: string;
   readonly resolveAuth?: (c: Context<{ Variables: StudioVariables }>) => AuthContext | Promise<AuthContext>;
   readonly skipDeterministicFonts?: boolean;
   readonly fetchImpl?: typeof fetch;

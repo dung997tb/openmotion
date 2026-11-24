@@ -33,11 +33,11 @@ import { projectFiles, projectVersionFiles } from '../db/schema/project-files.ts
 import type { Logger } from '../infra/logger.ts';
 import { cancelChannel, jobChannel, projectChannel, type RedisEventBus } from '../infra/redis.ts';
 import {
-  catalogBlobKey,
   compThumbnailKey,
   exportKey,
-  workspaceBlobKey,
 } from '../infra/storage.ts';
+import { resolveBlobStorageKey } from '../services/project-files-service.ts';
+import type { BlobScope } from '../contracts/storage.ts';
 import { mimeTypeForExportFormat } from '../services/export-service.ts';
 import {
   assertRenderSubprocessEnvClean,
@@ -55,7 +55,7 @@ const DEFAULT_HEALTH_INTERVAL_MS = 15_000;
 
 export interface HydratedSnapshotFile {
   path: string;
-  blobScope: 'workspace' | 'catalog';
+  blobScope: BlobScope;
   sha256: string;
   sizeBytes: number;
   mimeType: string;
@@ -310,10 +310,9 @@ export async function sweepStaleRenderTempDirs(tmpBaseDir = os.tmpdir(), logger?
 }
 
 /**
- * Hydrate an immutable snapshot (`project_version_files` or `project_files`) from S3 CAS
- * (`workspaceBlobKey` / `catalogBlobKey`) into an ephemeral `/tmp` directory, verify every
- * file's SHA-256 digest and path containment, and inject `.hyperframes/studio-manual-edits.json`
- * + `.hyperframes/studio-motion.json` runtime scripts into the ephemeral entry HTML copy.
+ * Read an immutable manifest into the renderer's temporary directory. Verify physical
+ * blobs by SHA-256 and logical revisions through their baseline and stored splices.
+ * Inject runtime-only manual edits and motion scripts into the temporary entry HTML.
  */
 export async function hydrateSnapshotFilesToDir(params: {
   storage: StoragePort;
@@ -361,10 +360,7 @@ export async function hydrateSnapshotFilesToDir(params: {
           });
         }
 
-        const s3Key =
-          file.blobScope === 'catalog'
-            ? catalogBlobKey(file.sha256)
-            : workspaceBlobKey(params.workspaceId, file.sha256);
+        const s3Key = resolveBlobStorageKey(params.workspaceId, file.blobScope, file.sha256);
 
         await mkdir(path.dirname(destPath), { recursive: true, mode: 0o700 });
 
@@ -374,21 +370,27 @@ export async function hydrateSnapshotFilesToDir(params: {
         }
         try {
           const { stream } = await params.storage.getObjectStream(s3Key);
-          const hash = createHash('sha256');
+          // Patch IDs are logical revisions. The storage reader validates their base digest
+          // and each splice. Physical CAS objects also verify their content hash here.
+          const hash = file.blobScope === 'patch' ? null : createHash('sha256');
+          let transferred = 0;
           const hasher = new Transform({
             transform(chunk: Buffer, _encoding, callback) {
               const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-              hash.update(buf);
+              transferred += buf.length;
+              hash?.update(buf);
               callback(null, buf);
             },
           });
           await pipeline(stream, hasher, createWriteStream(destPath, { mode: 0o600 }));
-          const actualSha = hash.digest('hex');
-          if (actualSha !== file.sha256) {
-            await rm(destPath, { force: true }).catch(() => {});
+          const actualSha = hash?.digest('hex');
+          if (transferred !== file.sizeBytes || (actualSha && actualSha !== file.sha256)) {
+            const detail = transferred !== file.sizeBytes
+              ? `size mismatch: expected ${file.sizeBytes} bytes, got ${transferred}`
+              : `digest mismatch: expected ${file.sha256}, got ${actualSha}`;
             throw new CloudError(
               'STORAGE_ERROR',
-              `Hydrated CAS blob digest mismatch for ${safeRelPath}: expected ${file.sha256}, got ${actualSha}`,
+              `Hydrated CAS blob ${detail} (${safeRelPath})`,
               { status: 500 },
             );
           }

@@ -1,6 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { StudioFileConflictError } from './studioSaveDiagnostics';
 import { clearStudioSaveFailures, getStudioSaveSnapshot, observeStudioSavedAt, subscribeStudioSaves, trackStudioProjectSave } from './studioSaveState';
 afterEach(() => vi.restoreAllMocks());
+
+it('reports a discarded stale edit once without claiming a save or hiding an outstanding failure', async () => {
+  const project = 'stale-patch';
+  const conflict = new StudioFileConflictError({
+    filePath: 'index.html', currentContent: null, currentVersion: 'v2', attemptedContent: 'draft', syncLatest: true,
+  });
+  const rejectPatch = () => trackStudioProjectSave(project, 'index.html', async () => { throw conflict; });
+  observeStudioSavedAt(project, 123);
+  await expect(rejectPatch()).rejects.toBe(conflict);
+  expect(getStudioSaveSnapshot(project)).toEqual({ pending: 0, failed: false, savedAt: 123 });
+
+  const retainedDraft = new StudioFileConflictError({
+    filePath: 'index.html', currentContent: null, currentVersion: 'v3', attemptedContent: 'unresolved',
+  });
+  await expect(trackStudioProjectSave(project, 'index.html', async () => { throw retainedDraft; })).rejects.toBe(retainedDraft);
+  await expect(rejectPatch()).rejects.toBe(conflict);
+  expect(getStudioSaveSnapshot(project)).toEqual({ pending: 0, failed: true, savedAt: 123 });
+});
 
 it('reports only confirmed writes and keeps simultaneous writes and projects independent', async () => {
   const id = 'concurrent-project';

@@ -125,6 +125,7 @@ export function CommitField({
     return true;
   };
   const previewNumericKeyStep = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     const direction = arrowDirection(event.key);
     if (direction === null) return;
     const nextDraft = adjustNumericToken(draftRef.current, direction, event);

@@ -1,3 +1,5 @@
+import { readVersionedSource } from "../utils/readVersionedSource";
+import { confirmedSource, observeSourceRead } from "../utils/confirmedTextSources";
 // Soft-reload-first preview sync for timeline timing edits: server GSAP
 // position mutations (shift / scale), folding those rewrites into the timing
 // edit's undo history, and swapping the rewritten script into the live preview
@@ -29,15 +31,15 @@ import {
   serializeStudioFileMutations,
   type StudioProjectFileWriter,
 } from "../utils/studioFileMutationCoordinator";
-import { studioApiFetch } from "../utils/studioApiFetch";
 import { moveLiveTweens } from "../utils/gsapLiveRetime";
 
 export async function readFileContent(projectId: string, targetPath: string): Promise<string> {
   if (targetPath.includes("\0") || targetPath.includes("..")) {
     throw new Error(`Unsafe path: ${targetPath}`);
   }
-  const response = await studioApiFetch(
+  const response = await readVersionedSource(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(targetPath)}`,
+    confirmedSource(projectId, targetPath),
   );
   if (!response.ok) {
     throw new Error(`Failed to read ${targetPath}`);
@@ -46,6 +48,7 @@ export async function readFileContent(projectId: string, targetPath: string): Pr
   if (typeof data.content !== "string") {
     throw new Error(`Missing file contents for ${targetPath}`);
   }
+  observeSourceRead(projectId, targetPath, response, data);
   return data.content;
 }
 

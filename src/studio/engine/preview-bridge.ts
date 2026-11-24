@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import { PREVIEW_FIRST_FRAME } from './preview-first-frame.ts';
 import { PREVIEW_ASSET_READINESS } from './preview-asset-readiness.ts';
 import { PREVIEW_INSPECTOR } from './preview-inspector.ts';
+import { PREVIEW_INSPECTOR_STYLES } from './preview-inspector-styles.ts';
 import { PREVIEW_TIMELINE_MANIFEST } from './preview-timeline-manifest.ts';
 import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
 import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
+import { PREVIEW_PEER_TIMING } from './preview-peer-timing.ts';
 import { PREVIEW_THUMBNAIL_CAPTURE } from './preview-thumbnail-capture.ts';
 
 function scopedScript(configuration: string, body: string): string {
@@ -38,9 +40,17 @@ export function previewBuildBusyScript(projectId: string, retryAfterSeconds: num
  * PREVIEW_PUBLIC_ORIGIN. The bridge is inert without a project token, so local
  * same-origin previews keep their existing DOM/runtime fast path.
  */
+export const PREVIEW_SOURCE_IDENTITY = `
+  function sourceIdentity(raw) {
+    if (!raw) return {};
+    return raw.startsWith('"patch:') ? {fileVersion:raw} : {sha256:raw, fileVersion:'"sha256:'+raw+'"'};
+  }
+`;
+
 export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   var settings=JSON.parse(document.currentScript.getAttribute('data-openmotion-preview'));
   var projectId=settings.projectId, compositionPath=settings.compositionPath, sourceVersions=settings.sourceVersions;`, `
+  ${PREVIEW_SOURCE_IDENTITY}
   var pickMode=false, picked=null;
   var isCaptureMode=new URL(location.href).searchParams.get('capture')==='1';
   var durationBootAnnounced=false;
@@ -83,7 +93,9 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   ${PREVIEW_TIMELINE_MANIFEST}
   ${PREVIEW_CANVAS_DRAG}
   ${PREVIEW_INLINE_TEXT}
+  ${PREVIEW_PEER_TIMING}
   ${PREVIEW_INSPECTOR}
+  ${PREVIEW_INSPECTOR_STYLES}
   ${PREVIEW_LAYERS}
   ${PREVIEW_THUMBNAIL_CAPTURE}
   function respond(requestId,result,error,transfer){
@@ -94,7 +106,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     else parentWindow.postMessage(message,targetOrigin);
   }
   function ready(){
-    post('preview-ready',{capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']});
+    post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']});
     var state=timeline(true);
     if(state.duration>0){
       durationBootAnnounced=true;
@@ -119,6 +131,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(!message || message.source!==PARENT || message.version!==VERSION || message.projectId!==projectId || message.token!==token) return;
     var requestId=message.requestId;
     try {
+      if(message.type==='peer-timing' || message.type==='peer-presentation'){
+        if (!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
+        respond(requestId,applyPeerTiming(message)); return;
+      }
       if(message.type==='handshake'){
         if(message.timelineOnly) post('timeline-state',timeline(true));
         else { ready(); respond(requestId,{ready:true}); }
@@ -154,6 +170,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         respond(requestId,canvas?{sourceFile:compositionPath,fit:canvas.getAttribute('data-canvas-fit')==='cover'?'cover':'contain'}:null); return;
       }
       if(message.type==='inspect-element'){ respond(requestId,inspectPreviewElement(message)); return; }
+      if(message.type==='inspector-styles'){
+        if(settings.studioOrigin && settings.studioOrigin === event.origin) previewInspectorStyles(message);
+        return;
+      }
       if(message.type==='layer-tree'){ previewLayerTree(message); return; }
       if(message.type==='layer-family'){ respond(requestId,previewLayerFamily(message)); return; }
       if(message.type==='layer-select'){ respond(requestId,selectPreviewLayer(message)); return; }
@@ -223,10 +243,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
 export const PREVIEW_BRIDGE_PATH = '/api/preview-bridge.js';
 export const PREVIEW_BRIDGE_VERSION = createHash('sha256').update(PREVIEW_BRIDGE_SCRIPT).digest('hex');
 
-export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>) {
+export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[]) {
   const src = new URL(PREVIEW_BRIDGE_PATH, origin);
   src.searchParams.set('v', PREVIEW_BRIDGE_VERSION);
-  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions })
+  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, ...(canRebindTiming && { canRebindTiming }) })
     .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return {
     preload: `<link rel="preload" as="script" href="${src.href}">`,

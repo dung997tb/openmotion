@@ -17,7 +17,6 @@ vi.mock("./useFileTree", () => ({
 
 vi.mock("./useEditorSave", () => ({
   useEditorSave: () => ({
-    saveRafRef: { current: null },
     handleContentChange: vi.fn(),
     getPendingCandidate: vi.fn(() => null),
     flushPendingSave: vi.fn(async () => ({ status: "clean" as const })),

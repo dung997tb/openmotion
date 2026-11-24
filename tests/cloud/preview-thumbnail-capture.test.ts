@@ -343,6 +343,43 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
     assert.notEqual(rev5['compositions/s2.html'], rev1['compositions/s2.html']);
   });
 
+  it('folds transitive data-composition-src dependencies into per-composition revisions with cycle safety', () => {
+    const files = [
+      { path: 'index.html', sha256: 'idx-1' },
+      { path: 'compositions/nested-shell.html', sha256: 'shell-1' },
+      { path: 'compositions/title-card.html', sha256: 'card-1' },
+      { path: 'compositions/other.html', sha256: 'other-1' },
+      { path: 'compositions/cycle-a.html', sha256: 'ca-1' },
+      { path: 'compositions/cycle-b.html', sha256: 'cb-1' },
+    ];
+    const comps = files.map((f) => f.path);
+    const textByPath: Record<string, string> = {
+      'index.html': '<html><head></head><body></body></html>',
+      'compositions/nested-shell.html':
+        '<div data-composition-id="shell"><div data-composition-src="title-card.html"></div></div>',
+      'compositions/title-card.html': '<div data-composition-id="card"><h1>Title</h1></div>',
+      'compositions/other.html': '<div data-composition-id="other">Unrelated</div>',
+      'compositions/cycle-a.html': '<div data-composition-src="compositions/cycle-b.html"></div>',
+      'compositions/cycle-b.html': '<div data-composition-src="cycle-a.html"></div>',
+    };
+    const readText = (p: string) => textByPath[p] ?? null;
+
+    const revBefore = computeCompositionRevisions(files, comps, textByPath['index.html'], 'proj-1', readText);
+
+    // Editing title-card.html invalidates nested-shell.html, title-card.html, and index.html,
+    // while leaving unrelated other.html untouched.
+    const editedFiles = files.map((f) =>
+      f.path === 'compositions/title-card.html' ? { ...f, sha256: 'card-2' } : f,
+    );
+    const revAfter = computeCompositionRevisions(editedFiles, comps, textByPath['index.html'], 'proj-2', readText);
+
+    assert.notEqual(revAfter['compositions/title-card.html'], revBefore['compositions/title-card.html']);
+    assert.notEqual(revAfter['compositions/nested-shell.html'], revBefore['compositions/nested-shell.html']);
+    assert.equal(revAfter['compositions/other.html'], revBefore['compositions/other.html']);
+    assert.equal(revAfter['compositions/cycle-a.html'], revBefore['compositions/cycle-a.html']);
+    assert.equal(revAfter['compositions/cycle-b.html'], revBefore['compositions/cycle-b.html']);
+  });
+
   it('inlines decoded images to data URLs once and memoizes preview-asset fetches across multi-frame captures', async () => {
     const attrs: Record<string, string> = { src: 'assets/hero.png' };
     const fakeImg = {

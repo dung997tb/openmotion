@@ -6,7 +6,7 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
 } from "@codemirror/view";
-import { EditorState, Annotation } from "@codemirror/state";
+import { EditorState, Annotation, type Text } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
@@ -58,25 +58,34 @@ function detectLanguage(filePath: string): string {
 
 interface SourceEditorProps {
   content: string;
+  submitted?: string;
   filePath?: string;
   language?: string;
   onChange?: (content: string) => void;
+  onFlush?: () => void;
+  hasPendingChange?: () => boolean;
   readOnly?: boolean;
   revealOffset?: number | null;
 }
 
 export const SourceEditor = memo(function SourceEditor({
   content,
+  submitted,
   filePath,
   language,
   onChange,
+  onFlush,
+  hasPendingChange,
   readOnly = false,
   revealOffset,
 }: SourceEditorProps) {
   const editorRef = useRef<EditorView | null>(null);
+  const composition = useRef<{ view: EditorView; before: Text; deferredSync?: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onFlushRef = useRef(onFlush);
+  onFlushRef.current = onFlush;
 
   const contentRef = useRef(content);
   contentRef.current = content;
@@ -84,6 +93,7 @@ export const SourceEditor = memo(function SourceEditor({
   // fallow-ignore-next-line complexity
   const mountEditor = useCallback(
     (node: HTMLDivElement | null) => {
+      composition.current = null;
       if (editorRef.current) {
         editorRef.current.destroy();
         editorRef.current = null;
@@ -93,11 +103,37 @@ export const SourceEditor = memo(function SourceEditor({
 
       const lang = language ?? (filePath ? detectLanguage(filePath) : "html");
 
+      let lastEmitted = contentRef.current;
+      function notify(text: string) {
+        if (lastEmitted === text) return;
+        lastEmitted = text;
+        onChangeRef.current?.(text);
+      }
+      const typingEvents = EditorView.domEventHandlers({
+        compositionstart(_, view) { composition.current = { view, before: view.state.doc }; },
+        compositionend(_, view) {
+          const input = composition.current;
+          // CodeMirror processes the native final input before this microtask.
+          queueMicrotask(() => {
+            if (!input || composition.current !== input || editorRef.current !== view) return;
+            composition.current = null;
+            // A confirmed candidate supersedes the earlier receipt; cancelling the
+            // candidate lets a deferred update reconcile normally.
+            if (input.before.eq(view.state.doc)) input.deferredSync?.();
+            else notify(view.state.doc.toString());
+            if (!view.hasFocus) onFlushRef.current?.();
+          });
+        },
+        blur() { if (!composition.current) onFlushRef.current?.(); },
+      });
       const updateListener = EditorView.updateListener.of((update) => {
         if (!update.docChanged || !onChangeRef.current) return;
         // Ignore programmatic external syncs — only real user edits should save.
-        if (update.transactions.some((tr) => tr.annotation(ExternalSync))) return;
-        onChangeRef.current(update.state.doc.toString());
+        if (update.transactions.some((tr) => tr.annotation(ExternalSync))) {
+          lastEmitted = update.state.doc.toString();
+          return;
+        }
+        if (!composition.current) notify(update.state.doc.toString());
       });
 
       const state = EditorState.create({
@@ -112,6 +148,8 @@ export const SourceEditor = memo(function SourceEditor({
           bracketMatching(),
           closeBrackets(),
           highlightSelectionMatches(),
+          typingEvents,
+          keymap.of([{ key: "Mod-s", run: () => { if (!composition.current) onFlushRef.current?.(); return true; } }]),
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap]),
           getLanguageExtension(lang),
           studioCodeTheme,
@@ -131,19 +169,20 @@ export const SourceEditor = memo(function SourceEditor({
   useEffect(() => {
     const view = editorRef.current;
     if (!view) return;
-    const current = view.state.doc.toString();
-    if (current === content) return;
-    // If the user is actively typing (editor focused), a programmatic replace
-    // would clobber their in-flight keystrokes — the ExternalSync annotation
-    // suppresses onChange, so those edits would be silently lost. Skip the
-    // external sync while focused; it re-runs on the next `content` change after
-    // they blur (or when a later commit lands with the editor unfocused).
-    if (view.hasFocus) return;
-    view.dispatch({
-      changes: { from: 0, to: current.length, insert: content },
-      annotations: [ExternalSync.of(true)],
-    });
-  }, [content]);
+    const sync = () => {
+      const current = view.state.doc.toString();
+      if (current === content) return;
+      // Once a conflicted draft has been discarded, even a focused editor must
+      // receive the authoritative content.
+      if (view.hasFocus && current !== submitted && (hasPendingChange?.() ?? true)) return;
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: content },
+        annotations: [ExternalSync.of(true)],
+      });
+    };
+    if (composition.current?.view === view) composition.current.deferredSync = sync;
+    else sync();
+  }, [content, submitted]);
 
   useEffect(() => {
     const view = editorRef.current;

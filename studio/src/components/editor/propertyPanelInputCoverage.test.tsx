@@ -407,7 +407,7 @@ describe.each(["classic", "flat"] as const)("shared %s input telemetry", (ui) =>
     else delete (document as unknown as { fonts?: unknown }).fonts;
   });
 
-  it("tracks TextAreaField exactly once across scheduled commit and blur", () => {
+  it("tracks TextAreaField exactly once across scheduled commit and blur", async () => {
     vi.useFakeTimers();
     const host = render(
       section(
@@ -417,7 +417,7 @@ describe.each(["classic", "flat"] as const)("shared %s input telemetry", (ui) =>
     const textarea = host.querySelector("textarea");
     if (!textarea) throw new Error("expected text area");
     act(() => changeTextarea(textarea, "After"));
-    act(() => vi.advanceTimersByTime(120));
+    await act(() => vi.advanceTimersByTimeAsync(400));
     act(() => {
       textarea.focus();
       textarea.blur();
@@ -431,6 +431,100 @@ describe.each(["classic", "flat"] as const)("shared %s input telemetry", (ui) =>
       name: "content",
     });
   });
+
+  it("holds IME candidates locally and flushes the confirmed text once on blur", async () => {
+    vi.useFakeTimers();
+    const write = vi.fn();
+    const textarea = render(section(<TextAreaField label="Content" value="" onCommit={write} />)).querySelector("textarea")!;
+    act(() => {
+      textarea.focus();
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      changeTextarea(textarea, "zhong");
+    });
+    expect(textarea.value).toBe("zhong");
+    await act(() => vi.advanceTimersByTimeAsync(2400));
+    expect(write).not.toHaveBeenCalled();
+    await act(async () => {
+      changeTextarea(textarea, "中");
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "中" }));
+      textarea.blur();
+    });
+    expect(write).toHaveBeenCalledExactlyOnceWith("中");
+  });
+
+  it("saves at the maximum wait and coalesces all newer input behind a slow request", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const write = vi.fn().mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    const textarea = render(section(<TextAreaField label="Content" value="" onCommit={write} />)).querySelector("textarea")!;
+    for (let n = 1; n <= 20; n++) {
+      act(() => changeTextarea(textarea, "x".repeat(n)));
+      await act(() => vi.advanceTimersByTimeAsync(100));
+    }
+    expect(write).toHaveBeenCalledExactlyOnceWith("x".repeat(20));
+    for (let n = 21; n <= 27; n++) {
+      act(() => changeTextarea(textarea, "x".repeat(n)));
+      await act(() => vi.advanceTimersByTimeAsync(450));
+    }
+    expect(write).toHaveBeenCalledOnce();
+    await act(async () => { release(); });
+    expect(write.mock.calls.map(([value]) => value.length)).toEqual([20, 27]);
+  });
+  it.each([
+    ["throws", () => { throw new Error("offline"); }],
+    ["rejects", () => Promise.reject(new Error("offline"))],
+    ["returns false", () => false],
+    ["returns null", () => Promise.resolve(null)],
+    ["declines persistence", () => ({ ok: false, reason: "persist-failed" })],
+  ])("retains the draft and retries once on blur when the commit %s", async (_, fail) => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockImplementationOnce(fail).mockResolvedValue(true);
+    const field = (value: string) => section(
+      <TextAreaField flat={ui === "flat"} label="Content" value={value} onCommit={write} />,
+    );
+    const host = render(field("before"));
+    const textarea = host.querySelector("textarea")!;
+    act(() => { textarea.focus(); changeTextarea(textarea, "my draft"); });
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    act(() => roots.at(-1)!.render(field("refreshed value")));
+    expect(textarea.value).toBe("my draft");
+    expect(write).toHaveBeenCalledOnce();
+
+    await act(async () => textarea.blur());
+    await act(async () => { textarea.focus(); textarea.blur(); });
+    expect(write.mock.calls).toEqual([["my draft"], ["my draft"]]);
+  });
+
+  it("does not transfer a failed draft to another selected element", async () => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockResolvedValue(false);
+    const field = (target: string) => section(
+      <TextAreaField key={target} flat={ui === "flat"} label="Content" value={target} onCommit={write} />,
+    );
+    const host = render(field("first"));
+    act(() => changeTextarea(host.querySelector("textarea")!, "unsaved"));
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    act(() => roots.at(-1)!.render(field("second")));
+    const next = host.querySelector("textarea")!;
+    expect(next.value).toBe("second");
+    await act(async () => { next.focus(); next.blur(); });
+    expect(write).toHaveBeenCalledExactlyOnceWith("unsaved");
+  });
+
+  it("drops a queued stale inspector edit when another writer changed the selected target", async () => {
+    vi.useFakeTimers();
+    let refuse!: (value: { ok: false; reason: string }) => void;
+    const write = vi.fn().mockImplementationOnce(() => new Promise(resolve => { refuse = resolve; }));
+    const textarea = render(section(<TextAreaField label="Content" value="current" onCommit={write} />)).querySelector("textarea")!;
+    act(() => changeTextarea(textarea, "old input"));
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    act(() => changeTextarea(textarea, "more stale input"));
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    await act(async () => { refuse({ ok: false, reason: "preview-stale" }); });
+    expect(write).toHaveBeenCalledOnce();
+    expect(textarea.value).toBe("current");
+  });
+
 });
 
 function representativeElement() {

@@ -1,3 +1,5 @@
+import { formatFileVersion } from '../etag.ts';
+import { staticPreviewHtmlSources } from './preview-html-sources.ts';
 import { bridgeDocumentTags, previewBuildBusyScript } from './preview-bridge.ts';
 import { posix } from 'node:path';
 import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
@@ -103,6 +105,7 @@ export interface BundlePreviewOptions {
   readonly entryFile?: string;
   /** Origin serving Studio's static bridge, only for a token-enabled document. */
   readonly bridgeOrigin?: string;
+  readonly studioOrigin?: string;
   /** Interactive previews can reuse large classic scripts through their authorized asset base. */
   readonly cacheProjectScripts?: boolean;
   readonly runtimeUrl?: string;
@@ -544,11 +547,24 @@ async function applyDeterministicFonts(html: string, options: BundlePreviewOptio
   }
 }
 
+// User code can sample timing once at startup. Rebinding the runtime alone cannot replay its effects.
+const TIMING_ONLY_TAGS = new Set('html head title meta style body main section div article header footer span p h1 h2 h3 h4 h5 h6 img picture audio video source track'.split(' '));
+function canRebindDocumentTiming(doc: Document, runtimeUrl: string): boolean {
+  const scripts = doc.querySelectorAll('script');
+  const runtime = scripts[0];
+  if (scripts.length !== 1 || !runtime?.hasAttribute(RUNTIME_BOOTSTRAP_ATTR) ||
+      runtime.getAttribute('src') !== runtimeUrl || runtime.textContent?.trim()) return false;
+  return ![...doc.querySelectorAll('*')].some(el =>
+    (el !== runtime && !TIMING_ONLY_TAGS.has(el.localName.toLowerCase())) ||
+    el.hasAttribute('data-composition-src') || el.hasAttribute('http-equiv') ||
+    el.getAttributeNames().some(name => name.toLowerCase().startsWith('on')));
+}
+
 function applyStudioPreviewAugmentations(
   html: string,
   project: VirtualProjectReader,
   activeCompositionPath: string,
-  options: { capture: boolean; gsapBaseUrl: string; bridgeOrigin?: string; variables?: Record<string, unknown> | null },
+  options: { capture: boolean; gsapBaseUrl: string; bridgeOrigin?: string; studioOrigin?: string; canRebindTiming?: boolean; htmlSources?: string[]; variables?: Record<string, unknown> | null },
 ): string {
   let out = repairCodeExtrudeMaterial(html);
 
@@ -568,8 +584,8 @@ function applyStudioPreviewAugmentations(
   // across revisions, token renewals, nested compositions and other projects.
   if (options.bridgeOrigin) {
     const versions = Object.fromEntries(project.listFiles().filter(file => /\.html?$/i.test(file.path))
-      .map(file => [file.path, file.sha256]));
-    const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions);
+      .map(file => [file.path, file.blobScope === 'patch' ? formatFileVersion(file.blobScope, file.sha256) : file.sha256]));
+    const tags = bridgeDocumentTags(options.bridgeOrigin, project.projectId, activeCompositionPath, versions, options.studioOrigin, options.canRebindTiming, options.htmlSources);
     const snapdomPreload = options.capture
       ? `<link rel="preload" as="script" href="${new URL('/api/vendor/snapdom.js', options.bridgeOrigin).href}">`
       : '';
@@ -674,6 +690,14 @@ export async function bundlePreviewInMemory(
   const withRuntime = insertRuntimeTag(sanitized, runtimeTag);
 
   const document = parseHTMLContent(withRuntime);
+  const canRebindTiming = Boolean(options.bridgeOrigin && !options.capture && entryFile === 'index.html' &&
+    !Object.keys(options.variables ?? {}).length &&
+    !project.exists(STUDIO_MOTION_PATH) && !project.exists(STUDIO_MANUAL_EDITS_PATH) &&
+    canRebindDocumentTiming(document, runtimeUrl));
+
+  const htmlSources = options.bridgeOrigin && !options.capture && entryFile === 'index.html' &&
+    !Object.keys(options.variables ?? {}).length && !project.exists(STUDIO_MOTION_PATH) && !project.exists(STUDIO_MANUAL_EDITS_PATH)
+    ? staticPreviewHtmlSources(entryFile, document, runtimeUrl) : undefined;
 
   // Inline local <link rel="stylesheet"> stylesheets from VirtualProjectReader.
   for (const el of [...document.querySelectorAll('link[rel="stylesheet"]')]) {
@@ -709,10 +733,15 @@ export async function bundlePreviewInMemory(
       if (!isRelativeUrl(srcPath)) return null;
       const resolved = resolveVirtualPath(sourceDir, decodedUrlPath(srcPath));
       if (!resolved) return null;
+      htmlSources?.add(resolved);
       const html = project.readText(resolved);
       return html === null ? null : scopeNestedSources(project, resolved, sourceDir, ensureHfIds(html));
     },
-    parseHtml: parseHTMLContent,
+    parseHtml: html => {
+      const doc = parseHTMLContent(html);
+      htmlSources?.inspect(doc);
+      return doc;
+    },
     hostIdentityMap,
     rewriteInlineStyles: true,
     assetExists: (assetPath) => {
@@ -730,7 +759,7 @@ export async function bundlePreviewInMemory(
     parseHostVariables: parseHostVariableValues,
     buildScopeSelector: (compId) => cssAttributeSelector('data-composition-id', compId),
     scriptErrorLabel: '[HyperFrames] composition script error:',
-    onMissingComposition: () => {},
+    onMissingComposition: () => htmlSources?.markUnknown(),
   });
 
   // Inline local classic <script src="..."> scripts from VirtualProjectReader.
@@ -869,6 +898,9 @@ export async function bundlePreviewInMemory(
     gsapBaseUrl,
     variables: options.variables,
     bridgeOrigin: options.bridgeOrigin,
+    studioOrigin: options.studioOrigin,
+    canRebindTiming,
+    htmlSources: htmlSources?.paths(),
   });
   html = addScenePartsManifest(html, [`meta[name="${PROJECT_SIGNATURE_META}"]`]);
   return html;
@@ -968,6 +1000,7 @@ export async function buildSubCompositionHtmlInMemory(
     gsapBaseUrl,
     variables: options.variables,
     bridgeOrigin: options.bridgeOrigin,
+    studioOrigin: options.studioOrigin,
   });
   return html;
 }

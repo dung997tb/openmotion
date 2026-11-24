@@ -46,10 +46,11 @@ const workspaceActions = {
 };
 export const workspaceAssetUseTool = {
   ...assetUseTool,
-  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription + scenarioToolDescription + ' In cloud Studio, list_components searches motion effects by query (offset and limit paginate). install_component takes the selected name, projectId and requestId, preserves existing files, and returns project-relative paths. Mount the first path to place it in a composition.',
+  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription + scenarioToolDescription + ' In cloud Studio, list_components searches motion effects by query (offset and limit paginate). install_component takes the selected name, projectId and requestId, preserves existing files, and returns project-relative paths. To install and place in one undo step, provide hostFile with the host path, observed baseVersion and edited content mounting the listed compositionFile. Omit hostFile to install for later use.',
   annotations: { ...assetUseTool.annotations, destructiveHint: true },
   inputSchema: {
     ...assetUseTool.inputSchema, properties: { ...assetUseTool.inputSchema.properties,
+      hostFile: object({ path: { type: 'string' }, baseVersion: { type: 'string' }, content: { type: 'string' } }, ['path', 'baseVersion', 'content']),
       action: { enum: [...assetUseTool.inputSchema.properties.action.enum, ...Object.keys(workspaceActions)] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments, scenario: scenarioToolArguments },
     oneOf: [...assetUseTool.inputSchema.oneOf, ...Object.entries(workspaceActions).map(([action, required]) => ({
       type: 'object', properties: { action: { enum: [action] } }, required, additionalProperties: true,
