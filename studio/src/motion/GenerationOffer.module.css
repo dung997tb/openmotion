@@ -113,6 +113,7 @@
 }
 
 .subscriptionCard[data-guide='upgrade'] .subscriptionHeading h2 {
+  font-size: var(--motion-text-section);
   letter-spacing: 0.025em;
 }
 
