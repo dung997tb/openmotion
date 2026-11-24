@@ -6,6 +6,7 @@ import {
   clearClientCompositionCaptureCacheForTest,
   computeCompositionSampleTimes,
   createClientCompositionCaptureRequest,
+  evictStaleCompositionCaptures,
   getCompositionCacheRevision,
   getProgressiveCompositionCapture,
   peekCachedCompositionCapture,
@@ -1021,5 +1022,276 @@ describe("clientCompositionCapture", () => {
       Array.from({ length: 8 }, (_, idx) => new Blob([String(idx)])),
     );
     expect(peekFallbackCompositionCapture({ projectId: "proj-fb", previewUrl })).toBe(strip8);
+  });
+
+  it("reuses a single warm isolated capture iframe across sibling selector clips of the same composition without reloading", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test";
+    document.head.appendChild(meta);
+
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+    });
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const srcAssignments: string[] = [];
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        const next = String(value);
+        iframeSrcs.set(this, next);
+        srcAssignments.push(next);
+      },
+    });
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({
+        token: "tok-reuse-same-doc",
+        previewOrigin: "https://preview.example.test",
+        assetLease: "lease-reuse",
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      }),
+    ) as unknown as typeof fetch;
+    let urlSeq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:test/reuse-${++urlSeq}`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    try {
+      const selectors = ['[data-hf-id="clip-1"]', '[data-hf-id="clip-2"]', '[data-hf-id="clip-3"]'];
+      const pending = selectors.map((selector) =>
+        createClientCompositionCaptureRequest({
+          previewUrl: "/api/projects/proj-reuse/preview/comp/compositions/chart.html",
+          projectId: "proj-reuse",
+          sessionEpoch: 1,
+          contentRevision: 4,
+          frameCount: 2,
+          seekTime: 0,
+          duration: 10,
+          selector,
+        }).load(new AbortController().signal),
+      );
+
+      let iframe: HTMLIFrameElement | null = null;
+      await vi.waitFor(() => {
+        const frames = document.querySelectorAll<HTMLIFrameElement>('iframe[data-openmotion-thumb-capture="true"]');
+        expect(frames).toHaveLength(1);
+        iframe = frames[0]!;
+        expect(iframe.src).toContain("compositions/chart.html");
+      });
+
+      const postedSelectors: string[] = [];
+      const fakeWin = {
+        postMessage: (msg: Record<string, unknown>) => {
+          if (msg.type !== "capture-frames") return;
+          postedSelectors.push(String(msg.selector ?? ""));
+          queueMicrotask(() => {
+            window.dispatchEvent(
+              new MessageEvent("message", {
+                origin: "https://preview.example.test",
+                source: fakeWin as unknown as Window,
+                data: {
+                  source: "openmotion-preview-bridge",
+                  version: 1,
+                  type: "response",
+                  projectId: "proj-reuse",
+                  token: "tok-reuse-same-doc",
+                  requestId: msg.requestId,
+                  ok: true,
+                  result: {
+                    frames: [new Uint8Array([1]).buffer, new Uint8Array([2]).buffer],
+                    mimeType: "image/jpeg",
+                    width: 240,
+                    height: 135,
+                    aspect: 16 / 9,
+                  },
+                },
+              }),
+            );
+          });
+        },
+      };
+      Object.defineProperty(iframe!, "contentWindow", { configurable: true, value: fakeWin });
+
+      // Send timeline-state ONLY ONCE — clips 2 & 3 must reuse the already-loaded iframe without navigation.
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: fakeWin as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "timeline-state",
+            projectId: "proj-reuse",
+            token: "tok-reuse-same-doc",
+            duration: 10,
+            width: 1920,
+            height: 1080,
+          },
+        }),
+      );
+
+      const results = await Promise.all(pending);
+      expect(results).toHaveLength(3);
+      expect(document.querySelectorAll('iframe[data-openmotion-thumb-capture="true"]')).toHaveLength(1);
+      expect(srcAssignments.filter((s) => s.includes("chart.html"))).toHaveLength(1);
+      expect(postedSelectors).toEqual(selectors);
+      for (const r of results) r.dispose?.();
+    } finally {
+      if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      globalThis.fetch = origFetch;
+      meta.remove();
+    }
+  });
+
+  it("bounds post-edit refresh captures (contentRevision > 0) to 1 concurrent iframe even across distinct scenes", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test";
+    document.head.appendChild(meta);
+
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+    });
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        iframeSrcs.set(this, String(value));
+      },
+    });
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({
+        token: "tok-edit-cap",
+        previewOrigin: "https://preview.example.test",
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      }),
+    ) as unknown as typeof fetch;
+
+    try {
+      const c1 = new AbortController();
+      const c2 = new AbortController();
+      const p1 = createClientCompositionCaptureRequest({
+        previewUrl: "/api/projects/proj-edit/preview/comp/compositions/a.html",
+        projectId: "proj-edit",
+        sessionEpoch: 1,
+        contentRevision: 2,
+        frameCount: 2,
+        duration: 5,
+      }).load(c1.signal);
+      const p2 = createClientCompositionCaptureRequest({
+        previewUrl: "/api/projects/proj-edit/preview/comp/compositions/b.html",
+        projectId: "proj-edit",
+        sessionEpoch: 1,
+        contentRevision: 2,
+        frameCount: 2,
+        duration: 5,
+      }).load(c2.signal);
+
+      await vi.waitFor(() => {
+        const frames = document.querySelectorAll<HTMLIFrameElement>('iframe[data-openmotion-thumb-capture="true"]');
+        expect(frames).toHaveLength(1);
+        expect(frames[0]?.src).toContain("compositions/a.html");
+      });
+      // Give the queue a tick to confirm the second edit-refresh scene stays queued rather than booting a 2nd iframe.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(document.querySelectorAll('iframe[data-openmotion-thumb-capture="true"]')).toHaveLength(1);
+
+      c1.abort();
+      c2.abort();
+      await Promise.allSettled([p1, p2]);
+    } finally {
+      if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      globalThis.fetch = origFetch;
+      meta.remove();
+    }
+  });
+
+  it("evicts redundant stale revisions on edit invalidation while keeping one fallback strip until the new revision lands", () => {
+    const activeUrls = new Set<string>();
+    let seq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:test/evict-${++seq}`;
+      activeUrls.add(url);
+      return url;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+      activeUrls.delete(String(url));
+    });
+
+    const rev0A2 = {
+      previewUrl: "/api/projects/proj-evict/preview/comp/compositions/a.html",
+      projectId: "proj-evict",
+      contentRevision: 0,
+      frameCount: 2,
+    };
+    const rev0A4 = {
+      previewUrl: "/api/projects/proj-evict/preview/comp/compositions/a.html",
+      projectId: "proj-evict",
+      contentRevision: 0,
+      frameCount: 4,
+    };
+    const rev0B = {
+      previewUrl: "/api/projects/proj-evict/preview/comp/compositions/b.html",
+      projectId: "proj-evict",
+      contentRevision: 0,
+      frameCount: 2,
+    };
+    const valA2 = seedClientCompositionCaptureForTest(rev0A2, [new Blob(["a1"]), new Blob(["a2"])]);
+    const valA4 = seedClientCompositionCaptureForTest(rev0A4, [
+      new Blob(["a1"]),
+      new Blob(["a2"]),
+      new Blob(["a3"]),
+      new Blob(["a4"]),
+    ]);
+    const valB = seedClientCompositionCaptureForTest(rev0B, [new Blob(["b1"]), new Blob(["b2"])]);
+    const urlsA2 = valA2.kind === "filmstrip" ? [...valA2.urls] : [];
+    const urlsA4 = valA4.kind === "filmstrip" ? [...valA4.urls] : [];
+    const urlsB = valB.kind === "filmstrip" ? [...valB.urls] : [];
+
+    // Bumping revision for a.html immediately evicts redundant stale variants (rev0A2) while keeping
+    // only the single freshest fallback (rev0A4) until rev 1 lands; untouched b.html stays warm.
+    evictStaleCompositionCaptures("proj-evict", ["compositions/a.html"], { "compositions/a.html": 1 });
+    expect(peekCachedCompositionCapture(rev0A2)).toBeNull();
+    expect(peekFallbackCompositionCapture({ projectId: "proj-evict", previewUrl: rev0A4.previewUrl })).toBe(valA4);
+    expect(peekCachedCompositionCapture(rev0B)).toBe(valB);
+    for (const url of urlsA2) expect(activeUrls.has(url)).toBe(false);
+    for (const url of urlsA4) expect(activeUrls.has(url)).toBe(true);
+    for (const url of urlsB) expect(activeUrls.has(url)).toBe(true);
+
+    // Once rev 1 finishes capturing, the retained rev 0 fallback is immediately evicted and revoked.
+    const valA1 = seedClientCompositionCaptureForTest(
+      { ...rev0A4, contentRevision: 1 },
+      [new Blob(["n1"]), new Blob(["n2"]), new Blob(["n3"]), new Blob(["n4"])],
+    );
+    expect(peekCachedCompositionCapture(rev0A4)).toBeNull();
+    expect(peekFallbackCompositionCapture({ projectId: "proj-evict", previewUrl: rev0A4.previewUrl })).toBe(valA1);
+    for (const url of urlsA4) expect(activeUrls.has(url)).toBe(false);
+
+    // Updating project per-composition revision for b.html keeps its single fallback until the new revision lands,
+    // then revokes the previous revision immediately on arrival.
+    setCachedProjectRevision("proj-evict", "proj-rev-2", { "compositions/b.html": "sha-b-2" });
+    expect(peekFallbackCompositionCapture({ projectId: "proj-evict", previewUrl: rev0B.previewUrl })).toBe(valB);
+    const valB2 = seedClientCompositionCaptureForTest(rev0B, [new Blob(["nb1"]), new Blob(["nb2"])]);
+    expect(peekFallbackCompositionCapture({ projectId: "proj-evict", previewUrl: rev0B.previewUrl })).toBe(valB2);
+    for (const url of urlsB) expect(activeUrls.has(url)).toBe(false);
   });
 });

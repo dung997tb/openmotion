@@ -4,6 +4,7 @@ import { isUnrelatedPreviewHtmlChange } from "../player/lib/previewHtmlSources";
 import { syncPeerComposition } from "./syncPeerComposition";
 import { createRemoteFileReader } from "./remoteFileReads";
 import { knownCompositionSource } from "../player/lib/compositionPosterSource";
+import { evictStaleCompositionCaptures } from "../player/lib/clientCompositionCapture";
 import { expectPosterFileVersion } from "../player/lib/posterFileRead";
 import { usePlayerStore } from "../player/store/playerStore";
 import { clearStudioSaveFailures } from "../utils/studioSaveState";
@@ -70,7 +71,10 @@ export function useStudioExternalFileChanges({
     (path: string, affectedCompositions: readonly string[] | null, ownWrite?: { token: string; version: string }) => {
       onOutsideChange?.();
       bumpThumbnailRevisions(affectedCompositions, path);
-      if (projectId && ownWrite) expectPosterFileVersion(projectId, path, ownWrite);
+      if (projectId) {
+        evictStaleCompositionCaptures(projectId, affectedCompositions, usePlayerStore.getState().thumbnailRevisions);
+        if (ownWrite) expectPosterFileVersion(projectId, path, ownWrite);
+      }
     },
     [bumpThumbnailRevisions, onOutsideChange, projectId],
   );

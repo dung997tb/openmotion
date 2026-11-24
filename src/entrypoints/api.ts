@@ -189,6 +189,7 @@ function applyIsolatedPreviewHeaders(
     headers.set('Content-Security-Policy', `frame-ancestors 'self' ${appOrigin};`);
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Content-Type-Options', 'nosniff');
+    headers.set('Origin-Agent-Cluster', '?1');
     headers.delete('Set-Cookie');
     if (requestOrigin && allowedCorsOrigins.has(requestOrigin)) {
       headers.set('Access-Control-Allow-Origin', requestOrigin);
@@ -2876,6 +2877,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
         `${preconnectHints}<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">${previewOriginMeta}</head>`);
       const bytes = Buffer.from(studioHtml, 'utf8');
       const etag = `"sha256:${createHash('sha256').update(bytes).digest('hex')}"`;
+      const originAgentClusterHeaders: Record<string, string> = previewHostIsolationEnabled
+        ? { 'Origin-Agent-Cluster': '?1' }
+        : {};
       if (c.req.header('if-none-match')?.trim() === etag) {
         return new Response(null, {
           status: 304,
@@ -2883,6 +2887,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
             ETag: etag,
             'Cache-Control': 'no-cache',
             'X-Content-Type-Options': 'nosniff',
+            ...originAgentClusterHeaders,
           },
         });
       }
@@ -2894,6 +2899,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
           ETag: etag,
           'Cache-Control': 'no-cache',
           'X-Content-Type-Options': 'nosniff',
+          ...originAgentClusterHeaders,
         },
       });
     } catch (error) {

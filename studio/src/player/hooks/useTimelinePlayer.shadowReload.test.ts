@@ -1208,4 +1208,72 @@ describe("useTimelinePlayer scene swap", () => {
     expect(shadow.adapter.getTime()).toBe(4.5);
     expect(shadow.adapter.isPlaying()).toBe(true);
   });
+
+  it("disposes the retired isolated bridge adapter and its window message listener on shadow promotion", () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.test";
+    document.head.appendChild(meta);
+
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+
+    const makeIsolatedFrame = (token: string) => {
+      const iframe = document.createElement("iframe");
+      document.body.appendChild(iframe);
+      vi.spyOn(iframe, "getAttribute").mockReturnValue(
+        `https://preview.test/api/projects/p1/preview?pt=${token}`,
+      );
+      const fakeWin = { postMessage: vi.fn() } as unknown as Window;
+      Object.defineProperty(iframe, "contentWindow", { configurable: true, value: fakeWin });
+      return { iframe, fakeWin };
+    };
+
+    const harness = renderTimelinePlayerHarness();
+    try {
+      const live = makeIsolatedFrame("tok-live");
+      act(() => {
+        harness.getApi().iframeRef.current = live.iframe;
+        harness.getApi().onIframeLoad();
+      });
+      const liveListenersBefore = addSpy.mock.calls.filter(([type]) => type === "message").length;
+      expect(liveListenersBefore).toBeGreaterThan(0);
+
+      act(() => harness.getApi().refreshPlayer());
+      const gen = harness.getApi().previewSlots.find((s) => s.role === "shadow")!.gen;
+      const shadow = makeIsolatedFrame("tok-shadow");
+      act(() => {
+        harness.getApi().setShadowIframeNode(shadow.iframe);
+        harness.getApi().onShadowIframeLoad(gen);
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            origin: "https://preview.test",
+            source: shadow.fakeWin,
+            data: {
+              source: "openmotion-preview-bridge",
+              version: 1,
+              type: "timeline-state",
+              projectId: "p1",
+              token: "tok-shadow",
+              duration: 12,
+              currentTime: 0,
+              isPlaying: false,
+            },
+          }),
+        );
+      });
+
+      const removedBeforePromote = removeSpy.mock.calls.filter(([type]) => type === "message").length;
+      act(() => {
+        harness.getApi().onShadowReadyChange(gen, true);
+      });
+      const removedAfterPromote = removeSpy.mock.calls.filter(([type]) => type === "message").length;
+      // Promotion must dispose the retired live iframe's bridge adapter and remove its window message listener.
+      expect(removedAfterPromote).toBeGreaterThan(removedBeforePromote);
+      expect(harness.getApi().iframeRef.current).toBe(shadow.iframe);
+    } finally {
+      unmount(harness.root);
+      meta.remove();
+    }
+  });
 });

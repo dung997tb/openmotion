@@ -153,6 +153,22 @@ export function useTimelinePlayer({
     [setElements, requestTimelineReady, setDuration],
   );
 
+  const disposeBridgeAdapter = useCallback((retired?: HTMLIFrameElement | null) => {
+    if (retired) {
+      const cached = bridgeAdapterRef.current.get(retired);
+      if (cached) {
+        cached.dispose();
+        bridgeAdapterRef.current.delete(retired);
+      }
+    }
+    for (const [frame, cached] of bridgeAdapterRef.current) {
+      if (frame !== iframeRef.current && !frame.isConnected) {
+        cached.dispose();
+        bridgeAdapterRef.current.delete(frame);
+      }
+    }
+  }, []);
+
   const getAdapter = useCallback(
     (overrideIframe?: HTMLIFrameElement | null): PlaybackAdapter | null => {
       try {
@@ -162,12 +178,16 @@ export function useTimelinePlayer({
         if (!iframe || !win) return null;
         const preview = createPreviewAdapter({ iframe });
         if (preview.token) {
-          const current = bridgeAdapterRef.current.get(iframe);
-          if (current?.token === preview.token) return current;
           for (const [previousFrame, cached] of bridgeAdapterRef.current) {
-            if (previousFrame !== iframe && previousFrame.isConnected) continue;
+            if (previousFrame === iframe || previousFrame.isConnected) continue;
             cached.dispose();
             bridgeAdapterRef.current.delete(previousFrame);
+          }
+          const current = bridgeAdapterRef.current.get(iframe);
+          if (current?.token === preview.token) return current;
+          if (current) {
+            current.dispose();
+            bridgeAdapterRef.current.delete(iframe);
           }
           const adapter = createBridgePlaybackAdapter(preview);
           bridgeAdapterRef.current.set(iframe, adapter);
@@ -463,6 +483,7 @@ export function useTimelinePlayer({
     attachIframeShortcutListeners,
     applyPreviewAudioState,
     onPromoted: onShadowPromoted,
+    onRetiredIframe: disposeBridgeAdapter,
     onReloadFailed: onPreviewReloadFailed,
     handOverPlayback: (time, playing) => {
       // keepPlaying: move the playhead without the paused-seek audio scrub.

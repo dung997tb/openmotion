@@ -2820,6 +2820,7 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
       );
       assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
       assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(res.headers.get('origin-agent-cluster'), '?1');
       assert.equal(res.headers.get('set-cookie'), null);
     }
 
@@ -2844,7 +2845,12 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     );
     assert.equal(viaQuery.headers.get('referrer-policy'), 'no-referrer');
     assert.equal(viaQuery.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(viaQuery.headers.get('origin-agent-cluster'), '?1');
     assert.equal(viaQuery.headers.get('set-cookie'), null);
+    const studioDoc = await app.request('/', { headers: { Host: 'motion.example.test' } });
+    if (studioDoc.status === 200) {
+      assert.equal(studioDoc.headers.get('origin-agent-cluster'), '?1');
+    }
     const previewHtml = await viaQuery.text();
     assert.match(previewHtml, /Project Alpha/);
     const base = previewHtml.match(/<base href="([^"]+)"/)?.[1];
