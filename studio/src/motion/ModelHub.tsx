@@ -324,6 +324,8 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                 >
                   {column.map(item => {
                     const itemTitle = t(item.title);
+                    const isVideo = item.destination.scene.modality === 'video';
+                    const kindLabel = t(isVideo ? 'Video template' : 'Image template');
                     return (
                       <div
                         key={item.id}
@@ -341,6 +343,14 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                       >
                         <div className="om-hub-showcase-media" style={{ aspectRatio: String(item.aspectRatio) }}>
                           <img src={item.poster} alt={itemTitle} loading="lazy" />
+                          <span
+                            className="om-hub-showcase-kind"
+                            data-kind={isVideo ? 'video' : 'image'}
+                            title={kindLabel}
+                            aria-label={kindLabel}
+                          >
+                            <RemixIcon name={isVideo ? 'movie-line' : 'image-line'} size={14} />
+                          </span>
                           <div className="om-hub-showcase-overlay">
                             <strong className="om-hub-showcase-title" title={itemTitle}>{itemTitle}</strong>
                             <Button

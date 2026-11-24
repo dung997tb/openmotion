@@ -891,6 +891,28 @@
 .om-hub-showcase-card:is(:hover, :focus-visible) .om-hub-showcase-media::after {
   opacity: 1;
 }
+.om-hub-showcase-kind {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--motion-radius-step-7);
+  border: 1px solid color-mix(in srgb, var(--motion-black-friday-ink-light) 14%, transparent);
+  background: color-mix(in srgb, var(--motion-black-friday-stage-black) 56%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: color-mix(in srgb, var(--motion-black-friday-ink-light) 92%, transparent);
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.om-hub-showcase-card:is(:hover, :focus-visible) .om-hub-showcase-kind {
+  opacity: 0;
+  transform: translateY(-2px);
+}
 .om-hub-showcase-overlay {
   position: absolute;
   left: 0;
@@ -940,6 +962,7 @@
 }
 .om-hub-showcase-cta:hover { background: color-mix(in srgb, var(--motion-black-friday-ink-light) 32%, transparent); }
 @media (hover: none) {
+  .om-hub-showcase-kind { top: 10px; bottom: auto; }
   .om-hub-showcase-media::after,
   .om-hub-showcase-overlay { opacity: 1; transform: none; }
 }

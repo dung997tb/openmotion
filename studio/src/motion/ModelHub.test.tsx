@@ -58,6 +58,12 @@ it('renders curated Seedance 2.5 and GPT Image 2.6 showcase galleries with light
     const cards = container.querySelectorAll<HTMLElement>('.om-hub-showcase-card');
     expect(cards.length).toBeGreaterThan(0);
 
+    const expectedKind = hubId === 'seedance-2-5' ? 'video' : 'image';
+    const kindBadge = cards[0].querySelector<HTMLElement>('.om-hub-showcase-kind')!;
+    expect(kindBadge).not.toBeNull();
+    expect(kindBadge.dataset.kind).toBe(expectedKind);
+    expect(kindBadge.querySelector('svg')?.getAttribute('data-remix-icon')).toBe(expectedKind === 'video' ? 'movie-line' : 'image-line');
+
     await act(async () => cards[0].click());
     const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();

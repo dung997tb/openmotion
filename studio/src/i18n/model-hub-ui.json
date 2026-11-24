@@ -207,7 +207,9 @@
     "Luxury amber glass dropper bottle resting on raw travertine stone plinth with crisp afternoon botanical leaf shadows cast across warm plaster wall, editorial stillness.": "奢华琥珀玻璃滴管瓶静置于天然洞石基座，午后植物枝叶在暖色肌理墙面投下锐利光影，杂志级静物大片。",
     "Bold two-ink risograph graphic poster on textured uncoated paper stock, tall condensed display typography paired with halftone geometric illustration, tactile print grain.": "粗糙特种纸质感的双色孔版复古平面海报，高挑窄体标题排印结合半调网点几何插画，极具印刷肌理感。",
     "Surreal minimalist 3D art direction key visual with sculptural glossy forms, dramatic studio rim light, rich atmospheric contrast, museum exhibition poster composition.": "超现实极简 3D 概念主视觉：雕塑感高光几何造型搭配戏剧化轮廓棚光，强氛围明暗对比，美术馆展览级海报构图。",
-    "Ultra-wide vertical fashion editorial poster of tailored ivory wide-leg trousers silhouetted against a dreamy rose-pink twilight sky and dark tarmac, minimalist typography space.": "超广角低机位竖版时尚海报：象牙白阔腿裤剪影伫立于暗色柏油路与粉雾暮色天际之间，极简留白构图。"
+    "Ultra-wide vertical fashion editorial poster of tailored ivory wide-leg trousers silhouetted against a dreamy rose-pink twilight sky and dark tarmac, minimalist typography space.": "超广角低机位竖版时尚海报：象牙白阔腿裤剪影伫立于暗色柏油路与粉雾暮色天际之间，极简留白构图。",
+    "Video template": "视频模板",
+    "Image template": "图片模板"
   },
   "ja": {
     "New model": "新モデル",
@@ -372,7 +374,9 @@
     "Botanical Shadow Fragrance": "木漏れ日と琥珀ボトルの静物",
     "Two-Ink Risograph Poster": "2色リソグラフ・レトロポスター",
     "Surreal 3D Art Direction": "シュールレアル 3D キービジュアル",
-    "Rose Dusk Low-Angle": "夕焼けピンク・縦長ファッションポスター"
+    "Rose Dusk Low-Angle": "夕焼けピンク・縦長ファッションポスター",
+    "Video template": "動画テンプレート",
+    "Image template": "画像テンプレート"
   },
   "ko": {
     "New model": "새 모델",
@@ -537,7 +541,9 @@
     "Botanical Shadow Fragrance": "식물 그림자와 앰버 향수병",
     "Two-Ink Risograph Poster": "2색 리소그래프 레트로 포스터",
     "Surreal 3D Art Direction": "초현실 3D 아트 디렉션 키비주얼",
-    "Rose Dusk Low-Angle": "장밋빛 황혼 세로 패션 포스터"
+    "Rose Dusk Low-Angle": "장밋빛 황혼 세로 패션 포스터",
+    "Video template": "비디오 템플릿",
+    "Image template": "이미지 템플릿"
   },
   "de": {
     "New model": "Neues Modell",
@@ -702,7 +708,9 @@
     "Botanical Shadow Fragrance": "Bernsteinflakon im Blätterschatten",
     "Two-Ink Risograph Poster": "Zweifarbiges Risografie-Poster",
     "Surreal 3D Art Direction": "Surreale 3D-Art-Direction",
-    "Rose Dusk Low-Angle": "Rosarote Dämmerung im Hochformat"
+    "Rose Dusk Low-Angle": "Rosarote Dämmerung im Hochformat",
+    "Video template": "Videovorlage",
+    "Image template": "Bildvorlage"
   },
   "fr": {
     "New model": "Nouveau modèle",
@@ -867,7 +875,9 @@
     "Botanical Shadow Fragrance": "Flacon ambré aux ombres végétales",
     "Two-Ink Risograph Poster": "Affiche risographie bicolore",
     "Surreal 3D Art Direction": "Direction artistique 3D surréaliste",
-    "Rose Dusk Low-Angle": "Crépuscule rose en contre-plongée"
+    "Rose Dusk Low-Angle": "Crépuscule rose en contre-plongée",
+    "Video template": "Modèle vidéo",
+    "Image template": "Modèle image"
   },
   "ru": {
     "New model": "Новая модель",
@@ -1032,7 +1042,9 @@
     "Botanical Shadow Fragrance": "Янтарный флакон в тени листвы",
     "Two-Ink Risograph Poster": "Двухцветный ретро-постер ризография",
     "Surreal 3D Art Direction": "Сюрреалистичный 3D-ключевой визуал",
-    "Rose Dusk Low-Angle": "Розовые сумерки с нижнего ракурса"
+    "Rose Dusk Low-Angle": "Розовые сумерки с нижнего ракурса",
+    "Video template": "Видеошаблон",
+    "Image template": "Шаблон изображения"
   },
   "es": {
     "New model": "Nuevo modelo",
@@ -1197,7 +1209,9 @@
     "Botanical Shadow Fragrance": "Frasco ámbar con sombras botánicas",
     "Two-Ink Risograph Poster": "Póster risográfico bicolor",
     "Surreal 3D Art Direction": "Dirección de arte 3D surrealista",
-    "Rose Dusk Low-Angle": "Crepúsculo rosado en contrapicado"
+    "Rose Dusk Low-Angle": "Crepúsculo rosado en contrapicado",
+    "Video template": "Plantilla de video",
+    "Image template": "Plantilla de imagen"
   },
   "pt-BR": {
     "New model": "Novo modelo",
@@ -1362,7 +1376,9 @@
     "Botanical Shadow Fragrance": "Frasco âmbar com sombras botânicas",
     "Two-Ink Risograph Poster": "Pôster risográfico em duas tintas",
     "Surreal 3D Art Direction": "Direção de arte 3D surrealista",
-    "Rose Dusk Low-Angle": "Crepúsculo rosado em ângulo baixo"
+    "Rose Dusk Low-Angle": "Crepúsculo rosado em ângulo baixo",
+    "Video template": "Modelo de vídeo",
+    "Image template": "Modelo de imagem"
   },
   "it": {
     "New model": "Nuovo modello",
@@ -1527,7 +1543,9 @@
     "Botanical Shadow Fragrance": "Flacone ambra con ombre botaniche",
     "Two-Ink Risograph Poster": "Poster risograph bicolore",
     "Surreal 3D Art Direction": "Direzione artistica 3D surreale",
-    "Rose Dusk Low-Angle": "Crepuscolo rosa dal basso"
+    "Rose Dusk Low-Angle": "Crepuscolo rosa dal basso",
+    "Video template": "Modello video",
+    "Image template": "Modello immagine"
   },
   "tr": {
     "New model": "Yeni model",
@@ -1692,6 +1710,8 @@
     "Botanical Shadow Fragrance": "Bitki Gölgeli Amber Parfüm Şişesi",
     "Two-Ink Risograph Poster": "İki Renkli Risografi Retro Afiş",
     "Surreal 3D Art Direction": "Sürreal 3D Sanat Yönetimi",
-    "Rose Dusk Low-Angle": "Gül Alacakaranlık Dikey Afiş"
+    "Rose Dusk Low-Angle": "Gül Alacakaranlık Dikey Afiş",
+    "Video template": "Video şablonu",
+    "Image template": "Görsel şablonu"
   }
 }
