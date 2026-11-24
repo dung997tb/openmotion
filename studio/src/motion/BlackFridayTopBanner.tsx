@@ -83,7 +83,7 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   const copy = {
     aria: t('Black Friday campaign banner'),
     timerLabel: t('Ends in'),
-    offerBefore: t("Black Friday lowest of the year! DeepSeek V4.1 Flash Eco, DeepSeek V4.1 Flash & more "),
+    offerBefore: t('Black Friday lowest of the year! DeepSeek V4.1 Flash & Eco '),
     offerHighlight: t('7-day unlimited'),
     offerAfter: t(', up to 50% off annual'),
     bfCta: t('Claim offer'),
