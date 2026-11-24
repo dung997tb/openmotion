@@ -55,6 +55,8 @@ export interface PlayerProps {
   showInitialLoading?: boolean;
   /** Track all referenced composition assets for the unified editor readiness gate (live slot only). */
   trackAssets?: boolean;
+  /** Keeps a hidden shadow preview out of focus order and the accessibility tree while still rasterizing. */
+  inert?: boolean;
 }
 
 interface HyperframesPlayerElement extends HTMLElement {
@@ -194,6 +196,7 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
       noLoadTimeout,
       showInitialLoading,
       trackAssets,
+      inert,
       ...host
     },
     ref,
@@ -623,6 +626,7 @@ const SameOriginPlayer = forwardRef<HTMLIFrameElement, PlayerProps>(
       <div
         className="relative w-full h-full max-w-full max-h-full overflow-hidden flex items-center justify-center"
         style={style}
+        inert={inert || undefined}
       >
         <div ref={containerRef} className="w-full h-full" />
         {showCompositionOverlay && <PreviewCompositionLoading />}
