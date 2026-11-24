@@ -156,9 +156,9 @@
   box-sizing: border-box;
   max-inline-size: 100%;
   padding: var(--motion-space-6) var(--motion-space-10);
-  border: 1px solid var(--motion-neutral-n8);
+  border: 1px solid var(--motion-neutral-n9);
   border-radius: var(--motion-radius-step-7);
-  background: var(--motion-dark-card-bg);
+  background: var(--motion-neutral-n11);
   color: var(--motion-neutral-n4);
   font-size: var(--motion-text-sm);
   font-weight: var(--motion-weight-semibold);
@@ -222,9 +222,15 @@
 
 .subscriptionCard[data-guide='upgrade'] .upgradeAction > :is(button, a) {
   min-block-size: var(--motion-space-44);
-  min-inline-size: calc(2 * var(--motion-space-64));
-  padding-inline: var(--motion-space-20);
+  justify-content: center;
+  gap: var(--motion-space-6);
+  padding-inline: var(--motion-space-16);
   font-size: var(--motion-text-body);
+}
+
+.subscriptionCard[data-guide='upgrade'] .upgradeAction > button svg {
+  width: var(--motion-icon);
+  height: var(--motion-icon);
 }
 
 @container subscription-offer (max-width: 32rem) {
@@ -236,7 +242,6 @@
     font-size: var(--motion-text-sm);
   }
   .subscriptionCard[data-guide='upgrade'] .upgradeAction > :is(button, a) {
-    min-inline-size: calc(var(--motion-space-64) + var(--motion-space-40));
-    padding-inline: var(--motion-space-12);
+    padding-inline: var(--motion-space-10);
   }
 }
