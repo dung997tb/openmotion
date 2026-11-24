@@ -54,6 +54,7 @@ interface MemoryStripEntry {
   weight: number;
   baseCoverKey: string;
   compPathKey: string;
+  clipIdentityKey: string;
   inCache: boolean;
   refCount: number;
   revoked: boolean;
@@ -1239,15 +1240,27 @@ function compPathCacheTag(projectId: string, compPath: string, projectRev: strin
   return `${projectId}|${normalizeCompositionPathForGate(compPath)}|${projectRev}|${contentRevision}`;
 }
 
+function clipIdentityCacheKey(
+  input: Pick<StripCacheInput, "projectId" | "previewUrl" | "selector" | "selectorIndex">,
+): string {
+  return createThumbnailKey({
+    project: input.projectId,
+    url: input.previewUrl,
+    sel: input.selector,
+    idx: input.selectorIndex,
+  });
+}
+
 function stripMemoryCacheKey(
   input: StripCacheInput,
-): { idbKey: string; baseCoverKey: string; compPathKey: string } {
+): { idbKey: string; baseCoverKey: string; compPathKey: string; clipIdentityKey: string } {
   const compRev = resolveCompositionRevision(input.projectId, input.previewUrl);
   const baseCoverKey = coverCacheKey(input, compRev);
   return {
     idbKey: `${baseCoverKey}&frames=${input.frameCount}`,
     baseCoverKey,
     compPathKey: compPathCacheTag(input.projectId, input.previewUrl, compRev, input.contentRevision),
+    clipIdentityKey: clipIdentityCacheKey(input),
   };
 }
 
@@ -1255,6 +1268,7 @@ function putMemoryStripCache(
   idbKey: string,
   baseCoverKey: string,
   compPathKey: string,
+  clipIdentityKey: string,
   blobs: readonly Blob[],
   aspect: number,
   width: number,
@@ -1299,6 +1313,7 @@ function putMemoryStripCache(
     weight,
     baseCoverKey,
     compPathKey,
+    clipIdentityKey,
     inCache: true,
     refCount: 0,
     revoked: false,
@@ -1325,6 +1340,7 @@ function retainOrRematerialize(idbKey: string, entry: MemoryStripEntry): MemoryS
     idbKey,
     entry.baseCoverKey,
     entry.compPathKey,
+    entry.clipIdentityKey,
     entry.blobs,
     entry.aspect,
     entry.width,
@@ -1347,7 +1363,7 @@ function memoryEntryToThumbnailResult(entry: MemoryStripEntry): ThumbnailLoadedR
 function peekMemoryEntry(
   input: StripCacheInput,
 ): { entry: MemoryStripEntry; value: ThumbnailValue } | null {
-  const { idbKey, baseCoverKey, compPathKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
   const exact = memoryStripCache.get(idbKey);
   if (exact) {
     memoryStripCache.delete(idbKey);
@@ -1370,6 +1386,7 @@ function peekMemoryEntry(
         idbKey,
         baseCoverKey,
         compPathKey,
+        clipIdentityKey,
         [shared.blob],
         shared.aspect,
         shared.width,
@@ -1393,19 +1410,52 @@ export function peekCachedCompositionCapture(
   return peekMemoryEntry(input)?.value ?? null;
 }
 
+/**
+ * Return the freshest in-memory captured strip/render for the same clip identity
+ * regardless of frame count, revision, or selector time window, so a refreshing or
+ * remounted timeline clip keeps showing its previous filmstrip until the refresh completes.
+ */
+export function peekFallbackCompositionCapture(
+  input: Pick<StripCacheInput, "projectId" | "previewUrl" | "selector" | "selectorIndex">,
+): ThumbnailValue | null {
+  const target = clipIdentityCacheKey(input);
+  let fallbackRenderImage: ThumbnailValue | null = null;
+  const entries = [...memoryStripCache.values()];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if (entry.revoked || entry.clipIdentityKey !== target) continue;
+    if (entry.value.kind === "filmstrip" && entry.value.urls.length > 0) {
+      return entry.value;
+    }
+    if (!fallbackRenderImage && entry.value.kind === "image" && entry.value.representative === "render") {
+      fallbackRenderImage = entry.value;
+    }
+  }
+  return fallbackRenderImage;
+}
+
 /** Seed an in-memory cached capture strip in unit tests to exercise LRU/ownership semantics. */
 export function seedClientCompositionCaptureForTest(
   input: StripCacheInput,
   blobs: readonly Blob[],
   dims: { aspect?: number; width?: number; height?: number } = {},
 ): ThumbnailValue {
-  const { idbKey, baseCoverKey, compPathKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
   const aspect = dims.aspect ?? 16 / 9;
   const width = dims.width ?? CAPTURE_TARGET_WIDTH;
   const height = dims.height ?? 135;
   const coverBlob = blobs[Math.min(blobs.length - 1, Math.floor(blobs.length / 2))]!;
   putSharedCoverCache(baseCoverKey, { blob: coverBlob, aspect, width, height });
-  return putMemoryStripCache(idbKey, baseCoverKey, compPathKey, blobs, aspect, width, height).value;
+  return putMemoryStripCache(
+    idbKey,
+    baseCoverKey,
+    compPathKey,
+    clipIdentityKey,
+    blobs,
+    aspect,
+    width,
+    height,
+  ).value;
 }
 
 /** True when any frame count for this composition is already cached in RAM (no blocking gate needed). */
@@ -1465,7 +1515,7 @@ export function acquireCachedCompositionCaptureFromIdb(
       release: retainMemoryEntry(syncHit.entry),
     });
   }
-  const { idbKey, baseCoverKey, compPathKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
   let entryPromise = inFlightIdbReads.get(idbKey);
   if (!entryPromise) {
     entryPromise = readCachedStrip(idbKey)
@@ -1483,6 +1533,7 @@ export function acquireCachedCompositionCaptureFromIdb(
           idbKey,
           baseCoverKey,
           compPathKey,
+          clipIdentityKey,
           cached.blobs,
           cached.aspect,
           cached.width,
@@ -1505,7 +1556,7 @@ async function runClientCompositionCapture(
   input: ClientCaptureInput,
   signal: AbortSignal,
 ): Promise<ThumbnailLoadedResult> {
-  const { idbKey, baseCoverKey, compPathKey } = stripMemoryCacheKey(input);
+  const { idbKey, baseCoverKey, compPathKey, clipIdentityKey } = stripMemoryCacheKey(input);
 
   // 0. Fast path: synchronous in-memory strip/cover cache hit (0ms across switches).
   const memHit = memoryStripCache.get(idbKey);
@@ -1535,6 +1586,7 @@ async function runClientCompositionCapture(
         idbKey,
         baseCoverKey,
         compPathKey,
+        clipIdentityKey,
         [shared.blob],
         shared.aspect,
         shared.width,
@@ -1559,6 +1611,7 @@ async function runClientCompositionCapture(
       idbKey,
       baseCoverKey,
       compPathKey,
+      clipIdentityKey,
       cached.blobs,
       cached.aspect,
       cached.width,
@@ -1666,6 +1719,7 @@ async function runClientCompositionCapture(
       idbKey,
       baseCoverKey,
       compPathKey,
+      clipIdentityKey,
       result.blobs,
       result.aspect,
       result.width,

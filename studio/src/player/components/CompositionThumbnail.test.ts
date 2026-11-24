@@ -5,7 +5,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockResizeObserver, reportResize } from "../../hooks/resizeObserverTestUtils";
 import { setCachedCloudDisklessMode } from "../../utils/cloudRuntime";
+import {
+  clearClientCompositionCaptureCacheForTest,
+  seedClientCompositionCaptureForTest,
+  setCachedProjectRevision,
+  setClientCompositionCaptureCapabilityForTest,
+} from "../lib/clientCompositionCapture";
 import { thumbnailScheduler } from "../lib/thumbnailScheduler";
+import { usePlayerStore } from "../store/playerStore";
 import { buildCompositionThumbnailUrl, CompositionThumbnail, compositionThumbnailRequest } from "./CompositionThumbnail";
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
@@ -49,6 +56,8 @@ afterEach(() => {
   act(() => root?.unmount());
   root = null;
   setCachedCloudDisklessMode(null);
+  setClientCompositionCaptureCapabilityForTest(null);
+  clearClientCompositionCaptureCacheForTest();
   vi.useRealTimers();
   thumbnailScheduler.invalidateProject("/api/projects/demo/preview");
   thumbnailScheduler.invalidateProject("demo");
@@ -340,5 +349,422 @@ describe("CompositionThumbnail", () => {
     expect(strip?.textContent).toContain("Editable motion artwork montage");
     expect(strip?.textContent).toContain("reel");
     expect(strip?.textContent).not.toContain("reel.html");
+  });
+});
+
+describe("CompositionThumbnail retained filmstrip during refresh", () => {
+  function setupIsolatedCaptureEnv() {
+    setCachedCloudDisklessMode(true);
+    setClientCompositionCaptureCapabilityForTest(true);
+    Object.defineProperty(host, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(host, "clientHeight", { configurable: true, value: 40 });
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+      timelinePreviewSettledInitial: true,
+    });
+
+    let urlSeq = 0;
+    URL.createObjectURL = vi.fn(() => `blob:strip-${++urlSeq}`);
+    URL.revokeObjectURL = vi.fn();
+
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test";
+    document.head.appendChild(meta);
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        iframeSrcs.set(this, String(value));
+      },
+    });
+
+    const requestedUrls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const reqUrl = String(input);
+      requestedUrls.push(reqUrl);
+      if (reqUrl.includes("/preview-token")) {
+        return Response.json({
+          token: "tok-refresh",
+          previewOrigin: "https://preview.example.test",
+          assetLease: "lease-refresh",
+        });
+      }
+      return Response.json({
+        content:
+          '<template><div data-composition-id="scene-a" data-width="1920" data-height="1080">' +
+          '<canvas aria-label="Scene A text fallback"></canvas>' +
+          "</div></template>",
+      });
+    }) as typeof fetch;
+
+    let activeBridgeWin: { postMessage: ReturnType<typeof vi.fn> } | null = null;
+    let pendingRequestId: string | null = null;
+
+    async function waitForCaptureRequest() {
+      let iframe: HTMLIFrameElement | null = null;
+      await vi.waitFor(() => {
+        iframe = document.querySelector<HTMLIFrameElement>(
+          'iframe[data-openmotion-thumb-capture="true"]',
+        );
+        expect(iframe?.src).toContain("pt=tok-refresh");
+      });
+      activeBridgeWin = {
+        postMessage: vi.fn((msg: Record<string, unknown>) => {
+          if (msg.type === "capture-frames") {
+            pendingRequestId = String(msg.requestId ?? "");
+          }
+        }),
+      };
+      Object.defineProperty(iframe!, "contentWindow", {
+        configurable: true,
+        value: activeBridgeWin,
+      });
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: activeBridgeWin as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "timeline-state",
+            projectId: "demo",
+            token: "tok-refresh",
+            duration: 6,
+            width: 1920,
+            height: 1080,
+          },
+        }),
+      );
+      await vi.waitFor(() => expect(pendingRequestId).toBeTruthy());
+      return pendingRequestId!;
+    }
+
+    function sendProgressiveFrame(requestId: string, index: number, total: number) {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: activeBridgeWin as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "capture-frame",
+            projectId: "demo",
+            token: "tok-refresh",
+            requestId,
+            index,
+            total,
+            frame: new Uint8Array([9, index]).buffer,
+            mimeType: "image/jpeg",
+            width: 240,
+            height: 135,
+            aspect: 16 / 9,
+          },
+        }),
+      );
+    }
+
+    function resolveCapture(requestId: string, frameCount: number) {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: activeBridgeWin as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "response",
+            projectId: "demo",
+            token: "tok-refresh",
+            requestId,
+            ok: true,
+            result: {
+              frames: Array.from({ length: frameCount }, (_, idx) => new Uint8Array([7, idx]).buffer),
+              mimeType: "image/jpeg",
+              width: 240,
+              height: 135,
+              aspect: 16 / 9,
+            },
+          },
+        }),
+      );
+    }
+
+    function failCapture(requestId: string, error = "Capture failed") {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: activeBridgeWin as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "response",
+            projectId: "demo",
+            token: "tok-refresh",
+            requestId,
+            ok: false,
+            error,
+          },
+        }),
+      );
+    }
+
+    function cleanup() {
+      if (origSrcDescriptor) {
+        Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      }
+      meta.remove();
+      document
+        .querySelectorAll('iframe[data-openmotion-thumb-capture="true"]')
+        .forEach((node) => node.remove());
+    }
+
+    return {
+      requestedUrls,
+      waitForCaptureRequest,
+      sendProgressiveFrame,
+      resolveCapture,
+      failCapture,
+      cleanup,
+    };
+  }
+
+  it("keeps the existing filmstrip across refresh, LRU eviction, and mid-capture frames until the new strip finishes", async () => {
+    const env = setupIsolatedCaptureEnv();
+    try {
+      const previewUrl = "/api/projects/demo/preview/comp/compositions/intro.html";
+      const initial = seedClientCompositionCaptureForTest(
+        {
+          projectId: "demo",
+          previewUrl,
+          contentRevision: 0,
+          frameCount: 4,
+        },
+        [new Blob(["a"]), new Blob(["b"]), new Blob(["c"]), new Blob(["d"])],
+      );
+      expect(initial.kind).toBe("filmstrip");
+      const initialUrls = initial.kind === "filmstrip" ? [...initial.urls] : [];
+
+      root = createRoot(host);
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 0,
+            clipDuration: 6,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      const shownBefore = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(shownBefore.length).toBeGreaterThan(0);
+      expect(shownBefore.every((src) => initialUrls.includes(src!))).toBe(true);
+
+      // Trigger a refresh via contentRevision change while the new capture is in flight.
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 1,
+            clipDuration: 6,
+          }),
+        );
+      });
+
+      // Immediately during IDB check: no skeleton and no text fallback, still showing old strip.
+      expect(host.querySelector('[data-composition-strip="text"]')).toBeNull();
+      expect([...host.querySelectorAll("img")].every((img) => initialUrls.includes(img.getAttribute("src")!))).toBe(
+        true,
+      );
+
+      const requestId = await env.waitForCaptureRequest();
+
+      // Still holding the prior filmstrip while capture runs; poster file fetch was skipped.
+      expect(env.requestedUrls.some((u) => u.includes("/files/"))).toBe(false);
+      expect(host.querySelector('[data-composition-strip="text"]')).toBeNull();
+      expect([...host.querySelectorAll("img")].every((img) => initialUrls.includes(img.getAttribute("src")!))).toBe(
+        true,
+      );
+
+      // Even if LRU evicts the old entry from memoryStripCache mid-refresh, its object URLs stay valid.
+      for (let i = 0; i < 70; i++) {
+        seedClientCompositionCaptureForTest(
+          {
+            projectId: "other-project",
+            previewUrl: `/api/projects/other-project/preview/comp/compositions/filler-${i}.html`,
+            contentRevision: 0,
+            frameCount: 2,
+          },
+          [new Blob(["x"]), new Blob(["y"])],
+        );
+      }
+      for (const oldUrl of initialUrls) {
+        expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(oldUrl);
+      }
+
+      // A single progressive hero frame during refresh must not overwrite the existing full filmstrip.
+      await act(async () => {
+        env.sendProgressiveFrame(requestId, 2, 4);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect([...host.querySelectorAll("img")].every((img) => initialUrls.includes(img.getAttribute("src")!))).toBe(
+        true,
+      );
+
+      // Once the recalculated filmstrip finishes, swap atomically and release the evicted old URLs.
+      await act(async () => {
+        env.resolveCapture(requestId, 4);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const shownAfter = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(shownAfter.length).toBeGreaterThan(0);
+      expect(shownAfter.some((src) => initialUrls.includes(src!))).toBe(false);
+      for (const oldUrl of initialUrls) {
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith(oldUrl);
+      }
+    } finally {
+      env.cleanup();
+    }
+  });
+
+  it("keeps the existing filmstrip when project revision changes or the clip remounts during refresh", async () => {
+    const env = setupIsolatedCaptureEnv();
+    try {
+      const previewUrl = "/api/projects/demo/preview/comp/compositions/intro.html";
+      setCachedProjectRevision("demo", "rev-a");
+      const initial = seedClientCompositionCaptureForTest(
+        {
+          projectId: "demo",
+          previewUrl,
+          contentRevision: 0,
+          frameCount: 4,
+        },
+        [new Blob(["a"]), new Blob(["b"]), new Blob(["c"]), new Blob(["d"])],
+      );
+      const initialUrls = initial.kind === "filmstrip" ? [...initial.urls] : [];
+
+      // Advance project revision before mounting (simulates remount/reopen during refresh).
+      setCachedProjectRevision("demo", "rev-b");
+      root = createRoot(host);
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 0,
+            clipDuration: 6,
+          }),
+        );
+      });
+
+      expect(host.querySelector('[data-composition-strip="text"]')).toBeNull();
+      const shownDuring = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(shownDuring.length).toBeGreaterThan(0);
+      expect(shownDuring.every((src) => initialUrls.includes(src!))).toBe(true);
+
+      const requestId = await env.waitForCaptureRequest();
+      await act(async () => {
+        env.resolveCapture(requestId, 4);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const shownAfter = [...host.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+      expect(shownAfter.some((src) => initialUrls.includes(src!))).toBe(false);
+    } finally {
+      env.cleanup();
+    }
+  });
+
+  it("never bleeds a retained filmstrip onto another clip and falls back cleanly on capture error", async () => {
+    const env = setupIsolatedCaptureEnv();
+    try {
+      const introUrl = "/api/projects/demo/preview/comp/compositions/intro.html";
+      const otherUrl = "/api/projects/demo/preview/comp/compositions/other.html";
+      const initial = seedClientCompositionCaptureForTest(
+        {
+          projectId: "demo",
+          previewUrl: introUrl,
+          contentRevision: 0,
+          frameCount: 4,
+        },
+        [new Blob(["a"]), new Blob(["b"]), new Blob(["c"]), new Blob(["d"])],
+      );
+      const initialUrls = initial.kind === "filmstrip" ? [...initial.urls] : [];
+
+      root = createRoot(host);
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl: introUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 0,
+            clipDuration: 6,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect([...host.querySelectorAll("img")].every((img) => initialUrls.includes(img.getAttribute("src")!))).toBe(
+        true,
+      );
+
+      // Switching to a different composition clears the old strip immediately.
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl: otherUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 0,
+            clipDuration: 6,
+          }),
+        );
+      });
+      expect([...host.querySelectorAll("img")].some((img) => initialUrls.includes(img.getAttribute("src")!))).toBe(
+        false,
+      );
+
+      // Switch back to introUrl at revision 1 and fail its capture -> falls back to poster text.
+      await act(async () => {
+        root!.render(
+          React.createElement(CompositionThumbnail, {
+            previewUrl: introUrl,
+            label: "",
+            labelColor: "#fff",
+            projectId: "demo",
+            contentRevision: 1,
+            clipDuration: 6,
+          }),
+        );
+      });
+      const requestId = await env.waitForCaptureRequest();
+      await act(async () => {
+        env.failCapture(requestId);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      expect(host.querySelectorAll("img")).toHaveLength(0);
+      expect(host.querySelector('[data-composition-strip="text"]')).not.toBeNull();
+    } finally {
+      env.cleanup();
+    }
   });
 });

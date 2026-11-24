@@ -57,7 +57,7 @@ function useVideoThumbnailSnapshot(
   const richSnapshot = useThumbnailLease(rich);
   const [shown, setShown] = useState({ media, request: rich });
   const settled = richSnapshot.status === "ready" || rich === null;
-  if (settled && shown.request !== rich) setShown({ media, request: rich });
+  if (settled && (shown.media !== media || shown.request !== rich)) setShown({ media, request: rich });
   const shownSnapshot = useThumbnailLease(shown.media === media ? shown.request : null);
   return selectThumbnailSnapshot(posterSnapshot, richSnapshot, shownSnapshot);
 }
@@ -139,7 +139,7 @@ export const VideoThumbnail = memo(function VideoThumbnail({
   const snapshot = useVideoThumbnailSnapshot(
     measured ? posterRequest : null,
     measured && requestFrameCount > 1 ? richRequest : null,
-    posterRequest.key,
+    `${projectId}\0${videoSrc}`,
   );
 
   const value = snapshot.status === "ready" ? snapshot.value : null;
