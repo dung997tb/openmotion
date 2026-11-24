@@ -1,4 +1,4 @@
-import { assetImportErrorCodes, exportFailureCodes, exportFailureStages, toolDimensions, toolFailureDimensions } from './tool-fields.ts';
+import { connectorCauseCodes, renderFailureReasons, assetImportErrorCodes, exportFailureCodes, exportFailureStages, toolDimensions, toolFailureDimensions } from './tool-fields.ts';
 import type { Entry, Registry } from './core.ts';
 import { studioUsageEvents } from './studio-events.ts';
 import { providerSetupEntries, type ProviderSetupEntry } from '../shared/workspace-url.ts';
@@ -113,14 +113,14 @@ export const omEvents = {
   media_generation_submitted: { producers: ['worker'], fields: { ...generation, job_id: 'uuid' }, required: ['modality', 'job_id'] },
   media_generation_result: { producers: ['worker'], fields: { ...generation, job_id: 'uuid',
     job_state: ['completed', 'failed', 'cancelled'], asset_count: 'integer' }, required: ['modality', 'job_id', 'job_state', 'asset_count'] },
-  export_result: { producers: ['worker'], fields: { job_id: 'uuid', job_state: ['completed', 'failed', 'cancelled'], duration_ms: 'integer', technical_check: ['passed', 'failed', 'unknown'], failure_stage: exportFailureStages, error_code: exportFailureCodes }, required: ['job_id', 'job_state', 'duration_ms', 'technical_check'] },
+  export_result: { producers: ['worker'], fields: { job_id: 'uuid', job_state: ['completed', 'failed', 'cancelled'], duration_ms: 'integer', technical_check: ['passed', 'failed', 'unknown'], check_code: 'code', render_reason: renderFailureReasons, renderer_exit_code: 'integer', failure_stage: exportFailureStages, error_code: exportFailureCodes }, required: ['job_id', 'job_state', 'duration_ms', 'technical_check'] },
   // One per finished OpenDesign sign-in attempt. `replaced` is an interrupted attempt the service refused; the same
   // sign-in continues with a new attempt. Times are milliseconds since the click. Stage values come from the connector
   // protocol; only confirmed account IDs are allowed, never links, authorization codes or credentials.
   account_sign_in_result: { producers: ['mcp'], fields: { attempt_id: 'uuid', outcome: ['success', 'failure', 'cancelled', 'replaced'],
     source_product: ['openmotion'], source_detail: ['openmotion_editor_login'], entry_id: 'uuid', entry_occurred_at: 'timestamp', amr_user_id: 'code',
-    error_code: ['connector_unavailable', 'setup_failed', 'authorization_expired', 'credentials_rejected'],
-    connector_problem: ['npm_missing', 'install_failed', 'start_failed'], connector_version: 'code', resumed: 'boolean',
+    error_code: ['connector_unavailable', 'setup_failed', 'interrupted', 'authorization_expired', 'credentials_rejected'],
+    connector_problem: ['npm_missing', 'install_failed', 'install_timeout', 'start_failed'], connector_cause: connectorCauseCodes, http_status: 'integer', connector_version: 'code', resumed: 'boolean',
     last_stage: accountStages, last_result: ['started', 'success', 'failed'], error_kind: accountErrorKinds, browser_opened: 'boolean',
     receipt: ['accepted', 'rejected'], exit_code: 'integer', duration_ms: 'integer', prepare_ms: 'integer', link_ms: 'integer', approved_ms: 'integer' },
     required: ['attempt_id', 'outcome', 'connector_version', 'resumed', 'duration_ms'] },
@@ -142,7 +142,7 @@ export const omEvents = {
   check_completed: { producers: ['mcp', 'worker'], fields: { ...check, result: ['pass', 'fail', 'unreviewed', 'error'], evidence_ref: 'code', duration_ms: 'integer' }, required: ['check_id', 'check_type', 'project_id', 'version_id', 'subject_id', 'checklist_version', 'checker_type', 'result'] },
   queue_snapshot: { producers: ['worker'], fields: { instance_id: 'uuid', task_type: ['asset_import', 'export', 'all'], queued_count: 'integer', running_count: 'integer', available_slots: 'integer', counts_complete: 'boolean' }, required: ['instance_id', 'task_type', 'queued_count', 'running_count', 'available_slots', 'counts_complete'] },
   worker_heartbeat: { producers: ['worker'], fields: { collector_id: 'uuid', instance_id: 'uuid', active: 'boolean', queue_count: 'integer' }, required: ['collector_id', 'instance_id', 'active', 'queue_count'] },
-  incident_confirmed: { producers: ['mcp', 'worker'], fields: { incident_id: 'uuid', incident_type: ['false_success', 'duplicate_charge', 'content_loss', 'cross_project_write', 'wrong_version_delivery', 'other'], severity: ['sev1', 'sev2', 'sev3'], subject_id: 'code', evidence_ref: 'code' }, required: ['incident_id', 'incident_type', 'severity', 'subject_id'] },
+  incident_confirmed: { producers: ['mcp', 'worker'], fields: { incident_id: 'uuid', incident_type: ['false_success', 'duplicate_charge', 'content_loss', 'cross_project_write', 'wrong_version_delivery', 'other'], severity: ['sev1', 'sev2', 'sev3'], subject_id: 'code', persist_reason: ['ownership_changed', 'permission_denied', 'out_of_space', 'missing_file', 'unknown'], evidence_ref: 'code' }, required: ['incident_id', 'incident_type', 'severity', 'subject_id'] },
   recovery_recorded: { producers: ['mcp', 'worker'], fields: { incident_id: 'uuid', test_case_id: 'code', fault_type: 'code', data_integrity: ['preserved', 'lost', 'unknown'], duplicate_charge_check: ['clear', 'found', 'unknown'], recovery_result: ['success', 'failure', 'unknown'] }, required: ['incident_id', 'test_case_id', 'fault_type', 'data_integrity', 'duplicate_charge_check', 'recovery_result'] },
   page_view: { producers: ['studio'], fields: { page_name: pages, view_id: 'uuid', embedded: 'boolean', has_project: 'boolean', brand_collection: brandCollection, entry_from: entryFrom, mcp_client: mcpClient, settings_section: settingsSection,
     studio_id: creative.studio_id, scene_id: creative.scene_id, model_provider: creative.model_provider, model_id: creative.model_id, explore_community: creative.explore_community, medium: creative.medium, landing: creative.landing, hub_id: modelHub.hub_id, signed_in: modelHub.signed_in }, required: ['page_name', 'view_id', 'embedded', 'has_project'] },

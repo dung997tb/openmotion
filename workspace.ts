@@ -68,7 +68,9 @@ export function trackExportResult(tracking: OmTracking | undefined, job: ExportJ
   tracking.track('export_result', {
     job_id: job.id, job_state: job.state, duration_ms: Math.min(86_400_000, Math.max(0, Date.now() - job.createdAt)),
     technical_check: status === 'passed' || status === 'failed' ? status : 'unknown',
-    ...(job.state === 'failed' ? { failure_stage: job.failureStage ?? 'unknown', error_code: job.failureCode ?? 'EXPORT_FAILED' } : {}),
+    ...(job.state === 'failed' ? { failure_stage: job.failureStage ?? 'unknown', error_code: job.failureCode ?? 'EXPORT_FAILED',
+      ...(job.checkCode ? { check_code: job.checkCode } : {}),
+      ...(job.renderReason ? { render_reason: job.renderReason } : {}), ...(job.rendererExitCode !== undefined ? { renderer_exit_code: job.rendererExitCode } : {}) } : {}),
   }, undefined, 'worker', validHostContext(job.trackingHost) ? job.trackingHost : undefined);
 }
 

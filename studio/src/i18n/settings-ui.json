@@ -373,7 +373,9 @@
     "Dedicated media · API key": "专用媒体服务 · API 密钥",
     "Local Agent · Uses installed sign-in, no API key needed": "本地 Agent · 复用本机登录，无需 API 密钥",
     "OpenAI compatible": "OpenAI 兼容",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "此协议当前仅支持同步目录与配置文本默认模型，暂不直接执行图片、视频或音频生成。"
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "此协议当前仅支持同步目录与配置文本默认模型，暂不直接执行图片、视频或音频生成。",
+    "Sign-in was interrupted. Sign in again.": "登录已中断，请重新登录。",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "登录组件安装超时。请检查网络连接后重试。"
   },
   "ja": {
     "Go back": "戻る",
@@ -513,7 +515,9 @@
     "Dedicated media · API key": "専用メディアサービス · API キー",
     "Local Agent · Uses installed sign-in, no API key needed": "ローカル Agent · 既存のログインを使用、API キー不要",
     "OpenAI compatible": "OpenAI 互換",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "このプロトコルは現在、モデル同期とテキスト既定値の保存のみに対応しており、画像・動画・音声の生成は実行されません。"
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "このプロトコルは現在、モデル同期とテキスト既定値の保存のみに対応しており、画像・動画・音声の生成は実行されません。",
+    "Sign-in was interrupted. Sign in again.": "ログインが中断されました。もう一度ログインしてください。",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "ログイン用コンポーネントのインストールがタイムアウトしました。接続を確認して再試行してください。"
   },
   "ko": {
     "Go back": "뒤로",
@@ -548,7 +552,9 @@
     "Dedicated media · API key": "전용 미디어 서비스 · API 키",
     "Local Agent · Uses installed sign-in, no API key needed": "로컬 Agent · 기존 로그인 사용, API 키 불필요",
     "OpenAI compatible": "OpenAI 호환",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "이 프로토콜은 현재 모델 동기화와 텍스트 기본값 저장만 지원하며 이미지·비디오·오디오 생성은 실행되지 않습니다."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "이 프로토콜은 현재 모델 동기화와 텍스트 기본값 저장만 지원하며 이미지·비디오·오디오 생성은 실행되지 않습니다.",
+    "Sign-in was interrupted. Sign in again.": "로그인이 중단되었습니다. 다시 로그인하세요.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "로그인 구성 요소 설치 시간이 초과되었습니다. 연결을 확인하고 다시 시도하세요."
   },
   "de": {
     "Go back": "Zurück",
@@ -583,7 +589,9 @@
     "Dedicated media · API key": "Dedizierter Mediendienst · API-Schlüssel",
     "Local Agent · Uses installed sign-in, no API key needed": "Lokaler Agent · Nutzt vorhandene Anmeldung, kein API-Schlüssel nötig",
     "OpenAI compatible": "OpenAI-kompatibel",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Dieses Protokoll synchronisiert derzeit nur Modelle und speichert Text-Standardwerte; Bild-, Video- und Audiogenerierung wird darüber nicht ausgeführt."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Dieses Protokoll synchronisiert derzeit nur Modelle und speichert Text-Standardwerte; Bild-, Video- und Audiogenerierung wird darüber nicht ausgeführt.",
+    "Sign-in was interrupted. Sign in again.": "Die Anmeldung wurde unterbrochen. Melden Sie sich erneut an.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "Die Installation der Anmeldekomponente dauerte zu lange. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut."
   },
   "fr": {
     "Go back": "Retour",
@@ -618,7 +626,9 @@
     "Dedicated media · API key": "Service média dédié · Clé API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent local · Utilise la connexion installée, sans clé API",
     "OpenAI compatible": "Compatible OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Ce protocole synchronise actuellement uniquement les modèles et enregistre les valeurs texte par défaut ; la génération d’images, de vidéos et d’audio n’est pas exécutée via ce protocole."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Ce protocole synchronise actuellement uniquement les modèles et enregistre les valeurs texte par défaut ; la génération d’images, de vidéos et d’audio n’est pas exécutée via ce protocole.",
+    "Sign-in was interrupted. Sign in again.": "La connexion a été interrompue. Reconnectez-vous.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "Le délai d’installation du composant de connexion a expiré. Vérifiez votre connexion et réessayez."
   },
   "ru": {
     "Go back": "Назад",
@@ -653,7 +663,9 @@
     "Dedicated media · API key": "Медиа-сервис · API-ключ",
     "Local Agent · Uses installed sign-in, no API key needed": "Локальный Agent · Использует текущий вход, API-ключ не нужен",
     "OpenAI compatible": "Совместимый с OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Этот протокол пока поддерживает только синхронизацию каталога и сохранение текстовых настроек по умолчанию; генерация изображений, видео и аудио через него не выполняется."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Этот протокол пока поддерживает только синхронизацию каталога и сохранение текстовых настроек по умолчанию; генерация изображений, видео и аудио через него не выполняется.",
+    "Sign-in was interrupted. Sign in again.": "Вход прерван. Войдите снова.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "Время установки компонента входа истекло. Проверьте подключение и повторите попытку."
   },
   "es": {
     "Go back": "Volver",
@@ -688,7 +700,9 @@
     "Dedicated media · API key": "Servicio multimedia · Clave API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent local · Usa el inicio de sesión instalado, sin clave API",
     "OpenAI compatible": "Compatible con OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo actualmente solo sincroniza modelos y guarda valores predeterminados de texto; no ejecuta generación de imágenes, video ni audio."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo actualmente solo sincroniza modelos y guarda valores predeterminados de texto; no ejecuta generación de imágenes, video ni audio.",
+    "Sign-in was interrupted. Sign in again.": "Se interrumpió el inicio de sesión. Vuelve a iniciar sesión.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "La instalación del componente de acceso agotó el tiempo de espera. Comprueba la conexión y vuelve a intentarlo."
   },
   "pt-BR": {
     "Go back": "Voltar",
@@ -723,7 +737,9 @@
     "Dedicated media · API key": "Serviço de mídia · Chave de API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent local · Usa o login instalado, sem chave de API",
     "OpenAI compatible": "Compatível com OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo atualmente apenas sincroniza modelos e salva padrões de texto; geração de imagem, vídeo e áudio não é executada por ele."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Este protocolo atualmente apenas sincroniza modelos e salva padrões de texto; geração de imagem, vídeo e áudio não é executada por ele.",
+    "Sign-in was interrupted. Sign in again.": "O login foi interrompido. Entre novamente.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "A instalação do componente de login excedeu o tempo limite. Verifique a conexão e tente novamente."
   },
   "it": {
     "Go back": "Indietro",
@@ -758,7 +774,9 @@
     "Dedicated media · API key": "Servizio media dedicato · Chiave API",
     "Local Agent · Uses installed sign-in, no API key needed": "Agent locale · Usa l’accesso installato, nessuna chiave API",
     "OpenAI compatible": "Compatibile OpenAI",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Questo protocollo attualmente sincronizza solo i modelli e salva i valori predefiniti di testo; la generazione di immagini, video e audio non viene eseguita tramite esso."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Questo protocollo attualmente sincronizza solo i modelli e salva i valori predefiniti di testo; la generazione di immagini, video e audio non viene eseguita tramite esso.",
+    "Sign-in was interrupted. Sign in again.": "Accesso interrotto. Accedi di nuovo.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "Installazione del componente di accesso scaduta. Controlla la connessione e riprova."
   },
   "tr": {
     "Go back": "Geri",
@@ -793,6 +811,8 @@
     "Dedicated media · API key": "Özel medya servisi · API anahtarı",
     "Local Agent · Uses installed sign-in, no API key needed": "Yerel Agent · Mevcut oturumu kullanır, API anahtarı gerekmez",
     "OpenAI compatible": "OpenAI uyumlu",
-    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Bu protokol şu anda yalnızca modelleri eşitler ve metin varsayılanlarını kaydeder; görsel, video ve ses üretimi bu protokol üzerinden çalıştırılmaz."
+    "This protocol currently syncs models and saves text defaults only; image, video and audio generation are not executed through it.": "Bu protokol şu anda yalnızca modelleri eşitler ve metin varsayılanlarını kaydeder; görsel, video ve ses üretimi bu protokol üzerinden çalıştırılmaz.",
+    "Sign-in was interrupted. Sign in again.": "Oturum açma kesintiye uğradı. Yeniden oturum açın.",
+    "The sign-in component installation timed out. Check your connection and select Retry.": "Oturum açma bileşeninin kurulumu zaman aşımına uğradı. Bağlantınızı kontrol edip yeniden deneyin."
   }
 }

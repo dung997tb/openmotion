@@ -126,6 +126,13 @@ export async function trackExportTerminal(store: WorkspaceStore, final: ExportJo
   }
 }
 
+export function classifyRenderFailure(output: string): NonNullable<ExportFailure['renderReason']> {
+  if (/listen (?:EPERM|EACCES).*?(?:127\.0\.0\.1|::1|localhost)/i.test(output)) return 'local_port_denied';
+  if (/Chrome cannot start|Failed to launch (?:the )?browser/i.test(output)) return 'browser_start';
+  if (/Error while opening encoder|Unknown encoder|Error initializing output stream/i.test(output)) return 'encoder';
+  return 'unclassified';
+}
+
 export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tracking?: OmTracking) {
   await emitQueueTelemetry(store, tracking);
   const pending = await store.job();
@@ -159,7 +166,11 @@ export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tra
     const directory = store.snapshotDirectory(job.id);
     await stage('checking');
     const lint = await inspectProject(runtimeRoot, directory, 'lint', control.signal);
-    if (lint.exitCode) throw new Error('Hyperframes lint 失败：' + JSON.stringify(lint.result));
+    if (lint.exitCode) {
+      const finding = lint.result?.findings?.find((entry: { severity: string }) => entry.severity === 'error');
+      if (typeof finding?.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(finding.code)) failure.checkCode = finding.code;
+      throw new Error('Hyperframes lint 失败：' + JSON.stringify(lint.result));
+    }
     failure = { failureStage: 'output', failureCode: 'EXPORT_OUTPUT_INVALID' };
     const output = store.exportPath(job);
     await mkdir(path.dirname(output), { recursive: true });
@@ -169,7 +180,11 @@ export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tra
     // Let the engine read the snapshot's exact data-fps (including rational rates).
     const result = await runHyperframes(runtimeRoot, directory, ['render', '.', ...(job.compositionPath ? ['--composition', job.compositionPath] : []), '--output', output, '--format', 'mp4', '--json'], 25 * 60_000, { HYPERFRAMES_RENDER_DETACHED: '1' }, control.signal);
     await writeFile(path.join(store.directory, 'jobs', job.id, 'render.log'), result.stdout + '\n' + result.stderr, { mode: 0o600 });
-    if (result.code) throw new Error('Hyperframes render 失败：' + (result.stderr || result.stdout).slice(-1800));
+    if (result.code) {
+      if (!result.signal) failure.rendererExitCode = result.code;
+      failure.renderReason = result.signal ? 'process_signalled' : classifyRenderFailure(result.stderr + '\n' + result.stdout);
+      throw new Error('Hyperframes render 失败：' + (result.stderr || result.stdout).slice(-1800));
+    }
     // Never label an absent or non-MP4 output as completed, even after exit code 0.
     failure = { failureStage: 'output', failureCode: 'EXPORT_OUTPUT_INVALID' };
     const file = await (await import('node:fs/promises')).open(output, 'r');
@@ -183,6 +198,8 @@ export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tra
       const report = await verifyExport(output, job.expected!, undefined, control.signal);
       await stage('verified', report);
       if (report.status !== 'passed') {
+        failure.checkCode = report.checks.find(check => check.status === 'failed')?.name
+          ?? report.checks.find(check => check.status === 'not_run')?.name;
         if (report.status === 'blocked') failure.failureCode = 'EXPORT_VERIFICATION_BLOCKED';
         throw new Error('EXPORT_VERIFICATION_FAILED: ' + JSON.stringify(report.checks));
       }
@@ -197,12 +214,19 @@ export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tra
     if (failure.failureStage === 'output' && code === 'ENOENT') failure.failureCode = 'EXPORT_OUTPUT_MISSING';
     await recordDiagnostic(store.directory, { kind: 'export_failed', jobId: job.id, projectId: job.projectId,
       message: error instanceof Error ? error.message : 'Render failed' });
-    await rm(store.exportPath(job), { force: true });
+    // The per-job record can commit before the latest-job pointer update fails.
     const current = await store.job(job.id);
+    if (current?.state !== 'completed') await rm(store.exportPath(job), { force: true }).catch(() => {});
     if (current && ['running', 'cancelling'].includes(current.state)) {
-      try { await store.finishExport(job.id, job.token!, error instanceof Error ? error.message : '渲染失败', failure); }
-      catch {
-        tracking?.track('incident_confirmed', { incident_id: job.id, incident_type: 'other', severity: 'sev1', subject_id: job.id, evidence_ref: 'terminal_persist_failed' }, undefined, 'worker', validHostContext(job.trackingHost) ? job.trackingHost : undefined);
+      try {
+        await store.finishExport(job.id, job.token!, error instanceof Error ? error.message : '渲染失败', failure);
+      }
+      catch (persistError) {
+        const errno = (persistError as NodeJS.ErrnoException)?.code;
+        const reason = errno === 'ENOSPC' ? 'out_of_space' : errno === 'ENOENT' ? 'missing_file'
+          : errno === 'EACCES' || errno === 'EPERM' ? 'permission_denied'
+          : persistError instanceof Error && persistError.message === '无效的导出任务凭据' ? 'ownership_changed' : 'unknown';
+        tracking?.track('incident_confirmed', { incident_id: job.id, incident_type: 'other', severity: 'sev1', subject_id: job.id, evidence_ref: 'terminal_persist_failed', persist_reason: reason }, undefined, 'worker', validHostContext(job.trackingHost) ? job.trackingHost : undefined);
       }
     }
   } finally {

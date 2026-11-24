@@ -1,3 +1,4 @@
+import { connectorCauseCodes } from '../tracking/tool-fields.ts';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { access, mkdir, realpath } from 'node:fs/promises';
@@ -9,15 +10,20 @@ const execute = promisify(execFile);
 export const connectorVersion = '0.1.10';
 export const connectorPackage = '@powerformer/vela-cli';
 /** Why a connector could not be prepared: npm was not found, npm could not install it, or the installed copy does not run. */
-export type ConnectorProblem = 'npm_missing' | 'install_failed' | 'start_failed';
+export type ConnectorProblem = 'npm_missing' | 'install_failed' | 'install_timeout' | 'start_failed';
+
 export class ConnectorUnavailable extends Error {
   readonly problem: ConnectorProblem;
   /** Local diagnostic only (end of npm's output or the start error); never shown or sent as telemetry. */
   readonly detail: string;
+  readonly causeCode?: string;
   constructor(problem: ConnectorProblem, detail: unknown) {
     super('OpenDesign connector unavailable: ' + problem);
     this.problem = problem;
     const output = (detail as { stderr?: unknown })?.stderr;
+    const code = (detail as NodeJS.ErrnoException | undefined)?.code;
+    const npmCode = typeof output === 'string' ? /^npm (?:error|ERR!) code ([A-Z0-9_]+)$/mi.exec(output)?.[1] : undefined;
+    this.causeCode = [code, npmCode].find(value => typeof value === 'string' && connectorCauseCodes.includes(value));
     this.detail = String(typeof output === 'string' && output.trim() ? output : (detail as Error)?.message ?? detail).trim().slice(-600);
   }
 }
@@ -60,7 +66,7 @@ export async function findNpmCli(execPath = process.execPath, platform = process
 export async function verifyConnector(from: string) {
   const binary = createRequire(from)(connectorPackage).resolveVelaCliBin({ strict: true }) as string;
   const { stdout } = await execute(binary, ['--version'], { timeout: 5000 });
-  if (stdout.trim() !== connectorVersion) throw new Error('The installed account connector version is not supported');
+  if (stdout.trim() !== connectorVersion) throw Object.assign(new Error('The installed account connector version is not supported'), { code: 'VERSION_MISMATCH' });
   return binary;
 }
 
@@ -73,6 +79,9 @@ export async function installConnector(root: string, options: { signal?: AbortSi
   try {
     await mkdir(root, { recursive: true, mode: 0o700 });
     await execute(process.execPath, [npmCli, ...installArgs(root)], { timeout: options.timeoutMs ?? 300_000, maxBuffer: 1024 * 1024, signal: options.signal, windowsHide: true });
-  } catch (error) { throw new ConnectorUnavailable('install_failed', error); }
+  } catch (error) {
+    const timedOut = (error as { killed?: boolean }).killed && !options.signal?.aborted;
+    throw new ConnectorUnavailable(timedOut ? 'install_timeout' : 'install_failed', error);
+  }
   try { return await verifyConnector(manifest); } catch (error) { throw new ConnectorUnavailable('start_failed', error); }
 }

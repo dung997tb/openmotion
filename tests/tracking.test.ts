@@ -10,7 +10,7 @@ import { omEvents, studioEvents } from '../tracking/events.ts';
 import { assetActions, toolFailureFields, toolInputFields } from '../tracking/tool-fields.ts';
 import { closeTracking, createAppTracking, saveTrackingPreference, trackingError } from '../shared/tracking.ts';
 import { Phase1Service } from '../phase1.ts';
-import { cancelExport, renderNext, technicalCheckResult, trackExportTerminal } from '../server.ts';
+import { cancelExport, classifyRenderFailure, renderNext, technicalCheckResult, trackExportTerminal } from '../server.ts';
 import { TaskLedger } from '../tracking/task-ledger.ts';
 import { pluginRoot } from '../hyperframes.ts';
 import { fixture } from './fixtures.ts';
@@ -696,3 +696,10 @@ test('MCP export failures keep action and service validation details on the orig
     tracking.close();
   }
 }));
+
+test('renderer diagnostics classify known signatures and preserve unknown failures', () => {
+  assert.equal(classifyRenderFailure('listen EPERM: operation not permitted 127.0.0.1'), 'local_port_denied');
+  assert.equal(classifyRenderFailure('Chrome cannot start'), 'browser_start');
+  assert.equal(classifyRenderFailure('Unknown encoder libx264'), 'encoder');
+  assert.equal(classifyRenderFailure('input.mp4: other failure'), 'unclassified');
+});

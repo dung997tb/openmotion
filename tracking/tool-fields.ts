@@ -142,9 +142,11 @@ export function assetImportError(error: unknown) {
   return assetImportErrorCodes.find(value => value === code) ?? trackingError(error);
 }
 
+export const connectorCauseCodes: readonly string[] = ['ENOENT', 'MODULE_NOT_FOUND', 'EACCES', 'EPERM', 'ENOEXEC', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENOSPC', 'EINTEGRITY', 'VERSION_MISMATCH'];
+export const renderFailureReasons = ['browser_start', 'local_port_denied', 'encoder', 'process_signalled', 'unclassified'] as const;
 export const exportFailureStages = ['queued', 'lint', 'render', 'output', 'verification', 'finalize', 'unknown'] as const;
 export const exportFailureCodes = ['EXPORT_LINT_FAILED', 'EXPORT_RENDER_FAILED', 'EXPORT_RENDER_TIMEOUT',
   'EXPORT_OUTPUT_MISSING', 'EXPORT_OUTPUT_INVALID', 'EXPORT_VERIFICATION_FAILED', 'EXPORT_VERIFICATION_BLOCKED',
   'EXPORT_FINALIZE_FAILED', 'EXPORT_DEADLINE_EXCEEDED', 'EXPORT_WORKER_INTERRUPTED', 'EXPORT_FAILED'] as const;
 
-export type ExportFailure = { failureStage: typeof exportFailureStages[number]; failureCode: typeof exportFailureCodes[number] };
+export type ExportFailure = { checkCode?: string; renderReason?: typeof renderFailureReasons[number]; rendererExitCode?: number; failureStage: typeof exportFailureStages[number]; failureCode: typeof exportFailureCodes[number] };

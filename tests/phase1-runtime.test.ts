@@ -80,3 +80,33 @@ test('real phase1 MCP, active Studio history, confirmed running cancellation and
     assert.equal(review.review.verifiedUserAdoption, false); assert.equal(review.changed, false);
   } finally { await running.close(); }
 }, false));
+
+test('a pointer write failure after terminal commit preserves the completed MP4', { timeout: 120_000 }, t => fixture(async store => {
+  const saved = await store.writeFiles((await store.get()).revision, [{ path: 'index.html', content: film() }]);
+  const job = await store.requestExport(saved.revision, { phase1: true, audio: 'silent' });
+  const saveJob = store.saveJob.bind(store);
+  t.mock.method(store, 'saveJob', async (updated: typeof job) => {
+    if (updated.state !== 'completed') return saveJob(updated);
+    await writeFile(path.join(store.directory, 'jobs', job.id, 'job.json'), JSON.stringify(updated));
+    throw Object.assign(new Error('Pointer update failed'), { code: 'EACCES' });
+  });
+  await renderNext(store, pluginRoot);
+  assert.equal((await store.job(job.id))?.state, 'completed');
+  assert.equal((await readFile(store.exportPath(job))).subarray(4, 8).toString(), 'ftyp');
+}));
+
+test('a terminal record write failure removes the uncommitted MP4', { timeout: 120_000 }, t => fixture(async store => {
+  const saved = await store.writeFiles((await store.get()).revision, [{ path: 'index.html', content: film() }]);
+  const job = await store.requestExport(saved.revision, { phase1: true, audio: 'silent' });
+  const saveJob = store.saveJob.bind(store);
+  const terminalWrites: string[] = [];
+  t.mock.method(store, 'saveJob', async (updated: typeof job) => {
+    if (updated.state !== 'completed' && updated.state !== 'failed') return saveJob(updated);
+    terminalWrites.push(updated.state);
+    throw Object.assign(new Error('Job record write failed'), { code: 'ENOSPC' });
+  });
+  await renderNext(store, pluginRoot);
+  assert.deepEqual(terminalWrites, ['completed', 'failed']);
+  assert.equal((await store.job(job.id))?.state, 'running');
+  await assert.rejects(access(store.exportPath(job)), { code: 'ENOENT' });
+}));
