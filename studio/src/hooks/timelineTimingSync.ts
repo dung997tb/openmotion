@@ -32,6 +32,9 @@ import {
   type StudioProjectFileWriter,
 } from "../utils/studioFileMutationCoordinator";
 import { moveLiveTweens } from "../utils/gsapLiveRetime";
+import { hasPeerLiveEdit, hasPeerTimingDocument, tryApplyPeerChanges } from "../player/peerTimingPreview";
+import { isPreviewChanging } from "../player/previewReloading";
+import { announcePreviewScenesSwapped } from "../player/sceneSwap";
 
 export async function readFileContent(projectId: string, targetPath: string): Promise<string> {
   if (targetPath.includes("\0") || targetPath.includes("..")) {
@@ -415,9 +418,21 @@ async function scaleGsapPositions(
 
 /** Rebind the optimistic clip timing or swap the animation script produced by the shared edit. */
 export function refreshCommittedTimeline(iframe: HTMLIFrameElement | null, path: string, projectId: string | null, reloadPreview: () => void) {
+  const previous = projectId && iframe && (hasPeerTimingDocument(iframe) || hasPeerLiveEdit(iframe, "mediaTiming"))
+    ? confirmedSource(projectId, path) : undefined;
   return async (files: Record<string, {before: string; after: string}>) => {
     const file = files[path];
     if (!file) { reloadPreview(); return; }
+    const current = projectId && confirmedSource(projectId, path);
+    if (projectId && iframe && current && previous?.content === file.before &&
+        current.content === file.after && Object.keys(files).length === 1) {
+      const isCurrent = () => iframe.isConnected && !isPreviewChanging() &&
+        usePlayerStore.getState().timelineProjectId === projectId && confirmedSource(projectId, path)?.version === current.version;
+      if (await tryApplyPeerChanges(iframe, { path, previous, current }, isCurrent)) {
+        announcePreviewScenesSwapped(iframe);
+        return;
+      }
+    }
     const status = sdkTimingGsapSync({status: "committed", version:"", ...file});
     await syncTimingEditPreview(iframe, status ?? UNMUTATED, projectId, reloadPreview, true);
   };

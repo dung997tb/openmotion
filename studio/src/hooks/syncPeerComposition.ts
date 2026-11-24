@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { shareCompositionPosterRead, type KnownCompositionSource, MAX_POSTER_SOURCE_LENGTH } from "../player/lib/compositionPosterSource";
 import { beginPeerTimelineUpdate } from "../player/lib/peerTimeline";
-import { hasPeerTimingDocument, hasScriptedStylePreview, tryApplyPeerChanges } from "../player/peerTimingPreview";
+import { hasPeerLiveEdit, hasPeerTimingDocument, hasScriptedStylePreview, tryApplyPeerChanges } from "../player/peerTimingPreview";
 import { isPreviewChanging } from "../player/previewReloading";
 import { announcePreviewScenesSwapped, notePeerPreviewChange, previewSourceRevision } from "../player/sceneSwap";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -45,7 +45,8 @@ export function syncPeerComposition(
     if (!result.missing && typeof result.content === "string") apply(result.content, frameRef.current);
     return result;
   });
-  if (!frame || !hasPeerTimingDocument(frame) || paths?.length !== 1 || !previous || isPreviewChanging()) {
+  if (!frame || (!hasPeerTimingDocument(frame) && !hasPeerLiveEdit(frame, "mediaTiming")) ||
+      paths?.length !== 1 || !previous || isPreviewChanging()) {
     void timeline.catch(() => {});
     return;
   }
