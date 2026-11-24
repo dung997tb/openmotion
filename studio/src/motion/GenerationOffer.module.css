@@ -148,6 +148,8 @@
 }
 
 .modelSummary {
+  --model-avatar-size: var(--motion-space-14);
+  font-size: var(--motion-text-sm);
   display: flex;
   flex-wrap: wrap;
   gap: var(--motion-space-6) 0;
@@ -214,8 +216,8 @@
 }
 
 .subscriptionCard :is(.models, .modelSummary) :global(.om-provider-avatar) {
-  width: var(--motion-space-16);
-  height: var(--motion-space-16);
+  width: var(--model-avatar-size, var(--motion-space-16));
+  height: var(--model-avatar-size, var(--motion-space-16));
   border: 0;
   border-radius: var(--motion-radius-sm);
 }
