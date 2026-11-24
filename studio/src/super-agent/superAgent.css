@@ -10759,3 +10759,51 @@
     animation: none;
   }
 }
+
+/* Top 100 market cards: a ranked text cover (rank, core loop, revenue tags) in the same tile as other games. */
+.om-sa-game-top-cover {
+  --top-tint: var(--motion-accent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--motion-space-6);
+  width: 100%;
+  height: 100%;
+  /* The tile's title row overlays the bottom of every cover; keep the text above it. */
+  padding: var(--motion-space-12) var(--motion-space-14) 52px;
+  text-align: start;
+  color: var(--motion-text);
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--top-tint) 34%, transparent), transparent 60%),
+    linear-gradient(160deg, color-mix(in srgb, var(--top-tint) 14%, var(--motion-inset)), var(--motion-inset));
+}
+.om-sa-game-top-cover[data-genre="shooter"] { --top-tint: #ef4444; }
+.om-sa-game-top-cover[data-genre="platformer"] { --top-tint: #22c55e; }
+.om-sa-game-top-cover[data-genre="story"] { --top-tint: #a855f7; }
+.om-sa-game-top-cover[data-genre="casual"] { --top-tint: #f59e0b; }
+.om-sa-game-top-cover[data-genre="racing"] { --top-tint: #3b82f6; }
+.om-sa-game-top-cover[data-genre="horror"] { --top-tint: #64748b; }
+.om-sa-game-top-rank {
+  position: absolute;
+  top: var(--motion-space-8);
+  inset-inline-end: var(--motion-space-12);
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--top-tint) 70%, var(--motion-text));
+  opacity: 0.9;
+}
+.om-sa-game-top-loop {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--motion-text-sm);
+  font-weight: var(--motion-weight-semibold);
+  line-height: 1.45;
+}
+.om-sa-game-top-tags { display: flex; flex-wrap: wrap; gap: var(--motion-space-4); font-size: var(--motion-text-xs); }
+.om-sa-game-top-tags span { padding: 1px var(--motion-space-6); border-radius: var(--motion-radius-full); background: var(--motion-overlay-ink); color: var(--motion-video-ink); }
+.om-sa-game-top-tags span[data-tone="good"] { background: color-mix(in srgb, var(--motion-success) 80%, black); }

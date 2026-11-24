@@ -18,6 +18,10 @@ export const topGames: TopGame[] = (Object.values(files)[0] ?? [])
   .filter(game => game.id && game.name && genres.has(game.genre))
   .sort((a, b) => a.rank - b.rank);
 
+/** Cards for the market grids, in chart order, and a lookup from card id back to the chart entry. */
+export const topGameCards = (): GameCard[] => topGames.map(topGameCard);
+export const topGameFor = (cardId: string) => cardId.startsWith('top100-') ? topGames.find(game => 'top100-' + game.id === cardId) ?? null : null;
+
 /** The brief for 做同款: same core loop, original everything else. */
 export function topGameRemixPrompt(game: TopGame) {
   return [

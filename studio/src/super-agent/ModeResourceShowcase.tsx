@@ -16,8 +16,7 @@ import { groupBrandSeries, rankDiscoverySeries } from '../motion/brandStoryData'
 import { cinemaTemplates } from '../motion/cinemaTemplates';
 import { gptImageStory, seedanceStory } from '../motion/exploreModelStories';
 import { GameMasonry, interleavePortrait } from '../motion/game/GameMasonry';
-import { GameTopChart } from '../motion/game/GameTopChart';
-import { topGameCard, topGames } from '../motion/game/topGames';
+import { topGameCards, topGameFor, topGames } from '../motion/game/topGames';
 import {
   bundledGames,
   communityGames,
@@ -1318,7 +1317,9 @@ export function ModeResourceShowcase({
   const filteredGames = useMemo<GameCard[]>(() => {
     if (!showGameCards) return [];
     const needle = gameQuery.trim();
-    const base = activeFilter === 'mine'
+    const base = activeFilter === 'top100'
+      ? topGameCards()
+      : activeFilter === 'mine'
       ? myGames
       : activeFilter === 'portrait'
         ? publishedGameTemplates.filter(g => g.orientation === 'portrait')
@@ -1340,7 +1341,7 @@ export function ModeResourceShowcase({
         }))
       : base.map(item => ({ item, score: 1 }));
     const matched = ranked.map(r => r.item);
-    if (activeFilter === 'mine') return matched;
+    if (activeFilter === 'mine' || activeFilter === 'top100') return matched;
     if (gameSort === 'plays') return [...matched].sort((a, b) => b.plays - a.plays);
     if (gameSort === 'newest') return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (needle) return matched;
@@ -1961,9 +1962,7 @@ export function ModeResourceShowcase({
           </div>
         )}
 
-        {mode.id === 'game' && activeFilter === 'top100' ? (
-          <GameTopChart query={gameQuery} selectedId={modeOptions?.gameTemplate?.id ?? null} onRemix={game => selectGameForAgent(topGameCard(game))} />
-        ) : visibleGames ? (
+        {visibleGames ? (
           visibleGames.length === 0 ? (
             <div className="om-sa-showcase-empty">
               <p className="om-muted">{t('No matching games')}</p>
@@ -1985,12 +1984,15 @@ export function ModeResourceShowcase({
                   : modeOptions?.gameTemplate?.id === game.id;
                 const isPlaying = playingGameId === game.id;
                 const status = isMine ? GAME_STATUS_LABELS[game.status] : undefined;
+                // Top 100 entries have no gameplay of their own here: a ranked text card stands in for the cover.
+                const top = topGameFor(game.id);
 
                 return (
                   <article
                     key={game.id}
                     className="om-sa-game-tile om-sa-game-showcase-card"
-                    data-orientation={game.orientation === 'portrait' ? 'portrait' : undefined}
+                    data-orientation={!top && game.orientation === 'portrait' ? 'portrait' : undefined}
+                    data-top={top ? true : undefined}
                     data-selected={isSelected || undefined}
                     data-playing={isPlaying || undefined}
                   >
@@ -2010,7 +2012,16 @@ export function ModeResourceShowcase({
                       {cover && game.orientation === 'portrait' && (
                         <img className="om-sa-game-tile-backdrop" src={cover} alt="" loading="lazy" decoding="async" />
                       )}
-                      {cover ? (
+                      {top ? (
+                        <div className="om-sa-game-top-cover" data-genre={top.genre}>
+                          <span className="om-sa-game-top-rank">{top.rank}</span>
+                          <span className="om-sa-game-top-loop">{locale === 'zh-CN' ? top.loop : top.loopEn || top.loop}</span>
+                          <span className="om-sa-game-top-tags">
+                            <span>{top.monetization === 'IAA' ? t('Ad revenue') : top.monetization === 'IAP' ? t('In-app purchases') : t('Hybrid')}</span>
+                            {top.webFeasible === 'high' && <span data-tone="good">{t('Easy to build')}</span>}
+                          </span>
+                        </div>
+                      ) : cover ? (
                         <img src={cover} alt="" loading="lazy" decoding="async" />
                       ) : (
                         <div className="om-sa-game-tile-placeholder">
@@ -2034,7 +2045,7 @@ export function ModeResourceShowcase({
                           {t(status)}
                         </span>
                       )}
-                      {game.external && !game.external.embeddable && (
+                      {!top && game.external && !game.external.embeddable && (
                         <span className="om-sa-game-status">
                           <RemixIcon name="external-link-line" size={12} />
                           {t('External link')}

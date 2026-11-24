@@ -18,8 +18,7 @@ import { MotionIcon } from '../icons';
 import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { GameMasonry, interleavePortrait } from './GameMasonry';
-import { GameTopChart } from './GameTopChart';
-import { topGameCard, topGameRemixPrompt, topGames, type TopGame } from './topGames';
+import { topGameCard, topGameCards, topGameFor, topGameRemixPrompt, topGames, type TopGame } from './topGames';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
 import { buildGameContextTags, buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import { optionId as optionFilter } from '../reporting';
@@ -242,8 +241,8 @@ export function GameStudio({
   const visible = useMemo(() => {
     const needle = query.trim();
     // Explore lists templates and community games only; games made here live in Assets → Games.
-    const byCategory = all.filter(game => game.source !== 'mine' && game.status === 'published'
-      && (category === 'all' || category === 'top100' || (category === 'portrait' ? game.orientation === 'portrait' : game.genre === category)));
+    const byCategory = category === 'top100' ? topGameCards() : all.filter(game => game.source !== 'mine' && game.status === 'published'
+      && (category === 'all' || (category === 'portrait' ? game.orientation === 'portrait' : game.genre === category)));
     const list = needle
       ? rankSearchResults(byCategory, needle, game => ({
           id: game.id,
@@ -258,6 +257,7 @@ export function GameStudio({
           ],
         })).map(r => r.item)
       : byCategory;
+    if (category === 'top100') return list;
     if (sort === 'plays') return [...list].sort((a, b) => b.plays - a.plays);
     if (sort === 'newest') return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return needle ? list : interleavePortrait(list);
@@ -268,7 +268,7 @@ export function GameStudio({
   const rows = [
     ...(browsing ? [
       { id: 'featured', title: t('Templates'), icon: 'gamepad-line', games: visible },
-    ] : [{ id: 'all', title: category === 'all' || category === 'top100' ? t('All games') : category === 'portrait' ? t('Portrait games') : t('{genre} games', { genre: t(genreLabels[category]) }), icon: 'gamepad-line', games: visible }]),
+    ] : [{ id: 'all', title: category === 'all' ? t('All games') : category === 'top100' ? t('Top 100') : category === 'portrait' ? t('Portrait games') : t('{genre} games', { genre: t(genreLabels[category]) }), icon: 'gamepad-line', games: visible }]),
   ];
 
   const options: { id: string; label: string; cover?: string | null; selected: boolean; pick: () => void }[] = menu === 'genre'
@@ -338,9 +338,9 @@ export function GameStudio({
           </span>
         </div>
         {offline && <p className="om-muted om-game-note">{t('Showing the built-in games. Your games appear once the local game service is running.')}</p>}
-        {category === 'top100' ? <GameTopChart query={query} onRemix={remixTop} /> : rows.filter(row => row.games.length || row.id === 'all').map(row => <section key={row.id} className="om-game-row" aria-label={row.title}>
+        {rows.filter(row => row.games.length || row.id === 'all').map(row => <section key={row.id} className="om-game-row" aria-label={row.title}>
           {row.id !== 'featured' && <header><h2 className="om-subtitle"><RemixIcon name={row.icon} size={16} />{row.title}</h2></header>}
-          {row.games.length ? <GameMasonry games={row.games} minColumn={280} render={game => <GameTile key={game.id} game={game} locale={locale} onOpen={() => open(game)} />} />
+          {row.games.length ? <GameMasonry games={row.games} minColumn={280} render={game => <GameTile key={game.id} game={game} locale={locale} onOpen={() => { const top = topGameFor(game.id); if (top) { reportGameClick('game_market', 'remix_game', game); void remixTop(top); } else open(game); }} />} />
             : <div className="om-discovery-empty"><span>{t('No games match these filters.')}</span></div>}
         </section>)}
       </section>
