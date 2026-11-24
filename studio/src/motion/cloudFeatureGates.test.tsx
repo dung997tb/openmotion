@@ -11,6 +11,7 @@ import { preloadAllWorkspacePages } from '../router/lazyPages';
 import { AssetsPage } from './AssetsPage';
 import { CaptionsPanel } from './CaptionsPanel';
 import { TimelineCaptionActions } from './TimelineCaptionActions';
+import { TimelineCaptionsMenu } from './TimelineCaptionsMenu';
 import { ReviewPlayerControls } from './ReviewPlayerControls';
 import { ReviewCommentsPanel } from './ReviewCommentsPanel';
 import { useDockLayoutStore } from '../components/dock/dockLayoutStore';
@@ -259,6 +260,7 @@ describe('Cloud Phase 1 feature gates', () => {
       <I18nProvider initialLocale="en">
         <CaptionsPanel />
         <TimelineCaptionActions onAddToTimeline={vi.fn(async () => true)} />
+        <TimelineCaptionsMenu />
       </I18nProvider>,
     ));
 
@@ -269,6 +271,12 @@ describe('Cloud Phase 1 feature gates', () => {
     const buttons = [...container.querySelectorAll('button')].map(el => el.textContent?.trim());
     expect(buttons).toContain('Import SRT / VTT');
     expect(studioMocks.transcriptCalls.some((c: any) => c.command === 'list' || c.command === 'models')).toBe(false);
+
+    const captionMenuTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="Caption visibility"]')!;
+    await act(async () => captionMenuTrigger.click());
+    const popoverButtons = [...document.querySelectorAll('button')].map(el => el.textContent?.trim());
+    expect(popoverButtons).toContain('Add captions');
+    expect(popoverButtons).not.toContain('Auto captions');
   });
 
   it('renders ReviewPlayerControls and ReviewCommentsPanel as null without calling comment APIs', async () => {
