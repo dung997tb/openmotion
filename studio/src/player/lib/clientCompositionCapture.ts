@@ -1,6 +1,13 @@
 import { NON_PREVIEW_FILES } from "../../../../shared/preview-impact";
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { usePlayerStore } from "../store/playerStore";
 import { thumbnailRevisionOf } from "../store/thumbnailSlice";
+import {
+  clearRemoteCompositionFilmstripStateForTest,
+  fetchRemoteCompositionFilmstrip,
+  subsampleFilmstripFrames,
+  uploadRemoteCompositionFilmstripIfEligible,
+} from "./remoteCompositionFilmstrip";
 import {
   acquireSharedPreviewGrant,
   clearSharedPreviewGrantsForTest,
@@ -280,6 +287,7 @@ export function clearClientCompositionCaptureCacheForTest(): void {
   }
   progressiveStrips.clear();
   progressiveListeners.clear();
+  clearRemoteCompositionFilmstripStateForTest();
   clearSharedPreviewGrantsForTest();
 }
 
@@ -2104,6 +2112,15 @@ function peekMemoryEntry(
     memoryStripCache.set(idbKey, exact);
     return { entry: exact, value: exact.value };
   }
+  if (!input.selector && input.frameCount > 1 && input.frameCount < MAX_CLIENT_COMPOSITION_FRAMES) {
+    const canonicalKey = `${baseCoverKey}&frames=${MAX_CLIENT_COMPOSITION_FRAMES}`;
+    const canonical = memoryStripCache.get(canonicalKey);
+    if (canonical && !canonical.fallbackOnly && canonical.value.kind === "filmstrip" && canonical.urls.length >= input.frameCount) {
+      memoryStripCache.delete(canonicalKey);
+      memoryStripCache.set(canonicalKey, canonical);
+      return { entry: canonical, value: canonical.value };
+    }
+  }
   if (input.frameCount === 1) {
     // Reuse an already-resident multi-frame strip's middle frame without creating duplicate
     // object URLs or triggering LRU eviction during React render.
@@ -2269,8 +2286,9 @@ async function readCachedStripWithCanonicalFallback(
 }
 
 /**
- * Fast-path IndexedDB lookup that bypasses `thumbnailScheduler`'s 2-slot composition bucket
- * so warm page reloads recover all cached strips in parallel (~5–15ms).
+ * Fast-path IndexedDB + remote shared filmstrip lookup that bypasses `thumbnailScheduler`'s
+ * 2-slot composition bucket so warm reloads (~5–15ms) and cold pre-baked/S3 template opens
+ * (~20–60ms, 0 SnapDOM) recover all cached strips in parallel.
  * Returns a retained lease that the caller must release when unmounting or changing keys.
  */
 export function acquireCachedCompositionCaptureFromIdb(
@@ -2283,46 +2301,108 @@ export function acquireCachedCompositionCaptureFromIdb(
       release: retainMemoryEntry(syncHit.entry),
     });
   }
+  const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
+  const remoteContentRevision = hasFileVersion ? 0 : input.contentRevision;
   const { idbKey, baseCoverKey, compPathKey, meta } = stripMemoryCacheKey(input);
+  const canonicalIdbKey =
+    !input.selector && input.frameCount < MAX_CLIENT_COMPOSITION_FRAMES
+      ? `${baseCoverKey}&frames=${MAX_CLIENT_COMPOSITION_FRAMES}`
+      : null;
+
+  const hydrateRecord = (
+    targetKey: string,
+    blobs: readonly Blob[],
+    aspect: number,
+    width: number,
+    height: number,
+  ): MemoryStripEntry => {
+    const coverBlob = blobs[Math.min(blobs.length - 1, Math.floor(blobs.length / 2))]!;
+    putSharedCoverCache(baseCoverKey, {
+      blob: coverBlob,
+      aspect,
+      width,
+      height,
+      projectId: meta.projectId,
+      compPath: meta.compPath,
+      compRev: meta.compRev,
+      contentRevision: meta.contentRevision,
+    });
+    return putMemoryStripCache(
+      targetKey,
+      baseCoverKey,
+      compPathKey,
+      meta,
+      blobs,
+      aspect,
+      width,
+      height,
+    );
+  };
+
   let entryPromise = inFlightIdbReads.get(idbKey);
   if (!entryPromise) {
-    entryPromise = readCachedStripWithCanonicalFallback(idbKey, baseCoverKey, input.frameCount)
-      .then((found) => {
-        if (!found) return null;
+    entryPromise = (async (): Promise<MemoryStripEntry | null> => {
+      const found = await readCachedStripWithCanonicalFallback(idbKey, baseCoverKey, input.frameCount);
+      if (found) {
         const { storageKey, record: cached } = found;
-        const coverBlob =
-          cached.blobs[Math.min(cached.blobs.length - 1, Math.floor(cached.blobs.length / 2))]!;
-        putSharedCoverCache(baseCoverKey, {
-          blob: coverBlob,
-          aspect: cached.aspect,
-          width: cached.width,
-          height: cached.height,
-          projectId: meta.projectId,
-          compPath: meta.compPath,
-          compRev: meta.compRev,
-          contentRevision: meta.contentRevision,
-        });
-        return putMemoryStripCache(
+        return hydrateRecord(
           storageKey,
-          baseCoverKey,
-          compPathKey,
-          meta,
           cached.blobs,
           cached.aspect,
           cached.width,
           cached.height,
         );
-      })
-      .finally(() => {
-        inFlightIdbReads.delete(idbKey);
-      });
+      }
+
+      // Tier 1.5: shared pre-baked / S3 composition filmstrip sprite cache (whole compositions only).
+      if (!input.selector && getCachedCloudDisklessMode()) {
+        const remote = await fetchRemoteCompositionFilmstrip({
+          projectId: input.projectId,
+          previewUrl: input.previewUrl,
+          compRev,
+          contentRevision: remoteContentRevision,
+        });
+        if (remote.status === "hit") {
+          const remoteKey = `${baseCoverKey}&frames=${remote.frameCount}`;
+          const remoteEntry = hydrateRecord(
+            remoteKey,
+            remote.blobs,
+            remote.aspect,
+            remote.width,
+            remote.height,
+          );
+          void writeCachedStrip({
+            key: remoteKey,
+            aspect: remote.aspect,
+            width: remote.width,
+            height: remote.height,
+            blobs: remote.blobs,
+            updatedAt: Date.now(),
+          });
+          if (remote.frameCount >= input.frameCount) {
+            if (remote.frameCount === input.frameCount || remote.frameCount === MAX_CLIENT_COMPOSITION_FRAMES) {
+              return remoteEntry;
+            }
+            if (input.frameCount === 1) {
+              const coverBlob = subsampleFilmstripFrames(remote.blobs, 1)[0]!;
+              return hydrateRecord(idbKey, [coverBlob], remote.aspect, remote.width, remote.height);
+            }
+            const sliced = subsampleFilmstripFrames(remote.blobs, input.frameCount);
+            return hydrateRecord(idbKey, sliced, remote.aspect, remote.width, remote.height);
+          }
+        }
+      }
+      return null;
+    })().finally(() => {
+      inFlightIdbReads.delete(idbKey);
+    });
     inFlightIdbReads.set(idbKey, entryPromise);
   }
   return entryPromise.then((entry) => {
     if (!entry) return null;
     const storageKey =
-      input.frameCount < MAX_CLIENT_COMPOSITION_FRAMES && entry.urls.length >= MAX_CLIENT_COMPOSITION_FRAMES
-        ? `${baseCoverKey}&frames=${MAX_CLIENT_COMPOSITION_FRAMES}`
+      canonicalIdbKey && entry.blobs.length >= MAX_CLIENT_COMPOSITION_FRAMES
+        ? canonicalIdbKey
         : idbKey;
     const live = retainOrRematerialize(storageKey, entry);
     return {
@@ -2492,6 +2572,21 @@ async function runClientCompositionCapture(
       blobs: result.blobs,
       updatedAt: Date.now(),
     });
+
+    if (!input.selector) {
+      const { rev: compRev, hasFileVersion } = resolveCompositionRevision(input.projectId, input.previewUrl);
+      void uploadRemoteCompositionFilmstripIfEligible({
+        projectId: input.projectId,
+        previewUrl: input.previewUrl,
+        compRev,
+        contentRevision: hasFileVersion ? 0 : input.contentRevision,
+        blobs: result.blobs,
+        width: result.width,
+        height: result.height,
+        aspect: result.aspect,
+        duration: input.duration,
+      });
+    }
 
     const entry = putMemoryStripCache(
       idbKey,

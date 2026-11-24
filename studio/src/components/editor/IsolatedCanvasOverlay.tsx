@@ -2,9 +2,9 @@ import { IsolatedCanvasContextMenu, type CanvasMenuPick } from "./IsolatedCanvas
 import { useIsolatedInlineText } from "./useIsolatedInlineText";
 import { isIsolatedSourceTarget, isolatedPatchTarget, type IsolatedSourceTarget } from "./isolatedSourceTarget";
 import { usePreviewOverlayContext } from "./PreviewOverlayProvider";
-import { relativeLayerBounds, useIsolatedLayerBounds, type LayerBounds } from "./useIsolatedLayerBounds";
+import { relativeLayerBounds, type LayerBounds } from "./isolatedLayerBounds";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
-import { useDomEditActionsContext } from "../../contexts/DomEditContext";
+import { useDomEditActionsContext, useDomEditSelectionContext } from "../../contexts/DomEditContext";
 import { useStudioShellContext } from "../../contexts/StudioContext";
 import { useI18n } from "../../i18n/I18n";
 import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/previewAdapter";
@@ -67,9 +67,13 @@ export function IsolatedCanvasOverlay() {
   const drag = useRef<Drag | null>(null);
   const lastPick = useRef<Drag | null>(null);
   const [menu, setMenu] = useState<CanvasMenuPick | null>(null);
-  const [box, setBox] = useState<LayerBounds | null>(null);
+  const { domEditSelection } = useDomEditSelectionContext();
+  const [draft, setDraft] = useState<{ frame: HTMLIFrameElement; bounds: LayerBounds } | null>(null);
+  const box = draft && draft.frame === previewIframeRef.current ? draft.bounds : domEditSelection?.isolatedBounds;
   const { state: { compositionRect } } = usePreviewOverlayContext();
-  useIsolatedLayerBounds(previewIframeRef, projectId, setBox);
+  useEffect(() => {
+    if (!lastPick.current) setDraft(null);
+  }, [domEditSelection]);
 
   const session = useRef(0);
   const reportUnapplied = useCallback(() => showToast(t("This canvas edit was not saved. Try again when the preview is ready."), "error"), [showToast, t]);
@@ -80,7 +84,7 @@ export function IsolatedCanvasOverlay() {
     drag.current = null;
     setMenu(null);
     lastPick.current = null;
-    setBox(null);
+    setDraft(null);
   }, []);
 
   const notifyUnapplied = useRef(reportUnapplied);
@@ -118,9 +122,9 @@ export function IsolatedCanvasOverlay() {
     const y = (active.offset?.y ?? 0) / active.frame.height;
     const rect = active.bounds, corner = active.corner;
     const west = corner?.endsWith("w"), north = corner?.startsWith("n");
-    setBox({ x: rect.x + (corner && !west ? 0 : x), y: rect.y + (corner && !north ? 0 : y),
+    setDraft({ frame: active.adapter.iframe, bounds: { x: rect.x + (corner && !west ? 0 : x), y: rect.y + (corner && !north ? 0 : y),
       width: Math.max(1 / active.frame.width, rect.width + (corner ? west ? -x : x : 0)),
-      height: Math.max(1 / active.frame.height, rect.height + (corner ? north ? -y : y : 0)) });
+      height: Math.max(1 / active.frame.height, rect.height + (corner ? north ? -y : y : 0)) } });
   }
 
   function begin(event: PointerEvent<HTMLDivElement>) {
@@ -151,9 +155,11 @@ export function IsolatedCanvasOverlay() {
       finishSettled: false,
     };
     drag.current = lastPick.current = active;
-    setBox(null);
+    // Keep the last visible bounds until the new hit has been measured.
     event.currentTarget.setPointerCapture(event.pointerId);
-    void adapter.request<Pick | { waitingForSource: true } | null>("canvas-drag", { phase: "start", gestureId: active.gestureId, x, y, corner })
+    const target = corner && domEditSelection?.isolatedTarget;
+    void adapter.request<Pick | { waitingForSource: true } | null>("canvas-drag", { phase: "start", gestureId: active.gestureId, x, y, corner,
+      ...(target && { target: { sourceFile: target.sourceFile, elementId: target.elementId, hfId: target.hfId } }) })
       .then(pick => {
         if (lastPick.current !== active || !pick) return;
         if ("waitingForSource" in pick) { active.waitingForSource = true; return; }
@@ -161,7 +167,7 @@ export function IsolatedCanvasOverlay() {
         if (!bounds) return;
         active.bounds = bounds;
         showBounds(active);
-      }).catch(() => { if (drag.current === active) setBox(null); })
+      }).catch(() => { if (drag.current === active) setDraft(null); })
       .finally(() => {
         active.pickSettled = true;
         if (active.finishSettled && lastPick.current === active) {
@@ -185,7 +191,7 @@ export function IsolatedCanvasOverlay() {
     }
     if (phase === "cancel" || !active.offset) {
       active.finishSettled = true;
-      if (phase === "cancel") { setBox(null); lastPick.current = null; }
+      if (phase === "cancel") { setDraft(null); lastPick.current = null; }
       else if (active.pickSettled && lastPick.current === active) { lastPick.current = null; }
       active.adapter.send("canvas-drag", { ...payload, phase: "cancel" });
       drag.current = null;
@@ -230,7 +236,7 @@ export function IsolatedCanvasOverlay() {
       if (lastPick.current === active) {
         if (!committed) {
           lastPick.current = null;
-          setBox(null);
+          setDraft(null);
         } else if (active.pickSettled) {
           lastPick.current = null;
         }

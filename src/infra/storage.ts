@@ -45,22 +45,24 @@ export const IMMUTABLE_PUBLIC_CACHE_CONTROL = 'public, max-age=31536000, immutab
 export const IMMUTABLE_PRIVATE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
 
 const CATALOG_CAS_KEY_REGEX = /^catalog\/blobs\/[a-f0-9]{64}$/;
+const CATALOG_FILMSTRIP_KEY_REGEX = /^catalog\/filmstrips\/[a-f0-9]{64}\/strip-v1\.jpg$/;
 const WORKSPACE_IMMUTABLE_CAS_KEY_REGEX =
   /^workspaces\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/(?:blobs\/[a-f0-9]{64}|(?:thumbnails|derived)\/[a-f0-9]{64}\/[^/]+)$/;
 
 export function isCatalogCasKey(key: string): boolean {
-  return CATALOG_CAS_KEY_REGEX.test(key);
+  return CATALOG_CAS_KEY_REGEX.test(key) || CATALOG_FILMSTRIP_KEY_REGEX.test(key);
 }
 
 /**
  * Returns true for content-addressed immutable object keys whose bytes never change at that key:
  * - `workspaces/{wid}/blobs/{sha256}`
  * - `catalog/blobs/{sha256}`
+ * - `catalog/filmstrips/{sha256}/strip-v1.jpg`
  * - `workspaces/{wid}/thumbnails/{sha256}/*`
  * - `workspaces/{wid}/derived/{sha256}/*`
  */
 export function isImmutableCasKey(key: string): boolean {
-  return CATALOG_CAS_KEY_REGEX.test(key) || WORKSPACE_IMMUTABLE_CAS_KEY_REGEX.test(key);
+  return isCatalogCasKey(key) || WORKSPACE_IMMUTABLE_CAS_KEY_REGEX.test(key);
 }
 
 /** Floor an epoch timestamp (ms) down to the start of its fixed UTC window boundary. */
@@ -128,6 +130,11 @@ export function catalogBlobKey(sha256: string): string {
   return `catalog/blobs/${sha256}`;
 }
 
+export function catalogCompFilmstripKey(sha256: string): string {
+  assertSha256(sha256);
+  return `catalog/filmstrips/${sha256}/strip-v1.jpg`;
+}
+
 export function uploadStagingKey(workspaceId: string, uploadId: string): string {
   assertUuid(workspaceId, 'workspaceId');
   assertUuid(uploadId, 'uploadId');
@@ -159,6 +166,17 @@ export function compThumbnailKey(workspaceId: string, projectId: string, key: st
   assertUuid(projectId, 'projectId');
   assertSafeSegment(key, 'composition thumbnail key');
   return `workspaces/${workspaceId}/comp-thumbs/${projectId}/${key}.png`;
+}
+
+export function projectCompFilmstripKey(
+  workspaceId: string,
+  projectId: string,
+  renderKey: string,
+): string {
+  assertUuid(workspaceId, 'workspaceId');
+  assertUuid(projectId, 'projectId');
+  assertSha256(renderKey);
+  return `workspaces/${workspaceId}/comp-thumbs/${projectId}/filmstrip-v1-${renderKey}.jpg`;
 }
 
 export function exportKey(workspaceId: string, jobId: string, name: string): string {
@@ -210,7 +228,7 @@ export function assertTenantScopedKey(
   }
   const tenantPrefix = `workspaces/${workspaceId}/`;
   if (key.startsWith(tenantPrefix)) return key;
-  if (options.allowCatalog && /^catalog\/blobs\/[a-f0-9]{64}$/.test(key)) return key;
+  if (options.allowCatalog && isCatalogCasKey(key)) return key;
   throw new CloudError('WORKSPACE_FORBIDDEN', 'Storage key escapes workspace tenant boundary', {
     status: 403,
     applied: false,

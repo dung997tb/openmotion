@@ -8,12 +8,13 @@ import { PREVIEW_BRIDGE_SOURCE, type PreviewBridgeMessage } from "../../player/l
 import { announcePreviewPromoted } from "../../player/sceneSwap";
 
 const state = vi.hoisted(() => ({
+  domEditSelection: null as null | { isolatedBounds: { x:number; y:number; width:number; height:number }; isolatedTarget?: { sourceFile:string; elementId:string } },
   previewIframeRef: { current: null as HTMLIFrameElement | null },
   compositionRect: { left: 10, top: 10, width: 200, height: 100 },
   commitDomEditPatchBatches: vi.fn(),
   showToast: vi.fn(),
 }));
-vi.mock("../../contexts/DomEditContext", () => ({ useDomEditActionsContext: () => state }));
+vi.mock("../../contexts/DomEditContext", () => ({ useDomEditActionsContext: () => state, useDomEditSelectionContext: () => state }));
 vi.mock("../../contexts/StudioContext", () => ({
   useStudioShellContext: () => ({ ...state, projectId: "project-1", writeBlockedReason: null }),
 }));
@@ -40,6 +41,7 @@ beforeEach(() => {
   vi.spyOn(frame, "getAttribute").mockReturnValue(origin + "/api/projects/project-1/preview?pt=one");
   vi.spyOn(frame, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 200, 100));
   state.previewIframeRef.current = frame;
+  state.domEditSelection = null;
   messages = [];
   state.compositionRect = { left: 10, top: 10, width: 200, height: 100 };
   state.commitDomEditPatchBatches.mockReset().mockResolvedValue({ durable: true, changed: true });
@@ -201,25 +203,28 @@ it("never saves an unrequested text edit or a completion from a replaced documen
   expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
 });
 
-it("outlines only the verified frame's layer selection at its scaled coordinates", () => {
-  const selection = { geometry: { x: 12, y: 15, width: 32, height: 20 }, viewport: { width: 100, height: 50 } };
-  const deliver = (token: string) => act(() => {
-    window.dispatchEvent(new MessageEvent("message", { origin, source: frame.contentWindow, data: {
-      version: 1, source: PREVIEW_BRIDGE_SOURCE, type: "select-element", projectId: "project-1", token,
-      layerKey: "doc:1", selection,
-    }}));
-  });
-  deliver("stale");
-  expect(canvas.firstElementChild).toBeNull();
-  deliver("one");
+it("keeps the selected element outlined across frame loads and layout changes until deselection", () => {
+  state.domEditSelection = { isolatedBounds: { x: 0.12, y: 0.3, width: 0.32, height: 0.4 } };
+  act(() => root.render(<IsolatedCanvasOverlay />));
   const style = (canvas.firstElementChild as HTMLElement).style;
   expect([style.left, style.top, style.width, style.height]).toEqual(["34px", "40px", "64px", "40px"]);
+  act(() => frame.dispatchEvent(new Event("load")));
   state.compositionRect = { left: 30, top: 20, width: 300, height: 150 };
   act(() => root.render(<IsolatedCanvasOverlay />));
   expect([style.left, style.top, style.width, style.height]).toEqual(["66px", "65px", "96px", "60px"]);
   expect(messages).toHaveLength(0);
-  act(() => frame.dispatchEvent(new Event("load")));
+  state.domEditSelection = null;
+  act(() => root.render(<IsolatedCanvasOverlay />));
   expect(canvas.firstElementChild).toBeNull();
+});
+
+it("resizes the selected source target after a replacement frame has forgotten its last hit", () => {
+  const target = { sourceFile: "compositions/logo.html", elementId: "logo" };
+  state.domEditSelection = { isolatedTarget: target, isolatedBounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.4 } };
+  act(() => root.render(<IsolatedCanvasOverlay />));
+  const corner = canvas.querySelector('[data-resize-corner="ne"]')!;
+  act(() => corner.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true, button:0, isPrimary:true, pointerId:1, clientX:110, clientY:20})));
+  expect(messages[0]).toMatchObject({ type:"canvas-drag", phase:"start", corner:"ne", target });
 });
 
 it("shows the released bounds even when the initial pick arrives after pointerup", async () => {

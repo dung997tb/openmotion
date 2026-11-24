@@ -21,7 +21,10 @@ export const PREVIEW_CANVAS_DRAG = `
   function confirmCanvasVersion(path, version) {
     const steps = pendingForSource(path);
     if (steps.length) steps.forEach(step => { step.confirmedVersion = version; });
-    else sourceVersions[path] = version;
+    else {
+      sourceVersions[path] = version;
+      notifyInspectorSourceReady(path);
+    }
   }
 
   function newerDragStyle(step, node, name) {
@@ -71,7 +74,7 @@ export const PREVIEW_CANVAS_DRAG = `
     if (drag) return null;
     const hit = document.elementFromPoint(message.x * innerWidth, message.y * innerHeight);
     const corner = ['nw','ne','sw','se'].includes(message.corner) ? message.corner : null;
-    const element = corner ? picked : hit?.closest('[id],[data-hf-id]');
+    const element = corner ? (message.target ? inspectorElement(message.target) : picked) : hit?.closest('[id],[data-hf-id]');
     if (!(element instanceof HTMLElement) || element === document.body || element === document.documentElement ||
         element.matches('[data-composition-id],[data-composition-src],[data-hf-scene]') ||
         element.closest('[data-timeline-locked]')) return null;
