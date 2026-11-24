@@ -90,6 +90,8 @@ export interface DomEditSelection extends PatchTarget {
   isCompositionHost: boolean;
   isInsideLockedComposition: boolean;
   boundingBox: { x: number; y: number; width: number; height: number };
+  /** Layout offsets in the mounted frame, before transforms. The inspector surrogate has no layout. */
+  isolatedLayoutBox?: DomEditSelection["boundingBox"];
   textContent: string | null;
   dataAttributes: Record<string, string>;
   inlineStyles: Record<string, string>;

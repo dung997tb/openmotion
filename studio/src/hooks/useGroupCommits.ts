@@ -59,14 +59,17 @@ export function computeGroupGeometry(
   members: DomEditSelection[],
   timelineElements: TimelineElement[],
 ): GroupGeometry {
-  const boxes = members.map((m) => ({
-    target: buildDomEditPatchTarget(m),
-    left: m.element.offsetLeft,
-    top: m.element.offsetTop,
-    right: m.element.offsetLeft + m.element.offsetWidth,
-    bottom: m.element.offsetTop + m.element.offsetHeight,
-    track: resolveAuthoredTrack(m, timelineElements),
-  }));
+  const boxes = members.map((m) => {
+    const el = m.element;
+    const box = m.isolatedTarget ? m.isolatedLayoutBox : {
+      x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight,
+    };
+    if (!box) throw new Error("Cannot measure the selected elements in the preview.");
+    return {
+      target: buildDomEditPatchTarget(m), track: resolveAuthoredTrack(m, timelineElements),
+      left: box.x, top: box.y, right: box.x + box.width, bottom: box.y + box.height,
+    };
+  });
   const left = Math.min(...boxes.map((b) => b.left));
   const top = Math.min(...boxes.map((b) => b.top));
   const width = Math.max(...boxes.map((b) => b.right)) - left;
@@ -144,9 +147,8 @@ export function useGroupCommits(params: UseGroupCommitsParams) {
       // Auto-name "Group N" by the count of existing groups in the document.
       const doc = members[0].element.ownerDocument;
       const groupId = `Group ${doc.querySelectorAll("[data-hf-group]").length + 1}`;
-      const { bbox, targets, rebases } = computeGroupGeometry(members, timelineElements);
-
       try {
+        const { bbox, targets, rebases } = computeGroupGeometry(members, timelineElements);
         const { groupCanvasElements } = await import("../../../packages/edit-core/canvas-source");
         let wrapperId = groupId;
         await saveGroupEdit(pid, targetPath, "Group elements", (source) => {

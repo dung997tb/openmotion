@@ -19,6 +19,23 @@ function inspect(html: string, lookup: {elementId: string; sourceFile?: string},
 }
 afterEach(() => document.body.replaceChildren());
 
+it("keeps untransformed layout offsets for grouping, separately from the displayed rectangle", async () => {
+  const mocks = [
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{ width: 4 }] as unknown as DOMRectList),
+    vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockReturnValue(15),
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockReturnValue(30),
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(100),
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(50),
+  ];
+  try {
+    const selection = await inspect('<div id="t"></div>', { elementId: "t" });
+    expect(selection?.boundingBox).toEqual({ x: 1, y: 2, width: 4, height: 5 });
+    expect(selection?.isolatedLayoutBox).toEqual({ x: 15, y: 30, width: 100, height: 50 });
+  } finally {
+    for (const mock of mocks) mock.mockRestore();
+  }
+});
+
 it("projects only the requested authored layer, with caret text and presentation facts in an inert document", async () => {
   const selection = await inspect('<h1 id="t" style="color:red" onclick="ignored()">A &amp; B</h1>', {elementId:"t"});
   expect(selection?.textFields[0]).toMatchObject({ source: "self", value: "A & B" });

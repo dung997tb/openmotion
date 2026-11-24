@@ -45,7 +45,9 @@ export const PREVIEW_INSPECTOR = `
     const src = el.getAttribute('src');
     return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, ...sourceIdentity(sha256),
       intrinsicMediaDuration: el.matches('audio,video') && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : undefined,
-      tag: el.localName, geometry: detail.geometry, inline, computed, data, leafText, lineBreaks: text && el.childElementCount > 0, binding: binding || undefined,
+      tag: el.localName, geometry: detail.geometry,
+      layoutBox: el.getClientRects().length ? {x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight} : null,
+      inline, computed, data, leafText, lineBreaks: text && el.childElementCount > 0, binding: binding || undefined,
       compositionHost: el.matches('[data-composition-src],[data-composition-file]'),
       compositionRoot: el === document.querySelector('[data-composition-id]'),
       locked: !!el.closest('[data-timeline-locked]'), muted: el.hasAttribute('muted'), loop: el.hasAttribute('loop'),

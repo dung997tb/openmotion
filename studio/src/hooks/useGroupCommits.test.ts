@@ -18,6 +18,20 @@ const timelineElement = (over: Partial<TimelineElement> = {}): TimelineElement =
 });
 
 describe("computeGroupGeometry — track threading", () => {
+  it("groups isolated members by their mounted layout and refuses missing measurements", () => {
+    const member = (id: string) => ({
+      ...makeSelection(id, document.createElement("div")),
+      isolatedTarget: { elementId: id, sourceFile: "index.html", sha256: "a".repeat(64) },
+    });
+    const a = member("a"), b = member("b");
+    const result = computeGroupGeometry([
+      { ...a, isolatedLayoutBox: { x: 50, y: 20, width: 200, height: 65 } },
+      { ...b, isolatedLayoutBox: { x: 80, y: 90, width: 80, height: 50 } },
+    ], []);
+    expect(result.bbox).toEqual({ left: 50, top: 20, width: 200, height: 120 });
+    expect(result.rebases.map(r => [r.left, r.top])).toEqual([[0, 0], [30, 70]]);
+    expect(() => computeGroupGeometry([a, b], [])).toThrow("Cannot measure");
+  });
   it("carries each member's authored track onto its rebase entry, so the server can pin it through the wrap", () => {
     const elA = document.createElement("div");
     elA.id = "clip-a";
