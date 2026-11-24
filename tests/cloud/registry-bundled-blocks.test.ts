@@ -26,6 +26,7 @@ test('bundled blocks install offline and each advertised control has one editabl
     const values = compositionVariableValues(source, keys);
     assert.ok(values?.size && values.size === params.length, name);
     for (const param of params) {
+      assert.ok(source.includes('var(' + param.key + ')'), 'The authored block must consume ' + name + ' ' + param.key);
       assert.equal(values.get(param.key)?.toLowerCase(), param.default.toLowerCase(), name + ' ' + param.key);
       const after = setBlockParameter(source, param.key, '#426d8e', path);
       assert.deepEqual(compositionVariableValues(after, keys), new Map(values).set(param.key, '#426d8e'));
