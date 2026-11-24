@@ -8,7 +8,7 @@ import { CloudError } from '../contracts/errors.ts';
 import type { BlobScope, StoragePort } from '../contracts/storage.ts';
 import type { Database, DbTransaction } from '../db/client.ts';
 import { projectFiles, projectTextRevisions } from '../db/schema/project-files.ts';
-import { TEXT_REVISION_MAX_DEPTH, TEXT_REVISION_MAX_CHAIN_BYTES } from '../infra/text-revisions.ts';
+import { TEXT_CHECKPOINT_INTERVAL, TEXT_CHECKPOINT_BYTES } from '../infra/text-revisions.ts';
 import { formatFileVersion } from '../studio/etag.ts';
 import {
   canonicalInputHash, loadProjectOrThrow, MAX_TEXT_FILE_BYTES, normalizeSafeProjectPath, readCommitReceipt,
@@ -124,8 +124,8 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
         .from(projectTextRevisions).where(and(eq(projectTextRevisions.workspaceId, ctx.workspaceId),
           eq(projectTextRevisions.projectId, projectId), eq(projectTextRevisions.id, parent.sha256)));
       if (!stored) throw new CloudError('STORAGE_ERROR', 'Missing text revision', {status: 500});
-      if (!stored.checkpoint && (stored.depth >= TEXT_REVISION_MAX_DEPTH ||
-          stored.chainBytes + patchBytes > TEXT_REVISION_MAX_CHAIN_BYTES)) {
+      if (!stored.checkpoint && (stored.depth >= TEXT_CHECKPOINT_INTERVAL ||
+          stored.chainBytes + patchBytes > TEXT_CHECKPOINT_BYTES)) {
         if (!storage.ensureTextCheckpoint) throw new CloudError('STORAGE_ERROR', 'Checkpoint storage is unavailable', {status: 503});
         await storage.ensureTextCheckpoint(ctx.workspaceId, parent.sha256);
       } else if (!stored.checkpoint) {
