@@ -410,6 +410,7 @@ export async function startWorkerRuntime(options: StartWorkerRuntimeOptions): Pr
   const presignCacheWindowSec = (config as { S3_PRESIGN_CACHE_WINDOW_SEC?: number })
     .S3_PRESIGN_CACHE_WINDOW_SEC;
   const storage = new StorageService({
+    textRevisionDb: dbHandle.db,
     bucket: config.S3_BUCKET,
     region: config.S3_REGION,
     endpoint: config.S3_ENDPOINT,

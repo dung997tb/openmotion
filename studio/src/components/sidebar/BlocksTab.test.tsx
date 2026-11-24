@@ -36,6 +36,7 @@ it("falls back from a failed hover video to its poster, then restores the compos
   const onPreview = vi.fn<(preview: BlockPreviewInfo | null) => void>();
   const host = mountHost(<BlocksTab onPreviewBlock={onPreview} />);
   expect(host.querySelector('[data-testid="catalog-cover-placeholder"]')).toBeNull();
+  expect(host.querySelector('img')?.getAttribute('draggable')).toBe('false');
   act(() => host.querySelector("[draggable]")!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })));
   act(() => vi.advanceTimersByTime(300));
 

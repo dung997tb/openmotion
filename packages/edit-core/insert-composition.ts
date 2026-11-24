@@ -2,6 +2,7 @@ import { parseHTMLContent } from '@hyperframes/core/compiler/html-document';
 import { nextUniqueId, parseSourceDocument } from '@hyperframes/studio-server/source-mutation';
 import { encodeUrlPath } from '@hyperframes/parsers';
 import { resolveTimelineAssetSrc } from './asset-placement.ts';
+import { DEFAULT_COMPOSITION_DURATION_SECONDS } from './time-bounds.ts';
 
 /**
  * Pure in-memory composition insertion (`POST /file-mutations/insert-composition/*`).
@@ -24,7 +25,7 @@ export function insertCompositionInMemory(input: {
   if (!childRoot) return { ok: false, status: 400, error: 'Composition source has no root' };
   const compId = childRoot.getAttribute('data-composition-id')?.trim() || 'subcomp';
   const duration = Number.parseFloat(
-    childRoot.getAttribute('data-composition-duration') ?? childRoot.getAttribute('data-duration') ?? '5',
+    childRoot.getAttribute('data-composition-duration') ?? childRoot.getAttribute('data-duration') ?? String(DEFAULT_COMPOSITION_DURATION_SECONDS),
   );
   if (!Number.isFinite(duration) || duration <= 0) {
     return { ok: false, status: 400, error: 'Composition source has no valid data-composition-duration' };

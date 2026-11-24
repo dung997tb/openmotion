@@ -65,6 +65,7 @@
     "@zumer/snapdom": "^3.8.1",
     "acorn": "8.19.0",
     "bullmq": "^5.48.0",
+    "diff": "9.0.0",
     "drizzle-orm": "^0.41.0",
     "fontkit": "2.0.4",
     "gsap": "3.15.0",

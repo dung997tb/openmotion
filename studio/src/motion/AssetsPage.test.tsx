@@ -16,7 +16,10 @@ let lastComposerOnCreated: ((job: import('../../../shared/gateway').GenerationJo
 let lastShowCurrentJob: boolean | undefined;
 let lastComposerOnUploadFiles: ((files: File[]) => void) | undefined;
 let lastComposerUploadingReferences: boolean | undefined;
-vi.mock('./AssetComposer', () => ({ AssetComposer: ({ draft, onReference, onUploadFiles, uploadingReferences, onCreated, showCurrentJob }: { draft: AssetDraft; onReference: () => void; onUploadFiles?: (files: File[]) => void; uploadingReferences?: boolean; onCreated: (job: import('../../../shared/gateway').GenerationJob) => void; showCurrentJob?: boolean }) => { lastComposerOnCreated = onCreated; lastShowCurrentJob = showCurrentJob; lastComposerOnUploadFiles = onUploadFiles; lastComposerUploadingReferences = uploadingReferences; return <><input aria-label="Creation draft" data-reference-count={draft.references.length} /><button onClick={onReference}>References</button></>; } }));
+let lastComposerPromptAppliedToken: number | undefined;
+let lastComposerSetDraft: ((next: AssetDraft | ((current: AssetDraft) => AssetDraft)) => void) | undefined;
+let lastComposerOnClose: (() => void) | undefined;
+vi.mock('./AssetComposer', () => ({ AssetComposer: ({ draft, setDraft, promptAppliedToken, onReference, onUploadFiles, uploadingReferences, onCreated, onClose, showCurrentJob }: { draft: AssetDraft; setDraft: (next: AssetDraft | ((current: AssetDraft) => AssetDraft)) => void; promptAppliedToken?: number; onReference: () => void; onUploadFiles?: (files: File[]) => void; uploadingReferences?: boolean; onCreated: (job: import('../../../shared/gateway').GenerationJob) => void; onClose: () => void; showCurrentJob?: boolean }) => { lastComposerOnCreated = onCreated; lastComposerOnClose = onClose; lastShowCurrentJob = showCurrentJob; lastComposerOnUploadFiles = onUploadFiles; lastComposerUploadingReferences = uploadingReferences; lastComposerPromptAppliedToken = promptAppliedToken; lastComposerSetDraft = setDraft; return <><input aria-label="Creation draft" data-reference-count={draft.references.length} data-prompt={draft.prompt} data-prompt-applied-token={promptAppliedToken ?? 0} /><button onClick={onReference}>References</button></>; } }));
 vi.mock('./AssetTaskHistory', () => ({ AssetTaskMenu: () => null }));
 vi.mock('./assetClient', () => ({ assetRequest: vi.fn(), uploadLibraryAsset: vi.fn() }));
 vi.mock('./gatewayClient', () => ({ gatewayRequest: async () => ({ conversations: [] }) }));
@@ -1264,4 +1267,112 @@ it('rejects oversized generated assets when attaching from the Generations light
   await act(async () => { useRefBtn!.click(); }); await flush();
   expect(document.body.textContent).toContain('The reference image is larger than the 2 MiB OpenDesign upload limit.');
   expect(rememberGen.mock.lastCall?.[0].references).toEqual([]);
+});
+
+it('confirms example prompt application with toast, composer prompt token, and applied button state', async () => {
+  const { mediaEditorDestination } = await import('./creativeStudios');
+  const remember = vi.fn();
+  const studio = {
+    destination: mediaEditorDestination('text-to-video'),
+    draftKey: 'cinema/text-to-video:feedback',
+    catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+    remember,
+    chooseModel: vi.fn(),
+  };
+  await act(async () => root.render(<AssetsPage active studio={studio} />)); await flush();
+
+  const draftInput = container.querySelector<HTMLInputElement>('input[aria-label="Creation draft"]')!;
+  const action = container.querySelector<HTMLButtonElement>('.om-canvas-idea-prompt')!;
+  expect(action.textContent).toBe('Use this example');
+  expect(action.getAttribute('data-applied')).toBeNull();
+  expect(lastComposerPromptAppliedToken).toBe(0);
+
+  await act(async () => { action.click(); }); await flush();
+  expect(draftInput.getAttribute('data-prompt')).toContain('orange soda bottle');
+  expect(lastComposerPromptAppliedToken).toBe(1);
+  expect(action.textContent).toBe('Example applied');
+  expect(action.getAttribute('data-applied')).toBe('true');
+  expect(document.body.textContent).toContain('Prompt loaded into editor');
+
+  // Clicking again while already filled still increments the composer feedback token.
+  await act(async () => { action.click(); }); await flush();
+  expect(lastComposerPromptAppliedToken).toBe(2);
+  expect(document.body.textContent).toContain('Prompt loaded into editor');
+
+  // Editing the prompt away from the example restores the original button label.
+  await act(async () => {
+    lastComposerSetDraft?.(current => ({ ...current, prompt: 'A custom shot' }));
+  }); await flush();
+  expect(action.textContent).toBe('Use this example');
+  expect(action.getAttribute('data-applied')).toBeNull();
+});
+
+it('tracks applied state per example card in the image canvas guide', async () => {
+  const { mediaEditorDestination } = await import('./creativeStudios');
+  const studio = {
+    destination: mediaEditorDestination('text-to-image'),
+    draftKey: 'design/text-to-image:feedback',
+    catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+    remember: vi.fn(),
+    chooseModel: vi.fn(),
+  };
+  await act(async () => root.render(<AssetsPage active studio={studio} />)); await flush();
+
+  const draftInput = container.querySelector<HTMLInputElement>('input[aria-label="Creation draft"]')!;
+  const action = container.querySelector<HTMLButtonElement>('.om-canvas-idea-prompt')!;
+  expect(action.textContent).toBe('Use this example');
+
+  await act(async () => { action.click(); }); await flush();
+  expect(draftInput.getAttribute('data-prompt')).toContain('amber glass bottle');
+  expect(lastComposerPromptAppliedToken).toBe(1);
+  expect(action.textContent).toBe('Example applied');
+  expect(action.getAttribute('data-applied')).toBe('true');
+  expect(document.body.textContent).toContain('Prompt loaded into editor');
+
+  // Switching to another example card resets the action back to Use this example for that card.
+  const deckButtons = container.querySelectorAll<HTMLButtonElement>('.om-canvas-deck button');
+  await act(async () => { deckButtons[1].click(); }); await flush();
+  expect(action.textContent).toBe('Use this example');
+  expect(action.getAttribute('data-applied')).toBeNull();
+});
+
+it('passes pending prompt feedback when opening a closed standalone library creator and clears it on later draft resets', async () => {
+  const jobFailed: import('../../../shared/gateway').GenerationJob = {
+    id: 'job-fail-closed', requestId: 'req-fail-closed', modality: 'image', prompt: 'Neon alley rain scene', state: 'failed',
+    error: 'Provider timeout',
+    model: { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'opendesign' },
+    createdAt: 250, updatedAt: 250,
+  };
+  let polledJobs: import('../../../shared/gateway').GenerationJob[] = [];
+  const baseImpl = vi.mocked(assetRequest).getMockImplementation()!;
+  vi.mocked(assetRequest).mockImplementation(async args => {
+    if (args.action === 'jobs') return { jobs: structuredClone(polledJobs) };
+    return baseImpl(args);
+  });
+
+  await render();
+  expect(container.querySelector('[aria-label="Creation draft"]')).toBeNull();
+
+  // Create a failed placeholder tile, then close the standalone creator before clicking Reuse prompt.
+  await click('AI Create');
+  polledJobs = [jobFailed];
+  await act(async () => { lastComposerOnCreated?.(jobFailed); }); await flush();
+  await act(async () => { lastComposerOnClose?.(); }); await flush();
+  expect(container.querySelector('[aria-label="Creation draft"]')).toBeNull();
+
+  await click('Reuse prompt');
+  const openedDraft = container.querySelector<HTMLInputElement>('[aria-label="Creation draft"]')!;
+  expect(openedDraft).not.toBeNull();
+  expect(openedDraft.getAttribute('data-prompt')).toBe('Neon alley rain scene');
+  expect(openedDraft.getAttribute('data-prompt-applied-token')).toBe('1');
+  expect(document.body.textContent).toContain('Prompt loaded into editor');
+
+  // Starting a new draft resets the token to 0 so remounted tasks never replay stale prompt feedback.
+  await act(async () => { container.querySelector<HTMLButtonElement>('.om-assets-heading button[data-primary]')!.click(); }); await flush();
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Creation draft"]')?.getAttribute('data-prompt-applied-token')).toBe('0');
+
+  // Closing and reusing again issues a fresh monotonic token on the newly opened composer.
+  await act(async () => { lastComposerOnClose?.(); }); await flush();
+  await click('Reuse prompt');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Creation draft"]')?.getAttribute('data-prompt-applied-token')).toBe('2');
 });

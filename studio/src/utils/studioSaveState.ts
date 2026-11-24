@@ -1,3 +1,5 @@
+import { StudioFileConflictError } from './studioSaveDiagnostics';
+
 /** Confirmed file writes and native history, scoped to each open project. No polling or source copies. */
 export interface StudioSaveSnapshot {
   pending: number;
@@ -42,8 +44,10 @@ export async function trackStudioProjectSave<T>(projectId: string, path: string,
     return result;
   } catch (error) {
     update(projectId, state => {
-      state.failures.add(path);
-      state.snapshot = { ...state.snapshot, pending: state.snapshot.pending - 1, failed: true };
+      // A stale patch is discarded and the caller reloads the accepted file.
+      // Only failures with an outstanding edit belong in the persistent badge.
+      if (!(error instanceof StudioFileConflictError && error.syncLatest)) state.failures.add(path);
+      state.snapshot = { ...state.snapshot, pending: state.snapshot.pending - 1, failed: state.failures.size > 0 };
     });
     throw error;
   }

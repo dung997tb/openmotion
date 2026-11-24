@@ -10,6 +10,14 @@ export function onRebasedFileEdit(listener: RebaseListener): () => void {
   return () => { listeners.delete(listener); };
 }
 
+/** Request an authoritative refresh after the displayed result diverges from storage. */
+export function reconcileFileEdit(projectId: string, path: string, version?: string | null, changed = true): RebasedFileEdit {
+  forgetFileEditChain(projectId, path);
+  const file = { path, version: version ?? '', changed };
+  for (const listener of listeners) listener(projectId, file);
+  return file;
+}
+
 /** A receipt may describe a merge onto another writer's source. Never let a stale
  * frame claim those bytes. Ordinary edits keep the no-reload path. */
 export async function acceptFileEditReceipt(
@@ -17,10 +25,7 @@ export async function acceptFileEditReceipt(
   committed: string, receipt: { rebased?: boolean; changedPaths?: string[] },
 ): Promise<RebasedFileEdit | undefined> {
   if (receipt.rebased && (predicted === undefined ? before !== committed : await studioFileContentVersion(predicted) !== committed)) {
-    forgetFileEditChain(projectId, path);
-    const file = { path, version: committed, changed: receipt.changedPaths?.includes(path) ?? true };
-    for (const listener of listeners) listener(projectId, file);
-    return file;
+    return reconcileFileEdit(projectId, path, committed, receipt.changedPaths?.includes(path) ?? true);
   }
   if (predicted !== undefined) acknowledgeFileEdit(projectId, path, before, committed);
 }

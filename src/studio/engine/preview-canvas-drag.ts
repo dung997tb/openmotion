@@ -80,7 +80,7 @@ export const PREVIEW_CANVAS_DRAG = `
     const pending = pendingDrags.get(message.gestureId);
     if (pending && (message.phase === 'commit' || message.phase === 'cancel')) {
       if (message.phase === 'cancel') restoreStyles(pending.element, pending.original, pending.applied);
-      // A changed file needs the digest from the authoritative replacement frame.
+      // A changed file receives its new version from the verified in-place update or a replacement frame.
       if (message.phase === 'cancel' || !message.changed) sourceVersions[pending.selection.sourceFile] = pending.sha256;
       pendingDrags.delete(message.gestureId);
       return null;
@@ -124,6 +124,6 @@ export const PREVIEW_CANVAS_DRAG = `
     delete sourceVersions[sourceFile];
     pendingDrags.set(drag.id, { ...drag, sha256 });
     drag = null;
-    return { sourceFile, elementId, hfId, sha256, left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
+    return { sourceFile, elementId, hfId, ...sourceIdentity(sha256), left, top, makeRelative, ...(!corner && {position}), ...(corner && {corner,width,height}) };
   }
 `;

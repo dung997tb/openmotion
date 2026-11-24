@@ -1,4 +1,5 @@
-import { walkCompositionDescendants } from '@hyperframes/parsers/hf-ids';
+import { createTextPatch } from '../../shared/create-text-patch.ts';
+import { stampHfIdsInPlace, walkCompositionDescendants } from '@hyperframes/parsers/hf-ids';
 import { parseSourceDocument, type SourceMutationTarget } from '@hyperframes/studio-server/source-mutation';
 import { hasRelativeLutSource } from '../../packages/edit-core/color-grading.ts';
 import { applyProjectEdit, locateEdit, type CompositionEdit, type EditRequest } from '../../packages/edit-core/commands.ts';
@@ -14,7 +15,7 @@ import { sha256Hex } from '../studio/etag.ts';
 import { normalizeSafeProjectPath, type ProjectFilesService } from './project-files-service.ts';
 
 export type EditGuard =
-  | { source: 'studio'; versions: Record<string, string | null>; writeToken: string; windowId?: string }
+  | { source: 'studio'; versions: Record<string, string | null>; writeToken: string; windowId?: string; undoGroup?: string }
   | { source: 'agent'; expectedRevision: string; expectedVersionId: string };
 
 function invalid(message: string) {
@@ -116,7 +117,7 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
     requested.set(path, existing && existing !== kind ? 'text' : kind);
   };
   const plan = commands.map(command => ({ command, inputs: dependencies(command), rebasedCommand: onNewBase(command) }));
-  const canRebase = plan.every(item => item.rebasedCommand !== undefined);
+  const canRebase = !files.textPatchWrites && plan.every(item => item.rebasedCommand !== undefined);
   for (const { command, inputs } of plan) {
     const path = commandPath(command.compositionPath, true);
     if (command.kind !== 'setBeatGrid' && !/\.html?$/i.test(path)) throw invalid('A composition must be an HTML file');
@@ -140,17 +141,19 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
   // Preserve receipts issued by the original move endpoint during rolling upgrades.
   const legacyMove = input.kind === 'moveClip';
   const scope = `project:${projectId}:${guard.source}:${legacyMove ? 'moveClip' : 'edit'}`;
-  const hash = legacyMove
+  const commandHash = legacyMove
     ? sha256Hex(JSON.stringify([input.compositionPath, input.hfId, input.start,
       guard.source === 'studio' ? guard.versions[input.compositionPath] : base]))
     : sha256Hex(JSON.stringify([input, base], (_key, value) =>
       value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value));
+  const undoGroup = guard.source === 'studio' && files.textPatchWrites ? guard.undoGroup : undefined;
+  const hash = undoGroup ? sha256Hex(JSON.stringify([commandHash, undoGroup])) : commandHash;
   // Persist with the exact input versions we evaluated. A racing commit may
   // invalidate them between read and write, even if the client base was fresh.
   async function applyCurrent() {
     const snapshot = await files.readEditInputs(auth, projectId, requested, scope, requestId, hash,
-      !canRebase && guard.source === 'agent' ? guard : undefined);
+      !files.textPatchWrites && !canRebase && guard.source === 'agent' ? guard : undefined);
     if (snapshot.kind === 'replay') return snapshot.commit;
     for (const command of commands) {
       if (command.kind !== 'setBeatGrid') continue;
@@ -162,9 +165,10 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
     }
     const { versions } = snapshot;
     const sources = new Map(snapshot.sources);
-    const rebased = guard.source === 'agent'
+    const staleProject = guard.source === 'agent' && (snapshot.revision !== guard.expectedRevision || snapshot.versionId !== guard.expectedVersionId);
+    const rebased = !files.textPatchWrites && (guard.source === 'agent'
       ? snapshot.revision !== guard.expectedRevision || snapshot.versionId !== guard.expectedVersionId
-      : Object.entries(guard.versions).some(([path, expected]) => versions.get(path) !== expected);
+      : Object.entries(guard.versions).some(([path, expected]) => versions.get(path) !== expected));
     if (!canRebase && guard.source === 'studio') {
       for (const [path, expected] of Object.entries(guard.versions)) {
         if (versions.get(path) !== expected) throw new CloudError('VERSION_CONFLICT', 'Project file changed before the edit', {
@@ -212,14 +216,30 @@ export async function commitProjectEdit(files: ProjectFilesService, auth: AuthCo
         throw invalid(error instanceof Error ? error.message : 'Invalid project edit');
       }
     }
+    if (files.textPatchWrites) {
+      if (guard.source === 'agent' && staleProject) await files.checkObservedFiles(auth, projectId, guard, versions);
+      const edits = Array.from(changed, ([path, source]) => {
+        const content = /\.html?$/i.test(path) ? stampHfIdsInPlace(source) : source;
+        const baseVersion = versions.get(path) ?? null;
+        const patch = baseVersion === null ? null : createTextPatch(snapshot.sources.get(path)!, content);
+        return {path, baseVersion, ...(patch === null ? {content} : {patch})};
+      });
+      // A no-op still guards its read set and obtains an idempotent receipt.
+      if (edits.length) {
+        return files.commitTextEdits(auth, projectId, {files: edits, dependencies: Object.fromEntries(versions), undoGroup,
+          label: labels.size === 1 ? [...labels][0] : 'Edit project'}, {source: guard.source, requestId,
+          writeToken: guard.source === 'studio' ? guard.writeToken : undefined, command: {scope, hash, result: {rebased: false}}});
+      }
+    }
     return files.commitChanges(auth, {
       projectId, requestId, idempotencyScope: scope, commandReceipt: { inputHash: hash, result: { rebased } },
-      ops: Array.from(changed, ([path, content]) => ({ op: 'upsert_text', path, content, stampHfIds: /\.html?$/i.test(path) })),
+      ops: Array.from(changed, ([path, content]) => ({ op: 'upsert_text', path, content,
+        stampHfIds: /\.html?$/i.test(path) })),
       filePreconditions: Array.from(versions, ([path, version]) => version === null
         ? { path, ifNoneMatch: '*' as const } : { path, ifMatch: version }),
       source: guard.source, summary: labels.size === 1 ? [...labels][0] : 'Edit project',
       ...(guard.source === 'studio' ? { writeToken: guard.writeToken, windowId: guard.windowId } :
-        { actorKind: 'agent', ...(!canRebase && { expectedRevision: guard.expectedRevision, expectedVersionId: guard.expectedVersionId }) }),
+        { actorKind: 'agent', ...(!canRebase && !files.textPatchWrites && { expectedRevision: guard.expectedRevision, expectedVersionId: guard.expectedVersionId }) }),
     });
   }
   for (let attempt = 1; ; attempt++) {

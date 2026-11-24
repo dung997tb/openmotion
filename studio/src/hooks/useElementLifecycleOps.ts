@@ -1,3 +1,4 @@
+import { isolatedSourceVersion } from "../components/editor/isolatedSourceTarget";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
 import { buildProjectApiPath } from "../utils/projectRouting";
@@ -126,7 +127,7 @@ export function useElementLifecycleOps({
         const hfIds = sameFile
           .map((member) => member.hfId)
           .filter((hfId): hfId is string => Boolean(hfId));
-        const shownVersions = new Set(sameFile.flatMap(member => member.isolatedTarget ? [member.isolatedTarget.sha256] : []));
+        const shownVersions = new Set(sameFile.flatMap(member => member.isolatedTarget ? [isolatedSourceVersion(member.isolatedTarget)] : []));
         if (shownVersions.size > 1) throw new Error("Preview changed before the elements could be deleted");
         const [shownVersion] = shownVersions;
         if (!getCachedCloudDisklessMode() && !shownVersion && onTrySdkDelete && hfIds.length === sameFile.length) {
@@ -167,7 +168,7 @@ export function useElementLifecycleOps({
           recordEdit: editHistory.recordEdit,
           rewrite: async (originalContent, history) => {
             assertSafeElementDeletion(originalContent, patchTargets);
-            const expected = shownVersion && isolatedEditVersion(pid, targetPath, '"sha256:' + shownVersion + '"');
+            const expected = shownVersion && isolatedEditVersion(pid, targetPath, shownVersion);
             const removeResponse = await studioApiFetch(
               buildProjectApiPath(
                 pid,

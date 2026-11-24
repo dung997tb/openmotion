@@ -13,7 +13,7 @@ import {
   parseGsapAnimationsFromHtml,
   type GsapMutationBody,
 } from '../engine/gsap-mutations.ts';
-import { createWriteToken, formatVersionFromSha256, sha256Hex } from '../etag.ts';
+import { createWriteToken, formatFileVersion, formatVersionFromSha256, sha256Hex } from '../etag.ts';
 
 function resolveGsapFilePath(url: string, markers: readonly string[]): string {
   for (const marker of markers) {
@@ -37,24 +37,30 @@ export function createStudioGsapRoutes(deps: DisklessStudioDeps): Hono<{ Variabl
     const auth = await getAuthContext(c, deps, { scope: 'projects:read' });
     const projectId = c.req.param('id') ?? '';
     const filePath = resolveGsapFilePath(c.req.url, ['/gsap-animations/']);
-    const file = await deps.files.readTextFile(auth, projectId, filePath);
+    const file = await deps.files.getFile(auth, projectId, filePath);
     if (!file) {
       return c.json({ error: 'Composition file not found', path: filePath }, 404);
     }
 
-    const etag = `"sha256:${file.file.sha256}:gsap-animations:v1"`;
+    const version = formatFileVersion(file.blobScope, file.sha256);
+    if (!file.isText) {
+      throw new CloudError('INVALID_ARGUMENT', `File "${file.path}" is binary and cannot be read as text.`, {
+        status: 415, applied: false, details: { why: 'binary', path: file.path, version },
+      });
+    }
+    const etag = `${version.slice(0, -1)}:gsap-animations:v1"`;
+    c.header('ETag', etag);
     if (c.req.header('if-none-match')?.trim() === etag) {
-      c.header('ETag', etag);
       return c.body(null, 304);
     }
 
-    const parsed = parseGsapAnimationsFromHtml(file.content);
-    c.header('ETag', etag);
+    const content = await deps.files.readTextBlob(auth.workspaceId, file.blobScope, file.sha256);
+    const parsed = parseGsapAnimationsFromHtml(content);
     c.header('Cache-Control', 'no-cache');
     return c.json({
       ...parsed,
       path: filePath,
-      version: file.version,
+      version,
     });
   };
   app.get('/api/projects/:id/gsap-animations', handleGetGsapAnimations);
@@ -176,7 +182,13 @@ export function createStudioGsapRoutes(deps: DisklessStudioDeps): Hono<{ Variabl
       });
     }
 
-    const expectedEtag = formatVersionFromSha256(sha256Hex(body.expected));
+    let expectedEtag = formatVersionFromSha256(sha256Hex(body.expected));
+    const observed = await deps.files.getFile(auth, projectId, filePath);
+    if (observed?.blobScope === 'patch') {
+      const text = await deps.files.readTextBlob(auth.workspaceId, observed.blobScope, observed.sha256);
+      if (text !== body.expected) return c.json({ error: 'The file changed before rollback.' }, 409);
+      expectedEtag = formatFileVersion(observed.blobScope, observed.sha256);
+    }
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
 
     try {

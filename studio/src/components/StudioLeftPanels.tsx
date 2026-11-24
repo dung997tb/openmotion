@@ -77,6 +77,8 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
     handleImportFiles,
     refreshFileTree,
     handleContentChange,
+    flushPendingSourceSave,
+    getPendingSourceCandidate,
   } = useFileManagerContext();
 
   const handleRenderComposition = useCallback(
@@ -171,6 +173,8 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
                 editingFile={editingFile}
                 revealOffset={revealSourceOffset}
                 onChange={handleContentChange}
+                onFlush={flushPendingSourceSave}
+                hasPendingChange={() => Boolean(getPendingSourceCandidate())}
               />
             </div>
           </div>
@@ -190,11 +194,15 @@ function CodeBody({
   editingFile,
   revealOffset,
   onChange,
+  onFlush,
+  hasPendingChange,
 }: {
   projectId: string;
-  editingFile: { path: string; content: string | null } | null;
+  editingFile: { path: string; content: string | null; submitted?: string } | null;
   revealOffset: React.ComponentProps<typeof SourceEditor>["revealOffset"];
   onChange: (content: string) => void;
+  onFlush: () => void;
+  hasPendingChange: () => boolean;
 }) {
   const { t } = useI18n();
   if (!editingFile) {
@@ -217,8 +225,11 @@ function CodeBody({
   return <Suspense fallback={loadingFile}>
     <SourceEditor
       content={editingFile.content}
+      submitted={editingFile.submitted}
       filePath={editingFile.path}
       onChange={onChange}
+      onFlush={onFlush}
+      hasPendingChange={hasPendingChange}
       revealOffset={revealOffset}
     />
   </Suspense>;

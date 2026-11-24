@@ -250,7 +250,7 @@ export interface McpHttpTransportDeps {
   dispatcher: McpToolDispatcher;
   sessionStore: McpSessionStore;
   eventBus?: McpEventBusPort;
-  rateLimiter?: RateLimiter;
+  rateLimiter?: Pick<RateLimiter, 'consume'>;
   extraAllowedHosts?: readonly string[];
   sseKeepAliveMs?: number;
 }
@@ -309,8 +309,12 @@ export class McpStreamableHttpHandler {
     const headerRejection = this.validateHeaders(request);
     if (headerRejection) return headerRejection;
 
+    const method = request.method.toUpperCase();
+    const parsedBody = method === 'POST' ? await this.readPostBody(request) : undefined;
     if (this.deps.rateLimiter) {
-      const rl = await this.deps.rateLimiter.consume(`mcp:${auth.workspaceId}`, 120, 60_000);
+      // A JSON-RPC envelope can carry multiple messages. A single tool call may itself edit several files.
+      const cost = Array.isArray(parsedBody) ? Math.max(1, parsedBody.length) : 1;
+      const rl = await this.deps.rateLimiter.consume(`mcp:${auth.workspaceId}`, 120, 60_000, cost);
       if (!rl.allowed) {
         const res = jsonRpcErrorResponse(429, -32000, 'MCP rate limit exceeded');
         res.headers.set('Retry-After', String(rl.retryAfterSec));
@@ -318,8 +322,8 @@ export class McpStreamableHttpHandler {
       }
     }
 
-    const method = request.method.toUpperCase();
-    if (method === 'POST') return this.handlePost(request, auth);
+    if (parsedBody instanceof Response) return parsedBody;
+    if (method === 'POST') return this.handlePost(request, auth, parsedBody);
     if (method === 'GET') return this.handleGet(request, auth);
     if (method === 'DELETE') return this.handleDelete(request, auth);
 
@@ -328,7 +332,7 @@ export class McpStreamableHttpHandler {
     return res;
   }
 
-  private async handlePost(request: Request, auth: AuthContext): Promise<Response> {
+  private async readPostBody(request: Request): Promise<unknown> {
     if (!isJsonContentType(request.headers.get('content-type'))) {
       return jsonRpcErrorResponse(
         415,
@@ -347,13 +351,14 @@ export class McpStreamableHttpHandler {
     }
 
     const bodyText = 'text' in bodyRead ? bodyRead.text : '';
-    let parsedBody: unknown;
     try {
-      parsedBody = JSON.parse(bodyText);
+      return JSON.parse(bodyText);
     } catch {
       return jsonRpcErrorResponse(400, -32700, 'Parse error: Invalid JSON');
     }
+  }
 
+  private async handlePost(request: Request, auth: AuthContext, parsedBody: unknown): Promise<Response> {
     const incomingSessionId = request.headers.get('mcp-session-id')?.trim() || null;
     const isInit = isInitializeRequest(parsedBody);
     let sessionState: McpSessionState | null = null;

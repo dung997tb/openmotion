@@ -756,6 +756,50 @@
 .om-canvas-ideas h2.om-title strong { display: block; color: var(--motion-accent); font-weight: var(--motion-weight-bold); text-transform: uppercase; letter-spacing: -.02em; }
 .om-canvas-ideas p { max-width: 52ch; font-size: var(--motion-text-body); }
 [data-motion-studio] .om-canvas-idea-prompt { width: auto; padding: 0 var(--motion-space-14); margin-top: var(--motion-space-4); }
+[data-motion-studio] .om-canvas-idea-prompt[data-applied="true"] {
+  color: var(--motion-accent);
+  background: var(--motion-accent-soft);
+  border-color: var(--motion-accent);
+}
+[data-motion-studio] .om-canvas-idea-prompt[data-applied="true"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--motion-accent-soft) 80%, var(--motion-hover));
+  border-color: var(--motion-accent);
+}
+[data-motion-studio] :is(.om-creation-prompt, .om-field)[data-prompt-applied="a"] {
+  animation: om-prompt-applied-a 850ms ease-out;
+}
+[data-motion-studio] :is(.om-creation-prompt, .om-field)[data-prompt-applied="b"] {
+  animation: om-prompt-applied-b 850ms ease-out;
+}
+@keyframes om-prompt-applied-a {
+  0% {
+    border-color: var(--motion-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--motion-accent) 34%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@keyframes om-prompt-applied-b {
+  0% {
+    border-color: var(--motion-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--motion-accent) 34%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-motion-ui][data-motion-studio] .om-creation-prompt[data-prompt-applied] {
+    animation: none;
+    border-color: var(--motion-accent);
+  }
+  :root[data-motion-ui][data-motion-studio] .om-field[data-prompt-applied] {
+    animation: none;
+    outline: 1px solid var(--motion-accent);
+    outline-offset: 1px;
+  }
+}
 .om-canvas-deck { display: flex; width: 100%; justify-content: center; align-items: center; padding: var(--motion-space-16) var(--motion-space-8); }
 .om-canvas-deck button { position: relative; width: clamp(104px, 14vw, 178px); aspect-ratio: 1.32; overflow: hidden; padding: 0; border: 2px solid var(--motion-border); border-radius: var(--motion-radius-xl); background: var(--motion-panel); cursor: pointer; box-shadow: var(--motion-shadow-md); transition: transform var(--motion-duration-fast) ease, border-color var(--motion-duration-fast) ease; }
 .om-canvas-deck button + button { margin-left: -4%; }

@@ -11,6 +11,7 @@ import { idempotencyReceipts } from '../db/schema/jobs.ts';
 import {
   projectFiles,
   projectHistoryEntries,
+  projectTextRevisions,
   projectVersionFiles,
   projectVersions,
   type HistoryActorKind,
@@ -20,7 +21,8 @@ import { projects } from '../db/schema/projects.ts';
 import { projectChannel } from '../infra/redis.ts';
 import { workspaceBlobKey } from '../infra/storage.ts';
 import { computeProjectRevision, isSha256Hex, isTextProjectPath, isUuid } from '../../shared/project-validation.ts';
-import { computePreviewImpact, createWriteToken, formatVersionFromSha256 } from '../studio/etag.ts';
+import { computePreviewImpact, createWriteToken, formatFileVersion } from '../studio/etag.ts';
+import { htmlFileVersions } from './event-file-versions.ts';
 import {
   DEFAULT_HISTORY_COALESCE_WINDOW_MS,
   assertValidUuid,
@@ -640,7 +642,7 @@ export class VersionHistoryService {
         });
       }
 
-      const { appliedFiles, revision } = await this.applySnapshotToLiveFiles(
+      const changes = await this.applySnapshotToLiveFiles(
         tx,
         ctx.workspaceId,
         project.id,
@@ -651,7 +653,7 @@ export class VersionHistoryService {
         .update(projects)
         .set(
           asUpdate(projects, {
-            revision,
+            revision: changes.revision,
             currentVersionId: targetVersion.id,
             currentVersionNumber: targetVersion.versionNumber,
             currentHistorySeq: targetEntry.seq,
@@ -661,12 +663,11 @@ export class VersionHistoryService {
         .where(and(eq(projects.id, project.id), eq(projects.workspaceId, ctx.workspaceId)));
 
       return {
-        revision,
+        ...changes,
         versionId: targetVersion.id,
         versionNumber: targetVersion.versionNumber,
         seq: targetEntry.seq,
         stepLabel,
-        appliedFiles,
       };
     });
 
@@ -677,6 +678,7 @@ export class VersionHistoryService {
       txResult.versionId,
       txResult.seq,
       txResult.appliedFiles,
+      txResult.fileVersions,
       writeToken,
     );
 
@@ -836,14 +838,14 @@ export class VersionHistoryService {
               sha256: f.sha256.trim(),
               sizeBytes: Number(f.sizeBytes),
               mimeType: f.mimeType,
-              isText: isTextProjectPath(f.path),
+              isText: f.blobScope === 'patch' || isTextProjectPath(f.path),
               updatedAt: now,
             }),
           ),
         );
       }
 
-      const appliedFiles = computeChangedFilePaths(liveFiles, snapshotFiles);
+      const { appliedFiles, fileVersions } = compareSnapshotFiles(liveFiles, snapshotFiles);
       const nextRevision = computeProjectRevision(
         snapshotFiles.map((f) => ({ path: f.path, size: Number(f.sizeBytes), hash: f.sha256.trim() })),
       );
@@ -1001,7 +1003,7 @@ export class VersionHistoryService {
           });
       }
 
-      return { replayed: false, payload: resultPayload };
+      return { replayed: false, payload: resultPayload, fileVersions };
     });
 
     if (txResult.replayed) {
@@ -1015,6 +1017,7 @@ export class VersionHistoryService {
       txResult.payload.versionId,
       txResult.payload.seq,
       txResult.payload.appliedFiles,
+      txResult.fileVersions,
       writeToken,
     );
 
@@ -1036,27 +1039,27 @@ export class VersionHistoryService {
   ): Promise<{ ok: true; entryId: string; pinned: boolean }> {
     assertValidUuid(entryId, 'entryId');
 
-    return this.db.transaction(async (tx) => {
-      await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
+    const head = await this.db.transaction(async (tx) => {
+      const project = await loadProjectOrThrow(tx, ctx.workspaceId, projectId, {
         allowTrashed: true,
         forUpdate: true,
         auth: ctx,
       });
 
-      const rows = await tx
+      const entryFilter = and(
+        eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
+        eq(projectHistoryEntries.projectId, projectId),
+        eq(projectHistoryEntries.id, entryId),
+      );
+      const [updated] = await tx
         .update(projectHistoryEntries)
         .set(asUpdate(projectHistoryEntries, { pinned }))
-        .where(
-          and(
-            eq(projectHistoryEntries.workspaceId, ctx.workspaceId),
-            eq(projectHistoryEntries.projectId, projectId),
-            eq(projectHistoryEntries.id, entryId),
-          ),
-        )
-        .returning({ id: projectHistoryEntries.id, versionId: projectHistoryEntries.versionId });
+        .where(and(entryFilter, eq(projectHistoryEntries.pinned, !pinned)))
+        .returning({ versionId: projectHistoryEntries.versionId });
 
-      const updated = rows[0];
       if (!updated) {
+        const [existing] = await tx.select({ id: projectHistoryEntries.id }).from(projectHistoryEntries).where(entryFilter);
+        if (existing) return null;
         throw new CloudError('NOT_FOUND', `History entry ${entryId} not found.`, { status: 404, applied: false });
       }
 
@@ -1070,8 +1073,12 @@ export class VersionHistoryService {
           ),
         );
 
-      return { ok: true as const, entryId: updated.id, pinned };
+      return project;
     });
+    if (head) {
+      await this.publishHistoryChanged(ctx.workspaceId, projectId, head.revision.trim(), head.currentVersionId, head.currentHistorySeq);
+    }
+    return { ok: true, entryId, pinned };
   }
 
   /** Inspect files at a historical point (`versionId`, `entryId`, `seq`, or `'head'`). */
@@ -1085,7 +1092,7 @@ export class VersionHistoryService {
     versionId: string;
     revision: string;
     files: Record<string, string>;
-    file?: { path: string; content: string; version: string; sha256: string } | null;
+    file?: { path: string; content: string; version: string; sha256: string; blobId: string } | null;
   }> {
     const project = await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
 
@@ -1112,29 +1119,27 @@ export class VersionHistoryService {
       files[row.path] = row.sha256.trim();
     }
 
-    let singleFile: { path: string; content: string; version: string; sha256: string } | null | undefined;
+    let singleFile: { path: string; content: string; version: string; sha256: string; blobId: string } | null | undefined;
     if (filePath !== undefined) {
       const safePath = normalizeSafeProjectPath(filePath);
       const match = rows.find((r) => r.path === safePath);
       if (!match) {
         singleFile = null;
       } else {
-        const sha = match.sha256.trim();
-        let content: string | null = null;
-        if (this.hotTextCache) {
-          content = await this.hotTextCache.getText(sha).catch(() => null);
+        const blobId = match.sha256.trim();
+        let sha = blobId;
+        if (match.blobScope === 'patch') {
+          // The historical blob endpoint also accepts the content digest returned by peek.
+          if (!this.storage.ensureTextCheckpoint) throw new CloudError('STORAGE_ERROR', 'Text revision store unavailable.', { status: 503 });
+          sha = await this.storage.ensureTextCheckpoint(ctx.workspaceId, blobId);
         }
-        if (content === null) {
-          const key = resolveBlobStorageKey(ctx.workspaceId, match.blobScope, sha);
-          const buf = await this.storage.getObjectBuffer(key);
+        let content = await this.hotTextCache?.getText(sha).catch(() => null);
+        if (content == null) {
+          const scope = match.blobScope === 'patch' ? 'workspace' : match.blobScope;
+          const buf = await this.storage.getObjectBuffer(resolveBlobStorageKey(ctx.workspaceId, scope, sha));
           content = buf.toString('utf8');
         }
-        singleFile = {
-          path: match.path,
-          content,
-          sha256: sha,
-          version: formatVersionFromSha256(sha),
-        };
+        singleFile = { path: match.path, content, sha256: sha, blobId, version: formatFileVersion(match.blobScope, blobId) };
       }
     }
 
@@ -1148,7 +1153,7 @@ export class VersionHistoryService {
   }
 
   /**
-   * Read an immutable historical blob by SHA-256 ONLY if referenced by this project's live files
+   * Read an immutable file reference or content digest only if referenced by this project's live files
    * or version history (enforcing strict tenant + project isolation).
    */
   async readHistoryBlob(
@@ -1159,7 +1164,7 @@ export class VersionHistoryService {
     await loadProjectOrThrow(this.db, ctx.workspaceId, projectId, { allowTrashed: true, auth: ctx });
     const cleanSha = sha256.trim().toLowerCase();
     if (!isSha256Hex(cleanSha)) {
-      throw new CloudError('INVALID_ARGUMENT', 'History blob hash must be a 64-char hex SHA-256 digest.', {
+      throw new CloudError('INVALID_ARGUMENT', 'History blob identifier must be 64 hexadecimal characters.', {
         status: 400,
         applied: false,
       });
@@ -1177,7 +1182,7 @@ export class VersionHistoryService {
       )
       .limit(1);
 
-    const ref =
+    let ref: { blobScope: BlobScope; mimeType: string } | undefined =
       versionRefs[0] ??
       (
         await this.db
@@ -1192,6 +1197,20 @@ export class VersionHistoryService {
           )
           .limit(1)
       )[0];
+
+    if (!ref && this.storage.ensureTextCheckpoint) {
+      const [alias] = await this.db.select({ mimeType: projectVersionFiles.mimeType }).from(projectTextRevisions)
+        .innerJoin(projectVersionFiles, and(
+          eq(projectVersionFiles.projectId, projectTextRevisions.projectId),
+          eq(projectVersionFiles.blobScope, 'patch'),
+          eq(projectVersionFiles.sha256, projectTextRevisions.id),
+        )).where(and(
+          eq(projectTextRevisions.workspaceId, ctx.workspaceId),
+          eq(projectTextRevisions.projectId, projectId),
+          eq(projectTextRevisions.checkpointSha, cleanSha),
+        )).limit(1);
+      if (alias) ref = { blobScope: 'workspace', mimeType: alias.mimeType };
+    }
 
     if (!ref) {
       throw new CloudError('NOT_FOUND', `History blob ${cleanSha} was not found in this project.`, {
@@ -1340,7 +1359,7 @@ export class VersionHistoryService {
     workspaceId: string,
     projectId: string,
     versionId: string,
-  ): Promise<{ appliedFiles: string[]; revision: string }> {
+  ) {
     const liveFiles = await tx
       .select()
       .from(projectFiles)
@@ -1393,18 +1412,17 @@ export class VersionHistoryService {
             sha256: f.sha256.trim(),
             sizeBytes: Number(f.sizeBytes),
             mimeType: f.mimeType,
-            isText: isTextProjectPath(f.path),
+            isText: f.blobScope === 'patch' || isTextProjectPath(f.path),
             updatedAt: now,
           }),
         ),
       );
     }
 
-    const appliedFiles = computeChangedFilePaths(liveFiles, snapshotFiles);
     const revision = computeProjectRevision(
       snapshotFiles.map((f) => ({ path: f.path, size: Number(f.sizeBytes), hash: f.sha256.trim() })),
     );
-    return { appliedFiles, revision };
+    return { ...compareSnapshotFiles(liveFiles, snapshotFiles), revision };
   }
 
   private async publishHistoryChanged(
@@ -1436,6 +1454,7 @@ export class VersionHistoryService {
     versionId: string | null,
     historySeq: number,
     appliedFiles: readonly string[],
+    fileVersions: Record<string, string | null> | undefined,
     writeToken: string,
   ): Promise<void> {
     if (!this.eventBus) return;
@@ -1449,6 +1468,7 @@ export class VersionHistoryService {
         revision,
         versionId: versionId ?? undefined,
         paths: [...appliedFiles],
+        fileVersions,
         writeToken,
         affectsPreview: impact.affectsPreview,
         affectedCompositions: impact.affectedCompositions,
@@ -1460,17 +1480,23 @@ export class VersionHistoryService {
   }
 }
 
-function computeChangedFilePaths(
-  before: ReadonlyArray<{ path: string; sha256: string }>,
-  after: ReadonlyArray<{ path: string; sha256: string }>,
-): string[] {
-  const beforeMap = new Map(before.map((f) => [f.path, f.sha256.trim()]));
-  const afterMap = new Map(after.map((f) => [f.path, f.sha256.trim()]));
-  const changed: string[] = [];
+type SnapshotFile = { path: string; sha256: string; blobScope: BlobScope };
+
+function compareSnapshotFiles(before: readonly SnapshotFile[], after: readonly SnapshotFile[]) {
+  const beforeMap = new Map(before.map(f => [f.path, f]));
+  const afterMap = new Map(after.map(f => [f.path, f]));
+  const appliedFiles: string[] = [];
   for (const filePath of new Set([...beforeMap.keys(), ...afterMap.keys()])) {
-    if (beforeMap.get(filePath) !== afterMap.get(filePath)) {
-      changed.push(filePath);
+    const oldFile = beforeMap.get(filePath);
+    const newFile = afterMap.get(filePath);
+    if (oldFile?.sha256.trim() !== newFile?.sha256.trim()) {
+      appliedFiles.push(filePath);
     }
   }
-  return changed.sort((a, b) => a.localeCompare(b));
+  appliedFiles.sort((a, b) => a.localeCompare(b));
+  const fileVersions = htmlFileVersions(appliedFiles, path => {
+    const file = afterMap.get(path);
+    return file ? formatFileVersion(file.blobScope, file.sha256.trim()) : null;
+  });
+  return { appliedFiles, fileVersions };
 }

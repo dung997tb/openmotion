@@ -1,8 +1,9 @@
+import { formatFileVersion } from './etag.ts';
 import type { BlobMetadata, BlobScope } from '../contracts/storage.ts';
 
 /**
  * Pure read-only virtual file entry representing one file in a cloud project's working tree.
- * Never holds a local filesystem path; payloads live in S3 CAS + SHA-256 HotTextCache.
+ * The legacy sha256 field contains a content digest for CAS scopes or a logical ID for patch scope.
  */
 export interface VirtualFileRecord {
   readonly path: string;
@@ -75,6 +76,11 @@ export class InMemoryVirtualProject implements VirtualProjectReader {
 
   getFile(filePath: string): VirtualFileRecord | null {
     return this.filesByPath.get(normalizeVirtualPath(filePath)) ?? null;
+  }
+
+  getFileVersion(filePath: string): string | null {
+    const file = this.getFile(filePath);
+    return file ? formatFileVersion(file.blobScope, file.sha256) : null;
   }
 
   readText(filePath: string): string | null {

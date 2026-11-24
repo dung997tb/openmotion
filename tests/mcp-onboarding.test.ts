@@ -1,3 +1,4 @@
+import { projectFileExample, projectFileInstruction } from '../shared/project-file-guide.ts';
 import { clipMoveExample, projectEditExample } from '../shared/clip-move-guide.ts';
 import { reviewCommentsPrompt } from '../shared/review-comments.ts';
 import test from 'node:test';
@@ -81,6 +82,34 @@ test('cloud clip move example uses the public edit contract in the handbook and 
   assert.deepEqual(args.edit, { kind: 'moveClip', compositionPath: 'index.html', hfId: '<data-hf-id>', start: 5 });
   const reference = readFileSync(new URL('../docs/mcp-phase1-tools.md', import.meta.url), 'utf8');
   assert.ok(reference.includes(clipMoveExample));
+});
+
+test('the single-file handbook example covers pinned pages, syncing and download renewal', () => {
+  const card = mcpCapabilities.find(item => item.id === 'project-file')!;
+  assert.deepEqual(card.tools, ['openmotion_get_project']);
+  assert.equal(card.prompt, projectFileInstruction);
+  const info = buildCloudIntegrationInfo({ publicOrigin: 'https://motion.example.com', version: '1', workspaceId: 'w', authMode: 'dev', tools: phase1Tools });
+  const guide = agentGuide(info, 'codex');
+  const reference = readFileSync(new URL('../docs/mcp-phase1-tools.md', import.meta.url), 'utf8');
+  assert.ok(guide.includes(card.prompt) && guide.includes(projectFileExample()) && reference.includes(projectFileExample()));
+  const schema = phase1Tools.find(tool => tool.name === 'openmotion_get_project')!.inputSchema;
+  const files = projectFileExample('project').split('\n').map(call => {
+    const args = JSON.parse(call.slice('openmotion_get_project('.length, -1));
+    validateInput(schema, args);
+    assert.equal(args.projectId, 'project');
+    return args.file;
+  });
+  assert.deepEqual(files.map(file => file.mode), ['read', 'read', 'sync', 'download']);
+  assert.equal(files[1].offset, files[0].length);
+  assert.equal(files[1].atFileVersion, '<first page fileVersion>');
+  assert.equal(files[2].fromFileVersion, '<local fileVersion>');
+  assert.equal(files[3].atFileVersion, '<target fileVersion>');
+  assert.match(card.prompt, /baseline.*before applying the patches in order/);
+  assert.match(card.prompt, /link expires.*same atFileVersion/);
+  const translations = JSON.parse(readFileSync(new URL('../studio/src/i18n/mcp-ui.json', import.meta.url), 'utf8'));
+  for (const values of Object.values(translations) as Record<string, string>[]) {
+    for (const key of [card.title, card.description, card.prompt]) assert.ok(values[key]?.trim() && values[key] !== key);
+  }
 });
 
 test('the documented element edit works alone or inside one atomic batch', () => {

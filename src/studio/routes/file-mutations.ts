@@ -86,7 +86,7 @@ export function createStudioFileMutationsRoutes(
       return c.json({ error: 'Target file not found', path: filePath }, 404);
     }
 
-    const currentVersion = formatVersionFromSha256(sha256Hex(currentText));
+    const currentVersion = virtual.getFileVersion(filePath)!;
     const shownVersion = c.req.header('if-match');
     if (shownVersion !== undefined && shownVersion !== currentVersion) {
       return c.json({ error: 'file conflict', code: 'VERSION_MISMATCH', durable: false }, 409);
@@ -112,7 +112,7 @@ export function createStudioFileMutationsRoutes(
 
     const changed = nextHtml !== currentText;
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
-    let version = formatVersionFromSha256(sha256Hex(nextHtml));
+    let version = currentVersion;
 
     if (changed) {
       try {
@@ -202,7 +202,7 @@ export function createStudioFileMutationsRoutes(
         return c.json({ error: `Target file not found: ${sourceFile}`, durable: false }, 404);
       }
 
-      const currentVersion = formatVersionFromSha256(sha256Hex(before));
+      const currentVersion = virtual.getFileVersion(sourceFile)!;
       if (batch.ifMatch !== undefined && batch.ifMatch !== currentVersion) {
         return c.json({ error: 'file conflict', code: 'VERSION_MISMATCH', durable: false }, 409);
       }
@@ -340,13 +340,13 @@ export function createStudioFileMutationsRoutes(
 
     const changed = after !== before;
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
-    let version = formatVersionFromSha256(sha256Hex(after));
+    let version = virtual.getFileVersion(filePath)!;
 
     if (changed) {
       const committed = await deps.files.commitChanges(auth, {
         projectId,
         ops: [{ op: 'upsert_text', path: filePath, content: after, stampHfIds: true }],
-        filePreconditions: [{ path: filePath, ifMatch: formatVersionFromSha256(sha256Hex(before)) }],
+        filePreconditions: [{ path: filePath, ifMatch: version }],
         source: 'studio',
         ...studioWriteHistory(c.req.raw.headers, `Batch patched ${matchedCount} elements in ${filePath}`),
         writeToken,
@@ -572,7 +572,7 @@ export function createStudioFileMutationsRoutes(
           !Number.isFinite(cut.splitTime) || !Number.isFinite(cut.elementStart) || !(cut.elementDuration > 0))) {
         return c.json({ ok: false, outcome: 'failed', error: `Invalid split targets for ${safePath}` }, 400);
       }
-      const beforeVersion = fileContentVersion(before);
+      const beforeVersion = virtual.getFileVersion(safePath)!;
       if (entry.expectedVersion !== undefined && entry.expectedVersion !== beforeVersion) {
         return c.json({ ok: false, outcome: 'conflict', error: `File changed before cut: ${safePath}` }, 409);
       }
@@ -786,13 +786,13 @@ export function createStudioFileMutationsRoutes(
       delta: body.delta,
     }));
     const writeToken = createWriteToken(c.req.header('x-hyperframes-write-token'));
-    let version = formatVersionFromSha256(sha256Hex(dup.html));
+    let version = virtual.getFileVersion(filePath)!;
 
     if (dup.matched && dup.html !== currentText) {
       const committed = await deps.files.commitChanges(auth, {
         projectId,
         ops: [{ op: 'upsert_text', path: filePath, content: dup.html, stampHfIds: true }],
-        filePreconditions: [{ path: filePath, ifMatch: formatVersionFromSha256(sha256Hex(currentText)) }],
+        filePreconditions: [{ path: filePath, ifMatch: version }],
         source: 'studio',
         ...studioWriteHistory(c.req.raw.headers, `Duplicated element in ${filePath}`),
         writeToken,
@@ -979,7 +979,7 @@ export function createStudioFileMutationsRoutes(
     }
 
     const sourceFile = await deps.files.getFile(auth, projectId, body.sourcePath);
-    if (!sourceFile) {
+    if (!sourceFile || sourceFile.blobScope === 'patch') {
       return c.json({ error: 'Source video not found', path: body.sourcePath }, 404);
     }
 

@@ -168,7 +168,7 @@ afterEach(() => {
 });
 
 describe("useAppHotkeys text-field ownership", () => {
-  it("keeps two Backspaces in a child text editor across its scheduled save", () => {
+  it("keeps two Backspaces in a child text editor across its scheduled save", async () => {
     const host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
@@ -183,7 +183,7 @@ describe("useAppHotkeys text-field ownership", () => {
 
     const first = pressBackspace(textarea);
     act(() => setTextareaValue(textarea, "Kicke"));
-    act(() => vi.advanceTimersByTime(120));
+    await act(() => vi.advanceTimersByTimeAsync(400));
 
     expect(first.defaultPrevented).toBe(false);
     expect(textCommits).toHaveBeenLastCalledWith("Kicke");
@@ -194,7 +194,7 @@ describe("useAppHotkeys text-field ownership", () => {
 
     const second = pressBackspace(textarea);
     act(() => setTextareaValue(textarea, "Kick"));
-    act(() => vi.advanceTimersByTime(120));
+    await act(() => vi.advanceTimersByTimeAsync(400));
 
     expect(second.defaultPrevented).toBe(false);
     expect(textarea.value).toBe("Kick");

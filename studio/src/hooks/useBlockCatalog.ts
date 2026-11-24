@@ -10,6 +10,7 @@ import { useI18n } from "../i18n/I18n";
 
 type CatalogItem = RegistryItem & {
   category: BlockCategory;
+  compositionFile?: string;
 };
 
 let catalogCache: CatalogItem[] | null = null;
@@ -37,6 +38,10 @@ function loadCatalog(): Promise<CatalogItem[]> {
       throw error;
     });
   return catalogRequest;
+}
+
+export function cachedMotionComponent(name: string) {
+  return catalogCache?.find(item => item.name === name && item.compositionFile);
 }
 
 export function useBlockCatalog() {

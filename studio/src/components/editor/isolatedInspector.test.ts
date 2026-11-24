@@ -1,18 +1,19 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
+import { PREVIEW_SOURCE_IDENTITY } from "../../../../src/studio/engine/preview-bridge";
 import { PREVIEW_INSPECTOR } from "../../../../src/studio/engine/preview-inspector";
 import type { PreviewAdapter } from "../../player/lib/previewAdapter";
 import { inspectIsolatedElement } from "./isolatedInspector";
 import { planIsolatedLayerReorder } from "./isolatedLayerReorder";
 
 const sha256 = "b".repeat(64);
-function inspect(html: string, lookup: {elementId: string; sourceFile?: string}) {
+function inspect(html: string, lookup: {elementId: string; sourceFile?: string}, sourceVersion = sha256) {
   document.body.innerHTML = html;
   const request = new Function("sourceFileForElement","describe","sourceVersions","picked","inlineVariableOwner",
-    PREVIEW_INSPECTOR + "\nreturn inspectPreviewElement;")(
+    PREVIEW_SOURCE_IDENTITY + PREVIEW_INSPECTOR + "\nreturn inspectPreviewElement;")(
       (el: HTMLElement) => el.closest("[data-file]")?.getAttribute("data-file") || "index.html",
       (el: HTMLElement) => ({ sourceFile: "index.html", elementId: el.id, geometry: { x: 1, y: 2, width: 4, height: 5 }}),
-      { "index.html": sha256 }, null, () => null);
+      { "index.html": sourceVersion }, null, () => null);
   const adapter = { request: vi.fn(async (_command, payload) => request(payload)) } as unknown as PreviewAdapter;
   return inspectIsolatedElement(adapter, lookup, false);
 }
@@ -27,6 +28,21 @@ it("projects only the requested authored layer, with caret text and presentation
   expect(selection?.isolatedTarget?.sha256).toBe(sha256);
   expect(await inspect('<p id="t">first</p><p id="t">second</p>', {elementId:"t"})).toBeNull();
   expect(await inspect('<p id="t">word</p>', {elementId:"t",sourceFile:"missing.html"})).toBeNull();
+});
+
+it("distinguishes a mounted target awaiting its saved version from a removed target", async () => {
+  const html = '<h1 id="title">Title</h1>';
+  const target = { elementId: "title" };
+  expect(await inspect(html, target, "")).toBeUndefined();
+  expect((await inspect(html, target))?.id).toBe("title");
+  expect(await inspect('<p id="other">Other</p>', target)).toBeNull();
+});
+
+it("accepts a preview produced from a patch revision without a content digest", async () => {
+  const version = '"patch:' + 'c'.repeat(64) + '"';
+  const selection = await inspect('<h1 id="p">Title</h1>', {elementId:"p"}, version);
+  expect(selection?.isolatedTarget?.fileVersion).toBe(version);
+  expect(selection?.isolatedTarget?.sha256).toBeUndefined();
 });
 
 it("keeps empty shapes out of text editing and preserves media controls without copying resource URLs", async () => {

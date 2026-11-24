@@ -66,7 +66,10 @@ function inspectDrainFailures(results: PromiseSettledResult<unknown>[]): {
   let firstFailure: PromiseRejectedResult | undefined;
   for (const result of results) {
     if (result.status !== "rejected") continue;
-    if (result.reason instanceof StudioFileConflictError) return { conflict: result.reason };
+    if (result.reason instanceof StudioFileConflictError) {
+      if (result.reason.syncLatest) continue;
+      return { conflict: result.reason };
+    }
     firstFailure ??= result;
   }
   return { firstFailure };

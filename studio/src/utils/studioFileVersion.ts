@@ -3,6 +3,16 @@
 const WRITE_TOKEN_TTL_MS = 5 * 60_000;
 const studioWriteTokens = new Map<string, number>();
 let fileRevision = 0;
+let latestSourceWrite: string | null = null;
+
+/** Another write or a new editing session invalidates reuse of older local receipts. */
+export function invalidateLatestSourceWrite(): void {
+  latestSourceWrite = null;
+}
+
+export function isLatestSourceWrite(token: string): boolean {
+  return latestSourceWrite === token;
+}
 
 /** One step per write Studio claims: a copy of the project read at a lower revision is stale. */
 export function studioFileRevision(): number {
@@ -19,6 +29,7 @@ function pruneStudioWriteTokens(now: number): void {
 export function markStudioWriteToken(token: string, now: number = Date.now()): void {
   pruneStudioWriteTokens(now);
   studioWriteTokens.set(token, now);
+  latestSourceWrite = token;
   fileRevision += 1;
 }
 
@@ -33,6 +44,7 @@ export function consumeStudioWriteToken(token: string | null, now: number = Date
 /** Resets module-level echo identity between PR #2991 coordinator tests. */
 export function resetStudioWriteTokens(): void {
   studioWriteTokens.clear();
+  invalidateLatestSourceWrite();
 }
 
 /** Browser-safe SHA-256 version matching studio-server's strong ETag format. */

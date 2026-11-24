@@ -1,3 +1,4 @@
+import { TEXT_PATCH_BASE_HEADER } from '../../shared/text-patch.ts';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -1547,6 +1548,65 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.equal((await json(file)).content, shrunk);
   });
 
+  it('reads only one MCP file, pins pages and downloads, and scopes historical bytes to that project and path', async () => {
+    const { app, services, config } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const post = async (url: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    const { projectId } = await (await post('/motion-api/projects', { title: 'Single file' })).json();
+    const { projectId: other } = await (await post('/motion-api/projects', { title: 'Other files' })).json();
+    const auth: AuthContext = { workspaceId: config.DEV_WORKSPACE_ID, userId: config.DEV_USER_ID, role: 'owner',
+      scopes: [...DEFAULT_PAT_SCOPES], authMode: 'dev', authMethod: 'dev_bypass' };
+    const path = 'notes.txt';
+    const before = 'Hello 🌙\r\n原文';
+    const origin = await services.files.commitChanges(auth, { projectId, source: 'agent', ops: [
+      { op: 'upsert_text', path, content: before },
+      { op: 'upsert_binary', path: 'assets/song.mp3', data: Buffer.from([0, 255, 111]) },
+    ] });
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${config.DEV_PAT}`, Accept: 'application/json, text/event-stream',
+    };
+    let rpcId = 1;
+    const rpc = async (method: string, params: unknown) => post('/mcp', { jsonrpc: '2.0', id: rpcId++, method, params }, headers);
+    const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'single-file', version: '1' } });
+    headers['Mcp-Session-Id'] = init.headers.get('mcp-session-id')!;
+    const read = async (file: Record<string, unknown>, id = projectId) => (await (await rpc('tools/call', {
+      name: 'openmotion_get_project', arguments: { projectId: id, file },
+    })).json()).result;
+    services.files.loadVirtualProject = async () => { throw new Error('Single file must not load the project'); };
+    services.files.listFiles = async () => { throw new Error('Single file must not list the project'); };
+
+    const first = (await read({ path, length: 5 })).structuredContent.file;
+    assert.equal(first.content, 'Hello');
+    assert.equal(first.nextOffset, 5);
+    const snapshot = (await read({ path, mode: 'download' })).structuredContent.file;
+    assert.equal(snapshot.fileVersion, first.fileVersion);
+    assert.match(snapshot.downloadUrl, /^https:/);
+    assert.ok(Date.parse(snapshot.expiresAt) > Date.now());
+
+    const changed = await services.files.commitChanges(auth, { projectId, source: 'agent', ops: [
+      { op: 'upsert_text', path, content: 'Changed' },
+    ] });
+    const second = (await read({ path, offset: first.nextOffset, atFileVersion: first.fileVersion })).structuredContent.file;
+    assert.equal(first.content + second.content, before);
+    assert.equal((await read({ path, atProjectVersion: origin.versionId })).structuredContent.file.content, before);
+    assert.equal((await read({ path, atProjectVersion: changed.versionId })).structuredContent.file.content, 'Changed');
+    assert.equal((await read({ path, atProjectVersion: changed.versionId, atFileVersion: first.fileVersion })).isError, true);
+    assert.equal((await read({ path, atProjectVersion: origin.versionId }, other)).isError, true);
+    assert.equal((await read({ path: 'other.txt', atFileVersion: first.fileVersion })).isError, true);
+
+    const baseline = (await read({ path, mode: 'sync', atFileVersion: first.fileVersion })).structuredContent.file;
+    assert.equal(baseline.baseline.downloadUrl, snapshot.downloadUrl);
+    assert.deepEqual(baseline.patches, []);
+    const unchanged = (await read({ path, mode: 'sync', fromFileVersion: baseline.fileVersion, atFileVersion: first.fileVersion })).structuredContent.file;
+    assert.equal(unchanged.baseline, undefined);
+    assert.deepEqual(unchanged.patches, []);
+    assert.equal((await read({ path: 'assets/song.mp3' })).isError, true);
+    const audio = (await read({ path: 'assets/song.mp3', mode: 'download' })).structuredContent.file;
+    assert.equal(audio.bytes, 3);
+    assert.match(audio.downloadUrl, /^https:/);
+    assert.equal((await read({ path, mode: 'download', offset: 1 })).isError, true);
+  });
+
   it('persists the same clip and animation through Studio and headless MCP, once per request', async () => {
     const { app, config, services } = createApiFixture({ config: { AUTH_MODE: 'dev' } });
     const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -1559,7 +1619,8 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
       assert.equal(seed.status, 200);
     }
 
-    const base = (await app.request(file('ui.html'))).headers.get('etag')!;
+    const original = await (await app.request(file('ui.html'))).json();
+    const base = original.version;
     const command = { kind: 'moveClip', hfId: 'hf-title', start: 5 };
     const studio = (key: string) => post(`/api/projects/${projectId}/edits/ui.html`, command,
       { 'If-Match': base, 'Idempotency-Key': key });
@@ -1571,6 +1632,11 @@ describe('Cloud API Entrypoint — Studio UI Wiring Parity (/preview/open, Works
     assert.deepEqual(noop.changedPaths, []);
     assert.equal(noop.version, (await app.request(file('ui.html'))).headers.get('etag'));
     const { content } = await (await app.request(file('ui.html'))).json();
+    const synced = await app.request(file('ui.html'), { headers: { [TEXT_PATCH_BASE_HEADER]: base } });
+    assert.equal(synced.headers.get('X-OpenMotion-Representation'), null);
+    assert.equal((await synced.json()).content, content);
+    const missed = await app.request(file('ui.html'), { headers: { [TEXT_PATCH_BASE_HEADER]: '"sha256:' + '0'.repeat(64) + '"' } });
+    assert.equal((await missed.json()).content, content);
     assert.match(content, /data-start="5"/);
     assert.match(content, /duration:0.5},5.25\)/);
     assert.match(content, /"100%":\{x:80\}\}\},5\.5\)/);
@@ -2681,6 +2747,11 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     const bridgeAsset = await app.request(bridgeSrc, { headers: previewHeaders });
     assert.equal(bridgeAsset.status, 200);
     assert.match(bridgeAsset.headers.get('cache-control') ?? '', /immutable/);
+    const snapdomAsset = await app.request('/api/vendor/snapdom.js', { headers: previewHeaders });
+    assert.equal(snapdomAsset.status, 200);
+    assert.match(snapdomAsset.headers.get('content-type') ?? '', /javascript/);
+    assert.equal(snapdomAsset.headers.get('set-cookie'), null);
+    assert.match(await snapdomAsset.text(), /window\.snapdom/);
     const script = await bridgeAsset.text();
     assert.equal(createHash('sha256').update(script).digest('hex'), bridgeUrl.searchParams.get('v'));
     assert.ok(!script.includes(minted.token) && !script.includes(projectA));

@@ -1,4 +1,10 @@
-import { useCallback, type MutableRefObject } from "react";
+import { useCallback, useMemo, type MutableRefObject } from "react";
+import { changedFilePaths, readFileChangeAffectsPreview, readFileTreeChanged } from "../components/editor/manualEditsParsing";
+import { isUnrelatedPreviewHtmlChange } from "../player/lib/previewHtmlSources";
+import { syncPeerComposition } from "./syncPeerComposition";
+import { createRemoteFileReader } from "./remoteFileReads";
+import { knownCompositionSource } from "../player/lib/compositionPosterSource";
+import { expectPosterFileVersion } from "../player/lib/posterFileRead";
 import { usePlayerStore } from "../player/store/playerStore";
 import { clearStudioSaveFailures } from "../utils/studioSaveState";
 import {
@@ -34,6 +40,7 @@ interface UseStudioExternalFileChangesOptions {
   projectId: string | null;
   activeCompPath: string | null;
   masterCompPath: string | null;
+  previewIframeRef: MutableRefObject<HTMLIFrameElement | null>;
   fileManager: FileManager;
   previewPersistence: PreviewPersistence;
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
@@ -47,6 +54,7 @@ export function useStudioExternalFileChanges({
   projectId,
   activeCompPath,
   masterCompPath,
+  previewIframeRef,
   fileManager,
   previewPersistence,
   pendingTimelineEditPathRef,
@@ -58,12 +66,38 @@ export function useStudioExternalFileChanges({
   const { drainPendingDomEditSaves, resetDomEditSaveQueueBreaker } = previewPersistence;
   const bumpThumbnailRevisions = usePlayerStore((state) => state.bumpThumbnailRevisions);
   const onAcceptedPersistedFileChange = useCallback(
-    (path: string, affectedCompositions: readonly string[] | null) => {
+    (path: string, affectedCompositions: readonly string[] | null, ownWrite?: { token: string; version: string }) => {
       onOutsideChange?.();
       bumpThumbnailRevisions(affectedCompositions, path);
+      if (projectId && ownWrite) expectPosterFileVersion(projectId, path, ownWrite);
     },
-    [bumpThumbnailRevisions, onOutsideChange],
+    [bumpThumbnailRevisions, onOutsideChange, projectId],
   );
+  const filesForChange = useMemo(() => createRemoteFileReader(), []);
+  const refreshFileViews = useCallback((payload: unknown, acceptChange: (unaffectedPreview?: string) => void) => {
+    const activePath = activeCompPath ?? masterCompPath;
+    const previous = projectId && activePath
+      ? knownCompositionSource(usePlayerStore.getState(), projectId, activePath)
+      : null;
+    // Capture the displayed source first. All readers below belong to the new thumbnail revision.
+    const paths = changedFilePaths(payload);
+    const affectsPreview = readFileChangeAffectsPreview(payload);
+    const unrelated = affectsPreview && isUnrelatedPreviewHtmlChange(
+      previewIframeRef.current, projectId, activePath, paths, readFileTreeChanged(payload),
+    );
+    acceptChange(unrelated ? activePath ?? undefined : undefined);
+    if (!projectId) return;
+    const read = filesForChange(projectId, payload);
+    const preview = unrelated ? "unaffected" as const : affectsPreview
+      ? syncPeerComposition(projectId, activePath, paths, read, previewIframeRef, previous)
+      : undefined;
+    for (const path of paths ?? ["."]) {
+      notifyExternalFileReload(path, read);
+      fileManager.refreshOpenSource(path, read);
+    }
+    return preview;
+  }, [projectId, activeCompPath, masterCompPath, previewIframeRef, filesForChange, fileManager.refreshOpenSource]);
+
   const drainPendingChanges = useCallback(async () => {
     const source = await flushPendingSourceSave();
     if (source.status !== "clean") return source;
@@ -85,8 +119,7 @@ export function useStudioExternalFileChanges({
     getPendingCandidate: fileManager.getPendingSourceCandidate,
     discardPendingChanges,
     reloadPreview,
-    reloadSdkSession: notifyExternalFileReload,
-    refreshOpenSource: fileManager.refreshOpenSource,
+    refreshFileViews,
     persistConflictSnapshot: persistExternalConflictSnapshot,
     persistFailureSnapshot: persistExternalFailureSnapshot,
     loadConflictSnapshot: loadExternalConflictSnapshot,

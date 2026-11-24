@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canCaptureCompositionInBrowser,
+  captureSampleTimes,
   clearClientCompositionCaptureCacheForTest,
   computeCompositionSampleTimes,
   createClientCompositionCaptureRequest,
@@ -12,8 +13,10 @@ import {
   selectInitialGateCompositionPaths,
   setCachedProjectRevision,
   setClientCompositionCaptureCapabilityForTest,
+  withPreviewRedirectSafeFetch,
 } from "./clientCompositionCapture";
 import { ThumbnailScheduler } from "./thumbnailScheduler";
+import { usePlayerStore } from "../store/playerStore";
 
 afterEach(() => {
   setClientCompositionCaptureCapabilityForTest(null);
@@ -22,6 +25,41 @@ afterEach(() => {
 });
 
 describe("clientCompositionCapture", () => {
+  it("samples selector filmstrips inside their visible interval in the rendered composition", () => {
+    const clip = { selector: "#card", seekTime: 12, duration: 2, frameCount: 2 };
+    expect(captureSampleTimes(20, clip)).toEqual([12.5, 13.5]);
+    expect(captureSampleTimes(20, { ...clip, frameCount: 1 })).toEqual([13]);
+    // A nested composition has its own clock, independent of its parent's start.
+    expect(captureSampleTimes(5, { ...clip, seekTime: 2 })).toEqual([2.5, 3.5]);
+    expect(captureSampleTimes(20, { ...clip, selector: undefined })).toEqual([5, 15]);
+  });
+
+  it("invalidates selector captures across moves and trims while retaining composition covers", () => {
+    const input = { projectId: "windows", previewUrl: "/preview", contentRevision: 1, sessionEpoch: 0,
+      frameCount: 2, selector: "#card", seekTime: 5, duration: 2 };
+    const cached = seedClientCompositionCaptureForTest(input, [new Blob(["old"])]);
+    const key = createClientCompositionCaptureRequest(input).key;
+    for (const changed of [{ ...input, seekTime: 6 }, { ...input, duration: 1 }]) {
+      expect(createClientCompositionCaptureRequest(changed).key).not.toBe(key);
+      expect(peekCachedCompositionCapture(changed)).toBeNull();
+    }
+    expect(peekCachedCompositionCapture(input)).toBe(cached);
+    const whole = { ...input, selector: undefined };
+    expect(createClientCompositionCaptureRequest(whole).key)
+      .toBe(createClientCompositionCaptureRequest({ ...whole, duration: 3 }).key);
+  });
+
+  it("clamps partially visible, zero-length and sub-frame selection windows", () => {
+    const clip = { selector: "#card", seekTime: 19, duration: 4, frameCount: 4 };
+    const times = captureSampleTimes(20, clip);
+    expect(times).toHaveLength(4);
+    expect(times.every(value => value > 19 && value < 20)).toBe(true);
+    expect(captureSampleTimes(20, { ...clip, duration: 0 })).toEqual([19]);
+    expect(captureSampleTimes(20, { ...clip, seekTime: 25 })).toEqual([20]);
+    expect(captureSampleTimes(20, { ...clip, seekTime: -1, frameCount: 1 })).toEqual([1.5]);
+    expect(captureSampleTimes(20, { ...clip, duration: 0.0001 }).every(t => t > 19 && t < 19.0001)).toBe(true);
+  });
+
   it("disables browser capture automatically under HappyDOM unless overridden", () => {
     expect(canCaptureCompositionInBrowser()).toBe(false);
     setClientCompositionCaptureCapabilityForTest(true);
@@ -235,6 +273,255 @@ describe("clientCompositionCapture", () => {
     for (const url of stripUrls) {
       expect(activeUrls.has(url)).toBe(false);
       expect(revokeSpy).toHaveBeenCalledWith(url);
+    }
+  });
+
+  it("mounts the isolated capture iframe inside the viewport with opacity 0 so cross-origin rAF is not throttled", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test/";
+    document.head.appendChild(meta);
+
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+    });
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        iframeSrcs.set(this, String(value));
+      },
+    });
+
+    const posted: Array<{ message: Record<string, unknown>; targetOrigin: string }> = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({
+        token: "tok-isolated-1",
+        previewOrigin: "https://preview.example.test",
+        assetLease: "lease-1",
+      }),
+    ) as unknown as typeof fetch;
+
+    let seq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:test/iso-${++seq}`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    try {
+      const req = createClientCompositionCaptureRequest({
+        previewUrl: "/api/projects/proj-iso/preview/comp/compositions/scene-1.html",
+        projectId: "proj-iso",
+        sessionEpoch: 1,
+        contentRevision: 2,
+        frameCount: 2,
+        duration: 6,
+      });
+
+      const controller = new AbortController();
+      const pending = req.load(controller.signal);
+
+      let iframe: HTMLIFrameElement | null = null;
+      await vi.waitFor(() => {
+        iframe = document.querySelector<HTMLIFrameElement>('iframe[data-openmotion-thumb-capture="true"]');
+        expect(iframe).toBeTruthy();
+        expect(iframe?.src).toContain("https://preview.example.test/api/projects/proj-iso/preview/comp/compositions/scene-1.html");
+        expect(iframe?.src).toContain("capture=1");
+        expect(iframe?.src).toContain("pt=tok-isolated-1");
+      });
+
+      expect(iframe!.style.position).toBe("fixed");
+      expect(iframe!.style.left).toBe("0px");
+      expect(iframe!.style.top).toBe("0px");
+      expect(iframe!.style.opacity).toBe("0");
+      expect(iframe!.style.pointerEvents).toBe("none");
+      expect(iframe!.style.zIndex).toBe("-1");
+      expect(iframe!.hasAttribute("inert")).toBe(true);
+      expect(iframe!.referrerPolicy).toBe("no-referrer");
+
+      const fakeContentWindow = {
+        postMessage: (message: Record<string, unknown>, targetOrigin: string) => {
+          posted.push({ message, targetOrigin });
+          if (message.type === "capture-frames") {
+            queueMicrotask(() => {
+              window.dispatchEvent(
+                new MessageEvent("message", {
+                  origin: "https://preview.example.test",
+                  source: fakeContentWindow as unknown as Window,
+                  data: {
+                    source: "openmotion-preview-bridge",
+                    version: 1,
+                    type: "response",
+                    projectId: "proj-iso",
+                    token: "tok-isolated-1",
+                    requestId: message.requestId,
+                    ok: true,
+                    result: {
+                      frames: [new Uint8Array([1, 2]).buffer, new Uint8Array([3, 4]).buffer],
+                      mimeType: "image/jpeg",
+                      width: 240,
+                      height: 135,
+                      aspect: 16 / 9,
+                    },
+                  },
+                }),
+              );
+            });
+          }
+        },
+      };
+      Object.defineProperty(iframe!, "contentWindow", {
+        configurable: true,
+        value: fakeContentWindow,
+      });
+
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: fakeContentWindow as unknown as Window,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "timeline-state",
+            projectId: "proj-iso",
+            token: "tok-isolated-1",
+            duration: 6,
+            width: 1080,
+            height: 1920,
+          },
+        }),
+      );
+
+      const loaded = await pending;
+      expect(iframe!.style.width).toBe("1080px");
+      expect(iframe!.style.height).toBe("1920px");
+      expect(posted).toHaveLength(1);
+      expect(posted[0]?.targetOrigin).toBe("https://preview.example.test");
+      expect(loaded.value.kind).toBe("filmstrip");
+      if (loaded.value.kind === "filmstrip") {
+        expect(loaded.value.urls).toHaveLength(2);
+      }
+      loaded.dispose?.();
+    } finally {
+      if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      globalThis.fetch = origFetch;
+      meta.remove();
+      document.querySelector('iframe[data-openmotion-thumb-capture="true"]')?.remove();
+    }
+  });
+
+  it("fails fast on preview-build-busy and resets the capture iframe to about:blank", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.test";
+    document.head.appendChild(meta);
+
+    usePlayerStore.setState({
+      assetReadinessPhase: "ready",
+      assetReadinessSkipped: false,
+      editorInputLocked: false,
+      isPlaying: false,
+    });
+
+    const iframeSrcs = new WeakMap<HTMLIFrameElement, string>();
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return iframeSrcs.get(this) ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        iframeSrcs.set(this, String(value));
+      },
+    });
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({
+        token: "tok-busy-1",
+        previewOrigin: "https://preview.example.test",
+        assetLease: "lease-busy",
+      }),
+    ) as unknown as typeof fetch;
+
+    try {
+      const req = createClientCompositionCaptureRequest({
+        previewUrl: "/api/projects/proj-busy/preview/comp/compositions/scene-busy.html",
+        projectId: "proj-busy",
+        sessionEpoch: 1,
+        contentRevision: 1,
+        frameCount: 2,
+        duration: 5,
+      });
+
+      const pending = req.load(new AbortController().signal);
+      let iframe: HTMLIFrameElement | null = null;
+      await vi.waitFor(() => {
+        iframe = document.querySelector<HTMLIFrameElement>('iframe[data-openmotion-thumb-capture="true"]');
+        expect(iframe?.src).toContain("pt=tok-busy-1");
+      });
+
+      const fakeContentWindow = {} as Window;
+      Object.defineProperty(iframe!, "contentWindow", {
+        configurable: true,
+        value: fakeContentWindow,
+      });
+
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "https://preview.example.test",
+          source: fakeContentWindow,
+          data: {
+            source: "openmotion-preview-bridge",
+            version: 1,
+            type: "preview-build-busy",
+            projectId: "proj-busy",
+            token: "tok-busy-1",
+            retryAfterMs: 1000,
+          },
+        }),
+      );
+
+      await expect(pending).rejects.toThrow(/busy/i);
+      expect(iframe!.src).toBe("about:blank");
+    } finally {
+      if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
+      globalThis.fetch = origFetch;
+      meta.remove();
+      document.querySelector('iframe[data-openmotion-thumb-capture="true"]')?.remove();
+    }
+  });
+
+  it("downgrades credentials from include to same-origin only for same-origin preview assets and restores fetch", async () => {
+    const calls: Array<{ input: RequestInfo | URL; credentials?: RequestCredentials }> = [];
+    const origFetch = globalThis.fetch;
+    const stubFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, credentials: init?.credentials });
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+    globalThis.fetch = stubFetch;
+
+    try {
+      await withPreviewRedirectSafeFetch(async () => {
+        await globalThis.fetch("/api/projects/p1/preview/assets/hero.png", { credentials: "include" });
+        await globalThis.fetch("/motion-api/projects", { credentials: "include" });
+        await globalThis.fetch("https://cdn.example.test/image.png", { credentials: "include" });
+      });
+      expect(globalThis.fetch).toBe(stubFetch);
+      expect(calls).toEqual([
+        { input: "/api/projects/p1/preview/assets/hero.png", credentials: "same-origin" },
+        { input: "/motion-api/projects", credentials: "include" },
+        { input: "https://cdn.example.test/image.png", credentials: "include" },
+      ]);
+    } finally {
+      globalThis.fetch = origFetch;
     }
   });
 });

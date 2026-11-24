@@ -1,3 +1,4 @@
+import { readMcpProjectFile, type ProjectFileQuery } from '../mcp/project-file-read.ts';
 import { PrismMotionCatalog } from '../services/prism-motion-catalog.ts';
 import { commitCaptionCommand } from '../mcp/caption-mutations.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1056,6 +1057,8 @@ function buildProjectPreviewHandoff(
 }
 
 function createMcpDomainPorts(deps: {
+  db: Database;
+  storage: StoragePort;
   config: AppConfig;
   runtimeRoot: string;
   authStore: AuthStore;
@@ -1087,6 +1090,7 @@ function createMcpDomainPorts(deps: {
     projects: {
       async getProject(auth, args) {
         const projectId = typeof args.projectId === 'string' ? args.projectId : undefined;
+        if (args.file && !projectId) throw new CloudError('INVALID_ARGUMENT', 'A file read requires an explicit projectId.', { status: 400 });
         if (args.inspect && (!projectId || args.file || args.workId || args.exportJobId)) {
           throw new CloudError('INVALID_ARGUMENT', 'Inspect one composition in an explicit project.', { status: 400 });
         }
@@ -1111,7 +1115,7 @@ function createMcpDomainPorts(deps: {
           };
         }
 
-        const project = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+        let project = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
         if (typeof args.expectedRevision === 'string' && project.revision !== args.expectedRevision) {
           throw new CloudError('VERSION_CONFLICT', 'Project revision does not match expectedRevision', {
             status: 409,
@@ -1136,35 +1140,23 @@ function createMcpDomainPorts(deps: {
             ...await inspectComposition(file.content, path, query.offset, query.limit) };
         }
 
-        const virtual = await deps.files.loadVirtualProject(auth, project.id);
-        const allFiles = virtual.listFiles();
-        const assetNames = await deps.assetNames.readAssetNames(auth, project.id, {
-          paths: allFiles.map((f) => f.path),
-        });
-
-        let fileContent: Record<string, unknown> | undefined;
-        if (args.file && typeof args.file === 'object') {
-          const fileReq = args.file as { path: string; offset?: number; length?: number };
-          const read = await deps.files.readTextFile(auth, project.id, fileReq.path);
-          if (!read) {
-            throw new CloudError('NOT_FOUND', `File '${fileReq.path}' not found in project`, {
-              status: 404,
-              applied: false,
-            });
+        const query = args.file as ProjectFileQuery | undefined;
+        const fileContent = query ? await readMcpProjectFile({
+          db: deps.db, files: deps.files, storage: deps.storage, expiresInSec: deps.config.S3_PRESIGN_GET_TTL_SEC,
+        }, auth, projectId, query) : undefined;
+        // Capture edit guards from the same point in time as a live file read.
+        if (query && !query.atProjectVersion && !query.atFileVersion) {
+          const head = await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
+          if (head.revision !== project.revision) {
+            throw new CloudError('VERSION_CONFLICT', 'Project changed during the read; retry to capture the latest file.', { status: 409 });
           }
-          const offset = Math.max(0, fileReq.offset ?? 0);
-          const length = Math.min(2 * 1024 * 1024, Math.max(1, fileReq.length ?? 200_000));
-          const sliced = read.content.slice(offset, offset + length);
-          fileContent = {
-            path: read.file.path,
-            offset,
-            length: sliced.length,
-            totalLength: read.content.length,
-            truncated: offset + sliced.length < read.content.length,
-            content: sliced,
-          };
+          project = head; // A retained export or pagination snapshot can advance the version ID with identical bytes.
         }
-
+        const projectState = {
+          projectId, sessionId: project.sessionId, project, revision: project.revision,
+          currentVersionId: project.currentVersionId,
+          version: { versionId: project.currentVersionId, versionNumber: project.currentVersionNumber },
+        };
         let exportJob: Record<string, unknown> | undefined;
         if (typeof args.exportJobId === 'string') {
           const job = await deps.exports.getExport(auth, args.exportJobId);
@@ -1209,16 +1201,11 @@ function createMcpDomainPorts(deps: {
           };
         }
 
+        if (fileContent) return { ...projectState, file: fileContent, ...(exportJob && { exportJob }), ...(inlineWork && { inlineWork }) };
+        const allFiles = await deps.files.listFiles(auth, projectId);
+        const assetNames = await deps.assetNames.readAssetNames(auth, projectId, { paths: allFiles.map(f => f.path) });
         return {
-          projectId: project.id,
-          sessionId: project.sessionId,
-          project,
-          revision: project.revision,
-          currentVersionId: project.currentVersionId,
-          version: {
-            versionId: project.currentVersionId,
-            versionNumber: project.currentVersionNumber,
-          },
+          ...projectState,
           files: allFiles.map((f) => ({
             path: f.path,
             size: f.sizeBytes,
@@ -1228,7 +1215,6 @@ function createMcpDomainPorts(deps: {
           })),
           assetNames: assetNames.assetNames,
           namingLanguage: assetNames.namingLanguage,
-          ...(fileContent ? { file: fileContent } : {}),
           ...(exportJob ? { exportJob } : {}),
           ...(inlineWork ? { inlineWork } : {}),
         };
@@ -1879,6 +1865,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   const welcomeBootstrap = deps.welcomeBootstrap ?? new WelcomeBootstrapService({ db, catalog, logger });
 
   const files = new ProjectFilesService({
+    textPatchWrites: config.TEXT_PATCH_WRITES,
     db,
     storage,
     hotTextCache: deps.hotTextCache,
@@ -1931,6 +1918,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   const mcpDispatcher = new McpToolDispatcher(
     config,
     createMcpDomainPorts({
+      db, storage,
       config,
       runtimeRoot,
       authStore,
@@ -1969,7 +1957,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
 
   const amrIdentity =
     deps.amrIdentity ??
-    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache) : undefined);
+    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache, logger) : undefined);
 
   const authDeps: AuthMiddlewareDeps = {
     config,
@@ -2826,6 +2814,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     runtimeRoot,
     studioVersion: VERSION,
     previewOrigin: previewOriginUrl ? previewOriginUrl.origin : null,
+    studioOrigin: appOriginUrl.origin,
   };
   const studioApp = createDisklessStudioApp(studioDeps);
   app.route('/', studioApp);
@@ -2928,6 +2917,7 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
   shutdown.register('postgres', () => dbHandle.close());
 
   const storage = new StorageService({
+    textRevisionDb: dbHandle.db,
     bucket: config.S3_BUCKET,
     region: config.S3_REGION,
     endpoint: config.S3_ENDPOINT,
