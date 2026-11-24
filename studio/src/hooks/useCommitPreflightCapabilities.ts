@@ -40,7 +40,11 @@ interface CheckInputs {
   version: number;
 }
 
-interface Checked extends CheckInputs {
+interface Checked {
+  animations: GsapAnimation[];
+  iframe: WeakRef<HTMLIFrameElement> | null;
+  group: boolean;
+  version: number;
   preflight: CommitPreflight;
   narrowed?: DomEditSelection;
 }
@@ -52,13 +56,16 @@ function checkedPreflight(resolved: DomEditSelection, inputs: CheckInputs): Chec
   const known = checkedSelections.get(resolved);
   const same =
     known?.animations === inputs.animations &&
-    known.iframe === inputs.iframe &&
+    (known.iframe ? known.iframe.deref() === inputs.iframe : inputs.iframe === null) &&
     known.group === inputs.group &&
     known.version === inputs.version;
   if (same) return known;
-  const { animations, iframe, group } = inputs;
-  const checked = {
-    ...inputs,
+  const { animations, iframe, group, version } = inputs;
+  const checked: Checked = {
+    animations,
+    iframe: iframe ? new WeakRef(iframe) : null,
+    group,
+    version,
     preflight: runCommitPreflights(resolved, animations, iframe, group),
   };
   checkedSelections.set(resolved, checked);

@@ -4,7 +4,7 @@ import { applyTextPatch } from '../../../shared/text-patch';
 import { readProjectFileContent, studioHistoryForWrite } from './studioFileHistory';
 import { submitStudioCommands } from './projectEditBatch';
 import { observedSourceVersion, confirmedSource } from './confirmedTextSources';
-import { placeCatalogComponent, tryStudioTextEdit } from './studioTextEdits';
+import { placeCatalogComponent, tryStudioCommandPatches, tryStudioTextEdit } from './studioTextEdits';
 import { onRebasedFileEdit } from './rebasedFileEdit';
 import { readVersionedSource } from './readVersionedSource';
 
@@ -26,6 +26,23 @@ it('sends a cached host patch and the catalog dependency together, without a sep
   const body = JSON.parse(request.body);
   expect(body).toMatchObject({ installComponent: 'blur-in', files: [{ path, baseVersion: version(1) }] });
   expect(applyTextPatch(before, body.files[0].patch)).toContain('mounted</main>');
+});
+
+it('submits a block parameter as one named patch against its known source version', async () => {
+  const project = 'block-parameter-patch', path = 'intro.html';
+  const before = `<html data-composition-variables='[{"id":"title","type":"string","default":"Before"}]'><body>${' '.repeat(800)}</body></html>`;
+  const fetch = vi.fn().mockResolvedValueOnce(sourceResponse(before, 1)).mockResolvedValueOnce(receipt([path], 2));
+  vi.stubGlobal('fetch', fetch);
+  await readProjectFileContent(project, path);
+  const after = before.replace('Before', 'After');
+  await tryStudioCommandPatches(project, [{kind: 'setBlockParameter', compositionPath: path, key: 'title', value: 'After'}],
+    { [path]: version(1) }, undefined, () => after);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  const [url, request] = fetch.mock.calls[1];
+  expect(url).toBe('/api/projects/block-parameter-patch/text-edits');
+  const body = JSON.parse(request.body);
+  expect(body).toMatchObject({ label: 'Edit block parameter', files: [{ path, baseVersion: version(1) }] });
+  expect(applyTextPatch(before, body.files[0].patch)).toBe(after);
 });
 
 it('marks ongoing typing on the wire and keeps an independently confirmed edit separate', async () => {

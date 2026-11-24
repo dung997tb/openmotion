@@ -77,6 +77,8 @@ type UseShadowPreviewReloadParams = Omit<
   getAdapter: (overrideIframe?: HTMLIFrameElement | null) => PlaybackAdapter | null;
   /** Runs right after a shadow becomes the live iframe (iframeRef already points at it). */
   onPromoted?: () => void;
+  /** Runs whenever a live or shadow iframe is retired so cached bridge adapters can dispose immediately. */
+  onRetiredIframe?: (iframe: HTMLIFrameElement) => void;
   /** A shadow that never became ready was dropped; the live preview is unchanged. */
   onReloadFailed?: (message: string) => void;
   /** Puts the promoted document at the live frame's time, playing if the live frame was. */
@@ -96,6 +98,7 @@ export function useShadowPreviewReload({
   attachIframeShortcutListeners,
   applyPreviewAudioState,
   onPromoted,
+  onRetiredIframe,
   onReloadFailed,
   handOverPlayback,
 }: UseShadowPreviewReloadParams) {
@@ -114,6 +117,8 @@ export function useShadowPreviewReload({
   const catchUpGenRef = useRef<number | null>(null);
   const onPromotedRef = useRef(onPromoted);
   onPromotedRef.current = onPromoted;
+  const onRetiredIframeRef = useRef(onRetiredIframe);
+  onRetiredIframeRef.current = onRetiredIframe;
   const onReloadFailedRef = useRef(onReloadFailed);
   onReloadFailedRef.current = onReloadFailed;
   const handOverPlaybackRef = useRef(handOverPlayback);
@@ -154,8 +159,10 @@ export function useShadowPreviewReload({
       const got = pageGotTo(shadowIframeRef.current);
       shadowGenRef.current += 1;
       const failedGen = shadowGenRef.current;
+      const droppedShadow = shadowIframeRef.current;
       stopPendingShadow();
       shadowIframeRef.current = null;
+      if (droppedShadow) onRetiredIframeRef.current?.(droppedShadow);
       isRefreshingRef.current = false;
       pendingSeekRef.current = null;
       setPreviewSlots(planShadowDiscard);
@@ -284,6 +291,7 @@ export function useShadowPreviewReload({
         setCurrentTime(targetLiveTime);
       }
       announcePreviewPromoted({ retired, live: shadow });
+      if (retired) onRetiredIframeRef.current?.(retired);
       onPromotedRef.current?.();
       setPreviewReloading(false);
     },
@@ -424,8 +432,10 @@ export function useShadowPreviewReload({
   const resetPreviewSlots = useCallback(() => {
     retry.cancel();
     shadowGenRef.current += 1;
+    const droppedShadow = shadowIframeRef.current;
     stopPendingShadow();
     shadowIframeRef.current = null;
+    if (droppedShadow) onRetiredIframeRef.current?.(droppedShadow);
     isRefreshingRef.current = false;
     pendingSeekRef.current = null;
     usePlayerStore.getState().setTimelineReady(false);

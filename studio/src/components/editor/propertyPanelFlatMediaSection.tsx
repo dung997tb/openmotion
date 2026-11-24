@@ -13,6 +13,7 @@ import {
   formatTimingValue,
   parseNumericValue,
   readClipInPoint,
+  mediaStartLimit,
 } from "./propertyPanelHelpers";
 import { FlatSelectRow, FlatSlider } from "./propertyPanelFlatPrimitives";
 import { FlatToggle } from "./propertyPanelFlatToggle";
@@ -126,11 +127,7 @@ export function FlatMediaSection({
   const constantRate = Number.parseFloat(element.dataAttributes["playback-rate"] ?? "1") || 1;
   const playbackRate =
     rate?.automated && rate.automatedValue !== undefined ? rate.automatedValue : constantRate;
-  const sourceDuration =
-    Number.parseFloat(element.dataAttributes["source-duration"] ?? "") ||
-    (el as HTMLMediaElement).duration ||
-    0;
-  const mediaStartMax = Math.max(30, Math.ceil(sourceDuration || mediaStart + 10));
+  const mediaStartMax = mediaStartLimit(element, mediaStart);
   const fadeIn = readFadeSeconds(element.dataAttributes[HF_AUDIO_FADE_IN_DATA_KEY]);
   const fadeOut = readFadeSeconds(element.dataAttributes[HF_AUDIO_FADE_OUT_DATA_KEY]);
   const clipDuration = Number.parseFloat(element.dataAttributes.duration ?? "") || 0;

@@ -35,6 +35,9 @@ describe("peer timing classification", () => {
     expect(await diffScriptedPreviewStyles(before, next)).toMatchObject([{ id: "title", styles: [["font-size", "", "54px"]] }]);
     expect(diffPreviewChanges(before, next)).toBeNull();
     expect(await diffScriptedPreviewStyles(before, next.replace(/data-hf-id="[^"]+"/, 'data-hf-id="unrelated"'))).toBeNull();
+    const partial = '<main data-composition-id="scene"><p id="title" data-hf-id="existing">Hi</p></main>';
+    const stamped = ensureHfIds(partial).replace('id="title"', 'id="title" style="font-size: 52px"');
+    expect(await diffScriptedPreviewStyles(partial, stamped)).toMatchObject([{ hfId: "existing", id: "title" }]);
   });
 
   it("includes the containing-block change on the first drag of a static layer", () => {
@@ -43,6 +46,42 @@ describe("peer timing classification", () => {
     expect(diffPreviewChanges(before, after)?.[0]?.styles).toEqual([
       ["position", "", "relative"], ["left", "", "30px"], ["top", "", "12px"],
     ]);
+  });
+
+  it("validates media attributes, bounds, and boolean track state", () => {
+    const base = '<audio id="clip" data-start="0"></audio>';
+    const edit = (attributes: string) => base.replace('id="clip"', `id="clip" ${attributes}`);
+    expect(diffPreviewChanges(base, edit('data-volume="0.5" muted=""'))?.[0]?.attributes).toEqual([
+      ["muted", null, ""], ["data-volume", null, "0.5"],
+    ]);
+    for (const invalid of ['data-volume="4"', 'data-hidden="false"', 'muted="false"']) {
+      expect(diffPreviewChanges(base, edit(invalid))).toBeNull();
+    }
+    expect(diffPreviewChanges('<div id="clip"></div>', '<div id="clip" muted></div>')).toBeNull();
+  });
+
+  it("clears a fill image in place while loading a new image through the asset pipeline", () => {
+    const before = '<div id="tile" style="background-color:red"></div>';
+    const filled = '<div id="tile" style="background-color:blue;background-image:none"></div>';
+    expect(diffPreviewChanges(before, filled)?.[0]?.styles).toEqual([
+      ["background-color", "red", "blue"], ["background-image", "", "none"],
+    ]);
+    expect(diffPreviewChanges(filled, filled.replace("none", "url(asset.png)"))).toBeNull();
+  });
+
+  it("recognizes text, color, and an edit-core translation together and preserves font declarations", () => {
+    const before = '<style>@font-face { font-family: Sample; src:url(sample.woff2) }</style><h1 id="title">Old</h1>';
+    const after = before.replace('id="title"', 'id="title" style="font-family:Sample;color:red;translate:30px 12px"').replace('Old', 'New');
+    expect(diffPreviewChanges(before, after)).toMatchObject([{
+      id: "title", text: ["Old", "New"],
+      styles: [["font-family", "", "Sample"], ["color", "", "red"], ["translate", "", "30px 12px"]],
+    }]);
+    expect(diffPreviewChanges(before, after.replace("sample.woff2", "other.woff2"))).toBeNull();
+    expect(diffPreviewChanges(before, after.replace("30px 12px", "50% 12px"))).toBeNull();
+    const marked = after.replace('id="title"', 'data-hf-studio-original-inline-translate="" id="title"');
+    expect(diffPreviewChanges(before, marked)?.[0]?.captureOriginalTranslate).toBe(true);
+    expect(diffPreviewChanges(marked, before)?.[0]?.captureOriginalTranslate).toBe(false);
+    expect(diffPreviewChanges(before, marked.replace('translate=""', 'translate="90px"'))).toBeNull();
   });
 
   it("falls back for a changed tween, markup, source, label, style or expression in the same edit", () => {

@@ -149,7 +149,7 @@ function getCompositionContext(
  * iframe so the experimental Canvas renderer positions elements accurately.
  */
 export function capturePreviewLayoutSnapshot(
-  iframe: HTMLIFrameElement | null | undefined,
+  iframeOrDoc: HTMLIFrameElement | Document | null | undefined,
   elements: readonly TimelineElement[],
   targetWidth: number,
   targetHeight: number,
@@ -161,7 +161,9 @@ export function capturePreviewLayoutSnapshot(
 
   let doc: Document | null = null;
   try {
-    doc = iframe?.contentDocument ?? null;
+    if (iframeOrDoc) {
+      doc = "contentDocument" in iframeOrDoc ? (iframeOrDoc.contentDocument ?? null) : iframeOrDoc;
+    }
   } catch {
     return result;
   }

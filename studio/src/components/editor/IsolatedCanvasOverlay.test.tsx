@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { IsolatedCanvasOverlay } from "./IsolatedCanvasOverlay";
 import { PREVIEW_BRIDGE_SOURCE, type PreviewBridgeMessage } from "../../player/lib/previewAdapter";
+import { announcePreviewPromoted } from "../../player/sceneSwap";
 
 const state = vi.hoisted(() => ({
   previewIframeRef: { current: null as HTMLIFrameElement | null },
@@ -221,4 +222,15 @@ it("cancels a finish with an invalid write target", async () => {
   await reply("finish", { ...result, sourceFile: "../index.html" });
   expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
   expect(messages.at(-1)).toMatchObject({ phase: "cancel", gestureId: messages[0]?.gestureId });
+});
+
+it("detaches the retired iframe load listener when a shadow preview is promoted", () => {
+  const removeSpy = vi.spyOn(frame, "removeEventListener");
+  pointer("pointerdown", 60);
+  pointer("pointerup", 60);
+  const replacement = document.createElement("iframe");
+  act(() => {
+    announcePreviewPromoted({ retired: frame, live: replacement });
+  });
+  expect(removeSpy).toHaveBeenCalledWith("load", expect.any(Function));
 });

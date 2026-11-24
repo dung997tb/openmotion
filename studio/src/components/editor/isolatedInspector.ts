@@ -6,6 +6,7 @@ import { isInlineTextTarget, type InlineTextTarget } from "./isolatedInlineTextP
 interface InspectorSnapshot extends InlineTextTarget {
   tag: string;
   geometry: DomEditSelection["boundingBox"];
+  layoutBox?: DomEditSelection["boundingBox"] | null;
   inline: Record<string, string>;
   computed: Record<string, string>;
   data: Record<string, string>;
@@ -17,6 +18,7 @@ interface InspectorSnapshot extends InlineTextTarget {
   muted: boolean;
   loop: boolean;
   src?: string;
+  intrinsicMediaDuration?: number;
 }
 
 type Identity = { elementId?: string | null; hfId?: string | null; sourceFile?: string };
@@ -55,9 +57,14 @@ export async function inspectIsolatedElement(adapter: PreviewAdapter, identity: 
   const textContent = typeof snapshot.leafText === "string" && snapshot.leafText.length <= 16384 ? snapshot.leafText : null;
   element.textContent = textContent;
   const flags = { isCompositionHost: snapshot.compositionHost === true, isInsideLockedComposition: snapshot.locked === true };
+  const box = snapshot.layoutBox;
+  const isolatedLayoutBox = box && [box.x, box.y, box.width, box.height].every(Number.isFinite) &&
+    box.width >= 0 && box.height >= 0 ? box : undefined;
   return {
+    intrinsicMediaDuration: typeof snapshot.intrinsicMediaDuration === "number" && Number.isFinite(snapshot.intrinsicMediaDuration) && snapshot.intrinsicMediaDuration > 0
+      ? snapshot.intrinsicMediaDuration : undefined,
     element, id: id || undefined, hfId: hfId || undefined, selector, sourceFile, compositionPath: sourceFile,
-    label: id || hfId || tag, tagName: tag, ...flags, boundingBox: geometry, inlineStyles, computedStyles, dataAttributes,
+    label: id || hfId || tag, tagName: tag, ...flags, boundingBox: geometry, isolatedLayoutBox, inlineStyles, computedStyles, dataAttributes,
     existsInSource: true, textContent, isolatedTarget: { sourceFile, sha256: snapshot.sha256, ...(snapshot.fileVersion && {fileVersion: snapshot.fileVersion}), elementId: id, hfId, binding: snapshot.binding },
     textFields: textContent === null ? [] : [{ key: "self", label: "Text", value: textContent, tagName: tag,
       attributes: [], inlineStyles, computedStyles, preserveLineBreaks: snapshot.lineBreaks === true, source: "self" as const }],

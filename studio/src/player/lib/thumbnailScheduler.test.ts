@@ -537,6 +537,130 @@ describe("ThumbnailScheduler", () => {
     await flush();
     expect(captureSignals.every((s) => s.aborted)).toBe(true);
   });
+
+  it("evicts matching unleased entries immediately and disposes matching leased entries on release", async () => {
+    const scheduler = new ThumbnailScheduler();
+    const disposeStaleUnleased = vi.fn();
+    const disposeStaleLeased = vi.fn();
+    const disposeUntouched = vi.fn();
+    const disposeOtherProject = vi.fn();
+
+    const staleUnleasedReq = request("stale-unleased", async () => result("u", 1, disposeStaleUnleased), "visible", {
+      kind: "composition",
+      compositionPath: "compositions/choice.html",
+      contentRevision: 0,
+    });
+    const staleLeasedReq = request("stale-leased", async () => result("l", 1, disposeStaleLeased), "visible", {
+      kind: "composition",
+      compositionPath: "compositions/choice.html",
+      contentRevision: 1,
+    });
+    const untouchedReq = request("untouched", async () => result("k", 1, disposeUntouched), "visible", {
+      kind: "composition",
+      compositionPath: "compositions/intro.html",
+      contentRevision: 0,
+    });
+    const otherProjReq = request("other-proj", async () => result("o", 1, disposeOtherProject), "visible", {
+      projectId: "project-b",
+      kind: "composition",
+      compositionPath: "compositions/choice.html",
+      contentRevision: 0,
+    });
+
+    const leaseUnleased = scheduler.acquire(staleUnleasedReq, vi.fn());
+    const leaseLeased = scheduler.acquire(staleLeasedReq, vi.fn());
+    const leaseUntouched = scheduler.acquire(untouchedReq, vi.fn());
+    const leaseOther = scheduler.acquire(otherProjReq, vi.fn());
+    await flush();
+
+    leaseUnleased.release();
+    leaseUntouched.release();
+    leaseOther.release();
+
+    scheduler.invalidateMatching(
+      "project-a",
+      (req) => req.compositionPath === "compositions/choice.html" && (req.contentRevision ?? 0) < 2,
+    );
+
+    expect(disposeStaleUnleased).toHaveBeenCalledTimes(1);
+    expect(scheduler.getSnapshot(staleUnleasedReq).status).toBe("idle");
+    // Active consumer still displays staleLeased until it switches to the new revision and releases.
+    expect(disposeStaleLeased).not.toHaveBeenCalled();
+    expect(scheduler.getSnapshot(staleLeasedReq).status).toBe("ready");
+    // Untouched compositions and other projects stay cached.
+    expect(disposeUntouched).not.toHaveBeenCalled();
+    expect(disposeOtherProject).not.toHaveBeenCalled();
+
+    leaseLeased.release();
+    expect(disposeStaleLeased).toHaveBeenCalledTimes(1);
+    expect(scheduler.getSnapshot(staleLeasedReq).status).toBe("idle");
+  });
+
+  it("leaves queued and loading entries uncached when invalidated in flight and disposes them on release", async () => {
+    const scheduler = new ThumbnailScheduler(
+      resolveTimelineViewportBudgets({ concurrentCompositionFetches: 1 }),
+    );
+    const loadingDeferred = deferred<ThumbnailLoadedResult>();
+    const queuedDeferred = deferred<ThumbnailLoadedResult>();
+    const disposeLoading = vi.fn();
+    const disposeQueued = vi.fn();
+
+    const loadingReq = request(
+      "in-flight-loading",
+      () => loadingDeferred.promise,
+      "visible",
+      {
+        kind: "composition",
+        compositionPath: "compositions/choice.html",
+        contentRevision: 0,
+      },
+    );
+    const queuedReq = request(
+      "in-flight-queued",
+      () => queuedDeferred.promise,
+      "visible",
+      {
+        kind: "composition",
+        compositionPath: "compositions/choice.html",
+        contentRevision: 0,
+      },
+    );
+
+    const loadingLease = scheduler.acquire(loadingReq, vi.fn());
+    const queuedLease = scheduler.acquire(queuedReq, vi.fn());
+    expect(scheduler.getSnapshot(loadingReq).status).toBe("loading");
+    expect(scheduler.getSnapshot(queuedReq).status).toBe("queued");
+
+    // Invalidate while loadingReq is in flight and queuedReq is still queued.
+    scheduler.invalidateMatching(
+      "project-a",
+      (req) => req.compositionPath === "compositions/choice.html" && (req.contentRevision ?? 0) < 1,
+    );
+
+    // Late completion of loadingReq delivers to its active lease without entering the LRU cache.
+    loadingDeferred.resolve(result("late-loading", 10, disposeLoading));
+    await flush();
+    expect(scheduler.getSnapshot(loadingReq).status).toBe("ready");
+    expect(scheduler.getDiagnostics().cacheEntries).toBe(0);
+    expect(disposeLoading).not.toHaveBeenCalled();
+
+    // Releasing the loading lease disposes it immediately rather than caching it.
+    loadingLease.release();
+    expect(disposeLoading).toHaveBeenCalledTimes(1);
+    expect(scheduler.getSnapshot(loadingReq).status).toBe("idle");
+
+    // queuedReq now runs and settles, likewise staying uncached and disposing immediately on release.
+    await vi.waitFor(() => expect(scheduler.getSnapshot(queuedReq).status).toBe("loading"));
+    queuedDeferred.resolve(result("late-queued", 10, disposeQueued));
+    await flush();
+    expect(scheduler.getSnapshot(queuedReq).status).toBe("ready");
+    expect(scheduler.getDiagnostics().cacheEntries).toBe(0);
+    expect(disposeQueued).not.toHaveBeenCalled();
+
+    queuedLease.release();
+    expect(disposeQueued).toHaveBeenCalledTimes(1);
+    expect(scheduler.getSnapshot(queuedReq).status).toBe("idle");
+  });
 });
 
 describe("createThumbnailKey", () => {

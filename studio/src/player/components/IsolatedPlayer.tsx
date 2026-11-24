@@ -253,6 +253,14 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         observer.disconnect();
         window.removeEventListener("message", message);
         lease.current?.dispose();
+        lease.current = null;
+        forgetPreviewHtmlSources(iframe);
+        rememberPeerTimingDocument(iframe, null, null);
+        try {
+          iframe.src = "about:blank";
+        } catch {
+          // ignore teardown errors on detached iframes
+        }
       };
     }, [props.origin, passive, tracksAssets]);
 

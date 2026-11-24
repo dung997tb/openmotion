@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { act, createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { rememberSource } from "../utils/confirmedTextSources";
 import type { TimelineElement } from "../player";
-import { computeGroupGeometry, resolveGroupChildTracks } from "./useGroupCommits";
-import { makeSelection } from "./domSelectionTestHarness";
+import { computeGroupGeometry, resolveGroupChildTracks, useGroupCommits } from "./useGroupCommits";
+import { installReactActEnvironment, makeSelection, mountReactHarness } from "./domSelectionTestHarness";
 
 const timelineElement = (over: Partial<TimelineElement> = {}): TimelineElement => ({
   id: "clip",
@@ -16,6 +18,20 @@ const timelineElement = (over: Partial<TimelineElement> = {}): TimelineElement =
 });
 
 describe("computeGroupGeometry — track threading", () => {
+  it("groups isolated members by their mounted layout and refuses missing measurements", () => {
+    const member = (id: string) => ({
+      ...makeSelection(id, document.createElement("div")),
+      isolatedTarget: { elementId: id, sourceFile: "index.html", sha256: "a".repeat(64) },
+    });
+    const a = member("a"), b = member("b");
+    const result = computeGroupGeometry([
+      { ...a, isolatedLayoutBox: { x: 50, y: 20, width: 200, height: 65 } },
+      { ...b, isolatedLayoutBox: { x: 80, y: 90, width: 80, height: 50 } },
+    ], []);
+    expect(result.bbox).toEqual({ left: 50, top: 20, width: 200, height: 120 });
+    expect(result.rebases.map(r => [r.left, r.top])).toEqual([[0, 0], [30, 70]]);
+    expect(() => computeGroupGeometry([a, b], [])).toThrow("Cannot measure");
+  });
   it("carries each member's authored track onto its rebase entry, so the server can pin it through the wrap", () => {
     const elA = document.createElement("div");
     elA.id = "clip-a";
@@ -94,4 +110,38 @@ describe("resolveGroupChildTracks", () => {
 
     expect(result).toEqual([{ target: { id: "child-a", hfId: undefined }, track: 3 }]);
   });
+});
+
+it("writes one guarded change for grouping and ungrouping, and records each accepted change once", async () => {
+  installReactActEnvironment();
+  const projectId = "group-command-receipts", path = "index.html";
+  const before = '<main id="stage" data-composition-id="main"><div id="a"></div><div id="b"></div></main>';
+  const parse = (source: string) => new DOMParser().parseFromString(source, "text/html");
+  const original = parse(before);
+  rememberSource(projectId, path, { content: before, version: '"source-1"' });
+  const recordEdit = vi.fn(), writeProjectFile = vi.fn(async (_path: string, content: string) => {
+    rememberSource(projectId, path, { content, version: '"source-2"' });
+  });
+  const params = { projectIdRef: { current: projectId }, activeCompPath: path, timelineElements: [],
+    writeProjectFile, editHistory: { recordEdit }, clearDomSelection: vi.fn(), reloadPreview: vi.fn(), showToast: vi.fn() };
+  let hooks!: ReturnType<typeof useGroupCommits>;
+  function Harness() { hooks = useGroupCommits(params); return null; }
+  const root = mountReactHarness(createElement(Harness));
+  try {
+    const members = ["a", "b"].map(id => makeSelection(id, original.getElementById(id)!));
+    const groupId = await hooks.groupSelection(members);
+    expect(writeProjectFile).toHaveBeenCalledTimes(1);
+    const grouped = writeProjectFile.mock.calls[0]![1];
+    expect(writeProjectFile.mock.calls[0]?.[0]).toBe(path);
+    expect(writeProjectFile).toHaveBeenNthCalledWith(1, path, grouped, before);
+    const wrapper = parse(grouped).querySelector<HTMLElement>('[data-hf-group]');
+    expect(wrapper?.getAttribute('data-hf-group')).toBe(groupId);
+    expect(Array.from(wrapper!.children, e => e.id)).toEqual(["a", "b"]);
+    await hooks.ungroupSelection(makeSelection(groupId!, wrapper!));
+    const ungrouped = writeProjectFile.mock.calls[1]![1];
+    expect(writeProjectFile).toHaveBeenNthCalledWith(2, path, ungrouped, grouped);
+    expect(parse(ungrouped).getElementById("a")?.parentElement?.id).toBe("stage");
+    expect(recordEdit.mock.calls.map(([entry]) => entry.label)).toEqual(["Group elements", "Ungroup elements"]);
+    expect(params.showToast).not.toHaveBeenCalled();
+  } finally { act(() => root.unmount()); }
 });

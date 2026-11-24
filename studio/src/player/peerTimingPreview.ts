@@ -1,7 +1,10 @@
 import { isLiveMediaMove } from "../../../shared/preview-live-media";
+import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from "../../../packages/edit-core/canvas-position";
 import { createPreviewAdapter } from "./lib/previewAdapter";
 import { capturePresentedTimelineChanges } from "./lib/isolatedTimelineEdits";
-import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit } from "../../../shared/preview-timing";
+import { setPreviewMediaMuted } from "./lib/timelineIframeHelpers";
+import { usePlayerStore } from "./store/playerStore";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, PREVIEW_ATTRIBUTES, canPatchPreviewAttribute, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit, canPatchPresentationValue } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
@@ -62,7 +65,7 @@ function changedStyles(left: HTMLElement, right: HTMLElement): PreviewChange["st
     const from = left.style.getPropertyValue(name);
     const to = next.getPropertyValue(name);
     if (from === to) continue;
-    if (left.style.getPropertyPriority(name) || next.getPropertyPriority(name)) return null;
+    if (!canPatchPresentationValue(name, to) || left.style.getPropertyPriority(name) || next.getPropertyPriority(name)) return null;
     styles.push([name, from, to]);
     if (to) projected.style.setProperty(name, to);
     else projected.style.removeProperty(name);
@@ -88,21 +91,31 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
     const right = b[i]!;
     if (left.localName !== right.localName) return null;
     const attributes: PreviewChange["attributes"] = [];
-    for (const name of TIMING_ATTRIBUTES) {
+    for (const name of PREVIEW_ATTRIBUTES) {
       const from = left.getAttribute(name);
       const to = right.getAttribute(name);
       if (from === to) continue;
-      if ([from, to].some(value => value !== null && !/^\d+(?:\.\d+)?$/.test(value))) return null;
+      if ([from, to].some(value => !canPatchPreviewAttribute(name, value, left.localName))) return null;
       attributes.push([name, from, to]);
       left.removeAttribute(name);
       right.removeAttribute(name);
     }
     let styles: PreviewChange["styles"];
     let text: PreviewChange["text"];
+    let captureOriginalTranslate: boolean | undefined;
     if (presentationTags.has(left.localName) && left instanceof HTMLElement && right instanceof HTMLElement) {
       if (left.getAttribute("style") !== right.getAttribute("style")) {
         styles = changedStyles(left, right) ?? undefined;
         if (!styles) return null;
+        const from = left.getAttribute(STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR);
+        const to = right.getAttribute(STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR);
+        if (from !== to) {
+          const move = styles.find(([name]) => name === "translate");
+          if (!move || !(from === null && to === move[1] || to === null && from === move[2])) return null;
+          captureOriginalTranslate = from === null;
+          left.removeAttribute(STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR);
+          right.removeAttribute(STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR);
+        }
         left.removeAttribute("style");
         right.removeAttribute("style");
       }
@@ -117,7 +130,7 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
     const hfId = left.getAttribute("data-hf-id");
     const compositionId = left.getAttribute("data-composition-id");
     if (!hfId && !left.id && !compositionId) return null;
-    changes.push({ hfId, id: left.id, compositionId, tag: left.localName, attributes, styles, text });
+    changes.push({ hfId, id: left.id, compositionId, tag: left.localName, attributes, styles, text, captureOriginalTranslate });
   }
   if (!changes.length || changes.length > 32 || before.documentElement.outerHTML !== after.documentElement.outerHTML) return null;
   return changes;
@@ -126,11 +139,10 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
 /** The first visual edit can persist the exact IDs already mounted by the compiler. */
 async function diffMountedPreview(previous: string, current: string) {
   if (Math.max(previous.length, current.length) > MAX_PEER_PREVIEW_SOURCE_LENGTH) return null;
-  if (!previous.includes("data-hf-id=") && current.includes("data-hf-id=")) {
-    const { ensureHfIds } = await import("@hyperframes/parsers/hf-ids");
-    previous = ensureHfIds(previous);
-  }
-  return diffPreviewChanges(previous, current);
+  const changes = diffPreviewChanges(previous, current);
+  if (changes || current.split("data-hf-id=").length <= previous.split("data-hf-id=").length) return changes;
+  const { ensureHfIds } = await import("@hyperframes/parsers/hf-ids");
+  return diffPreviewChanges(ensureHfIds(previous), current);
 }
 
 function onlyStyles(changes: PreviewChange[]) {
@@ -177,6 +189,11 @@ export async function tryApplyPeerChanges(
       return false;
     }
     if (await paint !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    // The HTML attribute changes defaultMuted. The runtime combines per-clip mute
+    // with this window's independent monitor preference on a set-muted message.
+    if (changes.some(change => change.attributes.some(([name]) => name === "muted"))) {
+      setPreviewMediaMuted(frame, usePlayerStore.getState().audioMuted);
+    }
     if (!temporary && changes.some(change => change.attributes.length)) releasePresented?.();
     if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
       document.timingFile = { path: update.path, version: current.version };

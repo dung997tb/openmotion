@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import {
 	COMPONENT_TARGETS,
 	buildOpenMotionOrbitPayload,
+	isSupersededByRemoteHead,
+	matchesWorkflowPath,
+	parseDeployPushPaths,
 	publishCloudTestToOrbit,
 } from "../.github/scripts/orbit-publish-cloud-test.mjs";
 
@@ -51,7 +55,7 @@ function baseEnv(overrides = {}) {
 	return {
 		ORBIT_API_URL: TEST_ORBIT_API_URL,
 		ORBIT_OPENMOTION_BUILD_TOKEN: "orbit-build-token",
-		GITHUB_REF: "refs/heads/feat/cloud-container-p1",
+		GITHUB_REF: "refs/heads/main",
 		GITHUB_SHA: SOURCE_SHA,
 		GITHUB_REPOSITORY: "nexu-io/openmotion",
 		GITHUB_REPOSITORY_OWNER: "Nexu-IO",
@@ -127,7 +131,7 @@ test("publishes all four image digests and manifests to /api/automation/v1/publi
 			app: "openmotion",
 			environment: "test",
 			sourceSha: SOURCE_SHA,
-			sourceRef: "feat/cloud-container-p1",
+			sourceRef: "main",
 			buildId: "nexu-io/openmotion:4492881234.2",
 			buildUrl: "https://github.com/nexu-io/openmotion/actions/runs/4492881234",
 			artifact: {
@@ -453,10 +457,10 @@ test("rejects tampered manifests, missing artifacts, wrong branch or endpoint, 4
 		await assert.rejects(
 			() =>
 				buildOpenMotionOrbitPayload(
-					baseEnv({ GITHUB_REF: "refs/heads/main" }),
+					baseEnv({ GITHUB_REF: "refs/heads/feat/cloud-container-p1" }),
 					dir,
 				),
-			/feat\/cloud-container-p1/,
+			/refs\/heads\/main/,
 		);
 
 		let nonRetryCalls = 0;
@@ -552,7 +556,25 @@ test("release and container image workflows wire CI + 4-image gate, manifests, a
 		new URL("../.github/workflows/deploy-cloud-test.yml", import.meta.url),
 		"utf8",
 	);
-	assert.match(releaseWorkflow, /branches:\s*\[feat\/cloud-container-p1\]/);
+	assert.match(releaseWorkflow, /branches:\s*\[main\]/);
+	for (const expectedPath of [
+		"deploy/Dockerfile",
+		"src/**",
+		".github/workflows/container-images.yml",
+		".github/workflows/deploy-cloud-test.yml",
+		".github/scripts/orbit-publish-cloud-test.mjs",
+	]) {
+		assert.match(
+			releaseWorkflow,
+			new RegExp(`^      - ${expectedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+		);
+	}
+	for (const jobName of ["checks", "images", "promote"]) {
+		assert.match(
+			extractJobBlock(releaseWorkflow, jobName),
+			/\n    if:.*github\.ref == 'refs\/heads\/main'/,
+		);
+	}
 	const promoteJob = extractJobBlock(releaseWorkflow, "promote");
 	assert.match(promoteJob, PROMOTE_ENV_PATTERN);
 	assert.match(promoteJob, /\n    needs:\s*\[checks,\s*images\]/);
@@ -607,6 +629,11 @@ test("release and container image workflows wire CI + 4-image gate, manifests, a
 		new URL("../.github/workflows/container-images.yml", import.meta.url),
 		"utf8",
 	);
+	assert.doesNotMatch(imagesWorkflow, /^  push:\s*$/m);
+	const digestIfMatches = imagesWorkflow.match(
+		/^\s+if:.*github\.ref == 'refs\/heads\/main'$/gm,
+	);
+	assert.equal(digestIfMatches?.length, 2);
 	assert.match(imagesWorkflow, /full_sha_tag="sha-\$\{GITHUB_SHA\}"/);
 	assert.match(imagesWorkflow, /\$\{image_ref\}:\$\{FULL_SHA_TAG\}/);
 	assert.match(
@@ -616,5 +643,175 @@ test("release and container image workflows wire CI + 4-image gate, manifests, a
 	assert.match(
 		imagesWorkflow,
 		/\$\{\{\s*runner\.temp\s*\}\}\/\$\{\{\s*matrix\.target\s*\}\}\.manifest\.json/,
+	);
+
+	const ciWorkflow = await readFile(
+		new URL("../.github/workflows/ci.yml", import.meta.url),
+		"utf8",
+	);
+	assert.match(
+		ciWorkflow,
+		/concurrency:\n\s+group:\s*motion-\$\{\{\s*github\.workflow\s*\}\}-\$\{\{\s*github\.event\.pull_request\.number \|\| github\.ref\s*\}\}/,
+	);
+});
+
+test("parseDeployPushPaths and matchesWorkflowPath match runtime/workflow inputs and ignore docs/test-only files", async () => {
+	const releaseWorkflow = await readFile(
+		new URL("../.github/workflows/deploy-cloud-test.yml", import.meta.url),
+		"utf8",
+	);
+	const patterns = parseDeployPushPaths(releaseWorkflow);
+	for (const matchedFile of [
+		"deploy/Dockerfile",
+		"src/entrypoints/api.ts",
+		"packages/design-system/index.ts",
+		"docs/transcripts.md",
+		".github/workflows/deploy-cloud-test.yml",
+		".github/scripts/orbit-publish-cloud-test.mjs",
+	]) {
+		assert.equal(
+			patterns.some((pattern) => matchesWorkflowPath(pattern, matchedFile)),
+			true,
+			`${matchedFile} should match on.push.paths`,
+		);
+	}
+	for (const ignoredFile of [
+		"README.md",
+		"docs/architecture.md",
+		"tests/orbit-cloud-test-sync.test.mjs",
+		"src-extra/helper.ts",
+		"deploy/README.md",
+	]) {
+		assert.equal(
+			patterns.some((pattern) => matchesWorkflowPath(pattern, ignoredFile)),
+			false,
+			`${ignoredFile} must not match on.push.paths`,
+		);
+	}
+});
+
+test("supersession check preserves publication across excluded-path commits (including shallow checkouts and reverts)", async (t) => {
+	const workRoot = await mkdtemp(join(tmpdir(), "openmotion-supersede-"));
+	const { dir: digestsDir } = await createDigestsFixture();
+	t.after(async () => {
+		await rm(workRoot, { recursive: true, force: true });
+		await rm(digestsDir, { recursive: true, force: true });
+	});
+
+	const bareDir = join(workRoot, "origin.git");
+	const authorDir = join(workRoot, "author");
+	const shallowDir = join(workRoot, "shallow");
+	execFileSync("git", ["init", "--quiet", "--bare", bareDir]);
+	execFileSync("git", ["init", "--quiet", authorDir]);
+	execFileSync("git", ["config", "user.name", "test"], { cwd: authorDir });
+	execFileSync("git", ["config", "user.email", "test@example.invalid"], {
+		cwd: authorDir,
+	});
+	execFileSync("git", ["remote", "add", "origin", bareDir], { cwd: authorDir });
+
+	const commitAndPush = async (relPath, content, message) => {
+		const target = join(authorDir, relPath);
+		await mkdir(dirname(target), { recursive: true });
+		await writeFile(target, content, "utf8");
+		execFileSync("git", ["add", relPath], { cwd: authorDir });
+		execFileSync("git", ["commit", "--quiet", "-m", message], { cwd: authorDir });
+		execFileSync("git", ["push", "--quiet", "origin", "HEAD:refs/heads/main"], {
+			cwd: authorDir,
+		});
+		return execFileSync("git", ["rev-parse", "HEAD"], {
+			cwd: authorDir,
+			encoding: "utf8",
+		}).trim();
+	};
+
+	const shaA = await commitAndPush("src/app.ts", "v1\n", "runtime v1");
+	execFileSync(
+		"git",
+		["clone", "--quiet", "--depth=1", "--branch", "main", `file://${bareDir}`, shallowDir],
+	);
+	const shaB = await commitAndPush("README.md", "docs update\n", "docs only");
+
+	assert.equal(
+		isSupersededByRemoteHead({
+			sourceRef: "refs/heads/main",
+			sourceSha: shaA,
+			remoteSha: shaB,
+			cwd: shallowDir,
+		}),
+		false,
+	);
+
+	let publishedCalls = 0;
+	const acceptedAfterDocs = await publishCloudTestToOrbit({
+		digestsDir,
+		env: baseEnv({ GITHUB_SHA: shaA }),
+		getRemoteHead: () => shaB,
+		isSuperseded: ({ sourceRef, sourceSha, remoteSha }) =>
+			isSupersededByRemoteHead({
+				sourceRef,
+				sourceSha,
+				remoteSha,
+				cwd: shallowDir,
+			}),
+		log: () => {},
+		fetchImpl: async () => {
+			publishedCalls += 1;
+			return {
+				status: 202,
+				text: async () =>
+					JSON.stringify({
+						releaseId: "rel_docs_ok",
+						deploymentId: "dep_docs_ok",
+						status: "queued",
+						generation: 11,
+						blockedReason: null,
+					}),
+			};
+		},
+	});
+	assert.equal(acceptedAfterDocs.skipped, false);
+	assert.equal(acceptedAfterDocs.releaseId, "rel_docs_ok");
+	assert.equal(publishedCalls, 1);
+
+	const shaC = await commitAndPush("src/app.ts", "v2\n", "runtime v2");
+	assert.equal(
+		isSupersededByRemoteHead({
+			sourceRef: "refs/heads/main",
+			sourceSha: shaA,
+			remoteSha: shaC,
+			cwd: shallowDir,
+		}),
+		true,
+	);
+	const skippedAfterRuntime = await publishCloudTestToOrbit({
+		digestsDir,
+		env: baseEnv({ GITHUB_SHA: shaA }),
+		getRemoteHead: () => shaC,
+		isSuperseded: ({ sourceRef, sourceSha, remoteSha }) =>
+			isSupersededByRemoteHead({
+				sourceRef,
+				sourceSha,
+				remoteSha,
+				cwd: shallowDir,
+			}),
+		log: () => {},
+		fetchImpl: async () => {
+			throw new Error("must not publish once superseded by runtime commit");
+		},
+	});
+	assert.equal(skippedAfterRuntime.skipped, true);
+	assert.equal(skippedAfterRuntime.reason, "superseded");
+
+	// GitHub evaluates push path filters via two-dot diff(sourceSha, remoteSha): reverting shaC back to shaA's
+	// runtime tree plus README-only changes leaves zero net runtime diff, so shaD does not supersede shaA.
+	const shaD = await commitAndPush("src/app.ts", "v1\n", "revert runtime v2");
+	assert.equal(
+		isSupersededByRemoteHead({
+			sourceRef: "refs/heads/main",
+			sourceSha: shaA,
+			remoteSha: shaD,
+			cwd: shallowDir,
+		}),
+		false,
 	);
 });

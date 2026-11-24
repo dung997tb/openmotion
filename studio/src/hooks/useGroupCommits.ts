@@ -1,7 +1,7 @@
-import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
 import {
-  saveServerRewriteWithHistory,
+  readProjectFileContent,
+  saveProjectFilesWithHistory,
   type DomEditCommitBaseParams,
 } from "../utils/studioFileHistory";
 import {
@@ -9,18 +9,16 @@ import {
   readHfId,
   type DomEditSelection,
 } from "../components/editor/domEditing";
-import { studioWriteHeaders } from "../utils/studioFileVersion";
+import { confirmedSource } from "../utils/confirmedTextSources";
 import {
   findMatchingTimelineElementId,
   resolveElementTrack,
   type ElementMatchSelection,
 } from "../utils/studioHelpers";
 import type { TimelineElement } from "../player";
-import { studioApiFetch } from "../utils/studioApiFetch";
 
 interface UseGroupCommitsParams extends DomEditCommitBaseParams {
-  /** Resync the SDK session after a server-side write (the wrapper/unwrap changes
-   * structure the in-memory doc doesn't know about). */
+  /** Refresh the SDK after the document hierarchy changes. */
   forceReloadSdkSession?: () => void;
   timelineElements: TimelineElement[];
 }
@@ -61,14 +59,17 @@ export function computeGroupGeometry(
   members: DomEditSelection[],
   timelineElements: TimelineElement[],
 ): GroupGeometry {
-  const boxes = members.map((m) => ({
-    target: buildDomEditPatchTarget(m),
-    left: m.element.offsetLeft,
-    top: m.element.offsetTop,
-    right: m.element.offsetLeft + m.element.offsetWidth,
-    bottom: m.element.offsetTop + m.element.offsetHeight,
-    track: resolveAuthoredTrack(m, timelineElements),
-  }));
+  const boxes = members.map((m) => {
+    const el = m.element;
+    const box = m.isolatedTarget ? m.isolatedLayoutBox : {
+      x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight,
+    };
+    if (!box) throw new Error("Cannot measure the selected elements in the preview.");
+    return {
+      target: buildDomEditPatchTarget(m), track: resolveAuthoredTrack(m, timelineElements),
+      left: box.x, top: box.y, right: box.x + box.width, bottom: box.y + box.height,
+    };
+  });
   const left = Math.min(...boxes.map((b) => b.left));
   const top = Math.min(...boxes.map((b) => b.top));
   const width = Math.max(...boxes.map((b) => b.right)) - left;
@@ -107,54 +108,24 @@ export function resolveGroupChildTracks(
   return result;
 }
 
-// Shared read → mutate-route → save-with-history → reload pipeline for both
-// wrap (group) and unwrap (ungroup). Mirrors the structural-mutation pattern in
-// useElementLifecycleOps (delete). Returns the route's JSON, or throws.
-async function commitStructuralMutation(
-  pid: string,
-  targetPath: string,
-  route: "wrap-elements" | "unwrap-elements",
-  body: unknown,
+async function saveGroupEdit(
+  projectId: string,
+  path: string,
   label: string,
-  deps: Pick<
-    UseGroupCommitsParams,
-    | "writeProjectFile"
-    | "editHistory"
-    | "clearDomSelection"
-    | "forceReloadSdkSession"
-    | "reloadPreview"
-  >,
-): Promise<{ content?: string; groupId?: string }> {
-  let result: { content?: string; groupId?: string } = {};
-  await saveServerRewriteWithHistory({
-    projectId: pid,
-    path: targetPath,
+  transform: (source: string) => string,
+  deps: UseGroupCommitsParams,
+): Promise<void> {
+  await saveProjectFilesWithHistory({
+    projectId,
     label,
+    files: { [path]: transform },
+    readFile: async (file) => confirmedSource(projectId, file)?.content ?? readProjectFileContent(projectId, file),
     writeFile: deps.writeProjectFile,
     recordEdit: deps.editHistory.recordEdit,
-    rewrite: async (originalContent, history) => {
-      const mutateResponse = await studioApiFetch(
-        buildProjectApiPath(pid, `/file-mutations/${route}/${encodeURIComponent(targetPath)}`),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
-          body: JSON.stringify(body),
-        },
-      );
-      if (!mutateResponse.ok) {
-        const errBody = (await mutateResponse.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(errBody?.error ?? `Failed to ${label.toLowerCase()} in ${targetPath}`);
-      }
-      result = (await mutateResponse.json()) as { content?: string; groupId?: string };
-      return { disk: typeof result.content === "string" ? result.content : originalContent };
-    },
   });
   deps.clearDomSelection();
   deps.forceReloadSdkSession?.();
   deps.reloadPreview();
-  return result;
 }
 
 export function useGroupCommits(params: UseGroupCommitsParams) {
@@ -176,18 +147,17 @@ export function useGroupCommits(params: UseGroupCommitsParams) {
       // Auto-name "Group N" by the count of existing groups in the document.
       const doc = members[0].element.ownerDocument;
       const groupId = `Group ${doc.querySelectorAll("[data-hf-group]").length + 1}`;
-      const { bbox, targets, rebases } = computeGroupGeometry(members, timelineElements);
-
       try {
-        const data = await commitStructuralMutation(
-          pid,
-          targetPath,
-          "wrap-elements",
-          { targets, groupId, bbox, rebases },
-          "Group elements",
-          params,
-        );
-        return data.groupId ?? groupId;
+        const { bbox, targets, rebases } = computeGroupGeometry(members, timelineElements);
+        const { groupCanvasElements } = await import("../../../packages/edit-core/canvas-source");
+        let wrapperId = groupId;
+        await saveGroupEdit(pid, targetPath, "Group elements", (source) => {
+          const result = groupCanvasElements(source, targets, groupId, bbox, rebases);
+          if (!result.matched) throw new Error(result.error || "Cannot group the selected elements.");
+          wrapperId = result.groupId ?? groupId;
+          return result.html;
+        }, params);
+        return wrapperId;
       } catch (error) {
         showToast(error instanceof Error ? error.message : "Failed to group elements", "error");
         return null;
@@ -204,14 +174,10 @@ export function useGroupCommits(params: UseGroupCommitsParams) {
       const childTracks = resolveGroupChildTracks(group, timelineElements);
 
       try {
-        await commitStructuralMutation(
-          pid,
-          targetPath,
-          "unwrap-elements",
-          { target: buildDomEditPatchTarget(group), childTracks },
-          "Ungroup elements",
-          params,
-        );
+        const { applyCanvasCommand } = await import("../../../packages/edit-core/canvas-commands");
+        const target = buildDomEditPatchTarget(group);
+        await saveGroupEdit(pid, targetPath, "Ungroup elements", (source) =>
+          applyCanvasCommand(source, { kind: "ungroupElements", target, childTracks }), params);
       } catch (error) {
         showToast(error instanceof Error ? error.message : "Failed to ungroup elements", "error");
       }

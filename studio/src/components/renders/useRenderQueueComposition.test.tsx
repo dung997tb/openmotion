@@ -6,10 +6,25 @@
 // default therefore lives in startRender, which every control routes through.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startRenderAndReadBody, type MountedQueue } from "./renderQueueTestHarness";
+import { mountRenderQueue, renderPosts, startRenderAndReadBody, stubRenderFetch, type MountedQueue } from "./renderQueueTestHarness";
 import { setBrowserExportEnabled } from "./renderSettings";
 import { usePreviewIframeStore } from "../../player/store/previewIframeStore";
+import { usePlayerStore } from "../../player/store/playerStore";
+import { act } from "react";
 
+const runIsolatedBrowserExportMock = vi.fn(async () => ({
+  blobUrl: "blob:isolated-result",
+  mimeType: "video/mp4",
+  bytes: 1024,
+  durationMs: 42,
+  frameCount: 30,
+  width: 1920,
+  height: 1080,
+}));
+
+vi.mock("../../render/isolatedBrowserExport", () => ({
+  runIsolatedBrowserExport: runIsolatedBrowserExportMock,
+}));
 vi.mock("../../telemetry/policy", () => ({ browserTelemetryAllowed: () => false }));
 vi.mock("../../telemetry/config", () => ({ getAnonymousId: () => "unused" }));
 vi.mock("../../telemetry/events", () => ({ trackStudioRenderStart: vi.fn() }));
@@ -33,7 +48,9 @@ afterEach(() => {
   queue = null;
   localStorage.clear();
   usePreviewIframeStore.getState().setIframe(null);
+  document.head.querySelectorAll('meta[name="openmotion-preview-origin"]').forEach((el) => el.remove());
   document.body.innerHTML = "";
+  runIsolatedBrowserExportMock.mockClear();
   vi.unstubAllGlobals();
 });
 
@@ -123,5 +140,47 @@ describe("browser export composition & isolation gates", () => {
 
     const body = await renderBody("parts/part-1.html", { format: "mp4", origin: "header" });
     expect(body["composition"]).toBe("parts/part-1.html");
+  });
+
+  it("routes isolated preview browser export through the preview bridge when openmotion-preview-origin is configured", async () => {
+    vi.stubGlobal("VideoEncoder", class {});
+    vi.stubGlobal("VideoFrame", class {});
+    setBrowserExportEnabled(true);
+
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.com";
+    document.head.appendChild(meta);
+
+    const isolatedIframe = document.createElement("iframe");
+    isolatedIframe.setAttribute("src", "https://preview.example.com/api/projects/demo/preview?pt=tok");
+    isolatedIframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    Object.defineProperty(isolatedIframe, "contentDocument", {
+      get: () => {
+        throw new Error("Blocked a frame with origin");
+      },
+    });
+    usePreviewIframeStore.getState().setIframe(isolatedIframe);
+    usePlayerStore.setState({
+      duration: 2,
+      elements: [{ id: "t1", tag: "p", start: 0, duration: 2, track: 0, text: { value: "Hello" } }],
+      timelineReady: true,
+    });
+
+    const fetchMock = stubRenderFetch();
+    queue = mountRenderQueue(useRenderQueue, "demo", "index.html");
+    await act(async () => {
+      await queue!.api().startRender({ format: "mp4", engine: "browser", origin: "export_panel" });
+    });
+
+    expect(renderPosts(fetchMock)).toHaveLength(0);
+    expect(runIsolatedBrowserExportMock).toHaveBeenCalledTimes(1);
+    expect(runIsolatedBrowserExportMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "demo",
+        previewOrigin: "https://preview.example.com",
+        format: "mp4",
+      }),
+    );
   });
 });

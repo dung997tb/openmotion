@@ -135,4 +135,91 @@ describe("BrowserExportToggle integration in RenderQueue", () => {
     expect(exportBtn.disabled).toBe(true);
     expect(host.textContent).toContain(ISOLATED_PREVIEW_EXPORT_REASON);
   });
+
+  it("enables browser export when preview isolation matches configured openmotion-preview-origin", () => {
+    const meta = document.createElement("meta");
+    meta.name = "openmotion-preview-origin";
+    meta.content = "https://preview.example.com";
+    document.head.appendChild(meta);
+
+    const isolatedIframe = document.createElement("iframe");
+    isolatedIframe.setAttribute("src", "https://preview.example.com/api/projects/demo/preview?pt=tok");
+    isolatedIframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    Object.defineProperty(isolatedIframe, "contentDocument", {
+      get: () => {
+        throw new Error("Blocked a frame with origin");
+      },
+    });
+    usePreviewIframeStore.getState().setIframe(isolatedIframe);
+
+    const onStartRender = vi.fn<StartRenderHandler>();
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+
+    act(() => {
+      root?.render(
+        <StudioHostContext.Provider value={{ mvpEditor: false }}>
+          <RenderQueue
+            jobs={[]}
+            projectId="demo"
+            onDelete={vi.fn()}
+            onClearCompleted={vi.fn()}
+            onStartRender={onStartRender}
+            isRendering={false}
+            canBrowserExport={true}
+            compositionDimensions={{ width: 1920, height: 1080 }}
+            ffmpeg={{ ok: false, mode: "remote-worker", title: "Render worker unavailable" }}
+            ffmpegChecking={false}
+            onRecheckFfmpeg={vi.fn()}
+          />
+        </StudioHostContext.Provider>,
+      );
+    });
+
+    const toggle = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Browser export (Beta)"]')!;
+    const exportBtn = host.querySelector<HTMLButtonElement>('[data-testid="renders-export"]')!;
+    expect(Boolean(toggle.getAttribute("aria-disabled") === "true" || toggle.disabled)).toBe(false);
+    expect(host.textContent).not.toContain(ISOLATED_PREVIEW_EXPORT_REASON);
+
+    act(() => toggle.click());
+    expect(exportBtn.disabled).toBe(false);
+    act(() => exportBtn.click());
+    expect(onStartRender).toHaveBeenCalledExactlyOnceWith(
+      "mp4",
+      "standard",
+      "auto",
+      30,
+      false,
+      undefined,
+      "browser",
+    );
+
+    // Opaque sandbox without allow-same-origin must still be blocked even with meta configured.
+    const opaqueIframe = document.createElement("iframe");
+    opaqueIframe.setAttribute("src", "https://preview.example.com/api/projects/demo/preview?pt=tok");
+    opaqueIframe.setAttribute("sandbox", "allow-scripts");
+    act(() => {
+      usePreviewIframeStore.getState().setIframe(opaqueIframe);
+      root?.render(
+        <StudioHostContext.Provider value={{ mvpEditor: false }}>
+          <RenderQueue
+            jobs={[]}
+            projectId="demo"
+            onDelete={vi.fn()}
+            onClearCompleted={vi.fn()}
+            onStartRender={onStartRender}
+            isRendering={false}
+            canBrowserExport={true}
+            compositionDimensions={{ width: 1920, height: 1080 }}
+            ffmpeg={{ ok: false, mode: "remote-worker", title: "Render worker unavailable" }}
+            ffmpegChecking={false}
+            onRecheckFfmpeg={vi.fn()}
+          />
+        </StudioHostContext.Provider>,
+      );
+    });
+    expect(host.textContent).toContain(ISOLATED_PREVIEW_EXPORT_REASON);
+    meta.remove();
+  });
 });

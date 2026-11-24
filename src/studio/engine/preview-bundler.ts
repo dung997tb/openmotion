@@ -549,7 +549,7 @@ async function applyDeterministicFonts(html: string, options: BundlePreviewOptio
 }
 
 // User code can sample timing once at startup. Rebinding the runtime alone cannot replay its effects.
-const TIMING_ONLY_TAGS = new Set('html head title meta style body main section div article header footer span p h1 h2 h3 h4 h5 h6 img picture audio video source track'.split(' '));
+const TIMING_ONLY_TAGS = new Set('html head title meta style body main section div article header footer span p h1 h2 h3 h4 h5 h6 img picture canvas audio video source track'.split(' '));
 function canRebindDocumentTiming(doc: Document, runtimeUrl: string): boolean {
   const scripts = doc.querySelectorAll('script');
   const runtime = scripts[0];

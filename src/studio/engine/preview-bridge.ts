@@ -10,6 +10,7 @@ import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
 import { PREVIEW_PEER_TIMING } from './preview-peer-timing.ts';
 import type { PreviewLiveEdits } from '../../../shared/preview-timing.ts';
 import { PREVIEW_THUMBNAIL_CAPTURE } from './preview-thumbnail-capture.ts';
+import { PREVIEW_BROWSER_EXPORT } from './preview-browser-export.ts';
 
 function scopedScript(configuration: string, body: string): string {
   return `(function(){
@@ -20,10 +21,10 @@ function scopedScript(configuration: string, body: string): string {
   var parentWindow=window.parent;
   var parentOrigin='*';
   try { if(document.referrer) parentOrigin=new globalThis.URL(document.referrer).origin; } catch (_) {}
-  function post(type,payload,requestId,transfer){
+  function post(type,payload,requestId,transfer,explicitOrigin){
     var message=Object.assign({source:SOURCE,version:VERSION,type:type,projectId:projectId,token:token},payload||{});
     if(requestId) message.requestId=requestId;
-    var targetOrigin=parentOrigin==='null'?'*':parentOrigin;
+    var targetOrigin=explicitOrigin||(parentOrigin==='null'?'*':parentOrigin);
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
@@ -157,15 +158,16 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
       : Promise.resolve();
     return seekDone.then(function(){ return waitVisibleImagesAt(time); }).then(function(){ return waitPaintFrames(2); });
   }
-  function respond(requestId,result,error,transfer){
+  ${PREVIEW_BROWSER_EXPORT}
+  function respond(requestId,result,error,transfer,explicitOrigin){
     var message=Object.assign({source:SOURCE,version:VERSION,type:'response',projectId:projectId,token:token},error?{ok:false,error:String(error)}:{ok:true,result:result});
     if(requestId) message.requestId=requestId;
-    var targetOrigin=parentOrigin==='null'?'*':parentOrigin;
+    var targetOrigin=explicitOrigin||(parentOrigin==='null'?'*':parentOrigin);
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
   function ready(){
-    post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,liveEdits:settings.liveEdits,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']});
+    post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,liveEdits:settings.liveEdits,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture','browser-export']});
     var state=timeline(true);
     if(state.duration>0){
       durationBootAnnounced=true;
@@ -213,6 +215,23 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
         },function(error){
           respond(requestId,null,error);
         });
+        return;
+      }
+      if(message.type==='browser-export-start'){
+        if(!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
+        var exportTargetOrigin=settings.studioOrigin;
+        startBridgeBrowserExport(message,function(update){
+          post('browser-export-progress',update,requestId,undefined,exportTargetOrigin);
+        }).then(function(result){
+          respond(requestId,result,null,result&&result.buffer?[result.buffer]:undefined,exportTargetOrigin);
+        },function(error){
+          respond(requestId,null,error,undefined,exportTargetOrigin);
+        });
+        return;
+      }
+      if(message.type==='browser-export-cancel'){
+        if(!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
+        respond(requestId,{cancelled:cancelBridgeBrowserExport(message)},null,undefined,settings.studioOrigin);
         return;
       }
       if(message.type==='playback-control'){

@@ -7,6 +7,7 @@ Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: tr
 import type { TimelineElement } from "../player";
 import { usePlayerStore } from "../player/store/playerStore";
 import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
+import { forgetSource, rememberSource } from "../utils/confirmedTextSources";
 
 const saved = vi.hoisted(() => ({ inputs: [] as Array<Record<string, unknown>> }));
 vi.mock("../utils/studioFileHistory", () => ({
@@ -32,11 +33,13 @@ const clip = (id: string, sourceFile?: string): TimelineElement => ({
 afterEach(() => {
   document.body.innerHTML = "";
   usePlayerStore.getState().reset();
+  forgetSource("p1", "index.html");
   vi.restoreAllMocks();
 });
 
 describe("useSetElementsAttribute", () => {
   it('refreshes caption lock discovery only after a successful track lock save', async () => {
+    for (let i = 0; i < 4; i++) vi.mocked(saveProjectFilesWithHistory).mockResolvedValueOnce(["index.html"]);
     const iframe = document.createElement('iframe'); document.body.append(iframe);
     iframe.contentDocument!.body.innerHTML = '<div id="cue"></div>';
     const cue = { ...clip('cue'), tag: 'div' };
@@ -53,9 +56,19 @@ describe("useSetElementsAttribute", () => {
     await act(async () => { await write?.([{ element: cue, value: '' }], 'data-timeline-locked', 'Lock track'); });
     expect(changed).toHaveBeenCalledTimes(1);
     expect(usePlayerStore.getState().elements[0].timelineLocked).toBe(true);
-    vi.mocked(saveProjectFilesWithHistory).mockRejectedValueOnce(new Error('Conflict'));
+    rememberSource("p1", "index.html", { version: "ordinary", content: '<div id="cue"></div>' });
     await act(async () => { await write?.([{ element: cue, value: null }], 'data-timeline-locked', 'Unlock track'); });
     expect(changed).toHaveBeenCalledTimes(1);
+    rememberSource("p1", "index.html", { version: "custom", content: '<div id="cue" data-caption-track="custom"></div>' });
+    await act(async () => { await write?.([{ element: cue, value: '' }], 'data-timeline-locked', 'Lock track'); });
+    expect(changed).toHaveBeenCalledTimes(2);
+    rememberSource("p1", "index.html", { version: "legacy", content: '<div></div>' });
+    const legacy = { ...cue, domId: 'text-c926cda4-58ef-4f11-9b7d-9a73476b6179-segment' };
+    await act(async () => { await write?.([{ element: legacy, value: '' }], 'data-timeline-locked', 'Lock track'); });
+    expect(changed).toHaveBeenCalledTimes(3);
+    vi.mocked(saveProjectFilesWithHistory).mockRejectedValueOnce(new Error('Conflict'));
+    await act(async () => { await write?.([{ element: cue, value: null }], 'data-timeline-locked', 'Unlock track'); });
+    expect(changed).toHaveBeenCalledTimes(3);
     expect(usePlayerStore.getState().elements[0].timelineLocked).toBe(true);
     act(() => root.unmount());
   });

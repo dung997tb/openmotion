@@ -582,6 +582,7 @@ describe("FlatMediaSection — audio clips", () => {
 
   it.each([
     ["Media start", "media-start", "45.00", {}, "9999"],
+    ["Media start", "media-start", "1.23", { "source-duration": "1.237" }, "10.5"],
     ["Fade in", "fade-in", "10", {}, "9999"],
     ["Fade out", "fade-out", "10", {}, "9999"],
     ["Fade in", "fade-in", "5", { "fade-out": "5" }, "8"],

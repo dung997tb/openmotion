@@ -103,3 +103,49 @@ test('pasting after an attribute-selected wrapper keeps the selected occurrence 
     assert.equal(document.querySelector('aside > section > b')?.textContent, 'Original');
   }
 });
+
+test('block variables bind by ID and preserve unrelated defaults, markup and script literals', () => {
+  const schema = [
+    { id: 'cellSize', type: 'number', default: 54 },
+    { id: 'neighbor', type: 'number', default: 54 },
+    { id: 'title', type: 'string', default: 'Initial' },
+    { id: 'quantize', type: 'boolean', default: false },
+  ];
+  const html = `<template><main data-composition-id="grid" data-composition-variables='${JSON.stringify(schema)}'><script>const fallback = 54;</script></main></template>`;
+  const edit = (source: string, id: string, value: string) => applyContentCommand(source, {
+    kind: 'setBlockParameter', compositionPath: 'grid.html', key: id, value,
+  });
+  const number = edit(html, '--cellsize', '55');
+  assert.equal(number, html.replace('"default":54', '"default":55'));
+  assert.equal(edit(number, 'cellSize', '55'), number);
+  assert.match(edit(number, 'quantize', 'true'), /"default":true/);
+  const title = edit(number, 'title', "M & S's <intro>");
+  assert.match(title, /M &amp; S&#39;s &lt;intro>/);
+  assert.equal(edit(title, 'title', 'Initial'), number);
+  assert.throws(() => edit(number, 'missing', '54'), /Missing/);
+  assert.throws(() => edit(number, 'cellSize', 'NaN'), /Invalid value/);
+  assert.throws(() => edit(number, 'quantize', 'unknown'), /Invalid value/);
+});
+
+test('updates a named CSS parameter while preserving its documented example and unrelated identical colors', () => {
+  const html = '<style>/* --accent: #aaa */ #root {--accent: #aaa; color: #aaa}</style><div data-composition-id="root"></div>';
+  const command = { kind: 'setBlockParameter', compositionPath: 'legacy.html', key: '--accent', value: '#bbb' } as const;
+  assert.equal(applyContentCommand(html, command), html.replace('{--accent: #aaa', '{--accent: #bbb'));
+  assert.throws(() => applyContentCommand(html + '<style>body{--accent:black}</style>', command), /Ambiguous CSS parameter/);
+});
+
+test('document variables and root overrides target their original carrier without touching nested blocks', () => {
+  const attribute = (id: string, value: string) => `data-composition-variables='[{"id":"${id}","type":"string","default":"${value}"}]'`;
+  const cmd = (key: string) => ({kind: 'setBlockParameter', compositionPath: 'intro.html', key, value: 'After'} as const);
+  const doc = `<html ${attribute('title', 'April')}><body><div data-composition-id="intro"><div data-composition-id="nested" ${attribute('title', 'April')}></div></div></body></html>`;
+  assert.equal(applyContentCommand(doc, cmd('title')), doc.replace(attribute('title', 'April'), attribute('title', 'After')));
+  const rootOverride = doc.replace('id="intro"', `id="intro" ${attribute('title', 'May')}`);
+  assert.equal(applyContentCommand(rootOverride, cmd('title')), rootOverride.replace(attribute('title', 'May'), attribute('title', 'After')));
+});
+
+test('declared controls coexist with named legacy CSS controls without guessing a literal', () => {
+  const doc = `<html data-composition-variables='[{"id":"title","type":"string","default":"Ink"}]'><head><style>:root{--accent:#abc;color:#abc}</style></head><body id="stage">Ink</body></html>`;
+  const command = { kind: 'setBlockParameter', compositionPath: 'mixed.html', key: '--accent', previous: '#abc', value: '#123' } as const;
+  assert.equal(applyContentCommand(doc, command), doc.replace('--accent:#abc', '--accent:#123'));
+  assert.throws(() => applyContentCommand(doc, { ...command, key: '--missing', previous: 'stage' }), /Missing/);
+});

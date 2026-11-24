@@ -94,7 +94,8 @@ function applyResolvedSelections(
   if (selections.length === 0) {
     applyDomSelection(null, { revealPanel: false });
   } else if (selections.length === 1) {
-    applyDomSelection(selections[0]);
+    // Mirroring a selection into a ready preview must preserve the panel opened by the action.
+    applyDomSelection(selections[0], { revealPanel: false });
   } else {
     applyMarqueeSelection(selections, false);
   }
