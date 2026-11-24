@@ -77,6 +77,26 @@ describe('gamePublishStore', () => {
     expect(session).toMatchObject({ view: 'step', platformId: 'telegram' });
   });
 
+  it('a conversation card resumes its step after the user went back to the platform list', async () => {
+    gamePublishActions.open(input);
+    gamePublishActions.choose(input.artifactId, 'telegram');
+    gamePublishActions.showList(input.artifactId);
+    gamePublishActions.resumeStep(input.artifactId, { platformId: 'telegram', stepIndex: 0 });
+    expect(gamePublishSessionFor(input.artifactId)).toMatchObject({ view: 'step', platformId: 'telegram' });
+    gamePublishActions.showList(input.artifactId);
+    const done = gamePublishActions.completeStep(input.artifactId, { platformId: 'telegram', stepIndex: 0 });
+    await flush(10000);
+    await done;
+    expect(gamePublishSessionFor(input.artifactId)?.view).toBe('result');
+  });
+
+  it('a stale card for another platform or step does nothing', async () => {
+    gamePublishActions.open(input);
+    gamePublishActions.choose(input.artifactId, 'itch');
+    await gamePublishActions.completeStep(input.artifactId, { platformId: 'wechat', stepIndex: 0 });
+    expect(gamePublishSessionFor(input.artifactId)).toMatchObject({ platformId: 'itch', view: 'step', stepIndex: 0 });
+  });
+
   it('reopening returns to the step in progress', () => {
     gamePublishActions.open(input);
     gamePublishActions.choose(input.artifactId, 'telegram');

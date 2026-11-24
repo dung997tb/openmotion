@@ -98,14 +98,28 @@ function closeOpenNeedCards(session: GamePublishSession) {
   threads.set(key, (threads.get(key) ?? []).map(entry => (entry.kind === 'need' && entry.artifactId === session.artifactId ? { ...entry, closed: true } : entry)));
 }
 
+function stepInProgress(session: GamePublishSession): boolean {
+  const platform = gamePublishPlatform(session.platformId);
+  return Boolean(platform && session.stepIndex < platform.steps.length);
+}
+
+/** A conversation card only acts on the platform and step it was created for. */
+export interface GamePublishStepRef { platformId: GamePublishPlatformId; stepIndex: number }
+function matchesStep(session: GamePublishSession, ref: GamePublishStepRef) {
+  return session.platformId === ref.platformId && session.stepIndex === ref.stepIndex && stepInProgress(session);
+}
+
 export const gamePublishActions = {
   open(input: { artifactId: string; chatId: string | null; gameId: string; gameTitle: string }) {
     const existing = sessions.get(input.artifactId);
     if (existing) {
+      // The game moved to another conversation: cards left in the old one can no longer act on it.
+      if (input.chatId && input.chatId !== existing.chatId) closeOpenNeedCards(existing);
       // Reopening returns to the step in progress; a finished platform returns to the link result.
-      const view: GamePublishView = existing.view === 'result' || existing.view === 'list'
-        ? (existing.linkUrl ? 'link-result' : 'home')
-        : existing.view;
+      const home: GamePublishView = existing.linkUrl ? 'link-result' : 'home';
+      const view: GamePublishView = existing.view === 'result'
+        ? home
+        : existing.view === 'list' ? (stepInProgress(existing) ? 'step' : home) : existing.view;
       update(input.artifactId, { open: true, view, chatId: input.chatId ?? existing.chatId });
       return;
     }
@@ -124,7 +138,16 @@ export const gamePublishActions = {
   },
   close(artifactId: string) { update(artifactId, { open: false }); },
   /** Show the panel again for a game that already has publish state (e.g. from a conversation card). */
-  reopen(artifactId: string) { gamePublishActions.open({ ...sessions.get(artifactId)!, artifactId }); },
+  reopen(artifactId: string) {
+    const session = sessions.get(artifactId);
+    if (session) gamePublishActions.open({ ...session, artifactId });
+  },
+  /** Bring the panel back to the step a conversation card belongs to, if that step is still the current one. */
+  resumeStep(artifactId: string, ref: GamePublishStepRef) {
+    const session = sessions.get(artifactId);
+    if (!session || !matchesStep(session, ref) || session.view === 'working') return;
+    update(artifactId, { open: true, view: 'step' });
+  },
   toggle(input: { artifactId: string; chatId: string | null; gameId: string; gameTitle: string }) {
     if (sessions.get(input.artifactId)?.open) gamePublishActions.close(input.artifactId);
     else gamePublishActions.open(input);
@@ -188,7 +211,13 @@ export const gamePublishActions = {
     if (session) update(artifactId, { inputs: { ...session.inputs, [label]: value } });
   },
   /** The user finished the current step (from the panel or the conversation card). */
-  async completeStep(artifactId: string) {
+  async completeStep(artifactId: string, from?: GamePublishStepRef) {
+    // From a card: act only if the card's step is still current, even if the panel shows another screen.
+    if (from) {
+      const current = sessions.get(artifactId);
+      if (!current || !matchesStep(current, from) || current.view === 'working') return;
+      if (current.view !== 'step') update(artifactId, { view: 'step' });
+    }
     const session = sessions.get(artifactId);
     const platform = gamePublishPlatform(session?.platformId);
     if (!session || !platform || session.view !== 'step') return;

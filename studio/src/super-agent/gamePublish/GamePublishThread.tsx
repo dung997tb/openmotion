@@ -61,6 +61,11 @@ function ThreadEntry({ entry, onOpenPanel, onNotify }: {
     const step = platform?.steps[entry.stepIndex];
     if (!platform || !step) return null;
     const needsChoice = Boolean(step.pick);
+    const ref = { platformId: entry.platformId, stepIndex: entry.stepIndex };
+    const openStep = () => {
+      onOpenPanel(entry.artifactId);
+      gamePublishActions.resumeStep(entry.artifactId, ref);
+    };
     return (
       <div className="om-gp-card" data-closed={entry.closed || undefined}>
         <div className="om-gp-card-eyebrow">
@@ -73,11 +78,11 @@ function ThreadEntry({ entry, onOpenPanel, onNotify }: {
         {!entry.closed && (
           <div className="om-gp-card-actions">
             {needsChoice ? (
-              <Button variant="plain" type="button" className="om-gp-primary" onClick={() => onOpenPanel(entry.artifactId)}>{t('Choose in the panel')}</Button>
+              <Button variant="plain" type="button" className="om-gp-primary" onClick={() => openStep()}>{t('Choose in the panel')}</Button>
             ) : (
               <>
-                <Button variant="plain" type="button" className="om-gp-primary" onClick={() => void gamePublishActions.completeStep(entry.artifactId)}>{t(step.cta)}</Button>
-                <Button variant="plain" type="button" className="om-gp-secondary" onClick={() => onOpenPanel(entry.artifactId)}>{t('Open in the panel')}</Button>
+                <Button variant="plain" type="button" className="om-gp-primary" onClick={() => void gamePublishActions.completeStep(entry.artifactId, ref)}>{t(step.cta)}</Button>
+                <Button variant="plain" type="button" className="om-gp-secondary" onClick={() => openStep()}>{t('Open in the panel')}</Button>
                 <span className="om-gp-muted">{t('Tell me when it is done')}</span>
               </>
             )}

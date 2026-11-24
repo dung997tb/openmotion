@@ -28,7 +28,7 @@ export function GamePublishPanel({ artifactId, coverUrl, onNotify }: {
     <div className="om-gp-status" data-tone={session.status.tone} role="status">
       <span className="om-gp-status-dot" aria-hidden="true" />
       <span className="om-gp-status-text">{t(session.status.key, session.status.line ? { line: t(session.status.line) } : undefined)}</span>
-      <span className="om-gp-status-hint">{t('Details in the conversation')}</span>
+      {session.chatId && <span className="om-gp-status-hint">{t('Details in the conversation')}</span>}
     </div>
   );
 
