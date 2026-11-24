@@ -886,4 +886,83 @@ describe('Studio composition filmstrip HTTP routes', () => {
       true,
     );
   });
+
+  it('reads only reachable nested compositions when computing renderKey for a scene with data-composition-src', async () => {
+    const storage = new MemoryStorage();
+    const readPaths: string[] = [];
+    const files: VirtualFileRecord[] = [
+      {
+        path: 'index.html',
+        blobScope: 'workspace',
+        sha256: SHA_SCENE,
+        sizeBytes: 64,
+        mimeType: 'text/html; charset=utf-8',
+        isText: true,
+        updatedAt: new Date(0),
+      },
+      {
+        path: 'compositions/parent.html',
+        blobScope: 'workspace',
+        sha256: SHA_SCENE,
+        sizeBytes: 128,
+        mimeType: 'text/html; charset=utf-8',
+        isText: true,
+        updatedAt: new Date(0),
+      },
+      {
+        path: 'compositions/child.html',
+        blobScope: 'workspace',
+        sha256: SHA_OTHER,
+        sizeBytes: 128,
+        mimeType: 'text/html; charset=utf-8',
+        isText: true,
+        updatedAt: new Date(0),
+      },
+      {
+        path: 'compositions/unrelated-sibling.html',
+        blobScope: 'patch',
+        sha256: SHA_PATCH,
+        sizeBytes: 128,
+        mimeType: 'text/html; charset=utf-8',
+        isText: true,
+        updatedAt: new Date(0),
+      },
+    ];
+    const texts = new Map<string, string>([
+      ['index.html', '<html><head><title>Test</title></head><body></body></html>'],
+      ['compositions/parent.html', '<div data-composition-src="child.html"></div>'],
+      ['compositions/child.html', '<div>Child</div>'],
+      ['compositions/unrelated-sibling.html', '<div>Unrelated</div>'],
+    ]);
+
+    const deps = {
+      storage,
+      files: {
+        listFiles: async () => files,
+        readTextFile: async (_auth: AuthContext, _projectId: string, filePath: string) => {
+          readPaths.push(filePath);
+          const rec = files.find((f) => f.path === filePath);
+          const content = texts.get(filePath);
+          if (!rec || content === undefined) return null;
+          return {
+            path: rec.path,
+            content,
+            version: `"${rec.blobScope}:${rec.sha256}"`,
+            sha256: rec.sha256,
+            blobScope: rec.blobScope,
+          };
+        },
+      },
+      resolveAuth: () => makeAuth(),
+    } as unknown as DisklessStudioDeps;
+    const app = createStudioCompositionFilmstripsRoutes(deps);
+    app.onError((err, c) => handleStudioError(c, err));
+
+    const res = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/parent.html`,
+    );
+    assert.equal(res.status, 204);
+    assert.deepEqual(readPaths, ['index.html', 'compositions/parent.html', 'compositions/child.html']);
+    assert.equal(readPaths.includes('compositions/unrelated-sibling.html'), false);
+  });
 });

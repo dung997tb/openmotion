@@ -15,6 +15,7 @@ import {
   embedFilmstripComment,
   extractFilmstripMeta,
   extractIndexHeadMarkup,
+  extractNestedCompositionRefs,
   FILMSTRIP_HEADER_ASPECT,
   FILMSTRIP_HEADER_FRAMES,
   FILMSTRIP_HEADER_HEIGHT,
@@ -144,10 +145,11 @@ export function createStudioCompositionFilmstripsRoutes(
       }
     }
 
-    // Load HTML text for `safePath` (and any transitive nested `data-composition-src` files)
-    // so edits to nested scenes invalidate the parent composition's filmstrip render key.
+    // Load HTML text only for `safePath` and its reachable transitive `data-composition-src`
+    // subgraph so unrelated sibling scenes are never read on every filmstrip lookup.
     const htmlCache = new Map<string, string | null>();
     if (safePath !== 'index.html') {
+      const byPath = new Map(files.map((f) => [f.path, f]));
       const htmlPathsToCheck = [safePath];
       const visited = new Set<string>(htmlPathsToCheck);
       while (htmlPathsToCheck.length > 0) {
@@ -160,12 +162,11 @@ export function createStudioCompositionFilmstripsRoutes(
           content = null;
         }
         htmlCache.set(current, content);
-        if (content && /data-composition-src/i.test(content)) {
-          for (const f of files) {
-            if (f.isText && isHtmlCompositionPath(f.path) && !visited.has(f.path)) {
-              visited.add(f.path);
-              htmlPathsToCheck.push(f.path);
-            }
+        for (const target of extractNestedCompositionRefs(current, content, byPath)) {
+          const targetFile = byPath.get(target);
+          if (targetFile && isHtmlCompositionFile(targetFile) && !visited.has(target)) {
+            visited.add(target);
+            htmlPathsToCheck.push(target);
           }
         }
       }

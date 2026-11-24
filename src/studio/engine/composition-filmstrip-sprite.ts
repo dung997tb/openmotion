@@ -54,6 +54,25 @@ function resolveNestedCompRef(
   return null;
 }
 
+export function extractNestedCompositionRefs(
+  ownerPath: string,
+  html: string | null | undefined,
+  byPath: ReadonlyMap<string, FilmstripDependencyFile>,
+): string[] {
+  if (!html || !/data-composition-src/i.test(html)) return [];
+  const targets: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of scanHtmlOpeningTags(html)) {
+    const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
+    if (!attr || attr.kind !== 'value') continue;
+    const target = resolveNestedCompRef(ownerPath, decodeAuthoredAttribute(attr.value), byPath);
+    if (!target || seen.has(target)) continue;
+    seen.add(target);
+    targets.push(target);
+  }
+  return targets;
+}
+
 /**
  * Compute a deterministic sha256 fingerprint of every project input beyond `compPath`'s
  * own HTML bytes that affects how `compPath` renders:
@@ -87,12 +106,8 @@ export function computeCompositionFilmstripDepsDigest(input: {
     while (queue.length > 0) {
       const current = queue.shift()!;
       const html = input.readText(current);
-      if (!html || !/data-composition-src/i.test(html)) continue;
-      for (const tag of scanHtmlOpeningTags(html)) {
-        const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
-        if (!attr || attr.kind !== 'value') continue;
-        const target = resolveNestedCompRef(current, decodeAuthoredAttribute(attr.value), byPath);
-        if (!target || visited.has(target)) continue;
+      for (const target of extractNestedCompositionRefs(current, html, byPath)) {
+        if (visited.has(target)) continue;
         visited.add(target);
         includedComps.add(target);
         queue.push(target);
