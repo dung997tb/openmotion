@@ -4,37 +4,37 @@ import { useI18n } from '../i18n/I18n';
 import cover01 from './corridor-covers/cover-01.webp?no-inline';
 import cover02 from './corridor-covers/cover-02.webp?no-inline';
 import cover03 from './corridor-covers/cover-03.webp?no-inline';
-import cover04 from './corridor-covers/cover-04.webp?no-inline';
+import cover04 from './corridor-covers/cover-04.avif?no-inline';
 import cover05 from './corridor-covers/cover-05.webp?no-inline';
-import cover06 from './corridor-covers/cover-06.webp?no-inline';
+import cover06 from './corridor-covers/cover-06.avif?no-inline';
 import cover07 from './corridor-covers/cover-07.webp?no-inline';
-import cover08 from './corridor-covers/cover-08.webp?no-inline';
+import cover08 from './corridor-covers/cover-08.avif?no-inline';
 import cover09 from './corridor-covers/cover-09.webp?no-inline';
-import cover10 from './corridor-covers/cover-10.webp?no-inline';
-import cover11 from './corridor-covers/cover-11.webp?no-inline';
-import cover12 from './corridor-covers/cover-12.webp?no-inline';
+import cover10 from './corridor-covers/cover-10.avif?no-inline';
+import cover11 from './corridor-covers/cover-11.avif?no-inline';
+import cover12 from './corridor-covers/cover-12.avif?no-inline';
 import cover13 from './corridor-covers/cover-13.webp?no-inline';
-import cover14 from './corridor-covers/cover-14.webp?no-inline';
-import cover15 from './corridor-covers/cover-15.webp?no-inline';
+import cover14 from './corridor-covers/cover-14.avif?no-inline';
+import cover15 from './corridor-covers/cover-15.avif?no-inline';
 import cover16 from './corridor-covers/cover-16.webp?no-inline';
-import cover17 from './corridor-covers/cover-17.webp?no-inline';
-import cover18 from './corridor-covers/cover-18.webp?no-inline';
+import cover17 from './corridor-covers/cover-17.avif?no-inline';
+import cover18 from './corridor-covers/cover-18.avif?no-inline';
 import cover19 from './corridor-covers/cover-19.webp?no-inline';
-import cover20 from './corridor-covers/cover-20.webp?no-inline';
+import cover20 from './corridor-covers/cover-20.avif?no-inline';
 import cover21 from './corridor-covers/cover-21.webp?no-inline';
-import cover22 from './corridor-covers/cover-22.webp?no-inline';
-import cover23 from './corridor-covers/cover-23.webp?no-inline';
-import cover24 from './corridor-covers/cover-24.webp?no-inline';
-import cover25 from './corridor-covers/cover-25.webp?no-inline';
-import cover26 from './corridor-covers/cover-26.webp?no-inline';
-import cover27 from './corridor-covers/cover-27.webp?no-inline';
-import cover28 from './corridor-covers/cover-28.webp?no-inline';
-import cover29 from './corridor-covers/cover-29.webp?no-inline';
-import cover30 from './corridor-covers/cover-30.webp?no-inline';
+import cover22 from './corridor-covers/cover-22.avif?no-inline';
+import cover23 from './corridor-covers/cover-23.avif?no-inline';
+import cover24 from './corridor-covers/cover-24.avif?no-inline';
+import cover25 from './corridor-covers/cover-25.avif?no-inline';
+import cover26 from './corridor-covers/cover-26.avif?no-inline';
+import cover27 from './corridor-covers/cover-27.avif?no-inline';
+import cover28 from './corridor-covers/cover-28.avif?no-inline';
+import cover29 from './corridor-covers/cover-29.avif?no-inline';
+import cover30 from './corridor-covers/cover-30.avif?no-inline';
 import cover31 from './corridor-covers/cover-31.webp?no-inline';
 import cover32 from './corridor-covers/cover-32.webp?no-inline';
 import cover34 from './corridor-covers/cover-34.webp?no-inline';
-import cover35 from './corridor-covers/cover-35.webp?no-inline';
+import cover35 from './corridor-covers/cover-35.avif?no-inline';
 import cover36 from './corridor-covers/cover-36.webp?no-inline';
 import styles from './ExploreBlackFridayHero.module.css';
 import { MODEL_LOGO_ASSETS, type ModelLogoAsset } from './exploreModelLogos';
@@ -185,7 +185,7 @@ function easeOutExpo(t: number): number {
   return c >= 1 ? 1 : 1 - Math.pow(2, -10 * c);
 }
 
-export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } = {}) {
+export function ExploreBlackFridayHero({ active = true, onExpire }: { active?: boolean; onExpire?: () => void } = {}) {
   const { locale, t } = useI18n();
   const script = locale.startsWith('zh') ? 'zh' : (locale === 'ja' || locale === 'ko') ? 'cjk' : 'latin';
   const [time, setTime] = useState(() => readBlackFridayCountdown());
@@ -211,6 +211,23 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
   const [collapsedHeight, setCollapsedHeight] = useState<number | null>(null);
   const introStartRef = useRef<number>(typeof performance !== 'undefined' ? performance.now() : 0);
 
+  const [visible, setVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const hero = heroRef.current;
+    if (!hero || !active) return;
+    let inView = true;
+    const update = () => setVisible(inView && !document.hidden);
+    const observer = typeof IntersectionObserver === 'undefined' ? undefined : new IntersectionObserver(entries => {
+      inView = entries[entries.length - 1].isIntersecting;
+      update();
+    });
+    observer?.observe(hero);
+    document.addEventListener('visibilitychange', update);
+    update();
+    return () => { observer?.disconnect(); document.removeEventListener('visibilitychange', update); };
+  }, [active]);
+  const playing = active && visible;
+
   // Interactive physics state kept in refs to avoid React re-renders at 60fps
   const interactionRef = useRef({
     targetPointerX: 0,
@@ -223,37 +240,15 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
   });
 
   useEffect(() => {
-    let timer: number | undefined;
-    const stopTimer = () => {
-      if (timer !== undefined) {
-        window.clearInterval(timer);
-        timer = undefined;
-      }
-    };
+    if (!playing) return;
     const tick = () => {
-      if (document.hidden) {
-        stopTimer();
-        return;
-      }
-      if (!blackFridayHeroActive()) {
-        stopTimer();
-        onExpire?.();
-        return;
-      }
+      if (!blackFridayHeroActive()) { onExpire?.(); return; }
       setTime(readBlackFridayCountdown());
-      if (timer === undefined) {
-        timer = window.setInterval(tick, 1000);
-      }
     };
-    if (!document.hidden) {
-      timer = window.setInterval(tick, 1000);
-    }
-    document.addEventListener('visibilitychange', tick);
-    return () => {
-      stopTimer();
-      document.removeEventListener('visibilitychange', tick);
-    };
-  }, [onExpire]);
+    const timer = window.setInterval(tick, 1000);
+    tick();
+    return () => window.clearInterval(timer);
+  }, [onExpire, playing]);
 
   // Measure the exact compact Spotlight row below so the collapsed Black Friday hero stays large (~64-68% viewport)
   // while keeping the entire row of Spotlight cards 100% visible above the fold with zero bottom clipping.
@@ -324,6 +319,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
 
   // Precision staggered countdown digit roll-in synced with the signature opening sequence
   useEffect(() => {
+    if (!playing) return;
     const prefersReduced =
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
@@ -384,7 +380,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
 
     rafId = window.requestAnimationFrame(stepRoll);
     return () => window.cancelAnimationFrame(rafId);
-  }, []);
+  }, [playing]);
 
   // Keep 3D corridor walls flush with viewport corners across resizes.
   // Observe the centered full-height stage rather than the collapsible section
@@ -420,6 +416,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
 
   // 60fps infinite ring-recycling + signature opening camera choreography + mouse parallax + wheel inertia
   useEffect(() => {
+    if (!playing) return;
     const prefersReduced =
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
@@ -518,7 +515,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
 
     rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, [geometry]);
+  }, [geometry, playing]);
 
   // Passive wheel listener for kinetic corridor speed nudge; downward scroll while expanded immediately triggers collapse.
   useEffect(() => {

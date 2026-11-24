@@ -62,14 +62,14 @@ it('explains a missing sign-in component, offers Retry and a copyable command th
   await act(async () => button(page, '复制口令')!.click());
   expect(writeText).toHaveBeenCalledWith(command);
   await act(async () => button(page, '重试')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'settings_signin', entryId: expect.any(String) });
 });
 
 it('offers a retry after a connection failure, and sign-in again with a feedback link after rejected credentials', async () => {
   let page = await open({ state: 'signed-out', errorCode: 'setup_failed', error: "Can't connect to OpenDesign right now. Check your network and try again." });
   expect(actions(page)).toEqual(['Retry']); expect(page.querySelector('[role=alert]')?.textContent).toContain("Can't connect to OpenDesign");
   await act(async () => button(page, 'Retry')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'settings_signin', entryId: expect.any(String) });
   act(() => root!.unmount()); document.body.innerHTML = '';
   page = await open({ state: 'signed-out', errorCode: 'credentials_rejected', error: 'Account credentials could not be verified. Sign in again, and contact us if this keeps happening.' });
   expect(actions(page)).toEqual(['Sign in again', 'Report an issue']);
@@ -99,7 +99,7 @@ it('refreshes Go on checkout return and updates providers only after the plan ch
   await act(async () => window.dispatchEvent(new Event('focus')));
   expect(hooks.request).not.toHaveBeenCalled();
   await act(async () => button(page, 'Upgrade to Plus')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { entryId: expect.stringMatching(uuid) });
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'settings_subscription', entryId: expect.stringMatching(uuid) });
   hooks.account = { ...original as AccountSummary, plan: 'plus', balance: '4.00' };
   await act(async () => {
     window.dispatchEvent(new Event('focus'));
@@ -128,7 +128,7 @@ it('asks the local service to open the subscription page in the system browser, 
   const handoff = 'https://open-design.ai/cloud/login?intentId=intent-1';
   hooks.request.mockImplementation(async (route: string) => route === 'settings/account/subscription' ? { url: handoff, opened: true } : hooks.account);
   await act(async () => manage.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'settings_subscription', entryId: expect.any(String) });
   expect(popup).not.toHaveBeenCalled();
   const fallback = { opener: window as Window | null };
   popup.mockReturnValue(fallback as unknown as Window);
@@ -165,7 +165,7 @@ it.each(['free', 'go'])('offers an upgrade above the connected account for the %
   expect(actions(page)).toEqual(['Sign in now']);
   expect(offer()).toBeNull();
   await act(async () => button(page, 'Sign in now')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { entryId: expect.stringMatching(uuid) });
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'settings_signin', entryId: expect.stringMatching(uuid) });
 
   hooks.account = { state: 'signed-in', plan, balance: '12.00' };
   await act(async () => window.dispatchEvent(new Event('motion:account-changed')));
@@ -181,7 +181,7 @@ it.each(['free', 'go'])('offers an upgrade above the connected account for the %
   expect(upgrade.textContent).toBe('Upgrade to Plus');
   hooks.request.mockImplementation(async (route: string) => route === 'settings/account/subscription' ? { opened: true } : hooks.account);
   await act(async () => upgrade.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { entryId: expect.stringMatching(uuid) });
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'settings_subscription', entryId: expect.stringMatching(uuid) });
   hooks.account = { state: 'signed-in', plan: 'plus' };
   await act(async () => window.dispatchEvent(new Event('focus')));
   expect(offer()).toBeNull();
@@ -214,7 +214,7 @@ it('starts login from the signed-out subscription offer and switches to upgrade 
 
   hooks.account = { state: 'authorizing', authorizationUrl: activation };
   await act(async () => button(guide, 'Sign in now')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { entryId: expect.stringMatching(uuid) });
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'settings_signin', entryId: expect.stringMatching(uuid) });
   expect(page.querySelector('[data-guide]')).toBeNull();
   expect(button(page, 'Cancel')).toBeTruthy();
 

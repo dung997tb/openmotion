@@ -39,8 +39,6 @@ export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit
   const { t } = useI18n();
   const subscription = useSubscriptionOpener(
     element => {
-      onUpgrade();
-      if (visit) return reportOfferClick(visit, 'upgrade', destination.model);
       reportCreativeClick('creative_studio', 'asset_create', element, destinationTarget(destination));
     },
     onError,
@@ -50,6 +48,8 @@ export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit
   return <MultimodalUpgradeCard
     subscription={subscription}
     visit={visit}
+    model={destination.model ?? undefined}
+    onUpgrade={onUpgrade}
     title={t(title)}
     details={t(details)}
     buttonLabel={t('Upgrade', undefined, 'generation offer')}

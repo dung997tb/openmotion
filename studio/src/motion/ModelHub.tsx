@@ -1,3 +1,7 @@
+import { createPortal } from 'react-dom';
+import { useDialogBehavior } from '../components/ui/useDialogBehavior';
+import { useToast } from '../hooks/useToast';
+import { StudioToastViewport } from '../components/StudioToastViewport';
 import { Button } from 'open-design-ui/button';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MotionIcon } from './icons';
@@ -13,8 +17,10 @@ import { isOpenDesignProvider } from './imageMenuModels';
 import type { AssetDraft } from './AssetComposer';
 import { findModelHub, type HubShowcaseCase } from './modelHubs';
 import { HubVideoWall } from './HubVideoWall';
+import { setPendingAttribution } from './entitlementAttribution';
 import { reportHubClick, reportHubPageView } from './exploreTracking';
 import { campaignPricingUrl, newCampaignEntryId, useBlackFridayActive } from './campaignAttribution';
+import { newTrackingId } from './pageTracking';
 import { BackToExploreButton } from './BackToExploreButton';
 
 function columnsForWidth(width: number): number {
@@ -110,7 +116,9 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   ));
   const [lightboxPrompt, setLightboxPrompt] = useState('');
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const toast = useToast();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBehavior({ open: Boolean(activeCaseId), containerRef: dialogRef, onClose: () => setActiveCaseId(null) });
   const showcaseRef = useRef<HTMLElement>(null);
   const masonryCount = useMasonryColumns(showcaseRef);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -141,18 +149,12 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
     const found = hub.cases.find(item => item.id === activeCaseId);
     if (found) {
       setLightboxPrompt(t(found.prompt));
-      setCopiedPrompt(false);
     }
   }, [activeCaseId, hub, t]);
   useEffect(() => {
     if (!activeCaseId || !hub?.cases) return;
     const pool = hub.cases.filter(item => selectedTag === 'all' || item.tag === selectedTag);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setActiveCaseId(null);
-        return;
-      }
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === 'TEXTAREA' || tag === 'INPUT') return;
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -390,7 +392,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                         }}
                         onClick={() => setActiveCaseId(item.id)}
                         onKeyDown={event => {
-                          if (event.key === 'Enter' || event.key === ' ') {
+                          if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                             event.preventDefault();
                             setActiveCaseId(item.id);
                           }
@@ -447,16 +449,18 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
             const nextIdx = (currentIndex + delta + filteredCases.length) % filteredCases.length;
             setActiveCaseId(filteredCases[nextIdx].id);
           };
-          const handleCopyPrompt = () => {
+          const handleCopyPrompt = async () => {
             const text = lightboxPrompt.trim();
             if (!text) return;
-            navigator.clipboard?.writeText(text).then(() => {
-              setCopiedPrompt(true);
-              window.setTimeout(() => setCopiedPrompt(false), 1800);
-            }).catch(() => {});
+            try {
+              await navigator.clipboard.writeText(text);
+              toast.showToast(t('Copied to clipboard'), 'info', 'feedback');
+            } catch {
+              toast.showToast(t('Could not copy. Select and copy the text manually.'), 'error', 'feedback');
+            }
           };
-          return (
-            <div
+          return createPortal(
+            <div ref={dialogRef} tabIndex={-1}
               className="om-hub-lightbox-backdrop"
               role="dialog"
               aria-modal="true"
@@ -484,12 +488,6 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                 )}
 
                 <div className="om-hub-lightbox">
-                  <img
-                    className="om-hub-lightbox-aura"
-                    src={activeCase.poster}
-                    alt=""
-                    aria-hidden="true"
-                  />
                   <div className="om-hub-lightbox-stage">
                     <div
                       className="om-hub-lightbox-media"
@@ -568,8 +566,8 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                       <div className="om-hub-lightbox-prompt-head">
                         <span>{t('Prompt')}</span>
                         <Button type="button" variant="plain" className="om-hub-lightbox-copy" onClick={handleCopyPrompt}>
-                          <RemixIcon name={copiedPrompt ? 'check-line' : 'file-copy-line'} size={13} />
-                          <span>{copiedPrompt ? t('Copied') : t('Copy')}</span>
+                          <RemixIcon name="file-copy-line" size={13} />
+                          <span>{t('Copy')}</span>
                         </Button>
                       </div>
                       <textarea
@@ -606,9 +604,10 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                   </Button>
                 )}
               </div>
-            </div>
+            </div>, document.body
           );
         })()}
+        <StudioToastViewport {...toast} />
       </main>
     );
   }
@@ -639,7 +638,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
               <Button variant="plain" className="om-button om-model-hub-connected" onClick={() => { track('hub_hero', 'manage_connection'); onProvider('account'); }} title={t('Manage connection')}><RemixIcon name="checkbox-circle-fill" size={16} />{t('Connected to {provider}', { provider: 'OpenDesign' })}</Button>
             </>
             : <>
-              <Button variant="ghost" className="om-button h-auto" data-primary="media" onClick={() => { track('hub_hero', 'sign_in'); onSettings('account'); }}>{t('Sign in to use {model} now', { model: hub.latestModel })}<RemixIcon name="arrow-right-line" size={16} /></Button>
+              <Button variant="ghost" className="om-button h-auto" data-primary="media" onClick={() => { const entryId = newTrackingId(); setPendingAttribution('sign_in', 'model_hub_signin', entryId); track('hub_hero', 'sign_in', { hookId: 'model_hub_signin', entryId }); onSettings('account'); }}>{t('Sign in to use {model} now', { model: hub.latestModel })}<RemixIcon name="arrow-right-line" size={16} /></Button>
               {provider?.available
                 ? <Button variant="plain" className="om-button om-model-hub-connected" onClick={() => { track('hub_hero', 'manage_connection'); onProvider(hub.provider); }} title={t('Manage connection')}><RemixIcon name="checkbox-circle-fill" size={16} />{t('Connected to {provider}', { provider: provider.label })}</Button>
                 : <Button variant="ghost" className="om-button h-auto" onClick={() => { track('hub_hero', 'connect_key'); onProvider(hub.provider); }}><RemixIcon name="plug-line" size={16} />{t('Connect your own API key')}</Button>}
@@ -670,7 +669,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
               {/* Signed-in people are never asked to sign in again; they see what their plan needs instead. */}
               <strong><RemixIcon name="account-circle-line" size={16} />{t(signedIn ? 'Use it with your OpenDesign plan' : 'Sign in and subscribe')}</strong>
               <p>{t(signedIn ? '{model} appears here as soon as OpenDesign serves it on your plan. No API key needed.' : 'Sign in to OpenDesign with a paid plan and use {model} right away. No API key needed.', { model: hub.modelName })}</p>
-              <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => { track('hub_availability', signedIn ? 'view_plans' : 'sign_in'); onSettings(signedIn ? 'subscription' : 'account'); }}>{t(signedIn ? 'View plans' : 'Sign in')}<RemixIcon name="arrow-right-line" size={16} /></Button>
+              <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => { const entryId = newTrackingId(); const hookId = signedIn ? 'model_hub_upgrade' as const : 'model_hub_signin' as const; setPendingAttribution(signedIn ? 'subscription' : 'sign_in', hookId, entryId); track('hub_availability', signedIn ? 'view_plans' : 'sign_in', { hookId, entryId }); onSettings(signedIn ? 'subscription' : 'account'); }}>{t(signedIn ? 'View plans' : 'Sign in')}<RemixIcon name="arrow-right-line" size={16} /></Button>
             </div>
             <div className="om-model-hub-path">
               <strong><RemixIcon name="plug-line" size={16} />{t('Connect your own API key')}</strong>

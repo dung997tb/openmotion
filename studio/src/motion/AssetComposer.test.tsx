@@ -858,7 +858,7 @@ it.each(['free', 'plus'])('keeps the background removal draft through sign-in an
   expect(packet).toMatchObject({ page_name: 'creative_studio', area: 'asset_create', offer_kind: 'sign_in', studio_id: 'design', scene_id: 'remove-background',
     offer_visit_id: expect.stringMatching(uuid), entry_id: expect.stringMatching(uuid) });
   expect(validProperties(studioEvents, 'ui_click', packet)).toBe(true);
-  expect(gatewayRequest).toHaveBeenCalledWith('settings/account/login', 'POST', { entryId: (packet as Record<string, unknown>).entry_id });
+  expect(gatewayRequest).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'studio_generate', entryId: (packet as Record<string, unknown>).entry_id });
   expect(chrome.openAccountSettings).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Complete sign-in in your browser');
   signedIn = true;
@@ -1020,7 +1020,7 @@ it.each(['free', 'go'])('previews locked account models and lets a %s account sw
   expect(packet).toMatchObject({ page_name: 'creative_studio', area: 'asset_create', offer_kind: 'upgrade', studio_id: 'design', scene_id: 'remove-background',
     offer_visit_id: expect.stringMatching(uuid), entry_id: expect.stringMatching(uuid) });
   expect(validProperties(studioEvents, 'ui_click', packet)).toBe(true);
-  expect(gatewayRequest).toHaveBeenCalledWith('settings/account/subscription', 'POST', { entryId: (packet as Record<string, unknown>).entry_id });
+  expect(gatewayRequest).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'studio_free_gate', entryId: (packet as Record<string, unknown>).entry_id });
 
   await click(picker('Provider'));
   expect(optionNames()).toEqual(['OpenDesign', 'OpenDesign Cloud']);

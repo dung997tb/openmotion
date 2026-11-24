@@ -113,6 +113,7 @@
   --motion-on-signature-band: #121212;
   --motion-signature-band-muted: #4a5810;
   --motion-signature-band-hover: #bde61f;
+  --motion-font-campaign-display: "Instrument Serif", Georgia, serif;
   --motion-font-editorial: "Times New Roman", Times, serif;
   --motion-collection-title-gradient: linear-gradient(120deg, var(--motion-brand) 0%, var(--motion-strong) 40%);
   --motion-neutral-n0: #ffffff;

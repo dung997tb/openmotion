@@ -72,7 +72,7 @@ it('qualifies each guide once per scene visit and links each real button click t
         expect(packets()).toHaveLength(2);
         expect(click).toEqual(['ui_click', expect.objectContaining({ ...fields, element: kind === 'sign_in' ? 'sign_in' : 'view_plans', entry_id: expect.stringMatching(uuid) })]);
         const entryId = (click[1] as { entry_id: string }).entry_id;
-        expect(gateway).toHaveBeenCalledWith('settings/account/' + (kind === 'sign_in' ? 'login' : 'subscription'), 'POST', { entryId });
+        expect(gateway).toHaveBeenCalledWith('settings/account/' + (kind === 'sign_in' ? 'login' : 'subscription'), 'POST', { entryId, hookId: kind === 'sign_in' ? 'studio_generate' : 'studio_free_gate' });
         for (const [event, props] of packets()) expect(validProperties(studioEvents, event, props)).toBe(true);
         expect(validProperties(studioEvents, 'surface_view', { ...fields, element: 'card', offer_kind: 'private note' })).toBe(false);
         expect(validProperties(studioEvents, 'ui_click', { ...click[1], entry_id: 'private note' })).toBe(false);
@@ -129,11 +129,11 @@ it('attributes settings impressions and handoffs to the section and counts each 
           await act(async () => button.click());
           const [event, payload] = events.mock.calls[i + 1];
           expect(event).toBe('ui_click');
-          expect(payload).toEqual({ ...fields, element: kind === 'sign_in' ? 'sign_in' : 'view_plans', offer_visit_id: visit, entry_id: expect.stringMatching(uuid) });
+          expect(payload).toEqual({ ...fields, hook_id: kind === 'sign_in' ? 'settings_signin' : 'settings_subscription', element: kind === 'sign_in' ? 'sign_in' : 'view_plans', offer_visit_id: visit, entry_id: expect.stringMatching(uuid) });
           const entryId = (payload as { entry_id: string }).entry_id;
           expect(entries.has(entryId)).toBe(false);
           entries.add(entryId);
-          expect(gateway).toHaveBeenCalledWith(kind === 'sign_in' ? 'settings/account/login' : 'settings/account/subscription', 'POST', { entryId });
+          expect(gateway).toHaveBeenCalledWith(kind === 'sign_in' ? 'settings/account/login' : 'settings/account/subscription', 'POST', { entryId, hookId: kind === 'sign_in' ? 'settings_signin' : 'settings_subscription' });
         }
         expect(events.mock.calls).toHaveLength(3);
         for (const [event, payload] of events.mock.calls) expect(validProperties(studioEvents, event, payload)).toBe(true);

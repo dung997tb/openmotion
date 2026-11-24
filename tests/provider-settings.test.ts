@@ -50,7 +50,7 @@ function imageTransport(directory: string) {
 async function until(check: () => Promise<boolean>) { for (let n = 0; n < 500; n++) { if (await check()) return; await delay(20); } throw new Error('Fixture timed out'); }
 async function finish(store: any, id: string) { const g = gatewayFor(store); await g.tick(); await Promise.all([...g.active.values()].map(task => task.done)); return g.getJob(id); }
 async function signIn(account: OpenDesignAccount, entryId?: string) {
-  await account.login(entryId); await until(async () => Boolean((await account.summary()).authorizationUrl));
+  await account.login({ entryId }); await until(async () => Boolean((await account.summary()).authorizationUrl));
   await writeFile(path.join(account.home, 'authorize'), 'yes');
   await until(async () => (await account.summary()).state === 'signed-in');
 }
@@ -757,7 +757,7 @@ test('the subscription page opens in the system browser through a one-time accou
   const opened: string[] = [];
   const launch = async (url: string) => { opened.push(url); };
   const clickedEntry = randomUUID();
-  assert.deepEqual(await account.openSubscription(launch, clickedEntry), { url: 'https://open-design.ai/cloud/login?intentId=intent_1-a', opened: true });
+  assert.deepEqual(await account.openSubscription(launch, { entryId: clickedEntry }), { url: 'https://open-design.ai/cloud/login?intentId=intent_1-a', opened: true });
   assert.deepEqual(opened, ['https://open-design.ai/cloud/login?intentId=intent_1-a']);
   const target = new URL(targets[0], 'https://open-design.ai'), params = target.searchParams;
   assert.equal(target.pathname, '/dashboard');
@@ -770,7 +770,7 @@ test('the subscription page opens in the system browser through a one-time accou
   for (const refusal of [() => Response.json({ error: 'unauthorized' }, { status: 401 }), () => Response.json({ intentId: '../evil' }), () => { throw new TypeError('offline'); }]) {
     response = refusal;
     const fallbackEntry = randomUUID();
-    const result = await account.openSubscription(launch, fallbackEntry);
+    const result = await account.openSubscription(launch, { entryId: fallbackEntry });
     assert.equal(new URL(result.url).searchParams.get('od_entry_id'), fallbackEntry);
     assert.equal(new URL(result.url).origin + new URL(result.url).pathname, 'https://open-design.ai/cloud/dashboard');
     assert.equal(new URL(result.url).searchParams.get('od_origin'), 'openmotion'); assert.equal(result.opened, true);

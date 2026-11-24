@@ -507,7 +507,7 @@ function ExploreCollection({ community, root, firstPages, blackFridayHero, ...pr
     {!medium && <div className="om-explore-features" data-split={showFeatureSplit}>
       {community ? <CommunitySpotlight community={community} skill={skills[0]} onChooseStudio={onChooseStudio} /> :
         blackFridayHero ? <ExploreBlackFridaySpotlight active={active} onOpenBlackFriday={props.onOpenBlackFriday} onNavigate={onNavigate}
-          onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} onStartScenario={props.onStartScenario} /> :
+          onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} /> :
         <ExploreSpotlight active={active} onOpenBlackFriday={props.onOpenBlackFriday} onNavigate={onNavigate}
           onOpenMotionEditor={props.onOpenMotionEditor} motionEditorDisabled={props.motionEditorDisabled} onModelHub={props.onModelHub} onStartScenario={props.onStartScenario}
           onOpenGameStudio={openGameStudio} onBuildGameInSuperAgent={openGameInSuperAgent} />}
@@ -609,7 +609,7 @@ export function ExploreStudios(props: ExploreProps) {
   const isExploreHome = !community && !props.filters.medium;
   const showBlackFridayHero = isExploreHome && heroCampaignActive;
   return <main ref={root} className="om-explore">
-    {showBlackFridayHero && <ExploreBlackFridayHero onExpire={expireHeroCampaign} />}
+    {showBlackFridayHero && <ExploreBlackFridayHero active={props.active} onExpire={expireHeroCampaign} />}
     <div className="om-discovery-page">
       <header className={showBlackFridayHero ? 'om-discovery-heading om-discovery-heading-compact' : 'om-discovery-heading'}>
         {!showBlackFridayHero && <h1 className="om-explore-title">{t(!community && props.filters.medium ? mediaLabels[props.filters.medium] : 'Explore')}</h1>}

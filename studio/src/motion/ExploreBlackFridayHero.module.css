@@ -184,7 +184,7 @@
 }
 
 .tileLogoName {
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.14em;
@@ -374,7 +374,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: var(--motion-text-xs);
   font-weight: 400;
   text-transform: uppercase;
@@ -401,7 +401,7 @@
   align-items: baseline;
   justify-content: center;
   gap: 0.2em;
-  font-family: "Instrument Serif", "Didot", "Bodoni 72", Georgia, serif;
+  font-family: var(--motion-font-campaign-display);
   font-size: clamp(56px, 7.8vw, 98px);
   font-weight: 400;
   line-height: 0.92;
@@ -432,7 +432,7 @@
 .cnHeadline {
   --headline-tracking-start: 0.06em;
   --headline-tracking-end: 0.29em;
-  font-family: "Inter", "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: clamp(20px, 2.3vw, 30px);
   font-weight: 100;
   line-height: 1.24;
@@ -482,7 +482,7 @@
 }
 
 .thinClockDigits {
-  font-family: "Inter", "Helvetica Neue", system-ui, sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: clamp(28px, 3.3vw, 40px);
   font-weight: 200;
   line-height: 0.94;
@@ -496,7 +496,7 @@
 }
 
 .thinClockLabel {
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: var(--motion-text-step-9);
   font-weight: 300;
   letter-spacing: 0.24em;
@@ -529,7 +529,7 @@
   justify-content: center;
   gap: 6px 14px;
   max-width: 100%;
-  font-family: "Inter", "PingFang SC", "Noto Sans SC", sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: var(--motion-text-sm);
   font-weight: 200;
   letter-spacing: 0.1em;
@@ -625,7 +625,7 @@
   background: color-mix(in srgb, var(--motion-black-friday-stage-black) 92%, var(--motion-black-friday-ink-light));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--motion-black-friday-ink-light) 14%, transparent);
   color: var(--motion-black-friday-ink-light);
-  font-family: "Inter", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  font-family: var(--motion-font-sans);
   font-size: var(--motion-text-body);
   font-weight: 400;
   letter-spacing: 0.12em;

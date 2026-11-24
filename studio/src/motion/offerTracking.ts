@@ -1,3 +1,4 @@
+import { consumePendingAttribution } from './entitlementAttribution';
 import { useRef } from 'react';
 import { settingsEntryFrom } from './pageTracking';
 import { modelFields, newTrackingId, send, slugField, type Fields } from './reporting';
@@ -27,9 +28,13 @@ export function useOfferImpression(visit: OfferVisit | undefined, kind: OfferKin
 }
 
 export function reportOfferClick(visit: OfferVisit, kind: OfferKind, model?: string | null) {
-  const entryId = newTrackingId();
+  const settings = visit.fields.page_name === 'settings';
+  const signingIn = kind === 'sign_in';
+  const attribution = settings
+    ? consumePendingAttribution(signingIn ? 'sign_in' : 'subscription', signingIn ? 'settings_signin' : 'settings_subscription')
+    : { hookId: signingIn ? 'studio_generate' as const : 'studio_free_gate' as const, entryId: newTrackingId() };
   const entryFrom = visit.fields.page_name === 'settings' ? settingsEntryFrom() : undefined;
   send('ui_click', { ...visit.fields, element: kind === 'sign_in' ? 'sign_in' : 'view_plans', offer_kind: kind,
-    entry_id: entryId, ...modelFields(model), ...(entryFrom ? { entry_from: entryFrom } : {}) });
-  return entryId;
+    entry_id: attribution.entryId, hook_id: attribution.hookId, ...modelFields(model), ...(entryFrom ? { entry_from: entryFrom } : {}) });
+  return attribution;
 }

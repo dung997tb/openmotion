@@ -372,7 +372,7 @@
 }
 .om-studio-new-project-button strong { font-size: var(--motion-text-body); font-weight: var(--motion-weight-semibold); }
 .om-studio-new-project-button small { font-size: var(--motion-text-sm); color: var(--motion-muted); }
-.om-shelf-more { justify-self: center; }
+.om-shelf-sentinel { height: 1px; }
 .om-studio-techniques-title { margin-block: var(--motion-space-24) var(--motion-space-16); }
 @container (max-width: 900px) { .om-studio-template-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (max-width: 420px) { .om-studio-template-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -588,9 +588,7 @@
   padding: 4px 8px;
   border: 0;
   border-radius: var(--motion-radius-md);
-  background: color-mix(in srgb, var(--motion-black-friday-ink-light) 14%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--motion-neutral-n10);
   color: color-mix(in srgb, var(--motion-black-friday-ink-light) 90%, transparent);
   font-size: var(--motion-text-xs);
   font-weight: var(--motion-weight-semibold);
@@ -745,7 +743,10 @@
 .om-hub-editorial-tab:is(:hover, :focus-visible) {
   background-color: transparent;
   color: color-mix(in srgb, var(--motion-strong) 88%, transparent);
-  outline: none;
+}
+:root[data-motion-ui][data-motion-studio] .om-hub-editorial-tab:focus-visible {
+  outline: 2px solid var(--motion-focus);
+  outline-offset: 2px;
 }
 :root[data-motion-ui][data-motion-studio] .om-hub-editorial-tab[data-active="true"],
 :root[data-motion-ui][data-motion-studio] .om-hub-editorial-tab[data-active="true"]:is(:hover, :focus-visible),
@@ -911,9 +912,7 @@
   place-items: center;
   border-radius: var(--motion-radius-step-7);
   border: 1px solid color-mix(in srgb, var(--motion-black-friday-ink-light) 14%, transparent);
-  background: color-mix(in srgb, var(--motion-black-friday-stage-black) 56%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: var(--motion-neutral-n10);
   color: color-mix(in srgb, var(--motion-black-friday-ink-light) 92%, transparent);
   pointer-events: none;
   transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -959,9 +958,7 @@
   padding: 5px 10px;
   border: 0;
   border-radius: var(--motion-radius-full);
-  background: color-mix(in srgb, var(--motion-black-friday-ink-light) 20%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: var(--motion-neutral-n10);
   color: var(--motion-black-friday-ink-light);
   font-size: 11px;
   font-weight: var(--motion-weight-semibold);
@@ -969,7 +966,7 @@
   cursor: pointer;
   transition: background var(--motion-duration-fast) var(--motion-ease-out);
 }
-.om-hub-showcase-cta:hover { background: color-mix(in srgb, var(--motion-black-friday-ink-light) 32%, transparent); }
+.om-hub-showcase-cta:hover { background: var(--motion-neutral-n9); }
 @media (hover: none) {
   .om-hub-showcase-kind { top: 10px; bottom: auto; }
   .om-hub-showcase-media::after,
@@ -978,6 +975,8 @@
 
 /* Borderless cinema-gallery Preview Lightbox */
 .om-hub-lightbox-backdrop {
+  overflow: auto;
+  overscroll-behavior: contain;
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -985,8 +984,6 @@
   place-items: center;
   padding: clamp(20px, 4vw, 48px) clamp(16px, 3vw, 40px);
   background: color-mix(in srgb, var(--motion-black-friday-stage-black) 86%, transparent);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
   animation: om-hub-lightbox-fade 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .om-hub-lightbox-shell {
@@ -1013,9 +1010,7 @@
   border: 0;
   border-radius: 22px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--motion-neutral-n11) 56%, transparent);
-  backdrop-filter: blur(28px) saturate(140%);
-  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  background: var(--motion-neutral-n11);
   box-shadow: 0 40px 100px color-mix(in srgb, var(--motion-black-friday-stage-black) 72%, transparent);
   animation: om-hub-lightbox-rise 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -1032,18 +1027,6 @@
   padding: 28px;
   background: transparent;
   overflow: hidden;
-}
-.om-hub-lightbox-aura {
-  position: absolute;
-  inset: -14%;
-  z-index: 0;
-  width: 128%;
-  height: 128%;
-  object-fit: cover;
-  filter: blur(68px) saturate(1.55);
-  opacity: 0.34;
-  pointer-events: none;
-  transform: translateZ(0);
 }
 .om-hub-lightbox-media {
   position: relative;
@@ -1074,15 +1057,13 @@
   place-items: center;
   border: 0;
   border-radius: var(--motion-radius-full);
-  background: color-mix(in srgb, var(--motion-black-friday-ink-light) 8%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--motion-neutral-n10);
   color: color-mix(in srgb, var(--motion-black-friday-ink-light) 80%, transparent);
   cursor: pointer;
   transition: background 180ms ease, color 180ms ease, transform 180ms ease;
 }
 .om-hub-lightbox-nav:hover {
-  background: color-mix(in srgb, var(--motion-black-friday-ink-light) 16%, transparent);
+  background: var(--motion-neutral-n9);
   color: var(--motion-black-friday-ink-light);
   transform: scale(1.05);
 }
@@ -1095,13 +1076,7 @@
   overflow-y: auto;
   gap: 22px;
   padding: 26px 28px 28px;
-  background: linear-gradient(
-    165deg,
-    color-mix(in srgb, var(--motion-neutral-n10) 44%, transparent) 0%,
-    color-mix(in srgb, var(--motion-neutral-n11) 62%, transparent) 100%
-  );
-  backdrop-filter: blur(44px) saturate(175%);
-  -webkit-backdrop-filter: blur(44px) saturate(175%);
+  background: var(--motion-neutral-n11);
 }
 .om-hub-lightbox-top {
   display: flex;

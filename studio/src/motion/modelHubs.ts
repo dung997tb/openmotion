@@ -2,37 +2,35 @@ import geminiPoster from './model-hubs/gemini-4.svg?url';
 import { gemini4Videos, type HubVideo } from './gemini4Videos';
 import { findMediaStudio } from '../../../shared/studio-catalog';
 import { studioDestination, type StudioDestination } from './creativeStudios';
-import cover04 from './corridor-covers/cover-04.webp?no-inline';
-import cover06 from './corridor-covers/cover-06.webp?no-inline';
-import cover08 from './corridor-covers/cover-08.webp?no-inline';
-import cover10 from './corridor-covers/cover-10.webp?no-inline';
-import cover11 from './corridor-covers/cover-11.webp?no-inline';
-import cover12 from './corridor-covers/cover-12.webp?no-inline';
-import cover14 from './corridor-covers/cover-14.webp?no-inline';
-import cover15 from './corridor-covers/cover-15.webp?no-inline';
-import cover17 from './corridor-covers/cover-17.webp?no-inline';
-import cover18 from './corridor-covers/cover-18.webp?no-inline';
-import cover20 from './corridor-covers/cover-20.webp?no-inline';
-import cover22 from './corridor-covers/cover-22.webp?no-inline';
-import cover23 from './corridor-covers/cover-23.webp?no-inline';
-import cover24 from './corridor-covers/cover-24.webp?no-inline';
-import cover25 from './corridor-covers/cover-25.webp?no-inline';
-import cover26 from './corridor-covers/cover-26.webp?no-inline';
-import cover27 from './corridor-covers/cover-27.webp?no-inline';
-import cover28 from './corridor-covers/cover-28.webp?no-inline';
-import cover29 from './corridor-covers/cover-29.webp?no-inline';
-import cover30 from './corridor-covers/cover-30.webp?no-inline';
-import cover35 from './corridor-covers/cover-35.webp?no-inline';
-import glassSculpture from './scene-art/studio-glass-sculpture.jpg';
-import { archivedSkillPoster } from './skillCatalog';
-
-const retroPoster = archivedSkillPoster('retro-print-poster');
-const lightShadowProduct = archivedSkillPoster('light-shadow-product');
-const surreal3dPoster = archivedSkillPoster('surreal-3d-poster');
+import cover04 from './corridor-covers/cover-04.avif?no-inline';
+import cover06 from './corridor-covers/cover-06.avif?no-inline';
+import cover08 from './corridor-covers/cover-08.avif?no-inline';
+import cover10 from './corridor-covers/cover-10.avif?no-inline';
+import cover11 from './corridor-covers/cover-11.avif?no-inline';
+import cover12 from './corridor-covers/cover-12.avif?no-inline';
+import cover14 from './corridor-covers/cover-14.avif?no-inline';
+import cover15 from './corridor-covers/cover-15.avif?no-inline';
+import cover17 from './corridor-covers/cover-17.avif?no-inline';
+import cover18 from './corridor-covers/cover-18.avif?no-inline';
+import cover20 from './corridor-covers/cover-20.avif?no-inline';
+import cover22 from './corridor-covers/cover-22.avif?no-inline';
+import cover23 from './corridor-covers/cover-23.avif?no-inline';
+import cover24 from './corridor-covers/cover-24.avif?no-inline';
+import cover25 from './corridor-covers/cover-25.avif?no-inline';
+import cover26 from './corridor-covers/cover-26.avif?no-inline';
+import cover27 from './corridor-covers/cover-27.avif?no-inline';
+import cover28 from './corridor-covers/cover-28.avif?no-inline';
+import cover29 from './corridor-covers/cover-29.avif?no-inline';
+import cover30 from './corridor-covers/cover-30.avif?no-inline';
+import cover35 from './corridor-covers/cover-35.avif?no-inline';
+import glassSculpture from './scene-art/studio-glass-sculpture.avif';
+import retroPoster from './model-hubs/gpt-image-2-6/retro-print-poster.avif?no-inline';
+import lightShadowProduct from './model-hubs/gpt-image-2-6/light-shadow-product.avif?no-inline';
+import surreal3dPoster from './model-hubs/gpt-image-2-6/surreal-3d-poster.avif?no-inline';
 
 /** Local posters for posts whose X cover is a blank first frame; captured mid-video. */
-const posterOverrides: Record<string, string> = Object.fromEntries(Object.entries(import.meta.glob('./model-hubs/gemini-4/posters/*.jpg', { query: '?url', import: 'default', eager: true }) as Record<string, string>)
-  .map(([path, url]) => [path.split('/').pop()!.replace(/\.jpg$/, ''), url]));
+const posterOverrides: Record<string, string> = Object.fromEntries(Object.entries(import.meta.glob('./model-hubs/gemini-4/posters/*.avif', { query: '?url', import: 'default', eager: true }) as Record<string, string>)
+  .map(([path, url]) => [path.split('/').pop()!.replace(/\.avif$/, ''), url]));
 const withPoster = (video: HubVideo): HubVideo => posterOverrides[video.id] ? { ...video, poster: posterOverrides[video.id] } : video;
 
 export interface HubShowcaseCase {
@@ -65,9 +63,9 @@ export interface ModelHub {
   latestModel: string;
   vendor: string;
   eyebrow: string;
-  eyebrowZh?: string;
+
   summary: string;
-  summaryZh?: string;
+
   poster: string;
   /** Matches gateway model ids or model ids served for this family. */
   modelPattern: RegExp;
@@ -77,15 +75,15 @@ export interface ModelHub {
   /** Optional primary Studio destination when launching directly from the hub hero. */
   primaryDestination?: StudioDestination;
   primaryCta?: string;
-  primaryCtaZh?: string;
+
   /** Optional Black Friday promo note / bundled models highlighted in the hero. */
   promoModels?: string[];
   promoBadge?: string;
-  promoBadgeZh?: string;
+
   /** Curated 1-click remixable showcase cases for this model hub. */
   cases?: HubShowcaseCase[];
   casesHeading?: string;
-  casesHeadingZh?: string;
+
   /** Community videos made with this family; media stays on the original posts. */
   videos: HubVideo[];
 }
@@ -93,7 +91,6 @@ export interface ModelHub {
 const cinema = findMediaStudio('cinema')!;
 const design = findMediaStudio('design')!;
 const cinemaTextToVideo = studioDestination(cinema, 'text-to-video');
-const cinemaImageToVideo = studioDestination(cinema, 'image-to-video');
 const designTextToImage = studioDestination(design, 'text-to-image');
 
 export const modelHubs: ModelHub[] = [
@@ -104,20 +101,20 @@ export const modelHubs: ModelHub[] = [
     latestModel: 'Seedance 2.5',
     vendor: 'ByteDance',
     eyebrow: 'Black Friday 50% Off',
-    eyebrowZh: '黑五首年 5 折',
+
     summary: 'Multi-shot cinema video generation · Unlock with Go Plus or above.',
-    summaryZh: '电影级多镜头视频生成 · 开通 Go Plus 及以上解锁，24 套案例一键同款',
+
     poster: cover26,
     provider: 'opendesign',
     modelPattern: /seedance[\s._/-]*v?2[.\s_-]5(?!\d|\.\d)/i,
     companionPattern: /seedream|kling|veo|wan/i,
     primaryDestination: cinemaTextToVideo,
     primaryCta: 'Start Creating',
-    primaryCtaZh: '前往创作',
+
     promoBadge: 'Black Friday 50% Off',
-    promoBadgeZh: '黑五 5 折',
+
     casesHeading: '1-Click Cinema Templates',
-    casesHeadingZh: '精选同款大片',
+
     cases: [
       {
         id: 'sd-pink-horizon',
@@ -201,7 +198,7 @@ export const modelHubs: ModelHub[] = [
         aspectRatio: 16 / 9,
         prompt: 'Intimate cinematic medium shot inside a car driving through quiet city streets at night, woman in camel wool coat illuminated by passing cool-cyan and amber streetlights, contemplative cinema pacing.',
         promptZh: '车内近景电影叙事镜头：身着驼色大衣的女性深夜驾车穿行城市街道，车窗外冷青与暖琥珀路灯光影掠过脸庞，细腻情绪氛围。',
-        destination: cinemaImageToVideo,
+        destination: cinemaTextToVideo,
       },
       {
         id: 'sd-cherry-soda',
@@ -321,21 +318,21 @@ export const modelHubs: ModelHub[] = [
     latestModel: 'GPT Image 2.6',
     vendor: 'OpenAI',
     eyebrow: 'Black Friday Unlimited',
-    eyebrowZh: '黑五限时无限用',
+
     summary: 'Annual Pro & Max 7-day unlimited · Includes Seedream 5.5 / 5.0 & Nano Banana 2 (API supported).',
-    summaryZh: '年度 Pro / Max 7 天无限畅用 · 同步覆盖 Seedream 5.5 / 5.0 / Nano Banana 2，支持 API 调用',
+
     poster: glassSculpture,
     provider: 'opendesign',
-    modelPattern: /gpt[\s._/-]*image[\s._/-]*v?2[.\s_-]6(?!\d|\.\d)|gpt[\s._/-]*image/i,
+    modelPattern: /gpt[\s._/-]*image[\s._/-]*v?2[.\s_-]6(?!\d|\.\d)/i,
     companionPattern: /seedream|nano-banana|flux|imagen/i,
     primaryDestination: designTextToImage,
     primaryCta: 'Create Image',
-    primaryCtaZh: '前往生图',
+
     promoModels: ['GPT Image 2.6', 'Seedream 5.5', 'Seedream 5.0', 'Nano Banana 2'],
     promoBadge: '7 Days Unlimited',
-    promoBadgeZh: '7 天无限畅用',
+
     casesHeading: 'Featured Image Recipes',
-    casesHeadingZh: '旗舰生图样张',
+
     cases: [
       {
         id: 'gi-street-portrait',

@@ -20,6 +20,7 @@ import { MultimodalUpgradeButton } from './MultimodalOfferCard';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
 import { ModelAvatar, SettingsError, SettingsLoading } from './settingsPrimitives';
 import offerStyles from './GenerationOffer.module.css';
+import { consumePendingAttribution, evaluateEntitlementRefresh, readAccountPlan, type EntryAttribution } from './entitlementAttribution';
 
 type GuideArea = 'account' | 'provider_detail' | StudioDestination;
 type ShowToast = ReturnType<typeof useToast>['showToast'];
@@ -42,6 +43,7 @@ function GuideOffer({ callout = false }: { callout?: boolean }) {
 /** Sign-in benefits shown in the OpenDesign provider settings. */
 export function SignInGuide({ action }: { action: ReactNode }) {
   const { t } = useI18n();
+  useEffect(() => { tracking.reportEntitlementGateView('settings', 'settings_signin'); }, []);
   return <section className="om-card om-plan-guide" data-guide="sign-in">
     <div className="om-plan-guide-head"><h2 className="om-title">{t('Sign in to start multimodal generation')}</h2><span className="om-badge">{t('Plus and above')}</span></div>
     <p className="om-muted" data-quiet>{t('Sign in, then upgrade to Plus to generate images, video, voiceovers and music right in OpenMotion. No API keys to set up.')}</p>
@@ -96,6 +98,7 @@ function SubscriptionGuide({ kind, visit, children }: { kind: 'sign-in' | 'upgra
 
 export function UpgradeGuide({ plan, subscription }: UpgradeGuideProps) {
   const { t } = useI18n();
+  useEffect(() => { tracking.reportEntitlementGateView('settings', 'settings_subscription'); }, []);
   return <section className="om-card om-plan-guide" data-guide="upgrade">
     <div className="om-plan-guide-head"><h2 className="om-title om-plan-name">{plan === 'free' ? t('Free plan') : 'Go'}</h2><span className="om-badge">{t('Current plan')}</span></div>
     <p className="om-muted">{t('Upgrade to Plus to generate images, video, voiceovers and music. Pro and Max include them too.')}</p>
@@ -136,16 +139,22 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
   const { account, refresh } = state;
   const accountState = account?.state;
   const inGenerator = typeof area !== 'string';
-  const refreshBilling = useCallback(async () => {
+  const refreshBilling = useCallback(async (checkout?: { hookId: ReturnType<typeof consumePendingAttribution>['hookId']; entryId: string }) => {
+    const prevPlan = readAccountPlan(account);
     const updated = await refresh(true);
-    if (updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== account?.plan?.trim().toLowerCase()
-      || Boolean(updated.billingUnavailable) !== Boolean(account?.billingUnavailable))) notifyProvidersChanged();
-  }, [account, refresh]);
-  const trackAction = (element: Parameters<typeof tracking.reportSettingsClick>[1], includeProvider = false) => {
+    const { billingOk, planChanged } = evaluateEntitlementRefresh(prevPlan, updated);
+    const stateOrBillingChanged = Boolean(updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== account?.plan?.trim().toLowerCase()
+      || Boolean(updated.billingUnavailable) !== Boolean(account?.billingUnavailable)));
+    if (stateOrBillingChanged) notifyProvidersChanged();
+    if (checkout) {
+      tracking.reportEntitlementRefresh(inGenerator ? 'creative_studio' : 'settings', checkout.hookId, checkout.entryId, billingOk ? 'success' : 'failure', planChanged);
+    }
+  }, [account, refresh, inGenerator]);
+  const trackAction = (element: Parameters<typeof tracking.reportSettingsClick>[1], includeProvider = false, attribution?: EntryAttribution) => {
     if (inGenerator) reportCreativeClick('creative_studio', 'asset_create', element, destinationTarget(area));
-    else tracking.reportSettingsClick(area, element, includeProvider && provider ? { provider } : {});
+    else tracking.reportSettingsClick(area, element, { ...(includeProvider && provider ? { provider } : {}), ...(attribution && { hook_id: attribution.hookId, entry_id: attribution.entryId }) });
   };
-  const subscription = useSubscriptionOpener(trackAction, message => showToast(message, 'error'), refreshBilling);
+  const subscription = useSubscriptionOpener((element, attribution) => trackAction(element, false, attribution), message => showToast(message, 'error'), refreshBilling);
   // Order matters: the event below triggers a plain refresh, so the billing refresh must be issued after it to win.
   useEffect(() => {
     if (previous.current === 'authorizing' && accountState === 'signed-in') {
@@ -160,11 +169,12 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
     // The composer replaces its sign-in card when the catalog reloads. Resolve the plan first.
     if (inGenerator) void billing.then(notifyProvidersChanged);
   }, [accountState, inGenerator, refresh]);
-  async function action(name: AccountAction, cardEntryId?: string) {
-    if (!cardEntryId) trackAction(name === 'login' ? 'sign_in' : name === 'logout' ? 'sign_out' : 'cancel_sign_in', true);
+  async function action(name: AccountAction, cardAttribution?: EntryAttribution) {
+    const attribution = name === 'login' ? cardAttribution ?? consumePendingAttribution('sign_in', inGenerator ? 'studio_generate' : 'settings_signin') : undefined;
+    if (!cardAttribution) trackAction(name === 'login' ? 'sign_in' : name === 'logout' ? 'sign_out' : 'cancel_sign_in', true, attribution);
     setBusy(true);
     try {
-      state.setAccount(await gatewayRequest<AccountSummary>('settings/account/' + name, 'POST', cardEntryId ? { entryId: cardEntryId } : {}));
+      state.setAccount(await gatewayRequest<AccountSummary>('settings/account/' + name, 'POST', attribution ?? {}));
       if (!inGenerator) notifyProvidersChanged();
       window.dispatchEvent(new Event('motion:account-changed'));
     }

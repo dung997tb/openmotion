@@ -6,9 +6,8 @@ import { findModelHub } from './modelHubs';
 import { motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
-import type { ScenarioId } from '../../../shared/scenarios';
-import seedanceHeroPoster from './corridor-covers/cover-26.webp?no-inline';
-import gptImageHeroPoster from './scene-art/studio-glass-sculpture.jpg';
+import seedanceHeroPoster from './corridor-covers/cover-26.avif?no-inline';
+import gptImageHeroPoster from './scene-art/studio-glass-sculpture.avif';
 import blackFridayHeroPoster from './scene-art/black-friday-spotlight.webp?no-inline';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
@@ -19,12 +18,12 @@ const motionClip = motionStudioCover?.video;
 interface FeaturedSlide {
   id: string;
   title: string;
-  titleZh?: string;
+
   badge?: string;
-  badgeZh?: string;
+
   badgeTone?: 'top' | 'promo' | 'neutral';
   tagline: string;
-  taglineZh?: string;
+
   icon: string;
   poster: string;
   clip?: string;
@@ -42,10 +41,10 @@ const slides: FeaturedSlide[] = [{
   id: 'gpt-image-2-6',
   title: 'GPT Image 2.6',
   badge: '7 Days Unlimited',
-  badgeZh: '7 天无限畅用',
+
   badgeTone: 'promo',
   tagline: 'Annual Pro & Max · Includes Seedream 5.5 / 5.0 & Nano Banana 2',
-  taglineZh: '年度 Pro / Max 专享 · 同步畅用 Seedream 5.5 / 5.0 / Nano Banana 2',
+
   icon: 'image-line',
   poster: gptImageHeroPoster,
   hub: gptImageHub.id,
@@ -53,10 +52,10 @@ const slides: FeaturedSlide[] = [{
   id: 'seedance-2-5',
   title: 'Seedance 2.5',
   badge: '50% Off Annual',
-  badgeZh: '黑五首年 5 折',
+
   badgeTone: 'top',
   tagline: 'Cinema multi-shot video with Plus+ · 24 1-click templates',
-  taglineZh: 'Plus 及以上解锁电影级多镜头视频 · 24 套大片一键同款',
+
   icon: 'film-line',
   poster: seedanceHeroPoster,
   hub: seedanceHub.id,
@@ -64,20 +63,20 @@ const slides: FeaturedSlide[] = [{
   id: 'black-friday',
   title: 'Black Friday collection',
   badge: '36 Sale Templates',
-  badgeZh: '36 套爆款大片',
+
   badgeTone: 'promo',
   tagline: 'Black Friday promo templates · Ready to use',
-  taglineZh: '电商/社媒黑五促销 · 直接套用',
+
   icon: 'sparkling-line',
   poster: blackFridayHeroPoster,
 }, {
   id: 'hub-' + geminiHub.id,
   title: geminiHub.latestModel,
   badge: 'Viral on X',
-  badgeZh: 'X 爆火同款',
+
   badgeTone: 'neutral',
   tagline: 'Generate code animations from one prompt',
-  taglineZh: '1 句提示词生成代码级动效',
+
   icon: 'sparkling-line',
   poster: geminiHub.poster,
   hub: geminiHub.id,
@@ -85,7 +84,7 @@ const slides: FeaturedSlide[] = [{
   id: motionStudio.id,
   title: motionStudio.title,
   tagline: 'Animate type & graphics on a timeline',
-  taglineZh: '时间线精细编排文字与图形动效',
+
   icon: motionStudio.icon,
   poster: motionPoster,
   clip: motionClip,
@@ -106,14 +105,13 @@ function FeaturedClip({ src, poster, playing }: { src: string; poster: string; p
   return videoSource && !failed ? <video ref={player} src={videoSource} poster={poster} muted loop playsInline preload="none" aria-hidden="true" onError={() => setFailed(true)} /> : null;
 }
 
-export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEditor, onOpenBlackFriday, onModelHub }: {
+export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEditor, motionEditorDisabled, onOpenBlackFriday, onModelHub }: {
   active: boolean;
   onNavigate: (target: StudioDestination, prompt: string) => void;
   onOpenMotionEditor: () => void;
   motionEditorDisabled?: boolean;
   onOpenBlackFriday: (trigger: HTMLButtonElement) => void;
   onModelHub: (id: string) => void;
-  onStartScenario?: (id: ScenarioId) => void;
 }) {
   const { t } = useI18n();
   const root = useRef<HTMLElement>(null);
@@ -180,7 +178,7 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
   // Trackpad two-finger horizontal swipe support with smooth inertia
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
+    if (!viewport || paused) return;
     const onWheel = (event: WheelEvent) => {
       if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || Math.abs(event.deltaX) < 1) return;
       event.preventDefault();
@@ -188,7 +186,7 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
     };
     viewport.addEventListener('wheel', onWheel, { passive: false });
     return () => viewport.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [paused]);
 
   // Sub-pixel 60/120fps GPU camera-dolly panning with asymmetric inertia & hydraulic end cushions
   useEffect(() => {
@@ -395,6 +393,7 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
               type="button"
               variant="plain"
               className="om-discovery-hero om-feature-slide om-spotlight-card"
+              disabled={Boolean(motionEditorDisabled && !slide.hub && !scene && !blackFriday)}
               data-scene={slide.id}
               data-clickable="true"
               onMouseEnter={() => setHoveredSlide(slide.id)}

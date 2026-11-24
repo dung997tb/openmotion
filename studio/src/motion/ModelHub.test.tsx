@@ -65,9 +65,16 @@ it('renders curated Seedance 2.5 and GPT Image 2.6 showcase galleries with light
     expect(kindBadge.dataset.kind).toBe(expectedKind);
     expect(kindBadge.querySelector('svg')?.getAttribute('data-remix-icon')).toBe(expectedKind === 'video' ? 'movie-line' : 'image-line');
 
+    const remix = cards[0].querySelector<HTMLButtonElement>('.om-hub-showcase-cta')!;
+    const key = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => { remix.dispatchEvent(key); });
+    expect(key.defaultPrevented).toBe(false);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    cards[0].focus();
     await act(async () => cards[0].click());
-    const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
-    expect(dialog).not.toBeNull();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.parentElement).toBe(document.body);
+    expect(dialog?.contains(document.activeElement)).toBe(true);
     const promptBox = dialog!.querySelector<HTMLTextAreaElement>('textarea')!;
     expect(promptBox.value.length).toBeGreaterThan(0);
 
@@ -83,7 +90,7 @@ it('renders curated Seedance 2.5 and GPT Image 2.6 showcase galleries with light
       prompt: promptBox.value,
       references: [],
     });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     act(() => root!.unmount());
     root = undefined;
     container.remove();
@@ -122,7 +129,7 @@ it('localizes Seedance 2.5 and GPT Image 2.6 hubs across all 10 non-English loca
       expect(container.textContent, locale).toContain(messages['Fashion & Visual']);
       expect(container.textContent, locale).toContain(messages['Pastel Horizon Walk']);
       await act(async () => container.querySelector<HTMLElement>('.om-hub-showcase-card')!.click());
-      expect(container.querySelector('.om-hub-lightbox-cta')!.textContent, locale).toContain(messages['Remix this look']);
+      expect(document.querySelector('.om-hub-lightbox-cta')!.textContent, locale).toContain(messages['Remix this look']);
       act(() => root!.unmount());
       root = undefined;
       container.remove();
