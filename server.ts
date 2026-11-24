@@ -218,7 +218,10 @@ export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tra
     if (failure.failureStage !== 'finalize') await rm(store.exportPath(job), { force: true }).catch(() => {});
     const current = await store.job(job.id);
     if (current && ['running', 'cancelling'].includes(current.state)) {
-      try { await store.finishExport(job.id, job.token!, error instanceof Error ? error.message : '渲染失败', failure); }
+      try {
+        const finished = await store.finishExport(job.id, job.token!, error instanceof Error ? error.message : '渲染失败', failure);
+        if (finished.state === 'cancelled' && failure.failureStage === 'finalize') await rm(store.exportPath(job), { force: true }).catch(() => {});
+      }
       catch (persistError) {
         const errno = (persistError as NodeJS.ErrnoException)?.code;
         const reason = errno === 'ENOSPC' ? 'out_of_space' : errno === 'ENOENT' ? 'missing_file'
