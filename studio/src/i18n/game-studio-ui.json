@@ -151,7 +151,8 @@
     "Ad revenue": "广告变现",
     "Easy to build": "好做",
     "Hybrid": "混合",
-    "Top 100 earners": "Top 100 赚钱"
+    "Top 100 earners": "Top 100 赚钱",
+    "Earners": "赚钱"
   },
   "ja": {
     "3D": "3D",
@@ -305,7 +306,8 @@
     "Ad revenue": "広告収益",
     "Easy to build": "作りやすい",
     "Hybrid": "ハイブリッド",
-    "Top 100 earners": "稼げる Top 100"
+    "Top 100 earners": "稼げる Top 100",
+    "Earners": "稼げる"
   },
   "ko": {
     "3D": "3D",
@@ -459,7 +461,8 @@
     "Ad revenue": "광고 수익",
     "Easy to build": "만들기 쉬움",
     "Hybrid": "혼합",
-    "Top 100 earners": "수익 Top 100"
+    "Top 100 earners": "수익 Top 100",
+    "Earners": "수익"
   },
   "de": {
     "3D": "3D",
@@ -613,7 +616,8 @@
     "Ad revenue": "Werbeeinnahmen",
     "Easy to build": "Leicht umsetzbar",
     "Hybrid": "Hybrid",
-    "Top 100 earners": "Top 100 Umsatz"
+    "Top 100 earners": "Top 100 Umsatz",
+    "Earners": "Umsatz"
   },
   "fr": {
     "3D": "3D",
@@ -767,7 +771,8 @@
     "Ad revenue": "Publicité",
     "Easy to build": "Facile à créer",
     "Hybrid": "Hybride",
-    "Top 100 earners": "Top 100 revenus"
+    "Top 100 earners": "Top 100 revenus",
+    "Earners": "Revenus"
   },
   "ru": {
     "3D": "3D",
@@ -921,7 +926,8 @@
     "Ad revenue": "Реклама",
     "Easy to build": "Легко сделать",
     "Hybrid": "Смешанная",
-    "Top 100 earners": "Топ-100 по доходу"
+    "Top 100 earners": "Топ-100 по доходу",
+    "Earners": "Доход"
   },
   "es": {
     "3D": "3D",
@@ -1075,7 +1081,8 @@
     "Ad revenue": "Publicidad",
     "Easy to build": "Fácil de crear",
     "Hybrid": "Híbrido",
-    "Top 100 earners": "Top 100 en ingresos"
+    "Top 100 earners": "Top 100 en ingresos",
+    "Earners": "Ingresos"
   },
   "pt-BR": {
     "3D": "3D",
@@ -1229,7 +1236,8 @@
     "Ad revenue": "Anúncios",
     "Easy to build": "Fácil de criar",
     "Hybrid": "Híbrido",
-    "Top 100 earners": "Top 100 em receita"
+    "Top 100 earners": "Top 100 em receita",
+    "Earners": "Receita"
   },
   "it": {
     "3D": "3D",
@@ -1383,7 +1391,8 @@
     "Ad revenue": "Pubblicità",
     "Easy to build": "Facile da creare",
     "Hybrid": "Ibrido",
-    "Top 100 earners": "Top 100 per ricavi"
+    "Top 100 earners": "Top 100 per ricavi",
+    "Earners": "Ricavi"
   },
   "tr": {
     "3D": "3D",
@@ -1537,6 +1546,7 @@
     "Ad revenue": "Reklam geliri",
     "Easy to build": "Yapması kolay",
     "Hybrid": "Karma",
-    "Top 100 earners": "En çok kazanan 100"
+    "Top 100 earners": "En çok kazanan 100",
+    "Earners": "Kazanç"
   }
 }

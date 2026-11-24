@@ -1822,7 +1822,9 @@ export function ModeResourceShowcase({
                   }
                 }}
               >
-                <span>{t(f.label)}</span>
+                {f.id === 'top100'
+                  ? <span className="ui-collection-label" aria-label={t('Top 100 earners')}><span className="ui-collection-label__title" aria-hidden="true">TOP 100</span><span aria-hidden="true">{t('Earners')}</span></span>
+                  : <span>{t(f.label)}</span>}
                 {typeof f.count === 'number' && <span className="om-sa-tab-count">{f.count}</span>}
               </Button>
             ))}
