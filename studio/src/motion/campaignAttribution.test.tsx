@@ -203,3 +203,19 @@ it('activates the Explore Black Friday hero from 2026-11-25 20:00 +08:00 until 2
   await act(async () => { vi.advanceTimersByTime(1000); });
   expect(onExpire).toHaveBeenCalledOnce();
 });
+
+it('localizes the Explore Black Friday hero across all 10 non-English locales with script-aware layout hooks', () => {
+  vi.setSystemTime(BLACK_FRIDAY_HERO_STARTS_AT);
+  for (const locale of ['zh-CN', 'ja', 'ko', 'de', 'fr', 'ru', 'es', 'pt-BR', 'it', 'tr'] as const) {
+    const messages = campaignUi[locale];
+    act(() => root.render(<I18nProvider key={locale} initialLocale={locale}><ExploreBlackFridayHero /></I18nProvider>));
+    const section = container.querySelector('section[data-bf-hero]')!;
+    expect(section.getAttribute('aria-label')).toBe(messages['Black Friday flagship image 7 days unlimited hero']);
+    expect(section.getAttribute('data-script')).toBe(locale === 'zh-CN' ? 'zh' : (locale === 'ja' || locale === 'ko') ? 'cjk' : 'latin');
+    expect(container.textContent).toContain(messages['Flagship Image · 7 Days Unlimited']);
+    expect(container.textContent).toContain(messages['Claim 50% Off']);
+    expect(container.textContent).toContain(messages['Annual Pro & Max']);
+    expect(container.textContent).toContain(messages['API Supported']);
+    expect(container.textContent).toContain(messages['Up to 50% off annual']);
+  }
+});

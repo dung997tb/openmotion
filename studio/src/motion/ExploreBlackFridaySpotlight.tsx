@@ -115,8 +115,7 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
   onModelHub: (id: string) => void;
   onStartScenario?: (id: ScenarioId) => void;
 }) {
-  const { t, locale } = useI18n();
-  const zh = locale.startsWith('zh');
+  const { t } = useI18n();
   const root = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -293,7 +292,9 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
   };
 
   const onTrackPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    updateEdgePan(event.clientX);
+    if (event.pointerType !== 'touch') {
+      updateEdgePan(event.clientX);
+    }
     if (!dragState.current.active || !trackRef.current) return;
     const dx = event.clientX - dragState.current.startX;
     if (Math.abs(dx) > 6) dragState.current.moved = true;
@@ -324,6 +325,25 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
     endTrackDrag();
   };
 
+  const revealCardInView = (card: HTMLButtonElement) => {
+    const viewport = viewportRef.current;
+    const trackEl = trackRef.current;
+    if (!viewport || !trackEl || panRef.current.maxOffset <= 0) return;
+    const cardLeft = card.offsetLeft;
+    const cardRight = cardLeft + card.offsetWidth;
+    const viewLeft = panRef.current.offset;
+    const viewRight = viewLeft + viewport.clientWidth;
+    let next = viewLeft;
+    if (cardLeft < viewLeft) next = cardLeft;
+    else if (cardRight > viewRight) next = cardRight - viewport.clientWidth;
+    next = Math.max(0, Math.min(panRef.current.maxOffset, next));
+    if (next !== panRef.current.offset) {
+      panRef.current.offset = next;
+      trackEl.style.transform = `translate3d(${-next.toFixed(2)}px, 0, 0)`;
+      syncEdges(next, panRef.current.maxOffset);
+    }
+  };
+
   return <section
     ref={root}
     className="om-feature-carousel om-spotlight-carousel"
@@ -348,9 +368,9 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
           const scene = slide.scene;
           const blackFriday = slide.id === 'black-friday';
           const clipPlaying = active && visible && hoveredSlide === slide.id && !paused;
-          const title = zh && slide.titleZh ? slide.titleZh : t(slide.title);
-          const badge = slide.badge ? (zh && slide.badgeZh ? slide.badgeZh : t(slide.badge)) : null;
-          const tagline = zh && slide.taglineZh ? slide.taglineZh : t(slide.tagline);
+          const title = t(slide.title);
+          const badge = slide.badge ? t(slide.badge) : null;
+          const tagline = t(slide.tagline);
 
           const openSlide = (trigger: HTMLButtonElement) => {
             if (dragState.current.moved) return;
@@ -379,6 +399,7 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
               data-clickable="true"
               onMouseEnter={() => setHoveredSlide(slide.id)}
               onMouseLeave={() => setHoveredSlide(prev => (prev === slide.id ? null : prev))}
+              onFocus={event => revealCardInView(event.currentTarget)}
               onClick={event => openSlide(event.currentTarget)}
             >
               <div className="om-feature-art" aria-hidden="true"><div className="om-feature-camera">
@@ -387,14 +408,14 @@ export function ExploreBlackFridaySpotlight({ active, onNavigate, onOpenMotionEd
               </div></div>
               <div className="om-spotlight-overlay">
                 {badge && (
-                  <span className="om-spotlight-badge" data-tone={slide.badgeTone ?? 'neutral'}>
+                  <span className="om-spotlight-badge" data-tone={slide.badgeTone ?? 'neutral'} title={badge}>
                     {badge}
                   </span>
                 )}
                 <div className="om-spotlight-footer">
                   <div className="om-spotlight-copy">
-                    <h2>{title}</h2>
-                    <p>{tagline}</p>
+                    <h2 title={title}>{title}</h2>
+                    <p title={tagline}>{tagline}</p>
                   </div>
                 </div>
               </div>

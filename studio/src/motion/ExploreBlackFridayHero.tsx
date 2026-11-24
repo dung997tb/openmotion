@@ -186,8 +186,8 @@ function easeOutExpo(t: number): number {
 }
 
 export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } = {}) {
-  const { locale } = useI18n();
-  const zh = locale.startsWith('zh');
+  const { locale, t } = useI18n();
+  const script = locale.startsWith('zh') ? 'zh' : (locale === 'ja' || locale === 'ko') ? 'cjk' : 'latin';
   const [time, setTime] = useState(() => readBlackFridayCountdown());
   const [entryId, setEntryId] = useState(newCampaignEntryId);
   const [displayDigits, setDisplayDigits] = useState<[string, string, string] | null>(null);
@@ -570,29 +570,22 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
     window.setTimeout(() => setEntryId(newCampaignEntryId()), 0);
   };
 
-  const copy = zh
-    ? {
-        sectionLabel: '黑五旗舰生图 7 天无限畅用首屏',
-        campaign: 'Black Friday',
-        countdownAria: `本轮黑五倒计时还剩 ${time.hours} 小时 ${time.minutes} 分 ${time.seconds} 秒`,
-        serifLead: 'Create',
-        serifItalic: 'Unlimited',
-        cnHeadline: '旗舰生图 · 7 天无限畅用',
-        modalities: ['年度 Pro / Max 专享', '支持 API 调用'] as const,
-        offerNote: '年付低至 5 折',
-        primaryCta: '领取黑五 5 折',
-      }
-    : {
-        sectionLabel: 'Black Friday flagship image 7 days unlimited hero',
-        campaign: 'Black Friday',
-        countdownAria: `Black Friday round ends in ${time.hours} hours ${time.minutes} minutes ${time.seconds} seconds`,
-        serifLead: 'Create',
-        serifItalic: 'Unlimited',
-        cnHeadline: 'Flagship Image · 7 Days Unlimited',
-        modalities: ['Annual Pro & Max', 'API Supported'] as const,
-        offerNote: 'Up to 50% off annual',
-        primaryCta: 'Claim 50% Off',
-      };
+  const copy = {
+    sectionLabel: t('Black Friday flagship image 7 days unlimited hero'),
+    campaign: 'Black Friday',
+    countdownAria: t('Black Friday round ends in {hours} hours {minutes} minutes {seconds} seconds', {
+      hours: time.hours,
+      minutes: time.minutes,
+      seconds: time.seconds,
+    }),
+    serifLead: 'Create',
+    serifItalic: 'Unlimited',
+    cnHeadline: t('Flagship Image · 7 Days Unlimited'),
+    modalities: [t('Annual Pro & Max'), t('API Supported')] as const,
+    offerNote: t('Up to 50% off annual'),
+    primaryCta: t('Claim 50% Off'),
+    scrollHintAria: t('Collapse hero to explore'),
+  };
 
   const segments = [
     { key: 'hours', value: displayDigits ? displayDigits[0] : time.hours, label: 'HRS' },
@@ -645,7 +638,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
   };
 
   const collapsedEditorialScale = collapsedHeight !== null
-    ? Math.min(0.96, Math.max(0.84, (collapsedHeight - 40) / 480))
+    ? Math.min(0.96, Math.max(0.78, (collapsedHeight - 36) / 480))
     : 0.94;
 
   return (
@@ -653,6 +646,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
       ref={heroRef}
       className={collapsed ? `${styles.hero} ${styles.heroCollapsed}` : styles.hero}
       data-bf-hero="true"
+      data-script={script}
       data-collapsed={collapsed ? 'true' : 'false'}
       data-instant={startedCollapsed ? 'true' : undefined}
       data-curtain={collapsed || scrolledPastIntro ? 'open' : 'closed'}
@@ -776,7 +770,7 @@ export function ExploreBlackFridayHero({ onExpire }: { onExpire?: () => void } =
         variant="plain"
         data-bf-hero-scroll="true"
         className={styles.scrollHint}
-        aria-label={zh ? '收起首屏，浏览探索内容' : 'Collapse hero to explore'}
+        aria-label={copy.scrollHintAria}
         tabIndex={collapsed ? -1 : 0}
         aria-hidden={collapsed}
         onClick={triggerCollapse}

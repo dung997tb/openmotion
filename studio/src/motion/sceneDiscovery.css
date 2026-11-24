@@ -520,7 +520,14 @@
   padding: var(--motion-space-4);
   margin: calc(-1 * var(--motion-space-4));
   user-select: none;
+  touch-action: pan-y;
   cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .om-spotlight-edge-viewport {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
 }
 .om-spotlight-edge-track {
   display: flex;
@@ -574,6 +581,9 @@
   z-index: 2;
   display: inline-flex;
   align-items: center;
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin: 0;
   padding: 4px 8px;
   border: 0;
@@ -622,6 +632,12 @@
   text-overflow: ellipsis;
 }
 .om-feature-slide[data-scene="seedance-2-5"] img { object-position: center 26%; }
+@container discovery (max-width: 520px) {
+  .om-spotlight-card {
+    width: clamp(248px, 78cqi, 320px);
+    min-height: 196px;
+  }
+}
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .om-spotlight-card:hover { transform: translateY(-2px); }
   .om-spotlight-card .om-feature-camera > :is(img, video) { transition: transform var(--motion-duration-normal) var(--motion-ease-out); }
@@ -710,7 +726,7 @@
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 24px;
+  gap: 8px 24px;
 }
 .om-hub-editorial-tab {
   position: relative;
@@ -740,7 +756,7 @@
 .om-hub-editorial-indicator {
   position: absolute;
   left: 0;
-  bottom: -2px;
+  top: 0;
   height: 1.5px;
   border-radius: var(--motion-radius-full);
   background: var(--motion-strong);
@@ -784,6 +800,23 @@
 }
 .om-hub-editorial-cta:hover svg {
   transform: translateX(2px);
+}
+@container discovery (max-width: 720px) {
+  .om-model-hub-showcase {
+    padding-top: 16px;
+    gap: 16px;
+  }
+  .om-hub-editorial-controls {
+    width: 100%;
+    justify-content: space-between;
+    gap: 12px 16px;
+  }
+  .om-hub-editorial-tabs {
+    gap: 6px 18px;
+  }
+  .om-hub-editorial-divider {
+    display: none;
+  }
 }
 .om-hub-showcase { display: grid; gap: 16px; }
 .om-hub-masonry {
@@ -901,6 +934,7 @@
   color: var(--motion-black-friday-ink-light);
   font-size: 11px;
   font-weight: var(--motion-weight-semibold);
+  white-space: nowrap;
   cursor: pointer;
   transition: background var(--motion-duration-fast) var(--motion-ease-out);
 }
@@ -956,16 +990,6 @@
 @keyframes om-hub-lightbox-rise {
   from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.98); }
   to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-@media (max-width: 880px) {
-  .om-hub-lightbox-backdrop {
-    padding: 16px;
-  }
-  .om-hub-lightbox {
-    grid-template-columns: minmax(0, 1fr);
-    max-height: calc(100dvh - 32px);
-    overflow-y: auto;
-  }
 }
 .om-hub-lightbox-stage {
   position: relative;
@@ -1030,14 +1054,13 @@
   color: var(--motion-black-friday-ink-light);
   transform: scale(1.05);
 }
-@media (max-width: 880px) {
-  .om-hub-lightbox-nav { display: none; }
-}
 .om-hub-lightbox-panel {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
   gap: 22px;
   padding: 26px 28px 28px;
   background: linear-gradient(
@@ -1053,6 +1076,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.om-hub-lightbox-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.om-hub-lightbox-top-nav {
+  display: none;
+  align-items: center;
+  gap: 6px;
 }
 .om-hub-lightbox-index {
   font-family: var(--motion-font-mono);
@@ -1168,4 +1201,46 @@
 }
 .om-hub-lightbox-cta:hover {
   background: var(--motion-neutral-n3);
+}
+@media (max-width: 880px) {
+  .om-hub-lightbox-backdrop {
+    padding: 12px;
+  }
+  .om-hub-lightbox-shell {
+    max-height: calc(100dvh - 24px);
+  }
+  .om-hub-lightbox {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: calc(100dvh - 24px);
+    border-radius: 18px;
+    overflow-y: auto;
+  }
+  .om-hub-lightbox-nav {
+    display: none;
+  }
+  .om-hub-lightbox-stage {
+    min-height: 0;
+    padding: 16px 16px 12px;
+  }
+  .om-hub-lightbox-media,
+  .om-hub-lightbox-media[data-portrait="true"] {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: min(46dvh, 360px);
+  }
+  .om-hub-lightbox-panel {
+    gap: 14px;
+    padding: 16px 18px 20px;
+    overflow-y: visible;
+  }
+  .om-hub-lightbox-title {
+    font-size: 19px;
+  }
+  .om-hub-lightbox-prompt {
+    padding: 12px 14px;
+  }
+  .om-hub-lightbox-top-nav {
+    display: inline-flex;
+  }
 }

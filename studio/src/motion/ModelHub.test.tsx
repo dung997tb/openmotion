@@ -9,6 +9,7 @@ vi.mock('./useMediaCatalog', () => ({ useMediaCatalog: () => ({ catalog: { model
 vi.mock('./tracking', () => ({ trackMotion: vi.fn(async () => 'queued') }));
 import { ModelHub } from './ModelHub';
 import { I18nProvider } from '../i18n/I18n';
+import modelHubUi from '../i18n/model-hub-ui.json';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement;
@@ -79,5 +80,47 @@ it('renders curated Seedance 2.5 and GPT Image 2.6 showcase galleries with light
     act(() => root!.unmount());
     root = undefined;
     container.remove();
+  }
+});
+
+it('localizes Seedance 2.5 and GPT Image 2.6 hubs across all 10 non-English locales and adapts masonry columns to viewport widths', async () => {
+  const originalWidth = window.innerWidth;
+  try {
+    for (const [width, expectedCols] of [[375, 1], [768, 2], [1024, 3], [1440, 4]] as const) {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+      container = document.createElement('div'); document.body.append(container);
+      root = createRoot(container);
+      await act(async () => root!.render(
+        <I18nProvider initialLocale="en">
+          <ModelHub id="seedance-2-5" onExplore={() => {}} onProvider={() => {}} onModel={() => {}} onUse={() => {}} onSettings={() => {}} />
+        </I18nProvider>,
+      ));
+      expect(container.querySelectorAll('.om-hub-masonry-col').length, `width ${width}`).toBe(expectedCols);
+      act(() => root!.unmount());
+      root = undefined;
+      container.remove();
+    }
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    for (const locale of ['zh-CN', 'ja', 'ko', 'de', 'fr', 'ru', 'es', 'pt-BR', 'it', 'tr'] as const) {
+      const messages = modelHubUi[locale] as Record<string, string>;
+      container = document.createElement('div'); document.body.append(container);
+      root = createRoot(container);
+      await act(async () => root!.render(
+        <I18nProvider key={locale} initialLocale={locale}>
+          <ModelHub id="seedance-2-5" onExplore={() => {}} onProvider={() => {}} onModel={() => {}} onUse={() => {}} onSettings={() => {}} />
+        </I18nProvider>,
+      ));
+      expect(container.textContent, locale).toContain(messages['Start Creating']);
+      expect(container.textContent, locale).toContain(messages['Fashion & Visual']);
+      expect(container.textContent, locale).toContain(messages['Pastel Horizon Walk']);
+      await act(async () => container.querySelector<HTMLElement>('.om-hub-showcase-card')!.click());
+      expect(container.querySelector('.om-hub-lightbox-cta')!.textContent, locale).toContain(messages['Remix this look']);
+      act(() => root!.unmount());
+      root = undefined;
+      container.remove();
+    }
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
   }
 });

@@ -17,14 +17,28 @@ import { reportHubClick, reportHubPageView } from './exploreTracking';
 import { campaignPricingUrl, newCampaignEntryId, useBlackFridayActive } from './campaignAttribution';
 import { BackToExploreButton } from './BackToExploreButton';
 
-function useMasonryColumns() {
-  const compute = () => (window.innerWidth >= 1180 ? 4 : window.innerWidth >= 820 ? 3 : window.innerWidth >= 520 ? 2 : 1);
-  const [count, setCount] = useState(compute);
+function columnsForWidth(width: number): number {
+  return width >= 1180 ? 4 : width >= 820 ? 3 : width >= 520 ? 2 : 1;
+}
+
+function useMasonryColumns(containerRef: React.RefObject<HTMLElement | null>) {
+  const [count, setCount] = useState(() => columnsForWidth(typeof window !== 'undefined' ? window.innerWidth : 1280));
   useEffect(() => {
-    const onResize = () => setCount(compute());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+    const sync = () => {
+      const width = containerRef.current?.clientWidth || window.innerWidth;
+      const next = columnsForWidth(width);
+      setCount(prev => (prev === next ? prev : next));
+    };
+    sync();
+    const el = containerRef.current;
+    const ro = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null;
+    if (el) ro?.observe(el);
+    window.addEventListener('resize', sync);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', sync);
+    };
+  }, [containerRef]);
   return count;
 }
 
@@ -55,7 +69,6 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
   onUse: () => void; onScene?: (destination: StudioDestination, seed?: string | AssetDraft) => void; onSettings: (section: 'account' | 'subscription') => void; onStartScenario?: () => void;
 }) {
   const { t, locale } = useI18n();
-  const zh = locale.startsWith('zh');
   const bfActive = useBlackFridayActive();
   const [entryId, setEntryId] = useState(newCampaignEntryId);
   const [query, setQuery] = useState('');
@@ -63,9 +76,10 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [lightboxPrompt, setLightboxPrompt] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
-  const masonryCount = useMasonryColumns();
+  const showcaseRef = useRef<HTMLElement>(null);
+  const masonryCount = useMasonryColumns(showcaseRef);
   const tabsRef = useRef<HTMLDivElement>(null);
-  const [tabIndicator, setTabIndicator] = useState<{ left: number; width: number; ready: boolean }>({ left: 0, width: 0, ready: false });
+  const [tabIndicator, setTabIndicator] = useState<{ left: number; top: number; width: number; ready: boolean }>({ left: 0, top: 0, width: 0, ready: false });
   const search = useRef<HTMLInputElement>(null);
   const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K';
   const hub = findModelHub(id);
@@ -83,10 +97,10 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
     if (!activeCaseId || !hub?.cases) return;
     const found = hub.cases.find(item => item.id === activeCaseId);
     if (found) {
-      setLightboxPrompt(zh ? found.promptZh : found.prompt);
+      setLightboxPrompt(t(found.prompt));
       setCopiedPrompt(false);
     }
-  }, [activeCaseId, hub, zh]);
+  }, [activeCaseId, hub, t]);
   useEffect(() => {
     if (!activeCaseId || !hub?.cases) return;
     const pool = hub.cases.filter(item => selectedTag === 'all' || item.tag === selectedTag);
@@ -117,6 +131,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
       if (!active) return;
       setTabIndicator(prev => ({
         left: active.offsetLeft,
+        top: active.offsetTop + active.offsetHeight,
         width: active.offsetWidth,
         ready: prev.width > 0 || prev.ready,
       }));
@@ -126,9 +141,13 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
     const raf = requestAnimationFrame(() => {
       setTabIndicator(prev => (prev.width > 0 ? { ...prev, ready: true } : prev));
     });
+    const container = tabsRef.current;
+    const ro = container && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null;
+    if (container) ro?.observe(container);
     window.addEventListener('resize', sync);
     return () => {
       cancelAnimationFrame(raf);
+      ro?.disconnect();
       window.removeEventListener('resize', sync);
     };
   }, [selectedTag, id, locale]);
@@ -172,7 +191,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
   };
 
   const launchShowcaseRemix = (item: HubShowcaseCase, promptOverride?: string) => {
-    const prompt = (promptOverride ?? (zh ? item.promptZh : item.prompt)).trim();
+    const prompt = (promptOverride ?? t(item.prompt)).trim();
     const aspect = aspectRatioLabel(item.aspectRatio);
     const modality = item.destination.scene.modality;
     const draft: AssetDraft = {
@@ -187,14 +206,14 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
     openDestination(item.destination, draft);
   };
 
-  const eyebrowText = zh && hub.eyebrowZh ? hub.eyebrowZh : t(hub.eyebrow);
-  const summaryText = zh && hub.summaryZh ? hub.summaryZh : t(hub.summary);
-  const primaryCtaText = zh && hub.primaryCtaZh ? hub.primaryCtaZh : (hub.primaryCta ? t(hub.primaryCta) : t('Open in {studio}', { studio: t('Motion Studio') }));
-  const promoBadgeText = zh && hub.promoBadgeZh ? hub.promoBadgeZh : hub.promoBadge;
+  const eyebrowText = t(hub.eyebrow);
+  const summaryText = t(hub.summary);
+  const primaryCtaText = hub.primaryCta ? t(hub.primaryCta) : t('Open in {studio}', { studio: t('Motion Studio') });
+  const promoBadgeText = hub.promoBadge ? t(hub.promoBadge) : undefined;
   const pricingHref = campaignPricingUrl(locale, 'openmotion_bf_banner', entryId);
 
   const showcaseTags = Array.from(new Map(
-    (hub.cases ?? []).map(item => [item.tag, zh ? item.tagZh : item.tag])
+    (hub.cases ?? []).map(item => [item.tag, t(item.tag)])
   ).entries());
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -236,7 +255,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
 
               <div className="om-hub-editorial-controls">
                 {showcaseTags.length > 1 && (
-                  <div ref={tabsRef} className="om-hub-editorial-tabs" role="tablist" aria-label={zh ? '作品分类' : 'Categories'}>
+                  <div ref={tabsRef} className="om-hub-editorial-tabs" role="tablist" aria-label={t('Showcase categories')}>
                     <Button
                       type="button"
                       variant="plain"
@@ -246,7 +265,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                       data-active={selectedTag === 'all' ? 'true' : undefined}
                       onClick={() => setSelectedTag('all')}
                     >
-                      {zh ? '全部' : 'All'}
+                      {t('All')}
                     </Button>
                     {showcaseTags.map(([tagKey, tagLabel]) => (
                       <Button
@@ -268,7 +287,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                       data-ready={tabIndicator.ready ? 'true' : undefined}
                       style={{
                         width: `${tabIndicator.width}px`,
-                        transform: `translate3d(${tabIndicator.left}px, 0, 0)`,
+                        transform: `translate3d(${tabIndicator.left}px, ${tabIndicator.top}px, 0)`,
                         opacity: tabIndicator.width > 0 ? 1 : 0,
                       }}
                     />
@@ -295,7 +314,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
             </div>
           </header>
 
-          <section className="om-hub-showcase" aria-label={hub.latestModel}>
+          <section ref={showcaseRef} className="om-hub-showcase" aria-label={hub.latestModel}>
             <div key={`${hub.id}-${selectedTag}`} className="om-hub-masonry">
               {masonryColumns.map((column, colIndex) => (
                 <div
@@ -304,7 +323,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                   style={{ animationDelay: `${colIndex * 28}ms` }}
                 >
                   {column.map(item => {
-                    const itemTitle = zh ? item.titleZh : item.title;
+                    const itemTitle = t(item.title);
                     return (
                       <div
                         key={item.id}
@@ -323,7 +342,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                         <div className="om-hub-showcase-media" style={{ aspectRatio: String(item.aspectRatio) }}>
                           <img src={item.poster} alt={itemTitle} loading="lazy" />
                           <div className="om-hub-showcase-overlay">
-                            <strong className="om-hub-showcase-title">{itemTitle}</strong>
+                            <strong className="om-hub-showcase-title" title={itemTitle}>{itemTitle}</strong>
                             <Button
                               type="button"
                               variant="plain"
@@ -333,7 +352,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                                 launchShowcaseRemix(item);
                               }}
                             >
-                              <span>{zh ? '做同款' : 'Remix'}</span>
+                              <span>{t('Remix this')}</span>
                               <RemixIcon name="arrow-right-up-line" size={13} />
                             </Button>
                           </div>
@@ -351,7 +370,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
           const currentIndex = filteredCases.findIndex(entry => entry.id === activeCaseId);
           const activeCase = currentIndex >= 0 ? filteredCases[currentIndex] : hub.cases?.find(entry => entry.id === activeCaseId);
           if (!activeCase) return null;
-          const activeTitle = zh ? activeCase.titleZh : activeCase.title;
+          const activeTitle = t(activeCase.title);
           const activeAspect = aspectRatioLabel(activeCase.aspectRatio);
           const isVideoCase = activeCase.destination.scene.modality === 'video';
           const canCycle = filteredCases.length > 1 && currentIndex >= 0;
@@ -389,7 +408,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                     type="button"
                     variant="plain"
                     className="om-hub-lightbox-nav om-hub-lightbox-prev"
-                    aria-label={zh ? '上一个作品' : 'Previous'}
+                    aria-label={t('Previous showcase')}
                     onClick={() => stepCase(-1)}
                   >
                     <RemixIcon name="arrow-left-s-line" size={22} />
@@ -420,15 +439,39 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                           ? `${String(currentIndex + 1).padStart(2, '0')} / ${String(filteredCases.length).padStart(2, '0')}`
                           : hub.latestModel}
                       </span>
-                      <Button
-                        type="button"
-                        variant="plain"
-                        className="om-hub-lightbox-close"
-                        aria-label={zh ? '关闭预览' : 'Close'}
-                        onClick={() => setActiveCaseId(null)}
-                      >
-                        <RemixIcon name="close-line" size={18} />
-                      </Button>
+                      <div className="om-hub-lightbox-top-actions">
+                        {canCycle && (
+                          <div className="om-hub-lightbox-top-nav">
+                            <Button
+                              type="button"
+                              variant="plain"
+                              className="om-hub-lightbox-close"
+                              aria-label={t('Previous showcase')}
+                              onClick={() => stepCase(-1)}
+                            >
+                              <RemixIcon name="arrow-left-s-line" size={18} />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="plain"
+                              className="om-hub-lightbox-close"
+                              aria-label={t('Next showcase')}
+                              onClick={() => stepCase(1)}
+                            >
+                              <RemixIcon name="arrow-right-s-line" size={18} />
+                            </Button>
+                          </div>
+                        )}
+                        <Button
+                          type="button"
+                          variant="plain"
+                          className="om-hub-lightbox-close"
+                          aria-label={t('Close preview')}
+                          onClick={() => setActiveCaseId(null)}
+                        >
+                          <RemixIcon name="close-line" size={18} />
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="om-hub-lightbox-heading">
@@ -442,10 +485,10 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
 
                     <div className="om-hub-lightbox-prompt-box">
                       <div className="om-hub-lightbox-prompt-head">
-                        <span>{zh ? '提示词' : 'Prompt'}</span>
+                        <span>{t('Prompt')}</span>
                         <Button type="button" variant="plain" className="om-hub-lightbox-copy" onClick={handleCopyPrompt}>
                           <RemixIcon name={copiedPrompt ? 'check-line' : 'file-copy-line'} size={13} />
-                          <span>{copiedPrompt ? (zh ? '已复制' : 'Copied') : (zh ? '复制' : 'Copy')}</span>
+                          <span>{copiedPrompt ? t('Copied') : t('Copy')}</span>
                         </Button>
                       </div>
                       <textarea
@@ -453,7 +496,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                         value={lightboxPrompt}
                         onChange={event => setLightboxPrompt(event.target.value)}
                         rows={5}
-                        aria-label={zh ? '同款提示词' : 'Prompt'}
+                        aria-label={t('Showcase prompt')}
                       />
                     </div>
 
@@ -464,7 +507,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                         className="om-hub-lightbox-cta"
                         onClick={() => launchShowcaseRemix(activeCase, lightboxPrompt)}
                       >
-                        <span>{zh ? '一键做同款' : 'Remix this look'}</span>
+                        <span>{t('Remix this look')}</span>
                       </Button>
                     </div>
                   </aside>
@@ -475,7 +518,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                     type="button"
                     variant="plain"
                     className="om-hub-lightbox-nav om-hub-lightbox-next"
-                    aria-label={zh ? '下一个作品' : 'Next'}
+                    aria-label={t('Next showcase')}
                     onClick={() => stepCase(1)}
                   >
                     <RemixIcon name="arrow-right-s-line" size={22} />
