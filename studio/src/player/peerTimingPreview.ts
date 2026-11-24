@@ -2,7 +2,9 @@ import { isLiveMediaMove } from "../../../shared/preview-live-media";
 import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from "../../../packages/edit-core/canvas-position";
 import { createPreviewAdapter } from "./lib/previewAdapter";
 import { capturePresentedTimelineChanges } from "./lib/isolatedTimelineEdits";
-import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit, canPatchPresentationValue } from "../../../shared/preview-timing";
+import { setPreviewMediaMuted } from "./lib/timelineIframeHelpers";
+import { usePlayerStore } from "./store/playerStore";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, PREVIEW_ATTRIBUTES, canPatchPreviewAttribute, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit, canPatchPresentationValue } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
@@ -89,11 +91,11 @@ export function diffPreviewChanges(previous: string, current: string): PreviewCh
     const right = b[i]!;
     if (left.localName !== right.localName) return null;
     const attributes: PreviewChange["attributes"] = [];
-    for (const name of TIMING_ATTRIBUTES) {
+    for (const name of PREVIEW_ATTRIBUTES) {
       const from = left.getAttribute(name);
       const to = right.getAttribute(name);
       if (from === to) continue;
-      if ([from, to].some(value => value !== null && !/^\d+(?:\.\d+)?$/.test(value))) return null;
+      if ([from, to].some(value => !canPatchPreviewAttribute(name, value, left.localName))) return null;
       attributes.push([name, from, to]);
       left.removeAttribute(name);
       right.removeAttribute(name);
@@ -187,6 +189,11 @@ export async function tryApplyPeerChanges(
       return false;
     }
     if (await paint !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    // The HTML attribute changes defaultMuted. The runtime combines per-clip mute
+    // with this window's independent monitor preference on a set-muted message.
+    if (changes.some(change => change.attributes.some(([name]) => name === "muted"))) {
+      setPreviewMediaMuted(frame, usePlayerStore.getState().audioMuted);
+    }
     if (!temporary && changes.some(change => change.attributes.length)) releasePresented?.();
     if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
       document.timingFile = { path: update.path, version: current.version };

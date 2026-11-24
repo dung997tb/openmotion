@@ -1,3 +1,4 @@
+import { refreshCommittedTimeline } from "./timelineTimingSync";
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { saveCloudTimeline, timelineAttributeCommand } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
@@ -48,7 +49,7 @@ function patchLive(
     else node?.setAttribute(attr, value);
     syncStoredElementAttribute(element, attr, value);
   }
-  if (attr === "muted") {
+  if (attr === "muted" && iframe?.contentDocument) {
     // The HTML attribute changes defaultMuted, not the currently playing media.
     // Reapply the monitor state so the runtime also reads each clip's saved mute.
     setPreviewMediaMuted(iframe, usePlayerStore.getState().audioMuted);
@@ -85,17 +86,20 @@ export function useSetElementsAttribute({
         for (const path of byFile.keys()) pendingTimelineEditPathRef.current.add(path);
         const uniform = edits.every(edit => edit.value === edits[0]?.value);
         const state = attr === "muted" ? "muted" : attr === "data-timeline-locked" ? "locked" : null;
+        const iframe = previewIframeRef.current;
+        const cloud = getCachedCloudDisklessMode();
+        const onSaved = cloud && iframe && !iframe.contentDocument && reloadPreview
+          ? refreshCommittedTimeline(iframe, activeCompPath ?? "index.html", projectId, reloadPreview) : undefined;
         let changedPaths: string[];
-        if (state && uniform && getCachedCloudDisklessMode()) {
+        if (state && uniform && cloud) {
           changedPaths = await saveCloudTimeline(
             projectId,
             [...byFile].map(([path, patches]) => ({ path, command: resolve => ({
               kind: "setClipState", hfIds: patches.map(p => resolve({...p.target, domId:p.target.id ?? undefined})), state, enabled: edits[0]!.value !== null,
             }) })),
-            writeProjectFile, recordEdit, label,
+            writeProjectFile, recordEdit, label, onSaved,
           );
         } else {
-          const cloud = getCachedCloudDisklessMode();
           const apply = cloud ? (await import("../../../packages/edit-core/canvas-commands")).applyCanvasCommand : undefined;
           const commands = new Map([...byFile].map(([path, patches]) => [path, timelineAttributeCommand(patches, attr)]));
           const files = Object.fromEntries([...byFile].map(([path, patches]) => [path, (before: string) =>
@@ -106,12 +110,11 @@ export function useSetElementsAttribute({
             projectId, label, files,
             commandForWrite: apply ? (path) => commands.get(path) : undefined,
             readFile: (path) => readFileContent(projectId, path),
-            writeFile: writeProjectFile, recordEdit,
+            writeFile: writeProjectFile, recordEdit, onSaved,
           });
         }
-        const iframe = previewIframeRef.current;
         patchLive(iframe, edits, attr, activeCompPath);
-        if (changedPaths.length && iframe && !iframe.contentDocument) reloadPreview?.();
+        if (!onSaved && changedPaths.length && iframe && !iframe.contentDocument) reloadPreview?.();
         if (attr === "data-timeline-locked") useCaptionWorkspace.getState().changed();
         return { status: "saved" };
       } catch (error) {

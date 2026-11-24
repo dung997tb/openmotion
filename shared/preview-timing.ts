@@ -1,8 +1,20 @@
 export const MAX_PEER_PREVIEW_SOURCE_LENGTH = 128 * 1024;
 export type PreviewLiveEdits = { position?: true; mediaTiming?: true };
-export const TIMING_ATTRIBUTES = [
+export const PREVIEW_ATTRIBUTES = [
   "data-start", "data-end", "data-duration", "data-track-index", "data-playback-start", "data-media-start",
+  "data-timeline-locked", "data-hidden", "muted", "data-volume",
 ] as const;
+
+/** Only values the player can reproduce from the mounted declarative document. */
+export function canPatchPreviewAttribute(name: string, value: unknown, tag: string): boolean {
+  if ((name === "muted" || name === "data-volume") && tag !== "audio" && tag !== "video") return false;
+  if (value === null) return true;
+  if (typeof value !== "string") return false;
+  if (name === "data-timeline-locked" || name === "data-hidden" || name === "muted") {
+    return value === "" || value === "true" || value === name;
+  }
+  return /^\d+(?:\.\d+)?$/.test(value) && Number.isFinite(Number(value)) && (name !== "data-volume" || Number(value) <= 1);
+}
 
 // Properties set directly by the inspector or by the positioning gesture.
 export const PRESENTATION_STYLES = ["position", "left", "top", "width", "height", "font-size", "font-weight", "font-family", "text-align", "color", "background-color", "background-image", "opacity", "translate"] as const;
@@ -24,7 +36,7 @@ export interface PreviewChange {
   /** A first canvas move captures the author's translate for Reset; undo removes the marker. */
   captureOriginalTranslate?: boolean;
   text?: [string, string];
-  attributes: [typeof TIMING_ATTRIBUTES[number], string | null, string | null][];
+  attributes: [typeof PREVIEW_ATTRIBUTES[number], string | null, string | null][];
 }
 
 /** Used by Studio and the isolated bridge to validate the complete set of changes. */

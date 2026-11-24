@@ -74,6 +74,25 @@ it('updates text and placement on the same live nodes without seeking or replaci
   assert.equal(send(message), false);
 });
 
+it('rebinds declarative track flags and gain without replacing media or accepting unrelated attributes', () => {
+  const { document, send } = preview();
+  const audio = document.getElementById('clip')!;
+  const state = (attributes: unknown) => ({ changes: [{ id: 'clip', tag: 'audio', attributes }] });
+  for (const invalid of [[['muted', null, 'false']], [['data-volume', null, '2']], [['src', null, 'other.wav']]]) {
+    assert.equal(send(state(invalid)), false);
+  }
+  const message = state([['data-timeline-locked', null, ''], ['data-hidden', null, ''], ['muted', null, ''], ['data-volume', null, '0.5']]);
+  const locked = preview();
+  assert.equal(locked.send(state([['data-timeline-locked', null, ''], ['muted', null, '']])), true);
+  assert.deepEqual(locked.hooks, []);
+  assert.equal(preview(false, { mediaTiming: true }).send(message), false);
+  assert.equal(send(message), true);
+  assert.equal(document.getElementById('clip'), audio);
+  assert.ok(audio.hasAttribute('muted') && audio.hasAttribute('data-timeline-locked') && audio.hasAttribute('data-hidden'));
+  assert.equal(audio.getAttribute('data-volume'), '0.5');
+  assert.equal(send({ before: etag(2), after: etag(3), ...state([['data-volume', '0.9', '1']]) }), false);
+});
+
 it('applies a solid fill without installing a new image URL through the live bridge', () => {
   const { document, send } = preview();
   const tile = document.getElementById('title')!;
