@@ -20,6 +20,36 @@ export function blackFridayActive(now = Date.now()) {
   return now >= BLACK_FRIDAY_STARTS_AT && now < BLACK_FRIDAY_ENDS_AT;
 }
 
+/**
+ * Explore Black Friday hero takeover window: launches 2026-11-25 20:00 Beijing time and ends right after
+ * 2026-12-04 23:59:59 Beijing time (2026-12-05 00:00:00+08:00), restoring the previous Explore layout afterwards.
+ */
+export const BLACK_FRIDAY_HERO_STARTS_AT = Date.parse('2026-11-25T20:00:00+08:00');
+export const BLACK_FRIDAY_HERO_ENDS_AT = BLACK_FRIDAY_ENDS_AT;
+export function blackFridayHeroActive(now = Date.now()) {
+  return now >= BLACK_FRIDAY_HERO_STARTS_AT && now < BLACK_FRIDAY_HERO_ENDS_AT;
+}
+
+export const COUNTDOWN_CYCLE_SECONDS = 24 * 60 * 60; // 24h rolling cycle
+
+export function readBlackFridayCountdown(now = Date.now()) {
+  const remainingMs = Math.max(0, BLACK_FRIDAY_ENDS_AT - now);
+  const diffSec = remainingMs > 0 ? Math.floor((remainingMs - 1) / 1000) : 0;
+  const remaining = remainingMs > 0 ? diffSec % COUNTDOWN_CYCLE_SECONDS : 0;
+  const hours = Math.floor(remaining / 3600);
+  const minutes = Math.floor((remaining % 3600) / 60);
+  const seconds = remaining % 60;
+  const hh = String(hours).padStart(2, '0');
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+  return {
+    hours: hh,
+    minutes: mm,
+    seconds: ss,
+    datetime: `PT${hh}H${mm}M${ss}S`,
+  };
+}
+
 // A dismissed banner stays hidden for the rest of that local calendar day and returns the next day.
 const DISMISSED_ON_KEY = 'openmotion.black-friday-banner.dismissed-on';
 function localDay(now: Date) {
@@ -54,6 +84,8 @@ export function useMinuteCondition(read: () => boolean) {
 }
 const readBlackFridayActive = () => blackFridayActive();
 export const useBlackFridayActive = () => useMinuteCondition(readBlackFridayActive)[0];
+const readBlackFridayHeroActive = () => blackFridayHeroActive();
+export const useBlackFridayHeroActive = () => useMinuteCondition(readBlackFridayHeroActive);
 export const shouldShowBlackFridayBanner = () => blackFridayActive() && !bannerDismissedToday();
 
 /** Where the click happened: the top campaign banner or the header Pricing entry. */

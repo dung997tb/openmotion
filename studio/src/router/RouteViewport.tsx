@@ -340,6 +340,7 @@ export function RouteViewport({
               onModel={openModelFromPage}
               onSettings={openSettings}
               onProvider={provider => navigatePage({ settings: 'providers', provider, templates: false })}
+              onScene={openStudioFromPage}
               onUse={() => chooseStudio(motionStudio)}
               onStartScenario={
                 page.modelHub === 'gemini-4' ? () => openScenario('gemini-4-neon', undefined, true) : undefined

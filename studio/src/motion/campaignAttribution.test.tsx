@@ -6,8 +6,9 @@ import { I18nProvider } from '../i18n/I18n';
 import { studioEvents } from '../../../tracking/events.ts';
 import { validProperties } from '../../../tracking/core.ts';
 import { BlackFridayTopBanner, resetBlackFridayImpression } from './BlackFridayTopBanner';
+import { ExploreBlackFridayHero } from './ExploreBlackFridayHero';
 import campaignUi from '../i18n/campaign-ui.json';
-import { BLACK_FRIDAY_ENDS_AT, BLACK_FRIDAY_STARTS_AT, bannerDismissedToday, blackFridayActive, campaignPricingUrl, dismissBannerToday, resetBannerDismissal } from './campaignAttribution';
+import { BLACK_FRIDAY_ENDS_AT, BLACK_FRIDAY_HERO_ENDS_AT, BLACK_FRIDAY_HERO_STARTS_AT, BLACK_FRIDAY_STARTS_AT, bannerDismissedToday, blackFridayActive, blackFridayHeroActive, campaignPricingUrl, dismissBannerToday, readBlackFridayCountdown, resetBannerDismissal } from './campaignAttribution';
 import { PricingEntry } from './PricingEntry';
 import { trackMotion } from './tracking';
 
@@ -161,4 +162,44 @@ it('keeps the Pricing entry with localized Free credits badge before the campaig
     act(() => root.render(<I18nProvider key={locale} initialLocale={locale}><PricingEntry trackingPage="studio" /></I18nProvider>));
     expect(container.textContent).toContain(campaignUi[locale]['Free credits']);
   }
+});
+it('repeats a 24-hour countdown daily and expires after 2026-12-04 23:59:59 +08:00', () => {
+  expect(readBlackFridayCountdown(Date.parse('2026-11-23T00:00:00+08:00'))).toEqual({
+    hours: '23', minutes: '59', seconds: '59', datetime: 'PT23H59M59S',
+  });
+  expect(readBlackFridayCountdown(Date.parse('2026-11-23T12:00:00+08:00'))).toEqual({
+    hours: '11', minutes: '59', seconds: '59', datetime: 'PT11H59M59S',
+  });
+  expect(readBlackFridayCountdown(Date.parse('2026-11-23T23:59:59+08:00'))).toEqual({
+    hours: '00', minutes: '00', seconds: '00', datetime: 'PT00H00M00S',
+  });
+  expect(readBlackFridayCountdown(Date.parse('2026-11-24T00:00:00+08:00'))).toEqual({
+    hours: '23', minutes: '59', seconds: '59', datetime: 'PT23H59M59S',
+  });
+  expect(readBlackFridayCountdown(Date.parse('2026-12-04T23:59:59+08:00'))).toEqual({
+    hours: '00', minutes: '00', seconds: '00', datetime: 'PT00H00M00S',
+  });
+});
+
+it('activates the Explore Black Friday hero from 2026-11-25 20:00 +08:00 until 2026-12-04 23:59:59 +08:00 with a 24h rolling countdown', async () => {
+  expect(BLACK_FRIDAY_HERO_STARTS_AT).toBe(Date.parse('2026-11-25T20:00:00+08:00'));
+  expect(BLACK_FRIDAY_HERO_ENDS_AT).toBe(Date.parse('2026-12-05T00:00:00+08:00'));
+  expect(blackFridayHeroActive(BLACK_FRIDAY_HERO_STARTS_AT - 1)).toBe(false);
+  expect(blackFridayHeroActive(BLACK_FRIDAY_HERO_STARTS_AT)).toBe(true);
+  expect(blackFridayHeroActive(Date.parse('2026-12-04T23:59:59+08:00'))).toBe(true);
+  expect(blackFridayHeroActive(BLACK_FRIDAY_HERO_ENDS_AT)).toBe(false);
+
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  vi.setSystemTime(Date.parse('2026-12-04T23:59:58+08:00'));
+  const onExpire = vi.fn();
+  render(<ExploreBlackFridayHero onExpire={onExpire} />);
+  const timeEl = container.querySelector('time')!;
+  expect(timeEl.getAttribute('datetime')).toBe('PT00H00M01S');
+
+  await act(async () => { vi.advanceTimersByTime(1000); });
+  expect(timeEl.getAttribute('datetime')).toBe('PT00H00M00S');
+  expect(onExpire).not.toHaveBeenCalled();
+
+  await act(async () => { vi.advanceTimersByTime(1000); });
+  expect(onExpire).toHaveBeenCalledOnce();
 });
