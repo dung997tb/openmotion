@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { componentOverlaySource } from '../../shared/registry-material-compat.ts';
-import { MAX_PATCH_BYTES, type TextPatch } from '../../shared/text-patch.ts';
+import type { TextPatch } from '../../shared/text-patch.ts';
 import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { BlobScope, StoragePort } from '../contracts/storage.ts';
@@ -113,7 +113,7 @@ export async function commitTextEdits(files: ProjectFilesService, db: Database, 
       continue;
     }
     const patchBytes = Buffer.byteLength(JSON.stringify(item.patch));
-    if (!parent || patchBytes > MAX_PATCH_BYTES) throw invalid('Invalid patch base or size');
+    if (!parent) throw invalid('Invalid patch base');
     if (!item.patch.length) continue;
     const sizeBytes = await validateTextPatch(db, {workspaceId: ctx.workspaceId, projectId, base: parent, patch: item.patch, storage});
     let depth = 1;

@@ -105,6 +105,23 @@ it('commits missing dependencies and the host patch as one collaborative catalog
   } finally { await cleanup(); }
 });
 
+it('accepts large localized patches from an upgraded editor during a rolling deployment', { skip: !connectionString }, async () => {
+  const { auth, workspace, files, cleanup } = await fixture();
+  try {
+    const path = 'large.html';
+    const original = 'a'.repeat(1024 * 1024);
+    const inserted = 'b'.repeat(300 * 1024);
+    const { projectId } = await workspace.createProject(auth, { initialFiles: [{ path, content: original }] });
+    const base = (await files.readTextFile(auth, projectId, path))!;
+    const saved = await files.commitTextEdits(auth, projectId, { files: [
+      { path, baseVersion: base.version, patch: [[0, inserted.length, inserted]] },
+    ] }, { source: 'studio', requestId: randomUUID() });
+    const current = (await files.readTextFile(auth, projectId, path))!;
+    assert.equal(current.version, saved.versionsByPath[path]);
+    assert.equal(current.content, inserted + original.slice(inserted.length));
+  } finally { await cleanup(); }
+});
+
 it('publishes one exact file version and one history change for a patch, undo, redo and deletion', { skip: !connectionString }, async () => {
   const { events, auth, workspace, files, history, cleanup } = await fixture();
   try {
