@@ -222,8 +222,6 @@
 .om-plan-usage-figure .om-muted { font-size: var(--motion-text-sm); }
 .om-plan-usage-meter { height: 8px; border-radius: var(--motion-radius-full); background: var(--motion-border-subtle); overflow: hidden; }
 .om-plan-usage-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--motion-accent); transition: width .3s ease; }
-.om-plan-usage-note { display: flex; align-items: center; gap: var(--motion-space-8); margin: 0 var(--motion-space-24) var(--motion-space-20); padding: var(--motion-space-8) var(--motion-space-8) var(--motion-space-8) var(--motion-space-12); border-radius: var(--motion-radius-md); background: color-mix(in srgb, var(--motion-border-subtle) 50%, transparent); font-size: var(--motion-text-sm); color: var(--motion-muted); }
-.om-plan-usage-note > span { flex: 1; }
 .om-account-code { display: block; margin-top: var(--motion-space-12); font-family: var(--motion-font-mono); font-size: var(--motion-text-heading); }
 .om-preference-row { display: flex; align-items: center; justify-content: space-between; gap: var(--motion-space-24); padding-block: var(--motion-space-20); }
 .om-preference-row + .om-preference-row { border-top: 1px solid var(--motion-border-subtle); }

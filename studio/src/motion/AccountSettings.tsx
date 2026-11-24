@@ -228,7 +228,6 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
   const { t, locale } = useI18n(), usage = account.usage!;
   const [now, setNow] = useState(Date.now);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60_000); return () => window.clearInterval(timer); }, []);
-  const [noteHidden, setNoteHidden] = useState(false);
   const planName = !account.plan || account.plan === 'free' ? t('Free plan') : account.plan.charAt(0).toUpperCase() + account.plan.slice(1);
   const periodEnd = usage.periodEnd && Number.isFinite(Date.parse(usage.periodEnd)) ? new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(usage.periodEnd)) : undefined;
   const weekly = usage.weekly, percent = weekly ? Math.min(100, Math.max(0, weekly.remainingPercent)) : undefined;
@@ -260,8 +259,6 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
           <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('recharge')}>{t('Top up')}<RemixIcon name="external-link-line" size={15} /></Button></div>
       </div>
     </div>
-    {!noteHidden && <p className="om-plan-usage-note"><RemixIcon name="information-line" size={16} /><span>{t('Both quotas are shared by your team. Each task uses the quota of the model chosen when it starts.')}</span>
-      <IconButton variant="ghost" className="motion-icon-button" aria-label={t('Close')} onClick={() => setNoteHidden(true)} icon={<RemixIcon name="close-line" size={15} />} /></p>}
   </section>;
 }
 
