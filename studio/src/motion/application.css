@@ -221,7 +221,9 @@
 .om-plan-usage[data-look="console"] .om-plan-usage-head { gap: 24px; min-height: 112px; padding: 25px 24px; border-radius: 8px; background-position: center; background-repeat: no-repeat; background-size: cover; }
 .om-plan-usage[data-look="console"] .om-plan-usage-identity h2 { font-size: 24px; font-weight: 600; line-height: 32px; letter-spacing: -.4px; color: #151515; }
 .om-plan-usage[data-look="console"] .om-plan-usage-identity p { margin-top: 8px; color: #66746a; font-size: 13px; line-height: 22px; }
-[data-motion-studio] .om-plan-usage[data-look="console"] .om-plan-usage-link { height: auto; padding: 0; color: #3c4c41; font-size: 12px; line-height: 20px; text-decoration: underline; text-underline-offset: 3px; }
+.om-plan-usage[data-look="console"] .om-plan-usage-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+[data-motion-studio] .om-plan-usage[data-look="console"] .om-plan-usage-console { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 8px 16px; border: 1px solid #ffffffb3; border-radius: 10px; background: #ffffff8c; color: #163d1d; font-size: 14px; font-weight: 500; line-height: 20px; backdrop-filter: blur(6px); }
+[data-motion-studio] .om-plan-usage[data-look="console"] .om-plan-usage-console:hover { background: #ffffffcc; }
 [data-motion-studio] .om-plan-usage[data-look="console"] :is(.om-plan-usage-upgrade, .om-plan-usage-recharge) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; min-width: 84px; padding: 8px 16px; border-radius: 10px; font-size: 14px; font-weight: 500; line-height: 20px; }
 [data-motion-studio] .om-plan-usage[data-look="console"] .om-plan-usage-upgrade { background: #71f58a; color: #163d1d; }
 [data-motion-studio] .om-plan-usage[data-look="console"] .om-plan-usage-upgrade:hover { background: #5fe57a; }

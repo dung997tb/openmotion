@@ -235,9 +235,12 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
       ? <div className="om-plan-usage-head" style={{ backgroundImage: `linear-gradient(#ffffff45, #ffffff45), url(${planCardBackground})` }}>
         <div className="om-plan-usage-identity">
           <h2>{planName}</h2>
-          <p>{period && <span>{period}</span>}<Button variant="plain" className="om-plan-usage-link" onClick={() => open('open_console')}>{t('Go to console')}</Button></p>
+          {period && <p>{period}</p>}
         </div>
-        {upgrade}
+        <div className="om-plan-usage-actions">
+          <Button variant="plain" className="om-plan-usage-console" onClick={() => open('open_console')}>{t('Go to console')}<RemixIcon name="external-link-line" size={15} /></Button>
+          {upgrade}
+        </div>
       </div>
       : <div className="om-plan-usage-head">
         <div className="om-plan-usage-identity">
