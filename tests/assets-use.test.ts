@@ -172,6 +172,14 @@ test('read supports compact maxEdge previews and batch image contact sheets on b
   assert.equal(viaManage.content.filter((c: any) => c.type === 'image').length, 1);
   assert.ok(viaManage.previews[0].width <= 512 && viaManage.previews[0].height <= 512);
 
+  // Boundary checks at minimum maxEdge=128 for 4-item (2x2) and 12-item (4x3) sheets.
+  const tiny4 = await api.call('openmotion_assets_use', { action: 'read', items, maxEdge: 128 });
+  assert.ok(tiny4.previews[0].width <= 128 && tiny4.previews[0].height <= 128, `expected <=128, got ${tiny4.previews[0].width}x${tiny4.previews[0].height}`);
+  const items12 = Array.from({ length: 12 }, (_, idx) => items[idx % items.length]);
+  const tiny12 = await api.call('openmotion_assets_use', { action: 'read', items: items12, maxEdge: 128 });
+  assert.deepEqual(tiny12.grid, { cols: 4, rows: 3, cellSize: 27 });
+  assert.ok(tiny12.previews[0].width <= 128 && tiny12.previews[0].height <= 128, `expected <=128, got ${tiny12.previews[0].width}x${tiny12.previews[0].height}`);
+
   await assert.rejects(api.call('openmotion_assets_use', { action: 'read', assetId: wide.id, versionId: wide.currentVersionId, items }), /INVALID_ARGUMENT/);
   const tone = await library.importFile(await media(store.directory, 'batch-audio.wav', ['-f', 'lavfi', '-i', 'sine=duration=0.3']), { requestId: 'ba', name: 'Tone' });
   await assert.rejects(api.call('openmotion_assets_use', { action: 'read', assetId: tone.id, versionId: tone.currentVersionId, maxEdge: 512 }), /image\/video-only/);

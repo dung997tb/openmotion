@@ -66,7 +66,8 @@ async function readImageContactSheet(library: AssetLibrary, items: AssetReferenc
     const rows = Math.ceil(resolved.length / cols);
     const gridMax = Math.max(cols, rows);
     const pad = 4, margin = 4;
-    const cell = Math.max(64, Math.floor((sheetMaxEdge - margin * 2 - pad * (gridMax - 1)) / gridMax));
+    // Keep the full composited sheet (including padding and margins) strictly within sheetMaxEdge for all 1..12 item grids.
+    const cell = Math.max(1, Math.floor((sheetMaxEdge - margin * 2 - pad * (gridMax - 1)) / gridMax));
 
     const args: string[] = ['-v', 'error', '-nostdin'];
     const filters: string[] = [];
