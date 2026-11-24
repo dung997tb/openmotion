@@ -16,6 +16,7 @@ export interface BuiltinFilmstripManifestEntry {
   readonly templateId: string;
   readonly path: string;
   readonly file: string;
+  readonly depsSha256: string;
   readonly frameCount: number;
   readonly frameWidth: number;
   readonly frameHeight: number;
@@ -32,6 +33,7 @@ export interface LoadedBuiltinFilmstrip {
   readonly meta: CompositionFilmstripMeta;
   readonly templateId: string;
   readonly path: string;
+  readonly depsSha256: string;
 }
 
 interface RootCacheEntry {
@@ -57,6 +59,7 @@ async function loadRootIndex(repoRoot: string): Promise<RootCacheEntry> {
       for (const [sha256, entry] of Object.entries(parsed.entries)) {
         if (!isSha256Hex(sha256) || !entry || typeof entry !== 'object') continue;
         if (typeof entry.file !== 'string' || !isSafeRelativeJpg(entry.file)) continue;
+        if (typeof entry.depsSha256 !== 'string' || !isSha256Hex(entry.depsSha256)) continue;
         const validMeta = validateFilmstripMeta({
           frameCount: entry.frameCount,
           frameWidth: entry.frameWidth,
@@ -68,6 +71,7 @@ async function loadRootIndex(repoRoot: string): Promise<RootCacheEntry> {
           templateId: typeof entry.templateId === 'string' ? entry.templateId : '',
           path: typeof entry.path === 'string' ? entry.path : '',
           file: entry.file,
+          depsSha256: entry.depsSha256,
           frameCount: validMeta.frameCount,
           frameWidth: validMeta.frameWidth,
           frameHeight: validMeta.frameHeight,
@@ -135,6 +139,7 @@ export async function getBuiltinCompositionFilmstrip(
           meta,
           templateId: manifestEntry.templateId,
           path: manifestEntry.path,
+          depsSha256: manifestEntry.depsSha256,
         };
       } catch {
         return null;

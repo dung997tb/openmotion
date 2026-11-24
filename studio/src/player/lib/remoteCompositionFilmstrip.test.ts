@@ -12,12 +12,16 @@ import {
 import {
   buildCompositionFilmstripUrl,
   clearRemoteCompositionFilmstripStateForTest,
+  computeRemoteSpriteFrameDimensions,
+  fetchRemoteCompositionFilmstrip,
   setRemoteFilmstripCodecForTest,
   subsampleFilmstripFrames,
+  uploadRemoteCompositionFilmstripIfEligible,
 } from "./remoteCompositionFilmstrip";
 import { usePlayerStore } from "../store/playerStore";
 
 const SHA_A = "a".repeat(64);
+const RENDER_KEY_A = "d".repeat(64);
 
 afterEach(() => {
   setCachedCloudDisklessMode(null);
@@ -177,6 +181,7 @@ describe("remoteCompositionFilmstrip", () => {
           status: 204,
           headers: {
             "x-openmotion-filmstrip-sha256": SHA_A,
+            "x-openmotion-filmstrip-render-key": RENDER_KEY_A,
             "x-openmotion-filmstrip-scope": "workspace",
           },
         });
@@ -294,6 +299,7 @@ describe("remoteCompositionFilmstrip", () => {
       expect(putRequests[0]!.url).toBe("/api/projects/proj-wb/composition-filmstrip/compositions/custom.html");
       expect(putRequests[0]!.headers["content-type"]).toBe("image/jpeg");
       expect(putRequests[0]!.headers["x-openmotion-filmstrip-sha256"]).toBe(SHA_A);
+      expect(putRequests[0]!.headers["x-openmotion-filmstrip-render-key"]).toBe(RENDER_KEY_A);
       expect(putRequests[0]!.headers["x-openmotion-filmstrip-scope"]).toBe("workspace");
       expect(putRequests[0]!.headers["x-openmotion-filmstrip-frames"]).toBe("4");
       expect(putRequests[0]!.headers["x-openmotion-filmstrip-width"]).toBe("160");
@@ -303,6 +309,115 @@ describe("remoteCompositionFilmstrip", () => {
       if (origSrcDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "src", origSrcDescriptor);
       globalThis.fetch = origFetch;
       meta.remove();
+    }
+  });
+
+  it("preserves portrait aspect ratio with uniform scaling in the real sprite packer", async () => {
+    // 9:16 portrait (240x427) scales uniformly by 160/240 -> 160x285 (never squashed to 160x213).
+    expect(computeRemoteSpriteFrameDimensions(240, 427)).toEqual({ frameWidth: 160, frameHeight: 285 });
+    // Ultra-tall 1:5 (100x500) scales uniformly by 320/500 -> 64x320.
+    expect(computeRemoteSpriteFrameDimensions(100, 500)).toEqual({ frameWidth: 64, frameHeight: 320 });
+    // Standard 16:9 landscape (240x135) -> 160x90.
+    expect(computeRemoteSpriteFrameDimensions(240, 135)).toEqual({ frameWidth: 160, frameHeight: 90 });
+
+    const drawnCalls: Array<{ dx: number; dy: number; dw: number; dh: number }> = [];
+    const createdCanvases: Array<{ width: number; height: number }> = [];
+    const origCreateElement = document.createElement.bind(document);
+    const origCreateImageBitmap = globalThis.createImageBitmap;
+    const origFetch = globalThis.fetch;
+
+    const fakeBitmap = { width: 240, height: 427, close: vi.fn() };
+    globalThis.createImageBitmap = vi.fn(async () => fakeBitmap) as unknown as typeof createImageBitmap;
+    vi.spyOn(document, "createElement").mockImplementation(((tagName: string) => {
+      if (tagName.toLowerCase() === "canvas") {
+        let width = 0;
+        let height = 0;
+        const fakeCanvas = {
+          get width() {
+            return width;
+          },
+          set width(v: number) {
+            width = v;
+            if (v > 0 && height > 0) createdCanvases.push({ width, height });
+          },
+          get height() {
+            return height;
+          },
+          set height(v: number) {
+            height = v;
+            if (width > 0 && v > 0) createdCanvases.push({ width, height });
+          },
+          getContext: () => ({
+            drawImage: (_src: unknown, dx: number, dy: number, dw: number, dh: number) => {
+              drawnCalls.push({ dx, dy, dw, dh });
+            },
+          }),
+          toBlob: (cb: (blob: Blob | null) => void) => {
+            cb(new Blob(["packed-portrait-jpeg"], { type: "image/jpeg" }));
+          },
+        };
+        return fakeCanvas as unknown as HTMLCanvasElement;
+      }
+      return origCreateElement(tagName);
+    }) as typeof document.createElement);
+
+    const putHeaders: Array<Record<string, string>> = [];
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "x-openmotion-filmstrip-sha256": SHA_A,
+            "x-openmotion-filmstrip-render-key": RENDER_KEY_A,
+            "x-openmotion-filmstrip-scope": "workspace",
+          },
+        });
+      }
+      const hdrs: Record<string, string> = {};
+      new Headers(init?.headers).forEach((v, k) => {
+        hdrs[k.toLowerCase()] = v;
+      });
+      putHeaders.push(hdrs);
+      return Response.json({ stored: true, frameCount: 4 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const previewUrl = "/api/projects/proj-portrait/preview/comp/compositions/reel.html";
+      const miss = await fetchRemoteCompositionFilmstrip({
+        projectId: "proj-portrait",
+        previewUrl,
+        compRev: "rev-p",
+        contentRevision: 0,
+      });
+      expect(miss.status).toBe("miss");
+
+      const uploaded = await uploadRemoteCompositionFilmstripIfEligible({
+        projectId: "proj-portrait",
+        previewUrl,
+        compRev: "rev-p",
+        contentRevision: 0,
+        blobs: Array.from({ length: 4 }, (_, i) => new Blob([`p-${i}`], { type: "image/jpeg" })),
+        width: 240,
+        height: 427,
+        aspect: 240 / 427,
+        duration: 6,
+      });
+      expect(uploaded).toBe(true);
+      expect(createdCanvases).toContainEqual({ width: 160 * 4, height: 285 });
+      expect(drawnCalls).toEqual([
+        { dx: 0, dy: 0, dw: 160, dh: 285 },
+        { dx: 160, dy: 0, dw: 160, dh: 285 },
+        { dx: 320, dy: 0, dw: 160, dh: 285 },
+        { dx: 480, dy: 0, dw: 160, dh: 285 },
+      ]);
+      expect(putHeaders).toHaveLength(1);
+      expect(putHeaders[0]!["x-openmotion-filmstrip-width"]).toBe("160");
+      expect(putHeaders[0]!["x-openmotion-filmstrip-height"]).toBe("285");
+      expect(putHeaders[0]!["x-openmotion-filmstrip-render-key"]).toBe(RENDER_KEY_A);
+    } finally {
+      globalThis.createImageBitmap = origCreateImageBitmap;
+      globalThis.fetch = origFetch;
     }
   });
 });

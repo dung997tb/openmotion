@@ -167,6 +167,17 @@ export function compThumbnailKey(workspaceId: string, projectId: string, key: st
   return `workspaces/${workspaceId}/comp-thumbs/${projectId}/${key}.png`;
 }
 
+export function projectCompFilmstripKey(
+  workspaceId: string,
+  projectId: string,
+  renderKey: string,
+): string {
+  assertUuid(workspaceId, 'workspaceId');
+  assertUuid(projectId, 'projectId');
+  assertSha256(renderKey);
+  return `workspaces/${workspaceId}/comp-thumbs/${projectId}/filmstrip-v1-${renderKey}.jpg`;
+}
+
 export function exportKey(workspaceId: string, jobId: string, name: string): string {
   assertUuid(workspaceId, 'workspaceId');
   assertUuid(jobId, 'jobId');

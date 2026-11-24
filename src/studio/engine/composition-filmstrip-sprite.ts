@@ -1,3 +1,8 @@
+import { createHash } from 'node:crypto';
+import { decodeAuthoredAttribute, scanHtmlOpeningTags } from '@hyperframes/parsers';
+import { decodedUrlPath } from '@hyperframes/parsers/asset-paths';
+import { resolveVirtualPath, virtualDirname } from '../virtual-project-store.ts';
+
 export const COMPOSITION_FILMSTRIP_VERSION = 1 as const;
 export const MAX_FILMSTRIP_FRAMES = 8;
 export const MIN_FILMSTRIP_FRAME_WIDTH = 32;
@@ -8,16 +13,144 @@ export const MAX_FILMSTRIP_JPEG_BYTES = 512 * 1024;
 export const MIN_FILMSTRIP_ASPECT = 0.1;
 export const MAX_FILMSTRIP_ASPECT = 10;
 
-export const WORKSPACE_FILMSTRIP_DERIVED_NAME = 'comp-filmstrip-v1.jpg';
-export const WORKSPACE_PATCH_FILMSTRIP_DERIVED_NAME = 'comp-filmstrip-patch-v1.jpg';
-
 export const FILMSTRIP_HEADER_FRAMES = 'x-openmotion-filmstrip-frames';
 export const FILMSTRIP_HEADER_WIDTH = 'x-openmotion-filmstrip-width';
 export const FILMSTRIP_HEADER_HEIGHT = 'x-openmotion-filmstrip-height';
 export const FILMSTRIP_HEADER_ASPECT = 'x-openmotion-filmstrip-aspect';
 export const FILMSTRIP_HEADER_SHA256 = 'x-openmotion-filmstrip-sha256';
+export const FILMSTRIP_HEADER_RENDER_KEY = 'x-openmotion-filmstrip-render-key';
 export const FILMSTRIP_HEADER_SCOPE = 'x-openmotion-filmstrip-scope';
 export const FILMSTRIP_HEADER_SOURCE = 'x-openmotion-filmstrip-source';
+
+export interface FilmstripDependencyFile {
+  readonly path: string;
+  readonly blobScope: string;
+  readonly sha256: string;
+  readonly isText: boolean;
+}
+
+export function isHtmlCompositionPath(filePath: string): boolean {
+  return /\.html?$/i.test(filePath);
+}
+
+export function extractIndexHeadMarkup(indexHtml: string | null | undefined): string {
+  if (!indexHtml) return '';
+  return /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml)?.[1] ?? '';
+}
+
+function resolveNestedCompRef(
+  owner: string,
+  rawRef: string,
+  byPath: ReadonlyMap<string, FilmstripDependencyFile>,
+): string | null {
+  const trimmed = rawRef.trim();
+  if (!trimmed || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(trimmed)) return null;
+  const pathOnly = decodedUrlPath(trimmed.split(/[?#]/)[0] ?? '');
+  if (!pathOnly) return null;
+  const local = resolveVirtualPath(virtualDirname(owner), pathOnly);
+  if (local && byPath.has(local)) return local;
+  const fromRoot = resolveVirtualPath('', pathOnly);
+  if (fromRoot && byPath.has(fromRoot)) return fromRoot;
+  return null;
+}
+
+/**
+ * Compute a deterministic sha256 fingerprint of every project input beyond `compPath`'s
+ * own HTML bytes that affects how `compPath` renders:
+ * - `index.html` `<head>` markup (shared stylesheets/fonts/links; ignores `<body>` clip timing)
+ * - all non-composition project files (CSS, images, SVGs, fonts, scripts, etc.)
+ * - all nested compositions referenced via `data-composition-src` (or all sibling HTML scenes for `index.html`)
+ */
+export function computeCompositionFilmstripDepsDigest(input: {
+  readonly compPath: string;
+  readonly files: readonly FilmstripDependencyFile[];
+  readonly indexHead?: string | null;
+  readonly readText?: (filePath: string) => string | null;
+}): { readonly depsSha256: string; readonly allDepsCatalog: boolean } {
+  const byPath = new Map<string, FilmstripDependencyFile>();
+  for (const f of input.files) {
+    byPath.set(f.path, f);
+  }
+
+  const includedComps = new Set<string>();
+  let allDepsCatalog = true;
+
+  if (input.compPath === 'index.html') {
+    for (const f of input.files) {
+      if (f.path !== 'index.html' && f.isText && isHtmlCompositionPath(f.path)) {
+        includedComps.add(f.path);
+      }
+    }
+  } else if (input.readText) {
+    const visited = new Set<string>([input.compPath]);
+    const queue = [input.compPath];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const html = input.readText(current);
+      if (!html || !/data-composition-src/i.test(html)) continue;
+      for (const tag of scanHtmlOpeningTags(html)) {
+        const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
+        if (!attr || attr.kind !== 'value') continue;
+        const target = resolveNestedCompRef(current, decodeAuthoredAttribute(attr.value), byPath);
+        if (!target || visited.has(target)) continue;
+        visited.add(target);
+        includedComps.add(target);
+        queue.push(target);
+      }
+    }
+  }
+
+  const hash = createHash('sha256');
+  hash.update('omfs-deps-v1\n');
+
+  const indexFile = byPath.get('index.html');
+  if (input.indexHead !== undefined && input.indexHead !== null) {
+    hash.update('head:');
+    hash.update(input.indexHead);
+    hash.update('\n');
+    if (indexFile && indexFile.blobScope !== 'catalog') {
+      allDepsCatalog = false;
+    }
+  } else if (indexFile && input.compPath !== 'index.html') {
+    hash.update('index:');
+    hash.update(indexFile.sha256);
+    hash.update('\n');
+    if (indexFile.blobScope !== 'catalog') {
+      allDepsCatalog = false;
+    }
+  }
+
+  const sorted = [...input.files].sort((a, b) => a.path.localeCompare(b.path));
+  for (const file of sorted) {
+    if (file.path === input.compPath || file.path === 'index.html') continue;
+    const isComp = file.isText && isHtmlCompositionPath(file.path);
+    if (isComp && !includedComps.has(file.path)) continue;
+    hash.update(file.path);
+    hash.update(':');
+    hash.update(file.sha256);
+    hash.update('\n');
+    if (file.blobScope !== 'catalog') {
+      allDepsCatalog = false;
+    }
+  }
+
+  return { depsSha256: hash.digest('hex'), allDepsCatalog };
+}
+
+/**
+ * Compute the authoritative 64-hex cache identity for a project composition filmstrip,
+ * combining path, storage scope, composition bytes sha256, and rendered dependency digest.
+ */
+export function computeCompositionFilmstripRenderKey(input: {
+  readonly compPath: string;
+  readonly fileSha256: string;
+  readonly blobScope: string;
+  readonly depsSha256: string;
+}): string {
+  return createHash('sha256')
+    .update(`omfs-render-v1\n${input.compPath}\n${input.blobScope}\n${input.fileSha256}\n${input.depsSha256}`)
+    .digest('hex');
+}
 
 const COMMENT_PREFIX = 'OMFS1:';
 

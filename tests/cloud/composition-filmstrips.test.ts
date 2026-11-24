@@ -17,6 +17,7 @@ import {
   catalogCompFilmstripKey,
   isCatalogCasKey,
   isImmutableCasKey,
+  projectCompFilmstripKey,
 } from '../../src/infra/storage.ts';
 import {
   clearBuiltinFilmstripCacheForTest,
@@ -29,11 +30,14 @@ import {
 } from '../../src/services/builtin-template-source.ts';
 import { handleStudioError, type DisklessStudioDeps } from '../../src/studio/context.ts';
 import {
+  computeCompositionFilmstripDepsDigest,
   embedFilmstripComment,
   extractFilmstripMeta,
+  extractIndexHeadMarkup,
   FILMSTRIP_HEADER_ASPECT,
   FILMSTRIP_HEADER_FRAMES,
   FILMSTRIP_HEADER_HEIGHT,
+  FILMSTRIP_HEADER_RENDER_KEY,
   FILMSTRIP_HEADER_SCOPE,
   FILMSTRIP_HEADER_SHA256,
   FILMSTRIP_HEADER_SOURCE,
@@ -154,14 +158,32 @@ function makeAuth(overrides: Partial<AuthContext> = {}): AuthContext {
 
 function makeRouteApp(
   storage: MemoryStorage,
-  fileLookup: (auth: AuthContext, projectId: string, filePath: string) => VirtualFileRecord | null,
+  projectLookup: (
+    auth: AuthContext,
+    projectId: string,
+  ) => { files: VirtualFileRecord[]; texts?: ReadonlyMap<string, string> } | null,
   authResolver: (req: Request) => AuthContext,
 ) {
   const deps = {
     storage,
     files: {
+      listFiles: async (auth: AuthContext, projectId: string) =>
+        projectLookup(auth, projectId)?.files ?? [],
       getFile: async (auth: AuthContext, projectId: string, filePath: string) =>
-        fileLookup(auth, projectId, filePath),
+        projectLookup(auth, projectId)?.files.find((f) => f.path === filePath) ?? null,
+      readTextFile: async (auth: AuthContext, projectId: string, filePath: string) => {
+        const proj = projectLookup(auth, projectId);
+        const rec = proj?.files.find((f) => f.path === filePath);
+        const content = proj?.texts?.get(filePath);
+        if (!rec || content === undefined) return null;
+        return {
+          path: rec.path,
+          content,
+          version: `"${rec.blobScope}:${rec.sha256}"`,
+          sha256: rec.sha256,
+          blobScope: rec.blobScope,
+        };
+      },
     },
     resolveAuth: (c: { req: { raw: Request } }) => authResolver(c.req.raw),
   } as unknown as DisklessStudioDeps;
@@ -249,17 +271,23 @@ describe('Composition filmstrip sprite codec & storage security', () => {
     let verifiedCount = 0;
     for (const def of BUILTIN_TEMPLATES) {
       const assembled = await assembleBuiltinTemplate(def);
-      const projectFiles = assembled.files.filter((f) => f.isProjectFile);
-      const records: VirtualFileRecord[] = projectFiles.map((f) => ({
-        path: f.path,
-        blobScope: 'catalog',
-        sha256: f.sha256,
-        sizeBytes: f.sizeBytes,
-        mimeType: f.mimeType,
-        isText: f.path.endsWith('.html'),
-        updatedAt: new Date(0),
-        metadata: f.metadata,
-      }));
+      const projectFiles = assembled.files.filter((f) => f.isProjectFile && f.bytes !== null);
+      const texts = new Map<string, string>();
+      const records: VirtualFileRecord[] = projectFiles.map((f) => {
+        const isText = /\.(?:html?|css|js|mjs|json|svg|txt)$/i.test(f.path);
+        if (isText) texts.set(f.path, f.bytes!.toString('utf8'));
+        return {
+          path: f.path,
+          blobScope: 'catalog',
+          sha256: f.sha256,
+          sizeBytes: f.sizeBytes,
+          mimeType: f.mimeType,
+          isText,
+          updatedAt: new Date(0),
+          metadata: f.metadata,
+        };
+      });
+      const indexHead = extractIndexHeadMarkup(texts.get('index.html'));
       const allComps = listVirtualCompositions(records);
       const targetComps = allComps.filter((p) => p !== 'index.html');
       const comps = targetComps.length > 0 ? targetComps : allComps;
@@ -271,6 +299,13 @@ describe('Composition filmstrip sprite codec & storage security', () => {
           loaded,
           `Missing pre-baked filmstrip for ${def.id}/${compPath} (${file.sha256}). Run npm run templates:filmstrips`,
         );
+        const { depsSha256 } = computeCompositionFilmstripDepsDigest({
+          compPath,
+          files: records,
+          indexHead,
+          readText: (filePath) => texts.get(filePath) ?? null,
+        });
+        assert.equal(loaded.depsSha256, depsSha256);
         assert.equal(loaded.meta.frameCount, 8);
         assert.equal(loaded.meta.frameWidth, 160);
         assert.ok(loaded.bytes.byteLength > 1000 && loaded.bytes.byteLength <= MAX_FILMSTRIP_JPEG_BYTES);
@@ -284,26 +319,31 @@ describe('Composition filmstrip sprite codec & storage security', () => {
 });
 
 describe('Studio composition filmstrip HTTP routes', () => {
-  it('serves pre-baked built-in catalog scenes directly with 0 S3 writes and supports HEAD + 304 ETag', async () => {
+  it('serves pre-baked built-in scenes with 0 S3 writes, survives index body edits, and invalidates on CSS/asset/head edits', async () => {
     const welcome = await assembleBuiltinTemplate(
       BUILTIN_TEMPLATES.find((t) => t.id === WELCOME_TEMPLATE_ID)!,
     );
-    const introFile = welcome.files.find((f) => f.path === 'compositions/intro.html')!;
+    const projectFiles = welcome.files.filter((f) => f.isProjectFile && f.bytes !== null);
+    const texts = new Map<string, string>();
+    const files: VirtualFileRecord[] = projectFiles.map((f) => {
+      const isText = /\.(?:html?|css|js|mjs|json|svg|txt)$/i.test(f.path);
+      if (isText) texts.set(f.path, f.bytes!.toString('utf8'));
+      return {
+        path: f.path,
+        blobScope: 'catalog',
+        sha256: f.sha256,
+        sizeBytes: f.sizeBytes,
+        mimeType: f.mimeType,
+        isText,
+        updatedAt: new Date(0),
+        metadata: f.metadata,
+      };
+    });
+    const introFile = files.find((f) => f.path === 'compositions/intro.html')!;
     const storage = new MemoryStorage();
     const app = makeRouteApp(
       storage,
-      (_auth, projectId, filePath) =>
-        projectId === PID_A && filePath === 'compositions/intro.html'
-          ? {
-              path: 'compositions/intro.html',
-              blobScope: 'catalog',
-              sha256: introFile.sha256,
-              sizeBytes: introFile.sizeBytes,
-              mimeType: 'text/html; charset=utf-8',
-              isText: true,
-              updatedAt: new Date(0),
-            }
-          : null,
+      (_auth, projectId) => (projectId === PID_A ? { files, texts } : null),
       () => makeAuth(),
     );
 
@@ -315,9 +355,11 @@ describe('Studio composition filmstrip HTTP routes', () => {
     assert.equal(getRes.headers.get(FILMSTRIP_HEADER_SOURCE), 'builtin');
     assert.equal(getRes.headers.get(FILMSTRIP_HEADER_FRAMES), '8');
     assert.equal(getRes.headers.get(FILMSTRIP_HEADER_SHA256), introFile.sha256);
+    const initialRenderKey = getRes.headers.get(FILMSTRIP_HEADER_RENDER_KEY);
+    assert.ok(initialRenderKey && /^[a-f0-9]{64}$/.test(initialRenderKey));
     assert.equal(getRes.headers.get('cache-control'), 'private, no-cache');
     const etag = getRes.headers.get('etag');
-    assert.ok(etag);
+    assert.ok(etag && etag.includes(PID_A) && etag.includes(initialRenderKey));
     const body = Buffer.from(await getRes.arrayBuffer());
     assert.ok(extractFilmstripMeta(body)?.frameCount === 8);
 
@@ -344,6 +386,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: introFile.sha256,
+          [FILMSTRIP_HEADER_RENDER_KEY]: initialRenderKey,
           [FILMSTRIP_HEADER_SCOPE]: 'catalog',
           [FILMSTRIP_HEADER_FRAMES]: '8',
           [FILMSTRIP_HEADER_WIDTH]: '160',
@@ -359,11 +402,102 @@ describe('Studio composition filmstrip HTTP routes', () => {
       source: 'builtin',
       frameCount: 8,
       sha256: introFile.sha256,
+      renderKey: initialRenderKey,
     });
     assert.equal(storage.putCount, 0);
+
+    // Moving/trimming/splitting a clip edits only index.html <body> (same <head>) -> STILL hits built-in 0ms.
+    const indexIdx = files.findIndex((f) => f.path === 'index.html');
+    const origIndexHtml = texts.get('index.html')!;
+    const movedBodyHtml = origIndexHtml.replace('</body>', '<!-- clip moved --></body>');
+    texts.set('index.html', movedBodyHtml);
+    files[indexIdx] = {
+      ...files[indexIdx]!,
+      blobScope: 'patch',
+      sha256: createHash('sha256').update(movedBodyHtml).digest('hex'),
+    };
+    const afterBodyMove = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/intro.html`,
+    );
+    assert.equal(afterBodyMove.status, 200);
+    assert.equal(afterBodyMove.headers.get(FILMSTRIP_HEADER_SOURCE), 'builtin');
+    assert.equal(afterBodyMove.headers.get(FILMSTRIP_HEADER_RENDER_KEY), initialRenderKey);
+
+    // Editing a shared CSS / image asset (without touching intro.html) MUST invalidate the built-in sprite.
+    const sharedAssetIdx = files.findIndex(
+      (f) => f.path !== 'index.html' && !f.path.endsWith('.html'),
+    );
+    assert.ok(sharedAssetIdx >= 0, 'Expected at least one shared non-HTML asset in Welcome template');
+    files[sharedAssetIdx] = {
+      ...files[sharedAssetIdx]!,
+      blobScope: 'workspace',
+      sha256: SHA_OTHER,
+    };
+    const afterCssEdit = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/intro.html`,
+    );
+    assert.equal(afterCssEdit.status, 204);
+    const updatedRenderKey = afterCssEdit.headers.get(FILMSTRIP_HEADER_RENDER_KEY);
+    assert.ok(updatedRenderKey && updatedRenderKey !== initialRenderKey);
+
+    // Stale PUT carrying the pre-CSS-edit renderKey is rejected with 409 Conflict.
+    const staleDepPut = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/intro.html`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'image/jpeg',
+          [FILMSTRIP_HEADER_SHA256]: introFile.sha256,
+          [FILMSTRIP_HEADER_RENDER_KEY]: initialRenderKey,
+          [FILMSTRIP_HEADER_SCOPE]: 'catalog',
+          [FILMSTRIP_HEADER_FRAMES]: '8',
+          [FILMSTRIP_HEADER_WIDTH]: '160',
+          [FILMSTRIP_HEADER_HEIGHT]: '90',
+        },
+        body: new Uint8Array(raw8),
+      },
+    );
+    assert.equal(staleDepPut.status, 409);
+
+    // Fresh PUT with the updated renderKey writes ONLY to this project's comp-thumbs keyspace.
+    const freshDepPut = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/intro.html`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'image/jpeg',
+          [FILMSTRIP_HEADER_SHA256]: introFile.sha256,
+          [FILMSTRIP_HEADER_RENDER_KEY]: updatedRenderKey,
+          [FILMSTRIP_HEADER_SCOPE]: 'catalog',
+          [FILMSTRIP_HEADER_FRAMES]: '8',
+          [FILMSTRIP_HEADER_WIDTH]: '160',
+          [FILMSTRIP_HEADER_HEIGHT]: '90',
+        },
+        body: new Uint8Array(raw8),
+      },
+    );
+    assert.equal(freshDepPut.status, 200);
+    assert.equal(
+      storage.objects.has(projectCompFilmstripKey(WID_A, PID_A, updatedRenderKey)),
+      true,
+    );
+
+    // Editing index.html <head> also rotates the renderKey and misses until recaptured.
+    const editedHeadHtml = movedBodyHtml.replace('</head>', '<style>body{background:#111}</style></head>');
+    texts.set('index.html', editedHeadHtml);
+    files[indexIdx] = {
+      ...files[indexIdx]!,
+      blobScope: 'patch',
+      sha256: createHash('sha256').update(editedHeadHtml).digest('hex'),
+    };
+    const afterHeadEdit = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/intro.html`,
+    );
+    assert.equal(afterHeadEdit.status, 204);
+    assert.notEqual(afterHeadEdit.headers.get(FILMSTRIP_HEADER_RENDER_KEY), updatedRenderKey);
   });
 
-  it('serves S3 catalog filmstrips read-only and never allows client PUT to write catalog/*', async () => {
+  it('serves S3 catalog filmstrips read-only only when dependencies are catalog and never allows client PUT to write catalog/*', async () => {
     const storage = new MemoryStorage();
     const raw8 = await makeTestSpriteJpeg(8, 160, 90);
     const tagged8 = embedFilmstripComment(raw8, {
@@ -374,19 +508,33 @@ describe('Studio composition filmstrip HTTP routes', () => {
       aspect: 16 / 9,
     })!;
 
-    // Case 1: un-prebaked catalog scene -> GET 204, client PUT writes ONLY to workspace derived key.
+    let cssScope: BlobScope = 'catalog';
+    let cssSha = SHA_OTHER;
     const app = makeRouteApp(
       storage,
-      (_auth, projectId, filePath) =>
-        projectId === PID_A && filePath === 'compositions/prism.html'
+      (_auth, projectId) =>
+        projectId === PID_A
           ? {
-              path: 'compositions/prism.html',
-              blobScope: 'catalog',
-              sha256: SHA_SCENE,
-              sizeBytes: 512,
-              mimeType: 'text/html; charset=utf-8',
-              isText: true,
-              updatedAt: new Date(0),
+              files: [
+                {
+                  path: 'compositions/prism.html',
+                  blobScope: 'catalog',
+                  sha256: SHA_SCENE,
+                  sizeBytes: 512,
+                  mimeType: 'text/html; charset=utf-8',
+                  isText: true,
+                  updatedAt: new Date(0),
+                },
+                {
+                  path: 'assets/film.css',
+                  blobScope: cssScope,
+                  sha256: cssSha,
+                  sizeBytes: 128,
+                  mimeType: 'text/css',
+                  isText: true,
+                  updatedAt: new Date(0),
+                },
+              ],
             }
           : null,
       () => makeAuth(),
@@ -398,6 +546,8 @@ describe('Studio composition filmstrip HTTP routes', () => {
     assert.equal(miss.status, 204);
     assert.equal(miss.headers.get(FILMSTRIP_HEADER_SHA256), SHA_SCENE);
     assert.equal(miss.headers.get(FILMSTRIP_HEADER_SCOPE), 'catalog');
+    const renderKey = miss.headers.get(FILMSTRIP_HEADER_RENDER_KEY)!;
+    assert.ok(/^[a-f0-9]{64}$/.test(renderKey));
 
     const raw4 = await makeTestSpriteJpeg(4, 160, 90);
     const put = await app.request(
@@ -407,6 +557,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKey,
           [FILMSTRIP_HEADER_SCOPE]: 'catalog',
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
@@ -417,12 +568,9 @@ describe('Studio composition filmstrip HTTP routes', () => {
     );
     assert.equal(put.status, 200);
     assert.equal(storage.objects.has(catalogCompFilmstripKey(SHA_SCENE)), false);
-    assert.equal(
-      storage.objects.has(`workspaces/${WID_A}/derived/${SHA_SCENE}/comp-filmstrip-v1.jpg`),
-      true,
-    );
+    assert.equal(storage.objects.has(projectCompFilmstripKey(WID_A, PID_A, renderKey)), true);
 
-    // Case 2: once trusted catalog-sync populates catalog/filmstrips/{sha}/strip-v1.jpg, GET prefers catalog!
+    // Once trusted catalog-sync populates catalog/filmstrips/{sha}/strip-v1.jpg, GET prefers catalog while deps are unmodified.
     await storage.putObject(catalogCompFilmstripKey(SHA_SCENE), tagged8, 'image/jpeg');
     const hit = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/prism.html`,
@@ -430,42 +578,50 @@ describe('Studio composition filmstrip HTTP routes', () => {
     assert.equal(hit.status, 200);
     assert.equal(hit.headers.get(FILMSTRIP_HEADER_SOURCE), 'catalog');
     assert.equal(hit.headers.get(FILMSTRIP_HEADER_FRAMES), '8');
+
+    // Editing assets/film.css stops serving the catalog S3 sprite immediately.
+    cssScope = 'workspace';
+    cssSha = SHA_PATCH;
+    const missAfterCss = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/prism.html`,
+    );
+    assert.equal(missAfterCss.status, 204);
   });
 
-  it('enforces strict tenant isolation, upgrade-only writes, patch key separation, and input validation', async () => {
+  it('enforces strict tenant & project isolation, upgrade-only writes, render-key protection, and input validation', async () => {
     const storage = new MemoryStorage();
     let currentScope: BlobScope = 'workspace';
     let currentSha = SHA_SCENE;
 
     const app = makeRouteApp(
       storage,
-      (auth, projectId, filePath) => {
+      (auth, projectId) => {
         if (
-          (auth.workspaceId === WID_A && projectId === PID_A) ||
+          (auth.workspaceId === WID_A && (projectId === PID_A || projectId === PID_B)) ||
           (auth.workspaceId === WID_B && projectId === PID_B)
         ) {
-          if (filePath === 'compositions/custom.html') {
-            return {
-              path: filePath,
-              blobScope: currentScope,
-              sha256: currentSha,
-              sizeBytes: 1024,
-              mimeType: 'text/html; charset=utf-8',
-              isText: true,
-              updatedAt: new Date(0),
-            };
-          }
-          if (filePath === 'assets/photo.jpg') {
-            return {
-              path: filePath,
-              blobScope: 'workspace',
-              sha256: SHA_OTHER,
-              sizeBytes: 2048,
-              mimeType: 'image/jpeg',
-              isText: false,
-              updatedAt: new Date(0),
-            };
-          }
+          return {
+            files: [
+              {
+                path: 'compositions/custom.html',
+                blobScope: currentScope,
+                sha256: currentSha,
+                sizeBytes: 1024,
+                mimeType: 'text/html; charset=utf-8',
+                isText: true,
+                updatedAt: new Date(0),
+              },
+              {
+                path: 'assets/photo.jpg',
+                blobScope: 'workspace',
+                sha256: SHA_OTHER,
+                sizeBytes: 2048,
+                mimeType: 'image/jpeg',
+                isText: false,
+                updatedAt: new Date(0),
+              },
+            ],
+          };
         }
         return null;
       },
@@ -483,6 +639,14 @@ describe('Studio composition filmstrip HTTP routes', () => {
     );
     assert.equal(nonHtml.status, 404);
 
+    // Probe to obtain authoritative renderKey.
+    const probeA = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
+    );
+    assert.equal(probeA.status, 204);
+    const renderKeyA = probeA.headers.get(FILMSTRIP_HEADER_RENDER_KEY)!;
+    assert.ok(/^[a-f0-9]{64}$/.test(renderKeyA));
+
     // Viewer cannot PUT (403).
     const raw4 = await makeTestSpriteJpeg(4, 160, 90);
     const viewerPut = await app.request(
@@ -493,6 +657,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
           'x-test-role': 'viewer',
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -502,7 +667,23 @@ describe('Studio composition filmstrip HTTP routes', () => {
     );
     assert.equal(viewerPut.status, 403);
 
-    // Stale sha256 mismatch -> 409 Conflict.
+    // Missing render key -> 400; stale sha256 or stale render key -> 409 Conflict.
+    const missingRenderKey = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'image/jpeg',
+          [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_FRAMES]: '4',
+          [FILMSTRIP_HEADER_WIDTH]: '160',
+          [FILMSTRIP_HEADER_HEIGHT]: '90',
+        },
+        body: new Uint8Array(raw4),
+      },
+    );
+    assert.equal(missingRenderKey.status, 400);
+
     const stalePut = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
       {
@@ -510,6 +691,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_OTHER,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -527,6 +709,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/png',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -543,6 +726,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '8',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -559,6 +743,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -568,7 +753,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
     );
     assert.equal(tooBig.status, 413);
 
-    // Valid 4-frame PUT by Workspace A succeeds.
+    // Valid 4-frame PUT by Project A succeeds.
     const put4 = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
       {
@@ -576,6 +761,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -586,7 +772,8 @@ describe('Studio composition filmstrip HTTP routes', () => {
     assert.equal(put4.status, 200);
     assert.equal((await put4.json()).stored, true);
 
-    // Workspace A hits 200, while Workspace B (same SHA!) strictly misses with 204 (tenant isolation).
+    // Project A hits 200; Project B in the SAME workspace (even with identical scene bytes!) strictly misses
+    // with 204 and writes to its own project-scoped S3 key without cross-project sharing or blocking.
     const hitA = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
     );
@@ -594,31 +781,13 @@ describe('Studio composition filmstrip HTTP routes', () => {
     assert.equal(hitA.headers.get(FILMSTRIP_HEADER_FRAMES), '4');
     assert.equal(hitA.headers.get(FILMSTRIP_HEADER_SOURCE), 'workspace');
 
-    const missB = await app.request(
+    const missSameWsOtherProject = await app.request(
       `http://studio.local/api/projects/${PID_B}/composition-filmstrip/compositions/custom.html`,
-      { headers: { 'x-test-ws': WID_B } },
     );
-    assert.equal(missB.status, 204);
+    assert.equal(missSameWsOtherProject.status, 204);
+    const renderKeySameWsB = missSameWsOtherProject.headers.get(FILMSTRIP_HEADER_RENDER_KEY)!;
 
-    // Downgrade (2 < 4) is skipped; upgrade (8 > 4) replaces cleanly.
-    const raw2 = await makeTestSpriteJpeg(2, 160, 90);
-    const downgrade = await app.request(
-      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
-      {
-        method: 'PUT',
-        headers: {
-          'content-type': 'image/jpeg',
-          [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
-          [FILMSTRIP_HEADER_FRAMES]: '2',
-          [FILMSTRIP_HEADER_WIDTH]: '160',
-          [FILMSTRIP_HEADER_HEIGHT]: '90',
-        },
-        body: new Uint8Array(raw2),
-      },
-    );
-    assert.equal(downgrade.status, 200);
-    assert.equal((await downgrade.json()).stored, false);
-
+    // Upgrade Project A to 8 frames first, then verify Project B in the SAME workspace can still store its own 4-frame sprite.
     const raw8 = await makeTestSpriteJpeg(8, 160, 90);
     const upgrade = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
@@ -627,6 +796,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
           [FILMSTRIP_HEADER_FRAMES]: '8',
           [FILMSTRIP_HEADER_WIDTH]: '160',
           [FILMSTRIP_HEADER_HEIGHT]: '90',
@@ -637,15 +807,63 @@ describe('Studio composition filmstrip HTTP routes', () => {
     assert.equal(upgrade.status, 200);
     assert.equal((await upgrade.json()).stored, true);
 
-    const hitUpgraded = await app.request(
+    // Downgrade on Project A (2 < 8) is skipped.
+    const raw2 = await makeTestSpriteJpeg(2, 160, 90);
+    const downgrade = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'image/jpeg',
+          [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyA,
+          [FILMSTRIP_HEADER_FRAMES]: '2',
+          [FILMSTRIP_HEADER_WIDTH]: '160',
+          [FILMSTRIP_HEADER_HEIGHT]: '90',
+        },
+        body: new Uint8Array(raw2),
+      },
     );
-    assert.equal(hitUpgraded.status, 200);
-    assert.equal(hitUpgraded.headers.get(FILMSTRIP_HEADER_FRAMES), '8');
+    assert.equal(downgrade.status, 200);
+    assert.equal((await downgrade.json()).stored, false);
 
-    // Patch scope writes to its own comp-filmstrip-patch-v1.jpg derived key.
+    // Project B in WID_A can independently write 4 frames (not blocked by Project A's 8 frames).
+    const putSameWsB = await app.request(
+      `http://studio.local/api/projects/${PID_B}/composition-filmstrip/compositions/custom.html`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'image/jpeg',
+          [FILMSTRIP_HEADER_SHA256]: SHA_SCENE,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeySameWsB,
+          [FILMSTRIP_HEADER_FRAMES]: '4',
+          [FILMSTRIP_HEADER_WIDTH]: '160',
+          [FILMSTRIP_HEADER_HEIGHT]: '90',
+        },
+        body: new Uint8Array(raw4),
+      },
+    );
+    assert.equal(putSameWsB.status, 200);
+    assert.equal((await putSameWsB.json()).stored, true);
+    assert.equal(storage.objects.has(projectCompFilmstripKey(WID_A, PID_B, renderKeySameWsB)), true);
+
+    // Different workspace WID_B strictly misses with 204 (tenant isolation).
+    const missOtherWs = await app.request(
+      `http://studio.local/api/projects/${PID_B}/composition-filmstrip/compositions/custom.html`,
+      { headers: { 'x-test-ws': WID_B } },
+    );
+    assert.equal(missOtherWs.status, 204);
+
+    // Patch scope produces a distinct renderKey and project-scoped S3 object.
     currentScope = 'patch';
     currentSha = SHA_PATCH;
+    const probePatch = await app.request(
+      `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
+    );
+    assert.equal(probePatch.status, 204);
+    const renderKeyPatch = probePatch.headers.get(FILMSTRIP_HEADER_RENDER_KEY)!;
+    assert.notEqual(renderKeyPatch, renderKeyA);
+
     const putPatch = await app.request(
       `http://studio.local/api/projects/${PID_A}/composition-filmstrip/compositions/custom.html`,
       {
@@ -653,6 +871,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
         headers: {
           'content-type': 'image/jpeg',
           [FILMSTRIP_HEADER_SHA256]: SHA_PATCH,
+          [FILMSTRIP_HEADER_RENDER_KEY]: renderKeyPatch,
           [FILMSTRIP_HEADER_SCOPE]: 'patch',
           [FILMSTRIP_HEADER_FRAMES]: '4',
           [FILMSTRIP_HEADER_WIDTH]: '160',
@@ -663,7 +882,7 @@ describe('Studio composition filmstrip HTTP routes', () => {
     );
     assert.equal(putPatch.status, 200);
     assert.equal(
-      storage.objects.has(`workspaces/${WID_A}/derived/${SHA_PATCH}/comp-filmstrip-patch-v1.jpg`),
+      storage.objects.has(projectCompFilmstripKey(WID_A, PID_A, renderKeyPatch)),
       true,
     );
   });

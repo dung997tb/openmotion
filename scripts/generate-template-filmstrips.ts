@@ -19,8 +19,10 @@ import type {
   BuiltinFilmstripManifestEntry,
 } from '../src/services/builtin-filmstrip-store.ts';
 import {
+  computeCompositionFilmstripDepsDigest,
   embedFilmstripComment,
   extractFilmstripMeta,
+  extractIndexHeadMarkup,
   MAX_FILMSTRIP_FRAMES,
 } from '../src/studio/engine/composition-filmstrip-sprite.ts';
 import { buildSubCompositionHtmlInMemory } from '../src/studio/engine/preview-bundler.ts';
@@ -308,6 +310,42 @@ async function captureCompositionSprite(
   return { jpeg, ...meta };
 }
 
+function computeTemplateDepsMap(
+  assembled: Awaited<ReturnType<typeof assembleBuiltinTemplate>>,
+): Map<string, string> {
+  const projectFiles = assembled.files.filter((f) => f.isProjectFile && f.bytes !== null);
+  const textContents = new Map<string, string>();
+  const records: VirtualFileRecord[] = projectFiles.map((file) => {
+    const isText = isTextProjectPath(file.path);
+    if (isText) textContents.set(file.path, file.bytes!.toString('utf8'));
+    return {
+      path: file.path,
+      blobScope: 'catalog',
+      sha256: file.sha256,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+      isText,
+      updatedAt: new Date(0),
+      metadata: file.metadata,
+    };
+  });
+  const indexHead = extractIndexHeadMarkup(textContents.get('index.html'));
+  const allComps = listVirtualCompositions(records);
+  const comps = allComps.filter((p) => p !== 'index.html');
+  const targetComps = comps.length > 0 ? comps : allComps;
+  const depsByPath = new Map<string, string>();
+  for (const compPath of targetComps) {
+    const { depsSha256 } = computeCompositionFilmstripDepsDigest({
+      compPath,
+      files: records,
+      indexHead,
+      readText: (filePath) => textContents.get(filePath) ?? null,
+    });
+    depsByPath.set(compPath, depsSha256);
+  }
+  return depsByPath;
+}
+
 async function verifyManifest(selectedTemplates: readonly BuiltinTemplateDefinition[]): Promise<void> {
   const raw = await readFile(MANIFEST_PATH, 'utf8');
   const manifest = JSON.parse(raw) as BuiltinFilmstripManifest;
@@ -318,25 +356,17 @@ async function verifyManifest(selectedTemplates: readonly BuiltinTemplateDefinit
   for (const def of selectedTemplates) {
     const assembled = await assembleBuiltinTemplate(def, REPO_ROOT, REPO_ROOT);
     const projectFiles = assembled.files.filter((f) => f.isProjectFile);
-    const records: VirtualFileRecord[] = projectFiles.map((f) => ({
-      path: f.path,
-      blobScope: 'catalog',
-      sha256: f.sha256,
-      sizeBytes: f.sizeBytes,
-      mimeType: f.mimeType,
-      isText: isTextProjectPath(f.path),
-      updatedAt: new Date(0),
-      metadata: f.metadata,
-    }));
-    const allComps = listVirtualCompositions(records);
-    const comps = allComps.filter((p) => p !== 'index.html');
-    const targetComps = comps.length > 0 ? comps : allComps;
-    for (const compPath of targetComps) {
+    const depsByPath = computeTemplateDepsMap(assembled);
+    for (const [compPath, expectedDepsSha256] of depsByPath) {
       const file = projectFiles.find((f) => f.path === compPath);
       if (!file) continue;
       const entry = manifest.entries[file.sha256];
       if (!entry) {
         errors.push(`Missing filmstrip entry for ${def.id}/${compPath} (${file.sha256})`);
+        continue;
+      }
+      if (entry.depsSha256 !== expectedDepsSha256) {
+        errors.push(`Stale depsSha256 for ${def.id}/${compPath}: expected ${expectedDepsSha256}, got ${entry.depsSha256}`);
         continue;
       }
       const jpgPath = path.join(FILMSTRIPS_DIR, entry.file);
@@ -357,8 +387,43 @@ async function verifyManifest(selectedTemplates: readonly BuiltinTemplateDefinit
   console.log(`PASS: verified ${Object.keys(manifest.entries).length} pre-baked built-in composition filmstrips.`);
 }
 
+async function refreshManifestDeps(selectedTemplates: readonly BuiltinTemplateDefinition[]): Promise<void> {
+  const raw = await readFile(MANIFEST_PATH, 'utf8');
+  const manifest = JSON.parse(raw) as BuiltinFilmstripManifest;
+  const entries: Record<string, BuiltinFilmstripManifestEntry> = { ...manifest.entries };
+  for (const def of selectedTemplates) {
+    const assembled = await assembleBuiltinTemplate(def, REPO_ROOT, REPO_ROOT);
+    const projectFiles = assembled.files.filter((f) => f.isProjectFile);
+    const depsByPath = computeTemplateDepsMap(assembled);
+    for (const [compPath, depsSha256] of depsByPath) {
+      const file = projectFiles.find((f) => f.path === compPath);
+      const prev = file ? entries[file.sha256] : undefined;
+      if (!file || !prev) {
+        throw new Error(`Missing existing manifest entry for ${def.id}/${compPath}`);
+      }
+      entries[file.sha256] = {
+        templateId: prev.templateId,
+        path: prev.path,
+        file: prev.file,
+        depsSha256,
+        frameCount: prev.frameCount,
+        frameWidth: prev.frameWidth,
+        frameHeight: prev.frameHeight,
+        aspect: prev.aspect,
+      };
+    }
+  }
+  const sortedEntries: Record<string, BuiltinFilmstripManifestEntry> = {};
+  for (const key of Object.keys(entries).sort()) {
+    sortedEntries[key] = entries[key]!;
+  }
+  await writeFile(MANIFEST_PATH, `${JSON.stringify({ version: 1, entries: sortedEntries }, null, 2)}\n`, 'utf8');
+  console.log(`Updated depsSha256 for ${Object.keys(sortedEntries).length} built-in filmstrip entries.`);
+}
+
 async function run(argv: readonly string[]): Promise<void> {
   const checkOnly = argv.includes('--check');
+  const syncDepsOnly = argv.includes('--sync-manifest-deps');
   const templateFilter = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -380,6 +445,11 @@ async function run(argv: readonly string[]): Promise<void> {
 
   if (checkOnly) {
     await verifyManifest(selectedTemplates);
+    return;
+  }
+
+  if (syncDepsOnly) {
+    await refreshManifestDeps(selectedTemplates);
     return;
   }
 
@@ -414,13 +484,15 @@ async function run(argv: readonly string[]): Promise<void> {
     const page = await browser.newPage();
     for (const def of selectedTemplates) {
       const assembled = await assembleBuiltinTemplate(def, REPO_ROOT, REPO_ROOT);
+      const depsByPath = computeTemplateDepsMap(assembled);
       const preview = await startTemplatePreviewServer(assembled, REPO_ROOT);
       const outDir = path.join(FILMSTRIPS_DIR, def.id);
       await mkdir(outDir, { recursive: true });
       try {
         for (const compPath of preview.compositions) {
           const sha256 = preview.shaByPath.get(compPath);
-          if (!sha256) continue;
+          const depsSha256 = depsByPath.get(compPath);
+          if (!sha256 || !depsSha256) continue;
           const result = await captureCompositionSprite(page, preview.origin, compPath);
           const relFile = `${def.id}/${safeSlugForPath(compPath)}.jpg`;
           const outPath = path.join(FILMSTRIPS_DIR, relFile);
@@ -429,6 +501,7 @@ async function run(argv: readonly string[]): Promise<void> {
             templateId: def.id,
             path: compPath,
             file: relFile,
+            depsSha256,
             frameCount: result.frameCount,
             frameWidth: result.frameWidth,
             frameHeight: result.frameHeight,

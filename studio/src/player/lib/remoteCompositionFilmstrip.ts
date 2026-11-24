@@ -18,6 +18,7 @@ const HEADER_WIDTH = "x-openmotion-filmstrip-width";
 const HEADER_HEIGHT = "x-openmotion-filmstrip-height";
 const HEADER_ASPECT = "x-openmotion-filmstrip-aspect";
 const HEADER_SHA256 = "x-openmotion-filmstrip-sha256";
+const HEADER_RENDER_KEY = "x-openmotion-filmstrip-render-key";
 const HEADER_SCOPE = "x-openmotion-filmstrip-scope";
 const HEADER_SOURCE = "x-openmotion-filmstrip-source";
 
@@ -29,6 +30,7 @@ export interface RemoteFilmstripHit {
   readonly height: number;
   readonly aspect: number;
   readonly sha256: string;
+  readonly renderKey?: string;
   readonly scope: string;
   readonly source: string;
 }
@@ -36,6 +38,7 @@ export interface RemoteFilmstripHit {
 export interface RemoteFilmstripMiss {
   readonly status: "miss";
   readonly sha256?: string;
+  readonly renderKey?: string;
   readonly scope?: string;
 }
 
@@ -55,6 +58,7 @@ export interface RemoteFilmstripCodec {
 
 interface PendingWriteTarget {
   readonly sha256: string;
+  readonly renderKey: string;
   readonly scope: string;
   readonly existingFrames: number;
 }
@@ -259,6 +263,23 @@ async function defaultDecodeSprite(
   }
 }
 
+/**
+ * Compute uniform aspect-preserving pixel dimensions for a single filmstrip frame
+ * within `[MIN_FRAME_WIDTH..MAX_UPLOAD_FRAME_WIDTH]` × `[MIN_FRAME_HEIGHT..MAX_FRAME_HEIGHT]`.
+ */
+export function computeRemoteSpriteFrameDimensions(
+  frameWidth: number,
+  frameHeight: number,
+): { frameWidth: number; frameHeight: number } {
+  const origW = Math.max(1, Math.round(Number.isFinite(frameWidth) && frameWidth > 0 ? frameWidth : MAX_UPLOAD_FRAME_WIDTH));
+  const origH = Math.max(1, Math.round(Number.isFinite(frameHeight) && frameHeight > 0 ? frameHeight : 90));
+  const scale = Math.min(1, MAX_UPLOAD_FRAME_WIDTH / origW, MAX_FRAME_HEIGHT / origH);
+  return {
+    frameWidth: Math.max(MIN_FRAME_WIDTH, Math.min(MAX_FRAME_WIDTH, Math.round(origW * scale))),
+    frameHeight: Math.max(MIN_FRAME_HEIGHT, Math.min(MAX_FRAME_HEIGHT, Math.round(origH * scale))),
+  };
+}
+
 async function defaultPackSprite(
   blobs: readonly Blob[],
   frameWidth: number,
@@ -267,11 +288,10 @@ async function defaultPackSprite(
   if (typeof document === "undefined" || blobs.length === 0 || blobs.length > MAX_REMOTE_FILMSTRIP_FRAMES) {
     return null;
   }
-  const rawW = Math.max(MIN_FRAME_WIDTH, Math.min(MAX_FRAME_WIDTH, Math.round(frameWidth)));
-  const rawH = Math.max(MIN_FRAME_HEIGHT, Math.min(MAX_FRAME_HEIGHT, Math.round(frameHeight)));
-  const scale = rawW > MAX_UPLOAD_FRAME_WIDTH ? MAX_UPLOAD_FRAME_WIDTH / rawW : 1;
-  const safeW = Math.max(MIN_FRAME_WIDTH, Math.round(rawW * scale));
-  const safeH = Math.max(MIN_FRAME_HEIGHT, Math.min(MAX_FRAME_HEIGHT, Math.round(rawH * scale)));
+  const { frameWidth: safeW, frameHeight: safeH } = computeRemoteSpriteFrameDimensions(
+    frameWidth,
+    frameHeight,
+  );
   const canvas = document.createElement("canvas");
   canvas.width = safeW * blobs.length;
   canvas.height = safeH;
@@ -344,15 +364,18 @@ export function fetchRemoteCompositionFilmstrip(input: {
       const response = await studioApiFetch(url, { priority: "low" });
       const rawSha = response.headers.get(HEADER_SHA256)?.trim() ?? "";
       const sha256 = SHA256_HEX_RE.test(rawSha) ? rawSha : "";
+      const rawRenderKey = response.headers.get(HEADER_RENDER_KEY)?.trim() ?? "";
+      const renderKey = SHA256_HEX_RE.test(rawRenderKey) ? rawRenderKey : "";
       const scope = response.headers.get(HEADER_SCOPE)?.trim() ?? "";
 
       if (response.status === 204) {
-        if (sha256) {
-          recordPendingWriteTarget(targetKey, { sha256, scope, existingFrames: 0 });
+        if (sha256 && renderKey) {
+          recordPendingWriteTarget(targetKey, { sha256, renderKey, scope, existingFrames: 0 });
         }
         return {
           status: "miss",
           ...(sha256 ? { sha256 } : {}),
+          ...(renderKey ? { renderKey } : {}),
           ...(scope ? { scope } : {}),
         };
       }
@@ -393,9 +416,9 @@ export function fetchRemoteCompositionFilmstrip(input: {
         return { status: "miss" };
       }
 
-      if (sha256 && frameCount < MAX_REMOTE_FILMSTRIP_FRAMES) {
+      if (sha256 && renderKey && frameCount < MAX_REMOTE_FILMSTRIP_FRAMES) {
         // Allow a later higher-frame-count capture to upgrade this cached sprite in S3.
-        recordPendingWriteTarget(targetKey, { sha256, scope, existingFrames: frameCount });
+        recordPendingWriteTarget(targetKey, { sha256, renderKey, scope, existingFrames: frameCount });
       } else {
         pendingWriteTargets.delete(targetKey);
       }
@@ -408,6 +431,7 @@ export function fetchRemoteCompositionFilmstrip(input: {
         height: frameHeight,
         aspect,
         sha256,
+        ...(renderKey ? { renderKey } : {}),
         scope,
         source,
       };
@@ -461,7 +485,7 @@ export async function uploadRemoteCompositionFilmstripIfEligible(input: {
   const uploadUrl = buildCompositionFilmstripUrl(input.projectId, input.previewUrl);
   if (!uploadUrl) return false;
 
-  const dedupeKey = `${input.projectId}|${target.sha256}|${input.blobs.length}`;
+  const dedupeKey = `${input.projectId}|${target.renderKey}|${input.blobs.length}`;
   if (completedUploads.has(dedupeKey) || inFlightUploads.has(dedupeKey)) {
     return false;
   }
@@ -486,6 +510,7 @@ export async function uploadRemoteCompositionFilmstripIfEligible(input: {
         : packed.frameWidth / packed.frameHeight
       ).toFixed(4),
       [HEADER_SHA256]: target.sha256,
+      [HEADER_RENDER_KEY]: target.renderKey,
     };
     if (target.scope) {
       headers[HEADER_SCOPE] = target.scope;
@@ -509,6 +534,7 @@ export async function uploadRemoteCompositionFilmstripIfEligible(input: {
       } else {
         recordPendingWriteTarget(targetKey, {
           sha256: target.sha256,
+          renderKey: target.renderKey,
           scope: target.scope,
           existingFrames: packed.frameCount,
         });

@@ -3,46 +3,54 @@ import type { BlobScope } from '../../contracts/storage.ts';
 import {
   assertTenantScopedKey,
   catalogCompFilmstripKey,
-  derivedAssetKey,
+  projectCompFilmstripKey,
 } from '../../infra/storage.ts';
 import { isSha256Hex } from '../../../shared/project-validation.ts';
 import { getBuiltinCompositionFilmstrip } from '../../services/builtin-filmstrip-store.ts';
 import { normalizeSafeProjectPath } from '../../services/project-files-service.ts';
+import type { VirtualFileRecord } from '../virtual-project-store.ts';
+import {
+  computeCompositionFilmstripDepsDigest,
+  computeCompositionFilmstripRenderKey,
+  embedFilmstripComment,
+  extractFilmstripMeta,
+  extractIndexHeadMarkup,
+  FILMSTRIP_HEADER_ASPECT,
+  FILMSTRIP_HEADER_FRAMES,
+  FILMSTRIP_HEADER_HEIGHT,
+  FILMSTRIP_HEADER_RENDER_KEY,
+  FILMSTRIP_HEADER_SCOPE,
+  FILMSTRIP_HEADER_SHA256,
+  FILMSTRIP_HEADER_SOURCE,
+  FILMSTRIP_HEADER_WIDTH,
+  isHtmlCompositionPath,
+  MAX_FILMSTRIP_JPEG_BYTES,
+  validateFilmstripMeta,
+  type CompositionFilmstripMeta,
+} from '../engine/composition-filmstrip-sprite.ts';
 import {
   extractWildcardPath,
   getAuthContext,
   type DisklessStudioDeps,
   type StudioVariables,
 } from '../context.ts';
-import {
-  embedFilmstripComment,
-  extractFilmstripMeta,
-  FILMSTRIP_HEADER_ASPECT,
-  FILMSTRIP_HEADER_FRAMES,
-  FILMSTRIP_HEADER_HEIGHT,
-  FILMSTRIP_HEADER_SCOPE,
-  FILMSTRIP_HEADER_SHA256,
-  FILMSTRIP_HEADER_SOURCE,
-  FILMSTRIP_HEADER_WIDTH,
-  MAX_FILMSTRIP_JPEG_BYTES,
-  validateFilmstripMeta,
-  WORKSPACE_FILMSTRIP_DERIVED_NAME,
-  WORKSPACE_PATCH_FILMSTRIP_DERIVED_NAME,
-  type CompositionFilmstripMeta,
-} from '../engine/composition-filmstrip-sprite.ts';
 
 type FilmstripCacheSource = 'builtin' | 'catalog' | 'workspace';
 
 function isHtmlCompositionFile(file: { isText: boolean; path: string }): boolean {
-  return file.isText && /\.html?$/i.test(file.path);
+  return file.isText && isHtmlCompositionPath(file.path);
 }
 
-function workspaceFilmstripKey(workspaceId: string, sha256: string, blobScope: BlobScope): string {
-  const derivedName =
-    blobScope === 'patch'
-      ? WORKSPACE_PATCH_FILMSTRIP_DERIVED_NAME
-      : WORKSPACE_FILMSTRIP_DERIVED_NAME;
-  return assertTenantScopedKey(workspaceId, derivedAssetKey(workspaceId, sha256, derivedName));
+interface ResolvedCompositionIdentity {
+  readonly file: VirtualFileRecord;
+  readonly fileSha: string;
+  readonly depsSha256: string;
+  readonly renderKey: string;
+  readonly allDepsCatalog: boolean;
+}
+
+function projectFilmstripS3Key(workspaceId: string, projectId: string, renderKey: string): string {
+  return assertTenantScopedKey(workspaceId, projectCompFilmstripKey(workspaceId, projectId, renderKey));
 }
 
 async function readValidatedS3Filmstrip(
@@ -114,28 +122,96 @@ export function createStudioCompositionFilmstripsRoutes(
 ): Hono<{ Variables: StudioVariables }> {
   const app = new Hono<{ Variables: StudioVariables }>();
 
-  async function resolveFilmstripHit(
-    workspaceId: string,
-    file: { blobScope: BlobScope; sha256: string },
-  ): Promise<{ bytes: Buffer; meta: CompositionFilmstripMeta; source: FilmstripCacheSource } | null> {
-    if (file.blobScope === 'catalog') {
-      const builtin = await getBuiltinCompositionFilmstrip(file.sha256, deps.runtimeRoot);
-      if (builtin) {
-        return { bytes: builtin.bytes, meta: builtin.meta, source: 'builtin' };
-      }
-      const catalogKey = assertTenantScopedKey(
-        workspaceId,
-        catalogCompFilmstripKey(file.sha256),
-        { allowCatalog: true },
-      );
-      const catalogHit = await readValidatedS3Filmstrip(deps, catalogKey);
-      if (catalogHit) {
-        return { ...catalogHit, source: 'catalog' };
+  async function resolveCompositionIdentity(
+    auth: Parameters<DisklessStudioDeps['files']['listFiles']>[0],
+    projectId: string,
+    safePath: string,
+  ): Promise<ResolvedCompositionIdentity | null> {
+    const files = await deps.files.listFiles(auth, projectId);
+    const file = files.find((f) => f.path === safePath) ?? null;
+    if (!file || !isHtmlCompositionFile(file)) {
+      return null;
+    }
+    const fileSha = file.sha256.trim();
+
+    let indexHead: string | null = null;
+    if (files.some((f) => f.path === 'index.html')) {
+      try {
+        const indexRes = await deps.files.readTextFile(auth, projectId, 'index.html');
+        if (indexRes) indexHead = extractIndexHeadMarkup(indexRes.content);
+      } catch {
+        indexHead = null;
       }
     }
 
-    const wsKey = workspaceFilmstripKey(workspaceId, file.sha256, file.blobScope);
-    const workspaceHit = await readValidatedS3Filmstrip(deps, wsKey);
+    // Load HTML text for `safePath` (and any transitive nested `data-composition-src` files)
+    // so edits to nested scenes invalidate the parent composition's filmstrip render key.
+    const htmlCache = new Map<string, string | null>();
+    if (safePath !== 'index.html') {
+      const htmlPathsToCheck = [safePath];
+      const visited = new Set<string>(htmlPathsToCheck);
+      while (htmlPathsToCheck.length > 0) {
+        const current = htmlPathsToCheck.shift()!;
+        let content: string | null = null;
+        try {
+          const read = await deps.files.readTextFile(auth, projectId, current);
+          content = read?.content ?? null;
+        } catch {
+          content = null;
+        }
+        htmlCache.set(current, content);
+        if (content && /data-composition-src/i.test(content)) {
+          for (const f of files) {
+            if (f.isText && isHtmlCompositionPath(f.path) && !visited.has(f.path)) {
+              visited.add(f.path);
+              htmlPathsToCheck.push(f.path);
+            }
+          }
+        }
+      }
+    }
+
+    const { depsSha256, allDepsCatalog } = computeCompositionFilmstripDepsDigest({
+      compPath: safePath,
+      files,
+      indexHead,
+      readText: (filePath) => htmlCache.get(filePath) ?? null,
+    });
+    const renderKey = computeCompositionFilmstripRenderKey({
+      compPath: safePath,
+      fileSha256: fileSha,
+      blobScope: file.blobScope,
+      depsSha256,
+    });
+
+    return { file, fileSha, depsSha256, renderKey, allDepsCatalog };
+  }
+
+  async function resolveFilmstripHit(
+    workspaceId: string,
+    projectId: string,
+    identity: ResolvedCompositionIdentity,
+  ): Promise<{ bytes: Buffer; meta: CompositionFilmstripMeta; source: FilmstripCacheSource } | null> {
+    if (identity.file.blobScope === 'catalog') {
+      const builtin = await getBuiltinCompositionFilmstrip(identity.fileSha, deps.runtimeRoot);
+      if (builtin && builtin.depsSha256 === identity.depsSha256) {
+        return { bytes: builtin.bytes, meta: builtin.meta, source: 'builtin' };
+      }
+      if (identity.allDepsCatalog) {
+        const catalogKey = assertTenantScopedKey(
+          workspaceId,
+          catalogCompFilmstripKey(identity.fileSha),
+          { allowCatalog: true },
+        );
+        const catalogHit = await readValidatedS3Filmstrip(deps, catalogKey);
+        if (catalogHit) {
+          return { ...catalogHit, source: 'catalog' };
+        }
+      }
+    }
+
+    const projectKey = projectFilmstripS3Key(workspaceId, projectId, identity.renderKey);
+    const workspaceHit = await readValidatedS3Filmstrip(deps, projectKey);
     if (workspaceHit) {
       return { ...workspaceHit, source: 'workspace' };
     }
@@ -147,27 +223,28 @@ export function createStudioCompositionFilmstripsRoutes(
     const projectId = c.req.param('id') ?? '';
     const rawPath = extractWildcardPath(c.req.url, '/composition-filmstrip/');
     const safePath = normalizeSafeProjectPath(rawPath || 'index.html');
-    const file = await deps.files.getFile(auth, projectId, safePath);
-    if (!file || !isHtmlCompositionFile(file)) {
+    const identity = await resolveCompositionIdentity(auth, projectId, safePath);
+    if (!identity) {
       return c.req.method === 'HEAD'
         ? c.body(null, 404)
         : c.json({ error: 'Composition file not found', path: safePath }, 404);
     }
-    const fileSha = file.sha256.trim();
+    const { file, fileSha, renderKey } = identity;
     if (!isSha256Hex(fileSha)) {
       c.header('Cache-Control', 'no-store');
       return c.body(null, 204);
     }
 
-    const hit = await resolveFilmstripHit(auth.workspaceId, { blobScope: file.blobScope, sha256: fileSha });
+    const hit = await resolveFilmstripHit(auth.workspaceId, projectId, identity);
     if (!hit) {
       c.header('Cache-Control', 'no-store');
       c.header(FILMSTRIP_HEADER_SHA256, fileSha);
+      c.header(FILMSTRIP_HEADER_RENDER_KEY, renderKey);
       c.header(FILMSTRIP_HEADER_SCOPE, file.blobScope);
       return c.body(null, 204);
     }
 
-    const etag = `"omfs-v1:${file.blobScope}:${fileSha}:${hit.meta.frameCount}"`;
+    const etag = `"omfs-v1:${projectId}:${file.blobScope}:${renderKey}:${hit.meta.frameCount}"`;
     c.header('Content-Type', 'image/jpeg');
     c.header('Content-Length', String(hit.bytes.byteLength));
     c.header('ETag', etag);
@@ -179,6 +256,7 @@ export function createStudioCompositionFilmstripsRoutes(
     c.header(FILMSTRIP_HEADER_HEIGHT, String(hit.meta.frameHeight));
     c.header(FILMSTRIP_HEADER_ASPECT, hit.meta.aspect.toFixed(4));
     c.header(FILMSTRIP_HEADER_SHA256, fileSha);
+    c.header(FILMSTRIP_HEADER_RENDER_KEY, renderKey);
     c.header(FILMSTRIP_HEADER_SCOPE, file.blobScope);
     c.header(FILMSTRIP_HEADER_SOURCE, hit.source);
 
@@ -196,23 +274,32 @@ export function createStudioCompositionFilmstripsRoutes(
     const projectId = c.req.param('id') ?? '';
     const rawPath = extractWildcardPath(c.req.url, '/composition-filmstrip/');
     const safePath = normalizeSafeProjectPath(rawPath || 'index.html');
-    const file = await deps.files.getFile(auth, projectId, safePath);
-    if (!file || !isHtmlCompositionFile(file)) {
+    const identity = await resolveCompositionIdentity(auth, projectId, safePath);
+    if (!identity) {
       return c.json({ error: 'Composition file not found', path: safePath }, 404);
     }
-    const fileSha = file.sha256.trim();
+    const { file, fileSha, depsSha256, renderKey, allDepsCatalog } = identity;
 
     const expectedSha = c.req.header(FILMSTRIP_HEADER_SHA256)?.trim() ?? '';
     if (!isSha256Hex(expectedSha)) {
       return c.json({ error: 'Valid x-openmotion-filmstrip-sha256 header is required' }, 400);
     }
+    const expectedRenderKey = c.req.header(FILMSTRIP_HEADER_RENDER_KEY)?.trim() ?? '';
+    if (!isSha256Hex(expectedRenderKey)) {
+      return c.json({ error: 'Valid x-openmotion-filmstrip-render-key header is required' }, 400);
+    }
     const expectedScope = c.req.header(FILMSTRIP_HEADER_SCOPE)?.trim();
-    if (expectedSha !== fileSha || (expectedScope && expectedScope !== file.blobScope)) {
+    if (
+      expectedSha !== fileSha ||
+      expectedRenderKey !== renderKey ||
+      (expectedScope && expectedScope !== file.blobScope)
+    ) {
       return c.json(
         {
           stored: false,
           reason: 'version_mismatch',
           currentSha256: fileSha,
+          currentRenderKey: renderKey,
           currentScope: file.blobScope,
         },
         409,
@@ -259,10 +346,11 @@ export function createStudioCompositionFilmstripsRoutes(
       );
     }
 
-    // Do not duplicate an equal-or-higher resolution pre-baked catalog filmstrip into workspace S3.
+    // Do not duplicate an equal-or-higher resolution pre-baked catalog filmstrip into project S3
+    // when the project's rendered dependencies still match that pre-baked catalog sprite.
     if (file.blobScope === 'catalog') {
       const builtin = await getBuiltinCompositionFilmstrip(fileSha, deps.runtimeRoot);
-      if (builtin && builtin.meta.frameCount >= meta.frameCount) {
+      if (builtin && builtin.depsSha256 === depsSha256 && builtin.meta.frameCount >= meta.frameCount) {
         return c.json(
           {
             stored: false,
@@ -270,33 +358,37 @@ export function createStudioCompositionFilmstripsRoutes(
             source: 'builtin',
             frameCount: builtin.meta.frameCount,
             sha256: fileSha,
+            renderKey,
           },
           200,
         );
       }
-      const catalogKey = assertTenantScopedKey(
-        auth.workspaceId,
-        catalogCompFilmstripKey(fileSha),
-        { allowCatalog: true },
-      );
-      const catalogHit = await readValidatedS3Filmstrip(deps, catalogKey);
-      if (catalogHit && catalogHit.meta.frameCount >= meta.frameCount) {
-        return c.json(
-          {
-            stored: false,
-            reason: 'already_cached',
-            source: 'catalog',
-            frameCount: catalogHit.meta.frameCount,
-            sha256: fileSha,
-          },
-          200,
+      if (allDepsCatalog) {
+        const catalogKey = assertTenantScopedKey(
+          auth.workspaceId,
+          catalogCompFilmstripKey(fileSha),
+          { allowCatalog: true },
         );
+        const catalogHit = await readValidatedS3Filmstrip(deps, catalogKey);
+        if (catalogHit && catalogHit.meta.frameCount >= meta.frameCount) {
+          return c.json(
+            {
+              stored: false,
+              reason: 'already_cached',
+              source: 'catalog',
+              frameCount: catalogHit.meta.frameCount,
+              sha256: fileSha,
+              renderKey,
+            },
+            200,
+          );
+        }
       }
     }
 
-    // Client write-backs strictly target this workspace's tenant-scoped derived keyspace (never catalog/*).
-    const wsKey = workspaceFilmstripKey(auth.workspaceId, fileSha, file.blobScope);
-    const existing = await readValidatedS3Filmstrip(deps, wsKey);
+    // Client write-backs strictly target this project's tenant-scoped comp-thumbs keyspace (never catalog/*).
+    const projectKey = projectFilmstripS3Key(auth.workspaceId, projectId, renderKey);
+    const existing = await readValidatedS3Filmstrip(deps, projectKey);
     if (existing && existing.meta.frameCount >= meta.frameCount) {
       return c.json(
         {
@@ -305,12 +397,13 @@ export function createStudioCompositionFilmstripsRoutes(
           source: 'workspace',
           frameCount: existing.meta.frameCount,
           sha256: fileSha,
+          renderKey,
         },
         200,
       );
     }
 
-    await deps.storage.putObject(wsKey, canonicalBytes, 'image/jpeg', canonicalBytes.byteLength);
+    await deps.storage.putObject(projectKey, canonicalBytes, 'image/jpeg', canonicalBytes.byteLength);
     return c.json(
       {
         stored: true,
@@ -318,6 +411,7 @@ export function createStudioCompositionFilmstripsRoutes(
         frameCount: meta.frameCount,
         bytes: canonicalBytes.byteLength,
         sha256: fileSha,
+        renderKey,
       },
       200,
     );
