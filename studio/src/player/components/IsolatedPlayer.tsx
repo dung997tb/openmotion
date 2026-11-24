@@ -265,9 +265,9 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
     }, [props.origin, passive, tracksAssets]);
 
     return (
-      <div className="relative h-full w-full overflow-hidden" style={props.style} ref={container}>
+      <div className="relative h-full w-full overflow-hidden" style={props.style} ref={container} inert={props.inert || undefined}>
         <iframe ref={attach} title={t("Composition preview")} sandbox="allow-scripts allow-same-origin"
-          referrerPolicy="no-referrer" tabIndex={passive ? -1 : undefined}
+          referrerPolicy="no-referrer" tabIndex={passive || props.inert ? -1 : undefined}
           allow={passive ? "autoplay 'none'" : "autoplay; fullscreen"}
           className="absolute left-1/2 top-1/2 max-w-none border-0" />
         {awaitingFirstFrame && !error && !passive && props.loadingUi !== "host" && <PreviewCompositionLoading />}

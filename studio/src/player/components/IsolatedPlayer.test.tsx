@@ -223,3 +223,47 @@ it("resets the iframe document to about:blank on unmount to release cross-origin
   player.unmount();
   expect(frame.src).toBe("about:blank");
 });
+
+it("keeps an inert shadow preview out of focus order and clears inert on promotion without remounting", () => {
+  const origin = "https://preview.test";
+  vi.mocked(bindPreviewLease).mockImplementation((source, _, navigate) => {
+    navigate(new URL(source.pathname + "?pt=shadow-1", origin));
+    return { retry: vi.fn(), dispose: vi.fn() };
+  });
+  const host = document.createElement("main");
+  const root = createRoot(host);
+  const onLoad = vi.fn();
+  try {
+    act(() =>
+      root.render(
+        <IsolatedPlayer
+          projectId="p"
+          origin={origin}
+          onLoad={onLoad}
+          inert
+        />,
+      ),
+    );
+    const container = host.firstElementChild as HTMLElement;
+    const frameBefore = host.querySelector("iframe")!;
+    expect(container.hasAttribute("inert")).toBe(true);
+    expect(frameBefore.tabIndex).toBe(-1);
+
+    // Promoting the shadow clears `inert` in place without remounting the iframe.
+    act(() =>
+      root.render(
+        <IsolatedPlayer
+          projectId="p"
+          origin={origin}
+          onLoad={onLoad}
+        />,
+      ),
+    );
+    const frameAfter = host.querySelector("iframe")!;
+    expect(frameAfter).toBe(frameBefore);
+    expect(container.hasAttribute("inert")).toBe(false);
+    expect(frameAfter.getAttribute("tabindex")).toBeNull();
+  } finally {
+    act(() => root.unmount());
+  }
+});

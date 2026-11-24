@@ -545,6 +545,7 @@ export const NLEPreview = memo(function NLEPreview({
                   portrait={portrait}
                   suppressLoadingOverlay
                   noLoadTimeout
+                  inert
                   style={SHADOW_IFRAME_STYLE}
                 />
               ),
