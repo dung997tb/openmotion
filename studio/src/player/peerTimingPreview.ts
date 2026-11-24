@@ -1,19 +1,23 @@
 import { createPreviewAdapter } from "./lib/previewAdapter";
-import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange } from "../../../shared/preview-timing";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type LivePreviewEdits, isLivePositionEdit } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
 // A WindowProxy survives navigation. Bind a request to the document that acknowledged the handshake.
-const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean }>();
-export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown): void {
+const documents = new WeakMap<HTMLIFrameElement, { token: string; id: string; canRebind: boolean; liveEdits: LivePreviewEdits }>();
+export function rememberPeerTimingDocument(frame: HTMLIFrameElement, token: string | null, timingId: unknown, styleId?: unknown, liveEdits: LivePreviewEdits = {}): void {
   const id = timingId ?? styleId;
-  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id, canRebind: id === timingId });
+  if (token && typeof id === "string" && id.length > 0 && id.length <= 64) documents.set(frame, { token, id, canRebind: id === timingId, liveEdits });
   else documents.delete(frame);
 }
 
 /** A scripted or older document can start rebuilding in parallel with the source read. */
 export function hasPeerTimingDocument(frame: HTMLIFrameElement): boolean {
   return documents.get(frame)?.canRebind === true;
+}
+
+export function hasPeerLiveEdit(frame: HTMLIFrameElement, capability: keyof LivePreviewEdits): boolean {
+  return documents.get(frame)?.liveEdits?.[capability] === true;
 }
 
 export function hasScriptedStylePreview(frame: HTMLIFrameElement) {
@@ -130,11 +134,13 @@ export async function tryApplyPeerChanges(
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
   const temporary = options === "temporary";
-  if (temporary ? document.canRebind : !document.canRebind) return false;
+  if (temporary && document.canRebind) return false;
   const localSave = typeof options === "object" ? options : undefined;
-  const changes = temporary ? await diffScriptedPreviewStyles(update.previous.content, update.current.content) :
+  const scriptedPosition = !document.canRebind && document.liveEdits?.position === true;
+  const changes = temporary || scriptedPosition ? await diffScriptedPreviewStyles(update.previous.content, update.current.content) :
     diffPreviewChanges(update.previous.content, update.current.content);
   if (!changes || !isCurrent()) return false;
+  if (!temporary && !document.canRebind && !(scriptedPosition && isLivePositionEdit(changes))) return false;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;

@@ -1,4 +1,4 @@
-import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH } from '../../../shared/preview-timing.ts';
+import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit } from '../../../shared/preview-timing.ts';
 
 // Runs inside the token-scoped iframe. Each change targets a verified live node and file revision.
 export const PREVIEW_PEER_TIMING = `
@@ -40,14 +40,17 @@ export const PREVIEW_PEER_TIMING = `
     }
     return true;
   }
+  const isPositionEdit = ${isLivePositionEdit.toString()};
   function applyPeerTiming(m) {
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
     const temporary = m.type === 'peer-presentation' && m.temporary === true;
     const local = !temporary && m.type === 'peer-presentation' && m.localSave === true;
     const pending = local && pendingDrags.get(m.gestureId);
     const base = pending && pending.selection.sourceFile === m.path ? pending.sha256 : sourceVersions[m.path];
-    const target = temporary ? styleDocumentId : timingDocumentId;
-    if (!target || m.documentId !== target || (temporary ? !!timingDocumentId : m.path !== compositionPath) ||
+    const position = settings.liveEdits?.position === true && m.type === 'peer-presentation' &&
+      Array.isArray(m.changes) && m.changes.length <= 32 && isPositionEdit(m.changes);
+    const target = temporary || position ? styleDocumentId : timingDocumentId;
+    if (!target || m.documentId !== target || (temporary ? !!timingDocumentId : !position && m.path !== compositionPath) ||
         !before || !after || before !== base ||
         !Number.isFinite(m.expiresAt) || Date.now() >= m.expiresAt ||
         drag || pendingDrags.size > (pending ? 1 : 0) ||

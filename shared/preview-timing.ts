@@ -17,3 +17,12 @@ export interface PreviewChange {
   text?: [string, string];
   attributes: [typeof TIMING_ATTRIBUTES[number], string | null, string | null][];
 }
+
+export type LivePreviewEdits = { position?: true; mediaTiming?: true };
+
+/** Used by Studio and the isolated bridge to validate the complete set of changes. */
+export function isLivePositionEdit(changes: PreviewChange[]): boolean {
+  return changes.length > 0 && changes.every(change => change?.styles?.length &&
+    !change.text && Array.isArray(change.attributes) && change.attributes.length === 0 &&
+    change.styles.every(([name]) => name === "left" || name === "top"));
+}

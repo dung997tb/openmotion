@@ -99,7 +99,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
     if(transfer&&transfer.length) parentWindow.postMessage(message,targetOrigin,transfer);
     else parentWindow.postMessage(message,targetOrigin);
   }
-  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
+  function ready(){ post('preview-ready',{timingDocumentId:timingDocumentId,styleDocumentId:styleDocumentId,liveEdits:settings.liveEdits,htmlSources:settings.htmlSources,capabilities:['selection','selection-geometry','edit-element','timeline','playback-control','pick-mode','layer-tree','layer-select','layer-family','inspect-element','canvas-framing','canvas-drag','inline-text','asset-readiness','thumbnail-capture']}); post('timeline-state',timeline(true)); }
   window.addEventListener('message',function(event){
     if(event.source!==parentWindow) return;
     var message=event.data;
