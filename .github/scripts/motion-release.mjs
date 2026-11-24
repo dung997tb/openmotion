@@ -36,6 +36,12 @@ export function candidateSourceRef(candidate) {
   return releaseRefs.includes(candidate?.workflow?.ref) ? candidate.workflow.ref : 'refs/heads/main';
 }
 
+export function assertCandidateDispatchBranch(candidate, env = process.env) {
+  releaseBranch(env.GITHUB_REF);
+  assert.equal(candidateSourceRef(candidate), env.GITHUB_REF, 'Candidate branch does not match the selected release branch');
+  return candidate;
+}
+
 function manualEntry(env, workflows) {
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Wrong repository');
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'Manual invocation required');
@@ -197,7 +203,7 @@ export async function recordAuthorization(directory, inputs, fetcher = fetch, en
   const authorized = releaseInputs(env);
   assert.notEqual(authorized.action, 'prepublish', 'Prepublish cannot authorize publication');
   assert.equal(authorized.action, inputs.action); assert.equal(authorized.version, inputs.version);
-  const candidate = await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version);
+  const candidate = assertCandidateDispatchBranch(await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version), env);
   const run = await github(`/actions/runs/${env.GITHUB_RUN_ID}`, fetcher);
   assert.equal(String(run.id), env.GITHUB_RUN_ID); assert.equal(run.head_branch, releaseBranch(env.GITHUB_REF)); assert.equal(run.event, 'workflow_dispatch');
   assert.equal(run.head_repository?.full_name, repository); assert.equal(run.head_sha, env.GITHUB_SHA);
@@ -514,15 +520,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const currentArtifact = process.env.MOTION_CANDIDATE_ARTIFACT_ID;
       assert(!selectedRun || !process.env.MOTION_SOURCE_SHA, 'Choose a candidate run ID or a source commit');
       assert(inputs.action === 'archive-only' || selectedRun || currentArtifact, 'An exact candidate artifact or run ID is required');
-      const candidate = process.env.MOTION_CANDIDATE_ARTIFACT_ID
+      const candidate = assertCandidateDispatchBranch(process.env.MOTION_CANDIDATE_ARTIFACT_ID
         ? await verifyCurrentCandidate(directory, inputs)
-        : await downloadCandidate(inputs.version, directory, inputs.expectedSHA256, fetch, selectedRun);
+        : await downloadCandidate(inputs.version, directory, inputs.expectedSHA256, fetch, selectedRun));
       const { appendFile } = await import('node:fs/promises');
       await appendFile(process.env.GITHUB_OUTPUT, `tgz_sha256=${candidate.tgzSHA256}\n`);
     }
     else if (command === 'authorize') await recordAuthorization(directory, inputs);
     else if (command === 'rescan') {
-      const c = await verifyDownloaded(directory, inputs.expectedSHA256);
+      const c = assertCandidateDispatchBranch(await verifyDownloaded(directory, inputs.expectedSHA256));
       await validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, candidateSourceRef(c));
       const work = await mkdtemp(path.join(os.tmpdir(), 'motion-source-verify-'));
       try {
@@ -531,10 +537,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         await writeJSON(path.join(directory, 'publication-package-scan.json'), await scanPackage(path.join(directory, c.tgz), final));
         if (c.schemaVersion >= 4) await writeJSON(path.join(directory, 'publication-dsh-scan.json'), await scanPluginPackage(path.join(directory, pluginCandidateFiles(c.version)[0]), final));
       } finally { await runFile('git', ['worktree', 'remove', '--force', work], { cwd: extra }).catch(() => {}); }
-    } else if (command === 'verify') await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version);
+    } else if (command === 'verify') assertCandidateDispatchBranch(await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version));
     else if (command === 'npm') await publishNpm(directory, inputs);
     else if (command === 'registry-readback') {
-      await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version);
+      assertCandidateDispatchBranch(await verifyDownloaded(directory, inputs.expectedSHA256, inputs.version));
       await verifyRegistryDownload(directory);
     }
     else if (command === 'promote-test') await promoteTest(directory, inputs);

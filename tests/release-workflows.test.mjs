@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { candidateFixture } from './release-fixture.mjs';
-import { waitForRegistry, releaseInputs, resolveCandidate, sealCandidate, validateSource, validateRun, verifyDownloaded, verifyCurrentCandidate, downloadCandidate, publishNpm, promoteTest, archiveRelease, repository, candidateWorkflow, recoveryWorkflow, publicationWorkflow, candidateJobName, candidateSourceRef, findCandidate, authorizationReceipt, recordAuthorization } from '../.github/scripts/motion-release.mjs';
+import { waitForRegistry, releaseInputs, resolveCandidate, sealCandidate, validateSource, validateRun, verifyDownloaded, verifyCurrentCandidate, downloadCandidate, publishNpm, promoteTest, archiveRelease, repository, candidateWorkflow, recoveryWorkflow, publicationWorkflow, candidateJobName, candidateSourceRef, assertCandidateDispatchBranch, findCandidate, authorizationReceipt, recordAuthorization } from '../.github/scripts/motion-release.mjs';
 import { compareReleaseVersions, comparePublicationVersions } from '../scripts/release-version.mjs';
 import { consumerEnvironment } from '../.github/scripts/motion-registry-smoke.mjs';
 import { runFile } from '../scripts/runtime-assets.mjs';
@@ -285,10 +285,39 @@ test('retained candidate source ancestry always falls back to main for non-relea
   assert.equal(candidateSourceRef({ workflow: { ref: 'refs/heads/feature/motion' } }), 'refs/heads/main');
   assert.equal(candidateSourceRef({ workflow: {} }), 'refs/heads/main');
   assert.equal(candidateSourceRef(null), 'refs/heads/main');
+  assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/main' } }, { GITHUB_REF: 'refs/heads/main' });
+  assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/next' } }, { GITHUB_REF: 'refs/heads/next' });
+  assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/feature/motion' } }, { GITHUB_REF: 'refs/heads/main' });
+  assert.throws(() => assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/next' } }, { GITHUB_REF: 'refs/heads/main' }), /Candidate branch does not match/);
+  assert.throws(() => assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/main' } }, { GITHUB_REF: 'refs/heads/next' }), /Candidate branch does not match/);
+  assert.throws(() => assertCandidateDispatchBranch({ workflow: { ref: 'refs/heads/feature/motion' } }, { GITHUB_REF: 'refs/heads/next' }), /Candidate branch does not match/);
   const script = await readFile(new URL('../.github/scripts/motion-release.mjs', import.meta.url), 'utf8');
   const installCheck = await readFile(new URL('../.github/workflows/motion-install-check.yml', import.meta.url), 'utf8');
+  assert(script.includes('assertCandidateDispatchBranch(await verifyDownloaded(directory, inputs.expectedSHA256))'));
   assert(script.includes('validateSource(extra, c.sourceCommit, c.version, runFile, inputs.channel, candidateSourceRef(c))'));
   assert(installCheck.includes('validateSource(process.cwd(), c.sourceCommit, c.version, undefined, undefined, candidateSourceRef(c))'));
+});
+
+test('publication and recovery paths reject retained candidates from another release branch', async t => {
+  const nextFixture = await candidateFixture(t, 'next');
+  const mainDispatchEnv = {
+    ...nextFixture.env,
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_WORKFLOW_REF: `${repository}/${publicationWorkflow}@refs/heads/main`,
+  };
+  const mainRun = { ...origin, head_branch: 'main', id: 800, path: publicationWorkflow, actor: { login: 'operator' } };
+  await assert.rejects(
+    recordAuthorization(nextFixture.directory, nextFixture.inputs, async () => Response.json(mainRun), mainDispatchEnv),
+    /Candidate branch does not match/,
+  );
+  const script = fileURLToPath(new URL('../.github/scripts/motion-release.mjs', import.meta.url));
+  for (const command of ['verify', 'rescan']) {
+    await assert.rejects(
+      runFile(process.execPath, [script, command, nextFixture.directory, nextFixture.root], { env: { ...process.env, ...mainDispatchEnv } }),
+      /Candidate branch does not match/,
+    );
+  }
+  await runFile(process.execPath, [script, 'verify', nextFixture.directory], { env: { ...process.env, ...nextFixture.env } });
 });
 
 test('old main receipts remain readable but unregistered candidate branches cannot seal artifacts', async t => {
